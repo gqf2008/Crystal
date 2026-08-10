@@ -546,6 +546,40 @@ fn monster_melee_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
     }
 }
 
+/// #1878：攻击动作种类（用于混合 Boss 分支防御类型）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MonsterDefenceKind {
+    /// 近战单体（C# DelayedType.Damage）
+    Melee,
+    /// 直线（C# LineAttack）
+    Line,
+    /// 范围/弧形（C# AOE / Halfmoon / Fullmoon / Triangle）
+    Aoe,
+}
+
+/// #1878：混合 Boss 分支防御类型（近战/直线/弧形各分支 C# 不同）。
+/// 仅覆盖已确认的 Boss；未覆盖回退 monster_melee_defence_type（零回归）。
+fn monster_melee_defence_type_for_kind(name: &str, kind: MonsterDefenceKind) -> mir2_shared::enums::DefenceType {
+    use mir2_shared::enums::DefenceType;
+    let n = name.to_ascii_lowercase();
+    match kind {
+        // DemonWolf.cs:67/89：近战 DelayedAction=MACAgility；LineAttack(3) 默认 ACAgility
+        MonsterDefenceKind::Melee => {
+            if matches!(n.as_str(), "demonwolf") { return DefenceType::MacAgility; }
+            if matches!(n.as_str(), "crystalspider") { return DefenceType::AcAgility; }
+        }
+        MonsterDefenceKind::Line => {
+            if matches!(n.as_str(), "crystalspider") { return DefenceType::MacAgility; }
+            if matches!(n.as_str(), "demonwolf") { return DefenceType::AcAgility; }
+        }
+        // HellSlasher.cs:41：HalfmoonAttack(damage, 500, AC)
+        MonsterDefenceKind::Aoe => {
+            if matches!(n.as_str(), "hellslasher") { return DefenceType::Ac; }
+        }
+    }
+    monster_melee_defence_type(name)
+}
+
 /// #1850：死亡回调爆炸防御类型（C# CompleteDeath/ExplosionDie/Die 的 DefenceType）
 /// 未收录默认 ACAgility（C# 多数死亡爆炸：WoodBox/BombSpider/Hugger/HoodedSummonerScrolls）。
 fn death_explosion_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
@@ -5862,9 +5896,15 @@ impl Message<Tick> for WorldActor {
                             // #1721：Boss 攻击完整结算（C# Attacked：命中/护甲/反伤/减伤）
                             let mut is_critical = false;
                             let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
+                                // #1878：按攻击动作种类选防御类型（近战/直线/弧形）
+                                let defence_kind = match atk {
+                                    ai::AttackAction::Melee { .. } => MonsterDefenceKind::Melee,
+                                    ai::AttackAction::Line { .. } => MonsterDefenceKind::Line,
+                                    _ => MonsterDefenceKind::Aoe,
+                                };
                                 let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
                                     &boss_stats, boss_level, &defender, damage,
-                                    monster_melee_defence_type(boss_name),
+                                    monster_melee_defence_type_for_kind(boss_name, defence_kind),
                                 );
                                 is_critical = crit;
                                 if reflected > 0 {
@@ -6870,6 +6910,24 @@ mod tests {
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)], 0), (false, true));
         // SLOW 不阻塞
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)], 0), (false, false));
+    }
+
+    /// #1878：混合 Boss 分支防御类型（近战/直线/弧形）
+    #[test]
+    fn test_mixed_boss_branch_defence() {
+        use mir2_shared::enums::DefenceType;
+        // DemonWolf：近战 MACAgility / 直线 ACAgility
+        assert_eq!(super::monster_melee_defence_type_for_kind("DemonWolf", super::MonsterDefenceKind::Melee), DefenceType::MacAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("DemonWolf", super::MonsterDefenceKind::Line), DefenceType::AcAgility);
+        // CrystalSpider：近战 ACAgility / 直线 MACAgility
+        assert_eq!(super::monster_melee_defence_type_for_kind("CrystalSpider", super::MonsterDefenceKind::Melee), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("CrystalSpider", super::MonsterDefenceKind::Line), DefenceType::MacAgility);
+        // HellSlasher：近战 ACAgility / 半月 AC
+        assert_eq!(super::monster_melee_defence_type_for_kind("HellSlasher", super::MonsterDefenceKind::Melee), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("HellSlasher", super::MonsterDefenceKind::Aoe), DefenceType::Ac);
+        // 未覆盖回退原函数（零回归）
+        assert_eq!(super::monster_melee_defence_type_for_kind("CaveMaggot", super::MonsterDefenceKind::Melee), DefenceType::MacAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("Kirin", super::MonsterDefenceKind::Aoe), DefenceType::Ac);
     }
 
     /// #1852：TreeGuardian 近战 ACAgility（远程仍 MACAgility；C# TreeGuardian.cs:49/70）
