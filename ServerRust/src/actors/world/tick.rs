@@ -421,6 +421,41 @@ fn pet_exp_gain(name: &str, amount: i64) -> i64 {
     }
 }
 
+/// #1759：Boss Range 伤害防御类型（C# 各怪 DelayedAction RangeDamage / CompleteRangeAttack 的 DefenceType）
+/// 精确名匹配（不区分大小写）；未收录默认 ACAgility（C# 默认敏捷物防，保持 #1721 既有行为，安全回退）。
+fn boss_range_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
+    use mir2_shared::enums::DefenceType;
+    let n = name.to_ascii_lowercase();
+    if matches!(n.as_str(),
+        // MACAgility：远程法术吃魔防+敏捷（C# DefenceType.MACAgility）
+        "antcommander" | "avengingspirit" | "avengingwarrior" | "blacktortoise" | "bluesoul"
+        | "bonelord" | "cannibaltentacles" | "catshaman" | "creeperplant" | "darkcaptain"
+        | "darkdevil" | "darkdevourer" | "finialturtle" | "flamescythe" | "flamingmutant"
+        | "frozenmagician" | "furbolgcommander" | "generalmeowmeow" | "hellkeeper"
+        | "hoodedsummonerscrolls" | "kinghydrax" | "omacannibal" | "omamage" | "peacockspider"
+        | "powerbead" | "restlessjar" | "rhinopriest" | "seedingsgeneral" | "septaoist"
+        | "sepwizard" | "treeguardian" | "waterdragon" | "whitefoxman" | "witchdoctor"
+    ) {
+        DefenceType::MacAgility
+    } else if matches!(n.as_str(),
+        // MAC：远程魔法吃魔防（C# DefenceType.MAC）
+        "burningzombie" | "darkomaking" | "elementguard" | "frosttiger" | "frozenzombie"
+        | "holydeva" | "hoodedsummoner" | "icecrystalsoldier" | "iceguard" | "icephantom"
+        | "jar2" | "kingguard" | "kirin" | "leftguard" | "manectricclaw" | "mudzombie"
+        | "omaking" | "omawitchdoctor" | "redfoxman" | "redthunderzuma" | "rightguard"
+        | "snowyeti" | "spittingtoad" | "swampwarrior" | "turtleking" | "yimoogi"
+    ) {
+        DefenceType::Mac
+    } else if matches!(n.as_str(),
+        // AC：远程物理吃物防（C# DefenceType.AC）
+        "armadillo" | "hedgekektal" | "hornedcommander" | "hornedmage" | "hornedsorceror"
+    ) {
+        DefenceType::Ac
+    } else {
+        DefenceType::AcAgility
+    }
+}
+
 /// C# Functions.InRange：切比雪夫距离（Abs(dx)<=range && Abs(dy)<=range）
 fn in_range(ax: i32, ay: i32, bx: i32, by: i32, range: i32) -> bool {
     (ax - bx).abs().max((ay - by).abs()) <= range
@@ -658,11 +693,14 @@ impl WorldActor {
                 let attacker_level = self.monsters.get(&hit.attacker_oid)
                     .map(|m| m.level)
                     .unwrap_or(0);
+                let attacker_name = self.monsters.get(&hit.attacker_oid)
+                    .map(|m| m.name.as_str())
+                    .unwrap_or("");
                 let mut is_critical = false;
                 let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
                     let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
                         &attacker_stats, attacker_level, &defender, hit.damage,
-                        mir2_shared::enums::DefenceType::AcAgility,
+                        boss_range_defence_type(attacker_name),
                     );
                     is_critical = crit;
                     if reflected > 0 {
@@ -5959,7 +5997,7 @@ impl Message<Tick> for WorldActor {
 mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
-        collect_slave_cascade, safe_zone_heal_hp, PARTY_EXP_RATE,
+        collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, PARTY_EXP_RATE,
     };
 
     #[test]
@@ -6091,6 +6129,27 @@ mod tests {
         assert_eq!(collect_slave_cascade(7, &sm), vec![99]);
         // 无 slave 的 master → 空
         assert!(collect_slave_cascade(42, &sm).is_empty());
+    }
+
+    /// #1759：Boss Range 伤害防御类型按 C# 配置映射（大小写不敏感）
+    #[test]
+    fn test_boss_range_defence_type() {
+        use mir2_shared::enums::DefenceType;
+        // MACAgility 组（远程法术）
+        assert_eq!(boss_range_defence_type("AntCommander"), DefenceType::MacAgility);
+        assert_eq!(boss_range_defence_type("WitchDoctor"), DefenceType::MacAgility);
+        assert_eq!(boss_range_defence_type("peacockspider"), DefenceType::MacAgility);
+        // MAC 组（远程魔法）
+        assert_eq!(boss_range_defence_type("BurningZombie"), DefenceType::Mac);
+        assert_eq!(boss_range_defence_type("Kirin"), DefenceType::Mac);
+        assert_eq!(boss_range_defence_type("turtleking"), DefenceType::Mac);
+        // AC 组（远程物理）
+        assert_eq!(boss_range_defence_type("Armadillo"), DefenceType::Ac);
+        assert_eq!(boss_range_defence_type("HedgeKekTal"), DefenceType::Ac);
+        // ACAgility：显式 C# 组 + 未收录回退
+        assert_eq!(boss_range_defence_type("AncientBringer"), DefenceType::AcAgility);
+        assert_eq!(boss_range_defence_type("SomeUnknownMonster"), DefenceType::AcAgility);
+        assert_eq!(boss_range_defence_type(""), DefenceType::AcAgility);
     }
 }
 
