@@ -2365,6 +2365,17 @@ impl Message<EquipSlotItemRequest> for WorldActor {
             return;
         };
 
+        // #1673：C# CanEquipItem 校验（槽位类型/性别/职业/RequiredType）——拖动装备路径此前漏接
+        let equippable = self
+            .item_infos
+            .get(&state.inventory.backpack[grid].as_ref().unwrap().item.item_index)
+            .map(|info| can_equip_item(info, equip_slot, &state))
+            .unwrap_or(false);
+        if !equippable {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
+            return;
+        }
+
         let result = record.actor_ref.ask(crate::actors::player::InventoryEquipItem {
             grid: grid as u8,
             slot: equip_slot,
