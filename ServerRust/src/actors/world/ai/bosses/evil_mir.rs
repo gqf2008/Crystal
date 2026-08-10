@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/EvilMir.cs
 //! 机制：不能移动、睡眠周期、全图视野、1/8 概率全屏大招 vs 普攻、攻击带绿毒+麻痹、
-//! 睡眠期完全免疫、DragonLink 死亡=睡眠 5 分钟（简化：死亡即真死，DragonLink 留 TODO）
+//! 睡眠期完全免疫；DragonLink 模式下死亡=睡眠 5 分钟（sleep_on_death，满血苏醒，非真死）
 
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
