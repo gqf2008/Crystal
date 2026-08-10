@@ -62,7 +62,7 @@ impl MonsterBehavior for PeacockSpiderBehavior {
                             let dur = fastrand::i32(2..6) as u32;
                             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                                 session_id: sid,
-                                poison: Poison::new(PoisonType::GREEN, dur, damage, 1000),
+                                poison: Poison::new(PoisonType::GREEN, dur, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                             });
                         }
                     }
@@ -79,7 +79,7 @@ impl MonsterBehavior for PeacockSpiderBehavior {
                         let dur = fastrand::i32(2..6) as u32;
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::DAZED, dur, 0, 1000),
+                            poison: Poison::new(PoisonType::DAZED, dur, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                         });
                     }
                 } else {

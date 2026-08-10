@@ -92,7 +92,7 @@ impl MonsterBehavior for StoningStatueBehavior {
                     let dur = fastrand::i32(5..10) as u32;
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: h.session_id,
-                        poison: Poison::new(PoisonType::DAZED, dur, 0, 1000),
+                        poison: Poison::new(PoisonType::DAZED, dur, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                     });
                 }
             }
