@@ -18,6 +18,8 @@ pub struct PlayerSnap {
     pub level: u16,
     /// #1385：PK 值（C# PKPoints；守卫红名目标判定用）
     pub pk_points: i32,
+    /// #1828：最小攻击力（C# MinDC；DarkCaptain/SnowWolfKing 选更弱目标用）
+    pub min_dc: i32,
 }
 
 /// 怪物快照（供 Boss 互查，如 Healer 治疗友军、Yimoogi 分身聚合）

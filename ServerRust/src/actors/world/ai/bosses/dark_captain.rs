@@ -111,10 +111,14 @@ impl MonsterBehavior for DarkCaptainBehavior {
             // ---- 近战分支 ----
             // 1/5 传送到更弱目标背后（C# TeleportBehindWeakerTarget）
             if fastrand::i32(0..5) == 0 {
-                // 选视野内 hp 最低玩家（C# 按 MinDC；PlayerSnap 无 DC，用 hp 近似）
+                // 选视野内 MinDC 最低玩家（C# TeleportBehindWeakerTarget 按 MinDC）
                 let weakest_opt: Option<(u64, i32, i32)> = {
-                    let targets = ctx.find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index);
-                    targets.iter().min_by_key(|p| p.hp).map(|p| (p.session_id, p.x, p.y))
+                    let targets: Vec<_> = ctx
+                        .find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+                        .into_iter()
+                        .copied()
+                        .collect();
+                    weakest_player_by_dc(&targets).map(|p| (p.session_id, p.x, p.y))
                 };
                 if let Some((wsession, wx, wy)) = weakest_opt {
                     // 背后点：目标位置沿“远离队长”方向 1 格（PlayerSnap 无目标朝向，近似）
