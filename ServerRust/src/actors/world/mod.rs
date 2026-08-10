@@ -2018,7 +2018,13 @@ impl WorldActor {
         };
         if let Some(info) = self.item_infos.get(&item_index) {
             item.max_dura = info.durability as u16;
-            item.current_dura = info.durability as u16;
+            // #1726：C# Envir.CreateDropItem（Envir.cs:4415）——掉落耐久随机：
+            // min(Durability, Random.Next(Durability)+1000)；Durability<=0 时为 0
+            item.current_dura = if info.durability > 0 {
+                (fastrand::i32(0..info.durability).max(0) + 1000).min(info.durability).max(1) as u16
+            } else {
+                0
+            };
         }
         // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
         enrich_item_info(&mut item, &self.item_infos);
@@ -7852,3 +7858,4 @@ impl Message<GmGotoRequest> for WorldActor {
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
     }
 }
+
