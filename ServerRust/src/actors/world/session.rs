@@ -1151,6 +1151,18 @@ impl Message<WorldTurnRequest> for WorldActor {
             }
         };
 
+        // #1655：C# 客户端转向节流 2500ms（PlayerObject.cs:1440）；服务端限流防广播风暴
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(last) = self.last_turn_ms.get(&msg.session_id) {
+            if now_ms - *last < 100 {
+                return;
+            }
+        }
+        self.last_turn_ms.insert(msg.session_id, now_ms);
+
         let _ = record.actor_ref.ask(TurnRequest {
             session_id: msg.session_id,
             direction: msg.direction,
