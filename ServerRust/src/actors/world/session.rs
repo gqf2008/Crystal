@@ -556,13 +556,13 @@ impl Message<StartGameRequest> for WorldActor {
         let map_index_val = loaded_state.map_index;
         let ground_sync: Vec<_> = self.ground_items.iter()
             .filter(|gi| gi.map_index == map_index_val)
-            .map(|gi| (gi.object_id, gi.item.clone(), gi.x, gi.y))
+            .map(|gi| (gi.object_id, gi.item.clone(), gi.x, gi.y, gi.gold_amount))
             .collect();
-        for (drop_oid, item, x, y) in ground_sync {
+        for (drop_oid, item, x, y, gold_amount) in ground_sync {
             if item.item_index == 0 {
                 let object_gold = mir2_shared::packets::server::ObjectGold {
                     object_id: drop_oid,
-                    gold: item.count as u32,
+                    gold: gold_amount,
                     location_x: x,
                     location_y: y,
                 };
@@ -995,7 +995,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             if gi.item.item_index == 0 {
                                 let object_gold = mir2_shared::packets::server::ObjectGold {
                                     object_id: gi.object_id,
-                                    gold: gi.item.count as u32,
+                                    gold: gi.gold_amount,
                                     location_x: gi.x,
                                     location_y: gi.y,
                                 };

@@ -303,7 +303,14 @@ impl Message<PickUpRequest> for WorldActor {
 
             // 通知 PlayerActor 添加到背包
             let mut picked_up = false;
-            if let Ok(success) = record.actor_ref.ask(AddItemToInventory {
+            if ground_item.item.item_index == 0 {
+                // #1688：金币堆完整金额（item.count 为 u16 会截断大额金币，gold_amount 保留完整值）
+                if let Ok(true) = record.actor_ref.ask(crate::actors::player::AddGold { amount: ground_item.gold_amount as u64 }).await {
+                    picked_up = true;
+                } else {
+                    self.ground_items.push(ground_item);
+                }
+            } else if let Ok(success) = record.actor_ref.ask(AddItemToInventory {
                 item: ground_item.item.clone(),
             }).await {
                 if success {
@@ -1813,6 +1820,7 @@ impl Message<DropItemRequest> for WorldActor {
                 dropper_session: None,
                 drop_tick: self.tick_count,
                 death_drop: false,
+                gold_amount: 0,
             });
 
             send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, true);
@@ -1946,6 +1954,7 @@ impl Message<DropGoldRequest> for WorldActor {
                 dropper_session: None,
                 drop_tick: self.tick_count,
                 death_drop: false,
+                gold_amount: amount as u32,
             });
 
             // 通知客户端金币变化
@@ -2990,6 +2999,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
                     dropper_session: None,
                     drop_tick: self.tick_count,
                     death_drop: false,
+                    gold_amount: 0,
                 });
             }
             send_system_message(&self.gate_ref, msg.session_id,

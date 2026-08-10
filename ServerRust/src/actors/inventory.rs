@@ -75,6 +75,8 @@ pub struct GroundItem {
     pub drop_tick: u64,
     /// 是否玩家死亡掉落（C# PlayerDiedItemTimeOut=120s，比普通 ItemTimeOut=30s 更久）
     pub death_drop: bool,
+    /// #1688：金币堆完整金额（item_index==0 时使用；item.count 为 u16 会截断大额金币）
+    pub gold_amount: u32,
 }
 
 /// 仓库格子数
