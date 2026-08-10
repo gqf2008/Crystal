@@ -3270,12 +3270,16 @@ impl Message<AddGold> for PlayerActor {
     type Reply = bool;
 
     async fn handle(&mut self, msg: AddGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.state.inventory.gold += msg.amount;
+        // #1747：C# GainGold（PlayerObject.cs:7677）——金币上限 uint.MaxValue，超出只加剩余额度
+        let before = self.state.inventory.gold.min(u32::MAX as u64);
+        let after = before.saturating_add(msg.amount).min(u32::MAX as u64);
+        let gained = after - before;
+        self.state.inventory.gold = after;
         self.send_gold_changed();
-        // C# GainGold：S.GainedGold（客户端金币浮字）
-        if msg.amount > 0 {
+        // C# GainGold：S.GainedGold（客户端金币浮字，发实际增加量）
+        if gained > 0 {
             let packet = mir2_shared::packets::server::drops::GainedGold {
-                gold: msg.amount.min(u32::MAX as u64) as u32,
+                gold: gained as u32,
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
@@ -6395,3 +6399,4 @@ allow_group: false,
         assert_eq!(s.equipped_poison_shape(), 0);
     }
 }
+
