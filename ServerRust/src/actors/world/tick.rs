@@ -1537,7 +1537,7 @@ impl WorldActor {
             if let Some(record) = self.players.get(&session_id) {
                 if gi.item.item_index == 0 {
                     // 金币
-                    let gold = gi.item.count as u64;
+                    let gold = gi.gold_amount as u64;
                     let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
                     send_system_message(&self.gate_ref, session_id,
                         &format!("宠物帮你拾取了 {} 金币", gold));

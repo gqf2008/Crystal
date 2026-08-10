@@ -1978,6 +1978,7 @@ impl WorldActor {
                 dropper_session: monster.last_hitter_session,
                 drop_tick: self.tick_count,
                 death_drop: false,
+                gold_amount: pile,
             });
             piles += 1;
         }
@@ -2038,6 +2039,7 @@ impl WorldActor {
             dropper_session: monster.last_hitter_session,
             drop_tick: self.tick_count,
             death_drop: false,
+            gold_amount: 0,
         });
         debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, dx, dy);
     }
@@ -2470,6 +2472,7 @@ impl WorldActor {
                 dropper_session: None,
                 drop_tick: self.tick_count,
                 death_drop: true,
+                gold_amount: 0,
             });
         }
     }
