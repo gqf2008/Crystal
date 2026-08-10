@@ -212,6 +212,28 @@ fn resolve_monster_vs_player(
     (result.damage, result.reflected, is_miss, result.is_critical)
 }
 
+/// #1768：怪物/宠物互伤结算（C# MonsterObject.Attacked(MonsterObject)：GetArmour + ArmourRate/DamageRate + armour>=damage→Miss）
+/// 返回 (实际伤害, 是否 Miss)。不含 HumanObject 专属的暴击/反伤/吸血/EnergyShield 分支。
+fn resolve_monster_vs_monster(
+    attacker: &crate::combat::attack::CombatStats,
+    defender: &crate::combat::attack::CombatStats,
+    raw_damage: i32,
+    defence_type: mir2_shared::enums::DefenceType,
+) -> (i32, bool) {
+    let (armour, hit) = crate::combat::attack::get_armour(defender, defence_type, attacker.accuracy);
+    if !hit {
+        return (0, true);
+    }
+    let armour = ((armour as f32 * defender.armour_rate) as i64)
+        .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    let damage = ((raw_damage as f32 * defender.damage_rate) as i64)
+        .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    if armour >= damage {
+        return (0, true); // C# 护甲完全抵消 → BroadcastDamageIndicator(Miss)
+    }
+    ((damage - armour).max(0), false)
+}
+
 /// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
 async fn broadcast_miss_feedback(
     players: &HashMap<u64, PlayerRecord>,
@@ -5012,10 +5034,28 @@ impl Message<Tick> for WorldActor {
 
             // #471：宠物协战伤害（循环外应用，避免借用冲突）
             for (pid, tmid, damage, master) in &pet_attacks {
-                // #1741：宠物位置（在 get_mut 前读取，避免借用冲突）
+                // #1741：宠物位置/属性（在 get_mut 前读取，避免借用冲突）
                 let (pet_x, pet_y) = self.monsters.get(pid).map(|m| (m.x, m.y)).unwrap_or((0, 0));
+                let pet_stats = self.monsters.get(pid).map(|m| m.to_combat_stats()).unwrap_or_default();
                 if let Some(tm) = self.monsters.get_mut(tmid) {
-                    tm.take_damage(*damage);
+                    // #1768：宠物攻击按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中
+                    let (actual, is_miss) = resolve_monster_vs_monster(
+                        &pet_stats, &tm.to_combat_stats(), *damage,
+                        mir2_shared::enums::DefenceType::AcAgility,
+                    );
+                    if is_miss {
+                        // C# Attacked：Miss 广播，不造成伤害/不换目标（BroadcastDamageIndicator(Miss)）
+                        let mut miss_body = Vec::new();
+                        miss_body.extend_from_slice(&0i32.to_le_bytes());
+                        miss_body.push(4u8); // damage_type = Miss
+                        miss_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                        let miss_packet = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &miss_body);
+                        let miss_map = tm.map_index;
+                        broadcast_to_map(&self.gate_ref, &self.players, miss_map, &miss_packet).await;
+                        continue;
+                    }
+                    tm.take_damage(actual);
                     tm.provoked = true;
                     tm.target_session = Some(*master);
                     // #1741：C# EXPOwner = attacker.Master——宠物补刀击杀归属主人（经验/掉落）
@@ -5035,7 +5075,7 @@ impl Message<Tick> for WorldActor {
                     let struck_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
                     let mut dmg_body = Vec::new();
-                    dmg_body.extend_from_slice(&damage.to_le_bytes());
+                    dmg_body.extend_from_slice(&actual.to_le_bytes());
                     dmg_body.push(0u8); // damage_type = normal
                     dmg_body.extend_from_slice(&tm.object_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
@@ -5051,15 +5091,19 @@ impl Message<Tick> for WorldActor {
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
-                    debug!("Pet #{} assists hitting '{}' (#{}) for {} dmg", pid, tm.name, tmid, damage);
+                    debug!("Pet #{} assists hitting '{}' (#{}) for {} dmg (after armour)", pid, tm.name, tmid, actual);
                 }
             }
 
             // #1013：怪物互伤伤害（C# StoneTrap 嘲讽后怪物攻击目标；循环外应用）
             for (aid, tmid, damage) in &monster_attacks {
+                let attacker_stats = self.monsters.get(aid).map(|m| m.to_combat_stats()).unwrap_or_default();
                 if let Some(tm) = self.monsters.get_mut(tmid) {
-                    tm.take_damage(*damage);
-                    tm.provoked = true;
+                    // #1768：怪物互伤按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中
+                    let (actual, is_miss) = resolve_monster_vs_monster(
+                        &attacker_stats, &tm.to_combat_stats(), *damage,
+                        mir2_shared::enums::DefenceType::AcAgility,
+                    );
                     // 广播 ObjectAttack（怪 A 攻击怪 B）
                     let mut attack_body = Vec::new();
                     attack_body.extend_from_slice(&aid.to_le_bytes());
@@ -5069,7 +5113,47 @@ impl Message<Tick> for WorldActor {
                         mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
                     // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
                     broadcast_to_map(&self.gate_ref, &self.players, tm.map_index, &attack_packet).await;
-                    debug!("Monster #{} hits '{}' (#{}) for {} dmg (monster-vs-monster)", aid, tm.name, tmid, damage);
+                    if is_miss {
+                        // C# Attacked：护甲全挡/未命中 → BroadcastDamageIndicator(Miss)，不造成伤害
+                        let mut miss_body = Vec::new();
+                        miss_body.extend_from_slice(&0i32.to_le_bytes());
+                        miss_body.push(4u8); // damage_type = Miss
+                        miss_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                        let miss_packet = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &miss_body);
+                        let miss_map = tm.map_index;
+                        broadcast_to_map(&self.gate_ref, &self.players, miss_map, &miss_packet).await;
+                        continue;
+                    }
+                    tm.take_damage(actual);
+                    tm.provoked = true;
+                    // C# Attacked 命中广播：ObjectStruck + DamageIndicator(Hit) + ObjectHealth
+                    let mut struck_body = Vec::new();
+                    struck_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                    struck_body.extend_from_slice(&aid.to_le_bytes());
+                    struck_body.extend_from_slice(&(tm.x as u32).to_le_bytes());
+                    struck_body.extend_from_slice(&(tm.y as u32).to_le_bytes());
+                    struck_body.push(tm.direction);
+                    let struck_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                    let mut dmg_body = Vec::new();
+                    dmg_body.extend_from_slice(&actual.to_le_bytes());
+                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                    let dmg_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                    let percent = ((tm.hp.max(0) as f32 / tm.max_hp.max(1) as f32) * 100.0) as u8;
+                    let mut health_body = Vec::new();
+                    health_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                    health_body.push(percent);
+                    health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
+                    let health_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+                    let hit_map = tm.map_index;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
+                    debug!("Monster #{} hits '{}' (#{}) for {} dmg (monster-vs-monster, after armour)", aid, tm.name, tmid, actual);
                 }
             }
 
@@ -6038,7 +6122,7 @@ mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
         collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, monster_melee_defence_type,
-        build_object_range_attack_body, PARTY_EXP_RATE,
+        build_object_range_attack_body, resolve_monster_vs_monster, PARTY_EXP_RATE,
     };
 
     #[test]
@@ -6242,6 +6326,35 @@ mod tests {
         assert_eq!(body[25], 2); // Type（C# AttackRange2）
         assert_eq!(body[26], 7); // spell
         assert_eq!(body[27], 0); // spell_level
+    }
+
+    /// #1768：怪物/宠物互伤按 C# MonsterObject.Attacked 结算（护甲减免/倍率/全挡 Miss/必中）
+    #[test]
+    fn test_resolve_monster_vs_monster() {
+        use crate::combat::attack::CombatStats;
+        use mir2_shared::enums::DefenceType;
+        // 必中：目标 agility=0，accuracy=0 → rand_below(1)=0 > 0 为 false
+        let attacker = CombatStats { accuracy: 0, ..Default::default() };
+        // 护甲减免：min_ac=max_ac=40 → armour=40，伤害 100-40=60
+        let defender = CombatStats { agility: 0, min_ac: 40, max_ac: 40, armour_rate: 1.0, damage_rate: 1.0, ..Default::default() };
+        let (dmg, miss) = resolve_monster_vs_monster(&attacker, &defender, 100, DefenceType::AcAgility);
+        assert!(!miss);
+        assert_eq!(dmg, 60);
+        // armour >= damage → Miss（护甲全挡）
+        let tank = CombatStats { agility: 0, min_ac: 200, max_ac: 200, armour_rate: 1.0, damage_rate: 1.0, ..Default::default() };
+        let (dmg, miss) = resolve_monster_vs_monster(&attacker, &tank, 100, DefenceType::AcAgility);
+        assert!(miss);
+        assert_eq!(dmg, 0);
+        // DamageRate 0.5：100*0.5=50 - armour 10 = 40
+        let soft = CombatStats { agility: 0, min_ac: 10, max_ac: 10, armour_rate: 1.0, damage_rate: 0.5, ..Default::default() };
+        let (dmg, miss) = resolve_monster_vs_monster(&attacker, &soft, 100, DefenceType::AcAgility);
+        assert!(!miss);
+        assert_eq!(dmg, 40);
+        // ArmourRate 2.0：armour 20，100-20=80
+        let armoured = CombatStats { agility: 0, min_ac: 10, max_ac: 10, armour_rate: 2.0, damage_rate: 1.0, ..Default::default() };
+        let (dmg, miss) = resolve_monster_vs_monster(&attacker, &armoured, 100, DefenceType::AcAgility);
+        assert!(!miss);
+        assert_eq!(dmg, 80);
     }
 }
 
