@@ -33,6 +33,8 @@ use crate::ui::sprite_ui::{
 pub struct InvItem {
     pub unique_id: u64,
     pub item_index: i32,
+    /// 物品品质（SharedRust ItemGrade +3：None=3/Common=4/Rare=5/Legendary=6/Mythical=7/Heroic=8）
+    pub grade: u8,
     pub name: String,
     pub image: u16,
     pub count: u16,
@@ -1790,6 +1792,7 @@ mod tests {
             required_amount: 0,
             required_class: 0,
             required_gender: 0,
+            grade: 0,
             soul_bound_id: -1,
             weight: 0,
             price: 0,
@@ -2095,4 +2098,5 @@ mod tests {
         );
     }
 }
+
 
