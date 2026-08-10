@@ -114,10 +114,19 @@ async fn apply_monster_hit_player(
             dmg_body.extend_from_slice(&victim.object_id.to_le_bytes());
             let dmg_packet = build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+            // #1710：受击/飘字只发同图其他玩家（C# CurrentMap.Broadcast 排除受害者；原实现漏过滤跨图）
+            let mut same_map_others: Vec<u64> = Vec::new();
             for (sid, _) in players {
                 if *sid == target_session {
                     continue;
                 }
+                if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
+                    if st.map_index == map_index {
+                        same_map_others.push(*sid);
+                    }
+                }
+            }
+            for sid in &same_map_others {
                 let _ = gate_ref.tell(SendToClient {
                     session_id: *sid,
                     data: struck_packet.clone(),
@@ -164,11 +173,16 @@ async fn apply_monster_hit_player(
             if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
                 let died_packet = WorldActor::build_object_died_packet(
                     victim.object_id, victim.x, victim.y, victim.direction);
+                // #1710：死亡动画只发同图玩家（C# CurrentMap.Broadcast；原实现漏过滤跨图）
                 for (sid, _) in players {
-                    let _ = gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: died_packet.clone(),
-                    }).await;
+                    if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
+                        if st.map_index == map_index {
+                            let _ = gate_ref.tell(SendToClient {
+                                session_id: *sid,
+                                data: died_packet.clone(),
+                            }).await;
+                        }
+                    }
                 }
                 death_drops.push((target_session, victim.x, victim.y, victim.map_index));
 
@@ -5832,3 +5846,4 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
