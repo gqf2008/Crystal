@@ -1038,6 +1038,25 @@ impl Message<WorldMoveRequest> for WorldActor {
                             self.send_map_players_to(msg.session_id, &mover_state, dest_map_u16).await;
                             // 向新地图其他玩家发送 mover（隐身跳过）
                             self.send_player_to_map(msg.session_id, &mover_state, dest_map_u16).await;
+                            // #1661：英雄随主人跨图召回（C# HeroObject.OwnerRecall → Teleport(Owner.CurrentMap, Owner.Back)）
+                            if self.hero_ai_states.contains_key(&msg.session_id) {
+                                let hero_oid = mover_state.object_id
+                                    .wrapping_add(crate::actors::world::hero::HERO_OID_OFFSET);
+                                let mut rh = Vec::new();
+                                rh.extend_from_slice(&hero_oid.to_le_bytes());
+                                let hero_remove = build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rh);
+                                broadcast_to_map(&self.gate_ref, &self.players, old_map, &hero_remove).await;
+                                if let Some(ai) = self.hero_ai_states.get_mut(&msg.session_id) {
+                                    let (hx, hy) = crate::actors::world::point_move(
+                                        mover_state.x, mover_state.y, mover_state.direction, 1);
+                                    ai.x = hx;
+                                    ai.y = hy;
+                                    ai.direction = mover_state.direction;
+                                }
+                                // 新地图广播英雄生成（C# CurrentMap.Broadcast）
+                                self.broadcast_hero_spawn(msg.session_id).await;
+                            }
                         }
                     }
                 }
