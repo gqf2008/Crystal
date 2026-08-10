@@ -1169,6 +1169,8 @@ pub struct WorldActor {
     pub(crate) siege_structures: HashMap<u32, conquest::SiegeStructure>,
     /// 行会战争声明 (guild_name -> set of enemy guild names)
     pub(crate) guild_wars: HashMap<String, std::collections::HashSet<String>>,
+    /// #1948：城堡自动门关闭计时（siege gate oid → 关闭 tick；owner 玩家靠近刷新）
+    pub(crate) gate_auto_open_until: std::collections::HashMap<u32, u64>,
     /// 行会战到期时间（C# GuildAtWar.TimeRemaining；键为排序后的行会对）
     pub(crate) guild_war_ends: HashMap<(String, String), i64>,
     /// 英雄战斗 AI 运行时状态（按主人 session_id 索引）
@@ -1500,6 +1502,7 @@ impl WorldActor {
             conquest_instances: default_conquest_instances(),
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
+            gate_auto_open_until: std::collections::HashMap::new(),
             guild_war_ends: HashMap::new(),
             hero_ai_states: HashMap::new(),
             player_heroes: HashMap::new(),
@@ -4607,6 +4610,7 @@ impl Actor for WorldActor {
             conquest_instances,
             siege_structures,
             guild_wars: HashMap::new(),
+            gate_auto_open_until: std::collections::HashMap::new(),
             guild_war_ends: HashMap::new(),
             hero_ai_states: HashMap::new(),
             player_heroes: HashMap::new(),

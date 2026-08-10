@@ -3202,6 +3202,59 @@ impl WorldActor {
     }
 
     pub(crate) async fn tick_conquest(&mut self) {
+        // #1948：城堡自动门（C# CastleGate.ProcessSearch：owner 公会成员靠近 4 格开门，10s 后自动关门）
+        let has_gates = self.siege_structures.values().any(|s| {
+            s.structure_type == conquest::SiegeStructureType::CastleGate && s.hp > 0
+        });
+        if has_gates {
+            // 收集玩家公会与坐标（一次 ask）
+            let mut player_info: Vec<(u64, i32, i32, u16, Option<String>)> = Vec::new();
+            for (sid, rec) in &self.players {
+                if let Ok(Some(st)) = rec.actor_ref.ask(GetPlayerState).await {
+                    player_info.push((*sid, st.x, st.y, st.map_index, st.guild_name.clone()));
+                }
+            }
+            // 每扇门：owner 玩家 4 格内 → 开 + 刷新 10s；超时且无 owner → 关
+            let mut gate_events: Vec<(u16, u8, bool)> = Vec::new(); // (map, gate_id, close)
+            for inst in &self.conquest_instances {
+                let mut gates: Vec<u32> = self.siege_structures.iter()
+                    .filter(|(_, s)| s.conquest_id == inst.id
+                        && s.structure_type == conquest::SiegeStructureType::CastleGate
+                        && s.hp > 0)
+                    .map(|(oid, _)| *oid)
+                    .collect();
+                gates.sort();
+                let map_index = inst.map_index as u16;
+                for (i, oid) in gates.iter().enumerate() {
+                    let gate_id = (i + 1) as u8;
+                    let Some(s) = self.siege_structures.get(oid) else { continue };
+                    let Some(owner) = s.owner_guild.clone() else { continue };
+                    let near_owner = player_info.iter().any(|(_, px, py, pmap, guild)| {
+                        guild.as_deref() == Some(owner.as_str())
+                            && *pmap == map_index
+                            && (px - s.x).abs().max((py - s.y).abs()) <= 4
+                    });
+                    if near_owner {
+                        self.gate_auto_open_until.insert(*oid, self.tick_count + 100);
+                        if !s.is_open {
+                            if let Some(ss) = self.siege_structures.get_mut(oid) { ss.is_open = true; }
+                            gate_events.push((map_index, gate_id, false));
+                        }
+                    } else if s.is_open
+                        && self.gate_auto_open_until.get(oid).copied().unwrap_or(0) <= self.tick_count
+                    {
+                        if let Some(ss) = self.siege_structures.get_mut(oid) { ss.is_open = false; }
+                        gate_events.push((map_index, gate_id, true));
+                    }
+                }
+            }
+            for (map_index, gate_id, close) in gate_events {
+                super::broadcast_opendoor_async(
+                    &self.gate_ref, &self.players, map_index, gate_id, close, 0,
+                ).await;
+            }
+        }
+
         // 1) 战争调度：开始/结束（每 tick 检查时间）
         //    先收集需要广播的消息，避免在借用 instance 时借用 gate_ref
         let mut messages: Vec<String> = Vec::new();
