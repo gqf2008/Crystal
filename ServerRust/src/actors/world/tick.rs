@@ -1558,7 +1558,7 @@ impl WorldActor {
     async fn apply_death_callbacks(
         &mut self,
         monster: &mut MonsterState,
-        player_positions: &[(u64, i32, i32, u32, i32, i32, u16, u16, i32)],
+        player_positions: &[(u64, i32, i32, u32, i32, i32, u16, u16, i32, mir2_shared::enums::PoisonType)],
     ) {
         use crate::actors::world::ai::{self, AiCtx};
         let mut die_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
@@ -1584,8 +1584,8 @@ impl WorldActor {
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                .map(|(s, x, y, oid, pk, hp, map, lvl, min_dc)| ai::PlayerSnap {
-                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk, min_dc: *min_dc,
+                .map(|(s, x, y, oid, pk, hp, map, lvl, min_dc, pf)| ai::PlayerSnap {
+                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk, min_dc: *min_dc, poison_flags: *pf,
                 }).collect();
             let die_monster_name_map: std::collections::HashMap<i32, String> =
                 self.monster_infos.iter().map(|(k, v)| (*k, v.name.clone())).collect();
@@ -1721,7 +1721,7 @@ impl WorldActor {
             let death_stats = monster.to_combat_stats();
             let death_level = monster.level;
             let death_def = death_explosion_defence_type(&monster.name);
-            for (sid, px, py, _, _, _, pmap, _, _) in player_positions {
+            for (sid, px, py, _, _, _, pmap, _, _, _) in player_positions {
                 if *pmap != monster.map_index { continue; }
                 if !hit_cells.contains(&(*px, *py)) { continue; }
                 if let Some(record) = self.players.get(sid) {
@@ -4563,7 +4563,7 @@ impl Message<Tick> for WorldActor {
         if !self.monsters.is_empty() && !self.players.is_empty() {
             // 收集所有玩家位置（避免在循环中借用 self）
             // 预收集玩家位置 + PK 值（用于 Guard AI 红名优先）
-            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16, u16, i32)> = {
+            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16, u16, i32, mir2_shared::enums::PoisonType)> = {
                 let mut results = Vec::new();
                 let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
                 for (session_id, record) in &self.players {
@@ -4578,7 +4578,7 @@ impl Message<Tick> for WorldActor {
                                 .unwrap_or(false);
                             if !in_safe {
                                 // (session, x, y, object_id, pk_points, hp, map_index, level)
-                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index, state.level, state.effective_min_attack()));
+                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index, state.level, state.effective_min_attack(), combined_poison_flags(&state.poison_list)));
                             }
                         }
                     }
@@ -4667,17 +4667,17 @@ impl Message<Tick> for WorldActor {
                             let mode = self.player_pet_modes.get(&master).copied();
                             let tgt = self.player_targets.get(&master).copied()
                                 .and_then(|oid| player_positions.iter()
-                                    .find(|(_, _, _, o, _, _, _, _, _)| *o == oid)
-                                    .map(|(s, x, y, oid, pk, hp, map, lvl, min_dc)| ai::PlayerSnap {
-                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk, min_dc: *min_dc,
+                                    .find(|(_, _, _, o, _, _, _, _, _, _)| *o == oid)
+                                    .map(|(s, x, y, oid, pk, hp, map, lvl, min_dc, pf)| ai::PlayerSnap {
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk, min_dc: *min_dc, poison_flags: *pf,
                                     }));
                             (mode, tgt, self.pet_targets.contains_key(&monster.object_id))
                         } else {
                             (None, None, false)
                         };
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                        .map(|(s, x, y, oid, pk, hp, map, lvl, min_dc)| ai::PlayerSnap {
-                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk, min_dc: *min_dc,
+                        .map(|(s, x, y, oid, pk, hp, map, lvl, min_dc, pf)| ai::PlayerSnap {
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk, min_dc: *min_dc, poison_flags: *pf,
                                     }).collect();
                     let monster_name_map: std::collections::HashMap<i32, String> =
                         self.monster_infos.iter().map(|(k, v)| (*k, v.name.clone())).collect();
@@ -4863,7 +4863,7 @@ impl Message<Tick> for WorldActor {
                     // PlayerObject.IsAttackTarget(MonsterObject)：AI==6/58/113 → PKPoints >= 200
                     // #1157：去掉“无红名时回退任意玩家”，避免城镇守卫围杀 PK=0 玩家
                     let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
-                    for (session, px, py, _, pk, _, _, _, _) in &player_positions {
+                    for (session, px, py, _, pk, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range && *pk > 0 {
                             if red_nearest.is_none_or(|n| dist < n.3) {
@@ -4873,7 +4873,7 @@ impl Message<Tick> for WorldActor {
                     }
                     nearest = red_nearest;
                 } else {
-                    for (session, px, py, _, _, _, _, _, _) in &player_positions {
+                    for (session, px, py, _, _, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range {
                             if nearest.is_none_or(|n| dist < n.3) {
@@ -4891,8 +4891,8 @@ impl Message<Tick> for WorldActor {
                 let had_target = monster.target_session.is_some();
                 let mut chase_target: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
                 if let Some(ts) = monster.target_session {
-                    if let Some((sid, px, py, _, _, hp, map, _, _)) =
-                        player_positions.iter().find(|(s, _, _, _, _, _, _, _, _)| *s == ts)
+                    if let Some((sid, px, py, _, _, hp, map, _, _, _)) =
+                        player_positions.iter().find(|(s, _, _, _, _, _, _, _, _, _)| *s == ts)
                     {
                         let d = (monster.x - px).abs() + (monster.y - py).abs();
                         if *map == monster.map_index && *hp > 0 && d <= DATA_RANGE {
@@ -5216,8 +5216,8 @@ impl Message<Tick> for WorldActor {
                         // 近战广播 ObjectAttack（C# MonsterObject.Attack）
                         let attack_packet = if is_ranged {
                             let target_oid = player_positions.iter()
-                                .find(|(sid, _, _, _, _, _, _, _, _)| *sid == target_session)
-                                .map(|(_, _, _, oid, _, _, _, _, _)| *oid)
+                                .find(|(sid, _, _, _, _, _, _, _, _, _)| *sid == target_session)
+                                .map(|(_, _, _, oid, _, _, _, _, _, _)| *oid)
                                 .unwrap_or(0);
                             build_packet_bytes(
                                 mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
@@ -5321,8 +5321,8 @@ impl Message<Tick> for WorldActor {
                         .unwrap_or(true); // 无缓存默认允许（C# 默认 Both）
                     if pet_can_follow && can_move {
                         let master_pos = player_positions.iter()
-                            .find(|(sid, _, _, _, _, _, _, _, _)| *sid == master)
-                            .map(|(_, x, y, _, _, _, _, pmap, _)| (*x, *y, *pmap));
+                            .find(|(sid, _, _, _, _, _, _, _, _, _)| *sid == master)
+                            .map(|(_, x, y, _, _, _, _, pmap, _, _)| (*x, *y, *pmap));
                         if let Some((mx, my, master_map)) = master_pos {
                             // C# MonsterObject.ProcessAI：!InRange(Master, DataRange=16) 或跨图 → PetRecall（传送回主人）
                             let dist_master = (monster.x - mx).abs().max((monster.y - my).abs());
@@ -5869,12 +5869,12 @@ impl Message<Tick> for WorldActor {
                     }
                     ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _, _, _)| {
                                 let dx = (px - center_x).abs();
                                 let dy = (py - center_y).abs();
                                 dx.max(dy) <= *radius && *pmap == boss_map
                             })
-                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
                     }
@@ -5882,29 +5882,29 @@ impl Message<Tick> for WorldActor {
                     ai::AttackAction::Arc { attacker_oid, center_x, center_y, direction, count, damage, spell_id, attack_type } => {
                         let cells = crate::actors::world::ai::helpers::arc_cells(*center_x, *center_y, *direction, *count);
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _, _, _)| {
                                 *pmap == boss_map && cells.contains(&(*px, *py))
                             })
-                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, *direction)
                     }
                     ai::AttackAction::Triangle { attacker_oid, center_x, center_y, direction, distance, limit_width, damage, spell_id, attack_type } => {
                         let cells = crate::actors::world::ai::helpers::triangle_cells(*center_x, *center_y, *direction, *distance, *limit_width);
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _, _, _)| {
                                 *pmap == boss_map && cells.contains(&(*px, *py))
                             })
-                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, *direction)
                     }
                     ai::AttackAction::Cells { attacker_oid, center_x, center_y, cells, damage, spell_id, attack_type } => {
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _, _, _)| {
                                 *pmap == boss_map && cells.contains(&(*px, *py))
                             })
-                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, 0u8)
                     }
@@ -5912,7 +5912,7 @@ impl Message<Tick> for WorldActor {
                         let dir = (*direction as usize) % 8;
                         let (ldx, ldy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _, _, _)| {
                                 if *pmap != boss_map {
                                     return false;
                                 }
@@ -5923,7 +5923,7 @@ impl Message<Tick> for WorldActor {
                                 }
                                 false
                             })
-                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *origin_x, *origin_y, *direction)
                     }
@@ -5936,8 +5936,8 @@ impl Message<Tick> for WorldActor {
                 let attack_packet = if matches!(atk, ai::AttackAction::Range { .. }) {
                     let (target_oid, target_x, target_y) = targets.first()
                         .and_then(|sid| player_positions.iter()
-                            .find(|(ps, _, _, _, _, _, _, _, _)| ps == sid)
-                            .map(|(_, tx, ty, oid, _, _, _, _, _)| (*oid, *tx, *ty)))
+                            .find(|(ps, _, _, _, _, _, _, _, _, _)| ps == sid)
+                            .map(|(_, tx, ty, oid, _, _, _, _, _, _)| (*oid, *tx, *ty)))
                         .unwrap_or((0, 0, 0));
                     build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
@@ -5965,8 +5965,8 @@ impl Message<Tick> for WorldActor {
                     // #1706：Boss 远程伤害按弹道延迟结算（C# DelayedAction RangeDamage；与 #1703 一致）
                     for sid in &targets {
                         let (tx, ty) = player_positions.iter()
-                            .find(|(ps, _, _, _, _, _, _, _, _)| ps == sid)
-                            .map(|(_, x, y, _, _, _, _, _, _)| (*x, *y))
+                            .find(|(ps, _, _, _, _, _, _, _, _, _)| ps == sid)
+                            .map(|(_, x, y, _, _, _, _, _, _, _)| (*x, *y))
                             .unwrap_or((boss_x, boss_y));
                         let dist = (boss_x - tx).abs().max((boss_y - ty).abs());
                         self.boss_ranged_pending.push(BossRangedPendingHit {

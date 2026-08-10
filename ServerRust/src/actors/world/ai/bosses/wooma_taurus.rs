@@ -191,7 +191,7 @@ mod tests {
     use crate::actors::world::ai::ctx::{MonsterSnap, PlayerSnap};
 
     fn player(sid: u64, x: i32, y: i32) -> PlayerSnap {
-        PlayerSnap { session_id: sid, x, y, hp: 100, map_index: 1, object_id: sid as u32, level: 30, pk_points: 0, min_dc: 10 }
+        PlayerSnap { session_id: sid, x, y, hp: 100, map_index: 1, object_id: sid as u32, level: 30, pk_points: 0, min_dc: 10, poison_flags: mir2_shared::enums::PoisonType::NONE }
     }
     fn monster(oid: u32, x: i32, y: i32) -> MonsterSnap {
         MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: 1 }

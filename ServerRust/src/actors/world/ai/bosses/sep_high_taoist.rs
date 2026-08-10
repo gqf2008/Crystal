@@ -7,7 +7,6 @@
 //!   - MassHealing（HP<=90% 且 1/8）：TriangleAttack(damage, 2, 1)（4 格锥）
 //!   - 无宠物时召唤 Shinsu（PetLevel 3 / MaxPetLevel 7）
 //!   - SoulFireBall + HalfmoonAttack（4 格弧）
-//! 近似说明：AI 无目标毒/buff 列表，毒轮换与 Curse buff 检查用行为状态/概率近似。
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -18,29 +17,19 @@ use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
 
-/// C# 毒轮换状态：0=无 1=Green 2=Red
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PoisonStage {
-    None = 0,
-    Green = 1,
-    Red = 2,
-}
-
 /// C# 绿毒 value = power / 15 + 4
 fn taoist_green_poison_value(power: i32) -> i32 {
     power / 15 + 4
 }
 
 pub struct SepHighTaoistBehavior {
-    /// 目标毒轮换状态（C# 查目标 PoisonList；AI 无该数据，用状态近似）
-    poison_stage: PoisonStage,
     /// 是否已召唤 Shinsu（C# Pets.Count<1；AI 无法感知宠物死亡，近似为仅一次）
     has_summoned: bool,
 }
 
 impl SepHighTaoistBehavior {
     pub fn new() -> Self {
-        Self { poison_stage: PoisonStage::None, has_summoned: false }
+        Self { has_summoned: false }
     }
 }
 
@@ -57,26 +46,38 @@ impl MonsterBehavior for SepHighTaoistBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
 
-            // C# 毒轮换：无→Green / Green→Red / Red→Green（毒分支优先）
-            // 约 3/4 概率施毒（近似 C# 毒优先；其余走双毒回落路径的 Curse/MassHealing/召唤/SoulFireBall）
-            if fastrand::i32(0..4) != 0 {
-                // C# 用 SC（道士灵魂）
-                let power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                let (stage, p_type) = match self.poison_stage {
-                    PoisonStage::None => (PoisonStage::Green, PoisonType::GREEN),
-                    PoisonStage::Green => (PoisonStage::Red, PoisonType::RED),
-                    PoisonStage::Red => (PoisonStage::Green, PoisonType::GREEN),
-                };
-                let value = if p_type == PoisonType::GREEN { taoist_green_poison_value(power) } else { 0 };
-                self.poison_stage = stage;
+            // C#：查目标真实 PoisonList（无绿无红→绿；绿无红→红；红无绿→绿；双毒→后续分支）
+            let has_green = target.poison_flags.intersects(PoisonType::GREEN);
+            let has_red = target.poison_flags.intersects(PoisonType::RED);
+            let power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
+            let dur = (power + fastrand::i32(1..4) * 7) as u32;
+            if !has_green && !has_red {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(
-                        p_type,
-                        power as u32 + (fastrand::i32(0..3) + 1) as u32 * 7,
-                        value,
-                        2000,
-                    ),
+                    poison: Poison::new(PoisonType::GREEN, dur, taoist_green_poison_value(power), 2000),
+                });
+                return;
+            }
+            if has_green && !has_red {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: target.session_id,
+                    poison: Poison::new(PoisonType::RED, dur, 0, 2000),
+                });
+                return;
+            }
+            if !has_green && has_red {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: target.session_id,
+                    poison: Poison::new(PoisonType::GREEN, dur, 0, 2000),
+                });
+                return;
+            }
+
+            // C# Curse（目标无 Curse 且 1/8）：Slow 5s（buff 检查近似为概率）
+            if fastrand::i32(0..8) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: target.session_id,
+                    poison: Poison::new(PoisonType::SLOW, 5, 1, 1000),
                 });
                 return;
             }
@@ -109,15 +110,6 @@ impl MonsterBehavior for SepHighTaoistBehavior {
                     y: monster.y,
                     is_slave: true,
                     summoner_oid: Some(monster.object_id),
-                });
-                return;
-            }
-
-            // C# Curse（目标无 Curse 且 1/8）：Slow 5s（buff 检查近似为概率）
-            if fastrand::i32(0..8) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 5, 1, 1000),
                 });
                 return;
             }
@@ -166,11 +158,10 @@ mod tests {
         assert_eq!(taoist_green_poison_value(0), 4);
     }
 
-    /// #1788：行为构建 + 毒轮换初始 None + 未召唤
+    /// #1788：行为构建 + 未召唤
     #[test]
     fn test_sep_high_taoist_builds() {
         let b = SepHighTaoistBehavior::new();
-        assert_eq!(b.poison_stage, PoisonStage::None);
         assert!(!b.has_summoned);
     }
 }
