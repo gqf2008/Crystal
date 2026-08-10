@@ -4276,13 +4276,35 @@ impl Message<Tick> for WorldActor {
                         }
                         } // close else (normal attack)
                     } else if should_chase && dist > profile.attack_range && can_move {
-                        // 追击
-                        let (nx, ny, dir) = monster.step_toward(px, py);
-                        if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                            && !monster_positions.contains(&(nx, ny))
-                            && moved_targets.insert((nx, ny))
-                        {
-                            moved_monsters.push((*oid, nx, ny, dir));
+                        // #1691：追击——8 方向 A* 寻路（C# PathFinder.FindPath），
+                        // 目标变更/路径失效才重算；贪心 step_toward 遇墙会卡住无法绕行
+                        let mut path = self.monster_paths.entry(*oid).or_default();
+                        let recalc = path.is_empty()
+                            || self.monster_path_targets.get(oid)
+                                .map(|(s, tx, ty)| *s != target_session || (tx - px).abs() > 3 || (ty - py).abs() > 3)
+                                .unwrap_or(true)
+                            || !self.maps.get(&monster.map_index)
+                                .map(|m| m.is_walkable(path[0].0, path[0].1))
+                                .unwrap_or(false);
+                        if recalc {
+                            *path = self.maps.get(&monster.map_index)
+                                .and_then(|m| crate::maps::pathfind::find_path(m, (monster.x, monster.y), (px, py)))
+                                .unwrap_or_default();
+                            self.monster_path_targets.insert(*oid, (target_session, px, py));
+                        }
+                        // 沿路径走一步（首格被其他怪物占据则原地等待，路径保留）
+                        if !path.is_empty() {
+                            let candidate = path[0];
+                            let walkable = self.maps.get(&monster.map_index)
+                                .map(|m| m.is_walkable(candidate.0, candidate.1))
+                                .unwrap_or(true);
+                            if walkable && !monster_positions.contains(&candidate) && moved_targets.insert(candidate) {
+                                let dir = (0..8)
+                                    .find(|d| MON_DIR_DX[*d] == candidate.0 - monster.x && MON_DIR_DY[*d] == candidate.1 - monster.y)
+                                    .unwrap_or(monster.direction as usize) as u8;
+                                moved_monsters.push((*oid, candidate.0, candidate.1, dir));
+                                path.remove(0);
+                            }
                         }
                         monster.next_move_tick = self.tick_count + profile.move_interval;
                         monster.ai_state = MonsterAiState::Chase;
@@ -4317,13 +4339,33 @@ impl Message<Tick> for WorldActor {
                         }
                     }
                 } else if can_move && dist_to_spawn(monster) > 2 {
-                    // 无目标 → 回出生点
-                    let (nx, ny, dir) = monster.step_toward(monster.spawn_x, monster.spawn_y);
-                    if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                        && !monster_positions.contains(&(nx, ny))
-                        && moved_targets.insert((nx, ny))
-                    {
-                        moved_monsters.push((*oid, nx, ny, dir));
+                    // #1691：无目标 → 回出生点（8 方向 A*，避免卡墙；目标哨兵 session=0）
+                    let mut path = self.monster_paths.entry(*oid).or_default();
+                    let recalc = path.is_empty()
+                        || self.monster_path_targets.get(oid)
+                            .map(|(s, tx, ty)| *s != 0 || *tx != monster.spawn_x || *ty != monster.spawn_y)
+                            .unwrap_or(true)
+                        || !self.maps.get(&monster.map_index)
+                            .map(|m| m.is_walkable(path[0].0, path[0].1))
+                            .unwrap_or(false);
+                    if recalc {
+                        *path = self.maps.get(&monster.map_index)
+                            .and_then(|m| crate::maps::pathfind::find_path(m, (monster.x, monster.y), (monster.spawn_x, monster.spawn_y)))
+                            .unwrap_or_default();
+                        self.monster_path_targets.insert(*oid, (0, monster.spawn_x, monster.spawn_y));
+                    }
+                    if !path.is_empty() {
+                        let candidate = path[0];
+                        let walkable = self.maps.get(&monster.map_index)
+                            .map(|m| m.is_walkable(candidate.0, candidate.1))
+                            .unwrap_or(true);
+                        if walkable && !monster_positions.contains(&candidate) && moved_targets.insert(candidate) {
+                            let dir = (0..8)
+                                .find(|d| MON_DIR_DX[*d] == candidate.0 - monster.x && MON_DIR_DY[*d] == candidate.1 - monster.y)
+                                .unwrap_or(monster.direction as usize) as u8;
+                            moved_monsters.push((*oid, candidate.0, candidate.1, dir));
+                            path.remove(0);
+                        }
                     }
                     monster.next_move_tick = self.tick_count + profile.move_interval;
                     monster.ai_state = MonsterAiState::Return;

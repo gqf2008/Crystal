@@ -1105,6 +1105,10 @@ pub struct WorldActor {
     pub(crate) monster_roam_ticks: HashMap<u32, u64>,
     /// 怪物搜索计时（oid → 下次索敌 tick；C# MonsterObject.SearchTime，SearchDelay=3s）
     pub(crate) monster_search_ticks: HashMap<u32, u64>,
+    /// 怪物追击寻路缓存（oid -> 路径瓦片序列，不含起点；#1691 八方寻路）
+    pub(crate) monster_paths: HashMap<u32, Vec<(i32, i32)>>,
+    /// 怪物寻路缓存对应的目标（oid -> (目标 session, 目标 x, 目标 y)；目标变更时重算）
+    pub(crate) monster_path_targets: HashMap<u32, (u64, i32, i32)>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1349,6 +1353,8 @@ impl WorldActor {
             monster_regen_ticks: HashMap::new(),
             monster_roam_ticks: HashMap::new(),
             monster_search_ticks: HashMap::new(),
+            monster_paths: HashMap::new(),
+            monster_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -4322,6 +4328,8 @@ impl Actor for WorldActor {
             monster_regen_ticks: HashMap::new(),
             monster_roam_ticks: HashMap::new(),
             monster_search_ticks: HashMap::new(),
+            monster_paths: HashMap::new(),
+            monster_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
