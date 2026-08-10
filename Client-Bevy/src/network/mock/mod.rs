@@ -1297,8 +1297,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::combat::ObjectAttack {
                                                 object_id: 100,
-                                                location_x: 354,
-                                                location_y: 352,
+                                                location_x: player_pos.0 as u32,
+                                                location_y: player_pos.1 as u32,
                                                 direction: p.direction as u8,
                                                 spell: 0,
                                                 level: 0,
@@ -1439,8 +1439,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::combat::ObjectRangeAttack {
                                                 object_id: 100,
-                                                location_x: 354,
-                                                location_y: 352,
+                                                location_x: player_pos.0 as u32,
+                                                location_y: player_pos.1 as u32,
                                                 direction: p.direction as u8,
                                                 target_id: target,
                                                 target_x: mx as u32,
@@ -2065,8 +2065,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::movement::UserDashAttack {
-                                                location_x: 353,
-                                                location_y: 352,
+                                                location_x: player_pos.0,
+                                                location_y: player_pos.1,
                                                 direction: MirDirection::Down,
                                             },
                                         );
@@ -3426,3 +3426,4 @@ mod roundtrip_tests {
         assert!(inv[1].is_some(), "slot1 should have item");
     }
 }
+
