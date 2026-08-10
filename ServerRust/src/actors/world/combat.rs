@@ -2345,10 +2345,14 @@ impl Message<MagicRequest> for WorldActor {
             | mir2_shared::enums::Spell::HealingCircle | mir2_shared::enums::Spell::ExplosiveTrap
             | mir2_shared::enums::Spell::Portal | mir2_shared::enums::Spell::DelayedExplosion
         );
+        // #1868：C# value = magic.GetDamage(GetAttackPower(MinMC, MaxMC))（FireWall/毒云/暴雪/流星/陷阱每跳伤害与时长依赖）
+        let spell_damage = spell_db
+            .map(|info| crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat))
+            .unwrap_or_else(|| magic_stat.max(10) * 2);
         let persistent_spell = if is_persistent {
             spell_oid.map(|oid| spell::create_persistent_spell(
                 oid, object_id, msg.session_id, state.map_index,
-                target_x, target_y, spell_level, magic_stat, spell_enum,
+                target_x, target_y, spell_level, magic_stat, spell_damage, spell_enum,
             ))
         } else {
             None
