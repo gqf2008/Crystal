@@ -14,6 +14,8 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
+/// C# AttackRange = 6
+const ATTACK_RANGE: i32 = 6;
 const POISON_BUFF_TICKS: u64 = 100; // C# Second*10 = 10s
 
 /// C# CrippleShot 3×3 区域毒值：damage / 25 + 4
@@ -41,7 +43,7 @@ impl MonsterBehavior for SepHighArcherBehavior {
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
-        if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
+        if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
 
@@ -102,7 +104,8 @@ impl MonsterBehavior for SepHighArcherBehavior {
             return;
         }
 
-        if ctx.tick_count >= monster.next_move_tick {
+        // C# ProcessTarget：出攻击范围才 MoveTo（不风筝）
+        if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
             monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;

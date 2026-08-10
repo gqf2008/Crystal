@@ -54,25 +54,14 @@ impl MonsterBehavior for SepWizardBehavior {
                     return;
                 }
             }
-            // C# 1/3 火墙 AOE1 / 火球
-            if fastrand::i32(0..3) == 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: target.x,
-                    center_y: target.y,
-                    radius: 1,
-                    damage,
-                    spell_id: 0,
-                });
-            } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
-            }
+            // C# 1/3 FireBang / 2/3 GreatFireBall：均为投射（MACAgility），spell_id 区分动画
+            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                attacker_oid: monster.object_id,
+                target_session: target.session_id,
+                target_object_id: target.object_id,
+                damage,
+                spell_id: if fastrand::i32(0..3) == 0 { 1 } else { 0 },
+            });
             return;
         }
 
