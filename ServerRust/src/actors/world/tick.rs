@@ -241,17 +241,18 @@ fn slow_adjusted_ticks(base_ticks: u64, slowed: bool) -> u64 {
     if slowed { (base_ticks + 1).min(35) } else { base_ticks }
 }
 
-/// #1777：C# MonsterObject.CanMove/CanAttack（MonsterObject.cs:634-664）——控制毒禁移动/攻击：
+/// #1777/#1824：C# MonsterObject.CanMove/CanAttack（MonsterObject.cs:634-664）——控制毒禁移动/攻击：
 /// 移动禁 PARALYSIS/LR_PARALYSIS/FROZEN/STUN；攻击另禁 DAZED。
-/// （C# Stun 对 Light 10/5 光源怪的豁免 Rust 暂不细分；光源怪极少且多为静态）
+/// C# 豁免：Light == 10/5 的光源怪对 STUN 免疫（被眩晕仍可移动/攻击）。
 /// 返回 (禁移动, 禁攻击)。
-fn monster_control_blocked(poison_list: &[crate::combat::poison::Poison]) -> (bool, bool) {
+fn monster_control_blocked(poison_list: &[crate::combat::poison::Poison], light: i32) -> (bool, bool) {
     use mir2_shared::enums::PoisonType;
+    let stun_exempt = light == 10 || light == 5;
     let move_blocked = poison_list.iter().any(|p| {
         p.p_type.intersects(PoisonType::PARALYSIS)
             || p.p_type.intersects(PoisonType::LR_PARALYSIS)
             || p.p_type.intersects(PoisonType::FROZEN)
-            || p.p_type.intersects(PoisonType::STUN)
+            || (p.p_type.intersects(PoisonType::STUN) && !stun_exempt)
     });
     let attack_blocked = move_blocked
         || poison_list.iter().any(|p| p.p_type.intersects(PoisonType::DAZED));
@@ -4416,7 +4417,8 @@ impl Message<Tick> for WorldActor {
                     // C# CanAttack：MoveOnly/None 不允许攻击（PetMode）
                     if let Some(master) = monster.master_session {
                         // #1777：宠物受控制毒同样禁移动/攻击
-                        let (pet_move_blocked, pet_attack_blocked) = monster_control_blocked(&monster.poison_list);
+                        let monster_light = self.monster_infos.get(&monster.monster_index).map(|i| i.light).unwrap_or(0);
+                        let (pet_move_blocked, pet_attack_blocked) = monster_control_blocked(&monster.poison_list, monster_light);
                         let pet_may_attack = self.player_pet_modes
                             .get(&master)
                             .map(|m| matches!(m, mir2_shared::enums::PetMode::Both
@@ -4514,8 +4516,9 @@ impl Message<Tick> for WorldActor {
                 let profile = &monster.ai_profile;
                 // C# Slow 毒：攻速/移速 +100ms（上限 3500ms）
                 let slowed = crate::combat::poison::is_slowed(&monster.poison_list);
-                // C# CanMove/CanAttack：控制毒禁移动/攻击
-                let (move_blocked, attack_blocked) = monster_control_blocked(&monster.poison_list);
+                // C# CanMove/CanAttack：控制毒禁移动/攻击（#1824：Light 10/5 光源怪豁免 STUN）
+                let monster_light = self.monster_infos.get(&monster.monster_index).map(|i| i.light).unwrap_or(0);
+                let (move_blocked, attack_blocked) = monster_control_blocked(&monster.poison_list, monster_light);
 
                 // 找最近玩家（在视野范围内）
                 // Guard AI：优先攻击红名玩家（PK 值 > 0）
@@ -5373,7 +5376,7 @@ impl Message<Tick> for WorldActor {
             // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {
                 // #1777：C# CanMove——Boss 受控制毒禁移动
-                if self.monsters.get(&oid).map(|m| monster_control_blocked(&m.poison_list).0).unwrap_or(false) {
+                if self.monsters.get(&oid).map(|m| monster_control_blocked(&m.poison_list, self.monster_infos.get(&m.monster_index).map(|i| i.light).unwrap_or(0)).0).unwrap_or(false) {
                     continue;
                 }
                 let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
@@ -5475,7 +5478,7 @@ impl Message<Tick> for WorldActor {
                     | ai::AttackAction::Aoe { attacker_oid, .. }
                     | ai::AttackAction::Line { attacker_oid, .. } => *attacker_oid,
                 };
-                if self.monsters.get(&atk_oid).map(|m| monster_control_blocked(&m.poison_list).1).unwrap_or(false) {
+                if self.monsters.get(&atk_oid).map(|m| monster_control_blocked(&m.poison_list, self.monster_infos.get(&m.monster_index).map(|i| i.light).unwrap_or(0)).1).unwrap_or(false) {
                     continue;
                 }
                 // #1638：Boss 攻击只命中同图玩家（C# CurrentMap；Aoe/Line 动作不带 map，从攻击者查）
@@ -6576,16 +6579,22 @@ mod tests {
         use crate::combat::poison::Poison;
         use mir2_shared::enums::PoisonType;
         // 空/普通毒：不阻塞
-        assert_eq!(monster_control_blocked(&[]), (false, false));
-        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::GREEN, 5, 10, 1000)]), (false, false));
-        // 移动+攻击均禁：PARALYSIS / LR_PARALYSIS / FROZEN / STUN
+        assert_eq!(monster_control_blocked(&[], 0), (false, false));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::GREEN, 5, 10, 1000)], 0), (false, false));
+        // 移动+攻击均禁：PARALYSIS / LR_PARALYSIS / FROZEN / STUN（普通怪 light=0）
         for t in [PoisonType::PARALYSIS, PoisonType::LR_PARALYSIS, PoisonType::FROZEN, PoisonType::STUN] {
-            assert_eq!(monster_control_blocked(&[Poison::new(t, 5, 0, 1000)]), (true, true));
+            assert_eq!(monster_control_blocked(&[Poison::new(t, 5, 0, 1000)], 0), (true, true));
         }
+        // #1824：Light 10/5 光源怪对 STUN 豁免（可移动/攻击），但 PARALYSIS/FROZEN 仍阻塞
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::STUN, 5, 0, 1000)], 10), (false, false));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::STUN, 5, 0, 1000)], 5), (false, false));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::STUN, 5, 0, 1000)], 9), (true, true));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::PARALYSIS, 5, 0, 1000)], 10), (true, true));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::FROZEN, 5, 0, 1000)], 5), (true, true));
         // DAZED：只禁攻击不禁移动
-        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)]), (false, true));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)], 0), (false, true));
         // SLOW 不阻塞
-        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)]), (false, false));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)], 0), (false, false));
     }
 
     /// #1790：ObjectDied.Type 映射（C#：HumanAssassin=2 / Sep*·HumanWizard 有主=1 / 其余 0）
