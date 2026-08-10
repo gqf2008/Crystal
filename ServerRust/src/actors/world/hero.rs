@@ -2036,6 +2036,44 @@ impl WorldActor {
                     // tick_heroes 在死亡处理之后运行，仅靠 target_session 会在下一 tick
                     // 怪物循环 hp<=0 时被清掉，导致主人/英雄拿不到击杀经验归属
                     monster.last_hitter_session = Some(*session_id);
+                    // #1735：英雄物理攻击命中广播（与玩家一致：ObjectStruck/DamageIndicator/ObjectHealth）
+                    let owner_oid = self.players.get(session_id).map(|r| r.object_id).unwrap_or(0);
+                    let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
+                    let (hx, hy) = self.hero_ai_states.get(session_id)
+                        .map(|ai| (ai.x, ai.y))
+                        .unwrap_or_else(|| snapshots.iter()
+                            .find(|s| s.session_id == *session_id)
+                            .map(|s| (s.owner_x, s.owner_y))
+                            .unwrap_or((monster.x, monster.y)));
+                    monster.direction = crate::actors::world::ai::direction_towards(
+                        monster.x, monster.y, hx, hy,
+                    );
+                    let mut struck_body = Vec::new();
+                    struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                    struck_body.extend_from_slice(&hero_oid.to_le_bytes());
+                    struck_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
+                    struck_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
+                    struck_body.push(monster.direction);
+                    let struck_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                    let mut dmg_body = Vec::new();
+                    dmg_body.extend_from_slice(&result.damage.to_le_bytes());
+                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                    let dmg_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                    let percent = ((monster.hp.max(0) as f32 / monster.max_hp.max(1) as f32) * 100.0) as u8;
+                    let mut health_body = Vec::new();
+                    health_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                    health_body.push(percent);
+                    health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
+                    let health_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+                    // #1649：动画/飘字/血条广播只发同图玩家（C# CurrentMap.Broadcast）
+                    let hit_map = monster.map_index;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
                     debug!(
                         "Hero (owner {}) attacked monster '{}' (#{}) for {} dmg [hit={}, crit={}]",
                         session_id, monster.name, target_oid, result.damage, result.is_hit, result.is_critical
@@ -3946,3 +3984,4 @@ mod tests {
         }
     }
 }
+
