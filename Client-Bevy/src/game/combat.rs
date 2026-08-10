@@ -422,11 +422,24 @@ fn apply_combat_events(
             }
             CombatEvent::Revived { object_id } => {
                 // 复活：恢复站立 + 清除死亡计时（本地玩家由 Revived 包驱动）
-                for (e, id, mut anim, _mon, _appr) in &mut actors {
+                for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Standing;
                         anim.frame_index = 0;
                         commands.entity(e).remove::<DeathTimer>();
+                        // #1634：怪物复活音（C# PlayReviveSound，MonsterObject.cs:4128；僵尸 705）
+                        if mon.is_some() {
+                            if let Some(appr) = appr {
+                                if let Some(sound_id) = crate::game::sound::monster_revive_sound(appr.monster_type) {
+                                    crate::game::sound::play_sound(
+                                        &mut commands,
+                                        &mut audio_assets,
+                                        &sound_bank,
+                                        sound_id,
+                                    );
+                                }
+                            }
+                        }
                         break;
                     }
                 }
@@ -490,8 +503,10 @@ fn apply_combat_events(
 fn advance_combat_timers(
     mut commands: Commands,
     time: Res<Time>,
+    sound_bank: Res<crate::game::sound::SoundBank>,
+    mut audio_assets: ResMut<Assets<bevy::audio::AudioSource>>,
     mut struck: Query<(Entity, &mut StruckTimer, &mut ActorAnim), Without<DeathTimer>>,
-    mut deaths: Query<(Entity, &mut DeathTimer), Without<StruckTimer>>,
+    mut deaths: Query<(Entity, &mut DeathTimer, Option<&MonsterAppearance>), Without<StruckTimer>>,
 ) {
     for (e, mut t, mut anim) in &mut struck {
         t.0 -= time.delta_secs();
@@ -501,9 +516,15 @@ fn advance_combat_timers(
             commands.entity(e).remove::<StruckTimer>();
         }
     }
-    for (e, mut t) in &mut deaths {
+    for (e, mut t, appr) in &mut deaths {
         t.0 -= time.delta_secs();
         if t.0 <= 0.0 {
+            // #1634：怪物 Dead 状态音（C# PlayDeadSound，MonsterObject.cs:4113；仅特殊怪 +5）
+            if let Some(appr) = appr {
+                if let Some(sound_id) = crate::game::sound::monster_dead_sound(appr.monster_type) {
+                    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                }
+            }
             commands.entity(e).despawn();
         }
     }
