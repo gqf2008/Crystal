@@ -2559,12 +2559,12 @@ pub struct ItemInfo {
 impl ItemInfo {
     /// 物品是否默认已鉴定。
     ///
-    /// 对齐 master C# 端 ItemInfo 设置逻辑:
+    /// 对齐 C# ItemData.cs:148/235——bool_flags bit 0 (0x01) = NeedIdentify：
     /// - start_item 永远已鉴定(任务物品/新手物品)
-    /// - bool_flags bit 0 (0x01) 表示从 DB 加载时已鉴定
-    /// - 其他情况需玩家用鉴定卷轴后才显示真实属性
+    /// - 非 NeedIdentify（bit0=0）的物品默认已鉴定（C# Envir.CreateDropItem：!NeedIdentify → Identified=true）
+    /// - NeedIdentify（bit0=1）物品初始未鉴定，使用/装备时自动鉴定
     pub fn is_identified(&self) -> bool {
-        self.start_item || (self.bool_flags & 0x01) != 0
+        self.start_item || (self.bool_flags & 0x01) == 0
     }
 }
 
