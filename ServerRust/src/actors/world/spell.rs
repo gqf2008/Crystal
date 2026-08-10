@@ -125,22 +125,25 @@ fn make_spell_config(
             tick_interval_ms: 2000,
             tick_value: stat.max(10) * 2,
         },
+        // C# Map.cs:1475：ExpireTime=6000ms、TickSpeed=1000
         Spell::PoisonCloud => SpellConfig {
             spell: Spell::PoisonCloud,
-            duration_ms: 20_000,
-            tick_interval_ms: 2000,
+            duration_ms: 6_000,
+            tick_interval_ms: 1000,
             tick_value: stat.max(5) * 3,
         },
+        // C# Map.cs:1670：ExpireTime=3000ms、TickSpeed=440
         Spell::Blizzard => SpellConfig {
             spell: Spell::Blizzard,
-            duration_ms: 25_000,
-            tick_interval_ms: 2000,
+            duration_ms: 3_000,
+            tick_interval_ms: 440,
             tick_value: stat.max(15) * 3,
         },
+        // C# Map.cs:1731：ExpireTime=3000ms、TickSpeed=440
         Spell::MeteorStrike => SpellConfig {
             spell: Spell::MeteorStrike,
-            duration_ms: 20_000,
-            tick_interval_ms: 2500,
+            duration_ms: 3_000,
+            tick_interval_ms: 440,
             tick_value: stat.max(20) * 4,
         },
         Spell::HealingCircle => SpellConfig {
@@ -244,6 +247,21 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), 9);
+    }
+
+    /// #1864：地面法术时长/跳速对齐（C# Map.cs：PoisonCloud 6s/1000、Blizzard/MeteorStrike 3s/440）
+    #[test]
+    fn ground_spell_duration_tick_aligned() {
+        let mk = |sp| super::create_persistent_spell(1, 1, 1, 0, 0, 0, 3, 100, sp);
+        let pc = mk(Spell::PoisonCloud);
+        assert_eq!(pc.expires_at_ms, 6000);
+        assert_eq!(pc.tick_interval_ms, 1000);
+        let bl = mk(Spell::Blizzard);
+        assert_eq!(bl.expires_at_ms, 3000);
+        assert_eq!(bl.tick_interval_ms, 440);
+        let ms = mk(Spell::MeteorStrike);
+        assert_eq!(ms.expires_at_ms, 3000);
+        assert_eq!(ms.tick_interval_ms, 440);
     }
 
     #[test]
