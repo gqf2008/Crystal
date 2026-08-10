@@ -369,6 +369,22 @@ fn bgm_system(
     tracing::info!("🎵 BGM #{}（音量 {:.0}%）", id, vol * 100.0);
 }
 
+/// #1612：获得金币音效（C# SoundList.Gold=10106）——S.GainedGold → ServerEvent::GoldGained
+fn gold_sound_system(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<AudioSource>>,
+    bank: Res<SoundBank>,
+    mut cache: ResMut<SoundCache>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+) {
+    for ev in events.read() {
+        if let crate::network::server_event::ServerEvent::GoldGained { .. } = ev {
+            play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, 10106);
+            tracing::debug!("💰 [SOUND] 获得金币音效 #10106");
+        }
+    }
+}
+
 pub struct SoundPlugin;
 
 impl Plugin for SoundPlugin {
@@ -378,6 +394,7 @@ impl Plugin for SoundPlugin {
         app.init_resource::<BgmState>();
         app.add_systems(Startup, load_sound_bank);
         app.add_systems(Update, bgm_system);
+        app.add_systems(Update, gold_sound_system);
         // #230：S.PlaySound → 播放服务端指定音效
         app.add_systems(
             Update,
