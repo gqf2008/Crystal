@@ -1277,6 +1277,12 @@ impl Message<ObservePlayerRequest> for WorldActor {
             return;
         };
 
+        // #1671：C# Envir.Observe——目标 AllowObserve 设置校验（Envir.cs:5183）
+        if !target.allow_observe {
+            debug!("Observe rejected: target {} has AllowObserve off", target.name);
+            return;
+        }
+
         // Send AllowObserve(true)
         let mut allow_body = Vec::new();
         allow_body.push(1u8);
