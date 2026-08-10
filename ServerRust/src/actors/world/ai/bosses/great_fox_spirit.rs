@@ -100,7 +100,7 @@ impl MonsterBehavior for GreatFoxSpiritBehavior {
             });
             // C# Attack（GreatFoxSpirit.cs:118）：远程命中时对每个目标广播特效
             if ranged {
-                ctx.out_effects.push((h.object_id, mir2_shared::enums::SpellEffect::GreatFoxSpirit));
+                ctx.out_effects.push((h.object_id, mir2_shared::enums::SpellEffect::GreatFoxSpirit, 0, 0));
             }
             // C# CompleteAttack: Slow 15s + Paralysis 5s
             // C# PoisonTarget 1/5

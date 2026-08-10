@@ -88,10 +88,11 @@ impl WorldActor {
 
     /// 广播 ObjectEffect（C# CurrentMap.Broadcast，ElementalBarrierUp/Down 等）
     pub(crate) async fn broadcast_object_effect(
-        &self, object_id: u32, effect: mir2_shared::enums::SpellEffect, map_index: u16,
+        &self, object_id: u32, effect: mir2_shared::enums::SpellEffect,
+        effect_type: u32, time: u32, map_index: u16,
     ) {
         let packet = mir2_shared::packets::server::magic_combat::ObjectEffect {
-            object_id, effect, effect_type: 0, delay_time: 0, time: 0,
+            object_id, effect, effect_type, delay_time: 0, time,
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {

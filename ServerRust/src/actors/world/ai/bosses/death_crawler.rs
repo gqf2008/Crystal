@@ -59,6 +59,7 @@ impl MonsterBehavior for DeathCrawlerBehavior {
             ctx.out_effects.push((
                 monster.object_id,
                 mir2_shared::enums::SpellEffect::DeathCrawlerBreath,
+                0, 0,
             ));
             if let Some(attacker) = ctx
                 .nearest_target(monster.x, monster.y, AOE_RADIUS, monster.map_index)

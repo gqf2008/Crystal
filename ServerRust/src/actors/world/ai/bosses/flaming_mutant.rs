@@ -93,6 +93,8 @@ impl MonsterBehavior for FlamingMutantBehavior {
                             session_id: wt.session_id,
                             poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
                         });
+                        // C# CompleteRangeAttack（FlamingMutant.cs:98）：麻痹命中广播蛛网特效，Time=5000
+                        ctx.out_effects.push((wt.object_id, mir2_shared::enums::SpellEffect::FlamingMutantWeb, 0, 5000));
                     }
                 }
             }

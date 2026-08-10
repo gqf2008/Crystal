@@ -151,7 +151,7 @@ impl MonsterBehavior for TurtleKingBehavior {
                         spell_id: 0,
                     });
                     // C# CompleteRangeAttack（TurtleKing.cs:150）：远程命中广播 TurtleKing 特效
-                    ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::TurtleKing));
+                    ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::TurtleKing, 0, 0));
                     // C# PoisonTarget 1/5
                         if fastrand::i32(0..5) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {

@@ -228,8 +228,8 @@ pub struct AiCtx<'a> {
     pub out_show_hide: &'a mut Vec<(u32, bool)>,
     /// 输出：坐下/起身广播（#1354 C# ObjectSitDown；oid, x, y, dir, sitting）
     pub out_sit_down: &'a mut Vec<(u32, i32, i32, u8, bool)>,
-    /// 输出：对象特效广播（#1364 C# ObjectEffect；oid, SpellEffect——如 DeathCrawlerBreath）
-    pub out_effects: &'a mut Vec<(u32, mir2_shared::enums::SpellEffect)>,
+    /// 输出：对象特效广播（#1364/#1888 C# ObjectEffect；oid, SpellEffect, effect_type, time）
+    pub out_effects: &'a mut Vec<(u32, mir2_shared::enums::SpellEffect, u32, u32)>,
     /// 输出：净化玩家毒（#1391 C# PowerBead Effect==1；session——PlayerActor.PurifyPoisons）
     pub out_player_purges: &'a mut Vec<u64>,
     /// 输出：对玩家回血（session, amount；C# MasterVampire / Healer 治疗玩家）

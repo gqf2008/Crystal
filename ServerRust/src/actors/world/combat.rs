@@ -3487,7 +3487,7 @@ impl Message<MagicRequest> for WorldActor {
                 // C# CurrentMap.Broadcast(ObjectEffect ElementalBarrierUp)
                 self.broadcast_object_effect(
                     state.object_id, mir2_shared::enums::SpellEffect::ElementalBarrierUp,
-                    state.map_index,
+                    0, 0, state.map_index,
                 ).await;
                 debug!("Magic: {} casts ElementalBarrier (damage -{}%, {}s, orb +{}s)",
                        state.name, reduction_pct, mc_power + barrier_power, barrier_power);
