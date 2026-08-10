@@ -37,6 +37,8 @@ impl MonsterBehavior for AntCommanderBehavior {
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程伤害用 MinMC/MaxMC（AntCommander.cs:69/86）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
             if dist <= 1 {
                 let roll = fastrand::i32(0..6);
                 match roll {
@@ -76,14 +78,14 @@ impl MonsterBehavior for AntCommanderBehavior {
                             });
                         }
                     }
-                    // 1/6 远程（C# case 2）
+                    // 1/6 远程（C# case 2，MC：AntCommander.cs:69）
                     _ => {
                         monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                             attacker_oid: monster.object_id,
                             target_session: target.session_id,
                             target_object_id: target.object_id,
-                            damage,
+                            damage: mc_damage,
                             spell_id: 0,
                         });
                         // PoisonTarget(5, 7, Green, 1000)：1/5、7s
@@ -96,12 +98,13 @@ impl MonsterBehavior for AntCommanderBehavior {
                     }
                 }
             } else {
+                // 出近战范围远程（C# :84-91 用 MC）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 if fastrand::i32(0..5) == 0 {
