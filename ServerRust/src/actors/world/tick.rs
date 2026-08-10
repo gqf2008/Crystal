@@ -3457,6 +3457,24 @@ impl WorldActor {
                             ));
                             expired_ids.push(*obj_id);
                         }
+                        // #1860：C# ExplosiveTrap 玩家踩中同样引爆（PvP，第三阶段结算）
+                        let mut stepped_player: Option<u64> = None;
+                        for (sid, r) in &self.players {
+                            if *sid == spell_obj.caster_session { continue; }
+                            if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                                if !ps.is_dead && ps.map_index == spell_obj.map_index
+                                    && ps.x == spell_obj.x && ps.y == spell_obj.y {
+                                    stepped_player = Some(*sid);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(sp) = stepped_player {
+                            debug!("SpellObject: ExplosiveTrap detonated at ({},{}) on player {}", spell_obj.x, spell_obj.y, sp);
+                            spell_obj.detonated = true;
+                            expired_ids.push(*obj_id);
+                            player_spell_hits.push((spell_obj.caster_session, spell_obj.spell, spell_obj.tick_value, vec![sp]));
+                        }
                     }
                 }
                 Spell::DelayedExplosion => {
@@ -3566,7 +3584,7 @@ impl WorldActor {
             }
         }
 
-        // #1856：第三阶段——地面法术命中玩家（C# SpellObject.ProcessSpell Player 分支）
+        // #1856/#1860：第三阶段——地面法术/陷阱命中玩家（C# SpellObject.ProcessSpell Player 分支）
         for (caster_session, spell, tick_value, player_ids) in player_spell_hits {
             let caster_state = match self.players.get(&caster_session) {
                 Some(r) => match r.actor_ref.ask(GetPlayerState).await {
@@ -3576,78 +3594,9 @@ impl WorldActor {
                 None => continue,
             };
             let attacker_stats = caster_state.to_combat_stats();
-            let caster_level = caster_state.level;
-            for target_session in player_ids {
-                let other_actor = match self.players.get(&target_session) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                let Ok(Some(other_state)) = other_actor.actor_ref.ask(GetPlayerState).await else { continue };
-                if other_state.is_dead { continue; }
-                if self.gm_protected.contains(&target_session) { continue; }
-                // 攻击模式/行会战（C# IsAttackTarget）
-                if !super::can_attack_player(&caster_state, &other_state, &self.guild_wars) { continue; }
-                // 安全区：双方任一在安全区则禁止伤害
-                let attacker_safe = self.maps.get(&caster_state.map_index)
-                    .map(|m| m.is_safe_zone(caster_state.x, caster_state.y)).unwrap_or(false);
-                let target_safe = self.maps.get(&other_state.map_index)
-                    .map(|m| m.is_safe_zone(other_state.x, other_state.y)).unwrap_or(false);
-                if attacker_safe || target_safe { continue; }
-                // 禁战地图（C# CurrentMap.Info.NoFight）
-                if self.map_infos.get(&(caster_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
-                    || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
-                { continue; }
-
-                let defender_stats = other_state.to_combat_stats();
-                let level_offset = if other_state.level > caster_level {
-                    0
-                } else {
-                    (caster_level - other_state.level).min(10) as u16
-                };
-                // C# SpellObject.ProcessSpell：伤害 = SpellObject.Value，MAC 防御
-                let attack_result = attack::resolve_attack(
-                    &attacker_stats, &defender_stats, tick_value.max(1),
-                    mir2_shared::enums::DefenceType::Mac, level_offset,
-                );
-                let damage = attack_result.damage;
-                if damage > 0 {
-                    let _ = other_actor.actor_ref.ask(TakeDamage {
-                        attacker_id: caster_state.object_id,
-                        attacker_session: target_session,
-                        damage,
-                    }).await;
-                    // 附加状态（对齐怪物路径：Blizzard 1/8 Slow、PoisonCloud 绿毒）
-                    match spell {
-                        Spell::Blizzard => {
-                            if fastrand::i32(0..8) == 0 {
-                                let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
-                                let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
-                                    poisons: vec![poison::Poison::new(PoisonType::SLOW, dur, 0, 2000)],
-                                }).await;
-                            }
-                        }
-                        Spell::PoisonCloud => {
-                            let poison_value = (tick_value / 4).min(10);
-                            let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
-                                poisons: vec![poison::Poison::new(PoisonType::GREEN, 12, poison_value, 1000)],
-                            }).await;
-                        }
-                        _ => {}
-                    }
-                    for p in &attack_result.applied_poisons {
-                        let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
-                            poisons: vec![*p],
-                        }).await;
-                    }
-                    // PvP 受击广播 + 装备耐久（C# Struck → DamageDura）
-                    self.broadcast_pvp_hit(
-                        other_state.object_id, caster_state.object_id,
-                        other_state.x, other_state.y, other_state.direction,
-                        damage, other_state.map_index, attack_result.is_critical,
-                    ).await;
-                    self.damage_armor_on_pvp_hit(target_session).await;
-                }
-            }
+            self.apply_spell_pvp_hits(
+                caster_session, &attacker_stats, caster_state.level, spell, tick_value, &player_ids,
+            ).await;
         }
 
         for (sid, amount) in heal_targets.iter().zip(heal_amounts.iter()) {
@@ -4221,14 +4170,14 @@ impl WorldActor {
                 debug!("Projectile {:?} missed/blocked target {}", spell, target_id);
             }
 
-            // NapalmShot：命中后 3×3 AOE（爆炸溅射，排除已被直击的主目标）
+            // NapalmShot：命中后 5x5 AOE（C# Map.cs:1303，MAC；排除已被直击的主目标避免双伤）
             if spell == Spell::NapalmShot {
                 let splash_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(id, m)| {
                         **id != target_id
                             && m.map_index == hit_map
-                            && (m.x - mx).abs() <= 1
-                            && (m.y - my).abs() <= 1
+                            && (m.x - mx).abs() <= 2
+                            && (m.y - my).abs() <= 2
                             && m.hp > 0
                     })
                     .map(|(id, _)| *id)
@@ -4237,7 +4186,7 @@ impl WorldActor {
                     if let Some(monster) = self.monsters.get_mut(&sid) {
                         let ds = monster.to_combat_stats();
                         let r = attack::resolve_attack(
-                            &attacker_stats_owned, &ds, raw_damage, DefenceType::Ac, level_offset,
+                            &attacker_stats_owned, &ds, raw_damage, DefenceType::Mac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
@@ -4251,7 +4200,28 @@ impl WorldActor {
                         }
                     }
                 }
-                debug!("NapalmShot exploded at ({},{}) 3x3 splash", mx, my);
+                // #1860：玩家溅射（5x5，MAC，PvP；排除主目标避免双伤）
+                let player_splash: Vec<u64> = {
+                    let mut ids = Vec::new();
+                    for (sid, r) in &self.players {
+                        if *sid == pending.session_id { continue; }
+                        if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                            if !ps.is_dead && ps.map_index == hit_map
+                                && (ps.x - mx).abs() <= 2 && (ps.y - my).abs() <= 2
+                                && ps.object_id != target_id {
+                                ids.push(*sid);
+                            }
+                        }
+                    }
+                    ids
+                };
+                if !player_splash.is_empty() {
+                    self.apply_spell_pvp_hits(
+                        pending.session_id, &attacker_stats_owned, caster_state.level,
+                        mir2_shared::enums::Spell::NapalmShot, raw_damage, &player_splash,
+                    ).await;
+                }
+                debug!("NapalmShot exploded at ({},{}) 5x5 splash", mx, my);
             }
 
             // ElementalShot：击退怪物（命中即结算，与是否造成伤害无关）
