@@ -4258,6 +4258,10 @@ impl Message<Tick> for WorldActor {
                                 let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
                                 let damage = ((self.tick_count.wrapping_add(monster.object_id as u64)
                                     .wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                                // #1732：攻击前转向目标（C# MonsterObject.Attack）
+                                monster.direction = crate::actors::world::ai::direction_towards(
+                                    monster.x, monster.y, tx, ty,
+                                );
                                 pet_attacks.push((monster.object_id, tmid, damage, master));
                                 monster.next_attack_tick = self.tick_count + monster.ai_profile.attack_cooldown;
                                 monster.ai_state = MonsterAiState::Attack;
@@ -4438,6 +4442,10 @@ impl Message<Tick> for WorldActor {
                         if dist <= 1 && can_attack {
                             let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
                             let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                            // #1732：攻击前转向目标（C# MonsterObject.Attack）
+                            monster.direction = crate::actors::world::ai::direction_towards(
+                                monster.x, monster.y, tx, ty,
+                            );
                             pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
                             monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
                             monster.ai_state = MonsterAiState::Attack;
@@ -4491,6 +4499,10 @@ impl Message<Tick> for WorldActor {
                         if dist <= 1 && can_attack {
                             let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
                             let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(17)) as i32 % dmg_range) + monster.min_dmg;
+                            // #1732：攻击前转向目标（C# MonsterObject.Attack）
+                            monster.direction = crate::actors::world::ai::direction_towards(
+                                monster.x, monster.y, *tx, *ty,
+                            );
                             monster_attacks.push((*oid, tmid, damage));
                             monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
                             monster.ai_state = MonsterAiState::Attack;
@@ -4648,6 +4660,10 @@ impl Message<Tick> for WorldActor {
                             debug!("Monster '{}' (#{}) attacks Player {} for {} dmg [AI={:?}]", monster.name, *oid, target_session, damage, profile.ai_type);
                             monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
                             monster.ai_state = MonsterAiState::Attack;
+                            // #1732：C# MonsterObject.Attack（:2162）——攻击前转向目标
+                            monster.direction = crate::actors::world::ai::direction_towards(
+                                monster.x, monster.y, px, py,
+                            );
 
                         let is_ranged = matches!(profile.ai_type, MonsterAiType::Ranged | MonsterAiType::Mage);
                         let spell_id = match profile.ai_type {
@@ -6035,6 +6051,7 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
 
 
 
