@@ -696,6 +696,8 @@ fn hold_move_system(
                     anim.frame_index = 0;
                     control.hold_target = Some((new_dir as i32, 0));
                     control.hold_run = Some(true);
+                    // #1626：站立转向同步（C# PlayerObject.cs:1439 SetAction(Standing) → C.Turn）
+                    net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
                 }
                 lm.path.clear();
                 lm.last = None;
@@ -824,6 +826,8 @@ fn hold_move_system(
                     anim.frame_index = 0;
                     control.hold_target = Some((new_dir as i32, 0));
                     control.hold_run = Some(run);
+                    // #1626：原地转向同步（C# PlayerObject.cs:1439 → C.Turn）
+                    net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
                 }
                 // 清空旧路径避免卡住
                 lm.path.clear();
