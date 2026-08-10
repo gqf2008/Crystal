@@ -290,7 +290,7 @@ fn apply_combat_events(
                     }
                 }
             }
-            CombatEvent::Died { object_id, .. } => {
+            CombatEvent::Died { object_id, death_type } => {
                 // #1564：本地玩家死亡音（C# PlayDieSound 按性别）
                 if hud.player_object_id == Some(*object_id) {
                     crate::game::sound::play_sound(
@@ -302,6 +302,11 @@ fn apply_combat_events(
                 }
                 for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
+                        // #1790：C# ObjectDied.Type 1/2——特效+立即移除，不播尸体动画
+                        if *death_type != 0 && hud.player_object_id != Some(*object_id) {
+                            commands.entity(e).despawn();
+                            break;
+                        }
                         anim.action = mir2_shared::enums::MirAction::Dead;
                         anim.frame_index = 0;
                         // 本地玩家死亡由 Death 包管理（复活时恢复），不自动 despawn
