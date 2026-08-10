@@ -5843,7 +5843,7 @@ impl Message<Tick> for WorldActor {
                                 x: *tx, y: *ty, direction: *dir,
                                 map_index: None, is_mounted: None,
                             }).await;
-                            self.broadcast_position_change(*sid, *tx, *ty, *dir).await;
+                            self.broadcast_player_teleport(*sid, st.x, st.y, *tx, *ty, *dir).await;
                             debug!("Boss teleported player {} to ({},{})", sid, tx, ty);
                         }
                     }

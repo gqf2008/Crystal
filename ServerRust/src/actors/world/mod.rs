@@ -1685,8 +1685,8 @@ impl WorldActor {
         }
     }
 
-    /// C# Teleport/Knockback：向自身发 UserLocation + 同图其他玩家 BroadcastMovement
-    pub(crate) async fn broadcast_position_change(&self, session_id: u64, x: i32, y: i32, direction: u8) {
+    /// #1803：玩家传送表现（C# Teleport：UserLocation 给自己 + ObjectTeleportOut/In 给同图他人）
+    pub(crate) async fn broadcast_player_teleport(&self, session_id: u64, old_x: i32, old_y: i32, x: i32, y: i32, direction: u8) {
         let mut loc = Vec::new();
         loc.extend_from_slice(&x.to_le_bytes());
         loc.extend_from_slice(&y.to_le_bytes());
@@ -1696,7 +1696,6 @@ impl WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
         }).await;
         let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
-        // #1677：击退广播只发同图玩家（C# CurrentMap）
         let player_map: u16 = match self.players.get(&session_id) {
             Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
                 Ok(Some(st)) => st.map_index,
@@ -1704,16 +1703,106 @@ impl WorldActor {
             },
             None => 0,
         };
-        let others: Vec<_> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.actor_ref.clone()).collect();
-        for other in others {
-            let _ = other.ask(crate::actors::player::BroadcastMovement {
-                object_id,
-                x,
-                y,
-                direction,
-                move_type: crate::actors::player::MoveType::Walk,
-                exclude_session: session_id,
-            }).await;
+        let others: Vec<u64> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.session_id).collect();
+        let mut out_body = Vec::new();
+        let out = mir2_shared::packets::server::map::ObjectTeleportOut {
+            object_id,
+            teleport_type: 0,
+            location_x: old_x as u32,
+            location_y: old_y as u32,
+        };
+        if out.write_body(&mut out_body).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectTeleportOut as i16, &out_body);
+            for sid in &others {
+                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: pkt.clone() }).await;
+            }
+        }
+        let mut in_body = Vec::new();
+        let inp = mir2_shared::packets::server::map::ObjectTeleportIn {
+            object_id,
+            teleport_type: 0,
+            location_x: x as u32,
+            location_y: y as u32,
+        };
+        if inp.write_body(&mut in_body).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectTeleportIn as i16, &in_body);
+            for sid in &others {
+                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: pkt.clone() }).await;
+            }
+        }
+    }
+
+    /// #1803：玩家冲刺表现（C# Dash：UserDash 给自己 + ObjectDash 给同图他人）
+    pub(crate) async fn broadcast_player_dash(&self, session_id: u64, x: i32, y: i32, direction: u8) {
+        let mut body = Vec::new();
+        let p = mir2_shared::packets::server::combat::UserDash {
+            location_x: x as u32,
+            location_y: y as u32,
+            direction,
+        };
+        if p.write_body(&mut body).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserDash as i16, &body);
+            let _ = self.gate_ref.tell(SendToClient { session_id, data: pkt }).await;
+        }
+        let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
+        let player_map: u16 = match self.players.get(&session_id) {
+            Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.map_index,
+                _ => 0,
+            },
+            None => 0,
+        };
+        let mut obody = Vec::new();
+        let op = mir2_shared::packets::server::combat::ObjectDash {
+            object_id,
+            location_x: x as u32,
+            location_y: y as u32,
+            direction,
+        };
+        if op.write_body(&mut obody).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectDash as i16, &obody);
+            let others: Vec<u64> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.session_id).collect();
+            for sid in others {
+                let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: pkt.clone() }).await;
+            }
+        }
+    }
+
+    /// #1803：玩家后跳表现（C# BackStep：UserBackStep 给自己 + ObjectBackStep 给同图他人）
+    pub(crate) async fn broadcast_player_backstep(&self, session_id: u64, x: i32, y: i32, direction: u8) {
+        let dir_enum = mir2_shared::enums::MirDirection::try_from(direction).unwrap_or(mir2_shared::enums::MirDirection::Up);
+        let mut body = Vec::new();
+        let p = mir2_shared::packets::server::movement::UserBackStep {
+            location_x: x,
+            location_y: y,
+            direction: dir_enum,
+        };
+        if p.write_body(&mut body).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserBackStep as i16, &body);
+            let _ = self.gate_ref.tell(SendToClient { session_id, data: pkt }).await;
+        }
+        let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
+        let player_map: u16 = match self.players.get(&session_id) {
+            Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.map_index,
+                _ => 0,
+            },
+            None => 0,
+        };
+        let mut obody = Vec::new();
+        let op = mir2_shared::packets::server::movement::ObjectBackStep {
+            object_id,
+            location_x: x,
+            location_y: y,
+            direction: dir_enum,
+            distance: 3,
+        };
+        if op.write_body(&mut obody).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectBackStep as i16, &obody);
+            let others: Vec<u64> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.session_id).collect();
+            for sid in others {
+                let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: pkt.clone() }).await;
+            }
         }
     }
 
