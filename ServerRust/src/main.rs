@@ -166,6 +166,7 @@ async fn async_main() -> anyhow::Result<()> {
         exp_rate: 1.0, // C# Settings.ExpRate 默认 1
         experience_list: cfg.server.experience_list.clone(),
         fishing_cfg: fishing_cfg,
+        random_item_stats: crystal_server::util::ini::load_random_item_stats(&configs_dir),
         guild_buff_infos: guild_buff_infos.clone(),
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,
@@ -234,3 +235,4 @@ async fn async_main() -> anyhow::Result<()> {
 
     Ok(())
 }
+

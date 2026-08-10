@@ -228,6 +228,7 @@ fn e2e_start_game_flow() {
             death_exp_penalty_percent: 0,
             movement_pacing_ms: 0,
             fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
         });
 
@@ -342,6 +343,7 @@ fn e2e_magic_cast_flow() {
             death_exp_penalty_percent: 0,
             movement_pacing_ms: 0,
             fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
             },
         );
@@ -445,6 +447,7 @@ fn e2e_two_sessions_concurrent_start() {
             death_exp_penalty_percent: 0,
             movement_pacing_ms: 0,
             fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
         });
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -528,6 +531,7 @@ fn e2e_attack_flow() {
             death_exp_penalty_percent: 0,
             movement_pacing_ms: 0,
             fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
             },
         );
@@ -572,3 +576,4 @@ fn e2e_attack_flow() {
         assert!(!rx.is_closed(), "Channel should remain open");
     });
 }
+

@@ -101,6 +101,8 @@ pub struct WorldActorArgs {
     pub experience_list: Vec<i64>,
     /// 钓鱼系统配置（C# Settings.Fishing*：Configs/FishingSystem.ini）
     pub fishing_cfg: crate::util::ini::FishingConfig,
+    /// #1749：掉落随机附加属性配置（C# Settings.RandomItemStatsList）
+    pub random_item_stats: Vec<mir2_shared::data::item::RandomItemStat>,
     /// 行会 Buff 定义（C# GuildBuffInfo：Configs/GuildSettings.ini [Buff-*]）
     pub guild_buff_infos: Vec<crate::util::ini::GuildBuffInfo>,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
@@ -960,6 +962,8 @@ pub struct WorldActor {
     pub(crate) fishing_success_counters: HashMap<u64, u32>,
     /// 钓鱼系统配置（C# Settings.Fishing*：Configs/FishingSystem.ini）
     pub(crate) fishing_cfg: crate::util::ini::FishingConfig,
+    /// #1749：掉落随机附加属性配置（C# Settings.RandomItemStatsList）
+    pub(crate) random_item_stats: Vec<mir2_shared::data::item::RandomItemStat>,
     /// 钓鱼掉落表（C# Envir.FishingDrops：Drops/00Fishing.txt，Type=FishingAttribute）
     pub(crate) fishing_drops: Vec<FishingDropInfo>,
     /// 行会 Buff 定义（id → info，C# Envir.FindGuildBuffInfo）
@@ -1243,6 +1247,90 @@ pub(crate) fn sealed_blocks_drop(
         .unwrap_or(false)
 }
 
+/// #1749：C# Envir.UpgradeItem（Envir.cs:4486）——掉落随机附加属性
+/// 按 RandomItemStats 的概率/数值给装备追加 MaxAC/MaxMAC/MaxDC/MaxMC/MaxSC/Accuracy/Agility/HP/MP/Strong/
+/// 魔抗/毒抗/回复/暴击/冰冻/毒攻/攻速/幸运 等附加属性、耐久加成、孔位、诅咒
+fn upgrade_item(item: &mut mir2_shared::data::item::UserItem, stat: &mir2_shared::data::item::RandomItemStat) {
+    use mir2_shared::enums::Stat;
+    // C# RandomomRange(count, rate)：count 次 1/rate 概率累加
+    fn randomom_range(count: u8, rate: u8) -> i32 {
+        let mut x = 0;
+        for _ in 0..count {
+            if rate > 0 && fastrand::i32(0..rate as i32) == 0 {
+                x += 1;
+            }
+        }
+        x
+    }
+    // C#：Chance>0 且 Random.Next(Chance)==0 → AddedStats = RandomomRange(MaxStat-1, StatChance)+1
+    let mut stat_roll = |chance: u8, max_stat: u8, stat_chance: u8| -> i32 {
+        if chance > 0 && fastrand::i32(0..chance as i32) == 0 {
+            randomom_range(max_stat.saturating_sub(1), stat_chance) + 1
+        } else {
+            0
+        }
+    };
+    if stat.max_dura_chance > 0 && fastrand::i32(0..stat.max_dura_chance as i32) == 0 {
+        let dura = randomom_range(stat.max_dura_max_stat, stat.max_dura_stat_chance);
+        item.max_dura = (item.max_dura as u32 + dura as u32 * 1000).min(u16::MAX as u32) as u16;
+        item.current_dura = (item.current_dura as u32 + dura as u32 * 1000).min(u16::MAX as u32) as u16;
+    }
+    let v = stat_roll(stat.max_ac_chance, stat.max_ac_max_stat, stat.max_ac_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MaxAC, v); }
+    let v = stat_roll(stat.max_mac_chance, stat.max_mac_max_stat, stat.max_mac_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MaxMAC, v); }
+    let v = stat_roll(stat.max_dc_chance, stat.max_dc_max_stat, stat.max_dc_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MaxDC, v); }
+    let v = stat_roll(stat.max_mc_chance, stat.max_mc_max_stat, stat.max_mc_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MaxMC, v); }
+    let v = stat_roll(stat.max_sc_chance, stat.max_sc_max_stat, stat.max_sc_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MaxSC, v); }
+    let v = stat_roll(stat.accuracy_chance, stat.accuracy_max_stat, stat.accuracy_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::Accuracy, v); }
+    let v = stat_roll(stat.agility_chance, stat.agility_max_stat, stat.agility_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::Agility, v); }
+    let v = stat_roll(stat.hp_chance, stat.hp_max_stat, stat.hp_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::HP, v); }
+    let v = stat_roll(stat.mp_chance, stat.mp_max_stat, stat.mp_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MP, v); }
+    let v = stat_roll(stat.strong_chance, stat.strong_max_stat, stat.strong_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::Strong, v); }
+    let v = stat_roll(stat.magic_resist_chance, stat.magic_resist_max_stat, stat.magic_resist_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::MagicResist, v); }
+    let v = stat_roll(stat.poison_resist_chance, stat.poison_resist_max_stat, stat.poison_resist_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::PoisonResist, v); }
+    let v = stat_roll(stat.hp_recovery_chance, stat.hp_recovery_max_stat, stat.hp_recovery_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::HealthRecovery, v); }
+    let v = stat_roll(stat.mp_recovery_chance, stat.mp_recovery_max_stat, stat.mp_recovery_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::SpellRecovery, v); }
+    let v = stat_roll(stat.poison_recovery_chance, stat.poison_recovery_max_stat, stat.poison_recovery_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::PoisonRecovery, v); }
+    let v = stat_roll(stat.critical_rate_chance, stat.critical_rate_max_stat, stat.critical_rate_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::CriticalRate, v); }
+    let v = stat_roll(stat.critical_damage_chance, stat.critical_damage_max_stat, stat.critical_damage_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::CriticalDamage, v); }
+    let v = stat_roll(stat.freeze_chance, stat.freeze_max_stat, stat.freeze_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::Freezing, v); }
+    let v = stat_roll(stat.poison_attack_chance, stat.poison_attack_max_stat, stat.poison_attack_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::PoisonAttack, v); }
+    let v = stat_roll(stat.attack_speed_chance, stat.attack_speed_max_stat, stat.attack_speed_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::AttackSpeed, v); }
+    let v = stat_roll(stat.luck_chance, stat.luck_max_stat, stat.luck_stat_chance);
+    if v > 0 { item.added_stats.set(Stat::Luck, v); }
+    if stat.curse_chance > 0 && fastrand::i32(0..100) < stat.curse_chance as i32 {
+        item.cursed = true;
+    }
+    if stat.slot_chance > 0 && fastrand::i32(0..stat.slot_chance as i32) == 0 {
+        let slot = randomom_range(stat.slot_max_stat.saturating_sub(1), stat.slot_stat_chance) + 1;
+        // clone info 避免 set_slot_size(&mut item) 与 info 借用冲突
+        let info_clone = item.info.clone();
+        let info_slots = info_clone.as_ref().map(|i| i.slots as usize).unwrap_or(0);
+        if slot > info_slots as i32 {
+            item.set_slot_size(info_clone.as_ref(), Some(slot as usize));
+        }
+    }
+}
+
 
 impl WorldActor {
     pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
@@ -1289,6 +1377,7 @@ impl WorldActor {
             fishing_sessions: HashMap::new(),
             fishing_success_counters: HashMap::new(),
             fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
             fishing_drops: Vec::new(),
             guild_buff_infos: HashMap::new(),
             ground_items: Vec::new(),
@@ -2030,6 +2119,15 @@ impl WorldActor {
         }
         // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
         enrich_item_info(&mut item, &self.item_infos);
+        // #1749：C# Envir.CreateDropItem → UpgradeItem——掉落随机附加属性（按 RandomItemStats.ini）
+        if let Some(info) = self.item_infos.get(&item_index) {
+            if let Some(stat) = self.random_item_stats.get(info.random_stats_id as usize) {
+                if let Some(ref mut ii) = item.info {
+                    ii.random_stats = Some(stat.clone());
+                }
+                upgrade_item(&mut item, stat);
+            }
+        }
         // #1274：C# MonsterObject.DropItem——GlobalDropNotify 稀有掉落全服公告（System2）
         if item.info.as_ref().map(|i| i.global_drop_notify).unwrap_or(false) {
             let item_name = item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default();
@@ -4275,6 +4373,7 @@ impl Actor for WorldActor {
             fishing_sessions: HashMap::new(),
             fishing_success_counters: HashMap::new(),
             fishing_cfg: args.fishing_cfg,
+            random_item_stats: args.random_item_stats,
             fishing_drops,
             guild_buff_infos: args.guild_buff_infos.into_iter().map(|b| (b.id, b)).collect(),
             ground_items: Vec::new(),
@@ -7119,6 +7218,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_upgrade_item_zero_chance_no_change() {
+        // #1749：全 0 概率 → 无附加属性/无诅咒
+        let mut item = crate::actors::inventory::make_item(1, 1);
+        item.info = Some(mir2_shared::data::item::ItemInfo { slots: 0, ..Default::default() });
+        let stat = mir2_shared::data::item::RandomItemStat::default();
+        upgrade_item(&mut item, &stat);
+        assert_eq!(item.added_stats.get(mir2_shared::enums::Stat::MaxDC), 0);
+        assert_eq!(item.added_stats.get(mir2_shared::enums::Stat::Accuracy), 0);
+        assert!(!item.cursed);
+    }
+
+    #[test]
+    fn test_upgrade_item_applies_stats_and_slots() {
+        // #1749：强制概率 → MaxDC 附加属性 + 孔位生成
+        let mut item = crate::actors::inventory::make_item(1, 1);
+        item.info = Some(mir2_shared::data::item::ItemInfo { slots: 0, ..Default::default() });
+        let mut stat = mir2_shared::data::item::RandomItemStat::default();
+        stat.max_dc_chance = 1;      // 必触发
+        stat.max_dc_stat_chance = 1; // 每次 1/1 命中
+        stat.max_dc_max_stat = 3;    // 0..2 次 + 1
+        stat.slot_chance = 1;
+        stat.slot_stat_chance = 1;
+        stat.slot_max_stat = 3;
+        upgrade_item(&mut item, &stat);
+        assert!(item.added_stats.get(mir2_shared::enums::Stat::MaxDC) > 0);
+        assert!(!item.slots.is_empty(), "slot should be created");
+    }
+
+    #[test]
     fn test_name_colour_for_pk_thresholds() {
         assert_eq!(name_colour_for_pk(0, false), 0);       // White
         assert_eq!(name_colour_for_pk(50, false), 0);      // White
@@ -7860,4 +7988,9 @@ impl Message<GmGotoRequest> for WorldActor {
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
     }
 }
+
+
+
+
+
 
