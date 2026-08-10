@@ -2495,6 +2495,33 @@ impl Message<ClearBackpack> for PlayerActor {
 // 背包操作消息 Handler
 // ============================================================
 
+/// #1753：英雄背包扩容（C# HeroInfo.ResizeInventory：上限 42，每次 +8；发 S.ResizeInventory）
+pub struct ResizeHeroInventory;
+
+impl Message<ResizeHeroInventory> for PlayerActor {
+    type Reply = usize;
+
+    async fn handle(&mut self, _msg: ResizeHeroInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let len = self.state.hero_inventory.backpack.len();
+        if len >= 42 {
+            return len;
+        }
+        let new_len = (len + 8).min(42);
+        self.state.hero_inventory.backpack.resize(new_len, None);
+        // C# HeroObject.cs:490——S.ResizeInventory（客户端英雄背包刷新）
+        let pkt = mir2_shared::packets::server::ui_events::ResizeInventory { size: new_len as i32 };
+        let mut body = Vec::new();
+        if pkt.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeInventory as i16, &body),
+            }).await;
+        }
+        debug!("Hero inventory resized to {}", new_len);
+        new_len
+    }
+}
+
 /// 添加物品到背包
 pub struct AddItemToInventory {
     pub item: mir2_shared::data::item::UserItem,
@@ -6399,4 +6426,5 @@ allow_group: false,
         assert_eq!(s.equipped_poison_shape(), 0);
     }
 }
+
 
