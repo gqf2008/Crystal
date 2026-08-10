@@ -12,8 +12,8 @@ const PATH_TARGET_PET_FOLLOW: u64 = u64::MAX;
 const PATH_TARGET_PET_ATTACK: u64 = u64::MAX - 1;
 const PATH_TARGET_MONSTER_ATTACK: u64 = u64::MAX - 2;
 
-/// #1699：构造 ObjectRangeAttack 包体（C# S.ObjectRangeAttack；与 combat.rs 玩家弓手一致）：
-/// object_id/x/y/direction/target_id/target_x/target_y/spell/spell_level；Type 暂缺省=0（AttackRange1）
+/// #1699/#1765：构造 ObjectRangeAttack 包体（C# S.ObjectRangeAttack）：
+/// object_id/x/y/direction/target_id/target_x/target_y/Type/spell/spell_level（28B，对齐 C#）
 fn build_object_range_attack_body(
     attacker_oid: u32,
     x: i32,
@@ -22,7 +22,8 @@ fn build_object_range_attack_body(
     target_id: u32,
     target_x: i32,
     target_y: i32,
-    spell: u16,
+    attack_type: u8,
+    spell: u8,
 ) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&attacker_oid.to_le_bytes());
@@ -32,8 +33,9 @@ fn build_object_range_attack_body(
     body.extend_from_slice(&target_id.to_le_bytes());
     body.extend_from_slice(&(target_x as u32).to_le_bytes());
     body.extend_from_slice(&(target_y as u32).to_le_bytes());
-    body.extend_from_slice(&spell.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+    body.push(attack_type);
+    body.push(spell);
+    body.push(0u8); // spell_level（C# Level 字节）
     body
 }
 
@@ -4761,7 +4763,7 @@ impl Message<Tick> for WorldActor {
                                 mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
                                 &build_object_range_attack_body(
                                     monster.object_id, monster.x, monster.y, monster.direction,
-                                    target_oid, px, py, spell_id as u16,
+                                    target_oid, px, py, 0u8, spell_id,
                                 ),
                             )
                         } else {
@@ -5268,7 +5270,7 @@ impl Message<Tick> for WorldActor {
                         mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
                         &build_object_range_attack_body(
                             attacker_oid, boss_x, boss_y, boss_dir,
-                            target_oid, target_x, target_y, spell_id as u16,
+                            target_oid, target_x, target_y, 0u8, spell_id,
                         ),
                     )
                 } else {
@@ -6036,7 +6038,7 @@ mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
         collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, monster_melee_defence_type,
-        PARTY_EXP_RATE,
+        build_object_range_attack_body, PARTY_EXP_RATE,
     };
 
     #[test]
@@ -6223,6 +6225,23 @@ mod tests {
         assert_eq!(monster_melee_defence_type("SandSnail"), DefenceType::AcAgility);
         assert_eq!(monster_melee_defence_type("SomeUnknownMonster"), DefenceType::AcAgility);
         assert_eq!(monster_melee_defence_type(""), DefenceType::AcAgility);
+    }
+
+    /// #1765：ObjectRangeAttack 包体布局对齐 C#（28B：oid/x/y/dir/tid/tx/ty/Type/spell/level）
+    #[test]
+    fn test_object_range_attack_body_layout() {
+        let body = build_object_range_attack_body(0x11223344, 11, 22, 3, 0x55667788, 33, 44, 2, 7);
+        assert_eq!(body.len(), 28);
+        assert_eq!(&body[0..4], &0x11223344u32.to_le_bytes());
+        assert_eq!(&body[4..8], &11u32.to_le_bytes());
+        assert_eq!(&body[8..12], &22u32.to_le_bytes());
+        assert_eq!(body[12], 3); // direction
+        assert_eq!(&body[13..17], &0x55667788u32.to_le_bytes()); // target_id
+        assert_eq!(&body[17..21], &33u32.to_le_bytes());
+        assert_eq!(&body[21..25], &44u32.to_le_bytes());
+        assert_eq!(body[25], 2); // Type（C# AttackRange2）
+        assert_eq!(body[26], 7); // spell
+        assert_eq!(body[27], 0); // spell_level
     }
 }
 

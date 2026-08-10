@@ -961,6 +961,7 @@ mod tests {
             target_id: 999,
             target_x: 70,
             target_y: 80,
+            attack_type: 2,
             spell: 3,
             spell_level: 1,
         };
@@ -975,6 +976,7 @@ mod tests {
         assert_eq!(decoded.target_id, 999);
         assert_eq!(decoded.target_x, 70);
         assert_eq!(decoded.target_y, 80);
+        assert_eq!(decoded.attack_type, 2);
         assert_eq!(decoded.spell, 3);
         assert_eq!(decoded.spell_level, 1);
         Ok(())

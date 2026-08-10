@@ -1464,8 +1464,9 @@ impl Message<RangeAttackRequest> for WorldActor {
         range_body.extend_from_slice(&msg.target_id.to_le_bytes());
         range_body.extend_from_slice(&(target_x as u32).to_le_bytes());
         range_body.extend_from_slice(&(target_y as u32).to_le_bytes());
-        range_body.extend_from_slice(&0u16.to_le_bytes()); // spell
-        range_body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+        range_body.push(0u8); // Type（C# 玩家恒 AttackRange1）
+        range_body.push(0u8); // spell
+        range_body.push(0u8); // spell_level
         let range_packet = build_packet_bytes(
             mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16, &range_body);
         for other in &others {

@@ -256,6 +256,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
             if let Ok(p) = combat::ObjectRangeAttack::read_body(&mut cur) {
                 combat_evt.write(CombatEvent::RangeAttack {
                     object_id: p.object_id,
+                    attack_type: p.attack_type,
                 });
                 effects.write(PendingEffect::ProjectileFromTo {
                     source_id: p.object_id,
