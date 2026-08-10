@@ -959,13 +959,24 @@ impl WorldActor {
             if behaviour_follow || snap.owner_dead {
                 let target_dist = HERO_FOLLOW_DISTANCE;
                 if dist_to_owner > target_dist && self.tick_count >= ai_local.next_move_tick {
-                    // 向主人移动一步（复用 step_toward 逻辑）
-                    let (nx, ny, dir) = step_towards(ai_local.x, ai_local.y, snap.owner_x, snap.owner_y);
-                    ai_local.x = nx;
-                    ai_local.y = ny;
-                    ai_local.direction = dir;
-                    ai_local.next_move_tick = self.tick_count + 2;
-                    move_intents.push((snap.session_id, nx, ny, dir));
+                    // #1695：向主人移动一步（8 方向 A*，避免卡墙；C# HeroObject.ProcessRoam → MoveTo）
+                    if let Some((nx, ny, dir)) = hero_path_step(
+                        &mut self.hero_paths,
+                        &mut self.hero_path_targets,
+                        self.maps.get(&snap.owner_map),
+                        snap.session_id,
+                        1,
+                        ai_local.x,
+                        ai_local.y,
+                        snap.owner_x,
+                        snap.owner_y,
+                    ) {
+                        ai_local.x = nx;
+                        ai_local.y = ny;
+                        ai_local.direction = dir;
+                        ai_local.next_move_tick = self.tick_count + 2;
+                        move_intents.push((snap.session_id, nx, ny, dir));
+                    }
                 }
                 ai_local.target_oid = None;
                 *ai = ai_local;
@@ -995,12 +1006,23 @@ impl WorldActor {
                 // 无目标：跟随主人（ProcessRoam）
                 ai_local.target_oid = None;
                 if dist_to_owner > HERO_FOLLOW_DISTANCE && self.tick_count >= ai_local.next_move_tick {
-                    let (nx, ny, dir) = step_towards(ai_local.x, ai_local.y, snap.owner_x, snap.owner_y);
-                    ai_local.x = nx;
-                    ai_local.y = ny;
-                    ai_local.direction = dir;
-                    ai_local.next_move_tick = self.tick_count + 2;
-                    move_intents.push((snap.session_id, nx, ny, dir));
+                    if let Some((nx, ny, dir)) = hero_path_step(
+                        &mut self.hero_paths,
+                        &mut self.hero_path_targets,
+                        self.maps.get(&snap.owner_map),
+                        snap.session_id,
+                        1,
+                        ai_local.x,
+                        ai_local.y,
+                        snap.owner_x,
+                        snap.owner_y,
+                    ) {
+                        ai_local.x = nx;
+                        ai_local.y = ny;
+                        ai_local.direction = dir;
+                        ai_local.next_move_tick = self.tick_count + 2;
+                        move_intents.push((snap.session_id, nx, ny, dir));
+                    }
                 }
                 *ai = ai_local;
                 continue;
@@ -1736,8 +1758,17 @@ impl WorldActor {
 
             } else if target_dist > attack_range && can_move {
                 // ===== 不在攻击范围：移动靠近目标（ProcessTarget.MoveTo） =====
-                let (nx, ny, dir) = step_towards(ai_local.x, ai_local.y, target.x, target.y);
-                if self.maps.get(&snap.owner_map).map(|m| m.is_walkable(nx, ny)).unwrap_or(true) {
+                if let Some((nx, ny, dir)) = hero_path_step(
+                    &mut self.hero_paths,
+                    &mut self.hero_path_targets,
+                    self.maps.get(&snap.owner_map),
+                    snap.session_id,
+                    2,
+                    ai_local.x,
+                    ai_local.y,
+                    target.x,
+                    target.y,
+                ) {
                     ai_local.x = nx;
                     ai_local.y = ny;
                     ai_local.direction = dir;
@@ -2472,6 +2503,40 @@ fn step_away_from(target_x: i32, target_y: i32, from_x: i32, from_y: i32) -> (i3
     let opp_x = from_x - (target_x - from_x);
     let opp_y = from_y - (target_y - from_y);
     step_towards(from_x, from_y, opp_x, opp_y)
+}
+
+/// #1695：英雄寻路——沿缓存路径走一步（kind 1=跟随主人 2=追击怪物）。
+/// 目标变更或路径失效才重算（8 方向 A*，复用 maps::pathfind）；
+/// 返回 (nx, ny, dir)，路径为空/不可达时返回 None（保持原地）。
+fn hero_path_step(
+    paths: &mut HashMap<u64, Vec<(i32, i32)>>,
+    targets: &mut HashMap<u64, (u8, i32, i32)>,
+    map: Option<&crate::maps::loader::MapData>,
+    hero_session: u64,
+    kind: u8,
+    from_x: i32,
+    from_y: i32,
+    tx: i32,
+    ty: i32,
+) -> Option<(i32, i32, u8)> {
+    let path = paths.entry(hero_session).or_default();
+    let recalc = path.is_empty()
+        || targets.get(&hero_session)
+            .map(|(k, px, py)| *k != kind || *px != tx || *py != ty)
+            .unwrap_or(true)
+        || !map.map(|m| m.is_walkable(path[0].0, path[0].1)).unwrap_or(false);
+    if recalc {
+        *path = map
+            .and_then(|m| crate::maps::pathfind::find_path(m, (from_x, from_y), (tx, ty)))
+            .unwrap_or_default();
+        targets.insert(hero_session, (kind, tx, ty));
+    }
+    let candidate = *path.first()?;
+    let dir = (0..8)
+        .find(|d| MON_DIR_DX[*d] == candidate.0 - from_x && MON_DIR_DY[*d] == candidate.1 - from_y)
+        .unwrap_or(4) as u8;
+    path.remove(0);
+    Some((candidate.0, candidate.1, dir))
 }
 
 /// 从 (from) 到 (to) 的 8 方向朝向
