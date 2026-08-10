@@ -1500,6 +1500,26 @@ impl WorldActor {
             .collect()
     }
 
+    /// #1677：同图其他玩家（C# CurrentMap 视野；玩家动作广播过滤，避免跨图多余流量）
+    pub(crate) async fn same_map_players(
+        &self,
+        exclude_session: u64,
+        map_index: u16,
+    ) -> Vec<PlayerRecord> {
+        let mut out = Vec::new();
+        for r in self.players.values() {
+            if r.session_id == exclude_session {
+                continue;
+            }
+            if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
+                if s.map_index == map_index {
+                    out.push(r.clone());
+                }
+            }
+        }
+        out
+    }
+
     /// NPC 改发型/转职/变性后刷新外观（自身 UserInformation + 同图广播 ObjectPlayer）
     pub(crate) async fn refresh_player_appearance(&self, session_id: u64) {
         let Some(record) = self.players.get(&session_id) else { return };
@@ -1562,7 +1582,15 @@ impl WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
         }).await;
         let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
-        let others: Vec<_> = self.other_players(session_id).into_iter().map(|r| r.actor_ref.clone()).collect();
+        // #1677：击退广播只发同图玩家（C# CurrentMap）
+        let player_map: u16 = match self.players.get(&session_id) {
+            Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.map_index,
+                _ => 0,
+            },
+            None => 0,
+        };
+        let others: Vec<_> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.actor_ref.clone()).collect();
         for other in others {
             let _ = other.ask(crate::actors::player::BroadcastMovement {
                 object_id,
@@ -4985,7 +5013,7 @@ impl WorldActor {
                     .map(&light_of)
                     .unwrap_or(0),
             );
-        for other in self.other_players(session_id) {
+        for other in self.same_map_players(session_id, state.map_index).await {
             send_player_update(
                 &self.gate_ref, other.session_id, state.object_id,
                 light, weapon_shape, weapon_effect, armor_shape, 0,
@@ -5143,7 +5171,15 @@ impl Message<PlayerLeveled> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: PlayerLeveled, _ctx: &mut Context<Self, Self::Reply>) {
-        for other in self.other_players(msg.session_id) {
+        // #1677：升级特效只发同图玩家（C# CurrentMap）
+        let player_map: u16 = match self.players.get(&msg.session_id) {
+            Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.map_index,
+                _ => 0,
+            },
+            None => 0,
+        };
+        for other in self.same_map_players(msg.session_id, player_map).await {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.object_id.to_le_bytes());
             body.extend_from_slice(&msg.level.to_le_bytes());

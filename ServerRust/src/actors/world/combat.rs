@@ -290,7 +290,7 @@ impl Message<WorldAttackRequest> for WorldActor {
             spell: msg.spell,
         }).await) {
             // 广播 ObjectAttack 给其他玩家
-            let others: Vec<_> = self.other_players(msg.session_id)
+            let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
                 .into_iter()
                 .map(|r| (r.actor_ref.clone(), r.session_id))
                 .collect();
@@ -1036,7 +1036,7 @@ impl Message<HarvestRequest> for WorldActor {
             b.push(msg.direction);
             build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHarvest as i16, &b)
         };
-        for other in self.other_players(msg.session_id) {
+        for other in self.same_map_players(msg.session_id, state.map_index).await {
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: other.session_id,
                 data: harvest_body.clone(),
@@ -1451,8 +1451,8 @@ impl Message<RangeAttackRequest> for WorldActor {
         // C# HumanObject.RangeAttack（HumanObject.cs:2745）：
         //   - Broadcast(S.ObjectRangeAttack{...}) 给其他玩家（拉弓动作，Broadcast 排除攻击者）
         //   - Enqueue(S.RangeAttack{TargetID, Target, Spell}) 给攻击者（弹道表现）
-        let others: Vec<_> = self.other_players(msg.session_id)
-            .into_iter().cloned()
+        let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
+            .into_iter()
             .collect();
         let mut range_body = Vec::new();
         range_body.extend_from_slice(&object_id.to_le_bytes());
@@ -2172,8 +2172,8 @@ impl Message<MagicRequest> for WorldActor {
             };
 
         // 广播 ObjectMagic 给其他玩家
-        let others: Vec<_> = self.other_players(msg.session_id)
-            .into_iter().cloned()
+        let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
+            .into_iter()
             .collect();
         let object_magic = mir2_shared::packets::server::magic_combat::ObjectMagic {
             object_id,
@@ -2257,7 +2257,7 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 // Send to self + nearby players
                 let session_ids: Vec<u64> = std::iter::once(msg.session_id)
-                    .chain(self.other_players(msg.session_id).iter().map(|p| p.session_id))
+                    .chain(self.same_map_players(msg.session_id, state.map_index).await.iter().map(|p| p.session_id))
                     .collect();
                 for sid in &session_ids {
                     let _ = self.gate_ref.tell(SendToClient {

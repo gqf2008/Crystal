@@ -782,7 +782,7 @@ impl Message<WorldMoveRequest> for WorldActor {
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             // 隐身玩家移动时不广播给其他人
             if !self.invisible_sessions.contains(&msg.session_id) {
-                let others: Vec<_> = self.other_players(msg.session_id)
+                let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
                     .into_iter()
                     .map(|r| r.actor_ref.clone())
                     .collect();
@@ -1189,7 +1189,7 @@ impl Message<WorldTurnRequest> for WorldActor {
 
         // 广播转向
         if let Ok(Some(state)) = record.actor_ref.ask(crate::actors::player::GetPlayerState).await {
-            let others: Vec<_> = self.other_players(msg.session_id)
+            let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
                 .into_iter()
                 .map(|r| r.actor_ref.clone())
                 .collect();
