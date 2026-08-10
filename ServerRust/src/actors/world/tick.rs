@@ -4932,10 +4932,45 @@ impl Message<Tick> for WorldActor {
 
             // #471：宠物协战伤害（循环外应用，避免借用冲突）
             for (pid, tmid, damage, master) in &pet_attacks {
+                // #1741：宠物位置（在 get_mut 前读取，避免借用冲突）
+                let (pet_x, pet_y) = self.monsters.get(pid).map(|m| (m.x, m.y)).unwrap_or((0, 0));
                 if let Some(tm) = self.monsters.get_mut(tmid) {
                     tm.take_damage(*damage);
                     tm.provoked = true;
                     tm.target_session = Some(*master);
+                    // #1741：C# EXPOwner = attacker.Master——宠物补刀击杀归属主人（经验/掉落）
+                    tm.last_hitter_session = Some(*master);
+                    // #1741：宠物协战命中反馈（与玩家/英雄/怪物一致：ObjectStruck/DamageIndicator/ObjectHealth）
+                    let pet_x = if pet_x == 0 && pet_y == 0 { tm.x } else { pet_x };
+                    let pet_y = if pet_x == 0 && pet_y == 0 { tm.y } else { pet_y };
+                    tm.direction = crate::actors::world::ai::direction_towards(
+                        tm.x, tm.y, pet_x, pet_y,
+                    );
+                    let mut struck_body = Vec::new();
+                    struck_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                    struck_body.extend_from_slice(&pid.to_le_bytes());
+                    struck_body.extend_from_slice(&(tm.x as u32).to_le_bytes());
+                    struck_body.extend_from_slice(&(tm.y as u32).to_le_bytes());
+                    struck_body.push(tm.direction);
+                    let struck_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                    let mut dmg_body = Vec::new();
+                    dmg_body.extend_from_slice(&damage.to_le_bytes());
+                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                    let dmg_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                    let percent = ((tm.hp.max(0) as f32 / tm.max_hp.max(1) as f32) * 100.0) as u8;
+                    let mut health_body = Vec::new();
+                    health_body.extend_from_slice(&tm.object_id.to_le_bytes());
+                    health_body.push(percent);
+                    health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
+                    let health_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+                    let hit_map = tm.map_index;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
                     debug!("Pet #{} assists hitting '{}' (#{}) for {} dmg", pid, tm.name, tmid, damage);
                 }
             }
@@ -6051,6 +6086,8 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
+
 
 
 
