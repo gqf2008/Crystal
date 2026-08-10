@@ -565,7 +565,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     // 发送 DamageIndicator（伤害数字）
                     let mut dmg_body = Vec::new();
                     dmg_body.extend_from_slice(&damage.to_le_bytes());
-                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.push(if attack_result.is_critical { 5u8 } else { 0u8 }); // damage_type: 0=Hit 5=Critical
                     dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
@@ -719,6 +719,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         self.broadcast_pvp_hit(
                             other_state.object_id, result.object_id,
                             other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
+                            attack_result.is_critical,
                         ).await;
                     }
                     // PvP 近战技能（C# 对玩家同样走 melee 技能逻辑）
@@ -1678,6 +1679,7 @@ impl WorldActor {
             self.broadcast_pvp_hit(
                 defender_state.object_id, attacker_object_id,
                 defender_state.x, defender_state.y, defender_state.direction, damage, defender_state.map_index,
+                attack_result.is_critical,
             ).await;
         }
         let pvp_died = defender_record.actor_ref.ask(TakeDamage {
@@ -5362,3 +5364,4 @@ mod tests {
         assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Necklace));
     }
 }
+

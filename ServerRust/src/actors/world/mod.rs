@@ -1548,7 +1548,7 @@ impl WorldActor {
     }
 
     /// C# Attacked()：向同图其他玩家广播 ObjectStruck + DamageIndicator（PvP 命中表现）
-    pub(crate) async fn broadcast_pvp_hit(&self, target_oid: u32, attacker_oid: u32, x: i32, y: i32, dir: u8, damage: i32, map_index: u16) {
+    pub(crate) async fn broadcast_pvp_hit(&self, target_oid: u32, attacker_oid: u32, x: i32, y: i32, dir: u8, damage: i32, map_index: u16, is_critical: bool) {
         let mut struck_body = Vec::new();
         struck_body.extend_from_slice(&target_oid.to_le_bytes());
         struck_body.extend_from_slice(&attacker_oid.to_le_bytes());
@@ -1558,7 +1558,7 @@ impl WorldActor {
         let struck_packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
         let mut dmg_body = Vec::new();
         dmg_body.extend_from_slice(&damage.to_le_bytes());
-        dmg_body.push(0u8); // damage_type = normal
+        dmg_body.push(if is_critical { 5u8 } else { 0u8 }); // damage_type: 0=Hit 5=Critical
         dmg_body.extend_from_slice(&target_oid.to_le_bytes());
         let dmg_packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
         for (sid, r) in &self.players {
@@ -7860,3 +7860,4 @@ impl Message<GmGotoRequest> for WorldActor {
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
     }
 }
+

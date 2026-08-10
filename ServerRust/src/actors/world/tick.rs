@@ -96,7 +96,7 @@ async fn apply_monster_hit_player(
                 return 0;
             }
             // #1721：完整 C# Attacked 结算（命中/护甲/反伤/减伤，复用 resolve_attack）
-            let (actual, reflected, is_miss) = resolve_monster_vs_player(
+            let (actual, reflected, is_miss, is_critical) = resolve_monster_vs_player(
                 attacker_stats, attacker_level, &defender, damage, defence_type,
             );
             if is_miss {
@@ -117,7 +117,7 @@ async fn apply_monster_hit_player(
             broadcast_hit_feedback(
                 players, gate_ref, map_index, target_session,
                 defender.object_id, defender.x, defender.y, defender.direction,
-                attacker_oid, actual,
+                attacker_oid, actual, if is_critical { 5 } else { 0 },
             ).await;
 
             // 被攻击时自动下坐骑
@@ -200,14 +200,14 @@ fn resolve_monster_vs_player(
     defender: &crate::actors::player::PlayerState,
     raw_damage: i32,
     defence_type: mir2_shared::enums::DefenceType,
-) -> (i32, i32, bool) {
+) -> (i32, i32, bool, bool) {
     let defender_stats = defender.to_combat_stats();
     let level_offset = crate::combat::attack::level_offset(attacker_level as u16, defender.level);
     let result = crate::combat::attack::resolve_attack(
         attacker_stats, &defender_stats, raw_damage, defence_type, level_offset,
     );
     let is_miss = !result.is_hit || (result.damage == 0 && result.reflected == 0);
-    (result.damage, result.reflected, is_miss)
+    (result.damage, result.reflected, is_miss, result.is_critical)
 }
 
 /// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
@@ -248,6 +248,7 @@ async fn broadcast_hit_feedback(
     victim_dir: u8,
     attacker_oid: u32,
     damage: i32,
+    damage_type: u8,
 ) {
     let mut struck_body = Vec::new();
     struck_body.extend_from_slice(&victim_oid.to_le_bytes());
@@ -259,7 +260,7 @@ async fn broadcast_hit_feedback(
         mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
     let mut dmg_body = Vec::new();
     dmg_body.extend_from_slice(&damage.to_le_bytes());
-    dmg_body.push(0u8); // damage_type = normal
+    dmg_body.push(damage_type); // damage_type: 0=Hit 5=Critical
     dmg_body.extend_from_slice(&victim_oid.to_le_bytes());
     let dmg_packet = build_packet_bytes(
         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
@@ -657,11 +658,13 @@ impl WorldActor {
                 let attacker_level = self.monsters.get(&hit.attacker_oid)
                     .map(|m| m.level)
                     .unwrap_or(0);
+                let mut is_critical = false;
                 let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
-                    let (actual, reflected, is_miss) = resolve_monster_vs_player(
+                    let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
                         &attacker_stats, attacker_level, &defender, hit.damage,
                         mir2_shared::enums::DefenceType::AcAgility,
                     );
+                    is_critical = crit;
                     if reflected > 0 {
                         if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
                             m.take_damage(reflected);
@@ -687,7 +690,7 @@ impl WorldActor {
                     broadcast_hit_feedback(
                         &self.players, &self.gate_ref, hit.map_index, hit.target_session,
                         victim.object_id, victim.x, victim.y, victim.direction,
-                        hit.attacker_oid, actual,
+                        hit.attacker_oid, actual, if is_critical { 5 } else { 0 },
                     ).await;
                 }
                 // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
@@ -3437,6 +3440,7 @@ impl WorldActor {
                 RangeTarget::Monster(monster_id) => {
                     // 目标怪物已消失/已死 → 箭矢落空（C# CompleteAttack 目标为空则无结算）
                     let mut struck_dir = 0u8;
+                    let mut hit_critical = false;
                     let hit_damage = {
                         let Some(monster) = self.monsters.get_mut(&monster_id) else {
                             debug!("RangeAttack resolve: monster {} gone, arrow whiffs", monster_id);
@@ -3479,6 +3483,7 @@ impl WorldActor {
                             monster.x, monster.y, c.attacker_x, c.attacker_y,
                         );
                         struck_dir = monster.direction;
+                        hit_critical = attack_result.is_critical;
                         debug!("RangeAttack resolve: {} -> monster {} for {} damage (crit={})",
                                c.attacker_object_id, monster_id, damage, attack_result.is_critical);
                         damage
@@ -3511,7 +3516,7 @@ impl WorldActor {
 
                     let mut dmg_body = Vec::new();
                     dmg_body.extend_from_slice(&hit_damage.to_le_bytes());
-                    dmg_body.push(0u8); // damage_type = normal (Hit)
+                    dmg_body.push(if hit_critical { 5u8 } else { 0u8 }); // damage_type: 0=Hit 5=Critical
                     dmg_body.extend_from_slice(&monster_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
@@ -3709,7 +3714,7 @@ impl WorldActor {
                         mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
                     let mut dmg_body = Vec::new();
                     dmg_body.extend_from_slice(&result.damage.to_le_bytes());
-                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.push(if result.is_critical { 5u8 } else { 0u8 }); // damage_type: 0=Hit 5=Critical
                     dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
@@ -5234,11 +5239,13 @@ impl Message<Tick> for WorldActor {
                     for sid in &targets {
                         if let Some(record) = self.players.get(sid) {
                             // #1721：Boss 攻击完整结算（C# Attacked：命中/护甲/反伤/减伤）
+                            let mut is_critical = false;
                             let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
-                                let (actual, reflected, is_miss) = resolve_monster_vs_player(
+                                let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
                                     &boss_stats, boss_level, &defender, damage,
                                     mir2_shared::enums::DefenceType::AcAgility,
                                 );
+                                is_critical = crit;
                                 if reflected > 0 {
                                     if let Some(m) = self.monsters.get_mut(&attacker_oid) {
                                         m.take_damage(reflected);
@@ -5264,7 +5271,7 @@ impl Message<Tick> for WorldActor {
                                 broadcast_hit_feedback(
                                     &self.players, &self.gate_ref, boss_map, *sid,
                                     victim.object_id, victim.x, victim.y, victim.direction,
-                                    attacker_oid, actual,
+                                    attacker_oid, actual, if is_critical { 5 } else { 0 },
                                 ).await;
                             }
                             // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
@@ -6086,6 +6093,12 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
+
+
+
+
+
 
 
 

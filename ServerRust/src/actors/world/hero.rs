@@ -2058,7 +2058,7 @@ impl WorldActor {
                         mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
                     let mut dmg_body = Vec::new();
                     dmg_body.extend_from_slice(&result.damage.to_le_bytes());
-                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.push(if result.is_critical { 5u8 } else { 0u8 }); // damage_type: 0=Hit 5=Critical
                     dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
@@ -3984,4 +3984,5 @@ mod tests {
         }
     }
 }
+
 
