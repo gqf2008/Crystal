@@ -485,10 +485,10 @@ pub(crate) fn actor_hover_tooltip_system(
         Some((name, head)) => {
             // 世界坐标 → 视口(物理像素) → UI 逻辑坐标（UI 相机 Fixed 1024x768）
             if let Ok(vp) = map_cam.world_to_viewport(map_gtf, head) {
-                let ui_x = vp.x / window.physical_width() as f32 * 1024.0;
-                let ui_y = vp.y / window.physical_height() as f32 * 768.0;
+                // world_to_viewport 返回的已是逻辑视口坐标（0..1024, 0..768），
+                // 不能再用物理宽度换算（会双重缩放导致偏移离谱）
                 // tooltip_panel 在 state+(16,16)，往上多留面板高度 → 面板显示在头顶上方
-                tooltip.update(12, true, name.clone(), vec![name], ui_x - 16.0, ui_y - 70.0);
+                tooltip.update(12, true, name.clone(), vec![name], vp.x - 16.0, vp.y - 70.0);
             } else {
                 tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0);
             }
