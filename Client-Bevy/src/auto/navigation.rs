@@ -359,6 +359,10 @@ pub(crate) fn real_verify_system(
             );
             s.target = Some(oid);
             s.target_tile = Some((mx, my));
+            // #1811：换目标必须重置攻击计时与命中基线，否则上一目标遗留的
+            // attack_elapsed>=30 会让 stage 2 底部无条件检查瞬间触发“30s 未击杀”换目标
+            s.attack_elapsed = 0.0;
+            s.hits_at_start = probe.hits;
             if d <= 1 {
                 control.attack_target = Some(oid);
                 tracing::info!("[REAL] ⚔️ 已在邻接，直接开始攻击 {}", oid);
@@ -463,6 +467,7 @@ pub(crate) fn real_verify_system(
                     control.attack_target = None;
                     s.target = None;
                     s.target_tile = None;
+                    s.attack_elapsed = 0.0;
                     s.stage = 1;
                     s.t = 0.0;
                     return;
@@ -475,6 +480,7 @@ pub(crate) fn real_verify_system(
                 control.attack_target = None;
                 s.target = None;
                 s.target_tile = None;
+                s.attack_elapsed = 0.0;
                 s.stage = 1;
                 s.t = 0.0;
             }
