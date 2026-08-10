@@ -17,7 +17,8 @@ impl WorldActor {
     /// #895：PvP 受击装备耐久损耗（C# HumanObject.DamageDura：非武器槽 -1，
     /// 命中即扣，含致死；NoDuraLoss/Strong 减免由 DamageEquipment 处理）。
     /// 对齐 tick.rs 怪物命中路径；装备损坏时重算属性并广播外观。
-    async fn damage_armor_on_pvp_hit(&self, session_id: u64) {
+    /// #1856：pub(crate) 供 tick_spells 地面法术命中玩家复用。
+    pub(crate) async fn damage_armor_on_pvp_hit(&self, session_id: u64) {
         let mut any_broke = false;
         if let Some(record) = self.players.get(&session_id) {
             for slot in DAMAGE_DURA_ARMOR_SLOTS {

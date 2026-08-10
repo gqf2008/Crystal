@@ -3327,6 +3327,8 @@ impl WorldActor {
         let mut expired_ids = Vec::new();
         // 收集需要结算的 spell tick：(caster_session, spell, x, y, tick_value, 命中怪物 ids)
         let mut spell_hits: Vec<(u64, Spell, i32, i32, i32, Vec<u32>)> = Vec::new();
+        // #1856：地面法术命中的玩家（C# SpellObject.ProcessSpell Player 分支）
+        let mut player_spell_hits: Vec<(u64, Spell, i32, Vec<u64>)> = Vec::new();
         let mut heal_targets: Vec<u64> = Vec::new();
         let mut heal_amounts: Vec<i32> = Vec::new();
 
@@ -3402,6 +3404,26 @@ impl WorldActor {
                                 }
                             }
                         }
+                    }
+                    // #1856：C# SpellObject.ProcessSpell 同时命中玩家（IsAttackTarget 门控，第三阶段结算）
+                    let player_ids: Vec<u64> = {
+                        let mut ids = Vec::new();
+                        for (sid, r) in &self.players {
+                            if *sid == spell_obj.caster_session { continue; }
+                            if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                                if ps.is_dead || ps.map_index != spell_obj.map_index { continue; }
+                                let in_area = if spell_obj.cells.is_empty() {
+                                    (ps.x - spell_obj.x).abs() + (ps.y - spell_obj.y).abs() <= 1
+                                } else {
+                                    spell_obj.cells.contains(&(ps.x, ps.y))
+                                };
+                                if in_area { ids.push(*sid); }
+                            }
+                        }
+                        ids
+                    };
+                    if !player_ids.is_empty() {
+                        player_spell_hits.push((spell_obj.caster_session, spell_obj.spell, spell_obj.tick_value, player_ids));
                     }
                 }
                 Spell::HealingCircle => {
@@ -3540,6 +3562,90 @@ impl WorldActor {
                             poison::apply_poison(&mut monster.poison_list, *p);
                         }
                     }
+                }
+            }
+        }
+
+        // #1856：第三阶段——地面法术命中玩家（C# SpellObject.ProcessSpell Player 分支）
+        for (caster_session, spell, tick_value, player_ids) in player_spell_hits {
+            let caster_state = match self.players.get(&caster_session) {
+                Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                    Ok(Some(s)) if !s.is_dead => s,
+                    _ => continue,
+                },
+                None => continue,
+            };
+            let attacker_stats = caster_state.to_combat_stats();
+            let caster_level = caster_state.level;
+            for target_session in player_ids {
+                let other_actor = match self.players.get(&target_session) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let Ok(Some(other_state)) = other_actor.actor_ref.ask(GetPlayerState).await else { continue };
+                if other_state.is_dead { continue; }
+                if self.gm_protected.contains(&target_session) { continue; }
+                // 攻击模式/行会战（C# IsAttackTarget）
+                if !super::can_attack_player(&caster_state, &other_state, &self.guild_wars) { continue; }
+                // 安全区：双方任一在安全区则禁止伤害
+                let attacker_safe = self.maps.get(&caster_state.map_index)
+                    .map(|m| m.is_safe_zone(caster_state.x, caster_state.y)).unwrap_or(false);
+                let target_safe = self.maps.get(&other_state.map_index)
+                    .map(|m| m.is_safe_zone(other_state.x, other_state.y)).unwrap_or(false);
+                if attacker_safe || target_safe { continue; }
+                // 禁战地图（C# CurrentMap.Info.NoFight）
+                if self.map_infos.get(&(caster_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                    || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                { continue; }
+
+                let defender_stats = other_state.to_combat_stats();
+                let level_offset = if other_state.level > caster_level {
+                    0
+                } else {
+                    (caster_level - other_state.level).min(10) as u16
+                };
+                // C# SpellObject.ProcessSpell：伤害 = SpellObject.Value，MAC 防御
+                let attack_result = attack::resolve_attack(
+                    &attacker_stats, &defender_stats, tick_value.max(1),
+                    mir2_shared::enums::DefenceType::Mac, level_offset,
+                );
+                let damage = attack_result.damage;
+                if damage > 0 {
+                    let _ = other_actor.actor_ref.ask(TakeDamage {
+                        attacker_id: caster_state.object_id,
+                        attacker_session: target_session,
+                        damage,
+                    }).await;
+                    // 附加状态（对齐怪物路径：Blizzard 1/8 Slow、PoisonCloud 绿毒）
+                    match spell {
+                        Spell::Blizzard => {
+                            if fastrand::i32(0..8) == 0 {
+                                let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
+                                let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                                    poisons: vec![poison::Poison::new(PoisonType::SLOW, dur, 0, 2000)],
+                                }).await;
+                            }
+                        }
+                        Spell::PoisonCloud => {
+                            let poison_value = (tick_value / 4).min(10);
+                            let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                                poisons: vec![poison::Poison::new(PoisonType::GREEN, 12, poison_value, 1000)],
+                            }).await;
+                        }
+                        _ => {}
+                    }
+                    for p in &attack_result.applied_poisons {
+                        let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                            poisons: vec![*p],
+                        }).await;
+                    }
+                    // PvP 受击广播 + 装备耐久（C# Struck → DamageDura）
+                    self.broadcast_pvp_hit(
+                        other_state.object_id, caster_state.object_id,
+                        other_state.x, other_state.y, other_state.direction,
+                        damage, other_state.map_index, attack_result.is_critical,
+                    ).await;
+                    self.damage_armor_on_pvp_hit(target_session).await;
                 }
             }
         }
