@@ -6298,6 +6298,17 @@ fn rarity_prefix(rarity: u8) -> &'static str {
     }
 }
 
+/// #1701：稀有度名字颜色（C# MonsterRarityData.NameColour → ObjectColourChanged ARGB）：
+/// 1=Uncommon LightGreen / 2=Rare DeepSkyBlue / 3=Elite Gold；0=默认白
+pub(crate) fn rarity_name_colour(rarity: u8) -> i32 {
+    match rarity {
+        3 => 0xFFFF_D700u32 as i32, // Gold
+        2 => 0xFF00_BFFFu32 as i32, // DeepSkyBlue
+        1 => 0xFF90_EE90u32 as i32, // LightGreen
+        _ => 0,
+    }
+}
+
 /// #926：物品绑定标志判定（C# BindMode.HasFlag；db::ItemInfo.bind_mode 与 SharedRust 位值一致）
 pub(crate) fn has_bind_flag(bind_mode: i32, flag: u16) -> bool {
     (bind_mode as u16 & flag) != 0
@@ -6907,6 +6918,11 @@ async fn spawn_npcs_and_monsters(
             session_id,
             data: packet,
         }).await;
+        // #1701：稀有怪名字颜色（C# MonsterRarityData.NameColour → ObjectColourChanged）
+        if rarity > 0 {
+            let colour_packet = build_object_colour_changed_packet(object_id, rarity_name_colour(rarity));
+            let _ = gate_ref.tell(SendToClient { session_id, data: colour_packet }).await;
+        }
 
         let monster_info_opt = ctx.monster_infos.get(&monster.monster_index);
         let ai_profile = monster_info_opt
