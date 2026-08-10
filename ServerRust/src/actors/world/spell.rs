@@ -116,35 +116,37 @@ fn make_spell_config(
     spell: mir2_shared::enums::Spell,
     _level: u8,
     stat: i32,
+    value: i32,
 ) -> SpellConfig {
     use mir2_shared::enums::Spell;
     match spell {
+        // C# Map.cs:1133：ExpireTime=(10+value/2)s、TickSpeed=2000，Value=magic.GetDamage
         Spell::FireWall => SpellConfig {
             spell: Spell::FireWall,
-            duration_ms: 30_000,
+            duration_ms: ((10 + value / 2).max(1) as u64) * 1000,
             tick_interval_ms: 2000,
-            tick_value: stat.max(10) * 2,
+            tick_value: value.max(1),
         },
         // C# Map.cs:1475：ExpireTime=6000ms、TickSpeed=1000
         Spell::PoisonCloud => SpellConfig {
             spell: Spell::PoisonCloud,
             duration_ms: 6_000,
             tick_interval_ms: 1000,
-            tick_value: stat.max(5) * 3,
+            tick_value: value.max(1),
         },
         // C# Map.cs:1670：ExpireTime=3000ms、TickSpeed=440
         Spell::Blizzard => SpellConfig {
             spell: Spell::Blizzard,
             duration_ms: 3_000,
             tick_interval_ms: 440,
-            tick_value: stat.max(15) * 3,
+            tick_value: value.max(1),
         },
         // C# Map.cs:1731：ExpireTime=3000ms、TickSpeed=440
         Spell::MeteorStrike => SpellConfig {
             spell: Spell::MeteorStrike,
             duration_ms: 3_000,
             tick_interval_ms: 440,
-            tick_value: stat.max(20) * 4,
+            tick_value: value.max(1),
         },
         Spell::HealingCircle => SpellConfig {
             spell: Spell::HealingCircle,
@@ -152,11 +154,12 @@ fn make_spell_config(
             tick_interval_ms: 1500,
             tick_value: stat.max(5) * 2 + 25,
         },
+        // C# Map.cs:1952：ExpireTime=(10+value/2)s、TickSpeed=500
         Spell::ExplosiveTrap => SpellConfig {
             spell: Spell::ExplosiveTrap,
-            duration_ms: 60_000,
-            tick_interval_ms: 1000,
-            tick_value: stat.max(30) * 2,
+            duration_ms: ((10 + value / 2).max(1) as u64) * 1000,
+            tick_interval_ms: 500,
+            tick_value: value.max(1),
         },
         Spell::DelayedExplosion => SpellConfig {
             spell: Spell::DelayedExplosion,
@@ -183,9 +186,10 @@ fn make_spell_config(
 /// 创建持久法术对象
 pub fn create_persistent_spell(
     object_id: u32, caster_id: u32, caster_session: u64, map_index: u16,
-    x: i32, y: i32, level: u8, stat: i32, spell: mir2_shared::enums::Spell,
+    x: i32, y: i32, level: u8, stat: i32, value: i32,
+    spell: mir2_shared::enums::Spell,
 ) -> SpellObject {
-    let cfg = make_spell_config(spell, level, stat);
+    let cfg = make_spell_config(spell, level, stat, value);
     SpellObject::new(
         object_id, cfg.spell,
         caster_id, caster_session, map_index, x, y,
@@ -252,7 +256,7 @@ mod tests {
     /// #1864：地面法术时长/跳速对齐（C# Map.cs：PoisonCloud 6s/1000、Blizzard/MeteorStrike 3s/440）
     #[test]
     fn ground_spell_duration_tick_aligned() {
-        let mk = |sp| super::create_persistent_spell(1, 1, 1, 0, 0, 0, 3, 100, sp);
+        let mk = |sp| super::create_persistent_spell(1, 1, 1, 0, 0, 0, 3, 100, 30, sp);
         let pc = mk(Spell::PoisonCloud);
         assert_eq!(pc.expires_at_ms, 6000);
         assert_eq!(pc.tick_interval_ms, 1000);
@@ -262,6 +266,18 @@ mod tests {
         let ms = mk(Spell::MeteorStrike);
         assert_eq!(ms.expires_at_ms, 3000);
         assert_eq!(ms.tick_interval_ms, 440);
+        // #1868：每跳伤害 = C# value（magic.GetDamage），非 stat 近似
+        assert_eq!(pc.tick_value, 30);
+        assert_eq!(bl.tick_value, 30);
+        assert_eq!(ms.tick_value, 30);
+        // FireWall/ExplosiveTrap 时长 = (10+value/2)s；value=30 → 25s
+        let fw = mk(Spell::FireWall);
+        assert_eq!(fw.expires_at_ms, 25000);
+        assert_eq!(fw.tick_value, 30);
+        let et = mk(Spell::ExplosiveTrap);
+        assert_eq!(et.expires_at_ms, 25000);
+        assert_eq!(et.tick_interval_ms, 500);
+        assert_eq!(et.tick_value, 30);
     }
 
     #[test]
