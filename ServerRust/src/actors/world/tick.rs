@@ -434,7 +434,8 @@ fn boss_range_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
         | "frozenmagician" | "furbolgcommander" | "generalmeowmeow" | "hellkeeper"
         | "hoodedsummonerscrolls" | "kinghydrax" | "omacannibal" | "omamage" | "peacockspider"
         | "powerbead" | "restlessjar" | "rhinopriest" | "seedingsgeneral" | "septaoist"
-        | "sepwizard" | "treeguardian" | "waterdragon" | "whitefoxman" | "witchdoctor"
+        | "sepwizard" | "treeguardian" | "tucsongeneral" | "waterdragon" | "whitefoxman"
+        | "witchdoctor"
     ) {
         DefenceType::MacAgility
     } else if matches!(n.as_str(),
@@ -449,6 +450,38 @@ fn boss_range_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
     } else if matches!(n.as_str(),
         // AC：远程物理吃物防（C# DefenceType.AC）
         "armadillo" | "hedgekektal" | "hornedcommander" | "hornedmage" | "hornedsorceror"
+    ) {
+        DefenceType::Ac
+    } else {
+        DefenceType::AcAgility
+    }
+}
+
+/// #1761：Boss 近战/AOE/直线伤害防御类型（C# 各怪 DelayedType.Damage / LineAttack / CompleteRangeAttack 的 DefenceType）
+/// 精确名匹配（不区分大小写）；未收录默认 ACAgility（C# 默认敏捷物防，保持 #1721 既有行为，安全回退）。
+/// 混合型（DemonWolf/SnowWolfKing/DarkOmaKing/OmaKing/TucsonGeneral 等近战与远程/直线不同）不映射，避免改错。
+fn boss_melee_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
+    use mir2_shared::enums::DefenceType;
+    let n = name.to_ascii_lowercase();
+    if matches!(n.as_str(),
+        // MACAgility：近战/直线吃魔防+敏捷（C# DefenceType.MACAgility）
+        "burningzombie" | "darkdevil" | "flamingwooma" | "flamespear" | "flyingstatue"
+        | "frozenzombie" | "hoodedsummonerscrolls" | "redthunderzuma" | "restlessjar"
+        | "rightguard" | "seedingsgeneral" | "sepwizard" | "shamanzombie" | "treeguardian"
+        | "treequeen" | "trollking" | "vampirespider" | "venomspider" | "yimoogi"
+        | "zumataurus"
+    ) {
+        DefenceType::MacAgility
+    } else if matches!(n.as_str(),
+        // MAC：近战/AOE吃魔防（C# DefenceType.MAC）
+        "charmedsnake" | "dragonstatue" | "elementguard" | "evilcentipede" | "evilmir"
+        | "greatfoxspirit" | "tucsonegg"
+    ) {
+        DefenceType::Mac
+    } else if matches!(n.as_str(),
+        // AC：近战/AOE吃物防（C# DefenceType.AC）
+        "cannibaltentacles" | "darkdevourer" | "darkwraith" | "elephantman" | "frozenaxeman"
+        | "generalmeowmeow" | "guard" | "hellbomb" | "kirin" | "turtlegrass"
     ) {
         DefenceType::Ac
     } else {
@@ -5276,12 +5309,15 @@ impl Message<Tick> for WorldActor {
                         .unwrap_or(0);
                     for sid in &targets {
                         if let Some(record) = self.players.get(sid) {
+                            let boss_name = self.monsters.get(&attacker_oid)
+                                .map(|m| m.name.as_str())
+                                .unwrap_or("");
                             // #1721：Boss 攻击完整结算（C# Attacked：命中/护甲/反伤/减伤）
                             let mut is_critical = false;
                             let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
                                 let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
                                     &boss_stats, boss_level, &defender, damage,
-                                    mir2_shared::enums::DefenceType::AcAgility,
+                                    boss_melee_defence_type(boss_name),
                                 );
                                 is_critical = crit;
                                 if reflected > 0 {
@@ -5997,7 +6033,8 @@ impl Message<Tick> for WorldActor {
 mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
-        collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, PARTY_EXP_RATE,
+        collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, boss_melee_defence_type,
+        PARTY_EXP_RATE,
     };
 
     #[test]
@@ -6150,6 +6187,30 @@ mod tests {
         assert_eq!(boss_range_defence_type("AncientBringer"), DefenceType::AcAgility);
         assert_eq!(boss_range_defence_type("SomeUnknownMonster"), DefenceType::AcAgility);
         assert_eq!(boss_range_defence_type(""), DefenceType::AcAgility);
+        // #1761：TucsonGeneral 远程主分支是 ProjectileAttack MACAgility
+        assert_eq!(boss_range_defence_type("TucsonGeneral"), DefenceType::MacAgility);
+    }
+
+    /// #1761：Boss 近战/AOE/直线伤害防御类型按 C# 配置映射（大小写不敏感）
+    #[test]
+    fn test_boss_melee_defence_type() {
+        use mir2_shared::enums::DefenceType;
+        // MACAgility 组（近战/直线法术）
+        assert_eq!(boss_melee_defence_type("BurningZombie"), DefenceType::MacAgility);
+        assert_eq!(boss_melee_defence_type("RestlessJar"), DefenceType::MacAgility);
+        assert_eq!(boss_melee_defence_type("zumataurus"), DefenceType::MacAgility);
+        // MAC 组（近战/AOE 魔法）
+        assert_eq!(boss_melee_defence_type("CharmedSnake"), DefenceType::Mac);
+        assert_eq!(boss_melee_defence_type("EvilCentipede"), DefenceType::Mac);
+        // AC 组（近战物理）
+        assert_eq!(boss_melee_defence_type("CannibalTentacles"), DefenceType::Ac);
+        assert_eq!(boss_melee_defence_type("Kirin"), DefenceType::Ac);
+        assert_eq!(boss_melee_defence_type("turtlegrass"), DefenceType::Ac);
+        // 混合型/未收录回退 ACAgility
+        assert_eq!(boss_melee_defence_type("OmaKing"), DefenceType::AcAgility);
+        assert_eq!(boss_melee_defence_type("DemonWolf"), DefenceType::AcAgility);
+        assert_eq!(boss_melee_defence_type("SomeUnknownMonster"), DefenceType::AcAgility);
+        assert_eq!(boss_melee_defence_type(""), DefenceType::AcAgility);
     }
 }
 
