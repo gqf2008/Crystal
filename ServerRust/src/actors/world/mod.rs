@@ -4883,10 +4883,14 @@ impl WorldActor {
         let target_war_zone = self.is_conquest_map(target_state.map_index);
         let mut viewers: Vec<(u64, Option<String>)> = Vec::new();
         for (sid, rec) in &self.players {
-            let guild = match rec.actor_ref.ask(GetPlayerState).await {
-                Ok(Some(s)) => s.guild_name,
-                _ => None,
+            // #1682：名字颜色只通知同图玩家（C# CurrentMap；PK 红名/灰名/行会战色）
+            let (guild, map) = match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => (s.guild_name, s.map_index),
+                _ => (None, 0),
             };
+            if map != target_state.map_index {
+                continue;
+            }
             viewers.push((*sid, guild));
         }
         for (sid, viewer_guild) in viewers {
