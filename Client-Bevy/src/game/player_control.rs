@@ -145,11 +145,17 @@ struct UiLockState<'w> {
     click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
     amount: Res<'w, crate::game::dialogs::amount_box::AmountBoxState>,
     confirm: Res<'w, crate::game::dialogs::inventory::InvDropConfirm>,
+    dialog: Res<'w, crate::game::dialogs::DialogManager>,
 }
 
 impl UiLockState<'_> {
     fn locked(&self) -> bool {
         self.click.selected.is_some() || self.amount.visible || self.confirm.visible
+    }
+
+    /// #1830：窗口类对话框打开（小地图除外）
+    fn blocks_world_click(&self) -> bool {
+        self.dialog.blocks_world_click()
     }
 }
 
@@ -211,6 +217,7 @@ fn right_click_move_system(
     >,
     buttons: Query<&UiButton>,
     hud: Res<HudState>,
+    dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
     if hud.dead || hud.fishing || hud.paralysis {
         return;
@@ -223,7 +230,8 @@ fn right_click_move_system(
         let (x, y, w, h) = b.rect;
         cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
     });
-    if !mouse.just_pressed(MouseButton::Right) || over_ui || over_main_dialog(cursor_logical) || over_chat_panel(cursor_logical) {
+    // #1830：窗口类对话框打开时不寻路移动（小地图除外）
+    if !mouse.just_pressed(MouseButton::Right) || over_ui || over_main_dialog(cursor_logical) || over_chat_panel(cursor_logical) || dialog.blocks_world_click() {
         return;
     }
     let Some(map) = &game_data.map else { return };
@@ -300,12 +308,14 @@ fn left_click_interact_system(
     });
     let world = screen_to_world(cursor, cam_tf, window);
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
-    // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管）
+    // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管；
+    //  #1830：窗口类对话框打开时也不处理世界点击，小地图除外）
     if !mouse.just_pressed(MouseButton::Left)
         || ui.locked()
         || over_ui
         || over_main_dialog(cursor_logical)
         || over_chat_panel(cursor_logical)
+        || ui.blocks_world_click()
     {
         return;
     }
@@ -682,8 +692,10 @@ fn hold_move_system(
     >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
     hud: Res<HudState>,
+    dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
+    // #1830：窗口类对话框打开时不按住移动（小地图除外）
+    if hud.dead || hud.fishing || hud.paralysis || dialog.blocks_world_click() {
         return;
     }
     let Some(map) = &game_data.map else { return };

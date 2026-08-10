@@ -144,6 +144,32 @@ impl DialogManager {
     pub fn close(&mut self, kind: DialogKind) {
         self.open.retain(|k| *k != kind);
     }
+
+    /// #1830：是否有窗口类对话框打开（小地图为无阻塞覆盖层，不屏蔽世界点击）
+    pub fn blocks_world_click(&self) -> bool {
+        self.open.iter().any(|k| !matches!(k, DialogKind::Minimap))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DialogKind, DialogManager};
+
+    #[test]
+    fn test_blocks_world_click() {
+        let mut m = DialogManager::default();
+        assert!(!m.blocks_world_click(), "空状态不屏蔽");
+        m.open.push(DialogKind::Minimap);
+        assert!(!m.blocks_world_click(), "小地图不屏蔽");
+        m.open.push(DialogKind::Inventory);
+        assert!(m.blocks_world_click(), "背包打开屏蔽");
+        m.open.clear();
+        m.open.push(DialogKind::Npc);
+        assert!(m.blocks_world_click(), "NPC 对话打开屏蔽");
+        m.open.clear();
+        m.open.push(DialogKind::BigMap);
+        assert!(m.blocks_world_click(), "大地图打开屏蔽");
+    }
 }
 
 
