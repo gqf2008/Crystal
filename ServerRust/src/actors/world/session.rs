@@ -461,6 +461,8 @@ impl Message<StartGameRequest> for WorldActor {
                 let is_invisible = ep_state.buffs.iter()
                     .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
                 if is_invisible { continue; }
+                // #1651：只同步同图玩家（C# CurrentMap 视野；防幽灵玩家）
+                if ep_state.map_index != loaded_state.map_index { continue; }
                 let ep_weapon = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
                     .and_then(|item| self.item_infos.get(&item.item_index))
                     .map(|info| info.shape as i16).unwrap_or(-1);
@@ -525,11 +527,12 @@ impl Message<StartGameRequest> for WorldActor {
                 .and_then(|item| self.item_infos.get(&item.item_index))
                 .map(|info| info.effect as i16).unwrap_or(0);
             for existing in &existing_players {
-                // #921：观察者（已有玩家）相对色（C# GetNameColour）
-                let viewer_guild = match existing.actor_ref.ask(GetPlayerState).await {
-                    Ok(Some(s)) => s.guild_name,
-                    _ => None,
+                // #921/#1651：观察者（已有玩家）相对色（C# GetNameColour）；只同步同图玩家
+                let (viewer_guild, viewer_map) = match existing.actor_ref.ask(GetPlayerState).await {
+                    Ok(Some(s)) => (s.guild_name, s.map_index),
+                    _ => (None, 0),
                 };
+                if viewer_map != loaded_state.map_index { continue; }
                 let (at_war, enemy) = super::guild_war_flags(
                     viewer_guild.as_deref(),
                     loaded_state.guild_name.as_deref(),
