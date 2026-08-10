@@ -12,6 +12,31 @@ const PATH_TARGET_PET_FOLLOW: u64 = u64::MAX;
 const PATH_TARGET_PET_ATTACK: u64 = u64::MAX - 1;
 const PATH_TARGET_MONSTER_ATTACK: u64 = u64::MAX - 2;
 
+/// #1699：构造 ObjectRangeAttack 包体（C# S.ObjectRangeAttack；与 combat.rs 玩家弓手一致）：
+/// object_id/x/y/direction/target_id/target_x/target_y/spell/spell_level；Type 暂缺省=0（AttackRange1）
+fn build_object_range_attack_body(
+    attacker_oid: u32,
+    x: i32,
+    y: i32,
+    dir: u8,
+    target_id: u32,
+    target_x: i32,
+    target_y: i32,
+    spell: u16,
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&attacker_oid.to_le_bytes());
+    body.extend_from_slice(&(x as u32).to_le_bytes());
+    body.extend_from_slice(&(y as u32).to_le_bytes());
+    body.push(dir);
+    body.extend_from_slice(&target_id.to_le_bytes());
+    body.extend_from_slice(&(target_x as u32).to_le_bytes());
+    body.extend_from_slice(&(target_y as u32).to_le_bytes());
+    body.extend_from_slice(&spell.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+    body
+}
+
 /// #1434：收集 master 的所有后代 slave oid（含多级；C# MonsterObject.SlaveList 死亡级联；不含 master 自身）
 fn collect_slave_cascade(master: u32, slave_master: &std::collections::HashMap<u32, u32>) -> Vec<u32> {
     let mut out = Vec::new();
@@ -4209,27 +4234,34 @@ impl Message<Tick> for WorldActor {
                             _ => 0u8,
                         };
 
-                        // ObjectAttack 广播
-                        let mut attack_body = Vec::new();
-                        attack_body.extend_from_slice(&monster.object_id.to_le_bytes());
-                        attack_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
-                        attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
-                        attack_body.push(monster.direction);
-                        attack_body.push(spell_id);
-                        attack_body.extend_from_slice(&0u16.to_le_bytes());
-                        attack_body.push(0u8);
-                        let attack_packet = build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
-                        if is_ranged {
-                            // 远程/法术攻击广播给所有玩家（弹道动画）
-                            // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
-                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
+                        // #1699：远程/法术攻击广播 ObjectRangeAttack（客户端生成弹道 ProjectileFromTo）；
+                        // 近战广播 ObjectAttack（C# MonsterObject.Attack）
+                        let attack_packet = if is_ranged {
+                            let target_oid = player_positions.iter()
+                                .find(|(sid, _, _, _, _, _, _, _)| *sid == target_session)
+                                .map(|(_, _, _, oid, _, _, _, _)| *oid)
+                                .unwrap_or(0);
+                            build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
+                                &build_object_range_attack_body(
+                                    monster.object_id, monster.x, monster.y, monster.direction,
+                                    target_oid, px, py, spell_id as u16,
+                                ),
+                            )
                         } else {
-                            // #1594：C# MonsterObject.Attack Broadcast——近战攻击动画广播给同图所有玩家
-                            // （受害者包含在内；远程/Boss 分支已广播）
-                            // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
-                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
-                        }
+                            let mut attack_body = Vec::new();
+                            attack_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                            attack_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
+                            attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
+                            attack_body.push(monster.direction);
+                            attack_body.push(spell_id);
+                            attack_body.extend_from_slice(&0u16.to_le_bytes());
+                            attack_body.push(0u8);
+                            build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body)
+                        };
+                        // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                        broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
                         // 安全区保护：目标在安全区内则不受怪物伤害
                         let target_in_safe = self.maps.get(&monster.map_index)
                             .map(|m| m.is_safe_zone(px, py))
@@ -4750,17 +4782,32 @@ impl Message<Tick> for WorldActor {
                 let (boss_x, boss_y, boss_dir) = self.monsters.get(&attacker_oid)
                     .map(|m| (m.x, m.y, m.direction))
                     .unwrap_or((atk_x, atk_y, atk_dir));
-                // 广播 ObjectAttack 给所有玩家（Boss 攻击动画）
-                let mut attack_body = Vec::new();
-                attack_body.extend_from_slice(&attacker_oid.to_le_bytes());
-                attack_body.extend_from_slice(&(boss_x as u32).to_le_bytes());
-                attack_body.extend_from_slice(&(boss_y as u32).to_le_bytes());
-                attack_body.push(boss_dir);
-                attack_body.push(spell_id);
-                attack_body.extend_from_slice(&0u16.to_le_bytes());
-                attack_body.push(attack_type);
-                let attack_packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
+                // #1699：远程攻击广播 ObjectRangeAttack（弹道）；近战/AOE/直线广播 ObjectAttack
+                let attack_packet = if matches!(atk, ai::AttackAction::Range { .. }) {
+                    let (target_oid, target_x, target_y) = targets.first()
+                        .and_then(|sid| player_positions.iter()
+                            .find(|(ps, _, _, _, _, _, _, _)| ps == sid)
+                            .map(|(_, tx, ty, oid, _, _, _, _)| (*oid, *tx, *ty)))
+                        .unwrap_or((0, 0, 0));
+                    build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
+                        &build_object_range_attack_body(
+                            attacker_oid, boss_x, boss_y, boss_dir,
+                            target_oid, target_x, target_y, spell_id as u16,
+                        ),
+                    )
+                } else {
+                    let mut attack_body = Vec::new();
+                    attack_body.extend_from_slice(&attacker_oid.to_le_bytes());
+                    attack_body.extend_from_slice(&(boss_x as u32).to_le_bytes());
+                    attack_body.extend_from_slice(&(boss_y as u32).to_le_bytes());
+                    attack_body.push(boss_dir);
+                    attack_body.push(spell_id);
+                    attack_body.extend_from_slice(&0u16.to_le_bytes());
+                    attack_body.push(attack_type);
+                    build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body)
+                };
                 // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
                 broadcast_to_map(&self.gate_ref, &self.players, boss_map, &attack_packet).await;
                 // 对命中玩家造成伤害
