@@ -74,6 +74,7 @@ fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
     InvItem {
         unique_id: item.unique_id,
         item_index: item.item_index,
+        grade: item.info.as_ref().map(|i| i.grade as u8).unwrap_or(0),
         name: item
             .info
             .as_ref()
@@ -184,6 +185,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
 
     parse_content(payload).or_else(|| parse_entry(payload))
 }
+
 
 
 

@@ -344,7 +344,15 @@ fn spawn_ground_item(
                     font_size: FontSize::Px(10.0),
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                // #1737：地面物品名字按品质着色（C# ItemObject NameColour by Grade：
+                // Rare DeepSkyBlue / Legendary DarkOrange / Mythical Plum / Heroic Red）
+                TextColor(match item.grade {
+                    5 => Color::srgb(0.0, 0.749, 1.0),      // Rare DeepSkyBlue
+                    6 => Color::srgb(1.0, 0.549, 0.0),      // Legendary DarkOrange
+                    7 => Color::srgb(0.867, 0.627, 0.867),  // Mythical Plum
+                    8 => Color::srgb(1.0, 0.0, 0.0),        // Heroic Red
+                    _ => Color::WHITE,
+                }),
                 Transform::from_xyz(-22.0, -22.0, 0.2),
             ));
         });
@@ -483,4 +491,5 @@ pub(crate) fn spawn_demo_actors_when_ready(
 pub fn depth_z(world_y: f32) -> f32 {
     crate::map_renderer::depth_y(world_y)
 }
+
 
