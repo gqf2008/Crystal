@@ -1946,16 +1946,9 @@ impl WorldActor {
             dmg_body.extend_from_slice(&oid.to_le_bytes());
             let dmg_packet = build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-            for session_id in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: struck_packet.clone(),
-                }).await;
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: dmg_packet.clone(),
-                }).await;
-            }
+            let hit_map = self.monsters.get(oid).map(|m| m.map_index).unwrap_or(0);
+            broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
+            broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
         }
     }
 }
@@ -3322,12 +3315,7 @@ impl Message<MagicRequest> for WorldActor {
                                 spread: 0,
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
-                            for sid in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
                             let ai_profile = MonsterAiProfile::from_info(&info);
                             self.monsters.insert(new_oid, MonsterState {
                                 object_id: new_oid,
@@ -3509,12 +3497,7 @@ impl Message<MagicRequest> for WorldActor {
                                 spread: 0,
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
-                            for sid in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
                             let ai_profile = MonsterAiProfile::from_info(&info);
                             self.monsters.insert(new_oid, MonsterState {
                                 object_id: new_oid,
@@ -3779,12 +3762,7 @@ impl Message<MagicRequest> for WorldActor {
                         walk_body.push(dir as u8);
                         let walk_packet = build_packet_bytes(
                             mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
-                        for sid in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: walk_packet.clone(),
-                            }).await;
-                        }
+                        broadcast_to_map(&self.gate_ref, &self.players, m.map_index, &walk_packet).await;
                         debug!("Magic: {} recalls existing summon '{}' #{}", state.name, summon_name, oid);
                     }
                     return;
@@ -3885,12 +3863,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             let packet = build_object_monster_packet_extra(
                                 &spawn, new_oid, &display_name, extra, name_colour);
-                            for session_id in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
                             let ai_profile = MonsterAiProfile::from_info(&info);
                             // 召唤物：target_session=主人、provoked=true 主动攻击
                             self.monsters.insert(new_oid, MonsterState {
@@ -4014,12 +3987,7 @@ impl Message<MagicRequest> for WorldActor {
                             // C# StoneTrap.Name：宠物名 = 怪物名(主人名)
                             let display_name = format!("{}({})", spawn.name, state.name);
                             let packet = build_object_monster_packet(&spawn, new_oid, &display_name);
-                            for session_id in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
                             let ai_profile = MonsterAiProfile::from_info(&info);
                             // 石阵存活时长：C# DieTime = now + (level*5+10) 秒
                             let duration_ticks = (spell_level as u64 * 5 + 10) * 10;
@@ -4739,12 +4707,8 @@ impl Message<MagicRequest> for WorldActor {
                     walk_body.push(mdir);
                     let walk_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: walk_packet.clone(),
-                        }).await;
-                    }
+                    let hit_map = self.monsters.get(&mid).map(|m| m.map_index).unwrap_or(0);
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &walk_packet).await;
                 }
                 debug!("Magic: {} casts Repulsion", state.name);
             }
