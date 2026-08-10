@@ -62,86 +62,96 @@ pub(crate) struct BossRangedPendingHit {
     pub damage: i32,
     pub map_index: u16,
 }
-/// #1703：怪物命中玩家结算（C# Attacked / DelayedAction RangeDamage 落地）：
-/// 伤害 + ObjectStruck/DamageIndicator 广播 + 下坐骑 + 装备耐久 + 死亡掉落/经验惩罚。
-/// 近战即时调用与远程延迟结算共用（避免逻辑分叉）。
+/// #1703/#1721：怪物命中玩家结算（C# Attacked / DelayedAction RangeDamage 落地）：
+/// 完整结算（命中/护甲/反伤/减伤）+ ObjectStruck/DamageIndicator 广播 + 下坐骑 + 装备耐久 + 死亡掉落/经验惩罚。
+/// 近战即时调用与远程延迟结算共用；返回反伤量（调用方施加给怪物）。
 async fn apply_monster_hit_player(
     players: &HashMap<u64, PlayerRecord>,
     gate_ref: &ActorRef<GateActor>,
     death_exp_penalty_percent: u32,
     attacker_oid: u32,
     attacker_name: &str,
+    attacker_stats: &crate::combat::attack::CombatStats,
+    attacker_level: i32,
     target_session: u64,
     damage: i32,
     px: i32,
     py: i32,
     map_index: u16,
     target_in_safe: bool,
+    defence_type: mir2_shared::enums::DefenceType,
     death_drops: &mut Vec<(u64, i32, i32, u16)>,
     dismount_sessions: &mut Vec<u64>,
     broken_armor: &mut Vec<(u64, EquipmentSlot)>,
-) {
+) -> i32 {
     if !target_in_safe {
-    // 伤害
-    if let Some(record) = players.get(&target_session) {
-        // #1708：C# CompleteRangeAttack 校验——目标存活且同图才结算（远程飞行期间目标可能死亡/跨图）
-        let target_alive_same_map = record.actor_ref.ask(GetPlayerState).await
-            .map(|s| s.map(|st| !st.is_dead && st.map_index == map_index).unwrap_or(false))
-            .unwrap_or(false);
-        if !target_alive_same_map {
-            return;
-        }
-        let died = record.actor_ref.ask(TakeDamage {
-            attacker_id: attacker_oid,
-            attacker_session: target_session,
-            damage,
-        }).await.unwrap_or(false);
+        if let Some(record) = players.get(&target_session) {
+            // #1708：C# CompleteRangeAttack 校验——目标存活且同图才结算（远程飞行期间目标可能死亡/跨图）
+            let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await else {
+                return 0;
+            };
+            if defender.is_dead || defender.map_index != map_index {
+                return 0;
+            }
+            // #1721：完整 C# Attacked 结算（命中/护甲/反伤/减伤，复用 resolve_attack）
+            let (actual, reflected, is_miss) = resolve_monster_vs_player(
+                attacker_stats, attacker_level, &defender, damage, defence_type,
+            );
+            if is_miss {
+                // 未命中/护甲全挡：同图其他玩家广播 Miss 飘字（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
+                broadcast_miss_feedback(
+                    players, gate_ref, map_index, target_session, defender.object_id,
+                ).await;
+                return reflected;
+            }
+            let died = record.actor_ref.ask(TakeDamage {
+                attacker_id: attacker_oid,
+                attacker_session: target_session,
+                damage: actual,
+            }).await.unwrap_or(false);
 
-        // #1598：C# HumanObject.Attacked（:7215/:7307）——向同图其他玩家
-        // 广播 ObjectStruck + DamageIndicator（C# CurrentMap.Broadcast 排除受害者；受害者收 S.Struck）
-        if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+            // #1598：C# HumanObject.Attacked（:7215/:7307）——向同图其他玩家
+            // 广播 ObjectStruck + DamageIndicator（C# CurrentMap.Broadcast 排除受害者；受害者收 S.Struck）
             broadcast_hit_feedback(
                 players, gate_ref, map_index, target_session,
-                victim.object_id, victim.x, victim.y, victim.direction,
-                attacker_oid, damage,
+                defender.object_id, defender.x, defender.y, defender.direction,
+                attacker_oid, actual,
             ).await;
-        }
 
-        // 被攻击时自动下坐骑
-        if !died {
-            dismount_sessions.push(target_session);
-        }
+            // 被攻击时自动下坐骑
+            if !died {
+                dismount_sessions.push(target_session);
+            }
 
-        // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1；
-        // #1230 致死也扣——C# DamageDura 在 ChangeHP 前调用）
-        {
-            let armor_slots = [
-                EquipmentSlot::Armour,
-                EquipmentSlot::Helmet,
-                EquipmentSlot::BraceletL,
-                EquipmentSlot::BraceletR,
-                EquipmentSlot::RingL,
-                EquipmentSlot::RingR,
-                EquipmentSlot::Shoes,
-                EquipmentSlot::Necklace,
-            ];
-            for slot in armor_slots {
-                let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
-                    slot,
-                    amount: 1,
-                }).await.unwrap_or(false);
-                if broke {
-                    debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
-                    // 延迟到怪物循环结束后广播（避免借用冲突）
-                    broken_armor.push((target_session, slot));
+            // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1；
+            // #1230 致死也扣——C# DamageDura 在 ChangeHP 前调用）
+            {
+                let armor_slots = [
+                    EquipmentSlot::Armour,
+                    EquipmentSlot::Helmet,
+                    EquipmentSlot::BraceletL,
+                    EquipmentSlot::BraceletR,
+                    EquipmentSlot::RingL,
+                    EquipmentSlot::RingR,
+                    EquipmentSlot::Shoes,
+                    EquipmentSlot::Necklace,
+                ];
+                for slot in armor_slots {
+                    let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                        slot,
+                        amount: 1,
+                    }).await.unwrap_or(false);
+                    if broke {
+                        debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
+                        // 延迟到怪物循环结束后广播（避免借用冲突）
+                        broken_armor.push((target_session, slot));
+                    }
                 }
             }
-        }
 
-        if died {
-            if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+            if died {
                 let died_packet = WorldActor::build_object_died_packet(
-                    victim.object_id, victim.x, victim.y, victim.direction);
+                    defender.object_id, defender.x, defender.y, defender.direction);
                 // #1710：死亡动画只发同图玩家（C# CurrentMap.Broadcast；原实现漏过滤跨图）
                 for (sid, _) in players {
                     if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
@@ -153,12 +163,12 @@ async fn apply_monster_hit_player(
                         }
                     }
                 }
-                death_drops.push((target_session, victim.x, victim.y, victim.map_index));
+                death_drops.push((target_session, defender.x, defender.y, defender.map_index));
 
                 // 死亡经验惩罚（配置百分比；默认 0=关闭，对齐 C# 无通用死亡惩罚）
                 if death_exp_penalty_percent > 0 {
                     let pct = (death_exp_penalty_percent.min(100)) as i64;
-                    let penalty = ((victim.max_experience as i64 * pct) / 100).max(1) as i32;
+                    let penalty = ((defender.max_experience as i64 * pct) / 100).max(1) as i32;
                     let deducted = record.actor_ref.ask(crate::actors::player::DeductExperience {
                         amount: penalty,
                     }).await.unwrap_or(0);
@@ -170,11 +180,58 @@ async fn apply_monster_hit_player(
                     }
                 }
             }
+            reflected
+        } else {
+            0
+        }
+    } else {
+        debug!("Monster '{}' attack on {} blocked: target in safe zone", attacker_name, target_session);
+        0
+    }
+}
+
+/// #1721：怪物→玩家完整结算（C# HumanObject.Attacked 的 GetArmour/护甲/反伤/减伤，复用 resolve_attack）
+/// 返回 (实际伤害, 反伤量, 是否未命中或护甲全挡)
+fn resolve_monster_vs_player(
+    attacker_stats: &crate::combat::attack::CombatStats,
+    attacker_level: i32,
+    defender: &crate::actors::player::PlayerState,
+    raw_damage: i32,
+    defence_type: mir2_shared::enums::DefenceType,
+) -> (i32, i32, bool) {
+    let defender_stats = defender.to_combat_stats();
+    let level_offset = crate::combat::attack::level_offset(attacker_level as u16, defender.level);
+    let result = crate::combat::attack::resolve_attack(
+        attacker_stats, &defender_stats, raw_damage, defence_type, level_offset,
+    );
+    let is_miss = !result.is_hit || (result.damage == 0 && result.reflected == 0);
+    (result.damage, result.reflected, is_miss)
+}
+
+/// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
+async fn broadcast_miss_feedback(
+    players: &HashMap<u64, PlayerRecord>,
+    gate_ref: &ActorRef<GateActor>,
+    map_index: u16,
+    exclude_session: u64,
+    victim_oid: u32,
+) {
+    let mut dmg_body = Vec::new();
+    dmg_body.extend_from_slice(&0i32.to_le_bytes()); // damage = 0
+    dmg_body.push(4u8); // damage_type = Miss
+    dmg_body.extend_from_slice(&victim_oid.to_le_bytes());
+    let dmg_packet = build_packet_bytes(
+        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+    for (sid, _) in players {
+        if *sid == exclude_session {
+            continue;
+        }
+        if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
+            if st.map_index == map_index {
+                let _ = gate_ref.tell(SendToClient { session_id: *sid, data: dmg_packet.clone() }).await;
+            }
         }
     }
-    } else {
-    debug!("Monster '{}' attack on {} blocked: target in safe zone", attacker_name, target_session);
-}
 }
 
 /// #1712：向同图其他玩家广播 ObjectStruck + DamageIndicator（C# CurrentMap.Broadcast 排除受害者；受害者收 S.Struck）
@@ -532,12 +589,25 @@ impl WorldActor {
             let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
             let mut dismount_sessions: Vec<u64> = Vec::new();
             let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
-            apply_monster_hit_player(
+            let attacker_stats = self.monsters.get(&hit.attacker_oid)
+                .map(|m| m.to_combat_stats())
+                .unwrap_or_default();
+            let attacker_level = self.monsters.get(&hit.attacker_oid)
+                .map(|m| m.level)
+                .unwrap_or(0);
+            let reflected = apply_monster_hit_player(
                 &self.players, &self.gate_ref, self.death_exp_penalty_percent,
-                hit.attacker_oid, "怪物", hit.target_session, hit.damage, hit.px, hit.py, hit.map_index,
-                hit.target_in_safe,
+                hit.attacker_oid, "怪物", &attacker_stats, attacker_level,
+                hit.target_session, hit.damage, hit.px, hit.py, hit.map_index,
+                hit.target_in_safe, mir2_shared::enums::DefenceType::AcAgility,
                 &mut death_drops, &mut dismount_sessions, &mut broken_armor,
             ).await;
+            if reflected > 0 {
+                if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
+                    m.take_damage(reflected);
+                    m.provoked = true;
+                }
+            }
             for (sid, x, y, map_index) in death_drops {
                 self.handle_player_death_drop(sid, x, y, map_index, false).await;
             }
@@ -578,17 +648,43 @@ impl WorldActor {
                 if !target_alive_same_map {
                     continue;
                 }
+                let attacker_stats = self.monsters.get(&hit.attacker_oid)
+                    .map(|m| m.to_combat_stats())
+                    .unwrap_or_default();
+                let attacker_level = self.monsters.get(&hit.attacker_oid)
+                    .map(|m| m.level)
+                    .unwrap_or(0);
+                let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
+                    let (actual, reflected, is_miss) = resolve_monster_vs_player(
+                        &attacker_stats, attacker_level, &defender, hit.damage,
+                        mir2_shared::enums::DefenceType::AcAgility,
+                    );
+                    if reflected > 0 {
+                        if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
+                            m.take_damage(reflected);
+                            m.provoked = true;
+                        }
+                    }
+                    if is_miss {
+                        broadcast_miss_feedback(
+                            &self.players, &self.gate_ref, hit.map_index, hit.target_session, defender.object_id,
+                        ).await;
+                        0
+                    } else {
+                        actual
+                    }
+                } else { hit.damage };
                 let _ = record.actor_ref.ask(TakeDamage {
                     attacker_id: hit.attacker_oid,
                     attacker_session: hit.target_session,
-                    damage: hit.damage,
+                    damage: actual,
                 }).await;
-                // #1712：Boss 远程命中反馈——同图其他玩家看受击/飘字
+                // #1712：Boss 远程命中反馈——同图其他玩家看受击/飘字（用实际伤害）
                 if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
                     broadcast_hit_feedback(
                         &self.players, &self.gate_ref, hit.map_index, hit.target_session,
                         victim.object_id, victim.x, victim.y, victim.direction,
-                        hit.attacker_oid, hit.damage,
+                        hit.attacker_oid, actual,
                     ).await;
                 }
                 // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
@@ -4574,12 +4670,18 @@ impl Message<Tick> for WorldActor {
                                 target_in_safe,
                             });
                         } else {
-                            apply_monster_hit_player(
+                            let attacker_stats = monster.to_combat_stats();
+                            let reflected = apply_monster_hit_player(
                                 &self.players, &self.gate_ref, self.death_exp_penalty_percent,
-                                monster.object_id, &monster.name, target_session, damage, px, py, monster.map_index,
-                                target_in_safe,
+                                monster.object_id, &monster.name, &attacker_stats, monster.level,
+                                target_session, damage, px, py, monster.map_index,
+                                target_in_safe, mir2_shared::enums::DefenceType::AcAgility,
                                 &mut death_drops, &mut dismount_sessions, &mut broken_armor,
                             ).await;
+                            if reflected > 0 {
+                                monster.take_damage(reflected);
+                                monster.provoked = true;
+                            }
                         }
                         } // close else (normal attack)
                     } else if should_chase && dist > profile.attack_range && can_move {
@@ -5038,19 +5140,46 @@ impl Message<Tick> for WorldActor {
                         });
                     }
                 } else {
+                    let boss_stats = self.monsters.get(&attacker_oid)
+                        .map(|m| m.to_combat_stats())
+                        .unwrap_or_default();
+                    let boss_level = self.monsters.get(&attacker_oid)
+                        .map(|m| m.level)
+                        .unwrap_or(0);
                     for sid in &targets {
                         if let Some(record) = self.players.get(sid) {
+                            // #1721：Boss 攻击完整结算（C# Attacked：命中/护甲/反伤/减伤）
+                            let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
+                                let (actual, reflected, is_miss) = resolve_monster_vs_player(
+                                    &boss_stats, boss_level, &defender, damage,
+                                    mir2_shared::enums::DefenceType::AcAgility,
+                                );
+                                if reflected > 0 {
+                                    if let Some(m) = self.monsters.get_mut(&attacker_oid) {
+                                        m.take_damage(reflected);
+                                        m.provoked = true;
+                                    }
+                                }
+                                if is_miss {
+                                    broadcast_miss_feedback(
+                                        &self.players, &self.gate_ref, boss_map, *sid, defender.object_id,
+                                    ).await;
+                                    0
+                                } else {
+                                    actual
+                                }
+                            } else { damage };
                             let _ = record.actor_ref.ask(TakeDamage {
                                 attacker_id: attacker_oid,
                                 attacker_session: *sid,
-                                damage,
+                                damage: actual,
                             }).await;
-                            // #1712：Boss 命中反馈——同图其他玩家看受击/飘字（C# Attacked → BroadcastDamageIndicator）
+                            // #1712：Boss 命中反馈——同图其他玩家看受击/飘字（C# Attacked → BroadcastDamageIndicator，用实际伤害）
                             if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
                                 broadcast_hit_feedback(
                                     &self.players, &self.gate_ref, boss_map, *sid,
                                     victim.object_id, victim.x, victim.y, victim.direction,
-                                    attacker_oid, damage,
+                                    attacker_oid, actual,
                                 ).await;
                             }
                             // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
@@ -5872,3 +6001,7 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
+
+
+
