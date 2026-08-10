@@ -1996,6 +1996,20 @@ impl Message<PurifyPoisons> for PlayerActor {
         _msg: PurifyPoisons,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // #1906：C# PowerBead Effect==1 净化 = 移除全部 Debuff Buff + 清空毒列表
+        let tags: Vec<u8> = self.state.buffs.iter()
+            .filter(|b| crate::combat::buff::is_debuff(&b.buff_type))
+            .map(|b| buff_tag(&b.buff_type))
+            .collect();
+        self.state.buffs.retain(|b| !crate::combat::buff::is_debuff(&b.buff_type));
+        for tag in tags {
+            let mut body = Vec::new();
+            body.push(tag);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
+            }).try_send();
+        }
         self.state.poison_list.clear();
     }
 }
