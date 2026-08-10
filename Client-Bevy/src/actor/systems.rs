@@ -425,6 +425,61 @@ pub(crate) fn demo_drive(
     }
 }
 
+/// 悬停玩家/怪物/NPC：鼠标放在目标上时，在**目标头顶**显示名字（source=12）
+/// 位置换算：world_to_viewport 返回的已是 UI 逻辑坐标（0..1024, 0..768），直接使用。
+pub(crate) fn actor_hover_tooltip_system(
+    windows: Query<&Window>,
+    map_cameras: Query<
+        (&Camera, &GlobalTransform),
+        (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    actors: Query<
+        (Option<&PlayerName>, Option<&MonsterName>, Option<&NpcName>, &Transform),
+        (
+            Without<LocalPlayer>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+            Without<crate::ui::tooltip::TooltipBg>,
+        ),
+    >,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((map_cam, map_gtf)) = map_cameras.single() else { return };
+    let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else { return };
+
+    let mut hit: Option<(String, Vec3)> = None;
+    for (p, m, n, tf) in &actors {
+        let (dx, dy) = (tf.translation.x - world.x, tf.translation.y - world.y);
+        // 目标碰撞盒：脚点向上 ~110px（角色/怪物体型），左右 28px
+        if dx.abs() < 28.0 && dy > -110.0 && dy < 20.0 {
+            let name = p
+                .map(|x| x.0.clone())
+                .or_else(|| m.map(|x| x.0.clone()))
+                .or_else(|| n.map(|x| x.0.clone()));
+            if let Some(name) = name {
+                // 头顶：脚点上方约 90px（对齐 C# 名字标签位置）
+                let head = Vec3::new(tf.translation.x, tf.translation.y + 90.0, 0.0);
+                hit = Some((name, head));
+                break;
+            }
+        }
+    }
+    match hit {
+        Some((name, head)) => {
+            if let Ok(vp) = map_cam.world_to_viewport(map_gtf, head) {
+                // world_to_viewport 返回的已是逻辑视口坐标（0..1024, 0..768），勿再缩放
+                // tooltip_panel 在 state+(16,16)，往上多留面板高度 → 面板显示在头顶上方
+                tooltip.update(12, true, name.clone(), vec![name], vp.x - 16.0, vp.y - 70.0);
+            } else {
+                tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0);
+            }
+        }
+        None => tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0),
+    }
+}
+
+
 /// MirDirection: 0=Up 1=UpRight 2=Right 3=DownRight 4=Down 5=DownLeft 6=Left 7=UpLeft
 fn dir_vec(d: u8) -> (f32, f32) {
     match d % 8 {
