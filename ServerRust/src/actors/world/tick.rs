@@ -234,6 +234,13 @@ fn resolve_monster_vs_monster(
     ((damage - armour).max(0), false)
 }
 
+/// C# MonsterObject.ProcessPoison（MonsterObject.cs:1544-1546）：SLOW 毒时 MoveSpeed/AttackSpeed +100ms
+/// （上限 3500ms = 35 tick）。tick=100ms，故 +1 tick。
+#[inline]
+fn slow_adjusted_ticks(base_ticks: u64, slowed: bool) -> u64 {
+    if slowed { (base_ticks + 1).min(35) } else { base_ticks }
+}
+
 /// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
 async fn broadcast_miss_feedback(
     players: &HashMap<u64, PlayerRecord>,
@@ -4365,7 +4372,10 @@ impl Message<Tick> for WorldActor {
                                     monster.x, monster.y, tx, ty,
                                 );
                                 pet_attacks.push((monster.object_id, tmid, damage, master));
-                                monster.next_attack_tick = self.tick_count + monster.ai_profile.attack_cooldown;
+                                monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(
+                                    monster.ai_profile.attack_cooldown,
+                                    crate::combat::poison::is_slowed(&monster.poison_list),
+                                );
                                 monster.ai_state = MonsterAiState::Attack;
                             } else if self.tick_count >= monster.next_move_tick {
                                 let mut path = self.monster_paths.entry(monster.object_id).or_default();
@@ -4395,7 +4405,10 @@ impl Message<Tick> for WorldActor {
                                         path.remove(0);
                                     }
                                 }
-                                monster.next_move_tick = self.tick_count + monster.ai_profile.move_interval;
+                                monster.next_move_tick = self.tick_count + slow_adjusted_ticks(
+                                    monster.ai_profile.move_interval,
+                                    crate::combat::poison::is_slowed(&monster.poison_list),
+                                );
                                 monster.ai_state = MonsterAiState::Chase;
                             }
                         }
@@ -4416,6 +4429,8 @@ impl Message<Tick> for WorldActor {
                 // 跳过攻击与追击；仍允许返回出生点漫游（由下方 else-if 分支处理）。
                 let is_passive_obj = ai::is_passive_object(&monster.name);
                 let profile = &monster.ai_profile;
+                // C# Slow 毒：攻速/移速 +100ms（上限 3500ms）
+                let slowed = crate::combat::poison::is_slowed(&monster.poison_list);
 
                 // 找最近玩家（在视野范围内）
                 // Guard AI：优先攻击红名玩家（PK 值 > 0）
@@ -4549,7 +4564,7 @@ impl Message<Tick> for WorldActor {
                                 monster.x, monster.y, tx, ty,
                             );
                             pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
-                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                             monster.ai_state = MonsterAiState::Attack;
                         } else if can_move {
                             let mut path = self.monster_paths.entry(*oid).or_default();
@@ -4579,7 +4594,7 @@ impl Message<Tick> for WorldActor {
                                     path.remove(0);
                                 }
                             }
-                            monster.next_move_tick = self.tick_count + profile.move_interval;
+                            monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                             monster.ai_state = MonsterAiState::Chase;
                         }
                     }
@@ -4606,7 +4621,7 @@ impl Message<Tick> for WorldActor {
                                 monster.x, monster.y, *tx, *ty,
                             );
                             monster_attacks.push((*oid, tmid, damage));
-                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                             monster.ai_state = MonsterAiState::Attack;
                         } else if can_move {
                             let mut path = self.monster_paths.entry(*oid).or_default();
@@ -4636,7 +4651,7 @@ impl Message<Tick> for WorldActor {
                                     path.remove(0);
                                 }
                             }
-                            monster.next_move_tick = self.tick_count + profile.move_interval;
+                            monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                             monster.ai_state = MonsterAiState::Chase;
                         }
                     }
@@ -4658,7 +4673,7 @@ impl Message<Tick> for WorldActor {
                         {
                             moved_monsters.push((*oid, nx, ny, dir));
                         }
-                        monster.next_move_tick = self.tick_count + profile.move_interval;
+                        monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                         monster.ai_state = MonsterAiState::Flee;
                     } else if dist <= profile.attack_range && can_attack {
                         // Healer AI：优先治疗附近受伤的怪物
@@ -4679,7 +4694,7 @@ impl Message<Tick> for WorldActor {
                             if let Some((target_oid, _)) = best_target {
                                 let heal_amount = (monster.max_hp / 4).max(10);
                                 heal_actions.push((target_oid, heal_amount));
-                                monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                                monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                                 monster.ai_state = MonsterAiState::Attack;
                                 did_heal = true;
                                 debug!("Monster '{}' (#{}) heals ally #{} for {} HP", monster.name, *oid, target_oid, heal_amount);
@@ -4733,7 +4748,7 @@ impl Message<Tick> for WorldActor {
                                 }
                                 if spawn_count > 0 {
                                     monster.next_summon_tick = self.tick_count + 100; // 10秒冷却
-                                    monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                                    monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                                     monster.ai_state = MonsterAiState::Attack;
                                     did_summon = true;
                                     debug!("Monster '{}' (#{}) summons {} adds", monster.name, *oid, spawn_count);
@@ -4760,7 +4775,7 @@ impl Message<Tick> for WorldActor {
                                 }
                             }
                             debug!("Monster '{}' (#{}) attacks Player {} for {} dmg [AI={:?}]", monster.name, *oid, target_session, damage, profile.ai_type);
-                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                             monster.ai_state = MonsterAiState::Attack;
                             // #1732：C# MonsterObject.Attack（:2162）——攻击前转向目标
                             monster.direction = crate::actors::world::ai::direction_towards(
@@ -4867,7 +4882,7 @@ impl Message<Tick> for WorldActor {
                                 path.remove(0);
                             }
                         }
-                        monster.next_move_tick = self.tick_count + profile.move_interval;
+                        monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                         monster.ai_state = MonsterAiState::Chase;
                     }
                 } else if let Some(master) = monster.master_session {
@@ -4921,7 +4936,7 @@ impl Message<Tick> for WorldActor {
                                         path.remove(0);
                                     }
                                 }
-                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                                monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                                 monster.ai_state = MonsterAiState::Return;
                             } else {
                                 monster.ai_state = MonsterAiState::Idle;
@@ -4960,7 +4975,7 @@ impl Message<Tick> for WorldActor {
                             path.remove(0);
                         }
                     }
-                    monster.next_move_tick = self.tick_count + profile.move_interval;
+                    monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                     monster.ai_state = MonsterAiState::Return;
                 } else {
                     // C# ProcessRoam：无目标时按 RoamDelay(1s) 1/10 概率随机转身/走动
@@ -4981,7 +4996,7 @@ impl Message<Tick> for WorldActor {
                                     && moved_targets.insert((nx, ny))
                                 {
                                     moved_monsters.push((*oid, nx, ny, monster.direction));
-                                    monster.next_move_tick = self.tick_count + profile.move_interval;
+                                    monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                                 }
                             }
                         }
@@ -6130,7 +6145,8 @@ mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
         collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, monster_melee_defence_type,
-        build_object_range_attack_body, resolve_monster_vs_monster, PARTY_EXP_RATE,
+        build_object_range_attack_body, resolve_monster_vs_monster, slow_adjusted_ticks,
+        PARTY_EXP_RATE,
     };
 
     #[test]
@@ -6363,6 +6379,20 @@ mod tests {
         let (dmg, miss) = resolve_monster_vs_monster(&attacker, &armoured, 100, DefenceType::AcAgility);
         assert!(!miss);
         assert_eq!(dmg, 80);
+    }
+
+    /// #1775：Slow 毒减速（+1 tick=100ms，上限 35 tick=3500ms）
+    #[test]
+    fn test_slow_adjusted_ticks() {
+        // 未减速：原值
+        assert_eq!(slow_adjusted_ticks(25, false), 25);
+        assert_eq!(slow_adjusted_ticks(4, false), 4);
+        // 减速：+1 tick
+        assert_eq!(slow_adjusted_ticks(25, true), 26);
+        assert_eq!(slow_adjusted_ticks(4, true), 5);
+        // 上限 35 tick（3500ms）
+        assert_eq!(slow_adjusted_ticks(35, true), 35);
+        assert_eq!(slow_adjusted_ticks(34, true), 35);
     }
 }
 

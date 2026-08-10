@@ -437,13 +437,14 @@ impl MonsterAiProfile {
         };
         // C# MonsterInfo.AttackSpeed/MoveSpeed（ms）：DB >0 用 DB，=0 用 C# 默认
         // （2500ms / 1800ms；Rust tick=100ms → 25 / 18 tick）
+        // C# MonsterObject.cs:829-830：MoveSpeed/AttackSpeed 下限 400ms（4 tick）
         let attack_cooldown = if info.attack_speed > 0 {
-            (info.attack_speed as u64 / 100).max(1)
+            (info.attack_speed as u64 / 100).max(4)
         } else {
             25
         };
         let move_interval = if info.move_speed > 0 {
-            (info.move_speed as u64 / 100).max(1)
+            (info.move_speed as u64 / 100).max(4)
         } else {
             18
         };
