@@ -61,6 +61,32 @@ pub fn triangle_cells(center_x: i32, center_y: i32, direction: u8, distance: u8,
     cells
 }
 
+/// C# IceThrust（Kirin.cs:126 / ManectricClaw.cs:85）：3 列（prevdir/dir/nextdir 起点）× 3 深 = 9 格。
+/// 返回 (x, y, j)，j=0..depth-1 为纵深段（ManectricClaw 用 j<=1 近 DC / j==2 远 MC）。
+pub fn ice_thrust_cells(center_x: i32, center_y: i32, direction: u8, depth: u8) -> Vec<(i32, i32, i32)> {
+    let mut cells = Vec::new();
+    let d = (direction as usize) % 8;
+    let (dx, dy) = (DIR_DX[d], DIR_DY[d]);
+    for col in [((d + 7) % 8), d, ((d + 1) % 8)] {
+        let (sx, sy) = (center_x + DIR_DX[col], center_y + DIR_DY[col]);
+        for j in 0..depth as i32 {
+            cells.push((sx + dx * j, sy + dy * j, j));
+        }
+    }
+    cells
+}
+
+/// C# ExplosionDie（HumanAssassin.cs:296）：8 方向 × 1..=max_radius 两圈（i%8 方向、i/8+1 距离）。
+pub fn eight_dir_rings(center_x: i32, center_y: i32, max_radius: u8) -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    for r in 1..=max_radius as i32 {
+        for d in 0..8usize {
+            cells.push((center_x + DIR_DX[d] * r, center_y + DIR_DY[d] * r));
+        }
+    }
+    cells
+}
+
 /// 计算朝向目标的 8 方向（对齐 C# DirectionFromPoint）
 pub fn direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> u8 {
     let dx = to_x - from_x;
@@ -135,6 +161,8 @@ pub fn slave_spawn_count(requested: usize, slave_count: usize, cap_total: i32) -
 #[cfg(test)]
 mod tests {
     use super::arc_cells;
+    use super::eight_dir_rings;
+    use super::ice_thrust_cells;
     use super::triangle_cells;
     use super::slave_spawn_count;
 
@@ -188,6 +216,42 @@ mod tests {
                 assert!((x - 10).abs().max((y - 10).abs()) <= 4, "dir={dir} 超距 {x},{y}");
             }
         }
+    }
+
+    #[test]
+    fn ice_thrust_cells_matches_csharp() {
+        // C# Kirin/ManectricClaw.IceThrust：dir=0(Up)，3 列（UpLeft/Up/UpRight 起点）× 3 深 = 9 格
+        let cells = ice_thrust_cells(0, 0, 0, 3);
+        assert_eq!(cells.len(), 9);
+        for c in [(-1, -1, 0), (-1, -2, 1), (-1, -3, 2), (0, -1, 0), (0, -2, 1), (0, -3, 2), (1, -1, 0), (1, -2, 1), (1, -3, 2)] {
+            assert!(cells.contains(&c), "missing {c:?}");
+        }
+        // dir=2(Right)：起点 (1,-1)/(1,0)/(1,1)，向右延伸 3 深
+        let cells = ice_thrust_cells(0, 0, 2, 3);
+        assert_eq!(cells.len(), 9);
+        assert!(cells.contains(&(2, -1, 1)));
+        assert!(cells.contains(&(3, 1, 2)));
+        // j 值 0/1/2 各 3 个（ManectricClaw 近 DC / 远 MC 分段用）
+        let js: Vec<i32> = cells.iter().map(|c| c.2).collect();
+        assert_eq!(js.iter().filter(|&&j| j == 0).count(), 3);
+        assert_eq!(js.iter().filter(|&&j| j == 1).count(), 3);
+        assert_eq!(js.iter().filter(|&&j| j == 2).count(), 3);
+    }
+
+    #[test]
+    fn eight_dir_rings_matches_csharp() {
+        // C# ExplosionDie：16 格（8 方向 × 2 圈）
+        let cells = eight_dir_rings(0, 0, 2);
+        assert_eq!(cells.len(), 16);
+        let mut sorted = cells.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 16, "不应重复");
+        for &(x, y) in &cells {
+            assert!([1, 2].contains(&x.abs().max(y.abs())), "距离应为 1/2: {x},{y}");
+        }
+        assert_eq!(cells.iter().filter(|&&(x, y)| x.abs().max(y.abs()) == 1).count(), 8);
+        assert_eq!(cells.iter().filter(|&&(x, y)| x.abs().max(y.abs()) == 2).count(), 8);
     }
 
     #[test]

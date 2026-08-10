@@ -83,53 +83,32 @@ impl MonsterBehavior for KirinBehavior {
 }
 
 impl KirinBehavior {
-    /// 冰锥：MC 前方 3x3 区域，1/5 Slow（C# IceThrust）
+    /// 冰锥：MC 前方 3x3（3 列 × 3 深）区域，每命中 1/5 Slow 4s（C# Kirin.IceThrust :126）
     fn ice_thrust(&self, monster: &mut MonsterState, target: crate::actors::world::ai::PlayerSnap, ctx: &mut AiCtx) {
         let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
         let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-        let dx = DIR_DX[dir as usize];
-        let dy = DIR_DY[dir as usize];
-        // 前方 3 格纵深 × 3 列（prevdir/dir/nextdir 起始）的玩家
-        let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
-            .find_targets_in_range(monster.x, monster.y, THRUST_RANGE, monster.map_index)
-            .into_iter().copied()
-            .filter(|p| {
-                let rx = p.x - monster.x;
-                let ry = p.y - monster.y;
-                // 朝目标方向的前方扇形/直线区域
-                (rx * dx >= 0 && ry * dy >= 0) && (rx.abs() <= THRUST_RANGE && ry.abs() <= THRUST_RANGE)
-            })
-            .collect();
-        if hits.is_empty() {
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
-            // 1/5 Slow（C# Random(5)==0）
+        monster.direction = dir;
+        // C# IceThrust：3 列（prevdir/dir/nextdir 起点）× 3 深 = 9 格
+        let cells3 = ice_thrust_cells(monster.x, monster.y, dir, THRUST_RANGE as u8);
+        let cells: Vec<(i32, i32)> = cells3.iter().map(|&(x, y, _)| (x, y)).collect();
+        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
+            attacker_oid: monster.object_id,
+            center_x: monster.x,
+            center_y: monster.y,
+            cells: cells.clone(),
+            damage,
+            spell_id: 0,
+            attack_type: 2,
+        });
+        // C# 每命中 1/5 Slow（玩家 4s，tick 1000）
+        let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
+            .iter().map(|p| p.session_id).collect();
+        for sid in hit {
             if fastrand::i32(0..5) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
+                    session_id: sid,
+                    poison: Poison::new(PoisonType::SLOW, 4, 0, 1000),
                 });
-            }
-        } else {
-            for h in hits {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: h.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
-                if fastrand::i32(0..5) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: h.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
-                    });
-                }
             }
         }
     }

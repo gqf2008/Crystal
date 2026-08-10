@@ -3,8 +3,8 @@
 //! C# 参考：Server/MirObjects/Monsters/ManectricClaw.cs
 //! 机制：
 //!   - AttackRange=3
-//!   - 远程或 5s 冷却到：ObjectRangeAttack → IceThrust：前方 3x3（近 DC / 远 MC，用前方 1 格半径 1 AOE 近似）
-//!     + 命中 1/5 减速 + 1/5 冰冻（5s，tick 1000）
+//!   - 远程或 5s 冷却到：ObjectRangeAttack → IceThrust：前方 3x3（j<=1 近 DC / j==2 远 MC）
+//!     + 每命中 1/5 减速（4s）+ 1/5 冰冻（2s，tick 1000）
 //!   - 否则：base.Attack 近战
 
 use crate::actors::world::MonsterState;
@@ -43,32 +43,47 @@ impl MonsterBehavior for ManectricClawBehavior {
             // C# ranged || 冷却到 → IceThrust
             if dist > 1 || ctx.tick_count >= self.next_thrust_tick {
                 self.next_thrust_tick = ctx.tick_count + THRUST_COOLDOWN;
-                let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
-                let cx = monster.x + DIR_DX[dir];
-                let cy = monster.y + DIR_DY[dir];
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                // C# IceThrust：3 列（prevdir/dir/nextdir 起点）× 3 深 = 9 格；j<=1 近 DC / j==2 远 MC
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                let cells3 = ice_thrust_cells(monster.x, monster.y, dir, 3);
+                let all: Vec<(i32, i32)> = cells3.iter().map(|&(x, y, _)| (x, y)).collect();
+                let near: Vec<(i32, i32)> = cells3.iter().filter(|&&(_, _, j)| j <= 1).map(|&(x, y, _)| (x, y)).collect();
+                let far: Vec<(i32, i32)> = cells3.iter().filter(|&&(_, _, j)| j == 2).map(|&(x, y, _)| (x, y)).collect();
+                let near_dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+                let far_dmg = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
                     attacker_oid: monster.object_id,
-                    center_x: cx,
-                    center_y: cy,
-                    radius: 1,
-                    damage,
+                    center_x: monster.x,
+                    center_y: monster.y,
+                    cells: near,
+                    damage: near_dmg,
                     spell_id: 0,
+                    attack_type: 2,
                 });
-                let nearby: Vec<u64> = ctx.find_targets_in_range(cx, cy, 1, monster.map_index)
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
+                    attacker_oid: monster.object_id,
+                    center_x: monster.x,
+                    center_y: monster.y,
+                    cells: far,
+                    damage: far_dmg,
+                    spell_id: 0,
+                    attack_type: 2,
+                });
+                // C# PoisonTarget(5, 4, Slow, 1000) / (5, 2, Frozen, 1000)：每命中 1/5
+                let hit: Vec<u64> = ctx.find_targets_in_cells(&all, monster.map_index)
                     .iter().map(|p| p.session_id).collect();
-                for sid in nearby {
-                    // PoisonTarget(5, Slow, 1000)：1/5
+                for sid in hit {
                     if fastrand::i32(0..5) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
+                            poison: Poison::new(PoisonType::SLOW, 4, 0, 1000),
                         });
                     }
-                    // PoisonTarget(5, Frozen, 1000)：1/5
                     if fastrand::i32(0..5) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::FROZEN, 5, 0, 1000),
+                            poison: Poison::new(PoisonType::FROZEN, 2, 0, 1000),
                         });
                     }
                 }

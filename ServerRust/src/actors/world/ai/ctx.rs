@@ -85,6 +85,16 @@ pub enum AttackAction {
         spell_id: u8,
         attack_type: u8,
     },
+    /// 精确格集合攻击（C# 自定义几何：behavior 按 C# 逐格算好 cells，tick 只按集合过滤）
+    Cells {
+        attacker_oid: u32,
+        center_x: i32,
+        center_y: i32,
+        cells: Vec<(i32, i32)>,
+        damage: i32,
+        spell_id: u8,
+        attack_type: u8,
+    },
     /// 直线攻击（C# LineAttack(damage, range)：沿 direction 逐格命中第一个目标）
     Line {
         attacker_oid: u32,
