@@ -247,6 +247,7 @@ app.add_systems(Update, magic_cooldown_system.run_if(in_state(AppState::Game)));
 fn skill_bar_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    hud: Res<crate::game::hud::HudState>,
     mut magics: ResMut<MagicsState>,
     net: Res<NetConnection>,
     session: Res<SessionState>,
@@ -265,6 +266,10 @@ fn skill_bar_system(
         KeyCode::F7,
         KeyCode::F8,
     ];
+    // #1600：C# GameScene.CheckInput——钓鱼时锁定施法输入（User.Fishing）
+    if hud.fishing {
+        return;
+    }
     let Some(slot) = F_KEYS.iter().position(|k| keys.just_pressed(*k)) else {
         return;
     };
