@@ -71,6 +71,7 @@ impl BombSpiderBehavior {
     /// 自爆：1 格 AOE + 绿毒，然后自身死亡
     fn explode(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
         let hits: Vec<crate::actors::world::ai::PlayerSnap> =
             ctx.find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
                 .into_iter().copied().collect();
@@ -86,8 +87,8 @@ impl BombSpiderBehavior {
             if fastrand::i32(0..5) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: h.session_id,
-                    // C# 毒值 = SP 攻（DC 近似）
-                    poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                    // C# 毒值 = SP 攻
+                    poison: Poison::new(PoisonType::GREEN, 5, sc_power, 2000),
                 });
             }
         }

@@ -528,6 +528,9 @@ pub struct MonsterState {
     pub max_ac: i32,
     pub min_mac: i32,
     pub max_mac: i32,
+    /// 最小/最大灵魂攻击力（C# Stat.MinSC/MaxSC；毒值/道士伤害用）
+    pub min_sc: i32,
+    pub max_sc: i32,
     pub agility: i32,
     pub accuracy: i32,
     /// 护甲倍率（C# ArmourRate，默认 1.0）
@@ -772,6 +775,8 @@ impl MonsterState {
         self.max_ac = get(Stat::MaxAC);
         self.min_mac = get(Stat::MinMAC);
         self.max_mac = get(Stat::MaxMAC);
+        self.min_sc = get(Stat::MinSC);
+        self.max_sc = get(Stat::MaxSC);
         self.agility = get(Stat::Agility);
         self.accuracy = get(Stat::Accuracy);
         self.magic_resist = get(Stat::MagicResist);
@@ -3644,6 +3649,7 @@ impl WorldActor {
                                     target_session: None,
                                     last_hitter_session: None,
                                     pending_brown_attacker: None,
+                                    min_sc: 0, max_sc: 0,
                                     provoked: true, // Boss is always aggressive
                                     is_elite: false,
                                     is_boss: true,
@@ -3939,7 +3945,8 @@ impl WorldActor {
                                         sit_down_tick: 0,
                                         target_session: None,
                                         last_hitter_session: None,
-                                        pending_brown_attacker: None, provoked: false,
+                                        pending_brown_attacker: None,
+                                        min_sc: 0, max_sc: 0, provoked: false,
                                         is_elite: false, is_boss: false,
                                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
@@ -4809,6 +4816,7 @@ impl WorldActor {
                 target_session: None,
                 last_hitter_session: None,
                 pending_brown_attacker: None,
+                min_sc: 0, max_sc: 0,
                 provoked: false,
                 is_elite: false,
                 is_boss: false,
@@ -7238,6 +7246,7 @@ async fn spawn_npcs_and_monsters(
             target_session: None,
             last_hitter_session: None,
             pending_brown_attacker: None,
+            min_sc: 0, max_sc: 0,
             provoked: false,
             rarity,
             is_elite,
@@ -7327,6 +7336,7 @@ async fn spawn_npcs_and_monsters(
                         target_session: None,
                         last_hitter_session: None,
                         pending_brown_attacker: None,
+                        min_sc: 0, max_sc: 0,
                         provoked: false,
                         is_elite: false,
                         is_boss: false,
@@ -7480,6 +7490,7 @@ mod tests {
             target_session: None,
             last_hitter_session: None,
             pending_brown_attacker: None,
+            min_sc: 0, max_sc: 0,
             provoked: false,
             is_elite: false,
             is_boss: true,

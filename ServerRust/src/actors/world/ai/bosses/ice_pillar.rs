@@ -58,12 +58,14 @@ impl MonsterBehavior for IcePillarBehavior {
                 });
                 let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
                     .iter().map(|p| p.session_id).collect();
+                let mc_power = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 for sid in nearby {
-                    // C# PoisonTarget(5, MC, Frozen, 1000)：1/5、时长=MC 攻秒数、值=MC（DC 近似）
+                    // C# PoisonTarget(5, MC, Frozen, 1000)：1/5、时长=MC 攻秒数、值=SC
                     if fastrand::i32(0..5) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::FROZEN, damage.max(1) as u32, damage, 1000),
+                            poison: Poison::new(PoisonType::FROZEN, mc_power as u32, sc_power, 1000),
                         });
                     }
                 }

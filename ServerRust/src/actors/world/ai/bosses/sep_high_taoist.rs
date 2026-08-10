@@ -60,8 +60,8 @@ impl MonsterBehavior for SepHighTaoistBehavior {
             // C# 毒轮换：无→Green / Green→Red / Red→Green（毒分支优先）
             // 约 3/4 概率施毒（近似 C# 毒优先；其余走双毒回落路径的 Curse/MassHealing/召唤/SoulFireBall）
             if fastrand::i32(0..4) != 0 {
-                // C# 用 SC（道士灵魂）；MonsterState 无 SC 字段，以 DC 近似
-                let power = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                // C# 用 SC（道士灵魂）
+                let power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 let (stage, p_type) = match self.poison_stage {
                     PoisonStage::None => (PoisonStage::Green, PoisonType::GREEN),
                     PoisonStage::Green => (PoisonStage::Red, PoisonType::RED),

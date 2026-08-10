@@ -72,11 +72,13 @@ impl MonsterBehavior for TrollKingBehavior {
                     spell_id: 0,
                 });
                 // C# CompleteRangeAttack：命中后 Dazed 1s
-                // C# PoisonTarget(1, random(MaxMC), Dazed, 1000)：恒生效、时长=random(MaxMC)（DC 近似）
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::DAZED, fastrand::i32(0..damage.max(1)) as u32, 0, 1000),
-                    });
+                // C# PoisonTarget(1, random(MaxMC), Dazed, 1000)：时长=random(MaxMC)、值=SC
+                let mc_power = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: target.session_id,
+                    poison: Poison::new(PoisonType::DAZED, fastrand::i32(0..mc_power.max(1)) as u32, sc_power, 1000),
+                });
             }
             return;
         }
