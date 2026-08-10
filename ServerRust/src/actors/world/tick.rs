@@ -3507,6 +3507,33 @@ impl WorldActor {
                 if other_state.object_id != target_id {
                     continue;
                 }
+                // #1645：C# CompleteMagic——目标校验（同图/未死/非GM/可攻击/安全区/禁战）
+                if other_state.map_index != caster_state.map_index {
+                    continue;
+                }
+                if other_state.is_dead {
+                    continue;
+                }
+                if self.gm_protected.contains(&other_session) {
+                    continue;
+                }
+                if !super::can_attack_player(caster_state, &other_state, &self.guild_wars) {
+                    continue;
+                }
+                let attacker_safe = self.maps.get(&caster_state.map_index)
+                    .map(|m| m.is_safe_zone(caster_state.x, caster_state.y))
+                    .unwrap_or(false);
+                let target_safe = self.maps.get(&other_state.map_index)
+                    .map(|m| m.is_safe_zone(other_state.x, other_state.y))
+                    .unwrap_or(false);
+                if attacker_safe || target_safe {
+                    continue;
+                }
+                if self.map_infos.get(&(caster_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                    || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                {
+                    continue;
+                }
                 let dist = (other_state.x - pending.target_x).abs() + (other_state.y - pending.target_y).abs();
                 if dist > 2 {
                     continue;

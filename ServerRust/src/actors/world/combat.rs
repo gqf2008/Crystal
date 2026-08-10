@@ -1634,6 +1634,10 @@ impl WorldActor {
         if attacker_state.is_dead || defender_state.is_dead {
             return false;
         }
+        // #1645：C# CompleteRangeAttack——目标跨图则箭矢落空（CurrentMap 隔离）
+        if attacker_state.map_index != defender_state.map_index {
+            return false;
+        }
         if self.gm_protected.contains(&defender_session) {
             return false;
         }
