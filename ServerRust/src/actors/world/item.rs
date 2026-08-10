@@ -2438,6 +2438,16 @@ impl Message<StoreItemRequest> for WorldActor {
             _ => return,
         };
 
+        // #1641：C# StoreItem（PlayerObject.cs:5376）——需先与仓库 NPC 对话且同图范围内（InRange DataRange=16）
+        let npc_ok = match self.session_npc.get(&msg.session_id).and_then(|oid| self.npcs.get(oid)) {
+            Some(npc) => npc_in_range(state.map_index, state.x, state.y, npc),
+            None => false,
+        };
+        if !npc_ok {
+            send_system_message(&self.gate_ref, msg.session_id, "请先与仓库 NPC 对话");
+            return;
+        }
+
         // 检查物品是否在背包中
         if msg.from < 0 || msg.from as usize >= state.inventory.backpack.len() || state.inventory.backpack[msg.from as usize].is_none() {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
@@ -2487,6 +2497,16 @@ impl Message<TakeBackItemRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+
+        // #1641：C# TakeBackItem（PlayerObject.cs:5457）——需先与仓库 NPC 对话且同图范围内（InRange DataRange=16）
+        let npc_ok = match self.session_npc.get(&msg.session_id).and_then(|oid| self.npcs.get(oid)) {
+            Some(npc) => npc_in_range(state.map_index, state.x, state.y, npc),
+            None => false,
+        };
+        if !npc_ok {
+            send_system_message(&self.gate_ref, msg.session_id, "请先与仓库 NPC 对话");
+            return;
+        }
 
         // 检查物品是否在仓库中
         if msg.from < 0 || msg.from as usize >= state.inventory.storage.len() || state.inventory.storage[msg.from as usize].is_none() {

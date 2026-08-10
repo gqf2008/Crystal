@@ -44,7 +44,12 @@ impl Message<NPCCallRequest> for WorldActor {
             }
         };
 
-        // 距离校验（NPC 交互范围 2 格）
+        // 距离校验（NPC 交互范围 2 格）；#1640：必须同图（C# CurrentMap.NPCs 语义）
+        if npc.map_index != player_state.map_index {
+            debug!("NPC {} on map {} but player on map {} (cross-map call rejected)",
+                   npc.name, npc.map_index, player_state.map_index);
+            return;
+        }
         let dist = (npc.x - player_pos.0).abs() + (npc.y - player_pos.1).abs();
         if dist > 2 {
             debug!("Player too far from NPC {} (dist={})", npc.name, dist);
