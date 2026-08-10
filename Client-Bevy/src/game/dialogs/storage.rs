@@ -223,7 +223,8 @@ fn spawn_storage_dialog(
         (1, "新密码:", DIALOG_Y + 400.0),
     ];
     for (id, label, y) in fields {
-        let _ = spawn_ui_text(&mut commands, &font, label, DIALOG_X + 28.0, y, 12.0, Color::WHITE, 9.1);
+        let t = spawn_ui_text(&mut commands, &font, label, DIALOG_X + 28.0, y, 12.0, Color::WHITE, 9.1);
+        commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
         let box_e = commands
             .spawn((
                 UiEntity,
@@ -272,7 +273,8 @@ fn spawn_storage_dialog(
             StoragePwdPanel,
         ));
     }
-    let _ = spawn_ui_text(&mut commands, &font, "设置", DIALOG_X + 43.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    let t = spawn_ui_text(&mut commands, &font, "设置", DIALOG_X + 43.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 206, 207, 208,
@@ -284,7 +286,8 @@ fn spawn_storage_dialog(
             StoragePwdPanel,
         ));
     }
-    let _ = spawn_ui_text(&mut commands, &font, "移除", DIALOG_X + 123.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    let t = spawn_ui_text(&mut commands, &font, "移除", DIALOG_X + 123.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 210, 211, 212,
@@ -296,7 +299,8 @@ fn spawn_storage_dialog(
             StoragePwdPanel,
         ));
     }
-    let _ = spawn_ui_text(&mut commands, &font, "关闭", DIALOG_X + 203.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    let t = spawn_ui_text(&mut commands, &font, "关闭", DIALOG_X + 203.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
     // 解锁面板（#200：C# PromptStorageUnlock —— 输入密码 → C.UnlockStorage）
     commands.spawn((
         UiEntity,
@@ -312,7 +316,7 @@ fn spawn_storage_dialog(
         Transform::from_xyz(DIALOG_X + 18.0, -(DIALOG_Y + 180.0), 9.5),
         Visibility::Hidden,
     ));
-    let _ = spawn_ui_text(
+    let t = spawn_ui_text(
         &mut commands,
         &font,
         "请输入仓库密码",
@@ -322,6 +326,7 @@ fn spawn_storage_dialog(
         Color::WHITE,
         9.6,
     );
+    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
     let unlock_input = commands
         .spawn((
             UiEntity,
@@ -390,7 +395,7 @@ fn spawn_storage_dialog(
             StorageUnlockPanel,
         ));
     }
-    let _ = spawn_ui_text(
+    let t = spawn_ui_text(
         &mut commands,
         &font,
         "确定",
@@ -400,6 +405,7 @@ fn spawn_storage_dialog(
         Color::WHITE,
         9.8,
     );
+    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands,
         &mut libs,
@@ -421,7 +427,7 @@ fn spawn_storage_dialog(
             StorageUnlockPanel,
         ));
     }
-    let _ = spawn_ui_text(
+    let t = spawn_ui_text(
         &mut commands,
         &font,
         "取消",
@@ -431,6 +437,7 @@ fn spawn_storage_dialog(
         Color::WHITE,
         9.8,
     );
+    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
 
     // 格子底板不在此预生成：#281 由 storage_grid_sync_system 按 StorageState.items.len()
     // 动态生成/移除（进图 UserStorage 到达前 items 为空，避免先建后删抖动）

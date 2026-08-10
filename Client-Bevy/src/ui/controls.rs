@@ -322,6 +322,20 @@ pub fn spawn_dropdown(
         );
         option_texts.push(t);
     }
+    // 关键：下拉框的 文字/箭头/弹出面板/选项 全部挂到闭合框 box_e 下（Bevy 层级可见性）。
+    // 否则对话框隐藏时只有闭合框被隐藏，文字与 ▼ 箭头是独立实体仍会渲染在屏幕上
+    // （用户看到的各对话框残留“▼”就是这里来的）。
+    // 挂为子实体后 Transform 改为相对父实体的局部坐标（父实体位于 (x, -y, z)）。
+    commands.entity(text).insert(Transform::from_xyz(6.0, -(h - 12.0) / 2.0, 0.1));
+    commands.entity(arrow).insert(Transform::from_xyz(w - 14.0, -(h - 12.0) / 2.0, 0.1));
+    commands.entity(popup).insert(Transform::from_xyz(-2.0, -h, 0.2));
+    commands.entity(box_e).add_child(text);
+    commands.entity(box_e).add_child(arrow);
+    commands.entity(box_e).add_child(popup);
+    for (i, ent) in option_texts.iter().enumerate() {
+        commands.entity(*ent).insert(Transform::from_xyz(6.0, -(2.0 + i as f32 * row_h), 0.3));
+        commands.entity(popup).add_child(*ent);
+    }
 
     let dd = DropDown {
         items,

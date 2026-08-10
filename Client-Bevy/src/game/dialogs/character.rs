@@ -509,6 +509,7 @@ fn spawn_character_dialog(
             let mut ec = commands.entity(e);
             ec.insert((
                 DialogRoot(DialogKind::Character),
+                CharDialogWidget,
             ));
             if is_next {
                 ec.insert(CharSkillNext);

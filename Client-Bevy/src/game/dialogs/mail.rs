@@ -501,10 +501,11 @@ fn spawn_mail(
         (3, "金币:", 190.0),
     ];
     for (id, label, y) in fields {
-        let _ = spawn_ui_text(
+        let t = spawn_ui_text(
             &mut commands, &font, label,
             300.0, y, 12.0, Color::WHITE, 8.1,
         );
+        commands.entity(t).insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
         let box_e = commands
             .spawn((
                 UiEntity,
@@ -539,7 +540,8 @@ fn spawn_mail(
         });
     }
     // 附件 5 格（C# MailComposeParcelDialog）
-    let _ = spawn_ui_text(&mut commands, &font, "附件:", 300.0, 218.0, 12.0, Color::WHITE, 8.1);
+    let t = spawn_ui_text(&mut commands, &font, "附件:", 300.0, 218.0, 12.0, Color::WHITE, 8.1);
+    commands.entity(t).insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
     for i in 0..5usize {
         let e = crate::ui::controls::spawn_item_cell(
             &mut commands, &mut images, &font,
@@ -553,7 +555,8 @@ fn spawn_mail(
         ));
     }
     // 背包物品选择（最多 20 格）
-    let _ = spawn_ui_text(&mut commands, &font, "背包物品:", 300.0, 274.0, 12.0, Color::WHITE, 8.1);
+    let t = spawn_ui_text(&mut commands, &font, "背包物品:", 300.0, 274.0, 12.0, Color::WHITE, 8.1);
+    commands.entity(t).insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
     for i in 0..20usize {
         let col = (i % 5) as f32;
         let row = (i / 5) as f32;
@@ -621,6 +624,10 @@ fn mail_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        // 收取附件按钮（MailCollect）不在 widgets 查询里，关闭时必须隐藏
+        for (_, mut vis) in &mut collect_btn {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
     for btn in &close {

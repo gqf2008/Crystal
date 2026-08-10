@@ -310,9 +310,11 @@ fn spawn_hero(
             HeroWidget,
         ));
     }
-    let _ = spawn_ui_text(&mut commands, &font, "创建英雄", 314.0, 266.0, 12.0, Color::WHITE, 8.4);
+    let t = spawn_ui_text(&mut commands, &font, "创建英雄", 314.0, 266.0, 12.0, Color::WHITE, 8.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Hero), HeroWidget));
     // 英雄行为（C# HeroBehaviourPanel：Prguse 1840..1843，16x17）
-    let _ = spawn_ui_text(&mut commands, &font, "行为:", 410.0, 266.0, 12.0, Color::WHITE, 8.4);
+    let t = spawn_ui_text(&mut commands, &font, "行为:", 410.0, 266.0, 12.0, Color::WHITE, 8.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Hero), HeroWidget));
     for i in 0..4usize {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
             &mut commands, &mut libs, &mut images, &mut cache,
@@ -328,7 +330,8 @@ fn spawn_hero(
     }
 
     // 自动药阈值（C# HeroInventoryDialog HPButton/MPButton，Title 560/563）
-    let _ = spawn_ui_text(&mut commands, &font, "自动药:", 300.0, 300.0, 12.0, Color::WHITE, 8.4);
+    let t = spawn_ui_text(&mut commands, &font, "自动药:", 300.0, 300.0, 12.0, Color::WHITE, 8.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Hero), HeroWidget));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 560, 561, 562,
@@ -414,7 +417,8 @@ fn spawn_hero(
         Transform::from_xyz(280.0, -296.0, 9.0),
         Visibility::Hidden,
     ));
-    let _ = spawn_ui_text(&mut commands, &font, "名字:", 290.0, 312.0, 12.0, Color::WHITE, 9.1);
+    let t = spawn_ui_text(&mut commands, &font, "名字:", 290.0, 312.0, 12.0, Color::WHITE, 9.1);
+    commands.entity(t).insert((DialogRoot(DialogKind::Hero), HeroCreatePanel));
     let name_box = commands
         .spawn((
             UiEntity,
@@ -486,7 +490,8 @@ fn spawn_hero(
             HeroCreatePanel,
         ));
     }
-    let _ = spawn_ui_text(&mut commands, &font, "确定", 315.0, 380.0, 12.0, Color::WHITE, 9.4);
+    let t = spawn_ui_text(&mut commands, &font, "确定", 315.0, 380.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Hero), HeroCreatePanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 210, 211, 212,
@@ -498,7 +503,8 @@ fn spawn_hero(
             HeroCreatePanel,
         ));
     }
-    let _ = spawn_ui_text(&mut commands, &font, "取消", 405.0, 380.0, 12.0, Color::WHITE, 9.4);
+    let t = spawn_ui_text(&mut commands, &font, "取消", 405.0, 380.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Hero), HeroCreatePanel));
     let msg = spawn_ui_text(&mut commands, &font, "", 300.0, 410.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 9.5);
     commands.entity(msg).insert((HeroCreateMsg, DialogRoot(DialogKind::Hero), HeroCreatePanel));
 }
@@ -521,6 +527,11 @@ fn hero_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        // 创建面板（HeroCreatePanel）不在 widgets 里，且只在 open 分支管理显隐；
+        // 关闭对话框时必须隐藏，否则“名字:/确定/取消/职业/性别”等标签残留屏幕
+        for mut vis in &mut panel {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
     for mut vis in &mut panel {

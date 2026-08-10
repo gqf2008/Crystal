@@ -254,6 +254,10 @@ fn buff_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        // 关闭按钮（BuffClose）只在 open 分支管理显隐，关闭时必须隐藏
+        for (_, mut vis) in &mut close {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
     // 关闭按钮仅展开时显示

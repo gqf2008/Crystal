@@ -259,7 +259,7 @@ fn trade_ui_system(
         ),
     >,
     mut cells: Query<(&mut ItemCellData, &TradeSlot)>,
-    mut gold_texts: Query<(&mut Text2d, &TradeGoldText), (Without<ItemCellCount>, Without<TradeInviteText>)>,
+    mut gold_texts: Query<(&mut Text2d, &mut Visibility, &TradeGoldText), (Without<ItemCellCount>, Without<TradeInviteText>, Without<TradeInviteWidget>)>,
     mut invite_widgets: Query<
         &mut Visibility,
         (
@@ -267,6 +267,7 @@ fn trade_ui_system(
             Without<TradeWidget>,
             Without<ItemCellIcon>,
             Without<ItemCellCount>,
+            Without<TradeGoldText>,
         ),
     >,
     mut invite_texts: Query<(&mut Text2d, &TradeInviteText), (Without<ItemCellCount>, Without<TradeGoldText>)>,
@@ -303,7 +304,12 @@ fn trade_ui_system(
             data.count = count;
         }
     }
-    for (mut t, _) in &mut gold_texts {
+    for (mut t, mut vis, _) in &mut gold_texts {
+        *vis = if trade.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         let new = format!(
             "金币: {} | 对方: {}{}",
             trade.my_gold,

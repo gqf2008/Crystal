@@ -576,6 +576,10 @@ fn inventory_ui_system(
         };
     }
     if !open {
+        // 关闭时同时隐藏金币/负重文本（money 查询在 open 分支才更新，否则残留可见）
+        for (_, mut vis, _, _) in &mut money {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
 
@@ -622,7 +626,8 @@ fn inventory_ui_system(
             }
         }
     }
-    for (mut t, _vis, gold, weight) in &mut money {
+    for (mut t, mut vis, gold, weight) in &mut money {
+        *vis = Visibility::Visible;
         if gold.is_some() {
             t.0 = format!("{}", hud.inventory.gold);
         } else if weight.is_some() {
