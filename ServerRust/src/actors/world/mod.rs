@@ -1109,6 +1109,8 @@ pub struct WorldActor {
     pub(crate) monster_paths: HashMap<u32, Vec<(i32, i32)>>,
     /// 怪物寻路缓存对应的目标（oid -> (目标 session, 目标 x, 目标 y)；目标变更时重算）
     pub(crate) monster_path_targets: HashMap<u32, (u64, i32, i32)>,
+    /// 普通 Ranged/Mage 怪物远程伤害延迟结算队列（#1703，C# DelayedAction RangeDamage）
+    pub(crate) ranged_pending: Vec<crate::actors::world::tick::RangedPendingHit>,
     /// 英雄寻路缓存（hero session -> 路径瓦片序列，不含起点；#1695 英雄 A* 跟随/追击）
     pub(crate) hero_paths: HashMap<u64, Vec<(i32, i32)>>,
     /// 英雄寻路缓存目标（hero session -> (kind, tx, ty)；kind 1=跟随主人 2=追击怪物）
@@ -1359,6 +1361,7 @@ impl WorldActor {
             monster_search_ticks: HashMap::new(),
             monster_paths: HashMap::new(),
             monster_path_targets: HashMap::new(),
+            ranged_pending: Vec::new(),
             hero_paths: HashMap::new(),
             hero_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),
@@ -4336,6 +4339,7 @@ impl Actor for WorldActor {
             monster_search_ticks: HashMap::new(),
             monster_paths: HashMap::new(),
             monster_path_targets: HashMap::new(),
+            ranged_pending: Vec::new(),
             hero_paths: HashMap::new(),
             hero_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),
@@ -7844,3 +7848,4 @@ impl Message<GmGotoRequest> for WorldActor {
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
     }
 }
+
