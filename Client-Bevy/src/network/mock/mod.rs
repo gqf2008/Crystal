@@ -26,6 +26,10 @@ use packets::*;
 use send::*;
 use state::*;
 
+/// #1713：方向 → 坐标增量（MirDirection 顺序：Up=0,UpRight=1,...,UpLeft=7）
+const MOCK_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+const MOCK_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
+
 pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
     std::thread::Builder::new()
         .name("mock-server".into())
@@ -48,6 +52,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             ]
             .into_iter()
             .collect();
+            /// #1713：怪物出生点（脱战回位用）
+            let monster_spawn_pos: HashMap<u32, (i32, i32)> = monster_pos.clone();
+            /// #1713：玩家真实位置（随 Walk/Run 方向包每步移动一格，替代硬编码出生点）
+            let mut player_pos: (i32, i32) = (354, 352);
             /// 怪物最后受击时刻（#49 脱战回血）
             let mut monster_last_hit: HashMap<u32, std::time::Instant> = HashMap::new();
             /// 地面掉落物品（id, x, y）
@@ -1626,7 +1634,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         // #224：战斗表现层——怪物反击施法/远程攻击/命中特效（验证
                                         // ObjectMagic/ObjectProjectile/ObjectEffect/ObjectRangeAttack 解码渲染）
                                         let (mx, my) = monster_pos.get(&target).copied().unwrap_or((353, 352));
-                                        let (px, py): (i32, i32) = (354, 352);
+                                        let (px, py) = player_pos;
                                         send(
                                             &to_client,
                                             &server::magic_combat::ObjectMagic {
@@ -2279,7 +2287,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         let (cx, cy) = if p.mouse_mode {
                                             (p.location.x, p.location.y)
                                         } else {
-                                            (354, 352) // 玩家位置（宠物跟随）
+                                            player_pos // 玩家位置（宠物跟随）
                                         };
                                         tracing::info!("[MOCK] 宠物拾取 mouse_mode={} @ ({},{})", p.mouse_mode, cx, cy);
                                         let target = ground_items.iter().position(|(_, ix, iy, _)| {
@@ -2898,7 +2906,15 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 x if x == ClientPacketIds::Turn as i16 => {}
                                 x if x == ClientPacketIds::Walk as i16
-                                    || x == ClientPacketIds::Run as i16 => {}
+                                    || x == ClientPacketIds::Run as i16 => {
+                                    // #1713：跟踪玩家真实位置（每步沿方向移动一格，替代硬编码出生点）
+                                    if let Ok(p) = client::movement::Walk::read_body(&mut cur) {
+                                        let dir = (p.direction as usize) % 8;
+                                        player_pos.0 += MOCK_DIR_DX[dir];
+                                        player_pos.1 += MOCK_DIR_DY[dir];
+                                        tracing::debug!("[MOCK] 玩家移动 -> {:?}", player_pos);
+                                    }
+                                }
                                 other => tracing::debug!("[MOCK] 未处理客户端包 {:04X}", other),
                             }
                         }
@@ -2998,7 +3014,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     continue;
                                 }
                                 let (mx, my) = monster_pos.get(&id).copied().unwrap_or((353, 352));
-                                let (px, py): (i32, i32) = (354, 352);
+                                let (px, py) = player_pos;
+                                // #1713：玩家远离（>16 格）→ 脱战回位（C# DATA_RANGE=16；玩家走远不再持续掉血）
+                                if (mx - px).abs().max((my - py).abs()) > 16 {
+                                    if let Some(spawn) = monster_spawn_pos.get(&id) {
+                                        monster_pos.insert(id, *spawn);
+                                    }
+                                    continue;
+                                }
                                 // 邻接攻击（切比雪夫距离 <=1）
                                 if (mx - px).abs().max((my - py).abs()) <= 1 {
                                     let defence = player_defence(&player_equipment);
@@ -3403,4 +3426,3 @@ mod roundtrip_tests {
         assert!(inv[1].is_some(), "slot1 should have item");
     }
 }
-
