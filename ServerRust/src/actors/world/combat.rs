@@ -980,6 +980,18 @@ impl Message<HarvestRequest> for WorldActor {
         };
         if state.is_dead { return; }
 
+        // #1657：C# Mining ActionTime=550ms（HumanObject）；服务端限流防无限挖矿
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(last) = self.last_harvest_ms.get(&msg.session_id) {
+            if now_ms - *last < 550 {
+                return;
+            }
+        }
+        self.last_harvest_ms.insert(msg.session_id, now_ms);
+
         let dir = msg.direction as usize % 8;
         let target_x = state.x + MON_DIR_DX[dir];
         let target_y = state.y + MON_DIR_DY[dir];
