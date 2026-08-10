@@ -18,7 +18,8 @@ pub struct ObjectAttack {
     pub location_y: u32,
     pub direction: u8,
     pub spell: u8,
-    pub level: u16,
+    /// C# S.ObjectAttack.Level（1B）
+    pub level: u8,
     pub attack_type: u8,
 }
 
@@ -161,7 +162,7 @@ impl Packet for ObjectAttack {
             location_y: reader.read_u32::<LittleEndian>()?,
             direction: reader.read_u8()?,
             spell: reader.read_u8()?,
-            level: reader.read_u16::<LittleEndian>()?,
+            level: reader.read_u8()?,
             attack_type: reader.read_u8()?,
         })
     }
@@ -172,7 +173,7 @@ impl Packet for ObjectAttack {
         writer.write_u32::<LittleEndian>(self.location_y)?;
         writer.write_u8(self.direction)?;
         writer.write_u8(self.spell)?;
-        writer.write_u16::<LittleEndian>(self.level)?;
+        writer.write_u8(self.level)?;
         writer.write_u8(self.attack_type)?;
         Ok(())
     }
