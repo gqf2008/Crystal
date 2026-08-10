@@ -104,32 +104,41 @@ pub(crate) fn auto_bigmap_test(
         *phase = *t;
         return;
     }
-    if *stage == 4 && *t - *phase >= 3.0 {
+    // #1836：传送验证改为轮询（服务端 TeleportToNPC 处理有延迟），
+    // 15s 内到达目标 → ✅；超时 → ❌（不再假绿“传送已处理”）
+    if *stage == 4 {
         let moved = players.single().ok().map(|tf| {
             client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y)
         });
-        match moved {
+        let done = match moved {
             Some((x, y)) if (x, y) == *target => {
                 tracing::info!("[BIGMAP] ✅ 传送生效 玩家位置=({},{})", x, y);
+                true
             }
-            Some((x, y)) => {
-                tracing::info!(
-                    "[BIGMAP] ✅ 传送已处理 玩家位置=({},{})（目标 ({},{})）",
+            Some((x, y)) if *t - *phase >= 15.0 => {
+                tracing::warn!(
+                    "[BIGMAP] ❌ 传送未生效 玩家位置=({},{})（目标 ({},{})）",
                     x,
                     y,
                     target.0,
                     target.1
                 );
+                true
             }
-            None => {
-                tracing::warn!("[BIGMAP] ⚠️ 无法读取玩家位置");
+            None if *t - *phase >= 15.0 => {
+                tracing::warn!("[BIGMAP] ⚠️ 15s 内无法读取玩家位置");
+                true
             }
+            _ => false,
+        };
+        if done {
+            if mgr.is_open(DialogKind::BigMap) {
+                mgr.close(DialogKind::BigMap);
+                tracing::info!("[BIGMAP] ✅ 关闭大地图");
+            }
+            *stage = 9;
         }
-        if mgr.is_open(DialogKind::BigMap) {
-            mgr.close(DialogKind::BigMap);
-            tracing::info!("[BIGMAP] ✅ 关闭大地图");
-        }
-        *stage = 9;
+        return;
     }
     if *t >= 40.0 && *stage < 9 {
         tracing::warn!("[BIGMAP] ❌ 超时 stage={}", *stage);
