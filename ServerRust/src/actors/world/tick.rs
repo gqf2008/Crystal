@@ -51,6 +51,17 @@ pub(crate) struct RangedPendingHit {
     pub py: i32,
     pub target_in_safe: bool,
 }
+
+/// #1706：Boss Range 远程伤害延迟结算项（C# DelayedAction RangeDamage）
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BossRangedPendingHit {
+    /// 到期 tick（100ms/tick）
+    pub fire_tick: u64,
+    pub attacker_oid: u32,
+    pub target_session: u64,
+    pub damage: i32,
+    pub map_index: u16,
+}
 /// #1703：怪物命中玩家结算（C# Attacked / DelayedAction RangeDamage 落地）：
 /// 伤害 + ObjectStruck/DamageIndicator 广播 + 下坐骑 + 装备耐久 + 死亡掉落/经验惩罚。
 /// 近战即时调用与远程延迟结算共用（避免逻辑分叉）。
@@ -506,6 +517,55 @@ impl WorldActor {
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(*target_session).await {
                     if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
                         self.broadcast_equipment_visuals(*target_session, &state).await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// #1706：Boss 远程伤害延迟结算（C# DelayedAction RangeDamage）
+    pub(crate) async fn tick_boss_ranged_pending(&mut self) {
+        if self.boss_ranged_pending.is_empty() {
+            return;
+        }
+        let now = self.tick_count;
+        let mut due: Vec<BossRangedPendingHit> = Vec::new();
+        self.boss_ranged_pending.retain(|h| {
+            if h.fire_tick <= now {
+                due.push(*h);
+                false
+            } else {
+                true
+            }
+        });
+        for hit in due {
+            if let Some(record) = self.players.get(&hit.target_session) {
+                let _ = record.actor_ref.ask(TakeDamage {
+                    attacker_id: hit.attacker_oid,
+                    attacker_session: hit.target_session,
+                    damage: hit.damage,
+                }).await;
+                // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
+                if let Some((expire, lv)) = self.counter_attack.get(&hit.target_session).copied() {
+                    if self.tick_count <= expire {
+                        self.counter_attack.remove(&hit.target_session);
+                        let counter_dmg = if let Ok(Some(vs)) = record.actor_ref.ask(GetPlayerState).await {
+                            crate::combat::attack::get_attack_power(
+                                vs.min_attack + vs.bonus_min_attack,
+                                vs.max_attack + vs.bonus_max_attack,
+                                vs.luck,
+                            ).max(1)
+                        } else { 1 };
+                        if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
+                            m.take_damage(counter_dmg);
+                            m.provoked = true;
+                            m.target_session = Some(hit.target_session);
+                            crate::combat::poison::apply_poison(&mut m.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::STUN, lv as u32 + 1, 0, 1000,
+                                ));
+                            debug!("Player {} counter-attacked boss {} ({} dmg)", hit.target_session, hit.attacker_oid, counter_dmg);
+                        }
                     }
                 }
             }
@@ -4915,33 +4975,51 @@ impl Message<Tick> for WorldActor {
                 // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
                 broadcast_to_map(&self.gate_ref, &self.players, boss_map, &attack_packet).await;
                 // 对命中玩家造成伤害
-                for sid in &targets {
-                    if let Some(record) = self.players.get(sid) {
-                        let _ = record.actor_ref.ask(TakeDamage {
-                            attacker_id: attacker_oid,
-                            attacker_session: *sid,
+                if matches!(atk, ai::AttackAction::Range { .. }) {
+                    // #1706：Boss 远程伤害按弹道延迟结算（C# DelayedAction RangeDamage；与 #1703 一致）
+                    for sid in &targets {
+                        let (tx, ty) = player_positions.iter()
+                            .find(|(ps, _, _, _, _, _, _, _)| ps == sid)
+                            .map(|(_, x, y, _, _, _, _, _)| (*x, *y))
+                            .unwrap_or((boss_x, boss_y));
+                        let dist = (boss_x - tx).abs().max((boss_y - ty).abs());
+                        self.boss_ranged_pending.push(BossRangedPendingHit {
+                            fire_tick: self.tick_count + crate::actors::world::combat::range_flight_ticks(dist),
+                            attacker_oid,
+                            target_session: *sid,
                             damage,
-                        }).await;
-                        // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
-                        if let Some((expire, lv)) = self.counter_attack.get(sid).copied() {
-                            if self.tick_count <= expire {
-                                self.counter_attack.remove(sid);
-                                let counter_dmg = if let Ok(Some(vs)) = record.actor_ref.ask(GetPlayerState).await {
-                                    crate::combat::attack::get_attack_power(
-                                        vs.min_attack + vs.bonus_min_attack,
-                                        vs.max_attack + vs.bonus_max_attack,
-                                        vs.luck,
-                                    ).max(1)
-                                } else { 1 };
-                                if let Some(m) = self.monsters.get_mut(&attacker_oid) {
-                                    m.take_damage(counter_dmg);
-                                    m.provoked = true;
-                                    m.target_session = Some(*sid);
-                                    crate::combat::poison::apply_poison(&mut m.poison_list,
-                                        crate::combat::poison::Poison::new(
-                                            mir2_shared::enums::PoisonType::STUN, lv as u32 + 1, 0, 1000,
-                                        ));
-                                    debug!("Player {} counter-attacked boss {} ({} dmg)", sid, attacker_oid, counter_dmg);
+                            map_index: boss_map,
+                        });
+                    }
+                } else {
+                    for sid in &targets {
+                        if let Some(record) = self.players.get(sid) {
+                            let _ = record.actor_ref.ask(TakeDamage {
+                                attacker_id: attacker_oid,
+                                attacker_session: *sid,
+                                damage,
+                            }).await;
+                            // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
+                            if let Some((expire, lv)) = self.counter_attack.get(sid).copied() {
+                                if self.tick_count <= expire {
+                                    self.counter_attack.remove(sid);
+                                    let counter_dmg = if let Ok(Some(vs)) = record.actor_ref.ask(GetPlayerState).await {
+                                        crate::combat::attack::get_attack_power(
+                                            vs.min_attack + vs.bonus_min_attack,
+                                            vs.max_attack + vs.bonus_max_attack,
+                                            vs.luck,
+                                        ).max(1)
+                                    } else { 1 };
+                                    if let Some(m) = self.monsters.get_mut(&attacker_oid) {
+                                        m.take_damage(counter_dmg);
+                                        m.provoked = true;
+                                        m.target_session = Some(*sid);
+                                        crate::combat::poison::apply_poison(&mut m.poison_list,
+                                            crate::combat::poison::Poison::new(
+                                                mir2_shared::enums::PoisonType::STUN, lv as u32 + 1, 0, 1000,
+                                            ));
+                                        debug!("Player {} counter-attacked boss {} ({} dmg)", sid, attacker_oid, counter_dmg);
+                                    }
                                 }
                             }
                         }
@@ -5583,6 +5661,7 @@ impl Message<Tick> for WorldActor {
 
         self.tick_spells().await;
 
+        self.tick_boss_ranged_pending().await;
         self.tick_ranged_pending().await;
         self.tick_spell_completions().await;
 
@@ -5739,6 +5818,3 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
-
-
-
