@@ -87,10 +87,13 @@ impl MonsterBehavior for HumanAssassinBehavior {
             return;
         }
 
-        // 双倍移动追击（C# Walk 走 2 格）：连续两步近似
+        // 双倍移动追击（C# HumanAssassin.Walk：先试 2 格，被挡回退 1 格）
         if ctx.tick_count >= monster.next_move_tick {
-            let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
-            ctx.out_moves.push((monster.object_id, nx, ny, dir));
+            let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as usize) % 8;
+            let two = (monster.x + DIR_DX[dir] * 2, monster.y + DIR_DY[dir] * 2);
+            let one = (monster.x + DIR_DX[dir], monster.y + DIR_DY[dir]);
+            let (nx, ny) = if (ctx.is_walkable)(two.0, two.1) { two } else { one };
+            ctx.out_moves.push((monster.object_id, nx, ny, dir as u8));
             monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
@@ -107,7 +110,8 @@ impl HumanAssassinBehavior {
     fn explode(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let crit = fastrand::i32(0..100) <= monster.accuracy;
         let base = if crit { monster.max_dmg * 2 } else { monster.min_dmg * 2 };
-        let damage = (monster.min_dmg / 5 + 4 * 1) * base / 20 + monster.max_dmg;
+        // C# ExplosionDie（HumanAssassin.cs:299）：4 * (Level / 20)
+        let damage = (monster.min_dmg / 5 + 4 * (monster.level / 20)) * base / 20 + monster.max_dmg;
         // C# ExplosionDie：16 格（8 方向 × 2 圈：i%8 方向、i/8+1 距离）
         let cells = eight_dir_rings(monster.x, monster.y, 2);
         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
