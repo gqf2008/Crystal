@@ -818,19 +818,50 @@ fn hold_move_system(
                     }
                 }
             } else {
-                // 三方向都不可走 → 原地转向（C# CanWalk 失败 → Standing direction）
-                if direction_changed {
-                    anim.direction = new_dir;
-                    anim.action = mir2_shared::enums::MirAction::Standing;
-                    anim.frame_index = 0;
-                    control.hold_target = Some((new_dir as i32, 0));
-                    control.hold_run = Some(run);
-                    // #1626：原地转向同步（C# PlayerObject.cs:1439 → C.Turn）
-                    net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
+                // 三方向都不可走：
+                if !lm.path.is_empty() {
+                    // 正在跟随 A* 路径 → 让 advance_local_move 继续（路径本身可走，不打断）
+                } else {
+                    // 尝试 A* 绕障寻路到鼠标目标格（自动寻路，C# NewMove 同款；避免撞墙停下）
+                    let mut re_path = false;
+                    if let Some(map) = &game_data.map {
+                        let mouse_tile = world_to_tile(world.x, world.y);
+                        if mouse_tile != from_tile {
+                            if let Some(p) = crate::game::pathfinding::find_path(map, from_tile, mouse_tile) {
+                                if let Some(&first) = p.first() {
+                                    if map.is_walkable(first.0, first.1) {
+                                        lm.path = p.into();
+                                        lm.last = None;
+                                        lm.step_origin = None;
+                                        lm.run = run;
+                                        if let Some(d) = direction_from_delta(
+                                            first.0 - from_tile.0,
+                                            first.1 - from_tile.1,
+                                        ) {
+                                            anim.direction = d as u8;
+                                        }
+                                        re_path = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !re_path {
+                        // 不可达 → 原地转向（C# CanWalk 失败 → Standing direction）
+                        if direction_changed {
+                            anim.direction = new_dir;
+                            anim.action = mir2_shared::enums::MirAction::Standing;
+                            anim.frame_index = 0;
+                            control.hold_target = Some((new_dir as i32, 0));
+                            control.hold_run = Some(run);
+                            // #1626：原地转向同步（C# PlayerObject.cs:1439 → C.Turn）
+                            net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
+                        }
+                        // 清空旧路径避免卡住
+                        lm.path.clear();
+                        lm.last = None;
+                    }
                 }
-                // 清空旧路径避免卡住
-                lm.path.clear();
-                lm.last = None;
             }
         } else {
             // 按住移动中松开 → 立即停下
