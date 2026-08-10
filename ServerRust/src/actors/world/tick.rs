@@ -3692,6 +3692,36 @@ impl WorldActor {
                 };
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
+                    // #1724：魔法弹道命中广播——与近战/弓手一致（C# CompleteMagic → Attacked → ObjectStruck/DamageIndicator/ObjectHealth）
+                    monster.direction = crate::actors::world::ai::direction_towards(
+                        monster.x, monster.y, caster_state.x, caster_state.y,
+                    );
+                    let mut struck_body = Vec::new();
+                    struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                    struck_body.extend_from_slice(&caster_state.object_id.to_le_bytes());
+                    struck_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
+                    struck_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
+                    struck_body.push(monster.direction);
+                    let struck_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                    let mut dmg_body = Vec::new();
+                    dmg_body.extend_from_slice(&result.damage.to_le_bytes());
+                    dmg_body.push(0u8); // damage_type = normal
+                    dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                    let dmg_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                    let percent = ((monster.hp.max(0) as f32 / monster.max_hp.max(1) as f32) * 100.0) as u8;
+                    let mut health_body = Vec::new();
+                    health_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                    health_body.push(percent);
+                    health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
+                    let health_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+                    // #1649：动画/飘字/血条广播只发同图玩家（C# CurrentMap.Broadcast）
+                    let hit_map = monster.map_index;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
                     monster.last_hitter_session = Some(pending.session_id);
                     self.pending_gather.push(pending.session_id);
                     monster.provoked = true;
@@ -6001,6 +6031,7 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
 
 
 
