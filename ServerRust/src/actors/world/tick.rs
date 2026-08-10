@@ -5641,7 +5641,21 @@ impl Message<Tick> for WorldActor {
             }
             // #1364：Boss 对象特效广播（C# ObjectEffect，如 DeathCrawlerBreath 吐息毒）
             for (oid, effect) in boss_effects.drain(..) {
-                let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
+                // #1886：目标可能是玩家（C# Target.Broadcast，ObjectID=Target）；怪物表查不到时按玩家 object_id 反查地图
+                let map_idx = if let Some(m) = self.monsters.get(&oid) {
+                    m.map_index
+                } else {
+                    let mut idx = 0u16;
+                    for r in self.players.values() {
+                        if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                            if st.object_id == oid {
+                                idx = st.map_index;
+                                break;
+                            }
+                        }
+                    }
+                    idx
+                };
                 self.broadcast_object_effect(oid, effect, map_idx).await;
             }
             // #1391：净化玩家毒（C# PowerBead Effect==1 → PlayerActor.PurifyPoisons）

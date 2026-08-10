@@ -68,14 +68,15 @@ impl MonsterBehavior for SepHighWarriorBehavior {
                         damage: dmg,
                         spell_id: 0,
                     });
-                    // C#：目标<=怪+8 且 Random(20)<=5 → Stun 5s
+                    // C#：目标<=怪+8 且 Random(20)<=5 → Stun 5s + 目标特效
                     if target.level as i32 <= monster.level + 8 && fastrand::i32(0..20) <= 5 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
                             poison: Poison::new(PoisonType::STUN, 5, 0, 1000),
                         });
+                        // C# TwinDrakeBlade（SepHighWarrior.cs:103）：眩晕时对目标广播特效
+                        ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::TwinDrakeBlade));
                     }
-                    ctx.out_effects.push((monster.object_id, mir2_shared::enums::SpellEffect::TwinDrakeBlade));
                 }
                 1 => {
                     // C# CrossHalfMoon（SepHighWarrior.cs:107）：HalfmoonAttack 4 格弧
