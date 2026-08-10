@@ -14,6 +14,77 @@ const DAMAGE_DURA_ARMOR_SLOTS: [EquipmentSlot; 8] = [
 ];
 
 impl WorldActor {
+    /// #1858：即时法术命中玩家（C# Map.cs Attacked(player, value, MAC, false)）
+    /// 门控：can_attack_player（攻击模式/行会战）+ GM 保护 + 安全区 + 禁战地图；
+    /// ThunderStorm 对玩家（非亡灵）伤害 ×1/10（C# Map.cs:1332）。
+    async fn apply_spell_pvp_hits(
+        &self,
+        caster_session: u64,
+        attacker_stats: &crate::combat::attack::CombatStats,
+        caster_level: u16,
+        spell: mir2_shared::enums::Spell,
+        raw_damage: i32,
+        target_sessions: &[u64],
+    ) {
+        let Some(record) = self.players.get(&caster_session) else { return };
+        let Ok(Some(caster_state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        if caster_state.is_dead { return; }
+        for &target_session in target_sessions {
+            let Some(other_actor) = self.players.get(&target_session) else { continue };
+            let Ok(Some(other_state)) = other_actor.actor_ref.ask(GetPlayerState).await else { continue };
+            if other_state.is_dead { continue; }
+            if self.gm_protected.contains(&target_session) { continue; }
+            // 攻击模式/行会战（C# IsAttackTarget）
+            if !can_attack_player(&caster_state, &other_state, &self.guild_wars) { continue; }
+            // 安全区：双方任一在安全区则禁止伤害
+            let attacker_safe = self.maps.get(&caster_state.map_index)
+                .map(|m| m.is_safe_zone(caster_state.x, caster_state.y)).unwrap_or(false);
+            let target_safe = self.maps.get(&other_state.map_index)
+                .map(|m| m.is_safe_zone(other_state.x, other_state.y)).unwrap_or(false);
+            if attacker_safe || target_safe { continue; }
+            // 禁战地图（C# CurrentMap.Info.NoFight）
+            if self.map_infos.get(&(caster_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+            { continue; }
+            // ThunderStorm 对玩家（恒非亡灵）伤害 ×1/10
+            let dmg_raw = if spell == mir2_shared::enums::Spell::ThunderStorm {
+                raw_damage / 10
+            } else {
+                raw_damage
+            };
+            let defender_stats = other_state.to_combat_stats();
+            let level_offset = if other_state.level > caster_level {
+                0
+            } else {
+                (caster_level - other_state.level).min(10) as u16
+            };
+            let attack_result = combat_attack::resolve_attack(
+                attacker_stats, &defender_stats, dmg_raw.max(1),
+                mir2_shared::enums::DefenceType::Mac, level_offset,
+            );
+            let damage = attack_result.damage;
+            if damage > 0 {
+                let _ = other_actor.actor_ref.ask(TakeDamage {
+                    attacker_id: caster_state.object_id,
+                    attacker_session: target_session,
+                    damage,
+                }).await;
+                for p in &attack_result.applied_poisons {
+                    let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                        poisons: vec![*p],
+                    }).await;
+                }
+                // PvP 受击广播 + 装备耐久（C# Struck → DamageDura）
+                self.broadcast_pvp_hit(
+                    other_state.object_id, caster_state.object_id,
+                    other_state.x, other_state.y, other_state.direction,
+                    damage, other_state.map_index, attack_result.is_critical,
+                ).await;
+                self.damage_armor_on_pvp_hit(target_session).await;
+            }
+        }
+    }
+
     /// #895：PvP 受击装备耐久损耗（C# HumanObject.DamageDura：非武器槽 -1，
     /// 命中即扣，含致死；NoDuraLoss/Strong 减免由 DamageEquipment 处理）。
     /// 对齐 tick.rs 怪物命中路径；装备损坏时重算属性并广播外观。
@@ -2877,6 +2948,23 @@ impl Message<MagicRequest> for WorldActor {
                         }
                     }
                 }
+                // #1858：C# Map.cs:952 同时命中玩家（3x3，MAC）
+                let player_hit_ids: Vec<u64> = {
+                    let mut ids = Vec::new();
+                    for (sid, r) in &self.players {
+                        if *sid == msg.session_id { continue; }
+                        if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                            if ps.is_dead || ps.map_index != state.map_index { continue; }
+                            if (ps.x - target_x).abs() <= 1 && (ps.y - target_y).abs() <= 1 {
+                                ids.push(*sid);
+                            }
+                        }
+                    }
+                    ids
+                };
+                if !player_hit_ids.is_empty() {
+                    self.apply_spell_pvp_hits(msg.session_id, &attacker_stats, state.level, spell_enum, raw_damage, &player_hit_ids).await;
+                }
                 debug!("Magic: {} casts FireBang/IceStorm (3x3) dmg={}", state.name, raw_damage);
             }
             // Lightning：直线 6 格，每格首目标，MAC（C# Map.cs:1189）
@@ -2920,6 +3008,30 @@ impl Message<MagicRequest> for WorldActor {
                         }
                         // C# 每格 break（只打第一个），但外层 i 继续 → 每格各打第一个
                     }
+                }
+                // #1858：C# Map.cs:1189 直线 6 格每格首个玩家同样命中（MAC）
+                let mut player_hit_ids: Vec<u64> = Vec::new();
+                {
+                    let mut px = state.x;
+                    let mut py = state.y;
+                    for _ in 0..6 {
+                        px += MON_DIR_DX[dir];
+                        py += MON_DIR_DY[dir];
+                        let mut first = None;
+                        for (sid, r) in &self.players {
+                            if *sid == msg.session_id { continue; }
+                            if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                                if ps.is_dead || ps.map_index != state.map_index { continue; }
+                                if ps.x == px && ps.y == py { first = Some(*sid); break; }
+                            }
+                        }
+                        if let Some(sid) = first {
+                            if !player_hit_ids.contains(&sid) { player_hit_ids.push(sid); }
+                        }
+                    }
+                }
+                if !player_hit_ids.is_empty() {
+                    self.apply_spell_pvp_hits(msg.session_id, &attacker_stats, state.level, spell_enum, raw_damage, &player_hit_ids).await;
                 }
                 debug!("Magic: {} casts Lightning (line 6) dmg={}", state.name, raw_damage);
             }
@@ -2973,6 +3085,23 @@ impl Message<MagicRequest> for WorldActor {
                             }
                         }
                     }
+                }
+                // #1858：C# Map.cs:1303 同时命中玩家（5x5，ThunderStorm ×1/10）
+                let player_hit_ids: Vec<u64> = {
+                    let mut ids = Vec::new();
+                    for (sid, r) in &self.players {
+                        if *sid == msg.session_id { continue; }
+                        if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                            if ps.is_dead || ps.map_index != state.map_index { continue; }
+                            if (ps.x - tx).abs() <= 2 && (ps.y - ty).abs() <= 2 {
+                                ids.push(*sid);
+                            }
+                        }
+                    }
+                    ids
+                };
+                if !player_hit_ids.is_empty() {
+                    self.apply_spell_pvp_hits(msg.session_id, &attacker_stats, state.level, spell_enum, raw_damage, &player_hit_ids).await;
                 }
                 debug!("Magic: {} casts ThunderStorm/FlameField (5x5) dmg={}", state.name, raw_damage);
             }
