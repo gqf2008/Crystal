@@ -56,8 +56,14 @@ pub(crate) fn advance_actor_animations(
             anim.frame_index = (anim.frame_index + 1) % count;
         }
 
-        // #1624：怪物 Attack2 挥击音——进入第 3 帧时触发一次（C# if (FrameIndex == 3) PlaySwingSound()）
-        if anim.action == MirAction::Attack2 && anim.frame_index == 3 && prev_frame != 3 {
+        // #1624/#1627：怪物挥击音——按 C# 帧号边缘触发（进入目标帧一次）：
+        //   Attack1 帧 3（MonsterObject.cs:1589）、Attack2 帧 3（:2126）、Attack3 帧 2（:2407）
+        let swing_frame: i32 = match anim.action {
+            MirAction::Attack1 | MirAction::Attack2 => 3,
+            MirAction::Attack3 => 2,
+            _ => i32::MAX,
+        };
+        if anim.frame_index == swing_frame && prev_frame != swing_frame {
             if let Some(monster) = monster {
                 if let Some(sound_id) = crate::game::sound::monster_swing_sound(monster.monster_type) {
                     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
