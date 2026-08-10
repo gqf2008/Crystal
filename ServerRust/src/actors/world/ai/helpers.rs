@@ -13,6 +13,11 @@ pub fn weakest_player_by_dc(targets: &[crate::actors::world::ai::ctx::PlayerSnap
     targets.iter().min_by_key(|p| p.min_dc).copied()
 }
 
+/// #1910：C# PoisonTarget 固定 Value = GetAttackPower(MinSC, MaxSC)（MonsterObject.cs:3529）
+pub fn poison_sc_value(monster: &crate::actors::world::MonsterState) -> i32 {
+    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1)
+}
+
 
 /// 方向增量（8 方向，对齐 MirDirection）
 pub const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];

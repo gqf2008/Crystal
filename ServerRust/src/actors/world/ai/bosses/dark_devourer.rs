@@ -59,7 +59,7 @@ impl MonsterBehavior for DarkDevourerBehavior {
                 // Effect==1：命中后吞噬绿毒 1s（C# PoisonTarget(1,5,Green,1000)）
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                    poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 1000),
                 });
             }
             return;

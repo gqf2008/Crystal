@@ -16,6 +16,7 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::ai::helpers::poison_sc_value;
 
 /// 现身检测间隔（C# VisibleTime = Envir.Time + 2000，单位 tick=100ms）
 const VISIBILITY_CHECK_TICKS: u64 = 20;
@@ -119,7 +120,7 @@ impl MonsterBehavior for EvilCentipedeBehavior {
                 if fastrand::i32(0..5) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: t.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 15, damage, 2000),
+                    poison: Poison::new(PoisonType::GREEN, 15, poison_sc_value(monster), 2000),
                 });
                 }
             // Paralysis 5s（C# PoisonTarget(Target, 15, 5, Paralysis, 2000)）
@@ -127,7 +128,7 @@ impl MonsterBehavior for EvilCentipedeBehavior {
                 if fastrand::i32(0..15) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: t.session_id,
-                    poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                    poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
                 });
                 }
         }
