@@ -3056,12 +3056,15 @@ async fn broadcast_hero_magic(
         mir2_shared::enums::ServerPacketIds::ObjectMagic as i16,
         &body,
     );
-    for sid in world.players.keys() {
-        let _ = world.gate_ref.tell(SendToClient {
-            session_id: *sid,
-            data: packet.clone(),
-        }).await;
-    }
+    // #1686：英雄施法广播只发主人同图（C# CurrentMap）
+    let owner_map = match world.players.get(&session_id) {
+        Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(st)) => st.map_index,
+            _ => 0,
+        },
+        None => 0,
+    };
+    crate::actors::world::broadcast_to_map(&world.gate_ref, &world.players, owner_map, &packet).await;
 }
 
 impl WorldActor {
