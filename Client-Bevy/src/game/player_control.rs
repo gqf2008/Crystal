@@ -577,10 +577,10 @@ fn auto_attack_system(
     }
     control.last_attack = 0.0;
 
-    // 朝向目标
-    let dx = (target_tf.translation.x - player_tf.translation.x) as i32;
-    let dy = (target_tf.translation.y - player_tf.translation.y) as i32;
-    let dir = direction_from_delta(dx.signum(), dy.signum()).unwrap_or(mir2_shared::enums::MirDirection::Up);
+    // 朝向目标（#1815：必须用瓦片差——Bevy 世界 y 向上、瓦片 y 向下，
+    // 直接拿世界坐标差会导致上下方向反，垂直相邻的怪物永远空挥）
+    let dir = direction_from_delta(t_tile.0 - p_tile.0, t_tile.1 - p_tile.1)
+        .unwrap_or(mir2_shared::enums::MirDirection::Up);
 
     if is_archer {
         // #1556：弓手 → C.RangeAttack（C# PlayerObject.cs:1574 AttackRange1）：
