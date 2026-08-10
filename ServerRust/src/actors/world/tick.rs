@@ -3043,12 +3043,7 @@ impl WorldActor {
                             dmg_body.extend_from_slice(&monster_id.to_le_bytes());
                             let dmg_packet = build_packet_bytes(
                                 mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-                            for session_id in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: dmg_packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, self.monsters.get(&monster_id).map(|m| m.map_index).unwrap_or(0), &dmg_packet).await;
                             debug!("RangeAttack resolve: {} -> monster {} MISS", c.attacker_object_id, monster_id);
                             continue;
                         }
@@ -3120,20 +3115,9 @@ impl WorldActor {
                     let health_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
 
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: struck_packet.clone(),
-                        }).await;
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: dmg_packet.clone(),
-                        }).await;
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: health_packet.clone(),
-                        }).await;
-                    }
+                    broadcast_to_map(&self.gate_ref, &self.players, self.monsters.get(&monster_id).map(|m| m.map_index).unwrap_or(0), &struck_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, self.monsters.get(&monster_id).map(|m| m.map_index).unwrap_or(0), &dmg_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, self.monsters.get(&monster_id).map(|m| m.map_index).unwrap_or(0), &health_packet).await;
 
                 }
                 RangeTarget::Player(defender_session) => {
@@ -3158,12 +3142,7 @@ impl WorldActor {
                             dmg_body.extend_from_slice(&st.object_id.to_le_bytes());
                             let dmg_packet = build_packet_bytes(
                                 mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-                            for session_id in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: dmg_packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, st.map_index, &dmg_packet).await;
                             debug!("RangeAttack resolve: {} -> player {} MISS", c.attacker_object_id, st.object_id);
                         }
                     }

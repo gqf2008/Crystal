@@ -580,20 +580,9 @@ impl Message<WorldAttackRequest> for WorldActor {
                         mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
 
                     // 广播给所有玩家
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: struck_packet.clone(),
-                        }).await;
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: dmg_packet.clone(),
-                        }).await;
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: health_packet.clone(),
-                        }).await;
-                    }
+                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &struck_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &dmg_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &health_packet).await;
 
                     primary_target_oid = *oid;
                     hit_monster = true;
@@ -4858,12 +4847,7 @@ impl Message<MagicRequest> for WorldActor {
                     body.push(percent);
                     body.extend_from_slice(&3u16.to_le_bytes());
                     let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &body);
-                    for sid in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid,
-                            data: pkt.clone(),
-                        }).await;
-                    }
+                    broadcast_to_map(&self.gate_ref, &self.players, self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0), &pkt).await;
                     debug!("Magic: {} casts Revelation -> oid {} ({}s)", state.name, oid, value);
                 } else {
                     debug!("Magic: {} casts Revelation (no target at {},{})", state.name, target_x, target_y);
