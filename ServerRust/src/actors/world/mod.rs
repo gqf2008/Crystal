@@ -1925,12 +1925,8 @@ impl WorldActor {
                 warn!("Failed to serialize ObjectGold: {}", e);
                 continue;
             }
-            for session_id in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: buf.clone(),
-                }).await;
-            }
+            // #1647：掉落广播只发同图玩家（C# CurrentMap.Broadcast）
+            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &buf).await;
             self.ground_items.push(GroundItem {
                 object_id: oid,
                 item: mir2_shared::data::item::UserItem {
@@ -1993,12 +1989,8 @@ impl WorldActor {
             warn!("Failed to serialize ObjectItem: {}", e);
             return;
         }
-        for session_id in self.players.keys() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: *session_id,
-                data: buf.clone(),
-            }).await;
-        }
+        // #1647：掉落广播只发同图玩家（C# CurrentMap.Broadcast）
+        broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &buf).await;
         self.ground_items.push(GroundItem {
             object_id: drop_oid,
             item,
@@ -2429,9 +2421,8 @@ impl WorldActor {
                 warn!("Failed to serialize ObjectItem: {}", e);
                 continue;
             }
-            for sid in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
-            }
+            // #1647：死亡掉落广播只发同图玩家（C# CurrentMap.Broadcast）
+            broadcast_to_map(&self.gate_ref, &self.players, map_index, &buf).await;
             // #1262：C# DeathDrop -> DropItem(item, deathDrop:true) 不设 Owner（仅延长 ExpireTime）→ 自由拾取
             self.ground_items.push(GroundItem {
                 object_id: drop_oid,
@@ -5264,6 +5255,22 @@ fn broadcast_system_message(
         message,
         mir2_shared::enums::ChatType::System,
     );
+}
+
+/// 广播数据给指定地图上的所有玩家（C# CurrentMap.Broadcast 语义；防跨图幽灵物品/多余流量）
+pub(crate) async fn broadcast_to_map(
+    gate_ref: &ActorRef<GateActor>,
+    players: &HashMap<u64, PlayerRecord>,
+    map_index: u16,
+    data: &[u8],
+) {
+    for (sid, rec) in players {
+        if let Ok(Some(s)) = rec.actor_ref.ask(crate::actors::player::GetPlayerState).await {
+            if s.map_index == map_index {
+                let _ = gate_ref.tell(SendToClient { session_id: *sid, data: data.to_vec() }).await;
+            }
+        }
+    }
 }
 
 /// 从 DB 任务配置创建任务实例

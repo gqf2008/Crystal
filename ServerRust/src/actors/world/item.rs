@@ -1798,9 +1798,8 @@ impl Message<DropItemRequest> for WorldActor {
             };
             let mut buf = Vec::new();
             if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
-                for sid in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
-                }
+                // #1647：掉落/金币广播只发同图玩家（C# CurrentMap.Broadcast）
+                super::broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &buf).await;
             }
 
             // 添加到地面物品
@@ -1927,9 +1926,8 @@ impl Message<DropGoldRequest> for WorldActor {
             let mut buf = Vec::new();
             if mir2_shared::packets::base::serialize_packet(
                 &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
-                for sid in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
-                }
+                // #1647：掉落/金币广播只发同图玩家（C# CurrentMap.Broadcast）
+                super::broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &buf).await;
             }
 
             // 地面金币（用特殊物品表示）
@@ -2965,9 +2963,8 @@ impl Message<DisassembleItemRequest> for WorldActor {
             if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
                 warn!("Failed to serialize disassemble drop: {}", e);
             } else {
-                for sid in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
-                }
+                // #1647：掉落/金币广播只发同图玩家（C# CurrentMap.Broadcast）
+                super::broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &buf).await;
                 // #1262：C# DropItem 不设 Owner → 自由拾取（对齐）
                 self.ground_items.push(GroundItem {
                     object_id: drop_oid,
