@@ -237,8 +237,7 @@ impl PacketHandler for CombatHandler {
                         target_id: packet.target_id,
                         target_x: packet.target_x,
                         target_y: packet.target_y,
-                        spell: packet.spell,
-                        spell_level: packet.spell_level,
+                        spell: packet.spell as u16,
                     });
                     tracing::trace!(
                         "🏹 RangeAttack: target={} spell={}",

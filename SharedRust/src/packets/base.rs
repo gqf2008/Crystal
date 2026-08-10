@@ -937,7 +937,6 @@ mod tests {
             target_x: 100,
             target_y: 200,
             spell: 5,
-            spell_level: 2,
         };
         let mut bytes = Vec::new();
         serialize_packet(&mut bytes, &packet)?;
@@ -947,7 +946,6 @@ mod tests {
         assert_eq!(decoded.target_x, 100);
         assert_eq!(decoded.target_y, 200);
         assert_eq!(decoded.spell, 5);
-        assert_eq!(decoded.spell_level, 2);
         Ok(())
     }
 
