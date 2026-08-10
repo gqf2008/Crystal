@@ -66,12 +66,12 @@ impl MonsterBehavior for GreatFoxSpiritBehavior {
             for t in targets {
                 let td = max_distance(monster.x, monster.y, t.x, t.y);
                 if td > 3 {
-                    // 传送到自身随机邻格（近似 C# PointMove(CurrentLocation, random dir, 1)）
-                    let off = fastrand::i32(-1..=1);
-                    let off2 = fastrand::i32(-1..=1);
-                    let nx = monster.x + off;
-                    let ny = monster.y + off2;
-                    ctx.out_moves.push((t.object_id, nx, ny, 0));
+                    // C# PointMove(CurrentLocation, random dir, 1)：8 方向随机邻格（无 (0,0)）
+                    let dir = fastrand::i32(0..8) as usize;
+                    let nx = monster.x + DIR_DX[dir];
+                    let ny = monster.y + DIR_DY[dir];
+                    // 玩家传送走 out_player_teleports（tick 端 walkable 校验 + ObjectTeleport 广播；TurtleKing 同款）
+                    ctx.out_player_teleports.push((t.session_id, nx, ny, dir as u8));
                     break; // C# 一次只传送一个
                 }
             }
