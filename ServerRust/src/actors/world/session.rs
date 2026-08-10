@@ -1956,12 +1956,7 @@ impl Message<ChatRequest> for WorldActor {
                                 if self.monsters.remove(oid).is_some() {
                                     removed += 1;
                                     let packet = Self::build_object_remove_packet(*oid);
-                                    for sid in self.players.keys() {
-                                        let _ = self.gate_ref.tell(SendToClient {
-                                            session_id: *sid,
-                                            data: packet.clone(),
-                                        }).await;
-                                    }
+                                    broadcast_to_map(&self.gate_ref, &self.players, map_index, &packet).await;
                                 }
                             }
                             send_system_message(&self.gate_ref, msg.session_id, &format!("已清除 {} 只怪物", removed));

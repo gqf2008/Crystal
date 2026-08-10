@@ -3293,12 +3293,7 @@ impl Message<MagicRequest> for WorldActor {
                 if let Some(oid) = existing {
                     if self.monsters.remove(&oid).is_some() {
                         let rm = Self::build_object_remove_packet(oid);
-                        for sid in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: rm.clone(),
-                            }).await;
-                        }
+                        broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &rm).await;
                     }
                     debug!("Magic: {} Mirroring removed existing clone #{}", state.name, oid);
                     return;
@@ -3460,12 +3455,7 @@ impl Message<MagicRequest> for WorldActor {
                 if let Some(oid) = existing {
                     if self.monsters.remove(&oid).is_some() {
                         let rm = Self::build_object_remove_packet(oid);
-                        for sid in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: rm.clone(),
-                            }).await;
-                        }
+                        broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &rm).await;
                     }
                     debug!("Magic: {} DarkBody removed existing clone #{}", state.name, oid);
                     return;
