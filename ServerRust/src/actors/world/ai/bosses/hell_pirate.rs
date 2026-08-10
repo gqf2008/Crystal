@@ -1,7 +1,7 @@
 //! HellPirate（地狱海盗）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/HellPirate.cs
-//! 机制：近战（dist<=1）：2/3 base.Attack（DC）/ 1/3 Fullmoon（用 AOE 1 近似）
+//! 机制：近战（dist<=1）：2/3 base.Attack（DC）/ 1/3 Fullmoon（8 格）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -9,7 +9,6 @@ use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
 const VIEW_RANGE: i32 = 12;
-const AOE_RADIUS: i32 = 1;
 
 pub struct HellPirateBehavior;
 
@@ -41,13 +40,18 @@ impl MonsterBehavior for HellPirateBehavior {
                     attack_type: 0,
                 });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                // C# FullmoonAttack(damage)：8 格（8 方向 × 距离 1，无中心）
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
-                    radius: AOE_RADIUS,
+                    direction: dir,
+                    count: 8,
                     damage,
                     spell_id: 0,
+                    attack_type: 0,
                 });
             }
             return;

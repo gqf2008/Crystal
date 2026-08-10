@@ -5,7 +5,7 @@
 //!   - _ThunderTime（10-20s）：MC 雷击 → 目标 2 格 AOE（MACAgility）
 //!   - _MassThunderTime（20-50s）：MC 大雷击 → 目标 5 格大 AOE
 //!   - _OrbTime（30-40s）：召唤 PowerBead（在 ±4 格随机点尝试 4 次）
-//!   - 近战 4/5：DC LineAttack(2)；1/5：DC Fullmoon 推开
+//!   - 近战 4/5：DC LineAttack(2)（1/5 推 1 格）；1/5：DC Fullmoon 8 格（推首个命中 1-2 格）
 //!   - 1/5 概率传送到更弱目标背后
 //!
 //! Attack（C# :20-119）：三定时器优先级 > 传送 > 近战。
@@ -135,31 +135,52 @@ impl MonsterBehavior for DarkCaptainBehavior {
             }
 
             if fastrand::i32(0..5) > 0 {
-                // 4/5 DC LineAttack(2)
+                // 4/5 DC LineAttack(2)（C# LineAttack(damage, 2, 300, ACAgility, push=Random(5)==0)）
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
                     attacker_oid: monster.object_id,
-                    target_session: target.session_id,
+                    origin_x: monster.x,
+                    origin_y: monster.y,
+                    direction: dir,
+                    range: 2,
                     damage,
                     spell_id: 0,
-                    attack_type: 0,
                 });
-            } else {
-                // 1/5 DC Fullmoon 推开（AOE 1-2 格）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, 2, monster.map_index)
-                        .into_iter().copied().collect();
-                for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 1,
+                // C# LineAttack push：推挤距离 = distance-1 = 1
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir,
+                        distance: 1,
                     });
-                    let (nx, ny, _d) = step_away(h.x, h.y, monster.x, monster.y);
-                    ctx.out_moves.push((h.object_id, nx, ny, 0));
+                }
+            } else {
+                // 1/5 DC FullmoonAttack（8 格，推首个命中目标 1-2 格）
+                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
+                    attacker_oid: monster.object_id,
+                    center_x: monster.x,
+                    center_y: monster.y,
+                    direction: dir,
+                    count: 8,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 1,
+                });
+                // C# FullmoonAttack pushDistance=Random(1,3)：仅首个命中目标，沿朝向推
+                let cells = arc_cells(monster.x, monster.y, dir, 8);
+                let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
+                    .iter().map(|p| p.session_id).collect();
+                if let Some(&first) = hit.first() {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: first,
+                        dir,
+                        distance: fastrand::i32(1..3),
+                    });
                 }
             }
             return;
