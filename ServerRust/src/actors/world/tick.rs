@@ -4935,6 +4935,33 @@ impl Message<Tick> for WorldActor {
             // 宠物 PetRecall（C# MonsterObject.ProcessAI）：主人>16 格/跨图 → 传送到主人身边
             for (oid, tx, ty, mm) in &pet_recalls {
                 if let Some(m) = self.monsters.get_mut(oid) {
+                    // #1665：跨图召回 → 旧图 ObjectRemove + 新图 ObjectMonster（C# Teleport 重广播）
+                    if m.map_index != *mm {
+                        let old_map = m.map_index;
+                        let pet_oid = m.object_id;
+                        let spawn = MonsterSpawn {
+                            name: m.name.clone(),
+                            image: m.image,
+                            monster_index: m.monster_index,
+                            x: *tx,
+                            y: *ty,
+                            direction: m.direction,
+                            hp: m.hp,
+                            min_dmg: m.min_dmg,
+                            max_dmg: m.max_dmg,
+                            xp: m.xp,
+                            map_index: *mm,
+                            count: 1,
+                            spread: 0,
+                        };
+                        let packet = build_object_monster_packet_extra(&spawn, pet_oid, &spawn.name, true, 0);
+                        let mut rm = Vec::new();
+                        rm.extend_from_slice(&pet_oid.to_le_bytes());
+                        let remove_packet = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rm);
+                        broadcast_to_map(&self.gate_ref, &self.players, old_map, &remove_packet).await;
+                        broadcast_to_map(&self.gate_ref, &self.players, *mm, &packet).await;
+                    }
                     // #1663：C# PetRecall 同步地图（MonsterObject.cs:1053 Teleport(Owner.CurrentMap)）
                     m.map_index = *mm;
                     m.x = *tx;
