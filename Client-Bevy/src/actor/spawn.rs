@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use mir2_shared::{MirAction, MirClass, MirGender};
 use crate::map_renderer::{GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
+use crate::game::movement::MoveTween;
 use crate::resources::libraries::{ArrayLibType, LibraryName};
 use crate::ui::sprite_ui::{UiFont, UiImageCache};
 use crate::network::{NetObject, NetObjectRemoved};
@@ -159,9 +160,19 @@ pub(crate) fn spawn_net_objects_when_ready(
                     });
                     continue;
                 }
-                spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets);
+                spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets, None);
             }
-            _ => spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets),
+            _ => {
+                // #1813：Monster/Npc 同 id 已存在 → 传给生成函数做去重更新
+                let existing = match obj {
+                    NetObject::Monster { object_id, .. } | NetObject::Npc { object_id, .. } => actors
+                        .iter()
+                        .find(|(_, id, _)| id.0 == *object_id)
+                        .map(|(e, _, _)| e),
+                    _ => None,
+                };
+                spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets, existing);
+            }
         }
     }
     tracing::info!("🌐 网络对象生成完成: {} 个", pending.len());
@@ -174,6 +185,7 @@ fn spawn_net_object_entity(
     is_local_player: bool,
     sound_bank: &crate::game::sound::SoundBank,
     audio_assets: &mut Assets<bevy::audio::AudioSource>,
+    existing: Option<Entity>,
 ) {
     // 瓦片坐标 → 世界像素（脚点）
     let wx = |tx: i32| tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
@@ -251,6 +263,22 @@ fn spawn_net_object_entity(
             image,
             direction,
         } => {
+            // #1813：同 id 已存在（地图重进/重生/时序重发）→ 更新位置/名字/方向，不重复生成
+            // （否则幽灵实体停在旧位置，ObjectWalk 更新 A、攻击读 B → 近战瞄错格空挥）
+            if let Some(ent) = existing {
+                let (nx, ny) = (wx(*location_x), wy(*location_y));
+                commands.entity(ent)
+                    .insert(Transform::from_xyz(nx, -ny, depth_z(-ny)))
+                    .insert(MonsterName(name.clone()))
+                    .insert(ActorAnim {
+                        action: MirAction::Standing,
+                        direction: *direction,
+                        frame_index: 0,
+                        elapsed_ms: 0.0,
+                    })
+                    .remove::<MoveTween>();
+                return;
+            }
             let e = spawn_monster(
                 commands,
                 *image,
@@ -274,6 +302,21 @@ fn spawn_net_object_entity(
             location_y,
             direction,
         } => {
+            // #1813：同 id 已存在 → 更新位置/名字/方向，不重复生成（同 Monster 去重）
+            if let Some(ent) = existing {
+                let (nx, ny) = (wx(*location_x), wy(*location_y));
+                commands.entity(ent)
+                    .insert(Transform::from_xyz(nx, -ny, depth_z(-ny)))
+                    .insert(NpcName(name.clone()))
+                    .insert(ActorAnim {
+                        action: MirAction::Standing,
+                        direction: *direction,
+                        frame_index: 0,
+                        elapsed_ms: 0.0,
+                    })
+                    .remove::<MoveTween>();
+                return;
+            }
             let e = spawn_npc(
                 commands,
                 *image,
