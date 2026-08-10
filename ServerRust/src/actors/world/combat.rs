@@ -347,6 +347,10 @@ impl Message<WorldAttackRequest> for WorldActor {
             let mut mp_eater_triggered = false;
             let mut hemorrhage_triggered = false;
             for (oid, monster) in &mut self.monsters {
+                // #1636：近战目标只在施法者同图（C# CurrentMap cell 语义）
+                if monster.map_index != state.map_index {
+                    continue;
+                }
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
                 // #471：主人近战不攻击自己的召唤宠物（宠物是友方）
                 if monster.master_session == Some(msg.session_id) {
@@ -607,7 +611,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                 let splash_dmg = halfmoon_splash[0].1;
                 for (cx, cy) in &halfmoon_cells {
                     let mid = self.monsters.iter()
-                        .find(|(id, m)| **id != primary_target_oid && m.hp > 0 && m.x == *cx && m.y == *cy)
+                        .find(|(id, m)| **id != primary_target_oid && m.hp > 0 && m.map_index == state.map_index && m.x == *cx && m.y == *cy)
                         .map(|(id, _)| *id);
                     if let Some(mid) = mid {
                         if let Some(sm) = self.monsters.get_mut(&mid) {
@@ -672,8 +676,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                             data: packet.clone(),
                         }).await;
 
-                        // #1623：C# HumanObject.Attack L2978——近战只命中正前方 1 格
-                        // （PointMove(CurrentLocation, dir, 1) 的 cell.Objects），与怪物路径一致
+                        // #1623/#1636：C# HumanObject.Attack L2978——近战只命中正前方 1 格（同图）
+                        if other_state.map_index != state.map_index { continue; }
                         let front_hit = other_state.x == target_x && other_state.y == target_y;
                         if front_hit {
                             // 攻击模式检查
@@ -1530,6 +1534,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                 if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
                     let id_match = msg.target_id != 0 && other_state.object_id == msg.target_id;
                     let cell_match = msg.target_id == 0
+                        && other_state.map_index == state.map_index
                         && (other_state.x - target_x).abs() + (other_state.y - target_y).abs() <= 1;
                     if !id_match && !cell_match {
                         continue;
@@ -2146,6 +2151,7 @@ impl Message<MagicRequest> for WorldActor {
                             .filter(|(id, mm)| {
                                 **id != msg.target_id
                                     && mm.hp > 0
+                                    && mm.map_index == m.map_index
                                     && (mm.x - m.x).abs() <= 4
                                     && (mm.y - m.y).abs() <= 4
                             })
@@ -2383,7 +2389,7 @@ impl Message<MagicRequest> for WorldActor {
                     0,
                 ).max(1);
                 let mid = self.monsters.iter()
-                    .find(|(_, m)| (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1 && m.hp > 0)
+                    .find(|(_, m)| m.map_index == state.map_index && (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1 && m.hp > 0)
                     .map(|(id, _)| *id);
                 if let Some(mid) = mid {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
@@ -2413,7 +2419,7 @@ impl Message<MagicRequest> for WorldActor {
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= 1 && m.hp > 0
+                        dist <= 1 && m.hp > 0 && m.map_index == state.map_index
                             && self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0) <= state.level as i32 + 2
                     })
                     .map(|(id, _)| *id)
@@ -2513,7 +2519,7 @@ impl Message<MagicRequest> for WorldActor {
             // 拉拽目标怪物朝施法者反方向靠近（对角 min(|dx|,|dy|)，十字轴 |axis|-2），并麻痹 round((Lv+1)*0.8) 秒
             SPELL_ENTRAPMENT => {
                 let mid = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1)
+                    .filter(|(_, m)| m.hp > 0 && m.map_index == state.map_index && (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1)
                     .map(|(id, _)| *id)
                     .next();
                 let Some(mid) = mid else { return; };
@@ -2568,7 +2574,7 @@ impl Message<MagicRequest> for WorldActor {
                     if !walkable { break; }
                     // C#：路径上等级 < 施法等级的目标才推送
                     let hit: Option<(u32, i32)> = self.monsters.iter()
-                        .find(|(_, m)| m.x == nx && m.y == ny && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == nx && m.y == ny && m.hp > 0)
                         .map(|(id, m)| (*id, self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0)));
                     if let Some((mid, mlevel)) = hit {
                         if mlevel < state.level as i32 {
@@ -2605,7 +2611,7 @@ impl Message<MagicRequest> for WorldActor {
                     cx += MON_DIR_DX[dir];
                     cy += MON_DIR_DY[dir];
                     let hit = self.monsters.iter()
-                        .find(|(_, m)| m.x == cx && m.y == cy && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == cx && m.y == cy && m.hp > 0)
                         .map(|(id, _)| *id);
                     if let Some(mid) = hit {
                         if let Some(m) = self.monsters.get_mut(&mid) {
@@ -2819,7 +2825,7 @@ impl Message<MagicRequest> for WorldActor {
                     .filter(|(_, m)| {
                         let dx = (m.x - target_x).abs();
                         let dy = (m.y - target_y).abs();
-                        dx <= 1 && dy <= 1 && m.hp > 0
+                        dx <= 1 && dy <= 1 && m.hp > 0 && m.map_index == state.map_index
                     })
                     .map(|(id, _)| *id)
                     .collect();
@@ -2863,7 +2869,7 @@ impl Message<MagicRequest> for WorldActor {
                     cy += MON_DIR_DY[dir];
                     // 找该格第一个怪物
                     let hit = self.monsters.iter()
-                        .find(|(_, m)| m.x == cx && m.y == cy && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == cx && m.y == cy && m.hp > 0)
                         .map(|(id, _)| *id);
                     if let Some(mid) = hit {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
@@ -2904,7 +2910,7 @@ impl Message<MagicRequest> for WorldActor {
                     .filter(|(_, m)| {
                         let dx = (m.x - state.x).abs();
                         let dy = (m.y - state.y).abs();
-                        dx <= 2 && dy <= 2 && m.hp > 0
+                        dx <= 2 && dy <= 2 && m.hp > 0 && m.map_index == state.map_index
                     })
                     .map(|(id, _)| *id)
                     .collect();
@@ -2949,7 +2955,7 @@ impl Message<MagicRequest> for WorldActor {
                 let attacker_stats = state.to_combat_stats();
                 let cells = hellfire_cells(state.x, state.y, msg.direction, spell_level);
                 let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .filter(|(_, m)| m.hp > 0 && m.map_index == state.map_index && cells.contains(&(m.x, m.y)))
                     .map(|(id, _)| *id)
                     .collect();
                 let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
@@ -2996,7 +3002,7 @@ impl Message<MagicRequest> for WorldActor {
                 for (i, (cx, cy)) in cells.iter().enumerate() {
                     let dmg = if i == 0 { raw_damage } else { (raw_damage as f32 * 0.6) as i32 };
                     let hit: Option<u32> = self.monsters.iter()
-                        .find(|(_, m)| m.x == *cx && m.y == *cy && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == *cx && m.y == *cy && m.hp > 0)
                         .map(|(id, _)| *id);
                     if let Some(mid) = hit {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
@@ -3049,7 +3055,7 @@ impl Message<MagicRequest> for WorldActor {
                 let duration = damage as u32;
                 // —— 怪物目标（C# IsAttackTarget：跳过自己的宠物；每目标 Random.Next(10)>=4 跳过）——
                 let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y))
+                    .filter(|(_, m)| m.hp > 0 && m.map_index == state.map_index && cells.contains(&(m.x, m.y))
                         && m.master_session != Some(msg.session_id))
                     .map(|(id, _)| *id)
                     .collect();
@@ -3562,7 +3568,7 @@ impl Message<MagicRequest> for WorldActor {
                 for _ in 0..3 {
                     cx += MON_DIR_DX[dir];
                     cy += MON_DIR_DY[dir];
-                    if let Some((&mid, _)) = self.monsters.iter().find(|(_, m)| m.x == cx && m.y == cy && m.hp > 0) {
+                    if let Some((&mid, _)) = self.monsters.iter().find(|(_, m)| m.map_index == state.map_index && m.x == cx && m.y == cy && m.hp > 0) {
                         hit_ids.push(mid);
                     }
                 }
@@ -3618,7 +3624,7 @@ impl Message<MagicRequest> for WorldActor {
                         let hy = start_y + MON_DIR_DY[dir] * j;
                         let cell_dmg = if j <= 1 { raw } else { ((raw as f64) * 0.6) as i32 };
                         let hit_ids: Vec<u32> = self.monsters.iter()
-                            .filter(|(_, m)| m.x == hx && m.y == hy && m.hp > 0)
+                            .filter(|(_, m)| m.map_index == state.map_index && m.x == hx && m.y == hy && m.hp > 0)
                             .map(|(id, _)| *id)
                             .collect();
                         for mid in hit_ids {
@@ -3661,7 +3667,7 @@ impl Message<MagicRequest> for WorldActor {
                 for fd in fan_dirs {
                     let tx = state.x + MON_DIR_DX[fd];
                     let ty = state.y + MON_DIR_DY[fd];
-                    if let Some((&mid, _)) = self.monsters.iter().find(|(_, m)| m.x == tx && m.y == ty && m.hp > 0) {
+                    if let Some((&mid, _)) = self.monsters.iter().find(|(_, m)| m.map_index == state.map_index && m.x == tx && m.y == ty && m.hp > 0) {
                         hit_ids.push(mid);
                     }
                 }
@@ -4069,6 +4075,7 @@ impl Message<MagicRequest> for WorldActor {
                         (m.x - target_x).abs() <= 2
                             && (m.y - target_y).abs() <= 2
                             && m.hp > 0
+                            && m.map_index == state.map_index
                             && m.master_session.is_none()
                     })
                     .map(|(id, _)| *id)
@@ -4113,6 +4120,7 @@ impl Message<MagicRequest> for WorldActor {
                         (m.x - target_x).abs() <= 2
                             && (m.y - target_y).abs() <= 2
                             && m.hp > 0
+                            && m.map_index == state.map_index
                             && m.master_session.is_none()
                     })
                     .map(|(id, _)| *id)
@@ -4167,7 +4175,7 @@ impl Message<MagicRequest> for WorldActor {
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= spell_range.max(1) && m.hp > 0 && m.undead
+                        dist <= spell_range.max(1) && m.hp > 0 && m.map_index == state.map_index && m.undead
                     })
                     .map(|(id, _)| *id)
                     .collect();
@@ -4237,7 +4245,7 @@ impl Message<MagicRequest> for WorldActor {
                         .unwrap_or(false);
                     if !walkable { break; }
                     let hit: Option<u32> = self.monsters.iter()
-                        .find(|(_, m)| m.x == nx && m.y == ny && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == nx && m.y == ny && m.hp > 0)
                         .map(|(id, _)| *id);
                     if let Some(mid) = hit {
                         if let Some(m) = self.monsters.get_mut(&mid) {
@@ -4304,7 +4312,7 @@ impl Message<MagicRequest> for WorldActor {
                 let attacker_stats = state.to_combat_stats();
                 let cells = plague_cells(target_x, target_y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .filter(|(_, m)| m.hp > 0 && m.map_index == state.map_index && cells.contains(&(m.x, m.y)))
                     .map(|(id, _)| *id)
                     .collect();
                 let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
@@ -4345,7 +4353,7 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_TRAP => {
                 // C# Map.cs Trap：目标等级 >= 施法等级+2 时跳过
                 let hit: Option<(u32, i32)> = self.monsters.iter()
-                    .find(|(_, m)| m.x == target_x && m.y == target_y && m.hp > 0)
+                    .find(|(_, m)| m.map_index == state.map_index && m.x == target_x && m.y == target_y && m.hp > 0)
                     .map(|(id, m)| (*id, self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0)));
                 if let Some((mid, mlevel)) = hit {
                     if mlevel >= state.level as i32 + 2 {
@@ -4396,7 +4404,7 @@ impl Message<MagicRequest> for WorldActor {
                 // C# Map.cs:1347：location ±2 = 5×5
                 let cells = curse_cells_5x5(state.x, state.y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .filter(|(_, m)| m.hp > 0 && m.map_index == state.map_index && cells.contains(&(m.x, m.y)))
                     .map(|(id, _)| *id)
                     .collect();
                 let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
@@ -4454,7 +4462,7 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_HALLUCINATION => {
                 if hallucination_success(spell_level, state.level) {
                     let hit: Option<u32> = self.monsters.iter()
-                        .find(|(_, m)| m.x == target_x && m.y == target_y && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == target_x && m.y == target_y && m.hp > 0)
                         .map(|(id, _)| *id);
                     if let Some(mid) = hit {
                         let dur = hallucination_duration();
@@ -4480,7 +4488,7 @@ impl Message<MagicRequest> for WorldActor {
                 let attacker_stats = state.to_combat_stats();
                 let cells = curse_cells_5x5(target_x, target_y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .filter(|(_, m)| m.hp > 0 && m.map_index == state.map_index && cells.contains(&(m.x, m.y)))
                     .map(|(id, _)| *id)
                     .collect();
                 // 特殊箭武装（#1483）：1=VampireShot 吸血 / 2=PoisonShot 绿毒
@@ -4623,6 +4631,7 @@ impl Message<MagicRequest> for WorldActor {
                 let until = self.tick_count + (duration_s as u64) * 10;
                 let pet: Option<u32> = self.monsters.iter()
                     .find(|(_, m)| m.master_session == Some(msg.session_id)
+                        && m.map_index == state.map_index
                         && (m.x - target_x).abs() <= 2 && (m.y - target_y).abs() <= 2)
                     .map(|(id, _)| *id);
                 if let Some(pid) = pet {
@@ -4661,6 +4670,8 @@ impl Message<MagicRequest> for WorldActor {
                 // 收集 (怪物id, 推动方向) —— 方向 = 怪物相对施法者
                 let mut pushes: Vec<(u32, usize)> = Vec::new();
                 for (id, m) in self.monsters.iter() {
+                    // #1636：仅同图怪物（C# CurrentMap）
+                    if m.map_index != state.map_index { continue; }
                     if m.hp <= 0 || m.master_session.is_some() { continue; }
                     let dx = m.x - state.x;
                     let dy = m.y - state.y;
@@ -4738,7 +4749,7 @@ impl Message<MagicRequest> for WorldActor {
                 let target_mid: Option<u32> = self.monsters.iter()
                     .find(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= 1 && m.hp > 0
+                        dist <= 1 && m.hp > 0 && m.map_index == state.map_index
                     })
                     .map(|(id, _)| *id);
                 if let Some(mid) = target_mid {
@@ -4845,7 +4856,7 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 if target_oid.is_none() {
                     target_oid = self.monsters.iter()
-                        .find(|(_, m)| (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1 && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1 && m.hp > 0)
                         .map(|(id, _)| *id);
                 }
                 if let Some(oid) = target_oid {
@@ -4961,7 +4972,7 @@ impl Message<MagicRequest> for WorldActor {
                     let hx = state.x + MON_DIR_DX[d];
                     let hy = state.y + MON_DIR_DY[d];
                     let mid = self.monsters.iter()
-                        .find(|(_, m)| m.x == hx && m.y == hy && m.hp > 0)
+                        .find(|(_, m)| m.map_index == state.map_index && m.x == hx && m.y == hy && m.hp > 0)
                         .map(|(id, _)| *id);
                     if let Some(mid) = mid {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
@@ -4994,7 +5005,7 @@ impl Message<MagicRequest> for WorldActor {
                 let hit_monster_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= spell_range && m.hp > 0
+                        dist <= spell_range && m.hp > 0 && m.map_index == state.map_index
                     })
                     .map(|(id, _)| *id)
                     .collect();

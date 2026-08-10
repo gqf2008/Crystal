@@ -3270,14 +3270,14 @@ impl WorldActor {
                     None
                 } else {
                     // ThunderBolt 亡灵 +50%（C# HumanObject.cs:4126），下方 final_damage 分支按 m.undead 加成
-                    Some((m.x, m.y, m.to_combat_stats()))
+                    Some((m.x, m.y, m.map_index, m.to_combat_stats()))
                 }
             } else {
                 None
             }
         };
 
-        if let Some((mx, my, defender_stats)) = monster_hit {
+        if let Some((mx, my, hit_map, defender_stats)) = monster_hit {
             // ElementalShot 击退：命中即结算（C# CompleteMagic 中 Attacked 后无条件 DoKnockback）
             let mut elemental_knockback: Option<(u8, i32)> = None;
             if spell == Spell::ElementalShot {
@@ -3418,6 +3418,7 @@ impl WorldActor {
                             .filter(|(id, m)| {
                                 **id != target_id
                                     && m.hp > 0
+                                    && m.map_index == hit_map
                                     && (m.x - mx).abs() <= 3
                                     && (m.y - my).abs() <= 3
                             })
@@ -3458,6 +3459,7 @@ impl WorldActor {
                 let splash_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(id, m)| {
                         **id != target_id
+                            && m.map_index == hit_map
                             && (m.x - mx).abs() <= 1
                             && (m.y - my).abs() <= 1
                             && m.hp > 0
