@@ -1711,8 +1711,10 @@ impl Message<AddPotionPool> for PlayerActor {
         msg: AddPotionPool,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.pot_hp_amount = self.state.pot_hp_amount.saturating_add(msg.hp);
-        self.state.pot_mp_amount = self.state.pot_mp_amount.saturating_add(msg.mp);
+        // #1667：C# PotHealthAmount/PotManaAmount = Min(ushort.MaxValue, ...)（PlayerObject.cs:5832）
+        const POT_POOL_CAP: u32 = 65535;
+        self.state.pot_hp_amount = self.state.pot_hp_amount.saturating_add(msg.hp).min(POT_POOL_CAP);
+        self.state.pot_mp_amount = self.state.pot_mp_amount.saturating_add(msg.mp).min(POT_POOL_CAP);
     }
 }
 
