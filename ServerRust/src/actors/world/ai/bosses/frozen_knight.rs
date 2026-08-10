@@ -44,6 +44,8 @@ impl MonsterBehavior for FrozenKnightBehavior {
         if in_knight_range(dx, dy) && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程伤害用 MinMC/MaxMC（FrozenKnight.cs）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
             // C# !range && Random.Next(3) > 0：近战 2/3 Halfmoon / 1/3 远程
             let melee = dist <= 1 && fastrand::i32(0..3) > 0;
             if melee {
@@ -66,7 +68,7 @@ impl MonsterBehavior for FrozenKnightBehavior {
                     center_x: target.x,
                     center_y: target.y,
                     radius: RANGE_AOE_RADIUS,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             }
