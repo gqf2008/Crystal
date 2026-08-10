@@ -1,7 +1,7 @@
 //! HellSlasher（地狱斩击者）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/HellSlasher.cs
-//! 机制：2/3 物理近战（DC，无毒）/ 1/3 Halfmoon 弧形（AC）；
+//! 机制：2/3 物理近战（DC，无毒）/ 1/3 Halfmoon 弧形（AC，4 格弧）；
 //!      仅半月命中后 1/5 眩晕毒（持续 random(1..4)s，tick 1000）
 
 use crate::actors::world::MonsterState;
@@ -12,7 +12,6 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
-const AOE_RADIUS: i32 = 1;
 
 pub struct HellSlasherBehavior;
 
@@ -44,19 +43,24 @@ impl MonsterBehavior for HellSlasherBehavior {
                     attack_type: 0,
                 });
             } else {
-                // C# HalfmoonAttack(damage, 500, AC)：弧形，用 AOE 半径 1 近似
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                // C# HalfmoonAttack(damage, 500, AC)：PreviousDir 起 4 方向 × 距离 1
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
-                    radius: AOE_RADIUS,
+                    direction: dir,
+                    count: 4,
                     damage,
                     spell_id: 0,
+                    attack_type: 0,
                 });
-                let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+                // C# CompleteAttack：每个命中目标独立 1/5 眩晕毒（持续 random(1..4)s，tick 1000）
+                let cells = arc_cells(monster.x, monster.y, dir, 4);
+                let nearby: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
                     .iter().map(|p| p.session_id).collect();
                 for sid in nearby {
-                    // PoisonTarget(5, random(1..4), Dazed, 1000)：1/5、持续 1-4s
                     if fastrand::i32(0..5) == 0 {
                         let dur = fastrand::i32(1..4) as u32;
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {

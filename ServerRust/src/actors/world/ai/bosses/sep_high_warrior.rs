@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/SepHighWarrior.cs
 //! 机制：近战（AttackRange=1）；攻击随机 5 选 1：
 //!   - 1/5 TwinDrakeBlade：0.8x 近战 + 0.8x 投射 +（目标<=怪+8 且 5/20）眩晕 5s + ObjectEffect
-//!   - 1/5 CrossHalfMoon：弧形 AOE 半径 1（C# HalfmoonAttack）
+//!   - 1/5 CrossHalfMoon：弧形 4 格弧（C# HalfmoonAttack）
 //!   - 1/5 BladeAvalanche：前方 3 列 × 3 行刀山（j<=1 全额 / j>=2 0.6x，C# DefenceType.MAC）
 //!   - 2/5 普攻（base.Attack）
 
@@ -78,17 +78,19 @@ impl MonsterBehavior for SepHighWarriorBehavior {
                     ctx.out_effects.push((monster.object_id, mir2_shared::enums::SpellEffect::TwinDrakeBlade));
                 }
                 1 => {
-                    // C# CrossHalfMoon：弧形 AOE（FindAllTargets(1) → HalfmoonAttack）
-                    for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0
-                        && max_distance(monster.x, monster.y, p.x, p.y) <= 1) {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: p.session_id,
-                            damage,
-                            spell_id: 0,
-                            attack_type: 1,
-                        });
-                    }
+                    // C# CrossHalfMoon（SepHighWarrior.cs:107）：HalfmoonAttack 4 格弧
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    monster.direction = dir;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        direction: dir,
+                        count: 4,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
                 }
                 2 => {
                     // C# BladeAvalanche：前方 3 列 × 3 行刀山（j<=1 全额 / j>=2 0.6x）

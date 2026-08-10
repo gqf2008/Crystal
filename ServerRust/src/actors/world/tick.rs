@@ -1550,21 +1550,38 @@ impl WorldActor {
         }
         // 应用死亡攻击（HumanAssassin 16 方向爆炸 → 半径 2 AOE）
         for atk in &die_attacks {
-            let (attacker_oid, damage, cx, cy, radius) = match atk {
+            let (attacker_oid, damage, _cx, _cy, hit_cells) = match atk {
                 ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
-                    (*attacker_oid, *damage, *center_x, *center_y, *radius)
+                    let mut cells = Vec::new();
+                    for dx in -(*radius)..=(*radius) {
+                        for dy in -(*radius)..=(*radius) {
+                            cells.push((*center_x + dx, *center_y + dy));
+                        }
+                    }
+                    (*attacker_oid, *damage, *center_x, *center_y, cells)
                 }
                 ai::AttackAction::Melee { attacker_oid, target_session, damage, .. } => {
                     let _ = target_session;
-                    (*attacker_oid, *damage, monster.x, monster.y, 0)
+                    (*attacker_oid, *damage, monster.x, monster.y, vec![(monster.x, monster.y)])
                 }
                 ai::AttackAction::Range { attacker_oid, target_session, damage, .. } => {
                     let _ = target_session;
-                    (*attacker_oid, *damage, monster.x, monster.y, 0)
+                    (*attacker_oid, *damage, monster.x, monster.y, vec![(monster.x, monster.y)])
                 }
-                // #1020：死亡回调直线攻击近似为半径=range 的 AOE
+                // #1020：死亡回调直线攻击近似为半径=range 的方形 AOE
                 ai::AttackAction::Line { attacker_oid, origin_x, origin_y, range, damage, .. } => {
-                    (*attacker_oid, *damage, *origin_x, *origin_y, *range)
+                    let mut cells = Vec::new();
+                    for dx in -(*range)..=(*range) {
+                        for dy in -(*range)..=(*range) {
+                            cells.push((*origin_x + dx, *origin_y + dy));
+                        }
+                    }
+                    (*attacker_oid, *damage, *origin_x, *origin_y, cells)
+                }
+                // 死亡回调弧形：按 C# HalfmoonAttack 几何逐格命中
+                ai::AttackAction::Arc { attacker_oid, center_x, center_y, direction, count, damage, .. } => {
+                    let cells = crate::actors::world::ai::helpers::arc_cells(*center_x, *center_y, *direction, *count);
+                    (*attacker_oid, *damage, *center_x, *center_y, cells)
                 }
             };
             // 广播 ObjectAttack（死亡爆炸动画）
@@ -1583,9 +1600,7 @@ impl WorldActor {
             // 对范围内玩家造成伤害
             for (sid, px, py, _, _, _, pmap, _, _) in player_positions {
                 if *pmap != monster.map_index { continue; }
-                let dx = (px - cx).abs();
-                let dy = (py - cy).abs();
-                if dx.max(dy) > radius { continue; }
+                if !hit_cells.contains(&(*px, *py)) { continue; }
                 if let Some(record) = self.players.get(sid) {
                     let _ = record.actor_ref.ask(crate::actors::player::TakeDamage {
                         attacker_id: attacker_oid,
@@ -5482,7 +5497,8 @@ impl Message<Tick> for WorldActor {
                     ai::AttackAction::Melee { attacker_oid, .. }
                     | ai::AttackAction::Range { attacker_oid, .. }
                     | ai::AttackAction::Aoe { attacker_oid, .. }
-                    | ai::AttackAction::Line { attacker_oid, .. } => *attacker_oid,
+                    | ai::AttackAction::Line { attacker_oid, .. }
+                    | ai::AttackAction::Arc { attacker_oid, .. } => *attacker_oid,
                 };
                 if self.monsters.get(&atk_oid).map(|m| monster_control_blocked(&m.poison_list, self.monster_infos.get(&m.monster_index).map(|i| i.light).unwrap_or(0)).1).unwrap_or(false) {
                     continue;
@@ -5492,7 +5508,8 @@ impl Message<Tick> for WorldActor {
                     ai::AttackAction::Melee { attacker_oid, .. }
                     | ai::AttackAction::Range { attacker_oid, .. }
                     | ai::AttackAction::Aoe { attacker_oid, .. }
-                    | ai::AttackAction::Line { attacker_oid, .. } => {
+                    | ai::AttackAction::Line { attacker_oid, .. }
+                    | ai::AttackAction::Arc { attacker_oid, .. } => {
                         self.monsters.get(attacker_oid).map(|m| m.map_index).unwrap_or(0)
                     }
                 };
@@ -5515,6 +5532,16 @@ impl Message<Tick> for WorldActor {
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
                     }
                     // #1020：直线攻击（C# LineAttack：沿 direction 逐格命中）
+                    ai::AttackAction::Arc { attacker_oid, center_x, center_y, direction, count, damage, spell_id, attack_type } => {
+                        let cells = crate::actors::world::ai::helpers::arc_cells(*center_x, *center_y, *direction, *count);
+                        let tgts: Vec<u64> = player_positions.iter()
+                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                                *pmap == boss_map && cells.contains(&(*px, *py))
+                            })
+                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .collect();
+                        (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, *direction)
+                    }
                     ai::AttackAction::Line { attacker_oid, origin_x, origin_y, direction, range, damage, .. } => {
                         let dir = (*direction as usize) % 8;
                         let (ldx, ldy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);

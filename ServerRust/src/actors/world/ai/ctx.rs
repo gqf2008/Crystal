@@ -62,6 +62,17 @@ pub enum AttackAction {
         damage: i32,
         spell_id: u8,
     },
+    /// 弧形攻击（C# HalfmoonAttack/ThreeQuarterMoonAttack：从 PreviousDir(direction) 起连续 count 个方向、距离 1）
+    Arc {
+        attacker_oid: u32,
+        center_x: i32,
+        center_y: i32,
+        direction: u8,
+        count: u8,
+        damage: i32,
+        spell_id: u8,
+        attack_type: u8,
+    },
     /// 直线攻击（C# LineAttack(damage, range)：沿 direction 逐格命中第一个目标）
     Line {
         attacker_oid: u32,
@@ -232,6 +243,14 @@ impl<'a> AiCtx<'a> {
                 let dy = (p.y - cy).abs();
                 dx.max(dy) <= radius // 切比雪夫距离（对齐 C# MaxDistance）
             })
+            .collect()
+    }
+
+    /// 弧形/自定义格命中目标（C# HalfmoonAttack 每格取第一个可攻击对象；此处近似为格内全部玩家）
+    pub fn find_targets_in_cells(&self, cells: &[(i32, i32)], map_index: u16) -> Vec<&PlayerSnap> {
+        self.players.iter()
+            .filter(|p| p.map_index == map_index)
+            .filter(|p| cells.contains(&(p.x, p.y)))
             .collect()
     }
 

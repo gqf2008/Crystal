@@ -18,6 +18,18 @@ pub fn weakest_player_by_dc(targets: &[crate::actors::world::ai::ctx::PlayerSnap
 pub const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 pub const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
+/// C# HalfmoonAttack/ThreeQuarterMoonAttack：从 PreviousDir(direction) 起连续 count 个方向、距离 1 的弧形格
+/// （对齐 Server/MirObjects/MonsterObject.cs:3715：dir = PreviousDir(Direction)；循环 count 次 PointMove(...,1) + NextDir）
+pub fn arc_cells(center_x: i32, center_y: i32, direction: u8, count: u8) -> Vec<(i32, i32)> {
+    let mut cells = Vec::with_capacity(count as usize);
+    let mut d = (direction as i32 + 7).rem_euclid(8) as usize; // Functions.PreviousDir
+    for _ in 0..count {
+        cells.push((center_x + DIR_DX[d], center_y + DIR_DY[d]));
+        d = (d + 1) % 8; // Functions.NextDir
+    }
+    cells
+}
+
 /// 计算朝向目标的 8 方向（对齐 C# DirectionFromPoint）
 pub fn direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> u8 {
     let dx = to_x - from_x;
@@ -91,6 +103,7 @@ pub fn slave_spawn_count(requested: usize, slave_count: usize, cap_total: i32) -
 
 #[cfg(test)]
 mod tests {
+    use super::arc_cells;
     use super::slave_spawn_count;
 
     #[test]
@@ -105,6 +118,32 @@ mod tests {
         assert_eq!(slave_spawn_count(6, 35, 40), 5); // AncientBringer 40-35=5
         assert_eq!(slave_spawn_count(8, 25, 30), 5); // TurtleKing 30-25=5
     }
+    #[test]
+    fn arc_cells_halfmoon_matches_csharp() {
+        // C# HalfmoonAttack dir=0（Up）：PreviousDir=7(UpLeft) 起 4 向 → (-1,-1),(0,-1),(1,-1),(1,0)
+        assert_eq!(arc_cells(0, 0, 0, 4), vec![(-1, -1), (0, -1), (1, -1), (1, 0)]);
+        // dir=4（Down）：PreviousDir=3(DownRight) 起 4 向
+        assert_eq!(arc_cells(0, 0, 4, 4), vec![(1, 1), (0, 1), (-1, 1), (-1, 0)]);
+        // 每格都是距离 1
+        for &(x, y) in &arc_cells(0, 0, 0, 4) {
+            assert_eq!(x.abs().max(y.abs()), 1);
+        }
+    }
+
+    #[test]
+    fn arc_cells_counts_and_no_dupes() {
+        for dir in 0..8u8 {
+            let full = arc_cells(10, 10, dir, 8);
+            assert_eq!(full.len(), 8, "dir={dir} 满弧应 8 格");
+            let mut sorted = full.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), 8, "dir={dir} 不应重复");
+            assert_eq!(arc_cells(10, 10, dir, 4).len(), 4, "dir={dir} 半月应 4 格");
+            assert_eq!(arc_cells(10, 10, dir, 6).len(), 6, "dir={dir} 三日月应 6 格");
+        }
+    }
+
     #[test]
     fn test_weakest_player_by_dc() {
         use super::weakest_player_by_dc;

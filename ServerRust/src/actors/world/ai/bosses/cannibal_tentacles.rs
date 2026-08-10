@@ -1,7 +1,7 @@
 //! CannibalTentacles（食人触手）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/CannibalTentacles.cs
-//! 机制：近战（dist<=1）：4/5 普攻（无毒）/ 1/5 Halfmoon（AOE1 近似）+ 命中 100% 绿毒（5s，tick 1000）；
+//! 机制：近战（dist<=1）：4/5 普攻（无毒）/ 1/5 Halfmoon（4 格弧）+ 弧内命中 100% 绿毒（5s，tick 1000）；
 //!      远程：RangeDamage（MC，MACAgility）
 
 use crate::actors::world::MonsterState;
@@ -12,7 +12,6 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
-const AOE_RADIUS: i32 = 1;
 
 pub struct CannibalTentaclesBehavior;
 
@@ -45,18 +44,23 @@ impl MonsterBehavior for CannibalTentaclesBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    monster.direction = dir;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: AOE_RADIUS,
+                        direction: dir,
+                        count: 4,
                         damage,
                         spell_id: 0,
+                        attack_type: 0,
                     });
-                    let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+                    // C# HalfmoonAttack → CompleteAttack：命中目标 100% 绿毒（5s，tick 1000）
+                    let cells = arc_cells(monster.x, monster.y, dir, 4);
+                    let nearby: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
                         .iter().map(|p| p.session_id).collect();
                     for sid in nearby {
-                        // C# PoisonTarget(1, 5, Green, 1000)：100%
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
                             poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),

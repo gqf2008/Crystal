@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/ManTree.cs（继承 ZumaMonster）
 //! 机制：
-//!   - 7/8：3/4 普通近战（DC）/ 1/4 Halfmoon（用 AOE 半径 1 近似）
+//!   - 7/8：3/4 普通近战（DC）/ 1/4 Halfmoon（4 格弧）
 //!   - 1/8：BoulderSmash（MC）：FindAllTargets(1, 目标) AOE + 1/5 眩晕毒（5s）
 
 use crate::actors::world::MonsterState;
@@ -47,13 +47,17 @@ impl MonsterBehavior for ManTreeBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    monster.direction = dir;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: AOE_RADIUS,
+                        direction: dir,
+                        count: 4,
                         damage,
                         spell_id: 0,
+                        attack_type: 0,
                     });
                 }
             } else {
