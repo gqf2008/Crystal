@@ -479,7 +479,9 @@ fn apply_combat_events(
                 } else {
                     Color::srgb(0.9, 0.2, 0.2) // Red（玩家目标）
                 };
-                let y = if is_crit { -55.0 } else { -40.0 }; // C# Critical Offset=15
+                // C# Damage.Draw：显示在目标头顶上方约 75px（暴击 +Offset15）并向上飘 50px；
+                // actor 子实体 +y 向上（根在脚底），故起始 y 用正值、vy 向上
+                let y = if is_crit { 145.0 } else { 130.0 };
                 commands.entity(target).with_children(|p| {
                     p.spawn((
                         Text2d::new(text),
@@ -491,7 +493,7 @@ fn apply_combat_events(
                             ..default()
                         },
                         Transform::from_xyz(0.0, y, 20.0),
-                        DamageText { vy: -50.0, life: 1.2 },
+                        DamageText { vy: 50.0, life: 1.2 },
                     ));
                 });
             }

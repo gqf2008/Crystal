@@ -623,7 +623,7 @@ fn hold_move_system(
         (With<LocalPlayer>, With<NetObjectId>),
     >,
     actors: Query<
-        &Transform,
+        (&Transform, Option<&Monster>, Option<&Npc>),
         (
             Without<LocalPlayer>,
             Without<GroundItem>,
@@ -648,7 +648,7 @@ fn hold_move_system(
         // 左键按住：鼠标下有可交互对象时交给点击交互，不做移动
         let near_actor = actors
             .iter()
-            .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 45.0)
+            .any(|(tf, _, _)| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 45.0)
             || items
                 .iter()
                 .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 40.0);
@@ -735,7 +735,19 @@ fn hold_move_system(
                     return false;
                 }
                 let p = point_move(from_tile.0, from_tile.1, d, 1);
-                check_door(map, &net, p)
+                if !check_door(map, &net, p) {
+                    return false;
+                }
+                // C# EmptyCell：目标格有 Blocking 对象（NPC/怪物）→ 不可走（玩家不阻挡）
+                !actors
+                    .iter()
+                    .any(|(tf, mon, npc)| {
+                        (mon.is_some() || npc.is_some())
+                            && {
+                                let (tx, ty) = world_to_tile(tf.translation.x, tf.translation.y);
+                                tx == p.0 && ty == p.1
+                            }
+                    })
             };
             if run {
                 // C# CanRun：负重不超限 && CanWalk(dir) && EmptyCell(2 格)；
