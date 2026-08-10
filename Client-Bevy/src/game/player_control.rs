@@ -688,6 +688,26 @@ fn hold_move_system(
             let direction_changed = control.hold_target != Some((new_dir as i32, 0))
                 || control.hold_run != Some(run);
 
+            // 跟随路径中：鼠标目标格变化 → 重算 A* 路径（绕障且响应新目标）
+            if !lm.path.is_empty() {
+                if let Some(map) = &game_data.map {
+                    let mouse_tile = world_to_tile(world.x, world.y);
+                    let last_node = *lm.path.back().unwrap_or(&from_tile);
+                    if mouse_tile != last_node && mouse_tile != from_tile {
+                        if let Some(p) = crate::game::pathfinding::find_path(map, from_tile, mouse_tile) {
+                            if let Some(&first) = p.first() {
+                                if map.is_walkable(first.0, first.1) {
+                                    lm.path = p.into();
+                                    lm.last = None;
+                                    lm.step_origin = None;
+                                    lm.run = run;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 右键按住且鼠标距玩家 <= 2 格 → 只转向（C# GameScene.cs:11614）
             if run && (world - Vec2::new(ptf.translation.x, ptf.translation.y)).length() <= TILE_WIDTH * 2.0 {
                 if direction_changed {
@@ -707,25 +727,24 @@ fn hold_move_system(
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
             let in_trap = hud.in_trap_rock;
 
-            // 门检查：目标格是门（door_index != 0）且当前未放行 → 发 Opendoor（C# CheckDoorOpen 12113）
-            // 门状态由服务端 Opendoor 包更新；walkable 中门格已阻挡，发 Opendoor 后服务端刷新地图可走
+            // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
+            // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
+            // 注意：不能对非门格直接放行——否则墙/河等障碍全被跳过（#1550 回归）。
             fn check_door(map: &crate::map_renderer::LoadedMap, net: &NetConnection, p: (i32, i32)) -> bool {
                 if !map.in_bounds(p.0, p.1) {
                     return false;
                 }
-                let di = map.doors[p.0 as usize][p.1 as usize];
-                if di == 0 {
-                    return true;
-                }
-                // 门格：walkable=false 表示门关；发 Opendoor 让服务端开门
                 if !map.is_walkable(p.0, p.1) {
-                    net.send_packet(&mir2_shared::packets::client::misc::Opendoor {
-                        door_index: di,
-                    });
-                    tracing::debug!("🚪 请求开门 door={} at ({},{})", di, p.0, p.1);
+                    let di = map.doors[p.0 as usize][p.1 as usize];
+                    if di != 0 {
+                        net.send_packet(&mir2_shared::packets::client::misc::Opendoor {
+                            door_index: di,
+                        });
+                        tracing::debug!("🚪 请求开门 door={} at ({},{})", di, p.0, p.1);
+                    }
+                    return false;
                 }
-                // 门仍关（walkable=false）→ 不可走；开（walkable=true）→ 可走
-                map.is_walkable(p.0, p.1)
+                true
             }
 
             // 尝试方向：原方向 → NextDir → PreviousDir（C# CanWalk(dir, out dir)）
@@ -798,8 +817,9 @@ fn hold_move_system(
                 }
             }
 
-            let need_step = chosen.is_some()
-                && (direction_changed || lm.path.is_empty());
+            // 关键：有 A* 路径时不做方向步进（否则 direction_changed 会顶掉绕障路径，
+            // 玩家又直冲墙）；路径走完或为空时才恢复方向驱动
+            let need_step = chosen.is_some() && lm.path.is_empty();
             if let Some((d, steps)) = chosen {
                 if need_step {
                     // 立即转向（C# Standing direction 语义：即使不可走也先转方向）
@@ -831,19 +851,50 @@ fn hold_move_system(
                     }
                 }
             } else {
-                // 三方向都不可走 → 原地转向（C# CanWalk 失败 → Standing direction）
-                if direction_changed {
-                    anim.direction = new_dir;
-                    anim.action = mir2_shared::enums::MirAction::Standing;
-                    anim.frame_index = 0;
-                    control.hold_target = Some((new_dir as i32, 0));
-                    control.hold_run = Some(run);
-                    // #1626：原地转向同步（C# PlayerObject.cs:1439 → C.Turn）
-                    net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
+                // 三方向都不可走：
+                if !lm.path.is_empty() {
+                    // 正在跟随 A* 路径 → 让 advance_local_move 继续（路径本身可走，不打断）
+                } else {
+                    // 尝试 A* 绕障寻路到鼠标目标格（自动寻路，C# NewMove 同款；避免撞墙停下）
+                    let mut re_path = false;
+                    if let Some(map) = &game_data.map {
+                        let mouse_tile = world_to_tile(world.x, world.y);
+                        if mouse_tile != from_tile {
+                            if let Some(p) = crate::game::pathfinding::find_path(map, from_tile, mouse_tile) {
+                                if let Some(&first) = p.first() {
+                                    if map.is_walkable(first.0, first.1) {
+                                        lm.path = p.into();
+                                        lm.last = None;
+                                        lm.step_origin = None;
+                                        lm.run = run;
+                                        if let Some(d) = direction_from_delta(
+                                            first.0 - from_tile.0,
+                                            first.1 - from_tile.1,
+                                        ) {
+                                            anim.direction = d as u8;
+                                        }
+                                        re_path = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !re_path {
+                        // 不可达 → 原地转向（C# CanWalk 失败 → Standing direction）
+                        if direction_changed {
+                            anim.direction = new_dir;
+                            anim.action = mir2_shared::enums::MirAction::Standing;
+                            anim.frame_index = 0;
+                            control.hold_target = Some((new_dir as i32, 0));
+                            control.hold_run = Some(run);
+                            // #1626：原地转向同步（C# PlayerObject.cs:1439 → C.Turn）
+                            net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
+                        }
+                        // 清空旧路径避免卡住
+                        lm.path.clear();
+                        lm.last = None;
+                    }
                 }
-                // 清空旧路径避免卡住
-                lm.path.clear();
-                lm.last = None;
             }
         } else {
             // 按住移动中松开 → 立即停下
