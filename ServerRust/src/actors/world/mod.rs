@@ -515,6 +515,8 @@ pub struct MonsterState {
     pub target_session: Option<u64>,
     /// 最后造成伤害的玩家/施法者 session（C# MapObject.LastHitter；死亡经验/掉落归属用）
     pub last_hitter_session: Option<u64>,
+    /// #1874：被玩家命中且为宠物时暂存攻击者（C# 灰名触发；每 tick 排水）
+    pub pending_brown_attacker: Option<u64>,
     /// 是否已被激怒（Passive 怪物被攻击后变为 Aggressive）
     pub provoked: bool,
     /// 是否为精英怪物
@@ -737,6 +739,16 @@ const SPELL_PLAGUE: u8 = mir2_shared::enums::Spell::Plague as u8;               
 const SPELL_POISON_SWORD: u8 = mir2_shared::enums::Spell::PoisonSword as u8;      // 99 刺客·武器涂毒 buff
 
 impl MonsterState {
+    /// #1874：记录最后攻击者（C# LastHitter）；若本怪为他人宠物，暂存攻击者供灰名排水
+    pub fn set_last_hitter(&mut self, session: u64) {
+        self.last_hitter_session = Some(session);
+        if let Some(master) = self.master_session {
+            if master != session {
+                self.pending_brown_attacker = Some(session);
+            }
+        }
+    }
+
     /// 受击：经 behavior.on_attacked 过滤后扣血。
     /// 返回实际扣除的血量（Boss 睡眠/免疫/无敌期返 0）。
     pub fn take_damage(&mut self, damage: i32) -> i32 {
@@ -3631,6 +3643,7 @@ impl WorldActor {
                                     sit_down_tick: 0,
                                     target_session: None,
                                     last_hitter_session: None,
+                                    pending_brown_attacker: None,
                                     provoked: true, // Boss is always aggressive
                                     is_elite: false,
                                     is_boss: true,
@@ -3925,7 +3938,8 @@ impl WorldActor {
                                         hidden: false,
                                         sit_down_tick: 0,
                                         target_session: None,
-                                        last_hitter_session: None, provoked: false,
+                                        last_hitter_session: None,
+                                        pending_brown_attacker: None, provoked: false,
                                         is_elite: false, is_boss: false,
                                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
@@ -4794,6 +4808,7 @@ impl WorldActor {
                 sit_down_tick: 0,
                 target_session: None,
                 last_hitter_session: None,
+                pending_brown_attacker: None,
                 provoked: false,
                 is_elite: false,
                 is_boss: false,
@@ -7222,6 +7237,7 @@ async fn spawn_npcs_and_monsters(
             sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
+            pending_brown_attacker: None,
             provoked: false,
             rarity,
             is_elite,
@@ -7310,6 +7326,7 @@ async fn spawn_npcs_and_monsters(
                         sit_down_tick: 0,
                         target_session: None,
                         last_hitter_session: None,
+                        pending_brown_attacker: None,
                         provoked: false,
                         is_elite: false,
                         is_boss: false,
@@ -7462,6 +7479,7 @@ mod tests {
             sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
+            pending_brown_attacker: None,
             provoked: false,
             is_elite: false,
             is_boss: true,

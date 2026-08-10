@@ -1121,7 +1121,7 @@ impl WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.last_hitter_session = Some(caster_session);
+                            monster.set_last_hitter(caster_session);
                             self.pending_gather.push(caster_session);
                             monster.provoked = true;
                             monster.target_session = Some(caster_session);
@@ -1708,7 +1708,8 @@ impl WorldActor {
  hidden: false,
  sit_down_tick: 0,
                         target_session: None,
-                        last_hitter_session: None, provoked: false,
+                        last_hitter_session: None,
+                        pending_brown_attacker: None, provoked: false,
                         is_elite: false, is_boss: false,
                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                         agility: 0, accuracy: 0,
@@ -1789,6 +1790,43 @@ impl WorldActor {
         }
     }
 
+
+    /// #1874：C# MonsterObject.Attacked——攻击他人宠物（主人非红名/非灰名/非行会战）→ 攻击者灰名 1 分钟
+    pub(crate) async fn tick_pet_hit_brown(&mut self) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        // 收集 (attacker, master)，避免迭代时借用冲突
+        let mut marks: Vec<(u64, u64)> = Vec::new();
+        for m in self.monsters.values_mut() {
+            if let Some(attacker) = m.pending_brown_attacker.take() {
+                if let Some(master) = m.master_session {
+                    if master != attacker {
+                        marks.push((attacker, master));
+                    }
+                }
+            }
+        }
+        for (attacker, master) in marks {
+            // C# MonsterObject.cs:2670：主人非红名（PK<200）且非灰名
+            let Some(master_record) = self.players.get(&master) else { continue };
+            let Ok(Some(master_state)) = master_record.actor_ref.ask(GetPlayerState).await else { continue };
+            if master_state.pk_points >= 200 { continue; }
+            if crate::actors::world::is_brown(master_state.brown_until_ms) { continue; }
+            let Some(attacker_record) = self.players.get(&attacker) else { continue };
+            let Ok(Some(attacker_state)) = attacker_record.actor_ref.ask(GetPlayerState).await else { continue };
+            // 主人与攻击者非行会战（C# !AtWar(attacker)）
+            let (_any, at_war) = crate::actors::world::guild_war_flags(
+                master_state.guild_name.as_deref(),
+                attacker_state.guild_name.as_deref(),
+                &self.guild_wars,
+            );
+            if at_war { continue; }
+            let _ = attacker_record.actor_ref.ask(crate::actors::player::SetBrownTime {
+                until_ms: now_ms + 60_000,
+            }).await;
+            debug!("Pet hit -> attacker {} brown 60s (master {})", attacker, master);
+        }
+    }
 
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
@@ -2062,6 +2100,7 @@ impl WorldActor {
                 sit_down_tick: 0,
                 target_session: None,
                 last_hitter_session: None,
+                pending_brown_attacker: None,
                 provoked: false,
                 rarity,
                 is_elite,
@@ -2926,6 +2965,7 @@ impl WorldActor {
             sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
+            pending_brown_attacker: None,
             provoked: true,
             is_elite: false,
             is_boss: true,
@@ -3551,7 +3591,7 @@ impl WorldActor {
                     );
                     if r.is_hit && r.damage > 0 {
                         monster.take_damage(r.damage);
-                        monster.last_hitter_session = Some(caster_session);
+                        monster.set_last_hitter(caster_session);
                         self.pending_gather.push(caster_session);
                         monster.provoked = true;
                         monster.target_session = Some(caster_session);
@@ -3789,7 +3829,7 @@ impl WorldActor {
                         );
                         let damage = attack_result.damage;
                         monster.take_damage(damage);
-                        monster.last_hitter_session = Some(c.session_id);
+                        monster.set_last_hitter(c.session_id);
                         monster.provoked = true;
                         if monster.target_session.is_none() {
                             monster.target_session = Some(c.session_id);
@@ -4049,7 +4089,7 @@ impl WorldActor {
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
-                    monster.last_hitter_session = Some(pending.session_id);
+                    monster.set_last_hitter(pending.session_id);
                     self.pending_gather.push(pending.session_id);
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
@@ -4191,7 +4231,7 @@ impl WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.last_hitter_session = Some(pending.session_id);
+                            monster.set_last_hitter(pending.session_id);
                             self.pending_gather.push(pending.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(pending.session_id);
@@ -5322,7 +5362,7 @@ impl Message<Tick> for WorldActor {
                     tm.provoked = true;
                     tm.target_session = Some(*master);
                     // #1741：C# EXPOwner = attacker.Master——宠物补刀击杀归属主人（经验/掉落）
-                    tm.last_hitter_session = Some(*master);
+                    tm.set_last_hitter(*master);
                     // #1741：宠物协战命中反馈（与玩家/英雄/怪物一致：ObjectStruck/DamageIndicator/ObjectHealth）
                     let pet_x = if pet_x == 0 && pet_y == 0 { tm.x } else { pet_x };
                     let pet_y = if pet_x == 0 && pet_y == 0 { tm.y } else { pet_y };
@@ -5474,6 +5514,7 @@ impl Message<Tick> for WorldActor {
                     sit_down_tick: 0,
                     target_session: None,
                     last_hitter_session: None,
+                    pending_brown_attacker: None,
                     provoked: false,
                     is_elite: false,
                     is_boss: false,
@@ -5904,7 +5945,8 @@ impl Message<Tick> for WorldActor {
  hidden: false,
  sit_down_tick: 0,
                             target_session: None,
-                            last_hitter_session: None, provoked: false,
+                            last_hitter_session: None,
+                            pending_brown_attacker: None, provoked: false,
                             is_elite: false, is_boss: false,
                             min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                             agility: 0, accuracy: 0,
@@ -5989,7 +6031,8 @@ impl Message<Tick> for WorldActor {
                             ai_profile, ai_state: MonsterAiState::Idle,
                             sitting: false, hidden: false, sit_down_tick: 0,
                             target_session: Some(cr.target_session),
-                            last_hitter_session: None, provoked: false,
+                            last_hitter_session: None,
+                            pending_brown_attacker: None, provoked: false,
                             is_elite: false, is_boss: false,
                             min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                             agility: 0, accuracy: 0,
@@ -6453,6 +6496,10 @@ impl Message<Tick> for WorldActor {
         self.tick_environment_damage().await;
 
         self.tick_exp_events_and_invisibility().await;
+
+
+        self.tick_pet_hit_brown().await;
+
 
         self.tick_pk_decay().await;
         self.tick_rested().await;
