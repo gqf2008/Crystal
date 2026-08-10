@@ -3901,7 +3901,7 @@ impl WorldActor {
                         let count = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
                         if mob_name.is_empty() { continue; }
                         for _ in 0..count {
-                            if let Some(&idx) = self.monster_name_index.get(&mob_name.to_lowercase()) {
+                            if let Some(&idx) = self.monster_name_index.get(&crate::util::normalized_monster_name(&mob_name)) {
                                 let info_opt = self.monster_infos.get(&idx).cloned();
                                 if let Some(info) = info_opt {
                                     let new_oid = self.alloc_object_id();
@@ -4251,7 +4251,7 @@ impl Actor for WorldActor {
         let monster_infos: HashMap<i32, db::MonsterInfo> = monster_infos_list.into_iter().map(|m| (m.index, m)).collect();
         // 建名称→index 缓存（Boss 召唤按名查用，对齐 C# Envir.GetMonsterInfo(name)）
         let monster_name_index: HashMap<String, i32> = monster_infos.iter()
-            .map(|(idx, m)| (m.name.to_lowercase(), *idx))
+            .map(|(idx, m)| (crate::util::normalized_monster_name(&m.name), *idx))
             .collect();
         let item_name_index: HashMap<String, i32> = item_infos.iter()
             .map(|(idx, i)| (i.name.to_lowercase(), *idx))
@@ -4723,7 +4723,7 @@ impl WorldActor {
         count: u32,
         map_index: u16,
     ) -> usize {
-        let Some(&idx) = self.monster_name_index.get(&name.to_lowercase()) else {
+        let Some(&idx) = self.monster_name_index.get(&crate::util::normalized_monster_name(&name)) else {
             warn!("spawn_monster_named: monster '{}' not found", name);
             return 0;
         };

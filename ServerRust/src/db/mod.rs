@@ -3875,7 +3875,9 @@ pub async fn load_dragon_info(
         Some(r) => {
             let exps: Vec<i64> = serde_json::from_str(&r.get::<String, _>("exps_json")).unwrap_or_default();
             let monster_name: String = r.get("monster_name");
-            let monster_index = monster_infos.values().find(|m| m.name == monster_name).map(|m| m.index);
+            let monster_index = monster_infos.values()
+                .find(|m| crate::util::normalized_monster_name(&m.name) == crate::util::normalized_monster_name(&monster_name))
+                .map(|m| m.index);
             if monster_index.is_none() {
                 tracing::warn!("Dragon references unknown monster_name='{}'", monster_name);
             }
