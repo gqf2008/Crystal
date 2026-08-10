@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::scenes::AppState;
+
 use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings};
 use bevy::prelude::*;
 
@@ -308,13 +310,74 @@ pub fn play_sound_cached(
     ));
 }
 
+/// #1608：背景音乐状态（按场景播放循环 BGM；切换场景只重启一次）
+#[derive(Resource, Default)]
+pub struct BgmState {
+    /// 当前播放的音效 id（None=无）
+    pub current: Option<u32>,
+    /// 正在播放的实体（用于停止）
+    pub entity: Option<Entity>,
+}
+
+/// #1608：背景音乐——C# IntroMusic(10146)/SelectMusic(10147)：
+/// Intro/Login → 10146（Login2.wav）；Select → 10147（Select2.wav）；Game → 停止（C# 默认无游戏 BGM）。
+/// 音量取 `OptionState.music_volume`（缺失默认 0.6）。
+fn bgm_system(
+    mut commands: Commands,
+    state: Res<State<AppState>>,
+    mut bgm: ResMut<BgmState>,
+    bank: Res<SoundBank>,
+    mut assets: ResMut<Assets<AudioSource>>,
+    option: Option<Res<crate::game::dialogs::option::OptionState>>,
+) {
+    let target = match state.get() {
+        AppState::Intro | AppState::Login => Some(10146u32),
+        AppState::Select => Some(10147u32),
+        AppState::Game => None,
+    };
+    if bgm.current == target {
+        return;
+    }
+    if let Some(e) = bgm.entity.take() {
+        commands.entity(e).despawn();
+    }
+    bgm.current = target;
+    let Some(id) = target else {
+        tracing::debug!("🎵 BGM 停止（进入游戏）");
+        return;
+    };
+    let Some(path) = bank.file_for(id) else {
+        return;
+    };
+    let Ok(bytes) = std::fs::read(&path) else {
+        return;
+    };
+    let vol = option
+        .as_ref()
+        .map(|o| o.music_volume.clamp(0.0, 1.0))
+        .unwrap_or(0.6);
+    let handle = assets.add(AudioSource {
+        bytes: Arc::from(bytes),
+    });
+    let e = commands
+        .spawn((
+            AudioPlayer(handle),
+            PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(vol)),
+        ))
+        .id();
+    bgm.entity = Some(e);
+    tracing::info!("🎵 BGM #{}（音量 {:.0}%）", id, vol * 100.0);
+}
+
 pub struct SoundPlugin;
 
 impl Plugin for SoundPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SoundBank>();
         app.init_resource::<SoundCache>();
+        app.init_resource::<BgmState>();
         app.add_systems(Startup, load_sound_bank);
+        app.add_systems(Update, bgm_system);
         // #230：S.PlaySound → 播放服务端指定音效
         app.add_systems(
             Update,
