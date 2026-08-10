@@ -311,6 +311,17 @@ fn npc_awake_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        // 关闭时也要隐藏下拉/材料/操作文字：它们不在 widgets 查询里，
+        // 否则下拉框等会残留成屏幕上的孤按钮（觉醒类型下拉默认 Visible）
+        for mut vis in &mut type_vis {
+            *vis = Visibility::Hidden;
+        }
+        for mut vis in &mut mat_vis {
+            *vis = Visibility::Hidden;
+        }
+        for (_, mut vis) in &mut action {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
     // #1356：操作按钮文字 + 类型/材料显隐（非觉醒模式隐藏）

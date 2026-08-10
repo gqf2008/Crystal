@@ -1243,6 +1243,7 @@ fn inv_add_del_buttons_system(
     mut hud: ResMut<HudState>,
     mut click: ResMut<InvClickState>,
     mut confirm: ResMut<InvDropConfirm>,
+    mgr: Res<DialogManager>,
     add_btn: Query<&UiButton, With<InvAddBtn>>,
     del_btn: Query<&UiButton, With<InvDelBtn>>,
     mut add_vis: Query<&mut Visibility, With<InvAddBtn>>,
@@ -1252,8 +1253,9 @@ fn inv_add_del_buttons_system(
     mut cache: ResMut<UiImageCache>,
 ) {
     let len = hud.inventory.items.len();
-    // C# AddButton.Visible = openLevel < 10（上限 86 格）
-    let can_expand = len < MAX_INV_EXPAND;
+    // C# AddButton.Visible = openLevel < 10（上限 86 格）；
+    // 必须先判断背包对话框是否打开，否则关闭后按钮残留成屏幕上的孤按钮
+    let can_expand = mgr.is_open(DialogKind::Inventory) && len < MAX_INV_EXPAND;
     for mut vis in &mut add_vis {
         *vis = if can_expand { Visibility::Visible } else { Visibility::Hidden };
     }

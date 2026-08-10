@@ -85,6 +85,9 @@ fn spawn_belt(
     _fonts: ResMut<Assets<Font>>,
     _ui_font: ResMut<UiFont>,
 ) {
+    if !crate::ui::sprite_ui::ui_enabled("belt") {
+        return;
+    }
     libs.0.ensure_initialized();
 
     // 横向背景 Prguse[1932]（位置：主对话框上方，快捷栏默认 (400,600) 附近）

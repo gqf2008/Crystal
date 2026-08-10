@@ -669,6 +669,10 @@ fn spawn_skill_bar(
     mut ui_font: ResMut<UiFont>,
     bar: Res<SkillBarState>,
 ) {
+if !crate::ui::sprite_ui::ui_enabled("skill") {
+    return;
+}
+
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }

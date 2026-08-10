@@ -142,6 +142,10 @@ fn spawn_quest_tracking(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
+if !crate::ui::sprite_ui::ui_enabled("quest") {
+    return;
+}
+
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }

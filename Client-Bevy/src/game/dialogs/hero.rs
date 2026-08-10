@@ -204,10 +204,13 @@ impl Plugin for HeroPlugin {
 fn hero_revive_system(
     mut state: ResMut<HeroState>,
     net: Res<NetConnection>,
+    mgr: Res<DialogManager>,
     mut q: Query<(&UiButton, &mut Visibility), With<HeroReviveBtn>>,
 ) {
+    // 复活按钮属于 Hero 对话框：对话框未打开时不显示，避免屏幕残留孤按钮
+    let hero_open = mgr.is_open(DialogKind::Hero);
     for (btn, mut vis) in &mut q {
-        *vis = if state.hero_hp <= 0 {
+        *vis = if hero_open && state.hero_hp <= 0 {
             Visibility::Visible
         } else {
             Visibility::Hidden

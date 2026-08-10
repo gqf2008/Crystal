@@ -418,6 +418,10 @@ fn spawn_chat(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
+if !crate::ui::sprite_ui::ui_enabled("chat") {
+    return;
+}
+
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
