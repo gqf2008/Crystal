@@ -63,10 +63,15 @@ fn spawn_compass(
     _fonts: ResMut<Assets<Font>>,
     _ui_font: ResMut<UiFont>,
 ) {
+    if !crate::ui::sprite_ui::ui_enabled("compass") {
+        return;
+    }
     libs.0.ensure_initialized();
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, 1470) {
         let e = spawn_ui_sprite(&mut commands, h, 10.0, 10.0, 5.0, 1.0);
-        commands.entity(e).insert((CompassWidget, Visibility::Visible));
+        // C# CompassDialog Visible=false 默认隐藏；CompassVisible 默认 false，
+        // spawn 先 Hidden 避免首帧闪现（compass_ui_system 会按 CompassVisible 同步）
+        commands.entity(e).insert((CompassWidget, Visibility::Hidden));
     }
     // #250：罗盘箭头（6x6 金色方块，初始指向右；按目标方向旋转）
     let tri = images.add(crate::map_renderer::make_image(
@@ -94,21 +99,28 @@ fn compass_ui_system(
     mut widgets: Query<&mut Visibility, With<CompassWidget>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    if mouse.just_pressed(MouseButton::Left) {
-        // 罗盘区域 (10,10) 大小约 60x60
-        if cursor.x >= 10.0 && cursor.x <= 70.0 && cursor.y >= 10.0 && cursor.y <= 70.0 {
-            visible.0 = !visible.0;
-        }
-    }
+    // 先按 CompassVisible 同步显隐：不依赖光标，否则光标离开窗口/未聚焦时
+    // cursor_position() 为 None 提前 return，罗盘保持 spawn 时的 Visible（#孤按钮）
     for mut vis in widgets.iter_mut() {
         *vis = if visible.0 {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    // UI 相机 Fixed 1024x768：窗口缩放时需换算成 UI 世界坐标（与 dialog_drag_system 一致）
+    let Ok((cam, gtf)) = ui_cameras.single() else { return };
+    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
+    let cursor = Vec2::new(world.x, -world.y);
+    if mouse.just_pressed(MouseButton::Left) {
+        // 罗盘区域 (10,10) 大小约 60x60
+        if cursor.x >= 10.0 && cursor.x <= 70.0 && cursor.y >= 10.0 && cursor.y <= 70.0 {
+            visible.0 = !visible.0;
+        }
     }
 }
 
@@ -161,3 +173,4 @@ fn compass_arrow_system(
     };
     arrow.0.rotation = Quat::from_rotation_z(-angle);
 }
+

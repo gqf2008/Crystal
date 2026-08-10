@@ -20,6 +20,16 @@ pub fn load_ui_font(assets: &mut Assets<Font>) -> Handle<Font> {
     ))
 }
 
+/// 调试用 UI 子系统开关（UI_BITS 环境变量，逗号分隔，如 "hud,chat"）。
+/// 未设置时全部显示；设置后只显示列出的子系统。
+/// 子系统名：hud / chat / map(小地图) / skill(技能栏) / quest(任务追踪)
+pub fn ui_enabled(subsystem: &str) -> bool {
+    match std::env::var("UI_BITS") {
+        Ok(v) => v.split(',').any(|s| s.trim() == subsystem),
+        Err(_) => true,
+    }
+}
+
 /// UI 图像缓存
 #[derive(Resource, Default)]
 pub struct UiImageCache {

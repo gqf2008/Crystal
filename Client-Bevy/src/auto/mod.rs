@@ -417,6 +417,9 @@ pub fn register(app: &mut App) {
     }
     // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
     app.add_systems(Update, debug_screenshot);
+    if std::env::var("UI_DUMP").is_ok() {
+        app.add_systems(Update, ui_dump_system);
+    }
     // --auto-pickup: 进图后自动拾取最近的 GroundItem（验证拾取闭环，无需鼠标）
     if std::env::args().any(|a| a == "--auto-pickup") {
         app.add_systems(Update, auto_pickup_system);
@@ -782,3 +785,70 @@ fn hold_move_test_system(
         st.dirs.push(d as u8);
     }
 }
+
+/// UI_DUMP=1：输出全部 UI 实体（按钮 rect / 文本 / 可见性 / 所属对话框）
+fn ui_dump_system(
+    time: Res<Time>,
+    mut acc: Local<f32>,
+    mut done: Local<bool>,
+    mgr: Res<client_bevy::game::dialogs::DialogManager>,
+    q: Query<(
+        Entity,
+        &Transform,
+        &Visibility,
+        Option<&client_bevy::ui::sprite_ui::UiButton>,
+        Option<&client_bevy::ui::sprite_ui::ButtonFrames>,
+        Option<&Text2d>,
+        Option<&Sprite>,
+        Option<&client_bevy::game::dialogs::DialogRoot>,
+    )>,
+) {
+    if *done {
+        return;
+    }
+    *acc += time.delta_secs();
+    if *acc < 10.0 {
+        return;
+    }
+    *done = true;
+    tracing::info!("=== UI_DUMP begin; open={:?} ===", mgr.open);
+    for (e, tf, vis, btn, frames, txt, sp, root) in q.iter() {
+        let vis_s = match *vis {
+            Visibility::Visible => "V",
+            Visibility::Hidden => "H",
+            _ => "I",
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(b) = btn {
+            parts.push(format!("btn=({:.0},{:.0},{:.0},{:.0})", b.rect.0, b.rect.1, b.rect.2, b.rect.3));
+        }
+        if frames.is_some() {
+            parts.push("frames".to_string());
+        }
+        if let Some(t) = txt {
+            parts.push(format!("txt={:?}", t.0));
+        }
+        if let Some(s) = sp {
+            if let Some(cs) = s.custom_size {
+                parts.push(format!("size=({:.0},{:.0})", cs.x, cs.y));
+            }
+            if let Some(r) = s.rect {
+                parts.push(format!("rect=({:.0},{:.0},{:.0},{:.0})", r.min.x, r.min.y, r.max.x, r.max.y));
+            }
+        }
+        if let Some(r) = root {
+            parts.push(format!("root={:?}", r.0));
+        }
+        tracing::info!(
+            "UI e={:?} vis={} pos=({:.0},{:.0}) z={:.1} {}",
+            e,
+            vis_s,
+            tf.translation.x,
+            -tf.translation.y,
+            tf.translation.z,
+            parts.join(" ")
+        );
+    }
+    tracing::info!("=== UI_DUMP end count={} ===", q.iter().count());
+}
+
