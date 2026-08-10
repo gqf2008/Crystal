@@ -4,7 +4,7 @@
 //! 机制：
 //!   - HP<20% 周期 MassAttack：FindAllTargets(7) 全体 MC 弹道（按距离延迟）
 //!   - 近战 AttackRange=3 的十字/对角判定：
-//!     * 贴身 1/3 概率 Type1 DC LineAttack（推回）
+//!     * 贴身 1/3 概率 Type1 DC LineAttack（推回 range-1）
 //!     * 其余 Type0 MC LineAttack(3)
 //!   - 风筝走位（恐惧期远离，否则追击）
 //!
@@ -68,14 +68,25 @@ impl MonsterBehavior for ManectricKingBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let close = dist <= ATTACK_RANGE - 1;
             if close && fastrand::i32(0..3) == 0 {
-                // Type1 DC LineAttack（带推回，用 attack_type=1 标记）
+                // Type1 DC LineAttack（C# LineAttack(damage, AttackRange-dist+1, 500, ACAgility, push=true)）
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                let range = ATTACK_RANGE - dist + 1;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
                     attacker_oid: monster.object_id,
-                    target_session: target.session_id,
+                    origin_x: monster.x,
+                    origin_y: monster.y,
+                    direction: dir,
+                    range,
                     damage,
                     spell_id: 0,
-                    attack_type: 1,
+                });
+                // C# LineAttack push：距离 = range-1
+                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                    session_id: target.session_id,
+                    dir,
+                    distance: range - 1,
                 });
             } else {
                 // Type0 MC LineAttack(3)

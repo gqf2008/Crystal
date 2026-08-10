@@ -1,7 +1,7 @@
 //! WereTiger（虎人）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/WereTiger.cs
-//! 机制：近战（dist<=1）：5/6 普通近战（DC，ACAgility）/ 1/6 Type=1 SinglePushAttack（伤害+推挤）
+//! 机制：近战（dist<=1）：5/6 普通近战（DC，ACAgility）/ 1/6 Type=1 SinglePushAttack（伤害+推挤 3，等级门控）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -49,11 +49,14 @@ impl MonsterBehavior for WereTigerBehavior {
                     spell_id: 0,
                     attack_type: 1,
                 });
-                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                    session_id: target.session_id,
-                    dir,
-                    distance: 1,
-                });
+                // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
+                if (target.level as i32) <= monster.level + 5 {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir,
+                        distance: 3,
+                    });
+                }
             }
             return;
         }

@@ -6,7 +6,7 @@
 //!   - 目标<=2 且 1/3：FlameField + 投射
 //!   - 1/3：FireBang + 投射
 //!   - HP<=80% 且 1/4：Vampirism + 投射
-//!   - 否则：GreatFireBall + SinglePushAttack（推 1）
+//!   - 否则：GreatFireBall + SinglePushAttack（推 3，等级门控）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -108,11 +108,14 @@ impl MonsterBehavior for SepHighWizardBehavior {
                 damage,
                 spell_id: 0,
             });
-            ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                session_id: target.session_id,
-                dir: direction_towards(monster.x, monster.y, target.x, target.y),
-                distance: 1,
-            });
+            // C# SinglePushAttack：目标等级<=怪+5 才推 3 格
+            if (target.level as i32) <= monster.level + 5 {
+                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                    session_id: target.session_id,
+                    dir: direction_towards(monster.x, monster.y, target.x, target.y),
+                    distance: 3,
+                });
+            }
             return;
         }
 
