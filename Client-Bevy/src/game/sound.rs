@@ -189,6 +189,117 @@ pub fn monster_range_sound(monster_type: u16) -> Option<u32> {
     }
 }
 
+/// #1631：怪物出现音（C# PlayAppearSound，MonsterObject.cs:3873）：
+/// - CannibalPlant(10)/WaterDragon(371)/EvilCentipede(41)/CreeperPlant(324) 不播
+/// - DragonStatue(902) → +6
+/// - ZumaArcher 等 17 个 Stoned 时静音，否则默认 BaseSound+0
+/// - 默认 → BaseSound+0
+pub fn monster_appear_sound(monster_type: u16, stoned: bool) -> Option<u32> {
+    let base = monster_base_sound(monster_type);
+    const NONE: &[u16] = &[10, 371, 41, 324];
+    const STONED_GATE: &[u16] = &[
+        64, 65, 66, 67, 211, 209, 210, 68, 251, 352, 353, 305, 417, 414, 415, 416, 403,
+    ];
+    if NONE.contains(&monster_type) {
+        return None;
+    }
+    if monster_type == 902 {
+        return Some(base + 6); // DragonStatue
+    }
+    if STONED_GATE.contains(&monster_type) && stoned {
+        return None;
+    }
+    Some(base)
+}
+
+/// #1631：怪物召唤音（C# PlaySummonSound，MonsterObject.cs:3823）：
+/// HellKnight1-4(243-246)/LightningBead(317)/HealingBead(318)/PowerUpBead(319) → +0；
+/// BoneFamiliar(78)/Shinsu(79)/HolyDeva(117) → +5；其余不播
+pub fn monster_summon_sound(monster_type: u16) -> Option<u32> {
+    let base = monster_base_sound(monster_type);
+    if matches!(monster_type, 243..=246 | 317 | 318 | 319) {
+        return Some(base);
+    }
+    if matches!(monster_type, 78 | 79 | 117) {
+        return Some(base + 5);
+    }
+    None
+}
+
+/// #1631：怪物弹出音（C# PlayPopupSound，MonsterObject.cs:3908）：
+/// ZumaTaurus(68)/DigOutZombie(69)/Armadillo(290)/ArmadilloElder(291) → +5；
+/// Shinsu(79) → +6；默认 +0
+pub fn monster_popup_sound(monster_type: u16) -> Option<u32> {
+    let base = monster_base_sound(monster_type);
+    if matches!(monster_type, 68 | 69 | 290 | 291) {
+        return Some(base + 5);
+    }
+    if monster_type == 79 {
+        return Some(base + 6);
+    }
+    Some(base)
+}
+
+/// #1632：怪物行走音（C# PlayWalkSound，MonsterObject.cs:3843）：
+/// left → WingedTigerLord(184)/PoisonHugger(160)/SnowWolfKing(370)/Catapult(940)/ChariotBallista(941) +8；
+/// right → WingedTigerLord(184)/AvengerPlant(327) +8、PoisonHugger(160)/SnowWolfKing(370) +9；其余不播
+pub fn monster_walk_sound(monster_type: u16, left: bool) -> Option<u32> {
+    let base = monster_base_sound(monster_type);
+    if left {
+        if matches!(monster_type, 184 | 160 | 370 | 940 | 941) {
+            return Some(base + 8);
+        }
+    } else if monster_type == 184 || monster_type == 327 {
+        return Some(base + 8);
+    } else if matches!(monster_type, 160 | 370) {
+        return Some(base + 9);
+    }
+    None
+}
+
+/// #1632：怪物奔跑音（C# PlayRunSound，MonsterObject.cs:3925）：HardenRhino(271) → +8
+pub fn monster_run_sound(monster_type: u16) -> Option<u32> {
+    if monster_type == 271 {
+        return Some(monster_base_sound(monster_type) + 8);
+    }
+    None
+}
+
+/// #1632：怪物跳跃音（C# PlayJumpSound，MonsterObject.cs:3935）：
+/// Armadillo(290)/ArmadilloElder(291)/ChieftainArcher(356) → +8
+pub fn monster_jump_sound(monster_type: u16) -> Option<u32> {
+    if matches!(monster_type, 290 | 291 | 356) {
+        return Some(monster_base_sound(monster_type) + 8);
+    }
+    None
+}
+
+/// #1632：怪物冲刺音（C# PlayDashSound，MonsterObject.cs:3947）：HornedSorceror(346) → +9
+pub fn monster_dash_sound(monster_type: u16) -> Option<u32> {
+    if monster_type == 346 {
+        return Some(monster_base_sound(monster_type) + 9);
+    }
+    None
+}
+
+/// #1632：怪物死亡音（C# PlayDeadSound，MonsterObject.cs:4113）：
+/// CaveBat(19)/HellKnight1-4(243-246)/CyanoGhast(153)/WoodBox(332) → +5；其余不播
+pub fn monster_dead_sound(monster_type: u16) -> Option<u32> {
+    if matches!(monster_type, 19 | 243..=246 | 153 | 332) {
+        return Some(monster_base_sound(monster_type) + 5);
+    }
+    None
+}
+
+/// #1632：怪物复活音（C# PlayReviveSound，MonsterObject.cs:4128）：
+/// ClZombie(70)/NdZombie(71)/CrawlerZombie(72) → 705（SoundList.ZombieRevive）
+pub fn monster_revive_sound(monster_type: u16) -> Option<u32> {
+    if matches!(monster_type, 70 | 71 | 72) {
+        return Some(705);
+    }
+    None
+}
+
 /// #1572：玩家步声（C# PlayerObject.PlayStepSound，PlayerObject.cs:3695）：
 /// - 门控：Front/Middle/BackIndex > 199 → 非 mir2 地图不播（None）；
 /// - 骑乘 → MountWalkL(10176)；
@@ -646,6 +757,62 @@ mod tests {
         // default → +1（PlayAttackSound）
         assert_eq!(monster_range_sound(1), Some(11));
         assert_eq!(monster_range_sound(42), Some(421));
+    }
+
+    #[test]
+    fn monster_appear_summon_popup_sounds_match_csharp() {
+        // #1631：C# PlayAppearSound/PlaySummonSound/PlayPopupSound
+        // 出现音：不播组
+        assert_eq!(monster_appear_sound(10, false), None);
+        assert_eq!(monster_appear_sound(371, false), None);
+        assert_eq!(monster_appear_sound(41, true), None);
+        assert_eq!(monster_appear_sound(324, false), None);
+        // DragonStatue +6
+        assert_eq!(monster_appear_sound(902, false), Some(9026));
+        // Stoned 组：石化静音，否则默认 +0
+        assert_eq!(monster_appear_sound(64, true), None);
+        assert_eq!(monster_appear_sound(64, false), Some(640));
+        assert_eq!(monster_appear_sound(1, false), Some(10)); // 默认 +0
+        // 召唤音
+        assert_eq!(monster_summon_sound(243), Some(2430));
+        assert_eq!(monster_summon_sound(319), Some(3190));
+        assert_eq!(monster_summon_sound(78), Some(785));
+        assert_eq!(monster_summon_sound(79), Some(795));
+        assert_eq!(monster_summon_sound(117), Some(1175));
+        assert_eq!(monster_summon_sound(1), None);
+        // 弹出音
+        assert_eq!(monster_popup_sound(68), Some(685));
+        assert_eq!(monster_popup_sound(291), Some(2915));
+        assert_eq!(monster_popup_sound(79), Some(796));
+        assert_eq!(monster_popup_sound(1), Some(10)); // 默认 +0
+    }
+
+    #[test]
+    fn monster_walk_run_jump_dash_dead_revive_sounds_match_csharp() {
+        // #1632：C# PlayWalkSound/PlayRunSound/PlayJumpSound/PlayDashSound/PlayDeadSound/PlayReviveSound
+        // 行走
+        assert_eq!(monster_walk_sound(184, true), Some(1848));
+        assert_eq!(monster_walk_sound(941, true), Some(9418));
+        assert_eq!(monster_walk_sound(327, false), Some(3278));
+        assert_eq!(monster_walk_sound(370, false), Some(3709));
+        assert_eq!(monster_walk_sound(1, true), None);
+        // 奔跑/跳跃/冲刺
+        assert_eq!(monster_run_sound(271), Some(2718));
+        assert_eq!(monster_run_sound(1), None);
+        assert_eq!(monster_jump_sound(290), Some(2908));
+        assert_eq!(monster_jump_sound(356), Some(3568));
+        assert_eq!(monster_jump_sound(1), None);
+        assert_eq!(monster_dash_sound(346), Some(3469));
+        assert_eq!(monster_dash_sound(1), None);
+        // 死亡（Dead 状态）
+        assert_eq!(monster_dead_sound(19), Some(195));
+        assert_eq!(monster_dead_sound(246), Some(2465));
+        assert_eq!(monster_dead_sound(332), Some(3325));
+        assert_eq!(monster_dead_sound(1), None);
+        // 复活
+        assert_eq!(monster_revive_sound(70), Some(705));
+        assert_eq!(monster_revive_sound(72), Some(705));
+        assert_eq!(monster_revive_sound(1), None);
     }
 
     #[test]
