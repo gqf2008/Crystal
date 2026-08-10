@@ -707,25 +707,24 @@ fn hold_move_system(
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
             let in_trap = hud.in_trap_rock;
 
-            // 门检查：目标格是门（door_index != 0）且当前未放行 → 发 Opendoor（C# CheckDoorOpen 12113）
-            // 门状态由服务端 Opendoor 包更新；walkable 中门格已阻挡，发 Opendoor 后服务端刷新地图可走
+            // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
+            // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
+            // 注意：不能对非门格直接放行——否则墙/河等障碍全被跳过（#1550 回归）。
             fn check_door(map: &crate::map_renderer::LoadedMap, net: &NetConnection, p: (i32, i32)) -> bool {
                 if !map.in_bounds(p.0, p.1) {
                     return false;
                 }
-                let di = map.doors[p.0 as usize][p.1 as usize];
-                if di == 0 {
-                    return true;
-                }
-                // 门格：walkable=false 表示门关；发 Opendoor 让服务端开门
                 if !map.is_walkable(p.0, p.1) {
-                    net.send_packet(&mir2_shared::packets::client::misc::Opendoor {
-                        door_index: di,
-                    });
-                    tracing::debug!("🚪 请求开门 door={} at ({},{})", di, p.0, p.1);
+                    let di = map.doors[p.0 as usize][p.1 as usize];
+                    if di != 0 {
+                        net.send_packet(&mir2_shared::packets::client::misc::Opendoor {
+                            door_index: di,
+                        });
+                        tracing::debug!("🚪 请求开门 door={} at ({},{})", di, p.0, p.1);
+                    }
+                    return false;
                 }
-                // 门仍关（walkable=false）→ 不可走；开（walkable=true）→ 可走
-                map.is_walkable(p.0, p.1)
+                true
             }
 
             // 尝试方向：原方向 → NextDir → PreviousDir（C# CanWalk(dir, out dir)）
