@@ -208,13 +208,24 @@ fn apply_combat_events(
                 if let Some(sound_id) = struck_sound {
                     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
                 }
-                for (e, id, mut anim, _mon, _appr) in &mut actors {
+                for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Attack1;
                         anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
+                        // #1627：C# MirAction.Struck → PlayFlinchSound（BaseSound+2，MonsterObject.cs:1064）
                         // 注：怪物攻击音由 Attack 事件（#1624）在动作起始播放，此处不播
+                        if mon.is_some() {
+                            if let Some(appr) = appr {
+                                crate::game::sound::play_sound(
+                                    &mut commands,
+                                    &mut audio_assets,
+                                    &sound_bank,
+                                    crate::game::sound::monster_flinch_sound(appr.monster_type),
+                                );
+                            }
+                        }
                         break;
                     }
                 }
