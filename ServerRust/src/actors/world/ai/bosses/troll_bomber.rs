@@ -36,28 +36,23 @@ impl MonsterBehavior for TrollBomberBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            // 投弹：主目标全额 + 目标点 2 格 AOE 半额（C# CompleteRangeAttack）
+            // 投弹：目标点 2 格 AOE——主目标全额、其他目标半额（C# CompleteRangeAttack，主目标不二次受击）
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let full = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             let half = (full / 2).max(1);
-
-            // 主目标全额
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage: full,
-                spell_id: 0,
-            });
-            // 目标点 AOE 半额（含主目标二次受击近似溅射）
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                attacker_oid: monster.object_id,
-                center_x: target.x,
-                center_y: target.y,
-                radius: SPLASH_RADIUS,
-                damage: half,
-                spell_id: 0,
-            });
+            let splash: Vec<crate::actors::world::ai::PlayerSnap> =
+                ctx.find_targets_in_range(target.x, target.y, SPLASH_RADIUS, monster.map_index)
+                    .into_iter().copied().collect();
+            for p in splash {
+                let dmg = if p.session_id == target.session_id { full } else { half };
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: p.session_id,
+                    target_object_id: p.object_id,
+                    damage: dmg,
+                    spell_id: 0,
+                });
+            }
             return;
         }
 
