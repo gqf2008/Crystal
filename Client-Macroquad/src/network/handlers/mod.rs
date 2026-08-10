@@ -1819,7 +1819,6 @@ pub enum NetworkEvent {
         target_x: u32,
         target_y: u32,
         spell: u16,
-        spell_level: u16,
     },
     ObjectRangeAttacked {
         object_id: u32,

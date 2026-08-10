@@ -1458,7 +1458,6 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 target_x: mx as u32,
                                                 target_y: my as u32,
                                                 spell: 0,
-                                                spell_level: 0,
                                             },
                                         );
                                         // 命中结算（同近战 Attack 分支）

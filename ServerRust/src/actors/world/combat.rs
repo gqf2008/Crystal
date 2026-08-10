@@ -1485,8 +1485,7 @@ impl Message<RangeAttackRequest> for WorldActor {
         proj_body.extend_from_slice(&msg.target_id.to_le_bytes());
         proj_body.extend_from_slice(&(target_x as u32).to_le_bytes());
         proj_body.extend_from_slice(&(target_y as u32).to_le_bytes());
-        proj_body.extend_from_slice(&0u16.to_le_bytes()); // spell
-        proj_body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+        proj_body.push(0u8); // spell
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RangeAttack as i16, &proj_body),

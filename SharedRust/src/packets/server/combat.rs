@@ -60,8 +60,8 @@ pub struct RangeAttack {
     pub target_id: u32,
     pub target_x: u32,
     pub target_y: u32,
-    pub spell: u16,
-    pub spell_level: u16,
+    /// C# S.RangeAttack.Spell（1B）
+    pub spell: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -280,8 +280,7 @@ impl Packet for RangeAttack {
             target_id: reader.read_u32::<LittleEndian>()?,
             target_x: reader.read_u32::<LittleEndian>()?,
             target_y: reader.read_u32::<LittleEndian>()?,
-            spell: reader.read_u16::<LittleEndian>()?,
-            spell_level: reader.read_u16::<LittleEndian>()?,
+            spell: reader.read_u8()?,
         })
     }
 
@@ -289,8 +288,7 @@ impl Packet for RangeAttack {
         writer.write_u32::<LittleEndian>(self.target_id)?;
         writer.write_u32::<LittleEndian>(self.target_x)?;
         writer.write_u32::<LittleEndian>(self.target_y)?;
-        writer.write_u16::<LittleEndian>(self.spell)?;
-        writer.write_u16::<LittleEndian>(self.spell_level)?;
+        writer.write_u8(self.spell)?;
         Ok(())
     }
 }

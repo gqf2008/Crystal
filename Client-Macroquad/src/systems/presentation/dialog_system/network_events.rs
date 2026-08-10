@@ -1431,13 +1431,12 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
                 target_x,
                 target_y,
                 spell,
-                spell_level,
             } => {
                 sys_chat(
                     &mut cmds,
                     format!(
-                        "远程攻击: 目标={} 位置=({},{}) 法术={} 等级={}",
-                        target_id, target_x, target_y, spell, spell_level
+                        "远程攻击: 目标={} 位置=({},{}) 法术={}",
+                        target_id, target_x, target_y, spell
                     ),
                 );
             }

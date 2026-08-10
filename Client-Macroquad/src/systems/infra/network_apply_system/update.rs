@@ -788,15 +788,13 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 target_x,
                 target_y,
                 spell,
-                spell_level,
             } => {
                 tracing::trace!(
-                    "🏹 RangeAttack: target={} loc=({},{}) spell={} level={}",
+                    "🏹 RangeAttack: target={} loc=({},{}) spell={}",
                     target_id,
                     target_x,
                     target_y,
-                    spell,
-                    spell_level
+                    spell
                 );
                 let from_id = local_player_object_id.unwrap_or(0);
                 range_projectiles.push((from_id, *target_id, *target_x, *target_y, *spell));
