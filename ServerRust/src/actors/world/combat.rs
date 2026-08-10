@@ -2236,6 +2236,13 @@ impl Message<MagicRequest> for WorldActor {
             None
         };
         if let Some(mut spell_obj) = persistent_spell {
+            // #1854：按 C# 落点几何设置覆盖格（FireWall 5 / PoisonCloud 9 / Blizzard·MeteorStrike 25）
+            let (fx, fy) = if target_x == 0 && target_y == 0 {
+                (state.x, state.y)
+            } else {
+                (target_x, target_y)
+            };
+            spell_obj.cells = spell::spell_cells_for(spell_enum, fx, fy);
             // DelayedExplosion（C# HumanObject.DelayedExplosion）：施法后按距离延迟
             // `距离*50 + 500ms` 才触发；且要挂到目标身上（target_id 用于引爆命中）。
             if spell_obj.spell == mir2_shared::enums::Spell::DelayedExplosion {
@@ -2915,17 +2922,22 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts Lightning (line 6) dmg={}", state.name, raw_damage);
             }
-            // ThunderStorm/FlameField：5×5 自身周围，MAC（C# Map.cs:1303）
+            // ThunderStorm/FlameField：5×5 以目标点为中心（C# Map.cs:1303 location±2，非施法者）
             // ThunderStorm 对非亡灵伤害 ×1/10（下方按 monster.undead 调整）
             SPELL_THUNDERSTORM | SPELL_FLAME_FIELD => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(5..=15) }.max(1);
                 let attacker_stats = state.to_combat_stats();
+                let (tx, ty) = if msg.target_x == 0 && msg.target_y == 0 {
+                    (state.x, state.y)
+                } else {
+                    (msg.target_x, msg.target_y)
+                };
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
-                        let dx = (m.x - state.x).abs();
-                        let dy = (m.y - state.y).abs();
+                        let dx = (m.x - tx).abs();
+                        let dy = (m.y - ty).abs();
                         dx <= 2 && dy <= 2 && m.hp > 0 && m.map_index == state.map_index
                     })
                     .map(|(id, _)| *id)
