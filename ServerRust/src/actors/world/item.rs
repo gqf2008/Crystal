@@ -2008,6 +2008,33 @@ impl Message<DropGoldRequest> for WorldActor {
     }
 }
 
+impl WorldActor {
+    /// #1866：NPC 价格倍率（C# NPCScript.PriceRate）：基础 Rate + 征服领地非所有者加税（GuildInfo.NPCRate）
+    fn npc_price_rate(&self, state: &crate::actors::player::PlayerState, npc_oid: u32) -> u64 {
+        let npc = match self.npcs.get(&npc_oid) {
+            Some(n) => n,
+            None => return 100,
+        };
+        let mut rate = self.npc_infos.get(&npc.db_index).map(|n| n.rate).unwrap_or(100).max(1) as u64;
+        if let Some(conq) = self.conquest_instances.iter().find(|c| {
+            let mi = npc.map_index as i32;
+            c.map_index == mi || c.palace_map == mi
+        }) {
+            rate = apply_conquest_tax(rate, state.guild_name.as_deref(), conq.owner_guild.as_deref(), conq.tax_rate);
+        }
+        rate.max(1)
+    }
+}
+
+/// #1866：征服领地非所有者加税（C# PriceRate：所有者 Rate/100，非所有者 ((Rate/100)*NPCRate+Rate)/100）
+fn apply_conquest_tax(base_rate: u64, player_guild: Option<&str>, owner_guild: Option<&str>, tax_rate: u8) -> u64 {
+    if owner_guild.is_some() && player_guild == owner_guild {
+        base_rate
+    } else {
+        (base_rate * (100 + tax_rate as u64)) / 100
+    }
+}
+
 impl Message<BuyItemRequest> for WorldActor {
     type Reply = ();
 
@@ -2043,6 +2070,8 @@ impl Message<BuyItemRequest> for WorldActor {
                 return;
             }
         }
+        // #1866：C# PriceRate——基础 Rate + 征服领地非所有者加税（提前计算避免借用冲突）
+        let npc_rate = self.npc_price_rate(&state, npc_oid);
 
         // 获取商品列表（可变引用以便扣减库存）
         let goods_list = match self.npc_goods.get_mut(&npc_db_index) {
@@ -2081,7 +2110,6 @@ impl Message<BuyItemRequest> for WorldActor {
         };
 
         // 计算价格：优先使用 npc_goods 中的自定义价格，否则使用 item_db.price * NPC rate（整数运算避免浮点误差）
-        let npc_rate = self.npc_infos.get(&npc_db_index).map(|n| n.rate).unwrap_or(100).max(1) as u64;
         let base_price = if good.price > 0 { good.price as u64 } else { item_db.price as u64 };
         let price_per_unit = ((base_price * npc_rate) / 100).max(1);
         let total_price = price_per_unit * msg.count as u64;
@@ -2325,6 +2353,8 @@ impl Message<RepairItemRequest> for WorldActor {
             .as_ref()
             .map(|info| compute_repair_cost(&item_data, info, msg.special))
             .unwrap_or(0);
+        // #1866：C# RepairItem cost = RepairPrice() × PriceRate（NPC 倍率 + 征服税）
+        let repair_cost = repair_cost.saturating_mul(self.npc_price_rate(&state, npc_oid)) / 100;
         if repair_cost == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法修理");
             return;
@@ -2798,6 +2828,8 @@ impl Message<BuyItemBackRequest> for WorldActor {
             return;
         }
 
+        // #1866：C# PriceRate（提前计算避免借用冲突）
+        let price_rate = self.npc_price_rate(&state, npc_oid);
         // 查找回购列表中的对应物品（按 unique_id，C# BuyItemBack 语义；仅当前 NPC 的条目）
         let list = match self.buyback_items.get_mut(&msg.session_id) {
             Some(l) => l,
@@ -2830,9 +2862,11 @@ impl Message<BuyItemBackRequest> for WorldActor {
         let count = (msg.count as u16).min(buyback.item.count.max(1));
         let mut item = buyback.item.clone();
         item.count = count;
-        // C#：按单价收费（sell_price 是整堆 Price()/2，除以原堆数量得到单价）
-        let per_unit = buyback.sell_price / buyback.item.count.max(1) as u64;
-        let cost = per_unit.saturating_mul(count as u64).max(1);
+        // #1866：C# BuyBack cost = goods.Price() × PriceRate（全价×倍率，非卖出价 Price/2）
+        let per_unit = self.item_infos.get(&buyback.item.item_index)
+            .map(|info| compute_item_price_per_unit(&buyback.item, info))
+            .unwrap_or(0);
+        let cost = (per_unit.saturating_mul(count as u64) * price_rate / 100).max(1);
 
         // 检查背包空间
         if !state.inventory.has_space() {
@@ -3055,6 +3089,23 @@ impl Message<DisassembleItemRequest> for WorldActor {
 
 #[cfg(test)]
 mod tests {
+
+    use super::apply_conquest_tax;
+
+    /// #1866：征服领地 NPC 加税（所有者免加价）
+    #[test]
+    fn conquest_tax_only_for_non_owner() {
+        // 所有者公会：不加价（rate 保持 100）
+        assert_eq!(apply_conquest_tax(100, Some("GuildA"), Some("GuildA"), 20), 100);
+        // 非所有者：rate*(100+tax)/100
+        assert_eq!(apply_conquest_tax(100, Some("GuildB"), Some("GuildA"), 20), 120);
+        assert_eq!(apply_conquest_tax(100, None, Some("GuildA"), 10), 110);
+        // 无所有者公会：按非所有者加税
+        assert_eq!(apply_conquest_tax(100, Some("GuildA"), None, 5), 105);
+        // 基础 rate 非 100 也正确
+        assert_eq!(apply_conquest_tax(150, Some("GuildB"), Some("GuildA"), 20), 180);
+    }
+
     use super::{can_equip_by_weight, can_pick_drop, npc_in_range, NpcState, DROP_OWNERSHIP_TICKS};
 
     #[test]
@@ -3210,5 +3261,3 @@ mod tests {
     }
 
 }
-
-
