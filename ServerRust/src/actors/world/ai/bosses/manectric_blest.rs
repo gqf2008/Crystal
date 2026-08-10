@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/ManectricBlest.cs
 //! 机制：每 5 次攻击 → Type=2 AOE3（MC，MAC）+ 每目标 1/5 冰冻（5s，tick 1000）；
-//!      其余 2/3 base.Attack / 1/3 旋风（8 邻格，用 AOE1 近似，不计数）
+//!      其余 2/3 base.Attack / 1/3 旋风（绕自身 8 向排除正面，每格 1 目标，不计数）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -71,14 +71,24 @@ impl MonsterBehavior for ManectricBlestBehavior {
                     attack_type: 0,
                 });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: 1,
-                    damage,
-                    spell_id: 0,
-                });
+                // C# 旋风（ManectricBlest.cs:70-93）：绕自身 8 向逐格，排除正面格，每格最多 1 个目标（DC，Agility）
+                let facing = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                for d in 0..8usize {
+                    if d == facing { continue; } // C# tar == Front → continue
+                    let cx = monster.x + DIR_DX[d];
+                    let cy = monster.y + DIR_DY[d];
+                    if let Some(p) = ctx.players.iter().find(|p| {
+                        p.map_index == monster.map_index && p.hp > 0 && p.x == cx && p.y == cy
+                    }) {
+                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: p.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
+                    }
+                }
             }
             return;
         }
