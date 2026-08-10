@@ -1937,6 +1937,19 @@ impl WorldActor {
     }
 }
 
+/// #1620：C# HumanObject.Magic InRange——目标格超施法范围（Chebyshev）
+pub(crate) fn cast_out_of_range(
+    caster_x: i32,
+    caster_y: i32,
+    target_x: i32,
+    target_y: i32,
+    range: i32,
+) -> bool {
+    range > 0
+        && (target_x != 0 || target_y != 0)
+        && (target_x - caster_x).abs().max((target_y - caster_y).abs()) > range
+}
+
 impl Message<MagicRequest> for WorldActor {
     type Reply = ();
 
@@ -1998,6 +2011,11 @@ impl Message<MagicRequest> for WorldActor {
             return;
         }
         let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
+        // #1620：C# HumanObject.Magic——目标格超施法范围拒绝（location!=0 && Range!=0 && !InRange）
+        if cast_out_of_range(state.x, state.y, msg.target_x, msg.target_y, spell_range) {
+            send_system_message(&self.gate_ref, msg.session_id, "目标超出施法范围");
+            return;
+        }
         let power = spell_db.map(|m| m.power_base).unwrap_or(10); // for buff/heal scaling
         // Use spell level from PlayerMagic if learned
         let spell_level = state.magics.iter()
@@ -5158,7 +5176,8 @@ mod spell_geometry_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
+        archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, cast_out_of_range,
+        find_attack_skill,
         logout_blocked, player_attack_speed_ms, range_attack_min_reduction, range_flight_ticks,
         ranged_chance_to_hit, should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
         LOGOUT_DELAY_MS,
@@ -5203,6 +5222,24 @@ mod tests {
         assert_eq!(range_flight_ticks(3), 7);  // 700ms → 7
         assert_eq!(range_flight_ticks(9), 10); // 1000ms → 10
         assert_eq!(range_flight_ticks(-5), 6); // 负距离按 0 处理
+    }
+
+    #[test]
+    fn test_cast_out_of_range_matches_csharp_inrange() {
+        // #1620：C# HumanObject.Magic InRange（Chebyshev）
+        // 超范围 → true
+        assert!(cast_out_of_range(0, 0, 3, 0, 2));
+        // 边界内：Chebyshev max(|dx|,|dy|) <= range 不超
+        assert!(!cast_out_of_range(0, 0, 2, 2, 2));
+        // 边界内
+        assert!(!cast_out_of_range(0, 0, 2, 0, 2));
+        assert!(!cast_out_of_range(0, 0, 1, 1, 2));
+        // 自身施法（目标=自身位置）
+        assert!(!cast_out_of_range(5, 5, 5, 5, 2));
+        // range 0（自增益）不校验
+        assert!(!cast_out_of_range(0, 0, 50, 50, 0));
+        // 目标格 0（无目标 fallback）不校验
+        assert!(!cast_out_of_range(0, 0, 0, 0, 2));
     }
 
     #[test]
