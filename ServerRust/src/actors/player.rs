@@ -389,7 +389,9 @@ impl PlayerState {
             &self.buffs,
             &crate::combat::buff::BuffType::Curse { percent: 0 },
         );
-        ((base + buff_bonus + slaying_bonus) * (100 - curse) / 100).max(self.effective_min_attack())
+        // #1888：RhinoPriestDebuff 固定降低 MaxDC（C# RhinoPriest.cs:91）
+        let rhino = crate::combat::buff::get_rhino_priest_debuff(&self.buffs);
+        ((base + buff_bonus + slaying_bonus) * (100 - curse) / 100 + rhino.0).max(self.effective_min_attack())
     }
 
     pub fn effective_min_mc(&self) -> i32 {
@@ -408,7 +410,9 @@ impl PlayerState {
             &self.buffs,
             &crate::combat::buff::BuffType::Curse { percent: 0 },
         );
-        ((base + buff_bonus) * (100 - curse) / 100).max(self.effective_min_mc())
+        // #1888：RhinoPriestDebuff 固定降低 MaxMC（C# RhinoPriest.cs:91）
+        let rhino = crate::combat::buff::get_rhino_priest_debuff(&self.buffs);
+        ((base + buff_bonus) * (100 - curse) / 100 + rhino.1).max(self.effective_min_mc())
     }
 
     pub fn effective_min_sc(&self) -> i32 {
@@ -427,7 +431,9 @@ impl PlayerState {
             &self.buffs,
             &crate::combat::buff::BuffType::Curse { percent: 0 },
         );
-        ((base + buff_bonus) * (100 - curse) / 100).max(self.effective_min_sc())
+        // #1888：RhinoPriestDebuff 固定降低 MaxSC（C# RhinoPriest.cs:91）
+        let rhino = crate::combat::buff::get_rhino_priest_debuff(&self.buffs);
+        ((base + buff_bonus) * (100 - curse) / 100 + rhino.2).max(self.effective_min_sc())
     }
 
     /// 计算包含装备+Buff加成的防御力
@@ -585,6 +591,7 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::Transform { .. } => 23,
         BuffType::TeleportManaPenalty { .. } => 24,
         BuffType::Curse { .. } => 25,
+        BuffType::RhinoPriestDebuff { .. } => 26,
     }
 }
 

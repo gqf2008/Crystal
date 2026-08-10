@@ -5,9 +5,8 @@
 //!   - 继承 AxeSkeleton 远程弹道（AttackRange=6）+ 风筝走位
 //!   - 近战：DC ACAgility
 //!   - 远程：MC 弹道；2/3 普通(MACAgility)，1/3 蓝圈(MAC)
-//!     - 普通：命中附加 RhinoPriestDebuff（DC/MC/SC 降伤害*duration）
 //!     - 蓝圈：3/4 Slow 2s，1/4 Frozen 4s
-//!   - 祭司特性：周期治疗/buff 附近友军（out_heals 近似 DC/MC 增益）
+//!     - 普通：命中附加 RhinoPriestDebuff（MaxDC/MC/SC 固定降低，时长 5+damage 秒）
 //!
 //! Attack（C# :13-63）：!range→DC ACAgility；range→2/3 MACAgility(Debuff) / 1/3 MAC(Slow/Frozen)。
 //! CompleteRangeAttack（C# :65-98）：poison→Slow/Frozen；else RhinoPriestDebuff。
@@ -22,18 +21,12 @@ use crate::actors::world::ai::helpers::*;
 const ATTACK_RANGE: i32 = 6;
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
-/// 友军 buff 半径
-const BUFF_RADIUS: i32 = 5;
-/// 友军 buff 冷却（10s）
-const BUFF_COOLDOWN_TICKS: u64 = 100;
 
-pub struct RhinoPriestBehavior {
-    next_buff_tick: u64,
-}
+pub struct RhinoPriestBehavior;
 
 impl RhinoPriestBehavior {
     pub fn new() -> Self {
-        Self { next_buff_tick: 0 }
+        Self
     }
 }
 
@@ -45,24 +38,6 @@ impl MonsterBehavior for RhinoPriestBehavior {
         };
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
-
-        // 周期 buff 附近友军（祭司特性：out_heals 正值近似 DC/MC 增益）
-        if ctx.tick_count >= self.next_buff_tick {
-            let buffed: Vec<u32> = ctx.monsters.iter()
-                .filter(|m| m.map_index == monster.map_index && m.hp > 0
-                    && m.object_id != monster.object_id)
-                .filter(|m| {
-                    let dx = (m.x - monster.x).abs();
-                    let dy = (m.y - monster.y).abs();
-                    dx.max(dy) <= BUFF_RADIUS
-                })
-                .map(|m| m.object_id)
-                .collect();
-            for oid in buffed {
-                ctx.out_heals.push((oid, monster.min_mac.max(1)));
-            }
-            self.next_buff_tick = ctx.tick_count + BUFF_COOLDOWN_TICKS;
-        }
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             if dist <= MELEE_RANGE {
@@ -104,12 +79,18 @@ impl MonsterBehavior for RhinoPriestBehavior {
                         });
                     }
                 }
-                // 普通：RhinoPriestDebuff（DC/MC/SC 降低）用红毒近似持续减益
+                // 普通：RhinoPriestDebuff（C# RhinoPriest.cs:91：MaxDC/MC/SC = -damage，时长 5+damage 秒）
                 else {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::RED, 5, damage / 2, 1000),
-                    });
+                    let debuff_ticks = ((5 + damage) * 10) as u32;
+                    ctx.out_player_buffs.push((
+                        target.session_id,
+                        crate::combat::buff::BuffInstance::new(
+                            crate::combat::buff::BuffType::RhinoPriestDebuff {
+                                max_dc: -damage, max_mc: -damage, max_sc: -damage,
+                            },
+                            debuff_ticks, 10,
+                        ),
+                    ));
                 }
             }
             return;

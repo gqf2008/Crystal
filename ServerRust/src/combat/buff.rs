@@ -57,6 +57,8 @@ pub enum BuffType {
     TeleportManaPenalty { percent: i32 },
     /// 诅咒（C# BuffType.Curse：MaxDC/MC/SC RatePercent 降低输出，玩家另 AttackSpeedRatePercent 降低攻速）
     Curse { percent: i32 },
+    /// 犀牛祭司减益（C# BuffType.RhinoPriestDebuff：MaxDC/MC/SC 固定值降低，时长 5+damage 秒）
+    RhinoPriestDebuff { max_dc: i32, max_mc: i32, max_sc: i32 },
 }
 
 /// Buff 实例
@@ -179,6 +181,16 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
             _ => 0,
         })
         .sum()
+}
+
+/// RhinoPriestDebuff：取 MaxDC/MC/SC 固定减益之和（C# RhinoPriestDebuff，值均为负数）
+pub fn get_rhino_priest_debuff(buffs: &[BuffInstance]) -> (i32, i32, i32) {
+    buffs.iter().fold((0, 0, 0), |(dc, mc, sc), b| match b.buff_type {
+        BuffType::RhinoPriestDebuff { max_dc, max_mc, max_sc } => {
+            (dc + max_dc, mc + max_mc, sc + max_sc)
+        }
+        _ => (dc, mc, sc),
+    })
 }
 
 /// 检查是否处于失控状态（Stun/Frozen 等，无法行动/攻击）

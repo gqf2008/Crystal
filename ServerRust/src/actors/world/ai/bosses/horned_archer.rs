@@ -33,45 +33,56 @@ impl HornedArcherBehavior {
 
 impl MonsterBehavior for HornedArcherBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        // ---- 周期性给友军上 buff（近似：用互疗队列给附近友军加攻击力）----
+        // ---- 周期性给友军上 buff（C# HornedArcher.ProcessTarget：BuffTime 到 → 随机友军增益弹道）----
         if ctx.tick_count >= self.next_buff_tick {
-            // 查找视野内一名友军（非自身、同 map）
-            let friend = ctx.monsters.iter()
+            // 查找视野内友军（C# FindAllFriends(ViewRange)，随机选 1 个）
+            let friends: Vec<_> = ctx.monsters.iter()
                 .filter(|m| m.object_id != monster.object_id
                     && m.map_index == monster.map_index
                     && m.hp > 0)
-                .min_by_key(|m| {
-                    let dx = (m.x - monster.x).abs();
-                    let dy = (m.y - monster.y).abs();
-                    dx + dy
-                })
                 .filter(|m| {
                     let dx = (m.x - monster.x).abs();
                     let dy = (m.y - monster.y).abs();
                     dx.max(dy) <= VIEW_RANGE
-                });
+                })
+                .collect();
 
-            if let Some(f) = friend {
-                // C# 对友军施放增益弹道；这里用互疗队列给友军及其周围友军临时增益
-                // 简化：对 4 格内友军提升伤害（out_heals 正值近似为攻击增益）
-                let buff_radius = 4;
+            if !friends.is_empty() {
+                let f = friends[fastrand::usize(0..friends.len())];
+                // C# CompleteAttack：命中友军 → 4 格内友军 AddBuff（时长 10s）
+                // C# 取施法者 MinMC/MaxMC；Rust 怪物魔法攻击等价字段为 min_mac/max_mac
+                let min = monster.min_mac.max(1);
+                let max = monster.max_mac.max(min);
+                // C# Info.Effect==0 → HornedArcherBuff（DC/MC）；==1 → ColdArcherBuff（AC/MAC）
+                let buff = if monster.effect == 0 {
+                    crate::actors::world::MonsterBuff {
+                        dc_min: min, dc_max: max,
+                        ac_min: 0, ac_max: 0, mac_min: min, mac_max: max,
+                        remaining_ticks: 100,
+                    }
+                } else {
+                    crate::actors::world::MonsterBuff {
+                        dc_min: 0, dc_max: 0,
+                        ac_min: min, ac_max: max, mac_min: min, mac_max: max,
+                        remaining_ticks: 100,
+                    }
+                };
                 let buffed: Vec<u32> = ctx.monsters.iter()
                     .filter(|m| m.map_index == monster.map_index && m.hp > 0)
                     .filter(|m| {
                         let dx = (m.x - f.x).abs();
                         let dy = (m.y - f.y).abs();
-                        dx.max(dy) <= buff_radius
+                        dx.max(dy) <= 4
                     })
                     .map(|m| m.object_id)
                     .collect();
                 for oid in buffed {
-                    // 正值 heal 作为"增益"近似（C# AddBuff DC/MC）
-                    ctx.out_heals.push((oid, monster.min_mac.max(1)));
+                    ctx.out_monster_buffs.push((oid, buff.clone()));
                 }
                 self.next_buff_tick = ctx.tick_count + BUFF_COOLDOWN_TICKS;
                 return;
             } else {
-                // 无友军：缩短冷却继续尝试
+                // 无友军：缩短冷却继续尝试（C# BuffTime = Time + 10000）
                 self.next_buff_tick = ctx.tick_count + BUFF_COOLDOWN_NO_FRIEND_TICKS;
             }
         }

@@ -265,6 +265,29 @@ fn combined_poison_flags(poison_list: &[crate::combat::poison::Poison]) -> mir2_
     poison_list.iter().fold(PoisonType::NONE, |acc, p| acc | p.p_type)
 }
 
+/// #1888：怪物友军增益每 tick 递减；过期时回退属性并移除（C# Buff 到期回退）
+fn tick_monster_buffs(monster: &mut MonsterState) {
+    let mut i = 0;
+    while i < monster.monster_buffs.len() {
+        let expired = {
+            let b = &mut monster.monster_buffs[i];
+            b.remaining_ticks = b.remaining_ticks.saturating_sub(1);
+            b.remaining_ticks == 0
+        };
+        if expired {
+            let b = monster.monster_buffs.remove(i);
+            monster.min_dmg = (monster.min_dmg - b.dc_min).max(0);
+            monster.max_dmg = (monster.max_dmg - b.dc_max).max(0);
+            monster.min_ac = (monster.min_ac - b.ac_min).max(0);
+            monster.max_ac = (monster.max_ac - b.ac_max).max(0);
+            monster.min_mac = (monster.min_mac - b.mac_min).max(0);
+            monster.max_mac = (monster.max_mac - b.mac_max).max(0);
+        } else {
+            i += 1;
+        }
+    }
+}
+
 /// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
 async fn broadcast_miss_feedback(
     players: &HashMap<u64, PlayerRecord>,
@@ -1014,6 +1037,8 @@ impl WorldActor {
             let mut delayed_effects: Vec<(u32, u8, u16)> = Vec::new(); // (object_id, stage, map_index)
             let mut pending_explosions: Vec<(u64, u16, i32, i32, i32)> = Vec::new(); // (caster, map, x, y, value)
             for (_, monster) in &mut self.monsters {
+                // #1888：友军增益每 tick 减时，过期回退属性
+                tick_monster_buffs(monster);
                 if monster.poison_list.is_empty() {
                     continue;
                 }
@@ -1550,6 +1575,7 @@ impl WorldActor {
         let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
+        let mut die_monster_buffs: Vec<(u32, crate::actors::world::MonsterBuff)> = Vec::new();
         let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
         let mut die_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
         let mut die_effects: Vec<(u32, mir2_shared::enums::SpellEffect, u32, u32)> = Vec::new();
@@ -1593,6 +1619,7 @@ impl WorldActor {
                 out_monster_taunts: &mut die_taunts,
                 out_monster_teleports: &mut die_monster_teleports,
                 out_player_buffs: &mut die_player_buffs,
+                out_monster_buffs: &mut die_monster_buffs,
                 out_show_hide: &mut die_show_hide,
                 out_sit_down: &mut die_sit_down,
                 out_effects: &mut die_effects,
@@ -1817,6 +1844,7 @@ impl WorldActor {
                         armour_rate: 1.0, damage_rate: 1.0,
                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
                         luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+                        monster_buffs: Vec::new(),
                         poison_list: Vec::new(),
                         last_hit_damage: 0,
                         undead: false,
@@ -2223,6 +2251,7 @@ impl WorldActor {
                 level: monster_level,
                 effect: monster_effect,
                 damage_reduction_percent: 0,
+                monster_buffs: Vec::new(),
                 poison_list: Vec::new(),
                 last_hit_damage: 0,
             undead: false,
@@ -3080,6 +3109,7 @@ impl WorldActor {
             critical_rate: 0, critical_damage: 0,
             luck: 0, reflect: 0, level: monster_info.level, effect: monster_info.effect,
             damage_reduction_percent: 0,
+            monster_buffs: Vec::new(),
             poison_list: Vec::new(),
             last_hit_damage: 0,
             undead: false,
@@ -4599,6 +4629,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
+            let mut boss_monster_buffs: Vec<(u32, crate::actors::world::MonsterBuff)> = Vec::new();
             let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
             let mut boss_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
             let mut boss_effects: Vec<(u32, mir2_shared::enums::SpellEffect, u32, u32)> = Vec::new();
@@ -4685,6 +4716,7 @@ impl Message<Tick> for WorldActor {
                         out_monster_taunts: &mut boss_taunts,
                         out_monster_teleports: &mut boss_monster_teleports,
                         out_player_buffs: &mut boss_player_buffs,
+                        out_monster_buffs: &mut boss_monster_buffs,
                         out_show_hide: &mut boss_show_hide,
                         out_sit_down: &mut boss_sit_down,
                         out_effects: &mut boss_effects,
@@ -5638,6 +5670,7 @@ impl Message<Tick> for WorldActor {
                     level: monster_level,
                     effect: monster_effect,
                     damage_reduction_percent: 0,
+                    monster_buffs: Vec::new(),
                     poison_list: Vec::new(),
                     last_hit_damage: 0,
             undead: false,
@@ -5786,6 +5819,18 @@ impl Message<Tick> for WorldActor {
             for (sid, buff) in boss_player_buffs.drain(..) {
                 if let Some(record) = self.players.get(&sid) {
                     let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                }
+            }
+            // #1888：Boss 给友军怪加增益（C# AddBuff：HornedArcher DC/MC、ColdArcher AC/MAC）
+            for (oid, buff) in boss_monster_buffs.drain(..) {
+                if let Some(m) = self.monsters.get_mut(&oid) {
+                    m.min_dmg = (m.min_dmg + buff.dc_min).max(0);
+                    m.max_dmg = (m.max_dmg + buff.dc_max).max(0);
+                    m.min_ac = (m.min_ac + buff.ac_min).max(0);
+                    m.max_ac = (m.max_ac + buff.ac_max).max(0);
+                    m.min_mac = (m.min_mac + buff.mac_min).max(0);
+                    m.max_mac = (m.max_mac + buff.mac_max).max(0);
+                    m.monster_buffs.push(buff);
                 }
             }
             // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害
@@ -6080,6 +6125,7 @@ impl Message<Tick> for WorldActor {
                             armour_rate: 1.0, damage_rate: 1.0,
                             magic_resist: 0, critical_rate: 0, critical_damage: 0,
                             luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+                            monster_buffs: Vec::new(),
                             poison_list: Vec::new(),
                             last_hit_damage: 0,
             undead: false,
@@ -6167,6 +6213,7 @@ impl Message<Tick> for WorldActor {
                             armour_rate: 1.0, damage_rate: 1.0,
                             magic_resist: 0, critical_rate: 0, critical_damage: 0,
                             luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+                            monster_buffs: Vec::new(),
                             poison_list: Vec::new(),
                             last_hit_damage: 0, undead: false,
                             master_session: None, rarity: 0, pet_experience: 0, max_pet_level: 0,
