@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/SnakeTotem.cs
 //! 机制：静态（CanMove=false）；主人>15 格或离线 → 自毁；
-//!      周期召唤 CharmedSnake 小兵（MaxMinions=PetLevel+1 近似 2，10s 冷却近似）
+//!      周期召唤 CharmedSnake 小兵（MaxMinions=PetLevel+1，10s 冷却近似）
 //!      （死亡连带小兵清理依赖 slave_list，此处 out_summons 用 is_slave=true）
 
 use crate::actors::world::MonsterState;
@@ -41,8 +41,9 @@ impl MonsterBehavior for SnakeTotemBehavior {
                 return;
             }
         }
-        // #1442：C# ProcessAI：SlaveList.Count < MaxMinions 才召唤（MaxMinions=PetLevel+1，Rust 近似 2）
-        if ctx.tick_count >= self.next_summon_tick && ctx.slave_count < 2 {
+        // #1442：C# ProcessAI：SlaveList.Count < MaxMinions 才召唤（SnakeTotem.cs:39 MaxMinions=PetLevel+1）
+        let max_minions = (ctx.pet_level + 1) as usize;
+        if ctx.tick_count >= self.next_summon_tick && ctx.slave_count < max_minions {
             self.next_summon_tick = ctx.tick_count + SUMMON_COOLDOWN;
             ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                 monster_name: "CharmedSnake".to_string(),
