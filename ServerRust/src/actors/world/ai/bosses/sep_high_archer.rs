@@ -47,15 +47,10 @@ impl MonsterBehavior for SepHighArcherBehavior {
 
             // C# 目标<=2 且 1/3：BackStep 后跳（反向最多 3 格；boss_moves 应用时校验 walkable）
             if dist <= 2 && fastrand::i32(0..3) == 0 {
+                // C# BackStep：ObjectBackStep 广播 + 直接落位（#1801）
                 let back = direction_towards(monster.x, monster.y, target.x, target.y) as i32 + 4;
                 let dir = (back.rem_euclid(8)) as u8;
-                let mut cx = monster.x;
-                let mut cy = monster.y;
-                for _ in 0..3 {
-                    cx += DIR_DX[dir as usize];
-                    cy += DIR_DY[dir as usize];
-                    ctx.out_moves.push((monster.object_id, cx, cy, dir));
-                }
+                ctx.out_backsteps.push((monster.object_id, dir, 3));
                 return;
             }
 

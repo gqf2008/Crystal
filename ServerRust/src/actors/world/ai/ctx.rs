@@ -158,6 +158,8 @@ pub struct AiCtx<'a> {
     pub slave_count: usize,
     /// 输出：移动 (oid, x, y, dir)
     pub out_moves: &'a mut Vec<(u32, i32, i32, u8)>,
+    /// 输出：后跳 (oid, dir, max_distance)（#1801：C# S.ObjectBackStep）
+    pub out_backsteps: &'a mut Vec<(u32, u8, i32)>,
     /// 输出：攻击动作
     pub out_attacks: &'a mut Vec<AttackAction>,
     /// 输出：地面法术场

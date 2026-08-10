@@ -1480,6 +1480,7 @@ impl WorldActor {
         let mut die_child_rocks: Vec<ai::ChildRockSpawn> = Vec::new();
         let mut die_heals: Vec<(u32, i32)> = Vec::new();
         let mut die_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+        let mut die_backsteps: Vec<(u32, u8, i32)> = Vec::new();
         let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
         let mut die_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
         let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
@@ -1517,6 +1518,7 @@ impl WorldActor {
                 out_summons: &mut die_summons,
                 out_child_rocks: &mut die_child_rocks,
                 out_heals: &mut die_heals,
+                out_backsteps: &mut die_backsteps,
                 out_poisons: &mut die_poisons,
                 out_pushes: &mut die_pushes,
                 out_player_teleports: &mut die_teleports,
@@ -4290,6 +4292,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_child_rocks: Vec<ai::ChildRockSpawn> = Vec::new();
             let mut boss_heals: Vec<(u32, i32)> = Vec::new();
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+            let mut boss_backsteps: Vec<(u32, u8, i32)> = Vec::new();
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
             let mut boss_delayed_attacks: Vec<ai::DelayedAttack> = Vec::new();
@@ -4370,6 +4373,7 @@ impl Message<Tick> for WorldActor {
                         out_summons: &mut boss_summons,
                         out_child_rocks: &mut boss_child_rocks,
                         out_heals: &mut boss_heals,
+                        out_backsteps: &mut boss_backsteps,
                         out_poisons: &mut boss_poisons,
                         out_pushes: &mut boss_pushes,
                         out_player_teleports: &mut boss_player_teleports,
@@ -5378,6 +5382,44 @@ impl Message<Tick> for WorldActor {
                     .unwrap_or(true);
                 if walkable {
                     moved_monsters.push((oid, nx, ny, dir));
+                }
+            }
+            // Boss 后跳（#1801：C# SepHighArcher.BackStep——ObjectBackStep 广播 + 直接落位）
+            for (oid, dir, max_dist) in boss_backsteps.drain(..) {
+                let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
+                let (sx, sy) = self.monsters.get(&oid).map(|m| (m.x, m.y)).unwrap_or((0, 0));
+                let d = (dir as usize) % 8;
+                let mut cx = sx;
+                let mut cy = sy;
+                let mut traveled = 0i32;
+                for _ in 0..max_dist {
+                    let nx = cx + MON_DIR_DX[d];
+                    let ny = cy + MON_DIR_DY[d];
+                    let ok = self.maps.get(&map_idx)
+                        .map(|m| m.is_walkable(nx, ny))
+                        .unwrap_or(false);
+                    if !ok { break; }
+                    cx = nx;
+                    cy = ny;
+                    traveled += 1;
+                }
+                if traveled == 0 { continue; }
+                let p = mir2_shared::packets::server::movement::ObjectBackStep {
+                    object_id: oid,
+                    location_x: cx,
+                    location_y: cy,
+                    direction: mir2_shared::enums::MirDirection::try_from(dir).unwrap_or(mir2_shared::enums::MirDirection::Up),
+                    distance: traveled,
+                };
+                let mut body = Vec::new();
+                if p.write_body(&mut body).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectBackStep as i16, &body);
+                    broadcast_to_map(&self.gate_ref, &self.players, map_idx, &pkt).await;
+                }
+                if let Some(m) = self.monsters.get_mut(&oid) {
+                    m.x = cx;
+                    m.y = cy;
                 }
             }
             // Boss 怪物自传送（C# MonsterObject.Teleport：ObjectTeleportOut → 更新位置 → ObjectTeleportIn）
