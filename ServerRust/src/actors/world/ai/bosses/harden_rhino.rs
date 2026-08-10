@@ -1,7 +1,7 @@
 //! HardenRhino（硬皮犀牛）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/HardenRhino.cs
-//! 机制：近战（dist<=1）DC；目标>3 格且 1/3 → Dash 冲刺（无伤害，用单步移动近似），冷却 1500ms
+//! 机制：近战（dist<=1）DC；目标>3 格且 1/3 → Dash 冲刺（无伤害，2 格步进多步移动），冷却 1500ms
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -34,8 +34,21 @@ impl MonsterBehavior for HardenRhinoBehavior {
         // C# ProcessSearch：目标>3 格且 1/3 → Dash 冲刺（无伤害）
         if dist > DASH_RANGE && ctx.tick_count >= self.next_dash_tick && fastrand::i32(0..3) == 0 {
             self.next_dash_tick = ctx.tick_count + DASH_COOLDOWN;
-            let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
-            ctx.out_moves.push((monster.object_id, nx, ny, dir));
+            // C# Dash（HardenRhino.cs:83-115）：沿目标方向 2 格步进，直到进入 2 格范围或遇阻挡；
+            // 用多步 out_moves（每步 2 格，ctx.is_walkable 预校验、遇阻截断），tick 端逐条应用并广播 ObjectWalk（近似 ObjectRun）
+            let mut cx = monster.x;
+            let mut cy = monster.y;
+            let mut cd = max_distance(cx, cy, target.x, target.y);
+            while cd > 2 {
+                let dir = (direction_towards(cx, cy, target.x, target.y) as usize) % 8;
+                let nx = cx + DIR_DX[dir] * 2;
+                let ny = cy + DIR_DY[dir] * 2;
+                if !(ctx.is_walkable)(nx, ny) { break; }
+                ctx.out_moves.push((monster.object_id, nx, ny, dir as u8));
+                cx = nx;
+                cy = ny;
+                cd = max_distance(cx, cy, target.x, target.y);
+            }
             return;
         }
 
