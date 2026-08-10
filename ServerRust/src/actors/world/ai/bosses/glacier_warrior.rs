@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/GlacierWarrior.cs
 //! 机制：基础近战（MonsterObject 默认）+ 受击反制：承伤>自身 DC 且 1/2 →
-//!       FindWeakerTarget（视野内选更弱目标，MinDC 用 hp 近似）→ TeleportToTarget（目标背后 1 格）
+//!       FindWeakerTarget（视野内选 MinDC 最低目标，#1885）→ TeleportToTarget（目标背后 1 格）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -10,8 +10,9 @@ use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
 const VIEW_RANGE: i32 = 12;
-    /// C# Attacked 反制：承伤>自身 DC 且 1/2 → FindWeakerTarget → TeleportToTarget（目标背后 1 格）
-    fn maybe_teleport_to_weaker(monster: &mut MonsterState, ctx: &mut AiCtx, view_range: i32) {
+
+/// C# Attacked 反制：承伤>自身 DC 且 1/2 → FindWeakerTarget → TeleportToTarget（目标背后 1 格）
+fn maybe_teleport_to_weaker(monster: &mut MonsterState, ctx: &mut AiCtx, view_range: i32) {
         if monster.last_hit_damage <= 0 {
             return;
         }
