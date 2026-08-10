@@ -50,6 +50,8 @@ pub struct HudState {
     pub mount_type: i16,
     /// 是否钓鱼中（FishingUpdate 本地玩家，#1544：钓鱼时不可使用物品）
     pub fishing: bool,
+    /// #1616：本地玩家麻痹/冰冻毒（C# CheckInput：Paralysis/LRParalysis/Frozen 锁定输入）
+    pub paralysis: bool,
     /// #1550：陷阱岩石（C# User.InTrapRock：陷阱中不可走/跑）
     pub in_trap_rock: bool,
     /// #1552：冲刺（C# User.Sprint，SwiftFeet Buff）——CanRun 3 格
@@ -92,6 +94,7 @@ impl Default for HudState {
             riding: false,
             mount_type: 0,
             fishing: false,
+            paralysis: false,
             in_trap_rock: false,
             sprint: false,
             sneaking: false,
@@ -1048,6 +1051,10 @@ fn hud_server_events(
             ServerEvent::TrapRockChanged { in_trap } => {
                 // #1550：C# User.InTrapRock——陷阱中不可走/跑
                 hud.in_trap_rock = *in_trap;
+            }
+            ServerEvent::LocalPoisonChanged { paralysis } => {
+                // #1616：C# CheckInput——麻痹/冰冻毒锁定输入
+                hud.paralysis = *paralysis;
             }
             ServerEvent::MountUpdated {
                 object_id,

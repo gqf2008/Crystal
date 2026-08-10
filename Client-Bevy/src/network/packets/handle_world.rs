@@ -577,6 +577,12 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                     object_id: pid,
                     poisoned: !p.poison.is_empty(),
                 });
+                // #1616：本地玩家麻痹/冰冻毒 → 输入锁定（C# CheckInput）
+                server_events.write(ServerEvent::LocalPoisonChanged {
+                    paralysis: p.poison.intersects(mir2_shared::enums::PoisonType::PARALYSIS)
+                        || p.poison.intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
+                        || p.poison.intersects(mir2_shared::enums::PoisonType::FROZEN),
+                });
                 tracing::debug!("☠️ 玩家中毒: {:?}", p.poison);
             }
         }
@@ -586,6 +592,14 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                     object_id: p.object_id,
                     poisoned: !p.poison.is_empty(),
                 });
+                // #1616：本地玩家毒状态变化（对象毒只影响本地玩家输入）
+                if Some(p.object_id) == session.local_player_id {
+                    server_events.write(ServerEvent::LocalPoisonChanged {
+                        paralysis: p.poison.intersects(mir2_shared::enums::PoisonType::PARALYSIS)
+                            || p.poison.intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
+                            || p.poison.intersects(mir2_shared::enums::PoisonType::FROZEN),
+                    });
+                }
                 tracing::debug!("☠️ 对象中毒 id={}: {:?}", p.object_id, p.poison);
             }
         }
