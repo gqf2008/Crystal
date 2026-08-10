@@ -119,6 +119,7 @@ pub mod sep_high_warrior;
 pub mod sep_warrior;
 pub mod sep_archer;
 pub mod sep_taoist;
+pub mod sep_high_wizard;
 pub mod sep_wizard;
 pub mod sep_assassin;
 pub mod dragon_warrior;

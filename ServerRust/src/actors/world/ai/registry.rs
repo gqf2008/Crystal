@@ -338,7 +338,7 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
         return Box::new(bosses::sep_taoist::SepTaoistBehavior::new());
     }
     if name.contains("sephighwizard") || name.contains("sep high wizard") {
-        return Box::new(bosses::sep_wizard::SepWizardBehavior::new());
+        return Box::new(bosses::sep_high_wizard::SepHighWizardBehavior::new());
     }
     if name.contains("sephighassassin") || name.contains("sep high assassin") {
         return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
