@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/OmaMage.cs
 //! 机制：
 //!   - 近战 Type0 DC（ACAgility）
-//!   - 远程 MC 弹道（MACAgility）→ 命中后 Slow 6s + Frozen 9s
+//!   - 远程 MC 弹道（MACAgility）→ 命中后 1/6 Slow、1/9 Frozen（各 5s，tick 2000）
 //!   - 全视野攻击范围（ViewRange）
 //!
 //! Attack（C# :18-58）：近战/远程分支。
