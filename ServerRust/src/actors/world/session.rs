@@ -448,127 +448,15 @@ impl Message<StartGameRequest> for WorldActor {
             data: self_packet,
         }).await;
 
-        // 多玩家可见性：向新玩家发送已有玩家的 ObjectPlayer
-        let existing_players: Vec<_> = self.players.values()
-            .filter(|r| r.session_id != msg.session_id)
-            .cloned()
-            .collect();
+        // 多玩家可见性：向新玩家发送已有玩家的 ObjectPlayer（同图 + 跳过隐身，#1651/#1653）
+        self.send_map_players_to(msg.session_id, &loaded_state, loaded_state.map_index).await;
 
+        // 向已有玩家发送新玩家的 ObjectPlayer（隐身新玩家不发送，#1651/#1653）
         let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
-        for existing in &existing_players {
-            if let Ok(Some(ep_state)) = existing.actor_ref.ask(GetPlayerState).await {
-                // 跳过隐身玩家
-                let is_invisible = ep_state.buffs.iter()
-                    .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
-                if is_invisible { continue; }
-                // #1651：只同步同图玩家（C# CurrentMap 视野；防幽灵玩家）
-                if ep_state.map_index != loaded_state.map_index { continue; }
-                let ep_weapon = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
-                    .and_then(|item| self.item_infos.get(&item.item_index))
-                    .map(|info| info.shape as i16).unwrap_or(-1);
-                let ep_armor = ep_state.inventory.get_equipment(EquipmentSlot::Armour)
-                    .and_then(|item| self.item_infos.get(&item.item_index))
-                    .map(|info| info.shape as i16).unwrap_or(0);
-                let ep_weapon_effect = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
-                    .and_then(|item| self.item_infos.get(&item.item_index))
-                    .map(|info| info.effect as i16).unwrap_or(0);
-                // #921：观察者（新玩家）相对色（C# GetNameColour）
-                let (at_war, enemy) = super::guild_war_flags(
-                    loaded_state.guild_name.as_deref(),
-                    ep_state.guild_name.as_deref(),
-                    &self.guild_wars,
-                );
-                let ep_colour = super::name_colour_for_viewer(
-                    ep_state.pk_points,
-                    super::is_brown(ep_state.brown_until_ms),
-                    self.is_conquest_map(ep_state.map_index),
-                    ep_state.guild_name.as_deref(),
-                    loaded_state.guild_name.as_deref(),
-                    at_war,
-                    enemy,
-                );
-                // #934：C# MapInfo.NoNames——按目标所在地图掩码
-                let ep_display_name = if self.map_infos.get(&(ep_state.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
-                    "?????"
-                } else {
-                    ep_state.name.as_str()
-                };
-                let packet = build_object_player_packet(
-                    ep_display_name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, ep_state.level,
-                    ep_colour,
-                    ep_state.class, ep_state.gender, ep_state.hair,
-                    ep_weapon, ep_weapon_effect, ep_armor,
-                    ep_state.mount_type, ep_state.is_mounted,
-                    ep_state.level_effects,
-                    ep_state.guild_name.as_deref().unwrap_or(""),
-                    crate::actors::world::guild_rank_name(ep_state.guild_rank),
-                );
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: packet,
-                }).await;
-            }
-        }
-
-        // 向已有玩家发送新玩家的 ObjectPlayer（隐身新玩家不发送）
-        let new_is_invisible = loaded_state.buffs.iter()
-            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
-        if new_is_invisible {
+        if loaded_state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == invis_tag) {
             self.invisible_sessions.insert(msg.session_id);
         }
-        if !new_is_invisible {
-            let new_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
-                .and_then(|item| self.item_infos.get(&item.item_index))
-                .map(|info| info.shape as i16).unwrap_or(-1);
-            let new_armor = loaded_state.inventory.get_equipment(EquipmentSlot::Armour)
-                .and_then(|item| self.item_infos.get(&item.item_index))
-                .map(|info| info.shape as i16).unwrap_or(0);
-            let new_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
-                .and_then(|item| self.item_infos.get(&item.item_index))
-                .map(|info| info.effect as i16).unwrap_or(0);
-            for existing in &existing_players {
-                // #921/#1651：观察者（已有玩家）相对色（C# GetNameColour）；只同步同图玩家
-                let (viewer_guild, viewer_map) = match existing.actor_ref.ask(GetPlayerState).await {
-                    Ok(Some(s)) => (s.guild_name, s.map_index),
-                    _ => (None, 0),
-                };
-                if viewer_map != loaded_state.map_index { continue; }
-                let (at_war, enemy) = super::guild_war_flags(
-                    viewer_guild.as_deref(),
-                    loaded_state.guild_name.as_deref(),
-                    &self.guild_wars,
-                );
-                let new_colour = super::name_colour_for_viewer(
-                    loaded_state.pk_points,
-                    super::is_brown(loaded_state.brown_until_ms),
-                    self.is_conquest_map(loaded_state.map_index),
-                    loaded_state.guild_name.as_deref(),
-                    viewer_guild.as_deref(),
-                    at_war,
-                    enemy,
-                );
-                // #934：C# MapInfo.NoNames——新玩家所在地图 no_names 时掩码
-                let new_display_name = if self.map_infos.get(&(loaded_state.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
-                    "?????"
-                } else {
-                    player_name.as_str()
-                };
-                let new_player_packet = build_object_player_packet(
-                    new_display_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
-                    new_colour,
-                    loaded_state.class, loaded_state.gender, loaded_state.hair,
-                    new_weapon, new_weapon_effect, new_armor,
-                    loaded_state.mount_type, loaded_state.is_mounted,
-                    loaded_state.level_effects,
-                    loaded_state.guild_name.as_deref().unwrap_or(""),
-                    crate::actors::world::guild_rank_name(loaded_state.guild_rank),
-                );
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: existing.session_id,
-                    data: new_player_packet,
-                }).await;
-            }
-        }
+        self.send_player_to_map(msg.session_id, &loaded_state, loaded_state.map_index).await;
 
         // 发送游戏进入序列（使用真实状态数据）
         let is_big_map = self.map_infos.get(&map_info_idx).map(|m| m.big_map).unwrap_or(false);
@@ -1137,9 +1025,112 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 send_opendoor(&self.gate_ref, msg.session_id, *door_idx, false).await;
                             }
                         }
+
+                        // #1653：进图传送玩家可见性同步（C# PlayerObject.Teleport → GetObjectsPassive）
+                        if let Ok(Some(mover_state)) = record.actor_ref.ask(GetPlayerState).await {
+                            // 通知旧地图其他玩家移除 mover
+                            let mut rm = Vec::new();
+                            rm.extend_from_slice(&mover_state.object_id.to_le_bytes());
+                            let remove_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rm);
+                            broadcast_to_map(&self.gate_ref, &self.players, old_map, &remove_packet).await;
+                            // 向 mover 发送新地图其他玩家
+                            self.send_map_players_to(msg.session_id, &mover_state, dest_map_u16).await;
+                            // 向新地图其他玩家发送 mover（隐身跳过）
+                            self.send_player_to_map(msg.session_id, &mover_state, dest_map_u16).await;
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+impl WorldActor {
+    /// 构建玩家 ObjectPlayer 数据包（观察者相对色/行会战；C# GetNameColour）
+    async fn build_player_object_packet(
+        &self,
+        target: &crate::actors::player::PlayerState,
+        viewer: Option<&crate::actors::player::PlayerState>,
+    ) -> Vec<u8> {
+        let target_weapon = target.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let target_armor = target.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let target_weapon_effect = target.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
+        let (at_war, enemy) = super::guild_war_flags(
+            viewer.and_then(|v| v.guild_name.as_deref()),
+            target.guild_name.as_deref(),
+            &self.guild_wars,
+        );
+        let colour = super::name_colour_for_viewer(
+            target.pk_points,
+            super::is_brown(target.brown_until_ms),
+            self.is_conquest_map(target.map_index),
+            target.guild_name.as_deref(),
+            viewer.and_then(|v| v.guild_name.as_deref()),
+            at_war,
+            enemy,
+        );
+        // #934：C# MapInfo.NoNames——按目标所在地图掩码
+        let display_name = if self.map_infos.get(&(target.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
+            "?????"
+        } else {
+            target.name.as_str()
+        };
+        build_object_player_packet(
+            display_name, target.object_id, target.x, target.y, target.direction, target.level,
+            colour,
+            target.class, target.gender, target.hair,
+            target_weapon, target_weapon_effect, target_armor,
+            target.mount_type, target.is_mounted,
+            target.level_effects,
+            target.guild_name.as_deref().unwrap_or(""),
+            crate::actors::world::guild_rank_name(target.guild_rank),
+        )
+    }
+
+    /// #1653：把同图其他玩家的 ObjectPlayer 发给 viewer（登录/进图同步；跳过隐身与跨图）
+    async fn send_map_players_to(
+        &self,
+        viewer_session: u64,
+        viewer_state: &crate::actors::player::PlayerState,
+        map_index: u16,
+    ) {
+        let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
+        for (sid, rec) in &self.players {
+            if *sid == viewer_session { continue; }
+            let Ok(Some(ep_state)) = rec.actor_ref.ask(GetPlayerState).await else { continue };
+            if ep_state.map_index != map_index { continue; }
+            let is_invisible = ep_state.buffs.iter()
+                .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+            if is_invisible { continue; }
+            let packet = self.build_player_object_packet(&ep_state, Some(viewer_state)).await;
+            let _ = self.gate_ref.tell(SendToClient { session_id: viewer_session, data: packet }).await;
+        }
+    }
+
+    /// #1653：把 mover 的 ObjectPlayer 发给同图其他玩家（跳过隐身；颜色按各观察者计算）
+    async fn send_player_to_map(
+        &self,
+        mover_session: u64,
+        mover_state: &crate::actors::player::PlayerState,
+        map_index: u16,
+    ) {
+        let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
+        if mover_state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == invis_tag) {
+            return;
+        }
+        for (sid, rec) in &self.players {
+            if *sid == mover_session { continue; }
+            let Ok(Some(viewer)) = rec.actor_ref.ask(GetPlayerState).await else { continue };
+            if viewer.map_index != map_index { continue; }
+            let packet = self.build_player_object_packet(mover_state, Some(&viewer)).await;
+            let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet }).await;
         }
     }
 }
