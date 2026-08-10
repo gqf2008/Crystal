@@ -70,7 +70,7 @@ impl MonsterBehavior for KingHydraxBehavior {
                         if fastrand::i32(0..3) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 10, damage, 1000),
+                            poison: Poison::new(PoisonType::PARALYSIS, 10, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                         });
                         }
                 } else {
@@ -86,7 +86,7 @@ impl MonsterBehavior for KingHydraxBehavior {
                         if fastrand::i32(0..2) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 10, damage, 1000),
+                            poison: Poison::new(PoisonType::GREEN, 10, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                         });
                         }
                 }

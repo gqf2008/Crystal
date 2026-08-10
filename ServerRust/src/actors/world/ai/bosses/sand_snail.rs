@@ -61,7 +61,7 @@ impl MonsterBehavior for SandSnailBehavior {
                     for sid in nearby {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                            poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                         });
                     }
                 }
