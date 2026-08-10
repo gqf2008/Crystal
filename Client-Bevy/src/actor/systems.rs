@@ -438,3 +438,55 @@ fn dir_vec(d: u8) -> (f32, f32) {
         _ => (-1.0, -1.0),
     }
 }
+
+
+/// 悬停玩家/怪物/NPC：鼠标放在目标上时，在鼠标当前位置显示名字（source=12）
+/// 对齐用户期望（“鼠标放在玩家身上后在鼠标当前位置显示出来”）；C# 原版仅头顶名字，
+/// 此处作为易用性补充，不影响原版布局。
+pub(crate) fn actor_hover_tooltip_system(
+    windows: Query<&Window>,
+    map_cameras: Query<
+        (&Camera, &GlobalTransform),
+        (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    actors: Query<
+        (Option<&PlayerName>, Option<&MonsterName>, Option<&NpcName>, &Transform),
+        (
+            Without<LocalPlayer>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+            Without<crate::ui::tooltip::TooltipBg>,
+        ),
+    >,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((map_cam, map_gtf)) = map_cameras.single() else { return };
+    let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else { return };
+    let Ok((ui_cam, ui_gtf)) = ui_cameras.single() else { return };
+    let Ok(ui_world) = ui_cam.viewport_to_world_2d(ui_gtf, cursor) else { return };
+    // UI 逻辑坐标（tooltip 面板定位用）
+    let cursor_ui = Vec2::new(ui_world.x, -ui_world.y);
+
+    let mut hit: Option<String> = None;
+    for (p, m, n, tf) in &actors {
+        let (dx, dy) = (tf.translation.x - world.x, tf.translation.y - world.y);
+        // 目标碰撞盒：脚点向上 ~110px（角色/怪物体型），左右 28px
+        if dx.abs() < 28.0 && dy > -110.0 && dy < 20.0 {
+            let name = p
+                .map(|x| x.0.clone())
+                .or_else(|| m.map(|x| x.0.clone()))
+                .or_else(|| n.map(|x| x.0.clone()));
+            if let Some(name) = name {
+                hit = Some(name);
+                break;
+            }
+        }
+    }
+    match hit {
+        Some(name) => tooltip.update(12, true, name.clone(), vec![name], cursor_ui.x, cursor_ui.y),
+        None => tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0),
+    }
+}
+

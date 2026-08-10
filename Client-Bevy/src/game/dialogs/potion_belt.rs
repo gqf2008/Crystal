@@ -282,6 +282,9 @@ fn potion_belt_ui_system(
             if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, if vert { 1945 } else { 1933 }) {
                 if let Some(sp) = sp.as_mut() {
                     sp.image = h;
+                    // C# BeltPanel_BeforeDraw：Prguse[1933/1945] 用 0.5F 透明度叠加；
+                    // 纹理本身 99% 是不透明黑块，不降 alpha 会整块黑盖住腰带
+                    sp.color = Color::srgba(1.0, 1.0, 1.0, 0.5);
                 }
             }
             let (x, y) = if vert { (BELT_VERT_X, BELT_VERT_Y) } else { (BELT_X, BELT_Y) };
