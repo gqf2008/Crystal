@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/SandSnail.cs
 //! 机制：
 //!   - 6/7：1/2 物理近战（DC）/ 1/2 魔法（MC，Type=2，毒标记→AOE 1 + 100% 绿毒 5s tick 2000）
-//!   - 1/7：Halfmoon 弧形攻击（DC，用 AOE 半径 1 近似）
+//!   - 1/7：Halfmoon 弧形攻击（DC，4 格弧）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -66,14 +66,18 @@ impl MonsterBehavior for SandSnailBehavior {
                     }
                 }
             } else {
-                // C# 1/7 HalfmoonAttack(damage, 300)：弧形，用 AOE 半径 1 近似
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                // C# 1/7 HalfmoonAttack(damage, 300)：PreviousDir 起 4 方向 × 距离 1
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
-                    radius: AOE_RADIUS,
+                    direction: dir,
+                    count: 4,
                     damage,
                     spell_id: 0,
+                    attack_type: 0,
                 });
             }
             return;

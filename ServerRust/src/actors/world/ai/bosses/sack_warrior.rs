@@ -1,7 +1,7 @@
 //! SackWarrior（布袋战士）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/SackWarrior.cs
-//! 机制：近战；2/3 Halfmoon AOE1 / 1/3 魔法近战（MC）；所有命中后 1/3 出血毒（5s，tick 1000）
+//! 机制：近战；2/3 Halfmoon（4 格弧，弧内命中目标独立 1/3 出血毒）/ 1/3 魔法近战（MC）；
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -11,7 +11,6 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
-const AOE_RADIUS: i32 = 1;
 
 pub struct SackWarriorBehavior;
 
@@ -35,14 +34,30 @@ impl MonsterBehavior for SackWarriorBehavior {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# Random.Next(3) > 0：2/3 Halfmoon / 1/3 魔法
             if fastrand::i32(0..3) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
-                    radius: AOE_RADIUS,
+                    direction: dir,
+                    count: 4,
                     damage,
                     spell_id: 0,
+                    attack_type: 0,
                 });
+                // C# CompleteAttack：每个命中目标独立 1/3 出血毒（5s，tick 1000）
+                let cells = arc_cells(monster.x, monster.y, dir, 4);
+                let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
+                    .iter().map(|p| p.session_id).collect();
+                for sid in hit {
+                    if fastrand::i32(0..3) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: sid,
+                            poison: Poison::new(PoisonType::BLEEDING, 5, damage, 1000),
+                        });
+                    }
+                }
             } else {
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -51,13 +66,13 @@ impl MonsterBehavior for SackWarriorBehavior {
                     spell_id: 0,
                     attack_type: 1,
                 });
-            }
-            // C# CompleteAttack：1/3 出血毒（5s，tick 1000）
-            if fastrand::i32(0..3) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::BLEEDING, 5, damage, 1000),
-                });
+                // C# CompleteAttack：1/3 出血毒（5s，tick 1000）
+                if fastrand::i32(0..3) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::BLEEDING, 5, damage, 1000),
+                    });
+                }
             }
             return;
         }

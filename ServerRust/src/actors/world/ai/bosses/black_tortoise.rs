@@ -1,7 +1,7 @@
 //! BlackTortoise（黑龟）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/BlackTortoise.cs
-//! 机制：AttackRange=5；近战（dist<=1）4/5 普攻 / 1/5 Halfmoon（AOE1 近似）；
+//! 机制：AttackRange=5；近战（dist<=1）4/5 普攻 / 1/5 Halfmoon（4 格弧）；
 //!      远程 MC（MACAgility）+ 命中 1/7 绿毒（5s，tick 1000）
 
 use crate::actors::world::MonsterState;
@@ -12,7 +12,6 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const ATTACK_RANGE: i32 = 5;
-const AOE_RADIUS: i32 = 1;
 
 pub struct BlackTortoiseBehavior;
 
@@ -45,13 +44,17 @@ impl MonsterBehavior for BlackTortoiseBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    monster.direction = dir;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: AOE_RADIUS,
+                        direction: dir,
+                        count: 4,
                         damage,
                         spell_id: 0,
+                        attack_type: 0,
                     });
                 }
             } else {

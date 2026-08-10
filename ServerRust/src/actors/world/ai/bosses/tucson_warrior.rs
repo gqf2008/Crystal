@@ -1,7 +1,7 @@
 //! TucsonWarrior（图森战士）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/TucsonWarrior.cs
-//! 机制：InAttackRange 2 格十字/对角；dist<=1 且 4/5 Halfmoon（AOE1 近似，DC）/
+//! 机制：InAttackRange 2 格十字/对角；dist<=1 且 4/5 Halfmoon（4 格弧，DC）/
 //!      否则 SmashAttack(1)：目标中心半径 1 AOE（MC）
 
 use crate::actors::world::MonsterState;
@@ -37,13 +37,17 @@ impl MonsterBehavior for TucsonWarriorBehavior {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# !range && Random.Next(5) > 0：近战 4/5 Halfmoon / 1/5 Smash
             if dist <= 1 && fastrand::i32(0..5) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
-                    radius: AOE_RADIUS,
+                    direction: dir,
+                    count: 4,
                     damage,
                     spell_id: 0,
+                    attack_type: 0,
                 });
             } else {
                 // C# SmashAttack(1)：目标中心半径 1

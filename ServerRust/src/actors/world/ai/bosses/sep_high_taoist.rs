@@ -6,7 +6,7 @@
 //!   - Curse（目标无 Curse 且 1/8）：Slow 5s
 //!   - MassHealing（HP<=90% 且 1/8）：TriangleAttack（Aoe 近似）
 //!   - 无宠物时召唤 Shinsu（PetLevel 3 / MaxPetLevel 7）
-//!   - SoulFireBall + HalfmoonAttack（Aoe 近似）
+//!   - SoulFireBall + HalfmoonAttack（4 格弧）
 //! 近似说明：AI 无目标毒/buff 列表，毒轮换与 Curse buff 检查用行为状态/概率近似。
 
 use crate::actors::world::MonsterState;
@@ -117,7 +117,9 @@ impl MonsterBehavior for SepHighTaoistBehavior {
                 return;
             }
 
-            // C# SoulFireBall + HalfmoonAttack（Aoe 半径 1 近似）
+            // C# SoulFireBall + HalfmoonAttack（PreviousDir 起 4 方向 × 距离 1，以怪自身为中心）
+            let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+            monster.direction = dir;
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,
@@ -125,13 +127,15 @@ impl MonsterBehavior for SepHighTaoistBehavior {
                 damage,
                 spell_id: 0,
             });
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                 attacker_oid: monster.object_id,
-                center_x: target.x,
-                center_y: target.y,
-                radius: 1,
+                center_x: monster.x,
+                center_y: monster.y,
+                direction: dir,
+                count: 4,
                 damage,
                 spell_id: 0,
+                attack_type: 0,
             });
             return;
         }

@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/FrozenKnight.cs
 //! 机制：
 //!   - InAttackRange：2 格十字/对角（同 SpittingSpider）
-//!   - 近战且 2/3：Halfmoon 弧形（DC，用 AOE 半径 1 近似）
+//!   - 近战且 2/3：Halfmoon 弧形（DC，4 格弧）
 //!   - 否则：远程 MC + CompleteRangeAttack：FindAllTargets(2, 目标位置) AOE（以目标为中心半径 2）
 
 use crate::actors::world::MonsterState;
@@ -12,7 +12,6 @@ use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
 const VIEW_RANGE: i32 = 12;
-const MELEE_AOE_RADIUS: i32 = 1;
 const RANGE_AOE_RADIUS: i32 = 2;
 
 /// C# InAttackRange：2 格十字/对角
@@ -48,13 +47,17 @@ impl MonsterBehavior for FrozenKnightBehavior {
             // C# !range && Random.Next(3) > 0：近战 2/3 Halfmoon / 1/3 远程
             let melee = dist <= 1 && fastrand::i32(0..3) > 0;
             if melee {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
-                    radius: MELEE_AOE_RADIUS,
+                    direction: dir,
+                    count: 4,
                     damage,
                     spell_id: 0,
+                    attack_type: 0,
                 });
             } else {
                 // C# 远程：RangeDamage(MC) + CompleteRangeAttack FindAllTargets(2, target)

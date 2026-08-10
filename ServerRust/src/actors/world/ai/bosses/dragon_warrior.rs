@@ -1,7 +1,7 @@
 //! DragonWarrior（龙战士）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/DragonWarrior.cs
-//! 机制：近战；4/5（2/3 base / 1/3 Halfmoon AOE1）/ 1/5 Type=2 盾击（伤害+推挤 1）+ 1/3 眩晕（5s）
+//! 机制：近战；4/5（2/3 base / 1/3 Halfmoon 4 格弧）/ 1/5 Type=2 盾击（伤害+推挤 1）+ 1/3 眩晕（5s）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -11,7 +11,6 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
-const AOE_RADIUS: i32 = 1;
 
 pub struct DragonWarriorBehavior;
 
@@ -34,6 +33,7 @@ impl MonsterBehavior for DragonWarriorBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+            monster.direction = dir;
             // C# Random.Next(5) > 0：4/5
             if fastrand::i32(0..5) > 0 {
                 // C# Random.Next(3) > 0：2/3 base / 1/3 Halfmoon
@@ -46,13 +46,15 @@ impl MonsterBehavior for DragonWarriorBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: AOE_RADIUS,
+                        direction: dir,
+                        count: 4,
                         damage,
                         spell_id: 0,
+                        attack_type: 0,
                     });
                 }
             } else {
