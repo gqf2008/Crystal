@@ -2446,7 +2446,7 @@ impl WorldActor {
 }
 
 /// 英雄虚拟 object_id 的偏移量（主人 oid + 此值，避免与真实怪物/玩家冲突）
-const HERO_OID_OFFSET: u32 = 0x1000_0000;
+pub(crate) const HERO_OID_OFFSET: u32 = 0x1000_0000;
 
 /// 朝目标走一步的纯函数版（不依赖 MonsterState，供英雄 AI 复用移动逻辑）
 fn step_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> (i32, i32, u8) {
