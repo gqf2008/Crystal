@@ -188,6 +188,8 @@ pub struct AiCtx<'a> {
     pub dragon_level: u8,
     /// 玩家快照（全图，behavior 自行按距离/map 过滤）
     pub players: &'a [PlayerSnap],
+    /// #1870：当前目标（C# Target；nearest_target 优先保持，存活/同图/射程内）
+    pub current_target: Option<u64>,
     /// 怪物快照（全图，供 Boss 互查）
     pub monsters: &'a [MonsterSnap],
     /// #1396：怪物 index → 名称映射（FloatingRock 克隆目标解析用）
@@ -242,6 +244,23 @@ pub struct AiCtx<'a> {
     pub has_master_monster_target: bool,
 }
 
+/// #1870：C# 目标保持——当前目标存活、同图且在射程内时优先返回，否则 None
+fn current_target_in_range<'a>(
+    players: &'a [PlayerSnap],
+    current: Option<u64>,
+    cx: i32,
+    cy: i32,
+    view_range: i32,
+    map_index: u16,
+) -> Option<&'a PlayerSnap> {
+    current.and_then(|cur| players.iter().find(|p| {
+        p.session_id == cur
+            && p.map_index == map_index
+            && p.hp > 0
+            && (p.x - cx).abs().max((p.y - cy).abs()) <= view_range
+    }))
+}
+
 impl<'a> AiCtx<'a> {
     /// 宠物目标选择（C# MonsterObject.ProcessSearch/ProcessTarget + Master.PMode）：
     /// - 非宠物：正常怪，最近玩家目标
@@ -277,8 +296,11 @@ impl<'a> AiCtx<'a> {
             .collect()
     }
 
-    /// 查找最近玩家（对齐 C# FindTarget 的最近目标选取）
+    /// 查找最近玩家（对齐 C# FindTarget 的最近目标选取；#1870 优先保持当前目标）
     pub fn nearest_target(&self, cx: i32, cy: i32, view_range: i32, map_index: u16) -> Option<&PlayerSnap> {
+        if let Some(p) = current_target_in_range(self.players, self.current_target, cx, cy, view_range, map_index) {
+            return Some(p);
+        }
         self.players.iter()
             .filter(|p| p.map_index == map_index && p.hp > 0)
             .min_by_key(|p| {
@@ -291,5 +313,35 @@ impl<'a> AiCtx<'a> {
                 let dy = (p.y - cy).abs();
                 dx.max(dy) <= view_range
             })
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::current_target_in_range;
+    use crate::actors::world::ai::ctx::PlayerSnap;
+
+    fn snap(id: u64, x: i32, y: i32, hp: i32) -> PlayerSnap {
+        PlayerSnap {
+            session_id: id, x, y, hp, map_index: 1, object_id: id as u32,
+            level: 30, pk_points: 0, min_dc: 10,
+        }
+    }
+
+    /// #1870：C# 目标保持——当前目标即使比最近玩家更远也保持
+    #[test]
+    fn current_target_preferred_over_nearer() {
+        // 当前目标 id=2 在 (91,100)（距离 9），最近玩家 id=1 在 (100,100)（距离 0）
+        let players = [snap(1, 100, 100, 100), snap(2, 91, 100, 100)];
+        let p = current_target_in_range(&players, Some(2), 100, 100, 12, 1).unwrap();
+        assert_eq!(p.session_id, 2, "应保持当前目标而非切到最近");
+        // 当前目标超射程 → None（回退最近）
+        assert!(current_target_in_range(&players, Some(2), 100, 100, 5, 1).is_none());
+        // 当前目标死亡 → None
+        let dead = [snap(1, 100, 100, 100), snap(2, 91, 100, 0)];
+        assert!(current_target_in_range(&dead, Some(2), 100, 100, 12, 1).is_none());
+        // 当前目标跨图 → None
+        let cross = [snap(1, 100, 100, 100), snap(2, 91, 100, 100)];
+        let p = current_target_in_range(&cross, Some(2), 100, 100, 12, 2);
+        assert!(p.is_none());
     }
 }
