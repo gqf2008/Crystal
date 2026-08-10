@@ -98,44 +98,13 @@ async fn apply_monster_hit_player(
         }).await.unwrap_or(false);
 
         // #1598：C# HumanObject.Attacked（:7215/:7307）——向同图其他玩家
-        // 广播 ObjectStruck + DamageIndicator（Broadcast 排除受害者；受害者收 S.Struck）
+        // 广播 ObjectStruck + DamageIndicator（C# CurrentMap.Broadcast 排除受害者；受害者收 S.Struck）
         if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
-            let mut struck_body = Vec::new();
-            struck_body.extend_from_slice(&victim.object_id.to_le_bytes());
-            struck_body.extend_from_slice(&attacker_oid.to_le_bytes());
-            struck_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
-            struck_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
-            struck_body.push(victim.direction);
-            let struck_packet = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
-            let mut dmg_body = Vec::new();
-            dmg_body.extend_from_slice(&damage.to_le_bytes());
-            dmg_body.push(0u8); // damage_type = normal
-            dmg_body.extend_from_slice(&victim.object_id.to_le_bytes());
-            let dmg_packet = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-            // #1710：受击/飘字只发同图其他玩家（C# CurrentMap.Broadcast 排除受害者；原实现漏过滤跨图）
-            let mut same_map_others: Vec<u64> = Vec::new();
-            for (sid, _) in players {
-                if *sid == target_session {
-                    continue;
-                }
-                if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
-                    if st.map_index == map_index {
-                        same_map_others.push(*sid);
-                    }
-                }
-            }
-            for sid in &same_map_others {
-                let _ = gate_ref.tell(SendToClient {
-                    session_id: *sid,
-                    data: struck_packet.clone(),
-                }).await;
-                let _ = gate_ref.tell(SendToClient {
-                    session_id: *sid,
-                    data: dmg_packet.clone(),
-                }).await;
-            }
+            broadcast_hit_feedback(
+                players, gate_ref, map_index, target_session,
+                victim.object_id, victim.x, victim.y, victim.direction,
+                attacker_oid, damage,
+            ).await;
         }
 
         // 被攻击时自动下坐骑
@@ -206,6 +175,47 @@ async fn apply_monster_hit_player(
     } else {
     debug!("Monster '{}' attack on {} blocked: target in safe zone", attacker_name, target_session);
 }
+}
+
+/// #1712：向同图其他玩家广播 ObjectStruck + DamageIndicator（C# CurrentMap.Broadcast 排除受害者；受害者收 S.Struck）
+async fn broadcast_hit_feedback(
+    players: &HashMap<u64, PlayerRecord>,
+    gate_ref: &ActorRef<GateActor>,
+    map_index: u16,
+    exclude_session: u64,
+    victim_oid: u32,
+    victim_x: i32,
+    victim_y: i32,
+    victim_dir: u8,
+    attacker_oid: u32,
+    damage: i32,
+) {
+    let mut struck_body = Vec::new();
+    struck_body.extend_from_slice(&victim_oid.to_le_bytes());
+    struck_body.extend_from_slice(&attacker_oid.to_le_bytes());
+    struck_body.extend_from_slice(&(victim_x as u32).to_le_bytes());
+    struck_body.extend_from_slice(&(victim_y as u32).to_le_bytes());
+    struck_body.push(victim_dir);
+    let struck_packet = build_packet_bytes(
+        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+    let mut dmg_body = Vec::new();
+    dmg_body.extend_from_slice(&damage.to_le_bytes());
+    dmg_body.push(0u8); // damage_type = normal
+    dmg_body.extend_from_slice(&victim_oid.to_le_bytes());
+    let dmg_packet = build_packet_bytes(
+        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+    // 同图其他玩家（C# CurrentMap.Broadcast 排除受害者）
+    for (sid, _) in players {
+        if *sid == exclude_session {
+            continue;
+        }
+        if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
+            if st.map_index == map_index {
+                let _ = gate_ref.tell(SendToClient { session_id: *sid, data: struck_packet.clone() }).await;
+                let _ = gate_ref.tell(SendToClient { session_id: *sid, data: dmg_packet.clone() }).await;
+            }
+        }
+    }
 }
 
 /// #1434：收集 master 的所有后代 slave oid（含多级；C# MonsterObject.SlaveList 死亡级联；不含 master 自身）
@@ -573,6 +583,14 @@ impl WorldActor {
                     attacker_session: hit.target_session,
                     damage: hit.damage,
                 }).await;
+                // #1712：Boss 远程命中反馈——同图其他玩家看受击/飘字
+                if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                    broadcast_hit_feedback(
+                        &self.players, &self.gate_ref, hit.map_index, hit.target_session,
+                        victim.object_id, victim.x, victim.y, victim.direction,
+                        hit.attacker_oid, hit.damage,
+                    ).await;
+                }
                 // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
                 if let Some((expire, lv)) = self.counter_attack.get(&hit.target_session).copied() {
                     if self.tick_count <= expire {
@@ -5027,6 +5045,14 @@ impl Message<Tick> for WorldActor {
                                 attacker_session: *sid,
                                 damage,
                             }).await;
+                            // #1712：Boss 命中反馈——同图其他玩家看受击/飘字（C# Attacked → BroadcastDamageIndicator）
+                            if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                                broadcast_hit_feedback(
+                                    &self.players, &self.gate_ref, boss_map, *sid,
+                                    victim.object_id, victim.x, victim.y, victim.direction,
+                                    attacker_oid, damage,
+                                ).await;
+                            }
                             // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
                             if let Some((expire, lv)) = self.counter_attack.get(sid).copied() {
                                 if self.tick_count <= expire {
@@ -5846,4 +5872,3 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
-
