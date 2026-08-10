@@ -1,7 +1,7 @@
 //! AvengingSpirit（复仇之魂）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/AvengingSpirit.cs（继承 AxeSkeleton）
-//! 机制：近战（dist<=1）：1/3 SinglePushAttack（伤害+推挤）/ 2/3 普攻；
+//! 机制：近战（dist<=1）：1/3 SinglePushAttack（伤害+推挤 3，等级门控）/ 2/3 普攻；
 //!      远程：RangeDamage（MC，MACAgility）+ 命中 1/7 绿毒（5s，tick 1000）
 
 use crate::actors::world::MonsterState;
@@ -44,11 +44,14 @@ impl MonsterBehavior for AvengingSpiritBehavior {
                         spell_id: 0,
                         attack_type: 1,
                     });
-                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                        session_id: target.session_id,
-                        dir,
-                        distance: 1,
-                    });
+                    // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
+                    if (target.level as i32) <= monster.level + 5 {
+                        ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                            session_id: target.session_id,
+                            dir,
+                            distance: 3,
+                        });
+                    }
                 } else {
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                         attacker_oid: monster.object_id,

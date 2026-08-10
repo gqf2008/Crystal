@@ -1,7 +1,7 @@
 //! DragonWarrior（龙战士）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/DragonWarrior.cs
-//! 机制：近战；4/5（2/3 base / 1/3 Halfmoon 4 格弧）/ 1/5 Type=2 盾击（伤害+推挤 1）+ 1/3 眩晕（5s）
+//! 机制：近战；4/5（2/3 base / 1/3 Halfmoon 4 格弧）/ 1/5 Type=2 盾击（伤害+推挤 3）+ 1/3 眩晕（5s）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -66,11 +66,14 @@ impl MonsterBehavior for DragonWarriorBehavior {
                     spell_id: 0,
                     attack_type: 2,
                 });
-                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                    session_id: target.session_id,
-                    dir,
-                    distance: 1,
-                });
+                // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
+                if (target.level as i32) <= monster.level + 5 {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir,
+                        distance: 3,
+                    });
+                }
                 if fastrand::i32(0..3) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,

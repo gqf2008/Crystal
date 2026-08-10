@@ -3,8 +3,8 @@
 //! C# 参考：Server/MirObjects/Monsters/Nadz.cs
 //! 机制：
 //!   - InAttackRange：3 格内（C# 守卫后 (x<=3&&y<=3) 恒真，即切比雪夫距离 <=3）
-//!   - 2/3 近战（C# damage=0，AC）+ 命中后 1/3 麻痹毒（5s，tick 1000）
-//!   - 1/3 半月 AOE（FindAllTargets(3)，用 AOE 半径 3 近似）
+//!   - 2/3 半月 AOE（C# CompleteAttack halfmoon=true → FindAllTargets(3)，无毒）
+//!   - 1/3 SinglePushAttack：单体伤害 + 推 3（等级门控）+ 1/3 麻痹毒（5s，tick 1000）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -36,24 +36,8 @@ impl MonsterBehavior for NadzBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            // C# Envir.Random.Next(3) > 0：2/3 近战（damage=0）/ 1/3 半月 AOE
+            // C# Envir.Random.Next(3) > 0：2/3 半月 AOE（CompleteAttack halfmoon=true → FindAllTargets(3)，无毒）
             if fastrand::i32(0..3) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage: 0,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
-                // C# 非半月：PoisonTarget(3, 5, Paralysis)：1/3 概率、5s
-                if fastrand::i32(0..3) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
-                    });
-                }
-            } else {
-                // C# Halfmoon：FindAllTargets(3)，用 AOE 半径 3 近似
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
@@ -62,6 +46,32 @@ impl MonsterBehavior for NadzBehavior {
                     damage,
                     spell_id: 0,
                 });
+            } else {
+                // 1/3 SinglePushAttack：单体伤害 + 推 3（等级门控）+ 1/3 麻痹
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 1,
+                });
+                // C# SinglePushAttack：目标等级<=怪+5 才推 3 格
+                if (target.level as i32) <= monster.level + 5 {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir,
+                        distance: 3,
+                    });
+                }
+                // C# 非半月 CompleteAttack：PoisonTarget(3, 5, Paralysis)：1/3 概率、5s
+                if fastrand::i32(0..3) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
+                    });
+                }
             }
             return;
         }

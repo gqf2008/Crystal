@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/FurbolgGuard.cs
 //! 机制：
 //!   - AttackRange=8
-//!   - 近战（dist<=1）：LineAttack(damage, 3)；若 dist<=2 且 1/3 → 带推挤 + JumpBack(3)（用远离 1 步近似）
+//!   - 近战（dist<=1）：LineAttack(damage, 3)；若 dist<=2 且 1/3 → 带推挤 2 + JumpBack(3)（用远离 1 步近似）
 //!   - 远程：ProjectileAttack（Range MC 近似）
 
 use crate::actors::world::MonsterState;
@@ -38,10 +38,11 @@ impl MonsterBehavior for FurbolgGuardBehavior {
             if dist <= 1 {
                 // C# 近战：LineAttack(3)；1/3 时带推挤 + JumpBack(3)
                 if dist <= 2 && fastrand::i32(0..3) == 0 {
+                    // C# LineAttack push：距离 = distance-1 = 2（MonsterObject.cs:3631）
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: target.session_id,
                         dir,
-                        distance: 1,
+                        distance: 2,
                     });
                     let (nx, ny, d2) = step_away(monster.x, monster.y, target.x, target.y);
                     ctx.out_moves.push((monster.object_id, nx, ny, d2));

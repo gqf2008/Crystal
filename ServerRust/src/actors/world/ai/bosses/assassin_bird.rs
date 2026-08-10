@@ -1,7 +1,7 @@
 //! AssassinBird（刺客鸟）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/AssassinBird.cs
-//! 机制：近战（dist<=1）：8/9：3/4 普攻 DC / 1/4 魔法 MC；1/9：Type=2 推挤 1
+//! 机制：近战（dist<=1）：8/9：3/4 普攻 DC / 1/4 魔法 MC；1/9：Type=2 SinglePushAttack（推挤 3，等级门控）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -50,11 +50,14 @@ impl MonsterBehavior for AssassinBirdBehavior {
                     spell_id: 0,
                     attack_type: 2,
                 });
-                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                    session_id: target.session_id,
-                    dir,
-                    distance: 1,
-                });
+                // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
+                if (target.level as i32) <= monster.level + 5 {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir,
+                        distance: 3,
+                    });
+                }
             }
             return;
         }

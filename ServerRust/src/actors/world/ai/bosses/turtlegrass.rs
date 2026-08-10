@@ -1,7 +1,7 @@
 //! Turtlegrass（龟草）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/Turtlegrass.cs（继承 ZumaMonster）
-//! 机制：InAttackRange 2 格十字/对角；3/4 base.Attack（DC）/ 1/4 SinglePushAttack（伤害+推挤）
+//! 机制：InAttackRange 2 格十字/对角；3/4 base.Attack（DC）/ 1/4 SinglePushAttack（伤害+推挤 3，等级门控）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -50,11 +50,14 @@ impl MonsterBehavior for TurtlegrassBehavior {
                     spell_id: 0,
                     attack_type: 1,
                 });
-                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                    session_id: target.session_id,
-                    dir,
-                    distance: 1,
-                });
+                // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
+                if (target.level as i32) <= monster.level + 5 {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir,
+                        distance: 3,
+                    });
+                }
             }
             return;
         }
