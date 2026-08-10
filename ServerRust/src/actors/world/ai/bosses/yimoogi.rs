@@ -40,9 +40,16 @@ impl MonsterBehavior for YimoogiBehavior {
         if self.spawn_ready_tick == 0 {
             self.spawn_ready_tick = ctx.tick_count + 40; // 4s = 40 ticks
         }
+        // 分身识别：名字带"（分身）"后缀仍命中 registry 的 contains("yimoogi")，
+        // 该实例按 C# IsChild 处理（不再召唤分身、不触发 HP<10% 传送）
+        let is_child = self.is_child || monster.name.contains("（分身）");
+        if is_child {
+            self.is_child = true;
+            self.child_spawned = true;
+        }
 
-        // HP<10% 一次性传送 + 召唤 WhiteSnake（C# Yimoogi.cs:115-135）
-        if !self.is_child && !self.final_teleport && monster.hp <= monster.max_hp / 10 {
+        // HP<10% 一次性传送 + 召唤 WhiteSnake（C# Yimoogi.cs:115-135，IsChild 跳过）
+        if !is_child && !self.final_teleport && monster.hp <= monster.max_hp / 10 {
             // 传送：全图随机可行走格（C# TeleportRandom(40,0) → 随机 walkable cell）
             // behavior 无法查 walkability，推多个候选；tick 端 out_moves 逐个校验 walkable，最后有效者生效
             let (mw, mh) = ctx.map_size;
@@ -70,11 +77,11 @@ impl MonsterBehavior for YimoogiBehavior {
         }
 
         // 出生 4s 后召唤分身（仅本体，仅一次）（C# Yimoogi.cs:137-145）
-        if !self.is_child && !self.child_spawned && ctx.tick_count >= self.spawn_ready_tick {
-            // 召唤同名分身（IsChild=true）。Rust 用 monster_name 重新匹配 Yimoogi behavior，
-            // 但 is_child 需要运行时标记——简化：召唤物名带后缀避免再次触发分身
+        if !is_child && !self.child_spawned && ctx.tick_count >= self.spawn_ready_tick {
+            // 召唤同名分身（C# IsChild=true）：名字带"（分身）"后缀仍命中 registry 的
+            // contains("yimoogi")，分身实例通过名字标记识别自身为 is_child，避免失控再召唤
             ctx.out_summons.push(crate::actors::world::ai::BossSummon {
-                monster_name: format!("{} 分身", monster.name), // 分身不匹配 Yimoogi 注册
+                monster_name: format!("{}（分身）", monster.name),
                 x: monster.x + DIR_DX[monster.direction as usize % 8],
                 y: monster.y + DIR_DY[monster.direction as usize % 8],
                 is_slave: true,
