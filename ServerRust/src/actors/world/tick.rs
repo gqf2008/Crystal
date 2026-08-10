@@ -155,7 +155,7 @@ async fn apply_monster_hit_player(
 
             if died {
                 let died_packet = WorldActor::build_object_died_packet(
-                    defender.object_id, defender.x, defender.y, defender.direction);
+                    defender.object_id, defender.x, defender.y, defender.direction, 0u8);
                 // #1710：死亡动画只发同图玩家（C# CurrentMap.Broadcast；原实现漏过滤跨图）
                 for (sid, _) in players {
                     if let Ok(Some(st)) = players.get(sid).expect("player exists").actor_ref.ask(GetPlayerState).await {
@@ -5836,7 +5836,9 @@ impl Message<Tick> for WorldActor {
                         let first_died = monster.behavior.mark_death_announced();
                         if first_died {
                             let died_packet = Self::build_object_died_packet(
-                                *oid, monster.x, monster.y, monster.direction);
+                                *oid, monster.x, monster.y, monster.direction,
+                                    Self::monster_death_type(&monster.name, monster.master_session.is_some()),
+                                );
                             broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &died_packet).await;
                             debug!("Monster #{} died, corpse kept for revive", oid);
                         }
@@ -5849,7 +5851,10 @@ impl Message<Tick> for WorldActor {
                     for soid in slave_oids {
                         self.slave_master.remove(&soid);
                         if let Some(slave) = self.monsters.remove(&soid) {
-                            let slave_died = Self::build_object_died_packet(soid, slave.x, slave.y, slave.direction);
+                            let slave_died = Self::build_object_died_packet(
+                                soid, slave.x, slave.y, slave.direction,
+                                Self::monster_death_type(&slave.name, slave.master_session.is_some()),
+                            );
                             let slave_removed = Self::build_object_remove_packet(soid);
                             broadcast_to_map(&self.gate_ref, &self.players, slave.map_index, &slave_died).await;
                             broadcast_to_map(&self.gate_ref, &self.players, slave.map_index, &slave_removed).await;
@@ -5883,7 +5888,9 @@ impl Message<Tick> for WorldActor {
                     }
                     // 发送 ObjectDied（死亡动画）
                     let died_packet = Self::build_object_died_packet(
-                        *oid, monster.x, monster.y, monster.direction);
+                        *oid, monster.x, monster.y, monster.direction,
+                                    Self::monster_death_type(&monster.name, monster.master_session.is_some()),
+                                );
                     // 发送 ObjectRemove（清理实体）
                     let remove_packet = Self::build_object_remove_packet(*oid);
                     broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &died_packet).await;
@@ -6447,6 +6454,38 @@ mod tests {
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)]), (false, true));
         // SLOW 不阻塞
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)]), (false, false));
+    }
+
+    /// #1790：ObjectDied.Type 映射（C#：HumanAssassin=2 / Sep*·HumanWizard 有主=1 / 其余 0）
+    #[test]
+    fn test_monster_death_type_mapping() {
+        use super::WorldActor;
+        // HumanAssassin 恒 2（暗体特效死亡）
+        assert_eq!(WorldActor::monster_death_type("HumanAssassin", false), 2);
+        assert_eq!(WorldActor::monster_death_type("HumanAssassin", true), 2);
+        // Sep*/HumanWizard 有 master → 1（特效+立即移除）
+        assert_eq!(WorldActor::monster_death_type("SepHighWarrior", true), 1);
+        assert_eq!(WorldActor::monster_death_type("SepWarrior", true), 1);
+        assert_eq!(WorldActor::monster_death_type("sephigharcher", true), 1);
+        assert_eq!(WorldActor::monster_death_type("HumanWizard", true), 1);
+        // 无 master / 其他怪 → 0（尸体动画）
+        assert_eq!(WorldActor::monster_death_type("SepHighWarrior", false), 0);
+        assert_eq!(WorldActor::monster_death_type("HumanWizard", false), 0);
+        assert_eq!(WorldActor::monster_death_type("HornedCommander", true), 0);
+        assert_eq!(WorldActor::monster_death_type("", false), 0);
+    }
+
+    /// #1790：ObjectDied 包体 death_type 位置（4B 头 + oid/x/y/dir/type）
+    #[test]
+    fn test_object_died_body_layout() {
+        use super::WorldActor;
+        let body = WorldActor::build_object_died_packet(0x11223344, 11, 22, 3, 2);
+        assert_eq!(body.len(), 18); // 4B 头 + 14B body
+        assert_eq!(&body[4..8], &0x11223344u32.to_le_bytes());
+        assert_eq!(&body[8..12], &11u32.to_le_bytes());
+        assert_eq!(&body[12..16], &22u32.to_le_bytes());
+        assert_eq!(body[16], 3); // direction
+        assert_eq!(body[17], 2); // death_type
     }
 }
 

@@ -2189,7 +2189,7 @@ impl Message<ChatRequest> for WorldActor {
                                     attacker_id: 0, attacker_session: 0, damage: i32::MAX,
                                 }).await.unwrap_or(false);
                                 if died {
-                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction);
+                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction, 0u8);
                                     for (sid, _) in &self.players {
                                         let _ = self.gate_ref.tell(SendToClient {
                                             session_id: *sid,
@@ -2209,7 +2209,7 @@ impl Message<ChatRequest> for WorldActor {
                                     attacker_id: 0, attacker_session: 0, damage: i32::MAX,
                                 }).await.unwrap_or(false);
                                 if died {
-                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction);
+                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction, 0u8);
                                     for (sid, _) in &self.players {
                                         let _ = self.gate_ref.tell(SendToClient {
                                             session_id: *sid,

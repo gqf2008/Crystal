@@ -879,7 +879,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     }
                     if pvp_died {
                                 let died_packet = Self::build_object_died_packet(
-                                    other_state.object_id, other_state.x, other_state.y, other_state.direction);
+                                    other_state.object_id, other_state.x, other_state.y, other_state.direction, 0u8);
                                 for (sid, _) in &self.players {
                                     let _ = self.gate_ref.tell(SendToClient {
                                         session_id: *sid,
@@ -1697,7 +1697,7 @@ impl WorldActor {
         if pvp_died {
                     // 目标死亡处理
                     let died_packet = Self::build_object_died_packet(
-                        defender_state.object_id, defender_state.x, defender_state.y, defender_state.direction);
+                        defender_state.object_id, defender_state.x, defender_state.y, defender_state.direction, 0u8);
                     for (sid, _) in &self.players {
                         let _ = self.gate_ref.tell(SendToClient {
                             session_id: *sid,

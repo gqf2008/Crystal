@@ -4823,7 +4823,10 @@ impl WorldActor {
         let mut cleared = 0usize;
         for oid in to_clear {
             if let Some(monster) = self.monsters.get(&oid) {
-                let died = Self::build_object_died_packet(oid, monster.x, monster.y, monster.direction);
+                let died = Self::build_object_died_packet(
+                    oid, monster.x, monster.y, monster.direction,
+                    Self::monster_death_type(&monster.name, monster.master_session.is_some()),
+                );
                 let remove = Self::build_object_remove_packet(oid);
                 let online: Vec<u64> = self.players.keys().copied().collect();
                 for session_id in online {
@@ -5262,14 +5265,26 @@ impl WorldActor {
         None
     }
 
-    /// 构建 ObjectDied 数据包
-    pub(crate) fn build_object_died_packet(object_id: u32, x: i32, y: i32, direction: u8) -> Vec<u8> {
+    /// #1790：C# ObjectDied.Type——0=尸体动画；Sep*/HumanWizard 有 Master=1（特效+立即移除）；HumanAssassin=2（暗体特效）
+    pub(crate) fn monster_death_type(name: &str, has_master: bool) -> u8 {
+        let n = name.to_ascii_lowercase();
+        if n == "humanassassin" {
+            return 2;
+        }
+        if has_master && (n.starts_with("sep") || n == "humanwizard") {
+            return 1;
+        }
+        0
+    }
+
+    /// 构建 ObjectDied 数据包（death_type 见 monster_death_type）
+    pub(crate) fn build_object_died_packet(object_id: u32, x: i32, y: i32, direction: u8, death_type: u8) -> Vec<u8> {
         let mut body = Vec::with_capacity(14);
         body.extend_from_slice(&object_id.to_le_bytes());
         body.extend_from_slice(&(x as u32).to_le_bytes());
         body.extend_from_slice(&(y as u32).to_le_bytes());
         body.push(direction);
-        body.push(0u8);
+        body.push(death_type);
         build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &body)
     }
 
