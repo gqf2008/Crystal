@@ -33,12 +33,17 @@ impl MonsterBehavior for MantisBehavior {
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            // C# Envir.Random.Next(5) > 0：80% 物理 / 20% 魔法（Type=1）
+            // C# Envir.Random.Next(5) > 0：80% 物理 / 20% 魔法（Type=1，Mantis.cs:39-41 用 MC）
             let magic = fastrand::i32(0..5) == 0;
+            let dmg = if magic {
+                crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1)
+            } else {
+                damage
+            };
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,
-                damage,
+                damage: dmg,
                 spell_id: 0,
                 attack_type: if magic { 1 } else { 0 },
             });

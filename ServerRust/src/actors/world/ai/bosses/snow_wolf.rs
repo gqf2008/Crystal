@@ -51,13 +51,14 @@ impl MonsterBehavior for SnowWolfBehavior {
                     attack_type: 0,
                 });
             } else {
-                // C# CompleteAttack：FindAllTargets(2) AOE + 减速/冰冻毒
+                // C# 魔法近战 Type1 = MC（SnowWolf.cs:40-41），命中后 FindAllTargets(2) AOE
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
                     center_y: monster.y,
                     radius: AOE_RADIUS,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
