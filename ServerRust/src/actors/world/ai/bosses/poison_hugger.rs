@@ -89,7 +89,7 @@ impl PoisonHuggerBehavior {
                 spell_id: 0,
                 attack_type: 0,
             });
-            // C# PoisonTarget(5, 5, Green, 2000)：1/5 概率、值=SP（DC 近似）
+            // C# PoisonTarget(5, 5, Green, 2000)：1/5 概率、值=SP
             if fastrand::i32(0..5) == 0 {
                 // C# 毒值 = SP 攻
                 let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);

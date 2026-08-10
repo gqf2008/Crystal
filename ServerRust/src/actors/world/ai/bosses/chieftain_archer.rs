@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/ChieftainArcher.cs
 //! 机制：
 //!   - AttackRange=6 远程风筝（<6 远离，>=6 接近）
-//!   - 攻击：等级 0/1/2 三态（DC/MC/SC，此处 SC 用 DC 近似）；等级 2 命中后推挤 1 格
+//!   - 攻击：等级 0/1/2 三态（DC/MC/SC）；等级 2 命中后推挤 1 格
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
