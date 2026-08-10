@@ -664,7 +664,9 @@ const SKILL_SLOT_H: f32 = 28.0;
 
 fn spawn_skill_bar(
     mut commands: Commands,
+    mut libs: ResMut<crate::map_renderer::GameLibraries>,
     mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     bar: Res<SkillBarState>,
@@ -677,6 +679,10 @@ if !crate::ui::sprite_ui::ui_enabled("skill") {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // C# SkillBarDialog 底色条 Prguse[2190]（没有它，8 个半透明格子在左上角悬空，看不出是技能栏）
+    if let Some(h) = crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, crate::resources::libraries::LibraryName::Prguse, 2190) {
+        crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, bar.pos.0, bar.pos.1, 2.4, 1.0);
+    }
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     for i in 0..8usize {
         let x = bar.pos.0 + i as f32 * (SKILL_SLOT_W + 4.0);
