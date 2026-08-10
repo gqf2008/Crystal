@@ -2228,8 +2228,8 @@ impl WorldActor {
             attack_body.extend_from_slice(&(ai.y as u32).to_le_bytes());
             attack_body.push(ai.direction);
             attack_body.push(*spell_id);
-            attack_body.extend_from_slice(&0u16.to_le_bytes());
-            attack_body.push(0u8);
+            attack_body.push(0u8); // level
+            attack_body.push(0u8); // attack_type
             let attack_packet = build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::ObjectAttack as i16,
                 &attack_body,

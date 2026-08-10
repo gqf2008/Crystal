@@ -301,7 +301,7 @@ impl Message<WorldAttackRequest> for WorldActor {
             attack_body.extend_from_slice(&(result.y as u32).to_le_bytes());
             attack_body.push(result.direction);
             attack_body.push(result.spell);
-            attack_body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+            attack_body.push(0u8); // level
             attack_body.push(0u8); // attack_type
             let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
             // #1580：本地玩家自己的攻击动画（C# 客户端本地 ActionFeed；Bevy 依赖服务端回显）

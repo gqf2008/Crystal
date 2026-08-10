@@ -22,7 +22,7 @@ impl PacketHandler for CombatHandler {
                         location_y: packet.location_y,
                         direction: packet.direction,
                         spell: packet.spell,
-                        level: packet.level,
+                        level: packet.level as u16,
                         attack_type: packet.attack_type,
                     });
                     tracing::trace!(

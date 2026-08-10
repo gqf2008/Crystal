@@ -1483,9 +1483,9 @@ impl WorldActor {
             attack_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
             attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
             attack_body.push(monster.direction);
-            attack_body.push(0u8);
-            attack_body.extend_from_slice(&0u16.to_le_bytes());
-            attack_body.push(0u8);
+            attack_body.push(0u8); // spell
+            attack_body.push(0u8); // level
+            attack_body.push(0u8); // attack_type
             let attack_packet = build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
             // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
@@ -4690,8 +4690,8 @@ impl Message<Tick> for WorldActor {
                                 heal_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
                                 heal_body.push(monster.direction);
                                 heal_body.push(SPELL_HEALING);
-                                heal_body.extend_from_slice(&0u16.to_le_bytes());
-                                heal_body.push(0u8);
+                                heal_body.push(0u8); // level
+                                heal_body.push(0u8); // attack_type
                                 let heal_packet = build_packet_bytes(
                                     mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &heal_body);
                                 // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
@@ -4795,8 +4795,8 @@ impl Message<Tick> for WorldActor {
                             attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
                             attack_body.push(monster.direction);
                             attack_body.push(spell_id);
-                            attack_body.extend_from_slice(&0u16.to_le_bytes());
-                            attack_body.push(0u8);
+                            attack_body.push(0u8); // level
+                            attack_body.push(0u8); // attack_type
                             build_packet_bytes(
                                 mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body)
                         };
@@ -5098,17 +5098,25 @@ impl Message<Tick> for WorldActor {
             // #1013：怪物互伤伤害（C# StoneTrap 嘲讽后怪物攻击目标；循环外应用）
             for (aid, tmid, damage) in &monster_attacks {
                 let attacker_stats = self.monsters.get(aid).map(|m| m.to_combat_stats()).unwrap_or_default();
+                // #1770：攻击者位置/朝向（ObjectAttack 包体需要）
+                let (ax, ay, adir) = self.monsters.get(aid)
+                    .map(|m| (m.x, m.y, m.direction))
+                    .unwrap_or((0, 0, 0));
                 if let Some(tm) = self.monsters.get_mut(tmid) {
                     // #1768：怪物互伤按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中
                     let (actual, is_miss) = resolve_monster_vs_monster(
                         &attacker_stats, &tm.to_combat_stats(), *damage,
                         mir2_shared::enums::DefenceType::AcAgility,
                     );
-                    // 广播 ObjectAttack（怪 A 攻击怪 B）
+                    // 广播 ObjectAttack（怪 A 攻击怪 B；#1770 补全 16B 包体）
                     let mut attack_body = Vec::new();
                     attack_body.extend_from_slice(&aid.to_le_bytes());
-                    attack_body.push(0u8); // direction
-                    attack_body.push(0u8); // spell=0
+                    attack_body.extend_from_slice(&(ax as u32).to_le_bytes());
+                    attack_body.extend_from_slice(&(ay as u32).to_le_bytes());
+                    attack_body.push(adir);
+                    attack_body.push(0u8); // spell
+                    attack_body.push(0u8); // level
+                    attack_body.push(0u8); // attack_type
                     let attack_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
                     // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
@@ -5364,7 +5372,7 @@ impl Message<Tick> for WorldActor {
                     attack_body.extend_from_slice(&(boss_y as u32).to_le_bytes());
                     attack_body.push(boss_dir);
                     attack_body.push(spell_id);
-                    attack_body.extend_from_slice(&0u16.to_le_bytes());
+                    attack_body.push(0u8); // level
                     attack_body.push(attack_type);
                     build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body)
