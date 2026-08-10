@@ -30,6 +30,12 @@ pub trait MonsterBehavior: Send + Sync + 'static {
         damage
     }
 
+    /// #1920：受击预处理（带 monster 引用，供需要读自身属性的行为使用，如 HellKeeper 护甲减伤）
+    /// 默认转发 on_attacked，保持现有覆盖行为不变。
+    fn on_attacked_with_monster(&mut self, _monster: &mut MonsterState, damage: i32) -> i32 {
+        self.on_attacked(damage)
+    }
+
     /// 中毒预处理（返回 true 接受、false 拒绝；HellLord/TreeQueen 免疫返 false）
     fn on_poison(&mut self, _poison: Poison) -> bool {
         true
