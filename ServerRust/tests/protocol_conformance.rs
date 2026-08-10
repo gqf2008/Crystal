@@ -147,6 +147,7 @@ async fn start_server_with_world() -> u16 {
         safe_zone_healing: false,
         experience_list: Vec::new(),
         fishing_cfg: Default::default(),
+        random_item_stats: Vec::new(),
         guild_buff_infos: Vec::new(),
     });
     let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -399,3 +400,4 @@ fn test_startgame_full_flow() {
     assert!(got_startgame, "Expected StartGame response from server (got map_changed={} userinfo={} health={} loc={})", got_map_changed, got_userinfo, got_health, got_location);
     });
 }
+

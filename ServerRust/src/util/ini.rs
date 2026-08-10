@@ -274,3 +274,100 @@ BuffExpRate=0
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+/// #1749：C# Settings.RandomItemStatsList（Configs/RandomItemStats.ini）——掉落随机附加属性配置
+/// 解析 Item0..ItemN 节，字段名与 C# 一致（ini key 统一小写）
+pub fn load_random_item_stats(configs_dir: &Path) -> Vec<mir2_shared::data::item::RandomItemStat> {
+    let path = configs_dir.join("RandomItemStats.ini");
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let parsed = parse_ini(&content);
+    let mut out = Vec::new();
+    for i in 0..256 {
+        let section = format!("item{}", i);
+        if !parsed.contains_key(&section) {
+            break;
+        }
+        let mut s = mir2_shared::data::item::RandomItemStat::default();
+        macro_rules! rd {
+            ($key:literal, $field:ident) => {
+                s.$field = ini_get_i64(&parsed, &section, $key, 0).clamp(0, 255) as u8;
+            };
+        }
+        rd!("maxdurachanCe", max_dura_chance);
+        rd!("maxdurastatchance", max_dura_stat_chance);
+        rd!("maxduramaxstat", max_dura_max_stat);
+        rd!("maxacchance", max_ac_chance);
+        rd!("maxacstatchance", max_ac_stat_chance);
+        rd!("maxacmaxstat", max_ac_max_stat);
+        rd!("maxmacchance", max_mac_chance);
+        rd!("maxmacstatchance", max_mac_stat_chance);
+        rd!("maxmacmaxstat", max_mac_max_stat);
+        rd!("maxdcchance", max_dc_chance);
+        rd!("maxdcstatchance", max_dc_stat_chance);
+        rd!("maxdcmaxstat", max_dc_max_stat);
+        rd!("maxmcchance", max_mc_chance);
+        rd!("maxmcstatchance", max_mc_stat_chance);
+        rd!("maxmcmaxstat", max_mc_max_stat);
+        rd!("maxscchance", max_sc_chance);
+        rd!("maxscstatchance", max_sc_stat_chance);
+        rd!("maxscmaxstat", max_sc_max_stat);
+        rd!("accuracychance", accuracy_chance);
+        rd!("accuracystatchance", accuracy_stat_chance);
+        rd!("accuracymaxstat", accuracy_max_stat);
+        rd!("agilitychance", agility_chance);
+        rd!("agilitystatchance", agility_stat_chance);
+        rd!("agilitymaxstat", agility_max_stat);
+        rd!("hpchance", hp_chance);
+        rd!("hpstatchance", hp_stat_chance);
+        rd!("hpmaxstat", hp_max_stat);
+        rd!("mpchance", mp_chance);
+        rd!("mpstatchance", mp_stat_chance);
+        rd!("mpmaxstat", mp_max_stat);
+        rd!("strongchance", strong_chance);
+        rd!("strongstatchance", strong_stat_chance);
+        rd!("strongmaxstat", strong_max_stat);
+        rd!("magicresistchance", magic_resist_chance);
+        rd!("magicresiststatchance", magic_resist_stat_chance);
+        rd!("magicresistmaxstat", magic_resist_max_stat);
+        rd!("poisonresistchance", poison_resist_chance);
+        rd!("poisonresiststatchance", poison_resist_stat_chance);
+        rd!("poisonresistmaxstat", poison_resist_max_stat);
+        rd!("hprecovchance", hp_recovery_chance);
+        rd!("hprecovstatchance", hp_recovery_stat_chance);
+        rd!("hprecovmaxstat", hp_recovery_max_stat);
+        rd!("mprecovchance", mp_recovery_chance);
+        rd!("mprecovstatchance", mp_recovery_stat_chance);
+        rd!("mprecovmaxstat", mp_recovery_max_stat);
+        rd!("poisonrecovchance", poison_recovery_chance);
+        rd!("poisonrecovstatchance", poison_recovery_stat_chance);
+        rd!("poisonrecovmaxstat", poison_recovery_max_stat);
+        rd!("criticalratechance", critical_rate_chance);
+        rd!("criticalratestatchance", critical_rate_stat_chance);
+        rd!("criticalratemaxstat", critical_rate_max_stat);
+        rd!("criticaldamagechance", critical_damage_chance);
+        rd!("criticaldamagestatchance", critical_damage_stat_chance);
+        rd!("criticaldamagemaxstat", critical_damage_max_stat);
+        rd!("freezechance", freeze_chance);
+        rd!("freezestatchance", freeze_stat_chance);
+        rd!("freezemaxstat", freeze_max_stat);
+        rd!("poisonattackchance", poison_attack_chance);
+        rd!("poisonattackstatchance", poison_attack_stat_chance);
+        rd!("poisonattackmaxstat", poison_attack_max_stat);
+        rd!("attackspeedchance", attack_speed_chance);
+        rd!("attackspeedstatchance", attack_speed_stat_chance);
+        rd!("attackspeedmaxstat", attack_speed_max_stat);
+        rd!("luckchance", luck_chance);
+        rd!("luckstatchance", luck_stat_chance);
+        rd!("luckmaxstat", luck_max_stat);
+        rd!("cursechance", curse_chance);
+        rd!("slotchance", slot_chance);
+        rd!("slotstatchance", slot_stat_chance);
+        rd!("slotmaxstat", slot_max_stat);
+        out.push(s);
+    }
+    out
+}
+
