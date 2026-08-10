@@ -474,6 +474,18 @@ pub enum MonsterAiState {
     Return,
 }
 
+/// #1888：怪物友军增益（C# HornedArcherBuff/ColdArcherBuff；应用时直接加减属性，过期回退）
+#[derive(Debug, Clone)]
+pub struct MonsterBuff {
+    pub dc_min: i32,
+    pub dc_max: i32,
+    pub ac_min: i32,
+    pub ac_max: i32,
+    pub mac_min: i32,
+    pub mac_max: i32,
+    pub remaining_ticks: u32,
+}
+
 /// 运行时怪物状态
 pub struct MonsterState {
     pub object_id: u32,
@@ -551,6 +563,8 @@ pub struct MonsterState {
     pub last_hit_damage: i32,
     /// 运行时中毒/负面状态列表
     pub poison_list: Vec<crate::combat::poison::Poison>,
+    /// #1888：友军增益列表（HornedArcher/ColdArcher；每 tick 减时，过期回退属性）
+    pub monster_buffs: Vec<MonsterBuff>,
     /// 是否为亡灵类型（ThunderBolt +50%、TurnUndead 秒杀用，C# MonsterInfo.Undead）
     pub undead: bool,
     /// 主人 session（None=普通怪，Some=召唤物/奴仆）
@@ -3669,6 +3683,7 @@ impl WorldActor {
                                     level: monster_info.level,
                                     effect: monster_info.effect,
                                     damage_reduction_percent: 0,
+                                    monster_buffs: Vec::new(),
                                     poison_list: Vec::new(),
                                     last_hit_damage: 0,
             undead: false,
@@ -3952,6 +3967,7 @@ impl WorldActor {
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
                                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
                                         luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+                                        monster_buffs: Vec::new(),
                                         poison_list: Vec::new(),
                                         last_hit_damage: 0, undead: info.undead,
                                 rarity: 0,
@@ -4836,6 +4852,7 @@ impl WorldActor {
                 level: info.level,
                 effect: info.effect,
                 damage_reduction_percent: 0,
+                monster_buffs: Vec::new(),
                 poison_list: Vec::new(),
                 last_hit_damage: 0,
                 undead: info.undead,
@@ -7267,6 +7284,7 @@ async fn spawn_npcs_and_monsters(
             level: monster_level,
             effect: monster_effect,
             damage_reduction_percent: 0,
+            monster_buffs: Vec::new(),
             poison_list: Vec::new(),
             last_hit_damage: 0,
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
@@ -7356,6 +7374,7 @@ async fn spawn_npcs_and_monsters(
                         level: monster_db.level,
                         effect: monster_db.effect,
                         damage_reduction_percent: 0,
+                        monster_buffs: Vec::new(),
                         poison_list: Vec::new(),
                         last_hit_damage: 0,
             undead: false,
@@ -7510,6 +7529,7 @@ mod tests {
             level: 50,
             effect: 0,
             damage_reduction_percent: 0,
+            monster_buffs: Vec::new(),
             poison_list: Vec::new(),
             last_hit_damage: 0,
             undead: false,
