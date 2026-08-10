@@ -688,6 +688,26 @@ fn hold_move_system(
             let direction_changed = control.hold_target != Some((new_dir as i32, 0))
                 || control.hold_run != Some(run);
 
+            // 跟随路径中：鼠标目标格变化 → 重算 A* 路径（绕障且响应新目标）
+            if !lm.path.is_empty() {
+                if let Some(map) = &game_data.map {
+                    let mouse_tile = world_to_tile(world.x, world.y);
+                    let last_node = *lm.path.back().unwrap_or(&from_tile);
+                    if mouse_tile != last_node && mouse_tile != from_tile {
+                        if let Some(p) = crate::game::pathfinding::find_path(map, from_tile, mouse_tile) {
+                            if let Some(&first) = p.first() {
+                                if map.is_walkable(first.0, first.1) {
+                                    lm.path = p.into();
+                                    lm.last = None;
+                                    lm.step_origin = None;
+                                    lm.run = run;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 右键按住且鼠标距玩家 <= 2 格 → 只转向（C# GameScene.cs:11614）
             if run && (world - Vec2::new(ptf.translation.x, ptf.translation.y)).length() <= TILE_WIDTH * 2.0 {
                 if direction_changed {
@@ -785,8 +805,9 @@ fn hold_move_system(
                 }
             }
 
-            let need_step = chosen.is_some()
-                && (direction_changed || lm.path.is_empty());
+            // 关键：有 A* 路径时不做方向步进（否则 direction_changed 会顶掉绕障路径，
+            // 玩家又直冲墙）；路径走完或为空时才恢复方向驱动
+            let need_step = chosen.is_some() && lm.path.is_empty();
             if let Some((d, steps)) = chosen {
                 if need_step {
                     // 立即转向（C# Standing direction 语义：即使不可走也先转方向）
