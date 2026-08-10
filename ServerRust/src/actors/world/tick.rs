@@ -37,6 +37,145 @@ fn build_object_range_attack_body(
     body
 }
 
+/// #1703：普通 Ranged/Mage 怪物远程伤害延迟结算项（C# DelayedAction RangeDamage）
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RangedPendingHit {
+    /// 到期 tick（100ms/tick）
+    pub fire_tick: u64,
+    pub attacker_oid: u32,
+    pub target_session: u64,
+    pub damage: i32,
+    pub map_index: u16,
+    /// 攻击时目标位置（弹道落地时用于安全区/伤害广播定位）
+    pub px: i32,
+    pub py: i32,
+    pub target_in_safe: bool,
+}
+/// #1703：怪物命中玩家结算（C# Attacked / DelayedAction RangeDamage 落地）：
+/// 伤害 + ObjectStruck/DamageIndicator 广播 + 下坐骑 + 装备耐久 + 死亡掉落/经验惩罚。
+/// 近战即时调用与远程延迟结算共用（避免逻辑分叉）。
+async fn apply_monster_hit_player(
+    players: &HashMap<u64, PlayerRecord>,
+    gate_ref: &ActorRef<GateActor>,
+    death_exp_penalty_percent: u32,
+    attacker_oid: u32,
+    attacker_name: &str,
+    target_session: u64,
+    damage: i32,
+    px: i32,
+    py: i32,
+    map_index: u16,
+    target_in_safe: bool,
+    death_drops: &mut Vec<(u64, i32, i32, u16)>,
+    dismount_sessions: &mut Vec<u64>,
+    broken_armor: &mut Vec<(u64, EquipmentSlot)>,
+) {
+    if !target_in_safe {
+    // 伤害
+    if let Some(record) = players.get(&target_session) {
+        let died = record.actor_ref.ask(TakeDamage {
+            attacker_id: attacker_oid,
+            attacker_session: target_session,
+            damage,
+        }).await.unwrap_or(false);
+
+        // #1598：C# HumanObject.Attacked（:7215/:7307）——向同图其他玩家
+        // 广播 ObjectStruck + DamageIndicator（Broadcast 排除受害者；受害者收 S.Struck）
+        if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+            let mut struck_body = Vec::new();
+            struck_body.extend_from_slice(&victim.object_id.to_le_bytes());
+            struck_body.extend_from_slice(&attacker_oid.to_le_bytes());
+            struck_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
+            struck_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
+            struck_body.push(victim.direction);
+            let struck_packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+            let mut dmg_body = Vec::new();
+            dmg_body.extend_from_slice(&damage.to_le_bytes());
+            dmg_body.push(0u8); // damage_type = normal
+            dmg_body.extend_from_slice(&victim.object_id.to_le_bytes());
+            let dmg_packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+            for (sid, _) in players {
+                if *sid == target_session {
+                    continue;
+                }
+                let _ = gate_ref.tell(SendToClient {
+                    session_id: *sid,
+                    data: struck_packet.clone(),
+                }).await;
+                let _ = gate_ref.tell(SendToClient {
+                    session_id: *sid,
+                    data: dmg_packet.clone(),
+                }).await;
+            }
+        }
+
+        // 被攻击时自动下坐骑
+        if !died {
+            dismount_sessions.push(target_session);
+        }
+
+        // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1；
+        // #1230 致死也扣——C# DamageDura 在 ChangeHP 前调用）
+        {
+            let armor_slots = [
+                EquipmentSlot::Armour,
+                EquipmentSlot::Helmet,
+                EquipmentSlot::BraceletL,
+                EquipmentSlot::BraceletR,
+                EquipmentSlot::RingL,
+                EquipmentSlot::RingR,
+                EquipmentSlot::Shoes,
+                EquipmentSlot::Necklace,
+            ];
+            for slot in armor_slots {
+                let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                    slot,
+                    amount: 1,
+                }).await.unwrap_or(false);
+                if broke {
+                    debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
+                    // 延迟到怪物循环结束后广播（避免借用冲突）
+                    broken_armor.push((target_session, slot));
+                }
+            }
+        }
+
+        if died {
+            if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                let died_packet = WorldActor::build_object_died_packet(
+                    victim.object_id, victim.x, victim.y, victim.direction);
+                for (sid, _) in players {
+                    let _ = gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: died_packet.clone(),
+                    }).await;
+                }
+                death_drops.push((target_session, victim.x, victim.y, victim.map_index));
+
+                // 死亡经验惩罚（配置百分比；默认 0=关闭，对齐 C# 无通用死亡惩罚）
+                if death_exp_penalty_percent > 0 {
+                    let pct = (death_exp_penalty_percent.min(100)) as i64;
+                    let penalty = ((victim.max_experience as i64 * pct) / 100).max(1) as i32;
+                    let deducted = record.actor_ref.ask(crate::actors::player::DeductExperience {
+                        amount: penalty,
+                    }).await.unwrap_or(0);
+                    if deducted > 0 {
+                        send_system_message(
+                            &gate_ref, target_session,
+                            &format!("你损失了 {} 经验值", deducted)
+                        );
+                    }
+                }
+            }
+        }
+    }
+    } else {
+    debug!("Monster '{}' attack on {} blocked: target in safe zone", attacker_name, target_session);
+}
+}
+
 /// #1434：收集 master 的所有后代 slave oid（含多级；C# MonsterObject.SlaveList 死亡级联；不含 master 自身）
 fn collect_slave_cascade(master: u32, slave_master: &std::collections::HashMap<u32, u32>) -> Vec<u32> {
     let mut out = Vec::new();
@@ -332,6 +471,47 @@ impl WorldActor {
     }
 
     /// #1290：C# ProcessRegen PotTime——药水池每 200ms 处理（PerTickRegen = 5 + Level/10）
+    /// #1703：怪物远程伤害延迟结算（C# DelayedAction RangeDamage）
+    pub(crate) async fn tick_ranged_pending(&mut self) {
+        if self.ranged_pending.is_empty() {
+            return;
+        }
+        let now = self.tick_count;
+        let mut due: Vec<RangedPendingHit> = Vec::new();
+        self.ranged_pending.retain(|h| {
+            if h.fire_tick <= now {
+                due.push(*h);
+                false
+            } else {
+                true
+            }
+        });
+        for hit in due {
+            let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
+            let mut dismount_sessions: Vec<u64> = Vec::new();
+            let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
+            apply_monster_hit_player(
+                &self.players, &self.gate_ref, self.death_exp_penalty_percent,
+                hit.attacker_oid, "怪物", hit.target_session, hit.damage, hit.px, hit.py, hit.map_index,
+                hit.target_in_safe,
+                &mut death_drops, &mut dismount_sessions, &mut broken_armor,
+            ).await;
+            for (sid, x, y, map_index) in death_drops {
+                self.handle_player_death_drop(sid, x, y, map_index, false).await;
+            }
+            for sid in dismount_sessions {
+                self.dismount_player(sid).await;
+            }
+            for (target_session, slot) in &broken_armor {
+                if let Some(state) = self.recalculate_and_set_stat_bonuses(*target_session).await {
+                    if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
+                        self.broadcast_equipment_visuals(*target_session, &state).await;
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) async fn tick_potion_pools(&mut self) {
         if self.tick_count % 2 != 0 {
             return;
@@ -4274,109 +4454,26 @@ impl Message<Tick> for WorldActor {
                             .map(|m| m.is_safe_zone(px, py))
                             .unwrap_or(false);
 
-                        if !target_in_safe {
-                            // 伤害
-                            if let Some(record) = self.players.get(&target_session) {
-                                let died = record.actor_ref.ask(TakeDamage {
-                                    attacker_id: monster.object_id,
-                                    attacker_session: target_session,
-                                    damage,
-                                }).await.unwrap_or(false);
-
-                                // #1598：C# HumanObject.Attacked（:7215/:7307）——向同图其他玩家
-                                // 广播 ObjectStruck + DamageIndicator（Broadcast 排除受害者；受害者收 S.Struck）
-                                if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
-                                    let mut struck_body = Vec::new();
-                                    struck_body.extend_from_slice(&victim.object_id.to_le_bytes());
-                                    struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
-                                    struck_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
-                                    struck_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
-                                    struck_body.push(victim.direction);
-                                    let struck_packet = build_packet_bytes(
-                                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
-                                    let mut dmg_body = Vec::new();
-                                    dmg_body.extend_from_slice(&damage.to_le_bytes());
-                                    dmg_body.push(0u8); // damage_type = normal
-                                    dmg_body.extend_from_slice(&victim.object_id.to_le_bytes());
-                                    let dmg_packet = build_packet_bytes(
-                                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-                                    for (sid, _) in &self.players {
-                                        if *sid == target_session {
-                                            continue;
-                                        }
-                                        let _ = self.gate_ref.tell(SendToClient {
-                                            session_id: *sid,
-                                            data: struck_packet.clone(),
-                                        }).await;
-                                        let _ = self.gate_ref.tell(SendToClient {
-                                            session_id: *sid,
-                                            data: dmg_packet.clone(),
-                                        }).await;
-                                    }
-                                }
-
-                                // 被攻击时自动下坐骑
-                                if !died {
-                                    dismount_sessions.push(target_session);
-                                }
-
-                                // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1；
-                                // #1230 致死也扣——C# DamageDura 在 ChangeHP 前调用）
-                                {
-                                    let armor_slots = [
-                                        EquipmentSlot::Armour,
-                                        EquipmentSlot::Helmet,
-                                        EquipmentSlot::BraceletL,
-                                        EquipmentSlot::BraceletR,
-                                        EquipmentSlot::RingL,
-                                        EquipmentSlot::RingR,
-                                        EquipmentSlot::Shoes,
-                                        EquipmentSlot::Necklace,
-                                    ];
-                                    for slot in armor_slots {
-                                        let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
-                                            slot,
-                                            amount: 1,
-                                        }).await.unwrap_or(false);
-                                        if broke {
-                                            debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
-                                            // 延迟到怪物循环结束后广播（避免借用冲突）
-                                            broken_armor.push((target_session, slot));
-                                        }
-                                    }
-                                }
-
-                                if died {
-                                    if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
-                                        let died_packet = Self::build_object_died_packet(
-                                            victim.object_id, victim.x, victim.y, victim.direction);
-                                        for (sid, _) in &self.players {
-                                            let _ = self.gate_ref.tell(SendToClient {
-                                                session_id: *sid,
-                                                data: died_packet.clone(),
-                                            }).await;
-                                        }
-                                        death_drops.push((target_session, victim.x, victim.y, victim.map_index));
-
-                                        // 死亡经验惩罚（配置百分比；默认 0=关闭，对齐 C# 无通用死亡惩罚）
-                                        if self.death_exp_penalty_percent > 0 {
-                                            let pct = (self.death_exp_penalty_percent.min(100)) as i64;
-                                            let penalty = ((victim.max_experience as i64 * pct) / 100).max(1) as i32;
-                                            let deducted = record.actor_ref.ask(crate::actors::player::DeductExperience {
-                                                amount: penalty,
-                                            }).await.unwrap_or(0);
-                                            if deducted > 0 {
-                                                send_system_message(
-                                                    &self.gate_ref, target_session,
-                                                    &format!("你损失了 {} 经验值", deducted)
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        if is_ranged {
+                            // #1703：远程伤害按弹道延迟结算（C# DelayedAction RangeDamage；复用玩家 range_flight_ticks）
+                            let attack_dist = (monster.x - px).abs().max((monster.y - py).abs());
+                            self.ranged_pending.push(RangedPendingHit {
+                                fire_tick: self.tick_count + crate::actors::world::combat::range_flight_ticks(attack_dist),
+                                attacker_oid: monster.object_id,
+                                target_session,
+                                damage,
+                                map_index: monster.map_index,
+                                px,
+                                py,
+                                target_in_safe,
+                            });
                         } else {
-                            debug!("Monster '{}' attack on {} blocked: target in safe zone", monster.name, target_session);
+                            apply_monster_hit_player(
+                                &self.players, &self.gate_ref, self.death_exp_penalty_percent,
+                                monster.object_id, &monster.name, target_session, damage, px, py, monster.map_index,
+                                target_in_safe,
+                                &mut death_drops, &mut dismount_sessions, &mut broken_armor,
+                            ).await;
                         }
                         } // close else (normal attack)
                     } else if should_chase && dist > profile.attack_range && can_move {
@@ -5486,6 +5583,7 @@ impl Message<Tick> for WorldActor {
 
         self.tick_spells().await;
 
+        self.tick_ranged_pending().await;
         self.tick_spell_completions().await;
 
         // #1560：弓手远程攻击延迟结算（箭矢飞行后伤害落地 / Miss）
@@ -5641,3 +5739,6 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
+
+
