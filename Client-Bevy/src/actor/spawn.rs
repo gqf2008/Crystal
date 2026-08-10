@@ -88,6 +88,13 @@ pub(crate) fn spawn_net_objects_when_ready(
                 mount_type,
                 is_mounted,
                 guild_name,
+                class,
+                gender,
+                hair,
+                weapon,
+                weapon_effect,
+                armour,
+                wing_effect,
                 ..
             } => {
                 // M60：已存在的玩家（骑乘/下马重发 ObjectPlayer）→ 只更新坐骑层，不重复生成
@@ -138,6 +145,16 @@ pub(crate) fn spawn_net_objects_when_ready(
                             .entity(ent)
                             .insert(PlayerGuildName(guild_name.clone()));
                     }
+                    // #1606：重发 ObjectPlayer（换装/发型）→ 即时更新 ActorAppearance（装备外观）
+                    commands.entity(ent).insert(ActorAppearance {
+                        class: *class,
+                        gender: *gender,
+                        armour: *armour as u16,
+                        hair: *hair,
+                        weapon: *weapon,
+                        weapon_effect: *weapon_effect,
+                        wing_effect: *wing_effect,
+                    });
                     continue;
                 }
                 spawn_net_object_entity(&mut commands, obj, is_local);
