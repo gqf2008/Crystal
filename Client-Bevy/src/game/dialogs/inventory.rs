@@ -1582,13 +1582,35 @@ fn inv_item_action_system(
             match click.selected {
                 Some(from) if from == i => click.selected = None,
                 Some(from) => {
-                    // 目标格子可空可满（服务端处理交换/合并）
-                    net.send_packet(&mir2_shared::packets::client::item::MoveItem {
-                        grid: MirGridType::Inventory,
-                        from: from as i32,
-                        to: i as i32,
-                    });
-                    tracing::info!("📦 移动物品 {} -> {}", from, i);
+                    // #1604：拖到同类堆叠格 → C.MergeItem（C# MirItemCell.cs:815/906/980）；
+                    // ServerRust move_item 目标格有物品会失败，merge_item 只由 MergeItem 触发
+                    let same_stack = hud.inventory.items.get(i)
+                        .and_then(|s| s.as_ref())
+                        .zip(hud.inventory.items.get(from).and_then(|s| s.as_ref()))
+                        .map(|(t, f)| t.item_index == f.item_index && t.unique_id != f.unique_id)
+                        .unwrap_or(false);
+                    if same_stack {
+                        if let (Some(from_item), Some(to_item)) = (
+                            hud.inventory.items.get(from).and_then(|s| s.as_ref()),
+                            hud.inventory.items.get(i).and_then(|s| s.as_ref()),
+                        ) {
+                            net.send_packet(&mir2_shared::packets::client::item::MergeItem {
+                                grid_from: MirGridType::Inventory,
+                                grid_to: MirGridType::Inventory,
+                                id_from: from_item.unique_id,
+                                id_to: to_item.unique_id,
+                            });
+                            tracing::info!("🔗 合并物品 {} -> {}（uid {} -> {}）", from, i, from_item.unique_id, to_item.unique_id);
+                        }
+                    } else {
+                        // 目标格子可空可满（服务端处理交换/移动）
+                        net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                            grid: MirGridType::Inventory,
+                            from: from as i32,
+                            to: i as i32,
+                        });
+                        tracing::info!("📦 移动物品 {} -> {}", from, i);
+                    }
                     click.selected = None;
                 }
                 None => {
