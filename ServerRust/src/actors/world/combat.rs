@@ -134,6 +134,11 @@ fn range_attack_min_reduction(min: i32, range: i32) -> i32 {
     (min - x).max(0)
 }
 
+/// #1622：C# HumanObject.RangeAttack L2753——Chebyshev 距离 > Globals.MaxAttackRange(9) 即超范围
+pub(crate) fn range_attack_out_of_range(caster_x: i32, caster_y: i32, target_x: i32, target_y: i32) -> bool {
+    (target_x - caster_x).abs().max((target_y - caster_y).abs()) > 9
+}
+
 /// #1519：C# ApplyArcherState——MentalState 0/1/2 → 100 / 55+5*Lv / 80（返回伤害百分比）
 fn archer_state_penalty(mental_state: u8, mental_lvl: u8) -> i32 {
     match mental_state {
@@ -661,18 +666,16 @@ impl Message<WorldAttackRequest> for WorldActor {
                         if other_state.is_dead { continue; }
                         // #1465：C# GMGameMaster——GM 保护模式不可攻击
                         if self.gm_protected.contains(&other_session) { continue; }
-                        // 计算曼哈顿距离（Mir2 使用 8 方向近战范围约 1-2 格）
-                        let dist = (other_state.x - result.x).abs() + (other_state.y - result.y).abs();
-                        const MELEE_RANGE: i32 = 2; // 近战有效范围
-
-                        // 发送 ObjectAttack 动画（无论距离）
+                        // 发送 ObjectAttack 动画（无论距离，C# Broadcast 与命中无关）
                         let _ = self.gate_ref.tell(SendToClient {
                             session_id: other_session,
                             data: packet.clone(),
                         }).await;
 
-                        // 只有范围内的玩家才受到伤害
-                        if dist <= MELEE_RANGE {
+                        // #1623：C# HumanObject.Attack L2978——近战只命中正前方 1 格
+                        // （PointMove(CurrentLocation, dir, 1) 的 cell.Objects），与怪物路径一致
+                        let front_hit = other_state.x == target_x && other_state.y == target_y;
+                        if front_hit {
                             // 攻击模式检查
                             if !can_attack_player(state, &other_state, &self.guild_wars) {
                                 continue;
@@ -911,8 +914,9 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     }
                                 }
                             }
+                            let hit_dist = (other_state.x - result.x).abs() + (other_state.y - result.y).abs();
                             debug!("Hit! {} damaged {} for {} (dist={}, crit={})",
-                                   result.object_id, other_state.name, damage, dist, attack_result.is_critical);
+                                   result.object_id, other_state.name, damage, hit_dist, attack_result.is_critical);
                         }
                     }
                 }
@@ -1367,6 +1371,11 @@ impl Message<RangeAttackRequest> for WorldActor {
             _ => return,
         };
         if state.is_dead { return; }
+        // #1622：C# HumanObject.RangeAttack L2749-2752——非弓手职业不可远程攻击
+        // （RealItem.Shape / ClassWeaponCount == 2 即 Archer 武器）
+        if state.class != mir2_shared::enums::MirClass::Archer {
+            return;
+        }
         // #1269：C# CanAttack——麻痹/冰冻/眩晕中禁止远程攻击
         if attack_disabled_by_poison(&state.poison_list) {
             return;
@@ -1407,6 +1416,11 @@ impl Message<RangeAttackRequest> for WorldActor {
         let target_y = msg.target_y;
         // #1519：C# MaxDistance（Chebyshev）——Focus/距离缩放/命中率共用
         let attack_dist = (target_x - state.x).abs().max((target_y - state.y).abs());
+        // #1622：C# HumanObject.RangeAttack L2753——目标超 Globals.MaxAttackRange(9) 拒绝
+        if range_attack_out_of_range(state.x, state.y, target_x, target_y) {
+            send_system_message(&self.gate_ref, msg.session_id, "目标超出攻击范围");
+            return;
+        }
         // C# Focus：Random(5) <= Lv → 命中率×2（HumanObject.cs:2804）
         let focus = state.magics.iter()
             .find(|m| m.spell == (mir2_shared::enums::Spell::Focus as i32 - 3))
@@ -5177,7 +5191,7 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, cast_out_of_range,
-        find_attack_skill,
+        find_attack_skill, range_attack_out_of_range,
         logout_blocked, player_attack_speed_ms, range_attack_min_reduction, range_flight_ticks,
         ranged_chance_to_hit, should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
         LOGOUT_DELAY_MS,
@@ -5240,6 +5254,21 @@ mod tests {
         assert!(!cast_out_of_range(0, 0, 50, 50, 0));
         // 目标格 0（无目标 fallback）不校验
         assert!(!cast_out_of_range(0, 0, 0, 0, 2));
+    }
+
+    #[test]
+    fn test_range_attack_out_of_range_matches_csharp_inrange() {
+        // #1622：C# HumanObject.RangeAttack InRange(MaxAttackRange=9)（Chebyshev）
+        // 边界内（max<=9）→ false
+        assert!(!range_attack_out_of_range(0, 0, 9, 0));
+        assert!(!range_attack_out_of_range(0, 0, 6, 6));
+        assert!(!range_attack_out_of_range(0, 0, 7, 7));
+        // 超范围 → true
+        assert!(range_attack_out_of_range(0, 0, 10, 0));
+        assert!(range_attack_out_of_range(0, 0, 0, 10));
+        assert!(range_attack_out_of_range(0, 0, 7, 10));
+        // 自身
+        assert!(!range_attack_out_of_range(5, 5, 5, 5));
     }
 
     #[test]
