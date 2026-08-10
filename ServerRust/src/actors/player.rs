@@ -1130,6 +1130,17 @@ impl Message<RevivePlayer> for PlayerActor {
 // Handler 实现
 // ============================================================
 
+/// #1614：C# HumanObject.CanWalk——麻痹/冰冻毒禁止移动（Paralysis/LRParalysis/Frozen）
+pub(crate) fn movement_blocked_by_poison(
+    poison_list: &[crate::combat::poison::Poison],
+) -> bool {
+    poison_list.iter().any(|p| {
+        p.p_type.intersects(mir2_shared::enums::PoisonType::PARALYSIS)
+            || p.p_type.intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
+            || p.p_type.intersects(mir2_shared::enums::PoisonType::FROZEN)
+    })
+}
+
 impl Message<MoveRequest> for PlayerActor {
     type Reply = bool; // success
 
@@ -1139,6 +1150,10 @@ impl Message<MoveRequest> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         if self.has_buff(crate::combat::buff::BuffType::Stun) {
+            return false;
+        }
+        // #1614：C# CanWalk——麻痹/冰冻毒禁止移动
+        if movement_blocked_by_poison(&self.state.poison_list) {
             return false;
         }
         // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2；Walk = 1
@@ -5680,6 +5695,19 @@ impl PlayerActor {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn movement_blocked_by_poison_matches_csharp_canwalk() {
+        // #1614：C# HumanObject.CanWalk——Paralysis/LRParalysis/Frozen 禁止移动
+        use mir2_shared::enums::PoisonType;
+        use crate::combat::poison::Poison;
+        let list = |t: PoisonType| vec![Poison::new(t, 5, 0, 1000)];
+        assert!(movement_blocked_by_poison(&list(PoisonType::PARALYSIS)));
+        assert!(movement_blocked_by_poison(&list(PoisonType::LR_PARALYSIS)));
+        assert!(movement_blocked_by_poison(&list(PoisonType::FROZEN)));
+        assert!(!movement_blocked_by_poison(&list(PoisonType::GREEN)));
+        assert!(!movement_blocked_by_poison(&[]));
+    }
+
     #[test]
     fn hero_auto_pot_grid_constants_match_protocol() {
         // #1576：SetAutoPotItem 线协议 grid 值必须与 MirGridType 一致（HeroHpItem=26 / HeroMpItem=27）
