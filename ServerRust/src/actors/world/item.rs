@@ -1020,6 +1020,34 @@ impl Message<UseItemRequest> for WorldActor {
                             send_system_message(&self.gate_ref, msg.session_id, "全服喊话已激活！使用 ! 可免费全服喊话");
                             debug!("ServerShoutScroll: {} activated", player_state.name);
                         }
+                        // 7 CreditScroll（C# UseItem Scroll case 7：GainCredit(item.Info.Price)，上限 uint.MaxValue）
+                        7 => {
+                            let price = db.price.max(0) as u64;
+                            if price > 0 {
+                                let username = record.account_username.clone();
+                                let current = crate::db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+                                let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
+                                let delta = price.min(remaining) as i64;
+                                if delta > 0 {
+                                    if let Err(e) = crate::db::add_account_credit(&self.db_pool, &username, delta).await {
+                                        warn!("CreditScroll failed for {}: {}", username, e);
+                                    } else {
+                                        // C# GainCredit：S.GainedCredit（客户端积分浮字）
+                                        let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
+                                        let mut body = Vec::new();
+                                        if packet.write_body(&mut body).is_ok() {
+                                            let _ = self.gate_ref.tell(SendToClient {
+                                                session_id: msg.session_id,
+                                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
+                                            }).await;
+                                        }
+                                        send_system_message(&self.gate_ref, msg.session_id,
+                                            &format!("已获得 {} 积分", delta));
+                                    }
+                                }
+                            }
+                            debug!("CreditScroll: {} price={}", player_state.name, db.price);
+                        }
                         // 12 LotteryTicket（C# Scroll shape 12：按 Effect 概率中奖）
                         12 => {
                             let effect = db.effect.max(1) as usize;
@@ -3166,3 +3194,4 @@ mod tests {
     }
 
 }
+
