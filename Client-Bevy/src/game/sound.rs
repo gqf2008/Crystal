@@ -163,6 +163,32 @@ pub fn monster_flinch_sound(monster_type: u16) -> u32 {
     monster_base_sound(monster_type) + 2
 }
 
+/// #1629：怪物远程攻击音（C# PlayRangeSound，MonsterObject.cs:4139，AttackRange1）：
+/// - 67 个怪物（RedThunderZuma/KingScorpion/DarkDevil/BoneLord/LeftGuard/.../EvilMir/DragonStatue）→ +5
+/// - AncientBringer(272)/SeedingsGeneral(282) → +7
+/// - RestlessJar(283) → +8
+/// - TucsonGeneral(296) → 不播
+/// - default → PlayAttackSound（+1）
+pub fn monster_range_sound(monster_type: u16) -> Option<u32> {
+    let base = monster_base_sound(monster_type);
+    // C# PlayRangeSound +5 组（MonsterObject.cs:4143-4224）
+    const PLUS5: &[u16] = &[
+        67, 211, 75, 77, 86, 93, 100, 99, 102, 134, 90, 101, 184, 223, 229, 219, 220, 238, 239,
+        240, 241, 242, 159, 163, 202, 249, 250, 252, 113, 179, 253, 254, 255, 256, 257, 258, 259,
+        260, 262, 263, 264, 265, 279, 295, 299, 284, 302, 271, 306, 311, 315, 316, 324, 329, 330,
+        308, 200, 337, 334, 320, 339, 366, 368, 371, 372, 900, 902,
+    ];
+    if PLUS5.contains(&monster_type) {
+        return Some(base + 5);
+    }
+    match monster_type {
+        272 | 282 => Some(base + 7), // AncientBringer / SeedingsGeneral
+        283 => Some(base + 8),       // RestlessJar
+        296 => None,                 // TucsonGeneral（C# 直接 return）
+        _ => Some(base + 1),         // default → PlayAttackSound
+    }
+}
+
 /// #1572：玩家步声（C# PlayerObject.PlayStepSound，PlayerObject.cs:3695）：
 /// - 门控：Front/Middle/BackIndex > 199 → 非 mir2 地图不播（None）；
 /// - 骑乘 → MountWalkL(10176)；
@@ -602,6 +628,24 @@ mod tests {
         assert_eq!(monster_swing_sound(1), Some(14));
         // 畏缩 +2
         assert_eq!(monster_flinch_sound(1), 12);
+    }
+
+    #[test]
+    fn monster_range_sound_matches_csharp() {
+        // #1629：C# PlayRangeSound 分组
+        // +5 组代表性怪物
+        for t in [67u16, 211, 75, 77, 93, 100, 102, 184, 334, 900, 902] {
+            assert_eq!(monster_range_sound(t), Some(monster_base_sound(t) + 5), "type {}", t);
+        }
+        // +7 / +8
+        assert_eq!(monster_range_sound(272), Some(2727)); // AncientBringer
+        assert_eq!(monster_range_sound(282), Some(2827)); // SeedingsGeneral
+        assert_eq!(monster_range_sound(283), Some(2838)); // RestlessJar
+        // TucsonGeneral 不播
+        assert_eq!(monster_range_sound(296), None);
+        // default → +1（PlayAttackSound）
+        assert_eq!(monster_range_sound(1), Some(11));
+        assert_eq!(monster_range_sound(42), Some(421));
     }
 
     #[test]

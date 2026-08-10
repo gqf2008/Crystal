@@ -394,7 +394,7 @@ fn apply_combat_events(
             CombatEvent::RangeAttack { object_id } => {
                 // #224：远程攻击动作——玩家用 AttackRange1（C# Action.AttackRange1），
                 // 默认怪物无 AttackRange 帧表 → 回退 Attack1
-                for (e, id, mut anim, mon, _appr) in &mut actors {
+                for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = if mon.is_some() {
                             mir2_shared::enums::MirAction::Attack1
@@ -403,6 +403,19 @@ fn apply_combat_events(
                         };
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
+                        // #1629：怪物远程攻击动作起始音（C# PlayRangeSound，AttackRange1）
+                        if mon.is_some() {
+                            if let Some(appr) = appr {
+                                if let Some(sound_id) = crate::game::sound::monster_range_sound(appr.monster_type) {
+                                    crate::game::sound::play_sound(
+                                        &mut commands,
+                                        &mut audio_assets,
+                                        &sound_bank,
+                                        sound_id,
+                                    );
+                                }
+                            }
+                        }
                         break;
                     }
                 }
