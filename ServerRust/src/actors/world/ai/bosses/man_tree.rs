@@ -61,13 +61,14 @@ impl MonsterBehavior for ManTreeBehavior {
                     });
                 }
             } else {
-                // C# BoulderSmash：FindAllTargets(1, 目标) + 1/5 眩晕毒（5s）
+                // C# BoulderSmash Type2 = MC（ManTree.cs）：FindAllTargets(1, 目标) + 1/5 眩晕毒（5s）
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
                     center_x: target.x,
                     center_y: target.y,
                     radius: AOE_RADIUS,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 if fastrand::i32(0..5) == 0 {

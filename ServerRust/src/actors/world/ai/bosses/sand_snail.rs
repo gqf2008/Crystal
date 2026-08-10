@@ -47,13 +47,14 @@ impl MonsterBehavior for SandSnailBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    // C# 毒分支：FindAllTargets(1) AOE + PoisonTarget(1, 5, Green, 2000)
+                    // C# 毒分支 Type2 = MC（SandSnail.cs:43-45）：FindAllTargets(1) AOE + PoisonTarget
+                    let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
                         radius: AOE_RADIUS,
-                        damage,
+                        damage: mc_damage,
                         spell_id: 0,
                     });
                     let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
