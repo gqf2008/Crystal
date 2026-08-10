@@ -3,6 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/SnowWolf.cs
 //! 机制：80% 物理近战（DC）/ 20% 魔法近战（MC，Type=1）；
 //!      魔法命中时对周围 2 格 AOE，且每个目标 1/4 减速毒 + 1/8 冰冻毒（5s，tick 2000）
+//! #1876：宠物（SnowWolfKing 死亡驯化后）：用 pet_target 选目标（避免攻击主人），通用宠物跟随在 tick 处理
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -24,8 +25,13 @@ impl SnowWolfBehavior {
 
 impl MonsterBehavior for SnowWolfBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
-            Some(t) => *t,
+        // #1876：宠物（master_session）用 pet_target 选目标，避免攻击主人
+        let target = match if monster.master_session.is_some() {
+            ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+        } else {
+            ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index).copied()
+        } {
+            Some(t) => t,
             None => return,
         };
         monster.target_session = Some(target.session_id);

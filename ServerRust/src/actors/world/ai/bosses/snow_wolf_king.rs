@@ -7,7 +7,7 @@
 //!   - 2/3 概率普攻（Type 0）；攻击附带冰冻/减速（任务核心"冰冻"）
 //!   - HP<70% 时 SpawnSlaves：召唤 3 只雪狼（Settings.SnowWolfKingMob）
 //!   - 受击高伤时 FindWeakerTarget 切换到更弱目标（简化：受击大伤切换目标）
-//!   - 死亡时 1 格内全体 MAC 爆炸 + 驯化奴仆（简化为死亡 AOE）
+//!   - 死亡时 1 格内全体 MAC 爆炸 + 驯化奴仆（tick 层转移给击杀者，上限 6）
 
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
