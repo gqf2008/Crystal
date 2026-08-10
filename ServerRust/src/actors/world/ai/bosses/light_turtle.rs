@@ -45,9 +45,11 @@ impl MonsterBehavior for LightTurtleBehavior {
             // C# CompleteAttack（所有攻击）：PoisonTarget(4, SP, Green, 1000)
             // 第二参=时长（SP 攻秒数），值=SP 攻；此处用 DC 攻近似 SP
             if fastrand::i32(0..4) == 0 {
+                // C# PoisonTarget(4, SC, Green, 1000)：时长=SC 攻秒数、值=SC
+                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, damage.max(1) as u32, damage, 1000),
+                    poison: Poison::new(PoisonType::GREEN, sc_power as u32, sc_power, 1000),
                 });
             }
             return;

@@ -55,11 +55,13 @@ impl MonsterBehavior for HellCannibalBehavior {
                 });
                 let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
                     .iter().map(|p| p.session_id).collect();
+                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 for sid in nearby {
-                    let duration = fastrand::i32(0..(damage / 2).max(1));
+                    // C# PoisonTarget(1, random(SC/2), Red, 1000)：时长=random(SC/2)、值=SC
+                    let duration = fastrand::i32(0..(sc_power / 2).max(1));
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: sid,
-                        poison: Poison::new(PoisonType::RED, duration.max(0) as u32, damage, 1000),
+                        poison: Poison::new(PoisonType::RED, duration.max(0) as u32, sc_power, 1000),
                     });
                 }
             }

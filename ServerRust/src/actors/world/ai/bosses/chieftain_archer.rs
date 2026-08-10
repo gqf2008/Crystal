@@ -33,9 +33,11 @@ impl MonsterBehavior for ChieftainArcherBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-            // C# level = Random(0..3)：0=DC / 1=MC / 2=SC（SC 用 DC 近似）
+            // C# level = Random(0..3)：0=DC / 1=MC / 2=SC
             let level = fastrand::i32(0..3);
-            let dmg = if level == 1 { damage } else { damage };
+            let mc = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let sc = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, monster.luck).max(1);
+            let dmg = match level { 1 => mc, 2 => sc, _ => damage };
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,

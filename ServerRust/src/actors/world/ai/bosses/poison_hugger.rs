@@ -91,9 +91,11 @@ impl PoisonHuggerBehavior {
             });
             // C# PoisonTarget(5, 5, Green, 2000)：1/5 概率、值=SP（DC 近似）
             if fastrand::i32(0..5) == 0 {
+                // C# 毒值 = SP 攻
+                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: h.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                    poison: Poison::new(PoisonType::GREEN, 5, sc_power, 2000),
                 });
             }
         }
