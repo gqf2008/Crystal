@@ -1330,22 +1330,12 @@ impl Message<PlayerDisconnected> for WorldActor {
 
         // 通知其他玩家该玩家已离开
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            let others: Vec<_> = self.other_players(msg.session_id)
-                .into_iter()
-                .map(|r| (r.actor_ref.clone(), r.session_id))
-                .collect();
-
+            // #1680：玩家离线 ObjectRemove 只发同图玩家（C# CurrentMap）
             let opcode = mir2_shared::enums::ServerPacketIds::ObjectRemove as i16;
             let mut body = Vec::new();
             body.extend_from_slice(&state.object_id.to_le_bytes());
             let packet = build_packet_bytes(opcode, &body);
-
-            for (_, other_session) in others {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: other_session,
-                    data: packet.clone(),
-                }).await;
-            }
+            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
         }
     }
 }
@@ -1483,22 +1473,12 @@ impl Message<PlayerLogOut> for WorldActor {
             }).await;
 
             // 通知其他玩家该玩家已离开
-            let others: Vec<_> = self.other_players(msg.session_id)
-                .into_iter()
-                .map(|r| (r.actor_ref.clone(), r.session_id))
-                .collect();
-
+            // #1680：玩家登出 ObjectRemove 只发同图玩家（C# CurrentMap）
             let opcode = mir2_shared::enums::ServerPacketIds::ObjectRemove as i16;
             let mut remove_body = Vec::new();
             remove_body.extend_from_slice(&state.object_id.to_le_bytes());
             let packet = build_packet_bytes(opcode, &remove_body);
-
-            for (_, other_session) in others {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: other_session,
-                    data: packet.clone(),
-                }).await;
-            }
+            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
         }
         // 玩家已从 self.players 移除，无需再发 PlayerDisconnected
     }
