@@ -1,7 +1,7 @@
 //! DemonWolf（恶魔狼）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/DemonWolf.cs
-//! 机制：Pack = 5 格内同 AI 怪（用任意怪近似），倍率 = min(Pack,5)+1；
+//! 机制：Pack = 5 格内同类非敌对怪（排除自身，C# FindPackNearby 对齐），倍率 = min(Pack,5)+1；
 //!      Effect==1：3/4 近战 Type1（MaxDC*倍率）+ 1/4 出血毒；1/4 直线 LineAttack(3)（DC）+ 移动
 //!      Effect!=1：近战（MaxDC*倍率，MACAgility）
 
@@ -38,10 +38,16 @@ impl MonsterBehavior for DemonWolfBehavior {
 
         if in_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            // C# FindPackNearby(5)：5 格内同 AI 怪（用任意怪近似）
-            let pack = ctx.monsters.iter()
-                .filter(|m| m.map_index == monster.map_index && max_distance(m.x, m.y, monster.x, monster.y) <= PACK_RANGE)
-                .count();
+            // C# FindPackNearby(5)：5 格内非敌对同类怪（排除自身；近似 = 同 monster_index）
+            let pack = demon_wolf_pack_count(
+                ctx.monsters.iter(),
+                monster.object_id,
+                monster.monster_index,
+                monster.x,
+                monster.y,
+                monster.map_index,
+                PACK_RANGE,
+            );
             let multiplier = (pack.min(MAX_PACK_SIZE) + 1) as i32;
             let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
@@ -96,5 +102,70 @@ impl MonsterBehavior for DemonWolfBehavior {
             monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
+    }
+}
+
+/// #1826：DemonWolf 包计数（C# FindPackNearby：排除自身，只数非敌对同类怪）。
+/// 近似：同 monster_index（同类型怪）视为包成员；异类/自己不计。
+fn demon_wolf_pack_count<'a>(
+    monsters: impl Iterator<Item = &'a crate::actors::world::ai::ctx::MonsterSnap>,
+    self_oid: u32,
+    self_index: i32,
+    x: i32,
+    y: i32,
+    map_index: u16,
+    range: i32,
+) -> usize {
+    monsters
+        .filter(|m| {
+            m.object_id != self_oid
+                && m.map_index == map_index
+                && m.monster_index == self_index
+                && max_distance(m.x, m.y, x, y) <= range
+        })
+        .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::demon_wolf_pack_count;
+    use crate::actors::world::ai::ctx::MonsterSnap;
+
+    fn snap(oid: u32, idx: i32, x: i32, y: i32) -> MonsterSnap {
+        MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: idx }
+    }
+
+    #[test]
+    fn test_demon_wolf_pack_count_lone_wolf_is_zero() {
+        // 独狼：包内只有自己 → 0（C# ob==this 排除）；此前误把自身计入（倍率 2）
+        let wolves = [snap(1, 50, 100, 100)];
+        assert_eq!(demon_wolf_pack_count(wolves.iter(), 1, 50, 100, 100, 1, 5), 0);
+    }
+
+    #[test]
+    fn test_demon_wolf_pack_count_same_type_and_range() {
+        let wolves = [
+            snap(1, 50, 100, 100), // 自身
+            snap(2, 50, 102, 100), // 同类 2 格内
+            snap(3, 50, 108, 100), // 同类 8 格外（超 5）
+            snap(4, 50, 101, 101), // 同类对角
+            snap(5, 60, 101, 100), // 异类（不计）
+        ];
+        assert_eq!(demon_wolf_pack_count(wolves.iter(), 1, 50, 100, 100, 1, 5), 2);
+    }
+
+    #[test]
+    fn test_demon_wolf_pack_count_other_map_excluded() {
+        let wolves = [
+            snap(1, 50, 100, 100),
+            snap(2, 50, 101, 100),
+            snap(3, 50, 101, 100), // map_index=2
+        ];
+        let wolves: Vec<MonsterSnap> = wolves.iter().map(|w| {
+            let mut w = w.clone();
+            if w.object_id == 3 { w.map_index = 2; }
+            w
+        }).collect();
+        assert_eq!(demon_wolf_pack_count(wolves.iter(), 1, 50, 100, 100, 1, 5), 1);
     }
 }
