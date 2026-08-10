@@ -152,6 +152,8 @@ pub enum ServerEvent {
     /// #1550：InTrapRock：本地玩家陷阱岩石状态（C# User.InTrapRock：陷阱中不可走/跑）
     TrapRockChanged { in_trap: bool },
     ObjectPoisoned { object_id: u32, poisoned: bool },
+    /// #1616：本地玩家麻痹/冰冻毒变化（C# CheckInput：锁定移动/攻击/施法）
+    LocalPoisonChanged { paralysis: bool },
     /// #240 ItemRepaired：修理结果（耐久/最大耐久更新）
     ItemRepaired {
         unique_id: u64,

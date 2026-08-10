@@ -281,8 +281,8 @@ fn skill_bar_system(
         KeyCode::F7,
         KeyCode::F8,
     ];
-    // #1600：C# GameScene.CheckInput——钓鱼时锁定施法输入（User.Fishing）
-    if hud.fishing {
+    // #1600/#1616：C# GameScene.CheckInput——钓鱼/麻痹/冰冻锁定施法输入
+    if hud.fishing || hud.paralysis {
         return;
     }
     let Some(slot) = F_KEYS.iter().position(|k| keys.just_pressed(*k)) else {

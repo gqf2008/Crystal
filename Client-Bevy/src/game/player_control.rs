@@ -159,7 +159,7 @@ fn advance_attack_timer_system(
     mut control: ResMut<ControlState>,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     control.last_attack += time.delta_secs();
@@ -171,7 +171,7 @@ fn autorun_toggle_system(
     mouse: Res<ButtonInput<MouseButton>>,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     if mouse.just_pressed(MouseButton::Middle) {
@@ -200,7 +200,7 @@ fn right_click_move_system(
     buttons: Query<&UiButton>,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -275,7 +275,7 @@ fn left_click_interact_system(
     ui: UiLockState,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -428,7 +428,7 @@ fn pickup_arrival_system(
     players: Query<(&Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     let Some(target) = control.pickup_target else { return };
@@ -516,7 +516,7 @@ fn auto_attack_system(
     // C# OutputDelay=1000ms：范围外提示节流
     mut too_far_timer: Local<f32>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     control.last_attack += time.delta_secs();
@@ -633,7 +633,7 @@ fn hold_move_system(
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     let Some(map) = &game_data.map else { return };
@@ -942,7 +942,7 @@ fn pet_pickup_system(
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing {
+    if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
     // 聊天输入激活时不触发（X/Ctrl+X 是文本按键，避免输入字母时误发拾取指令）
