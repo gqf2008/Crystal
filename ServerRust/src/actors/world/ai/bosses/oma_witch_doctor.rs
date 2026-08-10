@@ -41,6 +41,8 @@ impl MonsterBehavior for OmaWitchDoctorBehavior {
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 直线/远程用 MinMC/MaxMC（OmaWitchDoctor.cs:65/76）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             if dist <= 1 {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
@@ -52,6 +54,7 @@ impl MonsterBehavior for OmaWitchDoctorBehavior {
                     attack_type: 0,
                 });
             } else if in_line_range(dx, dy) {
+                // C# LineAttack(MC, 6)（OmaWitchDoctor.cs:65-68）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
                     attacker_oid: monster.object_id,
@@ -59,16 +62,17 @@ impl MonsterBehavior for OmaWitchDoctorBehavior {
                     origin_y: monster.y,
                     direction: dir,
                     range: LINE_RANGE,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             } else {
+                // C# RangeDamage（MC）（OmaWitchDoctor.cs:76-79）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             }
