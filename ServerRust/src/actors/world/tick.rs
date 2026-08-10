@@ -84,6 +84,13 @@ async fn apply_monster_hit_player(
     if !target_in_safe {
     // 伤害
     if let Some(record) = players.get(&target_session) {
+        // #1708：C# CompleteRangeAttack 校验——目标存活且同图才结算（远程飞行期间目标可能死亡/跨图）
+        let target_alive_same_map = record.actor_ref.ask(GetPlayerState).await
+            .map(|s| s.map(|st| !st.is_dead && st.map_index == map_index).unwrap_or(false))
+            .unwrap_or(false);
+        if !target_alive_same_map {
+            return;
+        }
         let died = record.actor_ref.ask(TakeDamage {
             attacker_id: attacker_oid,
             attacker_session: target_session,
@@ -540,6 +547,13 @@ impl WorldActor {
         });
         for hit in due {
             if let Some(record) = self.players.get(&hit.target_session) {
+                // #1708：C# CompleteRangeAttack 校验——目标存活且同图才结算（远程飞行期间目标可能死亡/跨图）
+                let target_alive_same_map = record.actor_ref.ask(GetPlayerState).await
+                    .map(|s| s.map(|st| !st.is_dead && st.map_index == hit.map_index).unwrap_or(false))
+                    .unwrap_or(false);
+                if !target_alive_same_map {
+                    continue;
+                }
                 let _ = record.actor_ref.ask(TakeDamage {
                     attacker_id: hit.attacker_oid,
                     attacker_session: hit.target_session,
