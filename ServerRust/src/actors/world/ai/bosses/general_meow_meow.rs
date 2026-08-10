@@ -18,6 +18,8 @@ use crate::actors::world::ai::helpers::*;
 const VIEW_RANGE: i32 = 20;
 /// 近战判定距离（C# InRange(CurrentLocation, Target, 2)）
 const MELEE_RANGE: i32 = 2;
+/// 攻击范围（C# AttackRange = 12；远程/MassThunder 目标范围）
+const ATTACK_RANGE: i32 = 12;
 /// Slave 召唤周期：60s = 600 ticks（C# SlaveSpawnTime = Settings.Second * 60）
 const SLAVE_SPAWN_INTERVAL_TICKS: u64 = 600;
 /// MassThunder 间隔下限：2s = 20 ticks（C# Random(2000)）
@@ -54,10 +56,11 @@ impl GeneralMeowMeowBehavior {
 }
 
 impl MonsterBehavior for GeneralMeowMeowBehavior {
-    fn on_attacked(&mut self, damage: i32) -> i32 {
-        // C# Energy Shield：减伤 50%。简化为护盾期伤害减半。
+    /// C# GeneralMeowMeowShield：MaxAC/MinAC +100 固定护甲（GeneralMeowMeow.cs:79-84），
+    /// 护盾激活时承伤平减 100（armour >= damage → 0 对齐 C# Attacked）
+    fn on_attacked_with_monster(&mut self, _monster: &mut MonsterState, damage: i32) -> i32 {
         if self.shield_end_tick > 0 {
-            (damage / 2).max(1)
+            (damage - 100).max(0)
         } else {
             damage
         }
@@ -116,10 +119,12 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
         // ---- 护盾期间周期 MassThunder（C# MassThunderAttack）----
         if self.shield_end_tick > 0 && ctx.tick_count >= self.next_thunder_tick {
             // C# ThunderAttackTime = Envir.Time + max(Random(2000), Random(4000))
-            self.next_thunder_tick = ctx.tick_count + THUNDER_MIN_TICKS.max(THUNDER_MAX_TICKS);
+            self.next_thunder_tick = ctx.tick_count
+                + fastrand::u64(0..THUNDER_MIN_TICKS).max(fastrand::u64(0..THUNDER_MAX_TICKS));
             // 对攻击范围内每个玩家投放 GeneralMeowMeowThunder 法术场
+            // C# MassThunderAttack：FindAllTargets(AttackRange, Target.CurrentLocation)
             let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(target.x, target.y, VIEW_RANGE, monster.map_index)
+                ctx.find_targets_in_range(target.x, target.y, ATTACK_RANGE, monster.map_index)
                     .into_iter()
                     .copied()
                     .collect();
@@ -168,17 +173,18 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
                     attack_type: 1,
                 });
             }
-        } else if dist <= 12 {
-            // 远程弹道 MAC（C# GeneralMeowMeow.cs:112-120）
+        } else if dist <= ATTACK_RANGE {
+            // 远程弹道 MAC（C# GeneralMeowMeow.cs:112-120 + CompleteRangeAttack:198：目标 2 格 AOE）
             if ctx.tick_count < monster.next_attack_tick {
                 return;
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                 attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
+                center_x: target.x,
+                center_y: target.y,
+                radius: 2,
                 damage,
                 spell_id: 0,
             });
