@@ -4,7 +4,7 @@
 //! 机制：静态（CanMove=false）
 //!   - Effect==0：视野内随机目标远程伤害（MACAgility）
 //!   - Effect==1：净化友军毒（#1391：out_player_purges → PlayerActor.PurifyPoisons）
-//!   - Effect==2：给最近友军加 PowerBeadBuff（MaxAC/MaxMAC=DC 近似 AcDefenseBoost+MacDefenseBoost）
+//!   - Effect==2：给最近友军加 PowerBeadBuff（MaxAC/MaxMAC=DC，时长=Info.AttackSpeed）
 
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
@@ -52,7 +52,9 @@ impl MonsterBehavior for PowerBeadBehavior {
                 }
             }
             2 => {
-                // C# Effect==2：给友军（Owner/最近玩家）加 PowerBeadBuff（MaxAC/MaxMAC=DC 近似）
+                // C# Effect==2：给友军（Owner/最近玩家）加 PowerBeadBuff（MaxAC/MaxMAC=DC）
+                // C# AddBuff 时长 = Info.AttackSpeed（ms；Rust attack_cooldown ticks = ms/100）
+                let duration = monster.ai_profile.attack_cooldown as u32;
                 let owned: Vec<(u64, i32)> = nearby
                     .iter()
                     .map(|p| (p.session_id, max_distance(monster.x, monster.y, p.x, p.y)))
@@ -60,16 +62,16 @@ impl MonsterBehavior for PowerBeadBehavior {
                 if let Some(&(sid, _)) = owned.iter().min_by_key(|(_, d)| *d) {
                     ctx.out_player_buffs.push((
                         sid,
-                        BuffInstance::new(BuffType::AcDefenseBoost { bonus: damage }, 50, 10),
+                        BuffInstance::new(BuffType::AcDefenseBoost { bonus: damage }, duration, 10),
                     ));
                     ctx.out_player_buffs.push((
                         sid,
-                        BuffInstance::new(BuffType::MacDefenseBoost { bonus: damage }, 50, 10),
+                        BuffInstance::new(BuffType::MacDefenseBoost { bonus: damage }, duration, 10),
                     ));
                 }
             }
             1 => {
-                // #1391：C# Effect==1 净化友军毒——对最近友军玩家 PurifyPoisons
+                // #1391/#1906：C# Effect==1 净化友军——移除 Debuff Buff + 清空毒（PurifyPoisons）
                 let owned: Vec<(u64, i32)> = nearby
                     .iter()
                     .map(|p| (p.session_id, max_distance(monster.x, monster.y, p.x, p.y)))

@@ -193,6 +193,25 @@ pub fn get_rhino_priest_debuff(buffs: &[BuffInstance]) -> (i32, i32, i32) {
     })
 }
 
+/// #1906：是否 Debuff（对齐 C# BuffProperty.Debuff；PowerBead Effect==1 净化用）
+pub fn is_debuff(buff_type: &BuffType) -> bool {
+    match buff_type {
+        BuffType::Curse { .. }
+        | BuffType::RhinoPriestDebuff { .. }
+        | BuffType::Slow { .. }
+        | BuffType::Frozen
+        | BuffType::Stun
+        | BuffType::Silence
+        | BuffType::TeleportManaPenalty { .. }
+        | BuffType::Poison { .. } => true,
+        // 负值增益（C# 用负 Stats 表达减益，如 PK 惩罚）也算 Debuff
+        BuffType::AttackBoost { bonus }
+        | BuffType::McBoost { bonus }
+        | BuffType::ScBoost { bonus } => *bonus < 0,
+        _ => false,
+    }
+}
+
 /// 检查是否处于失控状态（Stun/Frozen 等，无法行动/攻击）
 pub fn is_incacapacitated(buffs: &[BuffInstance]) -> bool {
     buffs.iter().any(|b| matches!(b.buff_type, BuffType::Stun | BuffType::Frozen))
