@@ -26,10 +26,10 @@ const VIEW_RANGE: i32 = 12;
         if candidates.len() < 2 {
             return;
         }
-        // C# 用 MinDC 近似：选 hp 最低的玩家作为"更弱"目标
+        // C# FindWeakerTarget 按 MinDC 选更弱目标
         let weaker = candidates.iter()
             .filter(|p| current != Some(p.session_id))
-            .min_by_key(|p| p.hp)
+            .min_by_key(|p| p.min_dc)
             .copied();
         if let Some(w) = weaker {
             monster.target_session = Some(w.session_id);
