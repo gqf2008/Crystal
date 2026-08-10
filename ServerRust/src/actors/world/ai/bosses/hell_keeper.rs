@@ -6,11 +6,11 @@
 //!   - 免疫毒（C# ApplyPoison 空实现）
 //!   - 全视野攻击（InAttackRange = ViewRange），固定方向（Up）
 //!   - 1/3 概率 MC AOE + Dazed；2/3 概率 DC 全体单体（多目激光）
-//!   - 高敏捷/护甲减伤（C# Attacked 自定义 armour 判定，简化为 on_attacked 减伤）
+//!   - 高敏捷/护甲减伤（C# Attacked 自定义 armour 判定；on_attacked trait 无 monster/DefenceType 参数，暂未实现）
 //!
 //! Attack（C# HellKeeper.cs:163-171）：attacktype1 = Random(3)>0 ? 0 : 1。
 //! CompleteAttack（C# :173-201）：ViewRange 全体，Type 0=DC / Type 1=MC+Dazed。
-//! Attacked（C# :31-144）：自定义 armour 减伤 + 移除 LRParalysis。
+//! Attacked（C# :31-144）：自定义 armour 减伤 + 移除 LRParalysis（Rust 未实现，需 trait API 支持）。
 
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
@@ -75,7 +75,7 @@ impl MonsterBehavior for HellKeeperBehavior {
                     if fastrand::i32(0..10) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: t.session_id,
-                        poison: Poison::new(PoisonType::DAZED, damage.max(1) as u32, damage, 1000),
+                        poison: Poison::new(PoisonType::DAZED, damage.max(1) as u32, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                     });
                     }
             }
