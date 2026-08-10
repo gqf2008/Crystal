@@ -890,6 +890,11 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                                 // 击杀玩家：增加 PK 值并广播名字颜色变化
                                 let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+                                // #1751：C# Die——击杀/被击杀消息（MurderPlayer / MurderedByPlayer）
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    &format!("你谋杀了 {}", other_state.name));
+                                send_system_message(&self.gate_ref, other_session,
+                                    &format!("你被 {} 击杀了", record.name));
         // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
         if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
             slot: crate::actors::inventory::EquipmentSlot::Weapon,
@@ -1703,6 +1708,11 @@ impl WorldActor {
 
                     // 增加 PK 值
                     let _ = attacker_record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+                    // #1751：C# Die——击杀/被击杀消息（MurderPlayer / MurderedByPlayer）
+                    send_system_message(&self.gate_ref, attacker_session,
+                        &format!("你谋杀了 {}", defender_state.name));
+                    send_system_message(&self.gate_ref, defender_session,
+                        &format!("你被 {} 击杀了", attacker_record.name));
         // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
         if let Ok(Some(weapon)) = attacker_record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
             slot: crate::actors::inventory::EquipmentSlot::Weapon,
@@ -5364,4 +5374,5 @@ mod tests {
         assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Necklace));
     }
 }
+
 
