@@ -390,34 +390,44 @@ fn apply_combat_events(
                 if !ui_font.0.is_strong() {
                     continue;
                 }
-                let Some(target) = actors
+                let target_info = actors
                     .iter()
                     .find(|(_, id, _, _, _)| id.0 == *object_id)
-                    .map(|(e, _, _, _, _)| e)
-                else {
+                    .map(|(e, _, _, mon, _)| (e, mon.is_some()));
+                let Some((target, is_monster)) = target_info else {
                     continue;
                 };
-                // #1560：C# DamageType.Miss=4 → 渲染 "Miss"（灰色），其余渲染 "-damage"
+                // #1618：C# GameScene 飘字颜色——Miss 灰、暴击深红"暴击"、命中怪白/人红
                 let is_miss = *dmg_type == 4;
+                let is_crit = *dmg_type == 5;
+                let text = if is_miss {
+                    "Miss".to_string()
+                } else if is_crit {
+                    "暴击".to_string()
+                } else {
+                    format!("-{}", damage)
+                };
+                let color = if is_miss {
+                    Color::srgb(0.83, 0.83, 0.83) // LightGray
+                } else if is_crit {
+                    Color::srgb(0.55, 0.0, 0.0) // DarkRed
+                } else if is_monster {
+                    Color::srgb(0.95, 0.95, 0.95) // White（怪物命中）
+                } else {
+                    Color::srgb(0.9, 0.2, 0.2) // Red（玩家目标）
+                };
+                let y = if is_crit { -55.0 } else { -40.0 }; // C# Critical Offset=15
                 commands.entity(target).with_children(|p| {
                     p.spawn((
-                        Text2d::new(if is_miss {
-                            "Miss".to_string()
-                        } else {
-                            format!("-{}", damage)
-                        }),
+                        Text2d::new(text),
                         Anchor::TOP_LEFT,
-                        TextColor(if is_miss {
-                            Color::srgb(0.7, 0.7, 0.7)
-                        } else {
-                            Color::srgb(1.0, 0.9, 0.3)
-                        }),
+                        TextColor(color),
                         TextFont {
                             font: FontSource::Handle(ui_font.0.clone()),
                             font_size: FontSize::Px(16.0),
                             ..default()
                         },
-                        Transform::from_xyz(0.0, -40.0, 20.0),
+                        Transform::from_xyz(0.0, y, 20.0),
                         DamageText { vy: -50.0, life: 1.2 },
                     ));
                 });
