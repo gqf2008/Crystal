@@ -4330,6 +4330,38 @@ impl Message<Tick> for WorldActor {
                             if monster.map_index != master_map || dist_master > 16 {
                                 pet_recalls.push((*oid, mx, my, master_map));
                                 monster.ai_state = MonsterAiState::Return;
+                            } else if dist_master > 2 {
+                                // #1693：宠物跟随主人（C# ProcessRoam → MoveTo(Master.Back) 用 PathFinder），
+                                // A* 寻路到主人附近，保持 ~2 格；目标哨兵 session=u64::MAX 区分追击/回出生点
+                                let mut path = self.monster_paths.entry(*oid).or_default();
+                                let recalc = path.is_empty()
+                                    || self.monster_path_targets.get(oid)
+                                        .map(|(s, tx, ty)| *s != u64::MAX || *tx != mx || *ty != my)
+                                        .unwrap_or(true)
+                                    || !self.maps.get(&monster.map_index)
+                                        .map(|m| m.is_walkable(path[0].0, path[0].1))
+                                        .unwrap_or(false);
+                                if recalc {
+                                    *path = self.maps.get(&monster.map_index)
+                                        .and_then(|m| crate::maps::pathfind::find_path(m, (monster.x, monster.y), (mx, my)))
+                                        .unwrap_or_default();
+                                    self.monster_path_targets.insert(*oid, (u64::MAX, mx, my));
+                                }
+                                if !path.is_empty() {
+                                    let candidate = path[0];
+                                    let walkable = self.maps.get(&monster.map_index)
+                                        .map(|m| m.is_walkable(candidate.0, candidate.1))
+                                        .unwrap_or(true);
+                                    if walkable && !monster_positions.contains(&candidate) && moved_targets.insert(candidate) {
+                                        let dir = (0..8)
+                                            .find(|d| MON_DIR_DX[*d] == candidate.0 - monster.x && MON_DIR_DY[*d] == candidate.1 - monster.y)
+                                            .unwrap_or(monster.direction as usize) as u8;
+                                        moved_monsters.push((*oid, candidate.0, candidate.1, dir));
+                                        path.remove(0);
+                                    }
+                                }
+                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                                monster.ai_state = MonsterAiState::Return;
                             } else {
                                 monster.ai_state = MonsterAiState::Idle;
                             }
