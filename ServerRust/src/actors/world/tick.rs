@@ -1332,9 +1332,6 @@ impl WorldActor {
             let mut respawn_pos = spawn.clone();
             respawn_pos.x = rx;
             respawn_pos.y = ry;
-            let packet = build_object_monster_packet(&respawn_pos, new_oid, &spawn.name);
-            // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
-            broadcast_to_map(&self.gate_ref, &self.players, respawn_pos.map_index, &packet).await;
             let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
             let ai_profile = monster_info_opt
                 .map(MonsterAiProfile::from_info)
@@ -1380,6 +1377,16 @@ impl WorldActor {
             } else {
                 (spawn.name.clone(), spawn.hp, spawn.hp, spawn.min_dmg, spawn.max_dmg, spawn.xp)
             };
+            // #1701：稀有度在下方掷点后才生成前缀名字——原实现在掷点前广播导致重生稀有怪名字无前缀；
+            // 现在移到掷点/属性计算之后广播（C# MonsterObject.DropItem 后可见即带稀有名前缀/颜色）
+            let packet = build_object_monster_packet(&respawn_pos, new_oid, &name);
+            // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+            broadcast_to_map(&self.gate_ref, &self.players, respawn_pos.map_index, &packet).await;
+            // #1701：稀有怪名字颜色（C# MonsterRarityData.NameColour → ObjectColourChanged）
+            if rarity > 0 {
+                let colour_packet = build_object_colour_changed_packet(new_oid, crate::actors::world::rarity_name_colour(rarity));
+                broadcast_to_map(&self.gate_ref, &self.players, respawn_pos.map_index, &colour_packet).await;
+            }
             self.monsters.insert(new_oid, MonsterState {
                 object_id: new_oid,
                 name: name.clone(),
