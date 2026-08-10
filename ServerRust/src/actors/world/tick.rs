@@ -1668,6 +1668,39 @@ impl WorldActor {
                 }
             }
         }
+        // #1876：SnowWolfKing 死亡驯化（C# CompleteDeath：SlaveList → EXPOwner 宠物，上限 6）
+        if monster.name.eq_ignore_ascii_case("SnowWolfKing") {
+            if let Some(owner) = monster.last_hitter_session {
+                if self.players.contains_key(&owner) {
+                    let mut pet_count = self.monsters.values()
+                        .filter(|m| m.master_session == Some(owner) && m.hp > 0)
+                        .count();
+                    let slave_ids: Vec<u32> = self.slave_master.iter()
+                        .filter(|(_, m)| **m == monster.object_id)
+                        .map(|(s, _)| *s)
+                        .collect();
+                    let mut tamed: Vec<(u32, String)> = Vec::new();
+                    for soid in slave_ids {
+                        if pet_count >= 6 { break; }
+                        if let Some(slave) = self.monsters.get_mut(&soid) {
+                            if slave.hp <= 0 { continue; }
+                            let name = slave.name.clone();
+                            slave.master_session = Some(owner);
+                            slave.target_session = None;
+                            slave.ai_state = crate::actors::world::MonsterAiState::Idle;
+                            self.slave_master.remove(&soid);
+                            self.pet_levels.insert(soid, 1);
+                            pet_count += 1;
+                            tamed.push((soid, name));
+                        }
+                    }
+                    // C# mob.Broadcast(new S.ObjectName ...)：刷新名字显示（借用释放后广播）
+                    for (soid, name) in tamed {
+                        self.broadcast_object_name(soid, &name).await;
+                    }
+                }
+            }
+        }
         // 应用死亡召唤（KingHydrax 死亡召唤 2 只 slave）
         for bs in &die_summons {
             let mon_index = self.monster_name_index.get(&bs.monster_name.to_lowercase()).copied();
