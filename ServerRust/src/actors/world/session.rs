@@ -771,6 +771,11 @@ impl Message<WorldMoveRequest> for WorldActor {
             return;
         }
 
+        // #1757：C# Walk/Run——移动取消交易（双方收 S.TradeCancel）
+        let _ = self.social_ref.tell(crate::actors::social::TradeCancel {
+            session_id: msg.session_id,
+        }).try_send();
+
         // C# HumanObject Walk/Run：移动打断专注（3s 内不提供专注加成）
         self.interrupt_concentration(msg.session_id).await;
 
@@ -4029,4 +4034,5 @@ mod tests {
         assert!(!tile_blocked_by(100, 100, &[], &[], &[]));
     }
 }
+
 
