@@ -295,6 +295,48 @@ pub fn get_monster_frame(
     }
 }
 
+/// 怪物近战攻击动作（C# GameScene.cs:3347 Type 0-4 → Attack1-5）；
+/// 无对应帧表回退 Attack1（DEFAULT_MONSTER_FRAMES 仅 Attack1，避免动画冻结）
+pub fn resolve_monster_attack_action(
+    monster_type: u16,
+    attack_type: u8,
+    direction: mir2_shared::enums::MirDirection,
+    stage: u8,
+) -> MirAction {
+    let action = match attack_type {
+        1 => MirAction::Attack2,
+        2 => MirAction::Attack3,
+        3 => MirAction::Attack4,
+        4 => MirAction::Attack5,
+        _ => MirAction::Attack1,
+    };
+    if get_monster_frame(monster_type, action, direction, stage).is_some() {
+        action
+    } else {
+        MirAction::Attack1
+    }
+}
+
+/// 怪物远程攻击动作（C# GameScene.cs ObjectRangeAttack Type 0→AttackRange1 1→AttackRange2 2→AttackRange3）；
+/// 无对应帧表回退 Attack1（默认怪物无 AttackRange 帧表，避免动画冻结）
+pub fn resolve_monster_range_attack_action(
+    monster_type: u16,
+    attack_type: u8,
+    direction: mir2_shared::enums::MirDirection,
+    stage: u8,
+) -> MirAction {
+    let action = match attack_type {
+        1 => MirAction::AttackRange2,
+        2 => MirAction::AttackRange3,
+        _ => MirAction::AttackRange1,
+    };
+    if get_monster_frame(monster_type, action, direction, stage).is_some() {
+        action
+    } else {
+        MirAction::Attack1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,4 +488,28 @@ mod tests {
         .expect("cave statue 2 standing");
         assert_eq!(s2.start, 18);
     }
+    /// #1765：怪物近战/远程攻击动作无对应帧表时回退 Attack1（避免动画冻结）
+    #[test]
+    fn monster_attack_action_falls_back_to_attack1_without_frames() {
+        // 默认怪物（类型 0）无 Attack2-5 / AttackRange 帧表 → 回退 Attack1
+        assert_eq!(resolve_monster_attack_action(0, 0, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_attack_action(0, 1, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_attack_action(0, 2, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_attack_action(0, 3, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_attack_action(0, 4, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_range_attack_action(0, 0, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_range_attack_action(0, 1, MirDirection::Up, 0), MirAction::Attack1);
+        assert_eq!(resolve_monster_range_attack_action(0, 2, MirDirection::Up, 0), MirAction::Attack1);
+        // DragonStatue 有 AttackRange1 帧表 → 远程 Type0 用 AttackRange1，近战仍回退 Attack1
+        let dragon = MonsterKind::DragonStatue as u16;
+        assert_eq!(
+            resolve_monster_range_attack_action(dragon, 0, MirDirection::Up, 0),
+            MirAction::AttackRange1
+        );
+        assert_eq!(
+            resolve_monster_attack_action(dragon, 0, MirDirection::Up, 0),
+            MirAction::Attack1
+        );
+    }
+
 }

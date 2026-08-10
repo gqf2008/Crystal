@@ -26,8 +26,8 @@ pub enum CombatEvent {
     Damage { object_id: u32, damage: i32, dmg_type: u8 },
     /// #224 对象施法（S.ObjectMagic）：施法者播 Spell 动作
     SpellCast { object_id: u32 },
-    /// #224 对象远程攻击（S.ObjectRangeAttack）：施法者播 AttackRange 动作
-    RangeAttack { object_id: u32 },
+    /// #224/#1765 对象远程攻击（S.ObjectRangeAttack）：施法者播 AttackRange 动作（Type→AttackRange1/2/3）
+    RangeAttack { object_id: u32, attack_type: u8 },
     /// #234/#1624 对象近战攻击（S.ObjectAttack）：施法者按 attack_type 播 Attack1-5 动作
     Attack { object_id: u32, direction: u8, attack_type: u8 },
     /// #238 对象蓝量（S.ObjectMana）
@@ -355,7 +355,17 @@ fn apply_combat_events(
                 };
                 for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
-                        anim.action = if mon.is_some() { action } else { mir2_shared::enums::MirAction::Attack1 };
+                        // #1765：怪物无 Attack2-5 帧表时回退 Attack1（避免动画冻结）
+                        anim.action = match appr {
+                            Some(m) => crate::objects::frames::resolve_monster_attack_action(
+                                m.monster_type,
+                                *attack_type,
+                                mir2_shared::enums::MirDirection::try_from(*direction)
+                                    .unwrap_or(mir2_shared::enums::MirDirection::Up),
+                                m.stage,
+                            ),
+                            None => mir2_shared::enums::MirAction::Attack1,
+                        };
                         anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
@@ -391,15 +401,20 @@ fn apply_combat_events(
                     }
                 }
             }
-            CombatEvent::RangeAttack { object_id } => {
-                // #224：远程攻击动作——玩家用 AttackRange1（C# Action.AttackRange1），
-                // 默认怪物无 AttackRange 帧表 → 回退 Attack1
+            CombatEvent::RangeAttack { object_id, attack_type } => {
+                // #224/#1765：远程攻击动作——玩家用 AttackRange1（C# Action.AttackRange1）；
+                // 怪物按 Type 选 AttackRange1/2/3，无帧表回退 Attack1（避免动画冻结）
                 for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
-                        anim.action = if mon.is_some() {
-                            mir2_shared::enums::MirAction::Attack1
-                        } else {
-                            mir2_shared::enums::MirAction::AttackRange1
+                        anim.action = match appr {
+                            Some(m) => crate::objects::frames::resolve_monster_range_attack_action(
+                                m.monster_type,
+                                *attack_type,
+                                mir2_shared::enums::MirDirection::try_from(anim.direction)
+                                    .unwrap_or(mir2_shared::enums::MirDirection::Up),
+                                m.stage,
+                            ),
+                            None => mir2_shared::enums::MirAction::AttackRange1,
                         };
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));

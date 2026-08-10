@@ -809,6 +809,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 target_id,
                 target_x,
                 target_y,
+                attack_type: _,
                 spell,
                 spell_level: _,
             } => {

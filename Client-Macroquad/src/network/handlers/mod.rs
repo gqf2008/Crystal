@@ -1829,6 +1829,7 @@ pub enum NetworkEvent {
         target_id: u32,
         target_x: u32,
         target_y: u32,
+        attack_type: u8,
         spell: u16,
         spell_level: u16,
     },

@@ -76,8 +76,10 @@ pub struct ObjectRangeAttack {
     pub target_id: u32,
     pub target_x: u32,
     pub target_y: u32,
-    pub spell: u16,
-    pub spell_level: u16,
+    /// C# S.ObjectRangeAttack.Type
+    pub attack_type: u8,
+    pub spell: u8,
+    pub spell_level: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -308,8 +310,9 @@ impl Packet for ObjectRangeAttack {
             target_id: reader.read_u32::<LittleEndian>()?,
             target_x: reader.read_u32::<LittleEndian>()?,
             target_y: reader.read_u32::<LittleEndian>()?,
-            spell: reader.read_u16::<LittleEndian>()?,
-            spell_level: reader.read_u16::<LittleEndian>()?,
+            attack_type: reader.read_u8()?,
+            spell: reader.read_u8()?,
+            spell_level: reader.read_u8()?,
         })
     }
 
@@ -321,8 +324,9 @@ impl Packet for ObjectRangeAttack {
         writer.write_u32::<LittleEndian>(self.target_id)?;
         writer.write_u32::<LittleEndian>(self.target_x)?;
         writer.write_u32::<LittleEndian>(self.target_y)?;
-        writer.write_u16::<LittleEndian>(self.spell)?;
-        writer.write_u16::<LittleEndian>(self.spell_level)?;
+        writer.write_u8(self.attack_type)?;
+        writer.write_u8(self.spell)?;
+        writer.write_u8(self.spell_level)?;
         Ok(())
     }
 }
