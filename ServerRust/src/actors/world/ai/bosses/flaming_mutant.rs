@@ -87,11 +87,11 @@ impl MonsterBehavior for FlamingMutantBehavior {
                         spell_id: 0,
                         attack_type: 1,
                     });
-                    // C# Random(2)==0 Paralysis
+                    // C# Random(2)==0 → PoisonTarget(wt, 1, 5, Paralysis, 1000)：时长 5，值=SC（用 damage 近似）
                     if fastrand::i32(0..2) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: wt.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 1, 5, 1000),
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
                         });
                     }
                 }
