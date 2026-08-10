@@ -2564,6 +2564,16 @@ impl Message<CraftItemRequest> for WorldActor {
             _ => return,
         };
 
+        // #1643：C# CraftItem（PlayerObject.cs:7970-7984）——需先与合成 NPC 对话且同图范围内（InRange DataRange=16）
+        let npc_ok = match self.session_npc.get(&msg.session_id).and_then(|oid| self.npcs.get(oid)) {
+            Some(npc) => npc_in_range(state.map_index, state.x, state.y, npc),
+            None => false,
+        };
+        if !npc_ok {
+            send_system_message(&self.gate_ref, msg.session_id, "请先与合成 NPC 对话");
+            return;
+        }
+
         // 查找配方（DB recipes 表，对齐 C# RecipeInfo）
         let recipe = match self.recipe_infos.iter().find(|r| r.recipe_id == msg.recipe_id as i32) {
             Some(r) => r.clone(),
@@ -2715,6 +2725,17 @@ impl Message<BuyItemBackRequest> for WorldActor {
                 return;
             }
         };
+        // #1643：回购需在 NPC 同图范围内（C# NPCObject.BuyBack）
+        if let Some(npc) = self.npcs.get(&npc_oid) {
+            if !npc_in_range(state.map_index, state.x, state.y, npc) {
+                send_system_message(&self.gate_ref, msg.session_id, "距离 NPC 太远，无法回购");
+                return;
+            }
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+            return;
+        }
+
         // 查找回购列表中的对应物品（按 unique_id，C# BuyItemBack 语义；仅当前 NPC 的条目）
         let list = match self.buyback_items.get_mut(&msg.session_id) {
             Some(l) => l,
