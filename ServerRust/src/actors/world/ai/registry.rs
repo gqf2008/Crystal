@@ -327,9 +327,9 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客") {
         return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
     }
-    // SepHigh* 高级变体复用对应基础行为
+    // SepHigh* 高级变体：SepHighWarrior 专属行为（C# SepHighWarrior.cs 3 技能），其余复用对应基础行为
     if name.contains("sephighwarrior") || name.contains("sep high warrior") {
-        return Box::new(bosses::sep_warrior::SepWarriorBehavior::new());
+        return Box::new(bosses::sep_high_warrior::SepHighWarriorBehavior::new());
     }
     if name.contains("sephigharcher") || name.contains("sep high archer") {
         return Box::new(bosses::sep_archer::SepArcherBehavior::new());
