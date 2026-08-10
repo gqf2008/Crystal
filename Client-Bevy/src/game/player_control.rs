@@ -608,8 +608,8 @@ fn auto_attack_system(
     }
     // 诊断（#57）：攻击时打印玩家/目标瓦片与方向（debug 级）
     tracing::debug!(
-        "⚔️ Attack target={} dir={:?} range={} in_range={}",
-        target_id, dir, max_range, in_range
+        "⚔️ Attack target={} dir={:?} p_tile=({},{}) t_tile=({},{}) range={} in_range={}",
+        target_id, dir, p_tile.0, p_tile.1, t_tile.0, t_tile.1, max_range, in_range
     );
 }
 
