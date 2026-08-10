@@ -1074,6 +1074,22 @@ impl Message<UseItemRequest> for WorldActor {
                                 send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
                             }
                         }
+                        // 15 Increase Hero inventory（C# HeroObject.cs:482：上限 42，每次 +8）
+                        15 => {
+                            if player_state.hero_index == 0 {
+                                send_system_message(&self.gate_ref, msg.session_id, "你没有出战英雄");
+                                return;
+                            }
+                            let resized = record.actor_ref.ask(crate::actors::player::ResizeHeroInventory)
+                                .await.unwrap_or(0);
+                            if resized > 0 {
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    &format!("英雄背包已扩容到 {} 格", resized));
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, "英雄背包已达上限");
+                                return; // C# 满上限不消耗
+                            }
+                        }
                         _ => {
                             send_system_message(&self.gate_ref, msg.session_id, "该卷轴无法使用");
                             return;
@@ -3194,4 +3210,5 @@ mod tests {
     }
 
 }
+
 
