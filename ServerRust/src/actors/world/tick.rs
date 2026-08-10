@@ -303,11 +303,7 @@ impl WorldActor {
         for oid in pet_oids {
             if let Some(monster) = self.monsters.remove(&oid) {
                 let remove_packet = Self::build_object_remove_packet(oid);
-                for sid in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid, data: remove_packet.clone(),
-                    }).await;
-                }
+                broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
                 debug!("Pet '{}' despawned on master death", monster.name);
             }
         }
@@ -1444,12 +1440,7 @@ impl WorldActor {
             self.world_boss_queue.remove(&oid);
             if let Some(monster) = self.monsters.remove(&oid) {
                 let packet = Self::build_object_remove_packet(oid);
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: packet.clone(),
-                    }).await;
-                }
+                broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &packet).await;
                 broadcast_system_message(&self.gate_ref, &self.players,
                     &format!("世界Boss {} 因无人挑战而消失了", monster.name));
                 debug!("World boss '{}' (#{}) despawned (timeout)", monster.name, oid);
@@ -1552,12 +1543,7 @@ impl WorldActor {
 
             // 广播移除
             let remove_packet = Self::build_object_remove_packet(gi.object_id);
-            for sid in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *sid,
-                    data: remove_packet.clone(),
-                }).await;
-            }
+            broadcast_to_map(&self.gate_ref, &self.players, gi.map_index, &remove_packet).await;
 
             if let Some(record) = self.players.get(&session_id) {
                 if gi.item.item_index == 0 {
@@ -5003,12 +4989,7 @@ impl Message<Tick> for WorldActor {
             for oid in &expired_monsters {
                 if let Some(monster) = self.monsters.remove(oid) {
                     let remove_packet = Self::build_object_remove_packet(*oid);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: remove_packet.clone(),
-                        }).await;
-                    }
+                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
                     debug!("Summon '{}' (#{}) expired (recall_at_tick reached)", monster.name, oid);
                 }
             }
@@ -5025,12 +5006,7 @@ impl Message<Tick> for WorldActor {
                         if first_died {
                             let died_packet = Self::build_object_died_packet(
                                 *oid, monster.x, monster.y, monster.direction);
-                            for session_id in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: died_packet.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &died_packet).await;
                             debug!("Monster #{} died, corpse kept for revive", oid);
                         }
                     }
@@ -5044,16 +5020,8 @@ impl Message<Tick> for WorldActor {
                         if let Some(slave) = self.monsters.remove(&soid) {
                             let slave_died = Self::build_object_died_packet(soid, slave.x, slave.y, slave.direction);
                             let slave_removed = Self::build_object_remove_packet(soid);
-                            for session_id in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: slave_died.clone(),
-                                }).await;
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *session_id,
-                                    data: slave_removed.clone(),
-                                }).await;
-                            }
+                            broadcast_to_map(&self.gate_ref, &self.players, slave.map_index, &slave_died).await;
+                            broadcast_to_map(&self.gate_ref, &self.players, slave.map_index, &slave_removed).await;
                             debug!("Slave #{} died with master #{}", soid, oid);
                         }
                     }
@@ -5087,16 +5055,8 @@ impl Message<Tick> for WorldActor {
                         *oid, monster.x, monster.y, monster.direction);
                     // 发送 ObjectRemove（清理实体）
                     let remove_packet = Self::build_object_remove_packet(*oid);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: died_packet.clone(),
-                        }).await;
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: remove_packet.clone(),
-                        }).await;
-                    }
+                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &died_packet).await;
+                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
 
                     // 生成掉落物品
                     self.spawn_monster_drops(&monster).await;
