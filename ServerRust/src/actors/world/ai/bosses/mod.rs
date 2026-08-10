@@ -115,6 +115,7 @@ pub mod yin_devil_node;
 pub mod power_bead;
 pub mod demon_guard;
 pub mod trap_rock;
+pub mod sep_high_warrior;
 pub mod sep_warrior;
 pub mod sep_archer;
 pub mod sep_taoist;
