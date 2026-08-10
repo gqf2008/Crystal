@@ -1349,12 +1349,8 @@ impl Message<TownReviveRequest> for WorldActor {
         obj_body.extend_from_slice(&state.object_id.to_le_bytes());
         obj_body.push(1u8); // effect
         let revived_packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRevived as i16, &obj_body);
-        for sid in self.players.keys() {
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id: *sid,
-                data: revived_packet.clone(),
-            }).await;
-        }
+        // #1686：复生广播只发同图玩家（C# CurrentMap）
+        broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &revived_packet).await;
 
         debug!("TownRevive: {} revived at map {} ({}, {})", state.name, revive_map, spawn_x, spawn_y);
     }

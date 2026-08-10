@@ -136,12 +136,8 @@ async fn grant_pet_exp(world: &mut WorldActor, master: u64, amount: i64, map_ind
         health_body.extend_from_slice(&3u16.to_le_bytes());
         let health_packet = build_packet_bytes(
             mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
-        for session_id in world.players.keys() {
-            let _ = world.gate_ref.tell(SendToClient {
-                session_id: *session_id,
-                data: health_packet.clone(),
-            }).await;
-        }
+        // #1686：宠物血条广播只发同图玩家（C# CurrentMap）
+        crate::actors::world::broadcast_to_map(&world.gate_ref, &world.players, map_index, &health_packet).await;
     }
 }
 
@@ -261,14 +257,14 @@ impl WorldActor {
             let Some(record) = self.players.get(&session_id).cloned() else { continue };
             // 死亡地图 NoReconnect：由独立消息 ApplyNoReconnect 处理传送
             //（避免 handler 内同步加载大图导致 tokio 栈溢出，#881 回归）
-            let (needs_noreconnect, object_id) = match record.actor_ref.ask(GetPlayerState).await {
+            let (needs_noreconnect, object_id, revive_map) = match record.actor_ref.ask(GetPlayerState).await {
                 Ok(Some(state)) => {
                     let nn = self.map_infos.get(&(state.map_index as i32))
                         .map(|mi| mi.no_reconnect && !mi.no_reconnect_map.is_empty())
                         .unwrap_or(false);
-                    (nn, state.object_id)
+                    (nn, state.object_id, state.map_index)
                 }
-                _ => (false, 0),
+                _ => (false, 0, 0),
             };
             let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
             if needs_noreconnect {
@@ -285,12 +281,8 @@ impl WorldActor {
                 obj_body.push(1u8); // effect
                 let revived_packet = build_packet_bytes(
                     mir2_shared::enums::ServerPacketIds::ObjectRevived as i16, &obj_body);
-                for sid in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: revived_packet.clone(),
-                    }).await;
-                }
+                // #1686：复生广播只发同图玩家（C# CurrentMap）
+                broadcast_to_map(&self.gate_ref, &self.players, revive_map, &revived_packet).await;
             }
         }
     }
@@ -867,12 +859,9 @@ impl WorldActor {
             mir2_shared::enums::ServerPacketIds::ObjectHide as i16
         };
         let packet = build_packet_bytes(opcode, &body);
-        for sid in self.players.keys() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: *sid,
-                data: packet.clone(),
-            }).await;
-        }
+        // #1686：显隐广播只发同图玩家（C# CurrentMap）
+        let map_idx = self.monsters.get(&object_id).map(|m| m.map_index).unwrap_or(0);
+        broadcast_to_map(&self.gate_ref, &self.players, map_idx, &packet).await;
     }
 
 /// PK 值衰减 + 名字颜色广播（C# MapObject.Process：每 Settings.PKDelay=12 秒衰减 1 点）

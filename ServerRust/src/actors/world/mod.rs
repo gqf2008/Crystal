@@ -3443,12 +3443,8 @@ impl WorldActor {
                                         count: 1,
                                         spread: 0,
                                     }, boss_oid, &format!("[世界Boss] {}", monster_info.name));
-                                for session_id in self.players.keys() {
-                                    let _ = self.gate_ref.tell(SendToClient {
-                                        session_id: *session_id,
-                                        data: packet.clone(),
-                                    }).await;
-                                }
+                                // #1686：世界Boss 生成广播只发目标图（C# CurrentMap）
+                                broadcast_to_map(&self.gate_ref, &self.players, target_map_index, &packet).await;
                                 let map_title = self.map_infos.get(&(target_map_index as i32))
                                     .map(|m| m.title.clone())
                                     .unwrap_or_else(|| map_name.to_string());
