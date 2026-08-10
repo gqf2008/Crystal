@@ -519,7 +519,8 @@ fn auto_attack_system(
     net: Res<NetConnection>,
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
-    players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
+    game_data: Res<GameData>,
+    players: Query<(Entity, &Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
     hud: Res<HudState>,
     character_state: Res<crate::game::dialogs::character::CharacterState>,
@@ -539,7 +540,7 @@ fn auto_attack_system(
         control.attack_target = None;
         return;
     };
-    let Ok(player_tf) = players.single() else { return };
+    let Ok((pe, player_tf, lm_opt)) = players.single() else { return };
 
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
     let attack_kind = player_attack_kind(
@@ -557,16 +558,53 @@ fn auto_attack_system(
         && (t_tile.1 - p_tile.1).abs() <= max_range;
 
     if !in_range {
-        // 保留目标（玩家需走近），每 1s 提示一次（C# OutputDelay）
-        *too_far_timer += time.delta_secs();
-        if *too_far_timer >= 1.0 {
-            *too_far_timer = 0.0;
-            chat.add_line(
-                "目标太远".to_string(),
-                crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
-                crate::game::chat::ChatChannel::System,
-            );
-            tracing::debug!("🚫 目标太远: target={} range={} 需 <= {}", target_id, max_range, max_range);
+        // #1817：C# 点击目标后自动追击——目标离开攻击范围时寻路到其相邻格。
+        // 已有寻路（LocalMove 非空）时不打断人工/既有移动。
+        let pathing = lm_opt.map(|lm| !lm.path.is_empty()).unwrap_or(false);
+        let mut chased = false;
+        if !pathing {
+            if let Some(map) = &game_data.map {
+                let mut best_path: Option<Vec<(i32, i32)>> = None;
+                for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                    let t2 = (t_tile.0 + ox, t_tile.1 + oy);
+                    if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
+                        continue;
+                    }
+                    if let Some(p) = crate::game::pathfinding::find_path(map, p_tile, t2) {
+                        if !p.is_empty()
+                            && best_path.as_ref().map(|bp| p.len() < bp.len()).unwrap_or(true)
+                        {
+                            best_path = Some(p);
+                        }
+                    }
+                }
+                if let Some(p) = best_path {
+                    let len = p.len();
+                    commands.entity(pe).insert(LocalMove {
+                        path: p.into(),
+                        step_timer_ms: 0.0,
+                        run: true,
+                        last: None,
+                        step_origin: None,
+                        turn_acc: 0.0,
+                    });
+                    chased = true;
+                    tracing::debug!("🚶 追击目标 {}（{} 格）", target_id, len);
+                }
+            }
+        }
+        // 无法追击时才每 1s 提示一次（C# OutputDelay）
+        if !chased {
+            *too_far_timer += time.delta_secs();
+            if *too_far_timer >= 1.0 {
+                *too_far_timer = 0.0;
+                chat.add_line(
+                    "目标太远".to_string(),
+                    crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                    crate::game::chat::ChatChannel::System,
+                );
+                tracing::debug!("🚫 目标太远: target={} range={} 需 <= {}", target_id, max_range, max_range);
+            }
         }
         return;
     }
