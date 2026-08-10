@@ -35,6 +35,8 @@ impl MonsterBehavior for TucsonWarriorBehavior {
         if in_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# SmashAttack 用 MinMC/MaxMC（TucsonWarrior.cs:62）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
             // C# !range && Random.Next(5) > 0：近战 4/5 Halfmoon / 1/5 Smash
             if dist <= 1 && fastrand::i32(0..5) > 0 {
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
@@ -50,13 +52,13 @@ impl MonsterBehavior for TucsonWarriorBehavior {
                     attack_type: 0,
                 });
             } else {
-                // C# SmashAttack(1)：目标中心半径 1
+                // C# SmashAttack(1)（MC）：目标中心半径 1
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
                     center_x: target.x,
                     center_y: target.y,
                     radius: AOE_RADIUS,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             }
