@@ -569,6 +569,7 @@ pub(crate) fn auto_spell_verify(
     mut casts: Local<u32>,
     mut moving: Local<bool>,
     mut last_move_at: Local<f32>,
+    mut arrived_wait: Local<f32>,
     mut hits_at_stage: Local<u32>,
 ) {
     use client_bevy::scenes::AppState;
@@ -653,9 +654,18 @@ pub(crate) fn auto_spell_verify(
         if *t - *last_move_at >= 5.0 {
             *moving = false;
         }
+        *arrived_wait = 0.0;
         return;
     }
     *moving = false;
+
+    // #1819：到达目标邻接后等服务端位置同步再施法（real_verify 同款 arrived_wait 2s）。
+    // 客户端本地移动超前服务端 1-2 格，HellFire 等按“服务端位置+方向”解析 AoE 的法术会打空。
+    *arrived_wait += time.delta_secs();
+    if *arrived_wait < 2.0 {
+        return;
+    }
+    *arrived_wait = 0.0;
 
     *cast_t += time.delta_secs();
     if *cast_t < 1.0 {
