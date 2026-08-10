@@ -2025,6 +2025,8 @@ impl WorldActor {
             } else {
                 0
             };
+            // #1728：C# Envir.CreateDropItem——非 NeedIdentify 掉落直接已鉴定（is_identified 语义已修复）
+            item.identified = info.is_identified();
         }
         // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
         enrich_item_info(&mut item, &self.item_infos);
@@ -7858,4 +7860,3 @@ impl Message<GmGotoRequest> for WorldActor {
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
     }
 }
-
