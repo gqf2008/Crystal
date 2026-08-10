@@ -702,6 +702,11 @@ impl Message<WorldMoveRequest> for WorldActor {
                 .filter(|s| self.conquest_instances.iter().any(|c| c.id == s.conquest_id && c.map_index == state.map_index as i32))
                 .map(|s| (s.x, s.y))
                 .collect();
+            // #1717：C# EmptyCell——怪物占用目标格不可走（玩家不阻挡）
+            let monster_tiles: Vec<(i32, i32)> = self.monsters.values()
+                .filter(|m| m.map_index == state.map_index)
+                .map(|m| (m.x, m.y))
+                .collect();
             let mut blocked = false;
             for j in 1..=steps {
                 blocked |= tile_blocked_by(
@@ -709,6 +714,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                     state.y + super::MON_DIR_DY[dir] * j,
                     &npc_tiles,
                     &struct_tiles,
+                    &monster_tiles,
                 );
             }
             if blocked {
@@ -3901,9 +3907,15 @@ fn format_roll_message(player_name: &str, dice: i32) -> String {
     format!("{} 掷出了 {} 点", player_name, dice)
 }
 
-/// #1408：目标格是否被阻挡（NPC 或攻城结构占用，C# 移动阻挡语义）
-fn tile_blocked_by(tx: i32, ty: i32, npc_tiles: &[(i32, i32)], struct_tiles: &[(i32, i32)]) -> bool {
-    npc_tiles.contains(&(tx, ty)) || struct_tiles.contains(&(tx, ty))
+/// #1408/#1717：目标格是否被阻挡（NPC / 攻城结构 / 怪物占用，C# 移动阻挡语义 EmptyCell）
+fn tile_blocked_by(
+    tx: i32,
+    ty: i32,
+    npc_tiles: &[(i32, i32)],
+    struct_tiles: &[(i32, i32)],
+    monster_tiles: &[(i32, i32)],
+) -> bool {
+    npc_tiles.contains(&(tx, ty)) || struct_tiles.contains(&(tx, ty)) || monster_tiles.contains(&(tx, ty))
 }
 
 /// #1344：构建 S.ObjectChat body（wire 对齐 C# ObjectChat：[ObjectID u32][Text dotnet][ChatType u8]）
@@ -4006,12 +4018,15 @@ mod tests {
 
     #[test]
     fn test_tile_blocked_by() {
-        // #1408：NPC 或攻城结构占用目标格 → 阻挡
+        // #1408/#1717：NPC / 攻城结构 / 怪物占用目标格 → 阻挡（C# EmptyCell）
         let npcs = vec![(170i32, 667i32), (200, 300)];
         let walls = vec![(350i32, 350i32)];
-        assert!(tile_blocked_by(170, 667, &npcs, &walls));
-        assert!(tile_blocked_by(350, 350, &npcs, &walls));
-        assert!(!tile_blocked_by(171, 667, &npcs, &walls));
-        assert!(!tile_blocked_by(100, 100, &[], &[]));
+        let monsters = vec![(500i32, 500i32)];
+        assert!(tile_blocked_by(170, 667, &npcs, &walls, &monsters));
+        assert!(tile_blocked_by(350, 350, &npcs, &walls, &monsters));
+        assert!(tile_blocked_by(500, 500, &npcs, &walls, &monsters));
+        assert!(!tile_blocked_by(171, 667, &npcs, &walls, &monsters));
+        assert!(!tile_blocked_by(100, 100, &[], &[], &[]));
     }
 }
+
