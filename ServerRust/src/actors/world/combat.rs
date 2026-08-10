@@ -2242,6 +2242,17 @@ impl Message<MagicRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "魔法值不足");
             return;
         }
+        // #1872：C# HumanObject.cs:5630——ExplosiveTrap 上限 Lv+1（未引爆；MP 已扣，与 C# 一致）
+        if spell_enum == mir2_shared::enums::Spell::ExplosiveTrap {
+            let active = self.spell_objects.values()
+                .filter(|so| so.spell == mir2_shared::enums::Spell::ExplosiveTrap
+                    && so.caster_session == msg.session_id && !so.detonated)
+                .count();
+            if active >= spell_level as usize + 1 {
+                send_system_message(&self.gate_ref, msg.session_id, "已放置的陷阱数量达到上限");
+                return;
+            }
+        }
         // #1578：C# HumanObject 魔法 LogTime——成功施法后 10s 内不可下线
         self.player_logout_block_ms.insert(msg.session_id, now_ms + LOGOUT_DELAY_MS);
         // #312：冥想被动——施法后有概率返还 MP（C# HumanObject.cs:3827，概率≈(Lv+集中)/8）
