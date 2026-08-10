@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/VenomSpider.cs
 //! 机制：
 //!   - InAttackRange 特殊十字判定（2 格：x<=1&&y<=1 或 同奇偶）
-//!   - Attack：DC LineAttack(2) + MACAgility，命中后 8s 绿毒
+//!   - Attack：DC LineAttack(2) + MACAgility，命中后 8s 绿毒（值=SC）
 //!
 //! Attack（C# :27-46）：DC LineAttack(2, MACAgility)。
 //! CompleteAttack（C# :48-59）：命中 → Green 8s。
@@ -60,11 +60,12 @@ impl MonsterBehavior for VenomSpiderBehavior {
                         spell_id: 0,
                         attack_type: 0,
                     });
-                    // C# PoisonTarget(8,5,Green,1000)：1/8
+                    // C# PoisonTarget(8,5,Green,1000)：1/8、值=SC
                     if fastrand::i32(0..8) == 0 {
+                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                            poison: Poison::new(PoisonType::GREEN, 5, sc_value, 1000),
                         });
                     }
                 } else {
@@ -76,11 +77,12 @@ impl MonsterBehavior for VenomSpiderBehavior {
                             spell_id: 0,
                             attack_type: 0,
                         });
-                        // C# PoisonTarget(8,5,Green,1000)：1/8
+                        // C# PoisonTarget(8,5,Green,1000)：1/8、值=SC
                         if fastrand::i32(0..8) == 0 {
+                            let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                                 session_id: h.session_id,
-                                poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                                poison: Poison::new(PoisonType::GREEN, 5, sc_value, 1000),
                             });
                         }
                     }

@@ -1,8 +1,8 @@
 //! CharmedSnake（魅惑蛇）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/CharmedSnake.cs
-//! 机制：召唤物——主人>15 格或离线 → 自毁；近战（MAC）+ 1/9 麻痹毒（5s，tick 1000，PetLevel=1 近似）；
-//!      死亡 3x3 爆炸（10 伤害，MACAgility）
+//! 机制：召唤物——主人>15 格或离线 → 自毁；近战（MAC）+ 麻痹毒（概率 10-PetLevel、时长 4+PetLevel，值=SC，tick 1000）；
+//!      死亡 3x3 爆炸（10*PetLevel 伤害，MACAgility）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -52,11 +52,15 @@ impl MonsterBehavior for CharmedSnakeBehavior {
                 spell_id: 0,
                 attack_type: 0,
             });
-            // C# PoisonTarget(10-PetLevel, 4+PetLevel, Paralysis, 1000)：PetLevel=1 → 1/9、5s
-            if fastrand::i32(0..9) == 0 {
+            // C# PoisonTarget(10-PetLevel, 4+PetLevel, Paralysis, 1000)：概率/时长随 PetLevel、值=SC
+            let pet_level = ctx.pet_level.max(1);
+            let chance = (10 - pet_level).max(1);
+            let duration = (4 + pet_level) as u32;
+            if fastrand::i32(0..chance) == 0 {
+                let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
+                    poison: Poison::new(PoisonType::PARALYSIS, duration, sc_value, 1000),
                 });
             }
             return;
@@ -70,14 +74,14 @@ impl MonsterBehavior for CharmedSnakeBehavior {
         }
     }
 
-    /// C# Die：3x3 爆炸（10*PetLevel 伤害，PetLevel=1 → 10）
+    /// C# Die：3x3 爆炸（10*PetLevel 伤害，MACAgility）
     fn on_die(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
             attacker_oid: monster.object_id,
             center_x: monster.x,
             center_y: monster.y,
             radius: 1,
-            damage: 10,
+            damage: (10 * ctx.pet_level).max(1),
             spell_id: 0,
         });
     }
