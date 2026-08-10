@@ -87,11 +87,12 @@ impl MonsterBehavior for FlamingMutantBehavior {
                         spell_id: 0,
                         attack_type: 1,
                     });
-                    // C# Random(2)==0 → PoisonTarget(wt, 1, 5, Paralysis, 1000)：时长 5，值=SC（用 damage 近似）
+                    // C# Random(2)==0 → PoisonTarget(wt, 1, 5, Paralysis, 1000)：时长 5，值=SC
                     if fastrand::i32(0..2) == 0 {
+                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: wt.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, sc_value, 1000),
                         });
                         // C# CompleteRangeAttack（FlamingMutant.cs:98）：麻痹命中广播蛛网特效，Time=5000
                         ctx.out_effects.push((wt.object_id, mir2_shared::enums::SpellEffect::FlamingMutantWeb, 0, 5000));

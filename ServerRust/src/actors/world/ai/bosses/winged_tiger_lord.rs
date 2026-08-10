@@ -63,12 +63,13 @@ impl MonsterBehavior for WingedTigerLordBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    // C# PoisonTarget(2, poisonTime, Dazed, 2000)：1/2、时长=poisonTime（DC 近似）
+                    // C# PoisonTarget(2, poisonTime, Dazed, 2000)：1/2、时长=poisonTime=SC 攻、值=SC（PoisonTarget 内部固定 Value=SC）
                     if fastrand::i32(0..2) == 0 {
-                        let poison_time = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(2) as u32;
+                        let poison_time = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(2) as u32;
+                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: h.session_id,
-                            poison: Poison::new(PoisonType::DAZED, poison_time, 0, 2000),
+                            poison: Poison::new(PoisonType::DAZED, poison_time, sc_value, 2000),
                         });
                     }
                 }
@@ -108,11 +109,12 @@ impl MonsterBehavior for WingedTigerLordBehavior {
                         spell_id: 0,
                         attack_type: 2,
                     });
-                    // C# PoisonTarget 1/2
+                    // C# PoisonTarget(2, 5, Paralysis, 2000)：1/2、值=SC
                         if fastrand::i32(0..2) == 0 {
+                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: h.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 2000),
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, sc_value, 2000),
                         });
                         }
                 }

@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/LightTurtle.cs
 //! 机制：2/3 物理近战 / 1/3 魔法近战（Type=1）；
-//!      所有攻击命中后 1/4 绿毒（毒值=SP 近似 DC，tick 1000）
+//!      所有攻击命中后 1/4 绿毒（毒值=SP，tick 1000）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -43,7 +43,7 @@ impl MonsterBehavior for LightTurtleBehavior {
                 attack_type: if magic { 1 } else { 0 },
             });
             // C# CompleteAttack（所有攻击）：PoisonTarget(4, SP, Green, 1000)
-            // 第二参=时长（SP 攻秒数），值=SP 攻；此处用 DC 攻近似 SP
+            // 第二参=时长（SP 攻秒数），值=SP 攻
             if fastrand::i32(0..4) == 0 {
                 // C# PoisonTarget(4, SC, Green, 1000)：时长=SC 攻秒数、值=SC
                 let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);

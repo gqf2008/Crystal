@@ -1,7 +1,7 @@
 //! FlameAssassin（火焰刺客）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/FlameAssassin.cs（继承 RightGuard）
-//! 机制：AttackRange 风筝（<6 远离，>=6 接近）；远程命中后 100% 减速毒（值=MC 近似 DC，5s，tick 1000）
+//! 机制：AttackRange 风筝（<6 远离，>=6 接近）；远程命中后 100% 减速毒（时长=MC，值=SC，tick 1000）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
