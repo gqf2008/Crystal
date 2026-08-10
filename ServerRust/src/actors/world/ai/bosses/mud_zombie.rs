@@ -63,7 +63,7 @@ impl MonsterBehavior for MudZombieBehavior {
                         if fastrand::i32(0..5) == 0 {
                             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                                 session_id: p.session_id,
-                                poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
+                                poison: Poison::new(PoisonType::GREEN, 8, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                             });
                         }
                     }
@@ -91,7 +91,7 @@ impl MonsterBehavior for MudZombieBehavior {
                 if fastrand::i32(0..5) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
+                        poison: Poison::new(PoisonType::GREEN, 8, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                     });
                 }
             }

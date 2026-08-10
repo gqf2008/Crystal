@@ -79,7 +79,7 @@ impl MonsterBehavior for KingGuardBehavior {
                     if fastrand::i32(0..10) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                            poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                         });
                     }
                 } else {
@@ -104,7 +104,7 @@ impl MonsterBehavior for KingGuardBehavior {
                         if fastrand::i32(0..5) == 0 {
                             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                                 session_id: gt.session_id,
-                                poison: Poison::new(PoisonType::SLOW, 10, 0, 1000),
+                                poison: Poison::new(PoisonType::SLOW, 10, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                             });
                         }
                     }

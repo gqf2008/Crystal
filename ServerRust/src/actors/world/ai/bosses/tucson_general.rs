@@ -120,8 +120,8 @@ impl MonsterBehavior for TucsonGeneralBehavior {
                     }
                 }
             } else if fastrand::i32(0..4) > 0 {
-                // Type1 SC 弹道
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                // Type1 SC 弹道（TucsonGeneral.cs:111）
+                let damage = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
@@ -130,8 +130,8 @@ impl MonsterBehavior for TucsonGeneralBehavior {
                     spell_id: 0,
                 });
             } else {
-                // Type2 SC*2 强力弹道
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg * 2, 0).max(1);
+                // Type2 SC*2 强力弹道（TucsonGeneral.cs:119）
+                let damage = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc * 2, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,

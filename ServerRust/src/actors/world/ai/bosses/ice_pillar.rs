@@ -90,7 +90,7 @@ impl MonsterBehavior for IcePillarBehavior {
             if fastrand::i32(0..5) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: sid,
-                    poison: Poison::new(PoisonType::FROZEN, 5, damage, 1000),
+                    poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                 });
             }
         }

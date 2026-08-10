@@ -67,14 +67,14 @@ impl MonsterBehavior for SnowWolfBehavior {
                     if fastrand::i32(0..4) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::SLOW, 5, 0, 2000),
+                            poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                         });
                     }
                     // PoisonTarget(8, 5, Frozen, 2000)：1/8 概率
                     if fastrand::i32(0..8) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::FROZEN, 5, 0, 2000),
+                            poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                         });
                     }
                 }

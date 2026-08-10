@@ -64,14 +64,14 @@ impl MonsterBehavior for OmaMageBehavior {
                     if fastrand::i32(0..6) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, damage, 2000),
+                        poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                     });
                     }
                 // C# PoisonTarget 1/9
                     if fastrand::i32(0..9) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::FROZEN, 5, damage, 2000),
+                        poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                     });
                     }
             }

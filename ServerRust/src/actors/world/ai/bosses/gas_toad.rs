@@ -57,7 +57,7 @@ impl MonsterBehavior for GasToadBehavior {
                         });
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                            poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                         });
                     }
                 } else if fastrand::i32(0..2) == 0 {
@@ -71,7 +71,7 @@ impl MonsterBehavior for GasToadBehavior {
                     });
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 2000),
+                        poison: Poison::new(PoisonType::PARALYSIS, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                     });
                 } else {
                     // Type0 普通近战

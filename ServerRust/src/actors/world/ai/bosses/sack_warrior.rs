@@ -54,15 +54,17 @@ impl MonsterBehavior for SackWarriorBehavior {
                     if fastrand::i32(0..3) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::BLEEDING, 5, damage, 1000),
+                            poison: Poison::new(PoisonType::BLEEDING, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                         });
                     }
                 }
             } else {
+                // C# 魔法近战 MC（SackWarrior.cs:42）
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                     attack_type: 1,
                 });
@@ -70,7 +72,7 @@ impl MonsterBehavior for SackWarriorBehavior {
                 if fastrand::i32(0..3) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::BLEEDING, 5, damage, 1000),
+                        poison: Poison::new(PoisonType::BLEEDING, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
                     });
                 }
             }

@@ -47,7 +47,7 @@ impl MonsterBehavior for GlacierBeastBehavior {
             if magic && fastrand::i32(0..3) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 5, 0, 2000),
+                    poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
                 });
             }
             return;

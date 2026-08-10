@@ -46,11 +46,12 @@ impl MonsterBehavior for BlackHammerCatBehavior {
                     attack_type: 0,
                 });
             } else {
-                // C# 魔法近战 MC + LineAttack(2)
+                // C# 魔法近战 MC（BlackHammerCat.cs:57）+ LineAttack(2) 用 DC（:63）
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                     attack_type: 1,
                 });
