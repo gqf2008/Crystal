@@ -6655,6 +6655,16 @@ mod tests {
         ]);
         assert!(both.intersects(PoisonType::GREEN) && both.intersects(PoisonType::RED));
     }
+
+    /// #1805：怪物名归一化（去空格+小写）
+    #[test]
+    fn test_normalized_monster_name() {
+        assert_eq!(crate::util::normalized_monster_name("Evil Mir"), "evilmir");
+        assert_eq!(crate::util::normalized_monster_name("EvilMir"), "evilmir");
+        assert_eq!(crate::util::normalized_monster_name("  Evil  Mir  "), "evilmir");
+        assert_eq!(crate::util::normalized_monster_name("Sep High Warrior"), "sephighwarrior");
+        assert_eq!(crate::util::normalized_monster_name(""), "");
+    }
 }
 
 
