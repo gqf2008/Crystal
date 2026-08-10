@@ -524,7 +524,7 @@ fn monster_melee_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
         | "flamespear" | "flyingstatue" | "frozenzombie" | "hoodedsummonerscrolls"
         | "hornedmage" | "icepillar" | "incarnatedzt" | "jar2" | "leftguard" | "plaguecrab"
         | "redthunderzuma" | "restlessjar" | "rightguard" | "seedingsgeneral" | "sepwizard"
-        | "shamanzombie" | "stoningstatue" | "toxicghoul" | "treeguardian" | "treequeen"
+        | "shamanzombie" | "stoningstatue" | "toxicghoul" | "treequeen"
         | "trollking" | "vampirespider" | "venomspider" | "yimoogi" | "zumataurus"
     ) {
         DefenceType::MacAgility
@@ -6707,6 +6707,14 @@ mod tests {
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)], 0), (false, true));
         // SLOW 不阻塞
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)], 0), (false, false));
+    }
+
+    /// #1852：TreeGuardian 近战 ACAgility（远程仍 MACAgility；C# TreeGuardian.cs:49/70）
+    #[test]
+    fn test_treeguardian_melee_defence() {
+        use mir2_shared::enums::DefenceType;
+        assert_eq!(super::monster_melee_defence_type("TreeGuardian"), DefenceType::AcAgility);
+        assert_eq!(super::boss_range_defence_type("TreeGuardian"), DefenceType::MacAgility);
     }
 
     /// #1850：死亡爆炸防御类型映射（C# CompleteDeath/ExplosionDie 的 DefenceType）
