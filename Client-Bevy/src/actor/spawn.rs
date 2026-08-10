@@ -23,6 +23,8 @@ pub(crate) fn spawn_net_objects_when_ready(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    sound_bank: Res<crate::game::sound::SoundBank>,
+    mut audio_assets: ResMut<Assets<bevy::audio::AudioSource>>,
     mut actors: Query<(Entity, &NetObjectId, Option<&MountState>)>,
     children: Query<&Children>,
     mut layers: Query<&mut SpriteLayer>,
@@ -157,16 +159,22 @@ pub(crate) fn spawn_net_objects_when_ready(
                     });
                     continue;
                 }
-                spawn_net_object_entity(&mut commands, obj, is_local);
+                spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets);
             }
-            _ => spawn_net_object_entity(&mut commands, obj, is_local),
+            _ => spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets),
         }
     }
     tracing::info!("🌐 网络对象生成完成: {} 个", pending.len());
 }
 
 /// 按网络对象生成实体；is_local_player 时生成受控本地玩家（无 DemoBehavior）
-fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_player: bool) {
+fn spawn_net_object_entity(
+    commands: &mut Commands,
+    obj: &NetObject,
+    is_local_player: bool,
+    sound_bank: &crate::game::sound::SoundBank,
+    audio_assets: &mut Assets<bevy::audio::AudioSource>,
+) {
     // 瓦片坐标 → 世界像素（脚点）
     let wx = |tx: i32| tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
     let wy = |ty: i32| ty as f32 * TILE_HEIGHT + TILE_HEIGHT;
@@ -253,6 +261,10 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             commands
                 .entity(e)
                 .insert((NetObjectId(*object_id), MonsterName(name.clone())));
+            // #1631：怪物出现音（C# SetAction(Standing) → PlayAppearSound，MonsterObject.cs:284-296）
+            if let Some(sound_id) = crate::game::sound::monster_appear_sound(*image as u16, false) {
+                crate::game::sound::play_sound(commands, audio_assets, sound_bank, sound_id);
+            }
         }
         NetObject::Npc {
             object_id,

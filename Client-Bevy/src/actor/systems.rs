@@ -71,6 +71,22 @@ pub(crate) fn advance_actor_animations(
             }
         }
 
+        // #1632：怪物行走音——Walking 第 1 帧左步 / 第 4 帧右步（C# MonsterObject.cs:1280-1283），边缘触发
+        if anim.action == MirAction::Walking && anim.frame_index != prev_frame {
+            let step_left = match anim.frame_index {
+                1 => Some(true),
+                4 => Some(false),
+                _ => None,
+            };
+            if let Some(left) = step_left {
+                if let Some(monster) = monster {
+                    if let Some(sound_id) = crate::game::sound::monster_walk_sound(monster.monster_type, left) {
+                        crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                    }
+                }
+            }
+        }
+
         for child in children.iter() {
             if let Ok(mut layer) = layers.get_mut(child) {
                 if layer.is_mount {
