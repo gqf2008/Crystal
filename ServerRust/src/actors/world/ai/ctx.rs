@@ -159,14 +159,15 @@ pub struct PushPlayer {
     pub distance: i32,
 }
 
-/// Boss 延迟攻击（C# DelayedAction DelayedType.Damage：到点对范围内玩家造成伤害）
-#[derive(Debug, Clone, Copy)]
+/// Boss 延迟攻击（C# DelayedAction DelayedType.Damage：到点对指定格集合内玩家造成伤害）
+#[derive(Debug, Clone)]
 pub struct DelayedAttack {
     /// 相对当前 tick 的延迟（100ms/tick）
     pub delay_ticks: u64,
     pub center_x: i32,
     pub center_y: i32,
-    pub radius: i32,
+    /// 精确命中格集合（C# FullmoonAttack distance=2 等自定义几何）
+    pub cells: Vec<(i32, i32)>,
     pub damage: i32,
     pub attacker_oid: u32,
     pub map_index: u16,

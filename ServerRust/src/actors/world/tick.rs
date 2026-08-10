@@ -1710,7 +1710,7 @@ impl WorldActor {
             }
         }
         for atk in &die_delayed {
-            self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, *atk));
+            self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, atk.clone()));
         }
         for (oid, tx, ty) in &die_monster_teleports {
             if let Some(m) = self.monsters.get_mut(oid) {
@@ -3516,7 +3516,7 @@ impl WorldActor {
             let mut due: Vec<ai::DelayedAttack> = Vec::new();
             self.boss_pending_attacks.retain(|(fire, atk)| {
                 if *fire <= now {
-                    due.push(*atk);
+                    due.push(atk.clone());
                     false
                 } else {
                     true
@@ -3527,8 +3527,7 @@ impl WorldActor {
                     if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
                         if !st.is_dead
                             && st.map_index == atk.map_index
-                            && (st.x - atk.center_x).abs() <= atk.radius
-                            && (st.y - atk.center_y).abs() <= atk.radius
+                            && atk.cells.contains(&(st.x, st.y))
                         {
                             let _ = r.actor_ref.ask(TakeDamage {
                                 attacker_id: atk.attacker_oid,
@@ -3538,8 +3537,8 @@ impl WorldActor {
                         }
                     }
                 }
-                debug!("Boss delayed attack hit at ({},{}) radius {} dmg {}",
-                       atk.center_x, atk.center_y, atk.radius, atk.damage);
+                debug!("Boss delayed attack hit at ({},{}) cells={} dmg {}",
+                       atk.center_x, atk.center_y, atk.cells.len(), atk.damage);
             }
         }
 
@@ -5897,7 +5896,7 @@ impl Message<Tick> for WorldActor {
             }
             // Boss 延迟攻击：入队（C# DelayedAction DelayedType.Damage）
             for atk in &boss_delayed_attacks {
-                self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, *atk));
+                self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, atk.clone()));
             }
             // Boss 传送玩家（C# Target.Teleport：TurtleKing 拉拽等）
             for (sid, tx, ty, dir) in &boss_player_teleports {

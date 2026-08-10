@@ -76,7 +76,7 @@ pub fn ice_thrust_cells(center_x: i32, center_y: i32, direction: u8, depth: u8) 
     cells
 }
 
-/// C# ExplosionDie（HumanAssassin.cs:296）：8 方向 × 1..=max_radius 两圈（i%8 方向、i/8+1 距离）。
+/// C# ExplosionDie（HumanAssassin.cs:296）/ FullmoonAttack distance>1（MonsterObject.cs:3795、DarkOmaKing.cs:110）：8 方向 × 1..=max_radius 圈（i%8 方向、i/8+1 距离）。
 pub fn eight_dir_rings(center_x: i32, center_y: i32, max_radius: u8) -> Vec<(i32, i32)> {
     let mut cells = Vec::new();
     for r in 1..=max_radius as i32 {

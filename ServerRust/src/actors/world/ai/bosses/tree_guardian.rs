@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/TreeGuardian.cs
 //! 机制：
 //!   - AttackRange=6
-//!   - 近战（dist<=1）：2/3 普通 DC / 1/3 Fullmoon 弧形（用 AOE 半径 1 近似）
+//!   - 近战（dist<=1）：2/3 普通 DC / 1/3 Fullmoon 弧形（8 格）
 //!   - 远程：2/3 普通 MC / 1/3 MC*2 强化
 
 use crate::actors::world::MonsterState;
@@ -12,7 +12,6 @@ use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
 const ATTACK_RANGE: i32 = 6;
-const AOE_RADIUS: i32 = 1;
 
 pub struct TreeGuardianBehavior;
 
@@ -45,13 +44,18 @@ impl MonsterBehavior for TreeGuardianBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    // C# FullmoonAttack(damage)：8 格（8 方向 × 距离 1，无中心）
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    monster.direction = dir;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: AOE_RADIUS,
+                        direction: dir,
+                        count: 8,
                         damage,
                         spell_id: 0,
+                        attack_type: 0,
                     });
                 }
             } else {

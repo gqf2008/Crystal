@@ -5,7 +5,7 @@
 //!   - _OrbTime (20s)：召唤 2 个 PowerBead（在 8 距离内随机点）
 //!   - _MassThunderTime (10s + 0-5s 抖动)：MassThunder AOE（自身 5 格 AOE，MAC 伤害）
 //! 攻击：
-//!   - 近战 (距离<=3)：3/4 普攻 DC / 1/4 FullmoonAttack 三连击(溅射) + 前方 3 格 DarkOmaKingNuke 法术场
+//!   - 近战 (距离<=3)：3/4 普攻 DC / 1/4 FullmoonAttack 三连击（16 格 + 推 1）+ 前方 3 格 DarkOmaKingNuke 法术场
 //!   - 远程 (>3)：1/3 概率弹道远程攻击（MAC）
 //! 死亡：清理 SlaveList（PowerBead）
 
@@ -144,17 +144,33 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             } else {
                 // 1/4：FullmoonAttack 三连击 + DarkOmaKingNuke 法术场（Type=1）
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+                // C# FullmoonAttack(damage, delay, ACAgility, pushDistance=1, distance=2)：16 格（8 方向 × 2 圈）
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                monster.direction = dir;
+                let cells = eight_dir_rings(monster.x, monster.y, 2);
                 // C#：延迟 500/1700/2500ms 分 3 次结算（DelayedAction DelayedType.Damage）
                 for delay_ms in [500u64, 1700, 2500] {
                     ctx.out_delayed_attacks.push(crate::actors::world::ai::DelayedAttack {
                         delay_ticks: delay_ms / 100,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: 2,
+                        cells: cells.clone(),
                         damage,
                         attacker_oid: monster.object_id,
                         map_index: monster.map_index,
                     });
+                }
+                // C# FullmoonAttack 每次调用 pushDistance=1 → 3 次各推首个命中目标 1 格
+                let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
+                    .iter().map(|p| p.session_id).collect();
+                if let Some(&first) = hit.first() {
+                    for _ in 0..3 {
+                        ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                            session_id: first,
+                            dir,
+                            distance: 1,
+                        });
+                    }
                 }
                 // 前方 3 格投放 DarkOmaKingNuke 法术场（C# DarkOmaKing.cs:114-132）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize;
