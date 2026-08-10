@@ -451,8 +451,8 @@ pub(crate) fn actor_hover_tooltip_system(
     let mut hit: Option<(String, Vec3)> = None;
     for (p, m, n, tf) in &actors {
         let (dx, dy) = (tf.translation.x - world.x, tf.translation.y - world.y);
-        // 目标碰撞盒：脚点向上 ~110px（角色/怪物体型），左右 28px
-        if dx.abs() < 28.0 && dy > -110.0 && dy < 20.0 {
+        // 目标碰撞盒：脚点向上 ~140px（角色/怪物体型），左右 42px
+        if dx.abs() < 42.0 && dy > -140.0 && dy < 25.0 {
             let name = p
                 .map(|x| x.0.clone())
                 .or_else(|| m.map(|x| x.0.clone()))
