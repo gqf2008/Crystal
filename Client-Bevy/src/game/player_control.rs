@@ -86,6 +86,18 @@ pub fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec
     )
 }
 
+/// 演员命中盒（对齐 C# GameScene.MouseOver：按精灵身体矩形判定）。
+/// 以演员脚底锚点（tf.translation，Bevy y 向上）为基准：
+/// - 身体矩形：x ∈ [anchor.x-44, anchor.x+44]，y ∈ [anchor.y-16, anchor.y+128]
+///   （精灵从脚底向上延伸约 2.7 格，脚下留 0.5 格容差）
+/// - 保留原距离圆兜底（r=60，≈1.25 格），严格不缩小原命中区
+pub fn actor_hit_area(anchor: Vec2, click: Vec2) -> bool {
+    let dx = click.x - anchor.x;
+    let dy = click.y - anchor.y;
+    (dx.abs() <= 44.0 && dy >= -16.0 && dy <= 128.0)
+        || (dx * dx + dy * dy) <= 60.0 * 60.0
+}
+
 /// 上下文光标（#1321：对齐 C# SetMouseCursor——NPC→手型、怪物→准星、其他→默认）
 fn context_cursor_system(
     windows: Query<(Entity, &Window)>,
@@ -100,7 +112,7 @@ fn context_cursor_system(
     let world = screen_to_world(cursor, cam, window);
     let mut icon = SystemCursorIcon::Default;
     for (tf, is_npc, is_monster) in &actors {
-        if (tf.translation.x - world.x).abs() < 24.0 && (tf.translation.y - world.y).abs() < 24.0 {
+        if actor_hit_area(Vec2::new(tf.translation.x, tf.translation.y), world) {
             if is_npc {
                 icon = SystemCursorIcon::Pointer;
                 break;
@@ -315,15 +327,15 @@ fn left_click_interact_system(
     }
     let mut best: Option<(u32, f32)> = None;
     for (id, tf, app) in &actors {
-        let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
-        let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
-        let dist = d1.min(d2);
-        if dist < 60.0 && best.map(|(_, d)| dist < d).unwrap_or(true) {
-            best = Some((id.0, dist));
+        let a = Vec2::new(tf.translation.x, tf.translation.y);
+        if actor_hit_area(a, world) || actor_hit_area(a, world_logical) {
+            let dist = (a - world).length().min((a - world_logical).length());
+            if best.map(|(_, d)| dist < d).unwrap_or(true) {
+                best = Some((id.0, dist));
+            }
         }
         let _ = app;
     }
-    tracing::info!("[HITDBG] best_actor={:?}", best);
     let mut best_item: Option<(u32, f32)> = None;
     for (id, tf) in &items {
         let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
@@ -648,7 +660,7 @@ fn hold_move_system(
         // 左键按住：鼠标下有可交互对象时交给点击交互，不做移动
         let near_actor = actors
             .iter()
-            .any(|(tf, _, _)| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 45.0)
+            .any(|(tf, _, _)| actor_hit_area(Vec2::new(tf.translation.x, tf.translation.y), world))
             || items
                 .iter()
                 .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 40.0);
@@ -1303,6 +1315,31 @@ mod tests {
         let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer as u8
             && warrior.equipment.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(!is_archer);
+    }
+
+    #[test]
+    fn test_actor_hit_area_body_rect() {
+        // 精灵身体矩形：点击身体上部/左右应命中（原 60 距离圆在脚底，上部常 miss）
+        let anchor = Vec2::new(100.0, 200.0);
+        assert!(actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 80.0)), "身体上部");
+        assert!(actor_hit_area(anchor, Vec2::new(100.0 - 40.0, 200.0 + 40.0)), "身体左侧");
+        assert!(actor_hit_area(anchor, Vec2::new(100.0 + 40.0, 200.0 + 40.0)), "身体右侧");
+        assert!(actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 120.0)), "头顶附近");
+        // 远处/过高/过深 miss
+        assert!(!actor_hit_area(anchor, Vec2::new(100.0 + 80.0, 200.0 + 40.0)), "侧向过远");
+        assert!(!actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 160.0)), "头顶过远");
+        assert!(!actor_hit_area(anchor, Vec2::new(100.0, 200.0 - 80.0)), "脚下过深");
+    }
+
+    #[test]
+    fn test_actor_hit_area_legacy_circle_fallback() {
+        // 原距离圆覆盖的点仍命中（严格不缩小原命中区）
+        let anchor = Vec2::new(100.0, 200.0);
+        assert!(actor_hit_area(anchor, Vec2::new(100.0 + 50.0, 200.0)));
+        assert!(actor_hit_area(anchor, Vec2::new(100.0 - 55.0, 200.0 - 10.0)));
+        assert!(actor_hit_area(anchor, Vec2::new(100.0, 200.0 - 55.0)));
+        // 圆+矩形外 → miss
+        assert!(!actor_hit_area(anchor, Vec2::new(100.0 + 200.0, 200.0 + 200.0)));
     }
 }
 
