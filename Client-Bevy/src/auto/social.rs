@@ -1261,7 +1261,8 @@ pub(crate) fn auto_market_test(
             match target {
                 Some(it) => {
                     net.send_packet(&client_bevy::network::MarketGetBackWire {
-                        listing_id: it.auction_id as u32,
+                        mode: 0,
+                        auction_id: it.auction_id as u64,
                     });
                     tracing::info!("[MARKETTEST] 取回商品 {} uid={}", it.auction_id, it.unique_id);
                     *stage = 5;
