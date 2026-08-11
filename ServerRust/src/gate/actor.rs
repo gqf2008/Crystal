@@ -291,6 +291,19 @@ impl Message<SetMaxConnections> for GateActor {
     }
 }
 
+/// C# @CLEARIPBLOCKS（PlayerObject.cs:3065-3069）：清空全部 IP 封禁（GM）
+pub struct ClearIpBlocks;
+
+impl Message<ClearIpBlocks> for GateActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ClearIpBlocks, _ctx: &mut Context<Self, Self::Reply>) {
+        let count = self.ip_blocks.len();
+        self.ip_blocks.clear();
+        info!("ClearIpBlocks: cleared {} IP blocks", count);
+    }
+}
+
 /// Phase 2.2: 优雅关机 — 断开所有活跃 session,触发 PlayerDisconnected 保存。
 impl Message<ShutdownAll> for GateActor {
     type Reply = usize;

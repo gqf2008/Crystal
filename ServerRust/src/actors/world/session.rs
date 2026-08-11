@@ -1769,7 +1769,7 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1825,6 +1825,11 @@ impl Message<ChatRequest> for WorldActor {
                                 return;
                             };
                             self.gm_awakening(msg.session_id, item_type, awake_type).await;
+                        }
+                        // @clearipblocks（C# case "CLEARIPBLOCKS" ~3065：清空全部 IP 封禁，仅 GM）
+                        "CLEARIPBLOCKS" => {
+                            let _ = self.gate_ref.ask(crate::gate::actor::ClearIpBlocks).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "已清空全部 IP 封禁");
                         }
                         // @gold <n>
                         "GOLD" => {
