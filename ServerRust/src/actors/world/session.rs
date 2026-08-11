@@ -2878,6 +2878,11 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
                     return;
                 }
+                Some("TOGGLETRANSFORM") => {
+                    // C# case "TOGGLETRANSFORM"（~3836）：暂停/恢复变身 buff（无 GM 门槛）
+                    let _ = record.actor_ref.ask(crate::actors::player::ToggleTransform).await;
+                    return;
+                }
                 Some("TELEPORT") | Some("MOVE") => {
                     // C# case "MOVE"（~2850）：GM 或 Teleport 特殊装备可用；10s 冷却；NoPosition 地图非 GM 禁止
                     let state = match record.actor_ref.ask(GetPlayerState).await {
