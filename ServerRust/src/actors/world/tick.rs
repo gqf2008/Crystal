@@ -3463,92 +3463,126 @@ pub(crate) async fn tick_player_conditions(&mut self) {
 
     /// 租赁过期处理（每 3600 ticks = 6分钟检查一次）
     pub(crate) async fn tick_rental_expiry(&mut self) {
-        if self.tick_count % 3600 == 0 {
-            let now = chrono::Local::now().timestamp();
-            let mut expired_renters: Vec<String> = Vec::new();
+        if self.tick_count % 3600 != 0 {
+            return;
+        }
+        let now = chrono::Local::now().timestamp();
+        let mut expired_renters: Vec<String> = Vec::new();
+        let mut expired: Vec<RentedItem> = Vec::new();
 
-            for (renter_name, rentals) in &mut self.player_rentals {
-                let mut still_valid: Vec<RentedItem> = Vec::new();
-                for rental in rentals.drain(..) {
-                    if rental.expiry_timestamp > now {
-                        still_valid.push(rental);
-                        continue;
-                    }
-                    // Rental expired - try to remove from renter and return to owner
-                    let mut returned = false;
-                    for (_, record) in &self.players {
-                        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                            if state.name == *renter_name {
-                                // Try to remove item from renter
-                                let removed = record.actor_ref.ask(RemoveItemFromInventory {
-                                    unique_id: rental.item.unique_id,
-                                }).await.ok().flatten();
-                                if removed.is_some() {
-                                    // Return to owner if online
-                                    for (_, owner_record) in &self.players {
-                                        if let Ok(Some(owner_state)) = owner_record.actor_ref.ask(GetPlayerState).await {
-                                            if owner_state.name == rental.owner_name {
-                                                let added = owner_record.actor_ref.ask(AddItemToInventory {
-                                                    item: rental.item.clone(),
-                                                }).await.unwrap_or(false);
-                                                if added {
-                                                    send_system_message(&self.gate_ref, owner_record.session_id,
-                                                        &format!("租赁物品 {} 已到期收回", rental.item.item_index));
-                                                }
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    send_system_message(&self.gate_ref, record.session_id,
-                                        &format!("租赁物品 {} 已到期，已归还给 {}", rental.item.item_index, rental.owner_name));
-                                    returned = true;
-                                } else {
-                                    send_system_message(&self.gate_ref, record.session_id,
-                                        &format!("租赁物品 {} 已到期，但物品不在背包中", rental.item.item_index));
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    if !returned {
-                        // Renter offline or item not in inventory — return to owner via online or mail
-                        let mut owner_online = false;
-                        for (_, owner_record) in &self.players {
-                            if let Ok(Some(owner_state)) = owner_record.actor_ref.ask(GetPlayerState).await {
-                                if owner_state.name == rental.owner_name {
-                                    let added = owner_record.actor_ref.ask(AddItemToInventory {
-                                        item: rental.item.clone(),
-                                    }).await.unwrap_or(false);
-                                    if added {
-                                        send_system_message(&self.gate_ref, owner_record.session_id,
-                                            &format!("租赁物品 {} 已到期收回", rental.item.item_index));
-                                    } else {
-                                        send_system_message(&self.gate_ref, owner_record.session_id,
-                                            &format!("租赁物品 {} 已到期，背包已满，已通过邮件退回", rental.item.item_index));
-                                        send_item_via_mail(&self.db_pool, &rental.owner_name, rental.item.clone(),
-                                            "租赁物品退回", &format!("租赁物品 {} 已到期", rental.item.item_index));
-                                    }
-                                    owner_online = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if !owner_online {
-                            send_item_via_mail(&self.db_pool, &rental.owner_name, rental.item.clone(),
-                                "租赁物品退回", &format!("租赁物品 {} 已到期", rental.item.item_index));
-                        }
-                    }
-                    debug!("Rental expired: {} -> {} item={}", rental.owner_name, renter_name, rental.item.item_index);
-                }
-                if still_valid.is_empty() {
-                    expired_renters.push(renter_name.clone());
+        for (renter_name, rentals) in &mut self.player_rentals {
+            let mut still_valid: Vec<RentedItem> = Vec::new();
+            for rental in rentals.drain(..) {
+                if rental.expiry_timestamp > now {
+                    still_valid.push(rental);
                 } else {
-                    *rentals = still_valid;
+                    expired.push(rental);
                 }
             }
-            for name in expired_renters {
-                self.player_rentals.remove(&name);
+            if still_valid.is_empty() {
+                expired_renters.push(renter_name.clone());
+            } else {
+                *rentals = still_valid;
             }
+        }
+        for name in expired_renters {
+            self.player_rentals.remove(&name);
+        }
+
+        // 先释放 player_rentals 借用，再逐条处理（对齐 C# Envir.ProcessRentedItems）
+        for rental in expired {
+            self.process_expired_rental(&rental).await;
+            debug!("Rental expired: {} -> {} item={}", rental.owner_name, rental.renter_name, rental.item.item_index);
+        }
+    }
+
+    /// 处理单条到期租赁：从承租方（在线背包/装备，或离线 DB）移除，归还物主（在线背包/离线邮件），标记 returned=1
+    async fn process_expired_rental(&mut self, rental: &RentedItem) {
+        // 1. 定位承租方会话（在线则优先从内存背包/装备移除）
+        let mut renter_online: Option<(u64, crate::actors::player::PlayerState)> = None;
+        for (sid, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                if state.name == rental.renter_name {
+                    renter_online = Some((*sid, state));
+                    break;
+                }
+            }
+        }
+
+        let mut removed: Option<mir2_shared::data::item::UserItem> = None;
+        if let Some((sid, state)) = renter_online {
+            let record = match self.players.get(&sid).cloned() {
+                Some(r) => r,
+                None => return,
+            };
+            // 背包
+            removed = record.actor_ref.ask(RemoveItemFromInventory {
+                unique_id: rental.item.unique_id,
+            }).await.ok().flatten();
+            if removed.is_none() {
+                // 装备槽（C# ProcessRentedItems 双扫描：Inventory + Equipment）
+                if let Some((slot_idx, _)) = state.inventory.equipment.iter().enumerate()
+                    .find(|(_, s)| s.as_ref().map(|it| it.unique_id) == Some(rental.item.unique_id))
+                {
+                    if let Some(slot) = crate::actors::inventory::EquipmentSlot::from_i32(slot_idx as i32) {
+                        let ok = record.actor_ref.ask(crate::actors::player::InventoryUnequipItem { slot }).await.unwrap_or(false);
+                        if ok {
+                            removed = record.actor_ref.ask(RemoveItemFromInventory {
+                                unique_id: rental.item.unique_id,
+                            }).await.ok().flatten();
+                        }
+                    }
+                }
+            }
+            if removed.is_some() {
+                send_system_message(&self.gate_ref, sid,
+                    &format!("租赁物品 {} 已到期，已归还给 {}", rental.item.item_index, rental.owner_name));
+            } else {
+                send_system_message(&self.gate_ref, sid,
+                    &format!("租赁物品 {} 已到期，但物品不在背包/装备中", rental.item.item_index));
+            }
+        } else {
+            // 离线：直接从 DB 背包/装备移除（避免只发邮件导致物品复制）
+            removed = crate::db::remove_rented_item_from_character(
+                &self.db_pool, &rental.renter_name, rental.item.unique_id,
+            ).await.ok().flatten();
+        }
+
+        // 2. 归还物主（在线背包；背包满或离线 → 邮件退回）
+        if let Some(item) = removed {
+            let mut owner_online = false;
+            for (_, owner_record) in &self.players {
+                if let Ok(Some(owner_state)) = owner_record.actor_ref.ask(GetPlayerState).await {
+                    if owner_state.name == rental.owner_name {
+                        let added = owner_record.actor_ref.ask(AddItemToInventory {
+                            item: item.clone(),
+                        }).await.unwrap_or(false);
+                        if added {
+                            send_system_message(&self.gate_ref, owner_record.session_id,
+                                &format!("租赁物品 {} 已到期收回", item.item_index));
+                        } else {
+                            send_system_message(&self.gate_ref, owner_record.session_id,
+                                &format!("租赁物品 {} 已到期，背包已满，已通过邮件退回", item.item_index));
+                            send_item_via_mail(&self.db_pool, &rental.owner_name, item.clone(),
+                                "租赁物品退回", &format!("租赁物品 {} 已到期", item.item_index));
+                        }
+                        owner_online = true;
+                        break;
+                    }
+                }
+            }
+            if !owner_online {
+                send_item_via_mail(&self.db_pool, &rental.owner_name, item.clone(),
+                    "租赁物品退回", &format!("租赁物品 {} 已到期", item.item_index));
+            }
+
+            // 3. 标记 DB 已归还（幂等，防止重启后重复归还）
+            let _ = crate::db::mark_rental_returned(&self.db_pool, rental.item.unique_id).await;
+        } else {
+            // 承租方/DB 都找不到该物品：不归还也不标记（对齐 C#：保留记录等待重试），
+            // 避免凭空补发造成物品复制（Rust 租赁物品暂无 C# 绑定旗标，可能在仓库/已被处理）。
+            debug!("Rental expired but item {} not found for {}; keep rental record for retry",
+                rental.item.item_index, rental.renter_name);
         }
     }
 

@@ -883,13 +883,93 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             period_days INTEGER NOT NULL DEFAULT 7,
             started_at INTEGER NOT NULL DEFAULT 0,
             expires_at INTEGER NOT NULL DEFAULT 0,
-            returned INTEGER NOT NULL DEFAULT 0
+            returned INTEGER NOT NULL DEFAULT 0,
+            item_json TEXT NOT NULL DEFAULT ''
         )"#
     ).execute(&pool).await?;
+
+    // 老库迁移：rentals 补 item_json（用于重建 UserItem 到期归还）
+    let _ = sqlx::query("ALTER TABLE rentals ADD COLUMN item_json TEXT NOT NULL DEFAULT ''").execute(&pool).await;
 
     info!("SQLite database initialized: {}", db_url);
     Ok(pool)
 }
+
+    #[tokio::test]
+    async fn test_rentals_persistence_roundtrip() {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS rentals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_unique_id INTEGER NOT NULL,
+                item_index INTEGER NOT NULL,
+                owner_name TEXT NOT NULL,
+                renter_name TEXT NOT NULL,
+                fee INTEGER NOT NULL DEFAULT 0,
+                period_days INTEGER NOT NULL DEFAULT 7,
+                started_at INTEGER NOT NULL DEFAULT 0,
+                expires_at INTEGER NOT NULL DEFAULT 0,
+                returned INTEGER NOT NULL DEFAULT 0,
+                item_json TEXT NOT NULL DEFAULT ''
+            )"
+        ).execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS inventory_backpack (character_name TEXT NOT NULL, grid INTEGER NOT NULL, item_json TEXT NOT NULL)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS inventory_equipment (character_name TEXT NOT NULL, slot INTEGER NOT NULL, item_json TEXT NOT NULL)")
+            .execute(&pool).await.unwrap();
+
+        let item = mir2_shared::data::item::UserItem { unique_id: 999, item_index: 1001, ..Default::default() };
+        let item_json = serde_json::to_string(&item).unwrap();
+
+        // 写入一条租赁（等价 ConfirmItemRental INSERT）
+        sqlx::query("INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at, item_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(item.unique_id as i64)
+            .bind(item.item_index)
+            .bind("owner")
+            .bind("renter")
+            .bind(100i64)
+            .bind(7i64)
+            .bind(0i64)
+            .bind(9_999_999_999i64)
+            .bind(&item_json)
+            .execute(&pool).await.unwrap();
+
+        // load_all_rentals 恢复
+        let rows = load_all_rentals(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let (json, owner, renter, fee, _period_days, _started_at, expires) = &rows[0];
+        assert_eq!(owner, "owner");
+        assert_eq!(renter, "renter");
+        assert_eq!(*fee, 100);
+        assert_eq!(*expires, 9_999_999_999);
+        let loaded: mir2_shared::data::item::UserItem = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.unique_id, 999);
+        assert_eq!(loaded.item_index, 1001);
+
+        // mark_rental_returned：首次成功，二次幂等
+        assert!(mark_rental_returned(&pool, 999).await.unwrap());
+        assert!(!mark_rental_returned(&pool, 999).await.unwrap());
+        assert!(load_all_rentals(&pool).await.unwrap().is_empty());
+
+        // remove_rented_item_from_character：背包扫描删除
+        sqlx::query("INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES ('renter', 0, ?)")
+            .bind(&item_json)
+            .execute(&pool).await.unwrap();
+        let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().unique_id, 999);
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM inventory_backpack WHERE character_name = 'renter'")
+            .fetch_one(&pool).await.unwrap().get(0);
+        assert_eq!(count, 0);
+        assert!(remove_rented_item_from_character(&pool, "renter", 999).await.unwrap().is_none());
+
+        // 装备槽扫描删除
+        sqlx::query("INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES ('renter', 1, ?)")
+            .bind(&item_json)
+            .execute(&pool).await.unwrap();
+        let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
+        assert!(removed.is_some());
+    }
 
     #[tokio::test]
     async fn test_save_load_heroes_roundtrip() {
@@ -4295,6 +4375,73 @@ pub async fn load_all_auctions(
             r.get::<Option<String>, _>("buyer_name"),
         )
     }).collect())
+}
+
+/// 加载未归还的租赁记录（重启后恢复 C# CharacterInfo.RentedItems 语义）
+pub async fn load_all_rentals(
+    pool: &DbPool,
+) -> anyhow::Result<Vec<(String, String, String, i64, i64, i64, i64)>> {
+    let rows = sqlx::query(
+        "SELECT item_json, owner_name, renter_name, fee, period_days, started_at, expires_at FROM rentals WHERE returned = 0 AND item_json != '' ORDER BY started_at ASC"
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| {
+        (
+            r.get::<String, _>("item_json"),
+            r.get::<String, _>("owner_name"),
+            r.get::<String, _>("renter_name"),
+            r.get::<i64, _>("fee"),
+            r.get::<i64, _>("period_days"),
+            r.get::<i64, _>("started_at"),
+            r.get::<i64, _>("expires_at"),
+        )
+    }).collect())
+}
+
+/// 标记租赁已归还（到期处理/归还后调用，防止重启后重复归还）
+pub async fn mark_rental_returned(
+    pool: &DbPool,
+    item_unique_id: u64,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("UPDATE rentals SET returned = 1 WHERE item_unique_id = ? AND returned = 0")
+        .bind(item_unique_id as i64)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 从承租人 DB 背包/装备按 unique_id 移除租赁物品（对齐 C# ProcessRentedItems 双扫描），返回被移除的物品
+pub async fn remove_rented_item_from_character(
+    pool: &DbPool,
+    character_name: &str,
+    unique_id: u64,
+) -> anyhow::Result<Option<mir2_shared::data::item::UserItem>> {
+    for (table, col) in [("inventory_backpack", "grid"), ("inventory_equipment", "slot")] {
+        let rows = sqlx::query(&format!(
+            "SELECT {col}, item_json FROM {table} WHERE character_name = ?"
+        ))
+        .bind(character_name)
+        .fetch_all(pool)
+        .await?;
+        for row in rows {
+            let slot: i32 = row.get(col);
+            let item_json: String = row.get("item_json");
+            if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) {
+                if item.unique_id == unique_id {
+                    sqlx::query(&format!(
+                        "DELETE FROM {table} WHERE character_name = ? AND {col} = ?"
+                    ))
+                    .bind(character_name)
+                    .bind(slot)
+                    .execute(pool)
+                    .await?;
+                    return Ok(Some(item));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 pub async fn mark_auction_sold(

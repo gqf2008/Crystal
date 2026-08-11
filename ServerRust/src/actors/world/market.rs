@@ -1346,8 +1346,10 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         let period_hours = session.period_hours.max(1);
         let expiry = chrono::Local::now().timestamp() + (period_hours as i64 * 3600);
         let now = chrono::Local::now().timestamp();
+        // item_json 用于重启后重建 UserItem（到期归还物主）
+        let item_json = serde_json::to_string(&item).unwrap_or_default();
         let _ = sqlx::query(
-            "INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at, item_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(item.unique_id as i64)
         .bind(item.item_index)
@@ -1357,6 +1359,7 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         .bind(period_hours as i64 / 24)
         .bind(now)
         .bind(expiry)
+        .bind(item_json)
         .execute(&self.db_pool)
         .await;
 

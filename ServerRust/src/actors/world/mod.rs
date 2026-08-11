@@ -5011,6 +5011,41 @@ impl Actor for WorldActor {
             Err(e) => warn!("Failed to load auctions: {}", e),
         }
 
+        // 租赁持久化：启动时加载未归还租赁（对齐 C# CharacterInfo.RentedItems 随角色持久化）。
+        // 停机期间已过期的立即离线归还（DB 移除 + 邮件物主 + 标记 returned=1），未过期的进入内存由 tick 处理。
+        let mut player_rentals: HashMap<String, Vec<RentedItem>> = HashMap::new();
+        match db::load_all_rentals(&args.db_pool).await {
+            Ok(rows) => {
+                let now = chrono::Local::now().timestamp();
+                let mut active = 0usize;
+                let mut expired_returned = 0usize;
+                for (item_json, owner_name, renter_name, fee, _period_days, _started_at, expires_at) in rows {
+                    let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) else { continue };
+                    let rental = RentedItem {
+                        item,
+                        owner_name,
+                        renter_name,
+                        rental_fee: fee as u32,
+                        expiry_timestamp: expires_at,
+                    };
+                    if rental.expiry_timestamp > now {
+                        player_rentals.entry(rental.renter_name.clone()).or_default().push(rental);
+                        active += 1;
+                    } else if crate::db::remove_rented_item_from_character(
+                        &args.db_pool, &rental.renter_name, rental.item.unique_id,
+                    ).await.ok().flatten().is_some() {
+                        // 启动时无在线玩家：邮件退回物主并标记已归还
+                        send_item_via_mail(&args.db_pool, &rental.owner_name, rental.item.clone(),
+                            "租赁物品退回", &format!("租赁物品 {} 已到期", rental.item.item_index));
+                        let _ = crate::db::mark_rental_returned(&args.db_pool, rental.item.unique_id).await;
+                        expired_returned += 1;
+                    }
+                }
+                info!("Loaded {} active rentals, returned {} expired rentals from database", active, expired_returned);
+            }
+            Err(e) => warn!("Failed to load rentals from DB: {}", e),
+        }
+
         // Build movement trigger index for O(1) lookup: (map_index, source_x, source_y) -> MapMovementInfo
         let movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo> = {
             let mut idx = HashMap::new();
@@ -5196,7 +5231,7 @@ Ok(Self {
             next_auction_id,
             market_search_cache: HashMap::new(),
             rental_sessions: HashMap::new(),
-            player_rentals: HashMap::new(),
+            player_rentals,
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
