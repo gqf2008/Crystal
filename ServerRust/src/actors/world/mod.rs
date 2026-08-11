@@ -3483,6 +3483,27 @@ impl WorldActor {
                                         send_system_message(&self.gate_ref, session_id, "等级过高");
                                         continue;
                                     }
+                                    // #2026：C# QuestInfo.CanAccept——RequiredClass 位掩码（对齐包路径 #2004）
+                                    if quest_db.required_class != 0 {
+                                        let class_bit: i32 = match state.class {
+                                            mir2_shared::enums::MirClass::Warrior => 1,
+                                            mir2_shared::enums::MirClass::Wizard => 2,
+                                            mir2_shared::enums::MirClass::Taoist => 4,
+                                            mir2_shared::enums::MirClass::Assassin => 8,
+                                            mir2_shared::enums::MirClass::Archer => 16,
+                                        };
+                                        if quest_db.required_class & class_bit == 0 {
+                                            send_system_message(&self.gate_ref, session_id, "职业不符合");
+                                            continue;
+                                        }
+                                    }
+                                }
+                                // #2026：C# QuestInfo.CanAccept——RequiredQuest 前置任务（需已完成）
+                                if quest_db.required_quest > 0 {
+                                    if let Ok(false) = record.actor_ref.ask(HasCompletedQuest { quest_index: quest_db.required_quest }).await {
+                                        send_system_message(&self.gate_ref, session_id, "需要先完成前置任务");
+                                        continue;
+                                    }
                                 }
                                 // Check not already accepted or completed
                                 if let Ok(Some(_)) = record.actor_ref.ask(GetQuest { quest_index }).await {
@@ -3500,6 +3521,10 @@ impl WorldActor {
                                 let quest = make_quest_instance(quest_db, now);
                                 if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
                                     send_system_message(&self.gate_ref, session_id, "任务已接受");
+                                    // #2026：M43 ChangeQuest 任务日志推送（与包路径一致）
+                                    if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index }).await {
+                                        crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, session_id, &q);
+                                    }
                                 }
                             }
                         }
