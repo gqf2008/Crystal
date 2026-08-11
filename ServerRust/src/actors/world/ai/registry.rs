@@ -352,6 +352,12 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫") {
         return Box::new(bosses::archer_guard::ArcherGuardBehavior::new());
     }
+    if name.contains("guardianrock") || name.contains("guardian rock") || name.contains("守护之石") {
+        return Box::new(bosses::guardian_rock::GuardianRockBehavior::new());
+    }
+    if name.contains("trainer") || name.contains("训练师") {
+        return Box::new(bosses::trainer::TrainerBehavior::new());
+    }
     if name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手") {
         return Box::new(bosses::town_archer::TownArcherBehavior::new());
     }
@@ -747,6 +753,8 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士")
         || name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士")
         || name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫")
+        || name.contains("guardianrock") || name.contains("guardian rock") || name.contains("守护之石")
+        || name.contains("trainer") || name.contains("训练师")
         || name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手")
         || name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像")
         || name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石")
@@ -891,6 +899,16 @@ mod tests {
     fn plain_guard_still_boss_behavior() {
         assert!(is_registered_boss("Guard"));
         assert!(is_registered_boss("Guard2"));
+    }
+
+    #[test]
+    fn static_monsters_registered() {
+        // GuardianRock/Trainer：静态怪专属行为（C# CanMove=false）
+        assert!(is_registered_boss("GuardianRock"));
+        assert!(is_registered_boss("Trainer"));
+        // 静态/被动环境物体仍走默认行为
+        assert!(!is_registered_boss("Tree"));
+        assert!(!is_registered_boss("Deer"));
     }
 
     #[test]

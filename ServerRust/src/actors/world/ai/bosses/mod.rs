@@ -128,6 +128,8 @@ pub mod sep_assassin;
 pub mod dragon_warrior;
 pub mod sack_warrior;
 pub mod archer_guard;
+pub mod guardian_rock;
+pub mod trainer;
 pub mod dragon_statue;
 pub mod floating_rock;
 pub mod hooded_summoner_scrolls;
