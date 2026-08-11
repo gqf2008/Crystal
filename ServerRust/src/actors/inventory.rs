@@ -593,6 +593,46 @@ impl PlayerInventory {
         self.has_space()
     }
 
+    /// C# HumanObject.CanGainItem：单件物品可叠入已有堆叠或放入空格
+    pub fn can_gain_item(&self, item: &mir2_shared::data::item::UserItem) -> bool {
+        self.can_gain_items_for(std::slice::from_ref(item))
+    }
+
+    /// C# CanGainItems：检查一批物品是否都能放入背包（先叠入同类堆，剩余需空格；与 add_item 合并语义一致）
+    pub fn can_gain_items_for(&self, items: &[mir2_shared::data::item::UserItem]) -> bool {
+        let mut free = self.backpack.iter().filter(|s| s.is_none()).count();
+        // 已有堆叠的剩余容量（item_index -> room；Rust 约定 max_dura = 堆叠上限）
+        let mut room: std::collections::HashMap<i32, u32> = std::collections::HashMap::new();
+        for s in self.backpack.iter().flatten() {
+            let cap = s.item.max_dura.max(1) as u32;
+            if cap > 1 && (s.item.count as u32) < cap {
+                *room.entry(s.item.item_index).or_insert(0) += cap - s.item.count as u32;
+            }
+        }
+        for item in items {
+            if item.count == 0 { continue; }
+            let cap = item.max_dura.max(1) as u32;
+            if cap > 1 {
+                let count = item.count as u32;
+                let r = room.entry(item.item_index).or_insert(0);
+                if *r >= count {
+                    *r -= count;
+                    continue;
+                }
+                let remaining = count - *r;
+                *r = 0;
+                if remaining > 0 {
+                    if free == 0 { return false; }
+                    free -= 1; // 与 add_item 一致：剩余整堆放一格
+                }
+            } else {
+                if free == 0 { return false; }
+                free -= 1;
+            }
+        }
+        true
+    }
+
     /// 计算背包中已有物品的数量
     pub fn item_count(&self) -> usize {
         self.backpack.iter().filter(|s| s.is_some()).count()
@@ -1461,6 +1501,34 @@ mod tests {
         assert_eq!(new_uid, sword.unique_id);
         assert_eq!(inv.storage[3].as_ref().map(|s| s.item.unique_id), old.as_ref().map(|i| i.unique_id));
         assert_eq!(inv.equipment[EquipmentSlot::Weapon as usize].as_ref().map(|i| i.unique_id), Some(sword.unique_id));
+    }
+
+    #[test]
+    fn can_gain_items_for_stacking_matches_csharp() {
+        // C# CanGainItem：满包时堆叠物品可叠入已有堆叠（Count+count <= StackSize）
+        let mut inv = PlayerInventory::new();
+        // 填满背包；0 号格放 count=5、max_dura=10（堆叠上限 10）的同类药水
+        for g in 1..BACKPACK_SIZE {
+            inv.backpack[g] = Some(InventorySlot { grid: g as u8, item: make_item(1, 1) });
+        }
+        let mut potion = make_item(50, 5);
+        potion.max_dura = 10;
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: potion });
+        // 叠入 3 个（5+3=8 <= 10）→ 可以
+        let mut add3 = make_item(50, 3);
+        add3.max_dura = 10;
+        assert!(inv.can_gain_item(&add3));
+        // 叠入 10 个（5+10=15 > 10 且无空格）→ 拒绝
+        let mut add10 = make_item(50, 10);
+        add10.max_dura = 10;
+        assert!(!inv.can_gain_item(&add10));
+        // 不可堆叠物品且无空格 → 拒绝
+        assert!(!inv.can_gain_item(&make_item(2, 1)));
+        // 有空格时可堆叠物品整件放入
+        let mut inv2 = PlayerInventory::new();
+        let mut big = make_item(60, 7);
+        big.max_dura = 10;
+        assert!(inv2.can_gain_item(&big));
     }
 
     #[test]
