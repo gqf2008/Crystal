@@ -3492,6 +3492,28 @@ impl Message<EditGuildNoticeRequest> for SocialActor {
     }
 }
 
+/// C# GuildObject.DeleteMember（:455-510）：会长离开结果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeaderLeaveOutcome {
+    /// 最后一名成员离开 → 解散行会（C# LeaderOk）
+    Disband,
+    /// 多名会长 → 正常退会（C# AllOk）
+    Leave,
+    /// 唯一会长且还有其他成员 → 阻止（YouNeedLastLeaderToDisbandGuild）
+    Blocked,
+}
+
+/// C# GuildObject.DeleteMember：member_total<2 → Disband；leader_count>1 → Leave；否则 Blocked
+pub(crate) fn leader_leave_outcome(member_total: usize, leader_count: usize) -> LeaderLeaveOutcome {
+    if member_total < 2 {
+        LeaderLeaveOutcome::Disband
+    } else if leader_count > 1 {
+        LeaderLeaveOutcome::Leave
+    } else {
+        LeaderLeaveOutcome::Blocked
+    }
+}
+
 impl Message<LeaveGuildRequest> for SocialActor {
     type Reply = ();
 
@@ -3507,10 +3529,39 @@ impl Message<LeaveGuildRequest> for SocialActor {
             Some(n) => n.clone(), None => return,
         };
 
-        // 会长不能离开行会（必须先解散或转让）
+        // C# GuildObject.DeleteMember（:455-510）：会长离开 → 最后成员解散 / 多会长正常退 / 唯一会长有成员阻止
         if state.guild_rank == GuildRank::Leader {
-            send_system_message(&self.gate_ref, msg.session_id, "会长不能离开行会");
-            return;
+            let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+            let leader_count = guild.members.iter().filter(|m| m.rank == GuildRank::Leader).count();
+            let member_total = guild.members.len();
+            match leader_leave_outcome(member_total, leader_count) {
+                LeaderLeaveOutcome::Disband => {
+                    // LeaderOk：最后会长离开 → Envir.DeleteGuild（:505-506）
+                    let online: Vec<u64> = guild.online_sessions(0);
+                    drop(guild);
+                    self.guilds.remove(&guild_name);
+                    let _ = db::delete_guild(&self.db_pool, &guild_name).await;
+                    for sid in online {
+                        if let Some(rec) = self.players.get(&sid) {
+                            let _ = rec.ask(SetGuildInfo { guild_name: None, rank: GuildRank::Member }).await;
+                            send_guild_status_packet(&self.gate_ref, sid, false);
+                            if let Ok(Some(fresh)) = rec.ask(GetPlayerState).await {
+                                self.broadcast_ride_appearance(sid, &fresh).await;
+                            }
+                            send_system_message(&self.gate_ref, sid, &format!("行会 \"{}\" 已解散", guild_name));
+                        }
+                    }
+                    return;
+                }
+                LeaderLeaveOutcome::Blocked => {
+                    send_system_message(&self.gate_ref, msg.session_id,
+                        "你是唯一会长且行会还有其他成员，无法离开（需要最后一名会长才能解散行会）");
+                    return;
+                }
+                LeaderLeaveOutcome::Leave => {
+                    // AllOk：多名会长 → 继续正常退会
+                }
+            }
         }
 
         let guild = match self.guilds.get_mut(&guild_name) {
@@ -4285,7 +4336,17 @@ impl SocialActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{facing_each_other, front_tile};
+    use super::{facing_each_other, front_tile, leader_leave_outcome, LeaderLeaveOutcome};
+
+    #[test]
+    fn leader_leave_outcome_matches_csharp_deletemember() {
+        // C# GuildObject.DeleteMember：最后成员解散 / 多会长正常退 / 唯一会长有成员阻止
+        assert_eq!(leader_leave_outcome(1, 1), LeaderLeaveOutcome::Disband);
+        assert_eq!(leader_leave_outcome(2, 2), LeaderLeaveOutcome::Leave);
+        assert_eq!(leader_leave_outcome(3, 2), LeaderLeaveOutcome::Leave);
+        assert_eq!(leader_leave_outcome(5, 1), LeaderLeaveOutcome::Blocked);
+        assert_eq!(leader_leave_outcome(2, 1), LeaderLeaveOutcome::Blocked);
+    }
 
     /// #1159：C# Functions.FacingEachOther——双方朝向彼此才为 true
     #[test]
