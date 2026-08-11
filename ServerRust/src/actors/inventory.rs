@@ -49,8 +49,8 @@ impl EquipmentSlot {
     }
 }
 
-/// 背包格子（最多 40 格）
-pub const BACKPACK_SIZE: usize = 40;
+/// 背包格子（C# CharacterInfo.Inventory = new UserItem[46]，最多可扩到 86）
+pub const BACKPACK_SIZE: usize = 46;
 /// 任务物品格（C# QuestInventory 40 格；InventoryDialog QuestGrid 8x5）
 pub const QUEST_INVENTORY_SIZE: usize = 40;
 
@@ -87,7 +87,7 @@ pub const STORAGE_SIZE: usize = 80;
 pub struct PlayerInventory {
     /// 金币
     pub gold: u64,
-    /// 背包格子（默认 40 格，可扩容到 86；索引 = grid 字段，C# Inventory 46→86）
+    /// 背包格子（默认 46 格，可扩容到 86；索引 = grid 字段，C# Inventory 46→86）
     pub backpack: Vec<Option<InventorySlot>>,
     /// 装备槽位（12 个）
     pub equipment: [Option<UserItem>; EquipmentSlot::COUNT],
@@ -886,7 +886,7 @@ impl PlayerInventory {
     }
 
     /// 背包扩容（C# CharacterInfo.ResizeInventory：首次 +8，之后每次 +4，上限 86；
-    /// Rust 基线 40 格起步，相对增长模式与 C# 一致）
+    /// C# 基线 46 格起步，46→54→58→…→86）
     pub fn resize_inventory(&mut self) -> usize {
         const MAX_INVENTORY_SIZE: usize = 86; // C# ResizeInventory 上限 86
         let len = self.backpack.len();
@@ -1118,7 +1118,7 @@ mod tests {
     #[test]
     fn test_storage_full() {
         let mut inv = PlayerInventory::new();
-        // Fill storage in batches (backpack is 40, storage is 80)
+        // Fill storage in batches (backpack is 46, storage is 80)
         for _batch in 0..2 {
             for _ in 0..BACKPACK_SIZE {
                 inv.add_item(make_item(2, 1));
@@ -1154,27 +1154,27 @@ mod tests {
         // #899：C# CharacterInfo.ResizeInventory：首次 +8，之后 +4，上限 86
         let mut inv = PlayerInventory::new();
         assert_eq!(inv.backpack.len(), BACKPACK_SIZE);
-        // 首次 40 → 48
-        assert_eq!(inv.resize_inventory(), 48);
-        assert_eq!(inv.backpack.len(), 48);
-        // 之后每次 +4：48→52→56→…→86
-        assert_eq!(inv.resize_inventory(), 52);
-        assert_eq!(inv.resize_inventory(), 56);
+        // 首次 46 → 54
+        assert_eq!(inv.resize_inventory(), 54);
+        assert_eq!(inv.backpack.len(), 54);
+        // 之后每次 +4：54→58→62→…→86
+        assert_eq!(inv.resize_inventory(), 58);
+        assert_eq!(inv.resize_inventory(), 62);
         // 快速扩到上限
         for _ in 0..20 { inv.resize_inventory(); }
         assert_eq!(inv.backpack.len(), 86);
         // 上限后不再增长
         assert_eq!(inv.resize_inventory(), 86);
         assert_eq!(inv.backpack.len(), 86);
-        // 扩容后新格子可用（48 格可全部占用）
+        // 扩容后新格子可用（54 格可全部占用）
         let mut inv2 = PlayerInventory::new();
         inv2.resize_inventory();
-        for g in 0..48 {
+        for g in 0..54 {
             inv2.backpack[g] = Some(InventorySlot { grid: g as u8, item: make_item(9, 1) });
         }
-        assert_eq!(inv2.backpack.iter().filter(|s| s.is_some()).count(), 48);
+        assert_eq!(inv2.backpack.iter().filter(|s| s.is_some()).count(), 54);
         // 越界校验按当前长度
-        assert!(inv2.store_item(48).is_none()); // 48 已在扩容后范围内（格子满则返回 None 前已取走）
+        assert!(inv2.store_item(54).is_none()); // 54 已在扩容后范围内（格子满则返回 None 前已取走）
     }
 
     #[test]

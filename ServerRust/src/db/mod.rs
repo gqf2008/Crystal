@@ -667,7 +667,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN require_password_change INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // #899: 背包格数（C# CharacterInfo.Inventory.Length，扩容后重登不丢，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 40")
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 46")
+        .execute(&pool).await;
+    // #2166：C# Inventory 基础 46 格——既有 40 格角色迁移到 46（幂等）
+    let _ = sqlx::query("UPDATE characters SET backpack_size = 46 WHERE backpack_size < 46")
         .execute(&pool).await;
     // #1395: 行会职务定义/职务索引（C# GuildObject.Ranks，safe to re-run）
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN rank_defs_json TEXT NOT NULL DEFAULT '[]'")
@@ -1338,7 +1341,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     // 金币持久化：load_inventory 不读 gold，这里从 characters.gold 恢复
     inventory.gold = row.get::<i64, _>("gold").max(0) as u64;
     // #899：背包扩容持久化（C# CharacterInfo.Inventory.Length；旧存档默认 40）
-    let backpack_size = row.try_get::<i64, _>("backpack_size").unwrap_or(40).max(40) as usize;
+    let backpack_size = row.try_get::<i64, _>("backpack_size").unwrap_or(46).max(46) as usize;
     if inventory.backpack.len() < backpack_size {
         inventory.backpack.resize(backpack_size, None);
     }

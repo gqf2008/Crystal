@@ -3343,7 +3343,7 @@ impl Message<ChatRequest> for WorldActor {
                 }
                 Some("ADDINVENTORY") => {
                     // C# case "ADDINVENTORY"（~3644）：cost = 1M + openLevel*1M，
-                    // openLevel = (Inventory.Length - 46) / 4（Rust 基线 40 → (len-40)/4）；
+                    // openLevel = (Inventory.Length - 46) / 4（Rust 基线 46 → (len-46)/4）；
                     // ResizeInventory 首次 +8 之后 +4 上限 86；成功发 LoseGold + ResizeInventory
                     let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
                         Ok(Some(s)) => s,
