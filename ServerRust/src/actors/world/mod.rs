@@ -1153,6 +1153,8 @@ pub struct WorldActor {
     pub(crate) ranged_pending: Vec<crate::actors::world::tick::RangedPendingHit>,
     /// Boss Range 远程伤害延迟结算队列（#1706，C# DelayedAction RangeDamage）
     pub(crate) boss_ranged_pending: Vec<crate::actors::world::tick::BossRangedPendingHit>,
+    /// Boss 单体延迟伤害队列（#1986，C# DelayedAction DelayedType.Damage 多段近战）
+    pub(crate) boss_delayed_single_pending: Vec<(u64, crate::actors::world::tick::BossDelayedSingleHit)>,
     /// 英雄寻路缓存（hero session -> 路径瓦片序列，不含起点；#1695 英雄 A* 跟随/追击）
     pub(crate) hero_paths: HashMap<u64, Vec<(i32, i32)>>,
     /// 英雄寻路缓存目标（hero session -> (kind, tx, ty)；kind 1=跟随主人 2=追击怪物）
@@ -1494,6 +1496,7 @@ impl WorldActor {
             monster_path_targets: HashMap::new(),
             ranged_pending: Vec::new(),
             boss_ranged_pending: Vec::new(),
+            boss_delayed_single_pending: Vec::new(),
             hero_paths: HashMap::new(),
             hero_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),
@@ -4602,6 +4605,7 @@ impl Actor for WorldActor {
             monster_path_targets: HashMap::new(),
             ranged_pending: Vec::new(),
             boss_ranged_pending: Vec::new(),
+            boss_delayed_single_pending: Vec::new(),
             hero_paths: HashMap::new(),
             hero_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),

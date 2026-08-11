@@ -125,15 +125,22 @@ impl MonsterBehavior for ArmadilloBehavior {
                     });
                 }
                 1 => {
-                    // 三连击（半伤×3）
+                    // 三连击（半伤×3；C# DelayedAction 400/600/800ms——首段动画+立即，后两段延迟 2/4 ticks）
                     let half = (dmg_full / 2).max(1);
-                    for _ in 0..3 {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage: half,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
+                    for delay in [2u64, 4] {
+                        ctx.out_delayed_single_damage.push(crate::actors::world::ai::DelayedSingleDamage {
+                            delay_ticks: delay,
                             attacker_oid: monster.object_id,
                             target_session: target.session_id,
                             damage: half,
-                            spell_id: 0,
-                            attack_type: 1,
+                            defence: mir2_shared::enums::DefenceType::AcAgility,
                         });
                     }
                 }
