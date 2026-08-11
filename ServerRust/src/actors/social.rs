@@ -614,6 +614,55 @@ impl Message<NpcGuildGoldChange> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询玩家行会等级与剩余点数（C# GuildInfo.Level/SparePoints）
+pub struct NpcGetGuildLevelSparePoints {
+    pub session_id: u64,
+}
+
+impl Message<NpcGetGuildLevelSparePoints> for SocialActor {
+    type Reply = (u8, u8);
+
+    async fn handle(&mut self, msg: NpcGetGuildLevelSparePoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return (0, 0) },
+            None => return (0, 0),
+        };
+        let Some(guild_name) = state.guild_name else { return (0, 0) };
+        self.guilds.get(&guild_name).map(|g| (g.level, g.spare_points)).unwrap_or((0, 0))
+    }
+}
+
+/// WorldActor -> SocialActor: 行会 Buff 购买扣费（C# AddBuff/ChargeForBuff：SparePoints -= PointsRequirement；Gold -= ActivationCost）
+pub struct NpcGuildBuffCharge {
+    pub session_id: u64,
+    pub points: u32,
+    pub gold: u32,
+}
+
+impl Message<NpcGuildBuffCharge> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcGuildBuffCharge, _ctx: &mut Context<Self, Self::Reply>) {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            None => return,
+        };
+        let Some(guild_name) = state.guild_name.clone() else { return };
+        let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+        if msg.points > 0 {
+            guild.spare_points = guild.spare_points.saturating_sub(msg.points.min(255) as u8);
+        }
+        if msg.gold > 0 {
+            let amount = (msg.gold as u64).min(guild.gold);
+            guild.gold -= amount;
+            self.send_guild_storage_gold_change(msg.session_id, &state.name, amount as u32, 2).await;
+        }
+        self.save_guild_to_db(&guild_name).await;
+        self.broadcast_guild_info(&guild_name).await;
+        debug!("NPC GuildBuffCharge: {} points={} gold={}", guild_name, msg.points, msg.gold);
+    }
+}
+
 /// WorldActor -> SocialActor: 给指定行会增加金币（C# PurchaseGuildTerritory 卖家收款，:10502）
 pub struct NpcGuildGoldGive {
     pub guild_name: String,

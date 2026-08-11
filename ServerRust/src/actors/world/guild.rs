@@ -368,6 +368,42 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
             buffs.retain(|b| *b != msg.buff_id);
             send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已停用", msg.buff_id));
         } else {
+            // C# PlayerObject.GuildBuffUpdate（:10375-10408）：购买校验
+            let Some(info) = self.guild_buff_infos.get(&msg.buff_id).cloned() else {
+                send_system_message(&self.gate_ref, msg.session_id, "行会 Buff 不存在");
+                return;
+            };
+            let (level, spare) = self.social_ref
+                .ask(crate::actors::social::NpcGetGuildLevelSparePoints { session_id: msg.session_id })
+                .await.unwrap_or((0, 0));
+            if (level as u32) < info.level_req {
+                send_system_message(&self.gate_ref, msg.session_id,
+                    &format!("行会等级不足（需要 {} 级）", info.level_req));
+                return;
+            }
+            if (spare as u32) < info.points_req {
+                send_system_message(&self.gate_ref, msg.session_id,
+                    &format!("行会剩余点数不足（需要 {}）", info.points_req));
+                return;
+            }
+            let gold_cost = if info.time_limit_minutes > 0 && info.activation_cost > 0 {
+                info.activation_cost
+            } else {
+                0
+            };
+            if gold_cost > 0 {
+                let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id: msg.session_id }).await.unwrap_or(0);
+                if gold < gold_cost {
+                    send_system_message(&self.gate_ref, msg.session_id, "行会资金不足");
+                    return;
+                }
+            }
+            // C# NewBuff charge（:948-958）：扣点数 + 金币
+            let _ = self.social_ref.ask(crate::actors::social::NpcGuildBuffCharge {
+                session_id: msg.session_id,
+                points: info.points_req,
+                gold: gold_cost as u32,
+            }).await;
             buffs.push(msg.buff_id);
             send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已激活", msg.buff_id));
         }
