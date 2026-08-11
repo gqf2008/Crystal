@@ -3019,13 +3019,25 @@ fn forward_consign_item(
         .try_send();
 }
 
-/// MarketSearch: [keyword: DotNetString]
+/// MarketSearch: [match: DotNetString][type: u8][usermode: bool][min_shape: i16][max_shape: i16][market_type: u8]（C# C.MarketSearch）
 fn forward_market_search(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    use mir2_shared::binary::read_dotnet_string;
-    let keyword = read_dotnet_string(&mut std::io::Cursor::new(payload)).unwrap_or_default();
-    debug!("MarketSearch: session={} kw={}", session_id, keyword);
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(packet) = mir2_shared::packets::client::market::MarketSearch::read_body(&mut cur) else { return };
+    // SharedRust 枚举 = C# + 3：转回 C# 原始值（0=不过滤）
+    let item_type = (packet.item_type as u8).saturating_sub(3);
+    let market_type = (packet.market_type as u8).saturating_sub(3);
+    debug!("MarketSearch: session={} kw={} type={} usermode={} shapes=[{},{}] mkt={}",
+        session_id, packet.match_text, item_type, packet.user_mode, packet.min_shape, packet.max_shape, market_type);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::MarketSearchRequest { session_id, keyword }).try_send();
+    let _ = world_ref.tell(crate::actors::world::MarketSearchRequest {
+        session_id,
+        keyword: packet.match_text,
+        item_type,
+        user_mode: packet.user_mode,
+        min_shape: packet.min_shape,
+        max_shape: packet.max_shape,
+        market_type,
+    }).try_send();
 }
 
 /// MarketRefresh: []
