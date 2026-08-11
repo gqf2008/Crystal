@@ -99,6 +99,10 @@ pub struct Guild {
     pub spare_points: u8,
     /// 成员上限（C# GuildInfo.MemberCap）
     pub member_cap: i32,
+    /// 领地旗子图像（C# GuildInfo.FlagImage，默认 1000）
+    pub flag_image: u16,
+    /// 领地旗子染色（C# GuildInfo.FlagColour.Color.ToArgb()，建会随机）
+    pub flag_colour: i32,
     /// #1344：下次 GuildExpGain 广播时间（unix ms，运行时；C# NextExpUpdate=Envir.Time+10000）
     pub next_exp_update: i64,
 }
@@ -129,6 +133,12 @@ impl Guild {
             max_experience: 0,
             spare_points: 0,
             member_cap: 50,
+            flag_image: 1000,
+            // C# GuildInfo 构造：FlagColour = Color.FromArgb(255, Random(255), Random(255), Random(255))
+            flag_colour: 0xFF000000u32 as i32
+                | ((fastrand::u8(0..255) as i32) << 16)
+                | ((fastrand::u8(0..255) as i32) << 8)
+                | fastrand::u8(0..255) as i32,
             next_exp_update: 0,
         }
     }

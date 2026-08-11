@@ -8568,9 +8568,10 @@ async fn spawn_npcs_and_monsters(
 }
 
 /// 登录/换图时按领地地图生成征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn：
-/// 默认 Image=1000/Colour=0；归属行会 FlagImage/FlagColour 数据源待行会侧补齐后接入）
+/// 无归属默认 Image=1000/Colour=0；归属行会用行会 FlagImage/FlagColour）
 async fn spawn_conquest_flags(
     gate_ref: ActorRef<GateActor>,
+    social_ref: ActorRef<SocialActor>,
     conquest_instances: &[conquest::ConquestInstance],
     map_index: u16,
     session_id: u64,
@@ -8581,10 +8582,17 @@ async fn spawn_conquest_flags(
         if inst.map_index != map_index as i32 {
             continue;
         }
+        // 归属行会旗标外观（C# ConquestGuildFlagInfo.Spawn：Guild.Info.FlagImage/FlagColour）
+        let owner_flag: Option<(u16, i32)> = match &inst.owner_guild {
+            Some(owner) => social_ref.ask(crate::actors::social::NpcGetGuildFlagAppearance {
+                guild_name: owner.clone(),
+            }).await.unwrap_or(None),
+            None => None,
+        };
         for flag in &inst.flags {
             let object_id = *next_object_id;
             *next_object_id += 1;
-            let (image, colour) = conquest::conquest_flag_appearance(inst);
+            let (image, colour) = conquest::conquest_flag_appearance(owner_flag);
             let packet = build_object_npc_packet_full(
                 &flag.name,
                 image, // C# ConquestGuildFlagInfo.Spawn 默认 Image=1000
@@ -8645,7 +8653,14 @@ impl WorldActor {
     async fn broadcast_conquest_flag_updates(&mut self, conquest_id: i32) {
         use mir2_shared::packets::server::npc_interaction::NPCImageUpdate;
         let Some(inst) = self.conquest_instances.iter().find(|c| c.id == conquest_id) else { return };
-        let (image, colour) = conquest::conquest_flag_appearance(inst);
+        // 归属行会旗标外观（C# ConquestGuildFlagInfo.UpdateImage/UpdateColour）
+        let owner_flag: Option<(u16, i32)> = match &inst.owner_guild {
+            Some(owner) => self.social_ref.ask(crate::actors::social::NpcGetGuildFlagAppearance {
+                guild_name: owner.clone(),
+            }).await.unwrap_or(None),
+            None => None,
+        };
+        let (image, colour) = conquest::conquest_flag_appearance(owner_flag);
         let targets = conquest_flag_update_targets(&self.conquest_flags, conquest_id);
         for (session_id, object_id) in targets {
             if let Some(flag) = self.conquest_flags.get_mut(&object_id) {

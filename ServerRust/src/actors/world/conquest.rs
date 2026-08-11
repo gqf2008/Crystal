@@ -269,10 +269,10 @@ impl ConquestInstance {
     }
 }
 
-/// 旗子 NPC 外观（C# ConquestGuildFlagInfo.Spawn：默认 Image=1000/Colour=0；
-/// 归属行会 FlagImage/FlagColour 待行会数据补齐后在此接入）
-pub fn conquest_flag_appearance(_inst: &ConquestInstance) -> (u16, i32) {
-    (1000, 0)
+/// 旗子 NPC 外观（C# ConquestGuildFlagInfo.Spawn：无归属默认 Image=1000/Colour=Color.Empty(0)；
+/// 有归属用行会 GuildInfo.FlagImage/FlagColour）
+pub fn conquest_flag_appearance(owner_guild_flag: Option<(u16, i32)>) -> (u16, i32) {
+    owner_guild_flag.unwrap_or((1000, 0))
 }
 
 /// 城门/城墙状态（对应 C# Gate/Wall/CastleGate）
@@ -564,10 +564,10 @@ mod tests {
     }
 
     #[test]
-    fn test_conquest_flag_appearance_default() {
-        // C# ConquestGuildFlagInfo.Spawn：默认 Image=1000 / Colour=0
-        let inst = ConquestInstance::new(1, 0, 0, ConquestGame::ControlPoints);
-        assert_eq!(conquest_flag_appearance(&inst), (1000, 0));
+    fn test_conquest_flag_appearance() {
+        // C# ConquestGuildFlagInfo.Spawn：无归属 (1000, Color.Empty=0)；有归属用行会旗标
+        assert_eq!(conquest_flag_appearance(None), (1000, 0));
+        assert_eq!(conquest_flag_appearance(Some((1200, 0xFFFF0000u32 as i32))), (1200, 0xFFFF0000u32 as i32));
     }
 }
 
