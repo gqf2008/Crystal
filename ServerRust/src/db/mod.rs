@@ -2094,6 +2094,17 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 删除行会（C# Envir.DeleteGuild）：清成员角色 guild_name + 删 guild_members + 删 guilds 行
+pub async fn delete_guild(pool: &DbPool, guild_name: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE characters SET guild_name = NULL WHERE guild_name = ?")
+        .bind(guild_name).execute(pool).await?;
+    sqlx::query("DELETE FROM guild_members WHERE guild_name = ?")
+        .bind(guild_name).execute(pool).await?;
+    sqlx::query("DELETE FROM guilds WHERE name = ?")
+        .bind(guild_name).execute(pool).await?;
+    Ok(())
+}
+
 pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>> {
     let mut guilds = HashMap::new();
 
