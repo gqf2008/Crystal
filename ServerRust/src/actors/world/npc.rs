@@ -44,6 +44,15 @@ impl Message<NPCCallRequest> for WorldActor {
         // C# MirConnection.cs:1502-1504：ObjectID == 默认 NPC 对象 ID → 默认 NPC 脚本（key 为页面名）
         if msg.npc_object_id == self.default_npc_object_id {
             self.queue_default_npc(msg.session_id, &msg.key);
+            // C# CallDefaultNPC（PlayerObject.cs:7887）：下发 S.NPCUpdate（客户端刷新当前 NPC）
+            let packet = mir2_shared::packets::server::npc_interaction::NPCUpdate { npc_id: self.default_npc_object_id };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCUpdate as i16, &body),
+                }).await;
+            }
             return;
         }
 
@@ -1877,6 +1886,15 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
         // C# MirConnection.cs:2166-2168：NPCID == 默认 NPC 对象 ID → 默认 NPC 脚本（PageName 为段名）
         if msg.npc_id == self.default_npc_object_id {
             self.queue_default_npc(msg.session_id, &msg.page_name);
+            // C# CallDefaultNPC（PlayerObject.cs:7887）：下发 S.NPCUpdate（客户端刷新当前 NPC）
+            let packet = mir2_shared::packets::server::npc_interaction::NPCUpdate { npc_id: self.default_npc_object_id };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCUpdate as i16, &body),
+                }).await;
+            }
             return;
         }
 
