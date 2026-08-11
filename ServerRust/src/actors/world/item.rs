@@ -1454,7 +1454,17 @@ impl Message<UseItemRequest> for WorldActor {
                                 send_system_message(&self.gate_ref, msg.session_id, "背包负重上限提升！");
                             }
                         }
-                        // 21 BlackStone / 25 Strongbox：奖励表未实现（C# BlackstoneDrops/StrongboxDrops）
+                        // 21 BlackStone（C# :6129-6137）：消耗后按 BlackstoneDrops 奖励
+                        21 => {
+                            let drops = self.load_reward_drops(crate::actors::world::RewardDropKind::Blackstone);
+                            self.blackstone_reward(msg.session_id, drops).await;
+                        }
+                        // 25 Strongbox（C# :6193-6201）：boxtype=item.Effect，动态 WonderDrug
+                        25 => {
+                            let drops = self.load_reward_drops(crate::actors::world::RewardDropKind::Strongbox);
+                            let boxtype = db.effect as u8;
+                            self.strongbox_reward(msg.session_id, boxtype, drops).await;
+                        }
                         _ => {
                             send_system_message(&self.gate_ref, msg.session_id, "智能宠物功能暂未开放");
                         }
