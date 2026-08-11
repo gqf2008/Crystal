@@ -58,16 +58,16 @@ impl MonsterBehavior for DragonWarriorBehavior {
                     });
                 }
             } else {
-                // C# 1/5 盾击：伤害 + 推挤 + 1/3 眩晕
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 2,
-                });
-                // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
+                // C# 1/5 盾击：SinglePushAttack 等级门控（MonsterObject.cs:3842）→ 伤害+推挤；
+                // 眩晕毒在 SinglePushAttack 之后无条件判定（C# DragonWarrior.cs:51-54）
                 if (target.level as i32) <= monster.level + 5 {
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 2,
+                    });
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: target.session_id,
                         dir,

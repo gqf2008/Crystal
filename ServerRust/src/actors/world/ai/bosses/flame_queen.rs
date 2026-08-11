@@ -89,18 +89,11 @@ impl MonsterBehavior for FlameQueenBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let not_adjacent = dist > MELEE_RANGE;
-            let ranged = not_adjacent || fastrand::i32(0..3) == 0;
+            // C# FlameQueen.cs：!InRange(1) || Random(3)==0 → Type=1 近战 Damage；
+            // 否则（贴身 2/3）→ Type=0 RangeDamage 弹道
+            let melee_anim = not_adjacent || fastrand::i32(0..3) == 0;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-            if ranged {
-                // C# Type=0：RangeDamage 弹道
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
-            } else {
+            if melee_anim {
                 // C# Type=1：近战 Damage
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -108,6 +101,15 @@ impl MonsterBehavior for FlameQueenBehavior {
                     damage,
                     spell_id: 0,
                     attack_type: 1,
+                });
+            } else {
+                // C# Type=0：RangeDamage 弹道
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
                 });
             }
         } else if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {

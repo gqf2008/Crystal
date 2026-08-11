@@ -37,7 +37,11 @@ impl MonsterBehavior for KirinBehavior {
         };
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
-        let in_melee = dist <= MELEE_RANGE;
+        let dx = (target.x - monster.x).abs();
+        let dy = (target.y - monster.y).abs();
+        // C# Kirin.cs InAttackRange：x,y<=2 且（贴身 或 对角/同奇偶）
+        let in_melee = dx <= MELEE_RANGE && dy <= MELEE_RANGE
+            && ((dx <= 1 && dy <= 1) || dx == dy || dx % 2 == dy % 2);
 
         if ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;

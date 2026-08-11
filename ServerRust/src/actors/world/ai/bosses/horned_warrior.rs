@@ -48,7 +48,11 @@ impl MonsterBehavior for HornedWarriorBehavior {
             None => return,
         };
         monster.target_session = Some(target.session_id);
-        let dist = max_distance(monster.x, monster.y, target.x, target.y);
+        let dx = (target.x - monster.x).abs();
+        let dy = (target.y - monster.y).abs();
+        // C# HornedWarrior.cs InAttackRange：x,y<=4 且（贴身 或 对角/同奇偶）
+        let in_attack_range = dx <= ATTACK_RANGE && dy <= ATTACK_RANGE
+            && ((dx <= 1 && dy <= 1) || dx == dy || dx % 2 == dy % 2);
 
         let hp_pct = if monster.max_hp > 0 { monster.hp * 100 / monster.max_hp } else { 100 };
         let shielded = self.in_shield(ctx.tick_count);
@@ -85,7 +89,7 @@ impl MonsterBehavior for HornedWarriorBehavior {
         }
 
         // ---- 正常战斗 ----
-        if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
+        if in_attack_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# 2/3 DC 单体；1/3 WideLineAttack(4)
             if fastrand::i32(0..3) > 0 {

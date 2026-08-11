@@ -31,9 +31,9 @@ impl MonsterBehavior for ElephantManBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            // C# Envir.Random.Next(5) > 0：4/5 物理 / 1/5 魔法 AOE
+            // C# Envir.Random.Next(5) > 0：4/5 物理 DC / 1/5 魔法 MC AOE
             if fastrand::i32(0..5) > 0 {
+                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
@@ -42,7 +42,8 @@ impl MonsterBehavior for ElephantManBehavior {
                     attack_type: 0,
                 });
             } else {
-                // C# 魔法分支：FindAllTargets(1, CurrentLocation)
+                // C# 魔法分支：GetAttackPower(MinMC, MaxMC) + FindAllTargets(1, CurrentLocation)
+                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,
