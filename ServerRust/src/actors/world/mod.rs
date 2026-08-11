@@ -1459,6 +1459,8 @@ pub struct HeroInfo {
     pub dead: bool,
     /// 是否封印（SEALHERO，对齐 C# Hero.Sealed）
     pub sealed: bool,
+    /// 自动喝药已解锁（C# HeroInfo.AutoPot；Scroll 13 解锁，持久化）
+    pub autopot: bool,
     /// 英雄经验（运行时；C# Hero.Experience。等级持久化，经验重启清零）
     pub experience: u32,
     /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5）

@@ -994,6 +994,7 @@ impl Message<NewHeroRequest> for WorldActor {
                 gender: msg.gender,
                 dead: false,
                 sealed: false,
+                autopot: false,
                 experience: 0,
                 max_experience: 100,
             });
@@ -1039,7 +1040,7 @@ impl Message<NewHeroRequest> for WorldActor {
             let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
                 index: h.index, name: h.name.clone(), level: h.level,
                 class: h.class as u8, gender: h.gender as u8,
-                dead: h.dead, sealed: h.sealed,
+                dead: h.dead, sealed: h.sealed, autopot: h.autopot,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on NewHero: {}", e);
@@ -1149,7 +1150,7 @@ impl WorldActor {
                 .map(|hs| hs.iter().map(|h| db::DbHero {
                     index: h.index, name: h.name.clone(), level: h.level,
                     class: h.class as u8, gender: h.gender as u8,
-                    dead: h.dead, sealed: h.sealed,
+                    dead: h.dead, sealed: h.sealed, autopot: h.autopot,
                 }).collect())
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
@@ -1219,7 +1220,7 @@ impl WorldActor {
         let db_heroes: Vec<db::DbHero> = heroes_now.iter().map(|h| db::DbHero {
             index: h.index, name: h.name.clone(), level: h.level,
             class: h.class as u8, gender: h.gender as u8,
-            dead: h.dead, sealed: h.sealed,
+            dead: h.dead, sealed: h.sealed, autopot: h.autopot,
         }).collect();
         if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
             warn!("Failed to save heroes on SealHero: {}", e);
@@ -1247,7 +1248,7 @@ impl WorldActor {
             let db_heroes: Vec<db::DbHero> = remaining.iter().map(|h| db::DbHero {
                 index: h.index, name: h.name.clone(), level: h.level,
                 class: h.class as u8, gender: h.gender as u8,
-                dead: h.dead, sealed: h.sealed,
+                dead: h.dead, sealed: h.sealed, autopot: h.autopot,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on DeleteHero: {}", e);

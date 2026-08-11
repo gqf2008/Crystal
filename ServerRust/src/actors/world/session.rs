@@ -459,6 +459,7 @@ impl Message<StartGameRequest> for WorldActor {
                 gender: mir2_shared::enums::MirGender::try_from(h.gender).unwrap_or(mir2_shared::enums::MirGender::Male),
                 dead: h.dead,
                 sealed: h.sealed,
+                autopot: h.autopot,
                 experience: 0,
                 max_experience: 100,
             }).collect());
@@ -1544,6 +1545,7 @@ impl Message<PlayerDisconnected> for WorldActor {
                 gender: h.gender as u8,
                 dead: h.dead,
                 sealed: h.sealed,
+                autopot: h.autopot,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on disconnect: {}", record.name, e);
@@ -1685,6 +1687,7 @@ impl Message<PlayerLogOut> for WorldActor {
                 gender: h.gender as u8,
                 dead: h.dead,
                 sealed: h.sealed,
+                autopot: h.autopot,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on logout: {}", record.name, e);
