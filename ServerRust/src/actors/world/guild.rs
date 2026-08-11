@@ -283,6 +283,12 @@ impl WorldActor {
         // Record the war declaration
         self.guild_wars.entry(sender_guild.clone()).or_default().insert(guild_name.clone());
         self.guild_wars.entry(guild_name.clone()).or_default().insert(sender_guild.clone());
+        // #2138：宣战后同步战争状态镜像到 SocialActor（LeaveGuildRequest 退会/解散校验）
+        let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildWar {
+            guild_name: sender_guild.clone(),
+            other: guild_name.clone(),
+            at_war: true,
+        }).await;
         // C# GuildAtWar.TimeRemaining = Settings.Minute * Guild_WarTime（单位分钟）
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

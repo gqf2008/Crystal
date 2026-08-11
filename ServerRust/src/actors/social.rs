@@ -355,6 +355,58 @@ impl Message<NpcSetGuildBuffs> for SocialActor {
     }
 }
 
+/// 行会战争镜像增删（#2138）：WorldActor 为准，SocialActor 仅存镜像。
+/// at_war=true 双向添加；false 双向移除并清理空集合（C# IsAtWar = WarringGuilds.Count > 0）。
+fn apply_guild_war_mirror(
+    guild_wars: &mut HashMap<String, HashSet<String>>,
+    guild_name: &str,
+    other: &str,
+    at_war: bool,
+) {
+    if at_war {
+        guild_wars.entry(guild_name.to_string()).or_default().insert(other.to_string());
+        guild_wars.entry(other.to_string()).or_default().insert(guild_name.to_string());
+        return;
+    }
+    let remove_first = {
+        let mut empty = false;
+        if let Some(set) = guild_wars.get_mut(guild_name) {
+            set.remove(other);
+            empty = set.is_empty();
+        }
+        empty
+    };
+    if remove_first {
+        guild_wars.remove(guild_name);
+    }
+    let remove_second = {
+        let mut empty = false;
+        if let Some(set) = guild_wars.get_mut(other) {
+            set.remove(guild_name);
+            empty = set.is_empty();
+        }
+        empty
+    };
+    if remove_second {
+        guild_wars.remove(other);
+    }
+}
+
+/// WorldActor -> SocialActor: 行会战争状态镜像（#2138，宣战/停战双向增删）
+pub struct NpcSetGuildWar {
+    pub guild_name: String,
+    pub other: String,
+    pub at_war: bool,
+}
+
+impl Message<NpcSetGuildWar> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcSetGuildWar, _ctx: &mut Context<Self, Self::Reply>) {
+        apply_guild_war_mirror(&mut self.guild_wars, &msg.guild_name, &msg.other, msg.at_war);
+    }
+}
+
 /// WorldActor -> SocialActor: 行会获得经验（C# GuildObject.GainExp）
 pub struct GuildGainExp {
     pub guild_name: String,
@@ -999,6 +1051,7 @@ impl Actor for SocialActor {
             last_group_invite: HashMap::new(),
             guilds,
             pending_guild_invites: HashMap::new(),
+            guild_wars: HashMap::new(),
             pending_marriage_invites: HashMap::new(),
             pending_mentor_invites: HashMap::new(),
             gate_ref: args.gate_ref,
@@ -1029,6 +1082,8 @@ pub struct SocialActor {
     // === 行会状态 ===
     guilds: HashMap<String, Guild>,
     pending_guild_invites: HashMap<u64, (u64, String)>,
+    /// 行会战争镜像（guild_name -> 敌对行会集合；WorldActor 为准，#2138）
+    guild_wars: HashMap<String, HashSet<String>>,
 
     // === 婚姻状态 ===
     pending_marriage_invites: HashMap<u64, u64>,
@@ -3597,6 +3652,13 @@ impl Message<LeaveGuildRequest> for SocialActor {
             Some(n) => n.clone(), None => return,
         };
 
+        // C# LEAVEGUILD（PlayerObject.cs:3251-3259）：MyGuild.IsAtWar() -> CannotLeaveGuildAtWar
+        // 置于会长/解散逻辑之前：普通退会与最后会长解散两条路径统一拦截
+        if self.guild_wars.get(&guild_name).map(|s| !s.is_empty()).unwrap_or(false) {
+            send_system_message(&self.gate_ref, msg.session_id, "行会处于战争状态，无法退出行会");
+            return;
+        }
+
         // C# GuildObject.DeleteMember（:455-510）：会长离开 → 最后成员解散 / 多会长正常退 / 唯一会长有成员阻止
         if state.guild_rank == GuildRank::Leader {
             let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
@@ -4404,7 +4466,7 @@ impl SocialActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{facing_each_other, front_tile, leader_leave_outcome, LeaderLeaveOutcome};
+    use super::{apply_guild_war_mirror, facing_each_other, front_tile, leader_leave_outcome, LeaderLeaveOutcome};
 
     #[test]
     fn leader_leave_outcome_matches_csharp_deletemember() {
@@ -4437,5 +4499,31 @@ mod tests {
         assert_eq!(front_tile(5, 5, 4), (5, 6)); // Down
         assert_eq!(front_tile(5, 5, 6), (4, 5)); // Left
         assert_eq!(front_tile(5, 5, 1), (6, 4)); // UpRight
+    }
+
+    /// #2138：行会战争镜像双向增删（宣战/停战），与 C# WarringGuilds 语义一致
+    #[test]
+    fn guild_war_mirror_add_remove_bidirectional() {
+        use std::collections::{HashMap, HashSet};
+        let mut wars: HashMap<String, HashSet<String>> = HashMap::new();
+        // 宣战：双向添加
+        apply_guild_war_mirror(&mut wars, "A", "B", true);
+        assert!(wars.get("A").unwrap().contains("B"));
+        assert!(wars.get("B").unwrap().contains("A"));
+        // 第二个敌对行会：A 集合增长
+        apply_guild_war_mirror(&mut wars, "A", "C", true);
+        assert_eq!(wars.get("A").unwrap().len(), 2);
+        // 停战 B：A 仍与 C 交战，键保留；B 键清空删除
+        apply_guild_war_mirror(&mut wars, "A", "B", false);
+        assert!(!wars.get("A").unwrap().contains("B"));
+        assert!(!wars.contains_key("B"));
+        assert_eq!(wars.get("A").unwrap().len(), 1);
+        // 停战 C：集合清空后删除键
+        apply_guild_war_mirror(&mut wars, "A", "C", false);
+        assert!(!wars.contains_key("A"));
+        assert!(!wars.contains_key("C"));
+        // 停战不存在的对：无副作用
+        apply_guild_war_mirror(&mut wars, "X", "Y", false);
+        assert!(wars.is_empty());
     }
 }
