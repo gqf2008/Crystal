@@ -48,6 +48,8 @@ impl MonsterBehavior for StrayCatBehavior {
             // C# range = !InRange(CurrentLocation, Target, 1)（切比雪夫距离 > 1）
             let ranged = max_distance(monster.x, monster.y, target.x, target.y) > 1;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# Type=1/Type=2 直线用 MinMC/MaxMC（StrayCat.cs）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
 
             if !ranged && fastrand::i32(0..10) > 0 {
                 if fastrand::i32(0..10) > 0 {
@@ -60,34 +62,37 @@ impl MonsterBehavior for StrayCatBehavior {
                         attack_type: 0,
                     });
                 } else {
-                    // 10% Type=1：目标等级<=怪+5 且推挤成功 → 直线 MC
+                    // 10% Type=1（StrayCat.cs Attack2）：目标等级<=怪+5 且推挤成功 → 直线 MC
                     if target.level as i32 <= monster.level + 5 {
                         ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                             session_id: target.session_id,
                             dir,
                             distance: 1,
                         });
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                            attacker_oid: monster.object_id,
-                            origin_x: monster.x,
-                            origin_y: monster.y,
-                            direction: dir,
-                            range: LINE_RANGE,
-                            damage,
-                            spell_id: 0,
-                        });
+                        // C# Pushed>0 才发直线；用推挤落点（target+dir 1 格）可走判定近似（无法回读推挤结果）
+                        let dest = (target.x + DIR_DX[dir as usize], target.y + DIR_DY[dir as usize]);
+                        if (ctx.is_walkable)(dest.0, dest.1) {
+                            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
+                                attacker_oid: monster.object_id,
+                                origin_x: monster.x,
+                                origin_y: monster.y,
+                                direction: dir,
+                                range: LINE_RANGE,
+                                damage: mc_damage,
+                                spell_id: 0,
+                            });
+                        }
                     }
-                    // 注：C# 推挤返回>0 才发直线；Rust 无法回读推挤结果，此处近似为条件满足即推+线
                 }
             } else {
-                // Type=2：直线 MC
+                // Type=2：直线 MC（StrayCat.cs:70-76）
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
                     attacker_oid: monster.object_id,
                     origin_x: monster.x,
                     origin_y: monster.y,
                     direction: dir,
                     range: LINE_RANGE,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             }
