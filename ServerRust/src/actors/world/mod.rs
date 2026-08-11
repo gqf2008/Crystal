@@ -5973,8 +5973,8 @@ pub(crate) fn calculate_equipment_bonuses(
             }
         }
         let count = types.len();
-        // 对戒加成（C#：Ring(7) + Bracelet(6) 同套）
-        if types.contains(&7) && types.contains(&6) {
+        // 对戒加成（C#：Smash/Purity/HwanDevil = Ring+Bracelet；DarkGhost = Necklace+Bracelet）
+        if set_pair_bonus_applies(*set_type, &types) {
             apply_set_pair_bonus(&mut b, *set_type);
         }
         // 全套加成（Count >= Amount）
@@ -6002,6 +6002,15 @@ fn set_amount(set_type: i32) -> usize {
         // Spirit/WhiteGold/WhiteGoldH/RedJade/RedJadeH/Nephrite/NephriteH/Hyeolryong/Monitor/Oppressive/Paeok/Sulgwan/BlueFrost/BlueFrostH
         1 | 15 | 16 | 17 | 18 | 19 | 20 | 26 | 27 | 28 | 29 | 30 | 31 | 39 => 5,
         _ => 0,
+    }
+}
+
+/// #2054：C# RefreshItemSetStats 对戒条件——DarkGhost=Necklace+Bracelet；其余 Ring+Bracelet
+fn set_pair_bonus_applies(set_type: i32, types: &[i32]) -> bool {
+    if set_type == 38 {
+        types.contains(&5) && types.contains(&6)
+    } else {
+        types.contains(&7) && types.contains(&6)
     }
 }
 
@@ -7900,6 +7909,18 @@ mod tests {
         assert_eq!(WorldActor::party_gold_share(3, 5), None);
         assert_eq!(WorldActor::party_gold_share(100, 4), Some(25));
         assert_eq!(WorldActor::party_gold_share(101, 4), Some(25));
+    }
+
+    #[test]
+    fn dark_ghost_pair_bonus_uses_necklace_bracelet() {
+        // #2054：C# DarkGhost(38) 对戒条件 = Necklace(5)+Bracelet(6)
+        assert!(set_pair_bonus_applies(38, &[5, 6]));
+        assert!(!set_pair_bonus_applies(38, &[7, 6])); // Ring+Bracelet 不触发
+        // 其余套装 = Ring(7)+Bracelet(6)
+        assert!(set_pair_bonus_applies(5, &[7, 6])); // Smash
+        assert!(!set_pair_bonus_applies(5, &[5, 6]));
+        assert!(set_pair_bonus_applies(7, &[7, 6])); // Purity
+        assert!(set_pair_bonus_applies(6, &[7, 6])); // HwanDevil
     }
 
     #[test]
