@@ -2956,13 +2956,16 @@ impl Message<TradeAddItem> for SocialActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        // C# CanTradeItem：BindMode.DontTrade(0x10) 物品不可交易
+        // C# CanTradeItem：BindMode.DontTrade(0x10) 物品不可交易（含租赁绑定）
         {
             let infos = self.config.item_infos.read().await;
             let bind = state.inventory.get_item(msg.unique_id)
                 .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
                 .unwrap_or(0);
-            if (bind & 0x0010) != 0 {
+            let rental_dont_trade = state.inventory.get_item(msg.unique_id)
+                .map(|it| crate::actors::world::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_TRADE.bits()))
+                .unwrap_or(false);
+            if (bind & 0x0010) != 0 || rental_dont_trade {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
                 return;
             }
@@ -3093,13 +3096,16 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
             }
         };
 
-        // #2010：C# DepositTradeItem（10545-10553）——BindMode.DontTrade(0x10) 绑定物品不可放入交易
+        // #2010：C# DepositTradeItem（10545-10553）——BindMode.DontTrade(0x10) 绑定物品不可放入交易（含租赁绑定）
         {
             let infos = self.config.item_infos.read().await;
             let bind = state.inventory.get_item(uid)
                 .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
                 .unwrap_or(0);
-            if (bind & 0x0010) != 0 {
+            let rental_dont_trade = state.inventory.get_item(uid)
+                .map(|it| crate::actors::world::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_TRADE.bits()))
+                .unwrap_or(false);
+            if (bind & 0x0010) != 0 || rental_dont_trade {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
                 send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
                 return;
@@ -4118,12 +4124,15 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
                     return;
                 }
-                // C#：BindMode.DontStore(0x8) 物品不可存入行会仓库
+                // C#：BindMode.DontStore(0x8) 物品不可存入行会仓库（含租赁绑定，:10167）
                 let infos = self.config.item_infos.read().await;
                 let bind = state.inventory.get_item(msg.unique_id)
                     .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
                     .unwrap_or(0);
-                if (bind & 0x0008) != 0 {
+                let rental_dont_store = state.inventory.get_item(msg.unique_id)
+                    .map(|it| crate::actors::world::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_STORE.bits()))
+                    .unwrap_or(false);
+                if (bind & 0x0008) != 0 || rental_dont_store {
                     send_system_message(&self.gate_ref, msg.session_id, "该物品无法存入仓库");
                     return;
                 }

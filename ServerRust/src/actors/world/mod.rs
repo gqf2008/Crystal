@@ -5034,8 +5034,10 @@ impl Actor for WorldActor {
                     } else if crate::db::remove_rented_item_from_character(
                         &args.db_pool, &rental.renter_name, rental.item.unique_id,
                     ).await.ok().flatten().is_some() {
-                        // 启动时无在线玩家：邮件退回物主并标记已归还
-                        send_item_via_mail(&args.db_pool, &rental.owner_name, rental.item.clone(),
+                        // 启动时无在线玩家：邮件退回物主并标记已归还（先解除租赁信息）
+                        let mut returned_item = rental.item.clone();
+                        returned_item.rental_information = None;
+                        send_item_via_mail(&args.db_pool, &rental.owner_name, returned_item,
                             "租赁物品退回", &format!("租赁物品 {} 已到期", rental.item.item_index));
                         let _ = crate::db::mark_rental_returned(&args.db_pool, rental.item.unique_id).await;
                         expired_returned += 1;
@@ -7406,6 +7408,14 @@ pub(crate) fn rarity_name_colour(rarity: u8) -> i32 {
 /// #926：物品绑定标志判定（C# BindMode.HasFlag；db::ItemInfo.bind_mode 与 SharedRust 位值一致）
 pub(crate) fn has_bind_flag(bind_mode: i32, flag: u16) -> bool {
     (bind_mode as u16 & flag) != 0
+}
+
+/// 租赁物品绑定旗标判定（C# RentalInformation.BindingFlags.HasFlag）
+pub(crate) fn rental_has_flag(item: &mir2_shared::data::item::UserItem, flag: u16) -> bool {
+    item.rental_information
+        .as_ref()
+        .map(|r| has_bind_flag(r.binding_flags.bits() as i32, flag))
+        .unwrap_or(false)
 }
 
 /// #940：是否装备了含指定特殊模式的物品（C# SpecialMode.HasFlag）
