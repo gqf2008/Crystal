@@ -3549,7 +3549,9 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
 
         // 2. 归还物主（在线背包；背包满或离线 → 邮件退回）
-        if let Some(item) = removed {
+        if let Some(mut item) = removed {
+            // C# ReturnRentalItem：归还物主前解除租赁信息（恢复完整控制权）
+            item.rental_information = None;
             let mut owner_online = false;
             for (_, owner_record) in &self.players {
                 if let Ok(Some(owner_state)) = owner_record.actor_ref.ask(GetPlayerState).await {

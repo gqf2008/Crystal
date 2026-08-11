@@ -37,10 +37,11 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             return;
         };
 
-        // #926：C# BindMode.DontUpgrade(0x40)：不可精炼/升级
+        // #926：C# BindMode.DontUpgrade(0x40)：不可精炼/升级（含租赁绑定，:12678）
         if self.item_infos.get(&item.item_index)
             .map(|i| super::has_bind_flag(i.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits()))
             .unwrap_or(false)
+            || super::rental_has_flag(&item, mir2_shared::enums::BindMode::DONT_UPGRADE.bits())
         {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法精炼");
             return;
@@ -209,8 +210,10 @@ impl Message<RefineItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "只有武器可以精炼");
             return;
         }
-        // C# BindMode.DontUpgrade(0x40)：不可精炼（与 DepositRefineItem #926 一致）
-        if super::has_bind_flag(item_db.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits()) {
+        // C# BindMode.DontUpgrade(0x40)：不可精炼（与 DepositRefineItem #926 一致；含租赁绑定 :12678）
+        if super::has_bind_flag(item_db.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits())
+            || super::rental_has_flag(&deposited, mir2_shared::enums::BindMode::DONT_UPGRADE.bits())
+        {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法精炼");
             return;
         }
@@ -453,6 +456,12 @@ impl Message<AwakeningRequest> for WorldActor {
             }
         };
 
+        // C# AwakeningItem（:8826）：租赁 DontUpgrade 物品不可觉醒
+        if super::rental_has_flag(&item, mir2_shared::enums::BindMode::DONT_UPGRADE.bits()) {
+            self.send_awakening_result(msg.session_id, AWAKE_RESULT_FAIL, -1);
+            return;
+        }
+
         // 验证：物品可觉醒
         if !item_info.can_awakening {
             self.send_awakening_result(msg.session_id, AWAKE_RESULT_FAIL, -1);
@@ -629,6 +638,13 @@ impl Message<DowngradeAwakeningRequest> for WorldActor {
                 return;
             }
         };
+
+        // C# Downgrade（:8891）：租赁物品不可降级
+        if item.rental_information.is_some() {
+            let owner = item.rental_information.as_ref().map(|r| r.owner_name.clone()).unwrap_or_default();
+            send_system_message(&self.gate_ref, msg.session_id, &format!("该物品属于 {}，无法降级", owner));
+            return;
+        }
 
         if item.awake.awake_level() == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "该物品没有觉醒等级");
@@ -809,6 +825,14 @@ impl Message<ResetAddedItemRequest> for WorldActor {
                 return;
             }
         };
+
+        // C# Reset（:9001）：租赁物品不可重置
+        if item.rental_information.is_some() {
+            let owner = item.rental_information.as_ref().map(|r| r.owner_name.clone()).unwrap_or_default();
+            send_system_message(&self.gate_ref, msg.session_id, &format!("该物品属于 {}，无法重置", owner));
+            return;
+        }
+
         let Some(item_info) = self.item_infos.get(&item.item_index).cloned() else {
             send_system_message(&self.gate_ref, msg.session_id, "物品信息不存在");
             return;

@@ -2119,10 +2119,14 @@ impl Message<DropItemRequest> for WorldActor {
             send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, false);
             return;
         }
-        // C# DropItem：BindMode.DontDrop 物品不可丢弃（移除前校验）
+        // C# DropItem：BindMode.DontDrop 物品不可丢弃（移除前校验；含租赁绑定）
         let dont_drop = state.inventory.get_item(msg.unique_id)
-            .and_then(|it| self.item_infos.get(&it.item_index))
-            .map(|i| (i.bind_mode & mir2_shared::enums::BindMode::DONT_DROP.bits() as i32) != 0)
+            .map(|it| {
+                let info_bind = self.item_infos.get(&it.item_index)
+                    .map(|i| (i.bind_mode & mir2_shared::enums::BindMode::DONT_DROP.bits() as i32) != 0)
+                    .unwrap_or(false);
+                info_bind || super::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_DROP.bits())
+            })
             .unwrap_or(false);
         if dont_drop {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法丢弃");
@@ -2560,7 +2564,8 @@ impl Message<SellItemRequest> for WorldActor {
         let item_db = self.item_infos.get(&item_data.item_index).cloned();
         let dont_sell = item_db.as_ref()
             .map(|i| (i.bind_mode & mir2_shared::enums::BindMode::DONT_SELL.bits() as i32) != 0)
-            .unwrap_or(false);
+            .unwrap_or(false)
+            || super::rental_has_flag(&item_data, mir2_shared::enums::BindMode::DONT_SELL.bits());
         if dont_sell {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法出售");
             return;
@@ -2908,9 +2913,12 @@ impl Message<StoreItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         }
-        // C# StoreItem：BindMode.DontStore(0x8) 物品不可存入仓库
-        let item_idx = state.inventory.backpack[msg.from as usize].as_ref().unwrap().item.item_index;
-        if self.item_infos.get(&item_idx).map(|i| (i.bind_mode & 0x0008) != 0).unwrap_or(false) {
+        // C# StoreItem：BindMode.DontStore(0x8) 物品不可存入仓库（含租赁绑定）
+        let stored_item = &state.inventory.backpack[msg.from as usize].as_ref().unwrap().item;
+        let item_idx = stored_item.item_index;
+        if self.item_infos.get(&item_idx).map(|i| (i.bind_mode & 0x0008) != 0).unwrap_or(false)
+            || super::rental_has_flag(stored_item, mir2_shared::enums::BindMode::DONT_STORE.bits())
+        {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法存入仓库");
             return;
         }
@@ -3380,6 +3388,13 @@ impl Message<DisassembleItemRequest> for WorldActor {
         // 只有装备类物品可以分解（有耐久度的非消耗品）
         if item_info.durability <= 0 || item_info.item_type == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法分解");
+            return;
+        }
+
+        // C# DisassembleItem（:8945）：租赁 UnableToDisassemble 物品不可分解
+        if super::rental_has_flag(&item, mir2_shared::enums::BindMode::UNABLE_TO_DISASSEMBLE.bits()) {
+            let owner = item.rental_information.as_ref().map(|r| r.owner_name.clone()).unwrap_or_default();
+            send_system_message(&self.gate_ref, msg.session_id, &format!("该物品属于 {}，无法分解", owner));
             return;
         }
 

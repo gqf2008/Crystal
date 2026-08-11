@@ -154,7 +154,10 @@ impl Message<SendMailRequest> for WorldActor {
             let bind = sender_state.inventory.get_item(*uid)
                 .and_then(|it| self.item_infos.get(&it.item_index).map(|i| i.bind_mode))
                 .unwrap_or(0);
-            if super::has_bind_flag(bind, 16) || super::has_bind_flag(bind, 16384) {
+            let rental_dont_trade = sender_state.inventory.get_item(*uid)
+                .map(|it| super::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_TRADE.bits()))
+                .unwrap_or(false);
+            if super::has_bind_flag(bind, 16) || super::has_bind_flag(bind, 16384) || rental_dont_trade {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法邮寄");
                 return;
             }

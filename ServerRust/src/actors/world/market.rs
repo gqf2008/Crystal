@@ -874,6 +874,17 @@ impl Message<ConsignItemRequest> for WorldActor {
 // 物品租赁系统
 // ============================================================
 
+/// C# ConfirmItemRental（:14416）绑定旗标：DontDrop|DontStore|DontSell|DontTrade|UnableToRent|DontUpgrade|UnableToDisassemble
+pub(crate) fn rental_binding_flags() -> mir2_shared::enums::BindMode {
+    mir2_shared::enums::BindMode::DONT_DROP
+        | mir2_shared::enums::BindMode::DONT_STORE
+        | mir2_shared::enums::BindMode::DONT_SELL
+        | mir2_shared::enums::BindMode::DONT_TRADE
+        | mir2_shared::enums::BindMode::UNABLE_TO_RENT
+        | mir2_shared::enums::BindMode::DONT_UPGRADE
+        | mir2_shared::enums::BindMode::UNABLE_TO_DISASSEMBLE
+}
+
 pub struct ItemRentalRequestMsg {
     pub session_id: u64,
     pub target_name: String,
@@ -953,6 +964,25 @@ impl Message<DepositRentalItemRequest> for WorldActor {
             return;
         };
         let uid = item.unique_id;
+
+        // C# DepositRentalItem（:14143/:14157）：租赁锁定中 / 带 UnableToRent 旗标的物品不可再出租
+        if item.rental_information.as_ref().map(|r| r.rental_locked).unwrap_or(false) {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品租赁锁定中，无法再次出租");
+            self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::DepositRentalItem {
+                unique_id: item.unique_id,
+                success: false,
+            });
+            return;
+        }
+        if super::rental_has_flag(&item, mir2_shared::enums::BindMode::UNABLE_TO_RENT.bits()) {
+            let owner = item.rental_information.as_ref().map(|r| r.owner_name.clone()).unwrap_or_default();
+            send_system_message(&self.gate_ref, msg.session_id, &format!("该物品属于 {}，无法出租", owner));
+            self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::DepositRentalItem {
+                unique_id: item.unique_id,
+                success: false,
+            });
+            return;
+        }
 
         // Find the rental session where this player is the partner (owner)
         let initiator = self.rental_sessions.iter()
@@ -1302,6 +1332,17 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         let renter_record = match self.players.get(&initiator) { Some(r) => r.clone(), None => return };
         let owner_record = match self.players.get(&session.partner_session) { Some(r) => r.clone(), None => return };
 
+        // C# ConfirmItemRental（:14378）：物品模板 Bind.UnableToRent 或租赁 UnableToRent 不可成交
+        if item.info.as_ref().map(|i| i.bind.contains(mir2_shared::enums::BindMode::UNABLE_TO_RENT)).unwrap_or(false)
+            || super::rental_has_flag(&item, mir2_shared::enums::BindMode::UNABLE_TO_RENT.bits())
+        {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法出租");
+            let _ = owner_record.actor_ref.ask(AddItemToInventory { item }).await;
+            self.send_rental_packet(initiator, mir2_shared::packets::server::rental_system::ConfirmItemRental { success: false });
+            self.send_rental_packet(session.partner_session, mir2_shared::packets::server::rental_system::ConfirmItemRental { success: false });
+            return;
+        }
+
         // Check renter has enough gold
         let has_gold = renter_record.actor_ref.ask(crate::actors::player::HasGold { amount: fee }).await.unwrap_or(false);
         if !has_gold {
@@ -1326,8 +1367,19 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         // Give gold to owner
         let _ = owner_record.actor_ref.ask(AddGold { amount: fee }).await;
 
+        // C# ConfirmItemRental（:14416）：移交前给物品写 RentalInformation（OwnerName/BindingFlags/ExpiryDate）
+        let period_hours = session.period_hours.max(1);
+        let mut rented_item = item.clone();
+        rented_item.rental_information = Some(mir2_shared::data::item::RentalInformation {
+            owner_name: owner_record.name.clone(),
+            binding_flags: rental_binding_flags(),
+            expiry_date_binary: crate::actors::world::tick::dotnet_now_ticks()
+                + (period_hours as i64 * 3600 * 10_000_000),
+            rental_locked: false,
+        });
+
         // Give item to renter
-        let added = renter_record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await.unwrap_or(false);
+        let added = renter_record.actor_ref.ask(AddItemToInventory { item: rented_item.clone() }).await.unwrap_or(false);
         if !added {
             // Give gold back and return item to owner
             let _ = renter_record.actor_ref.ask(AddGold { amount: fee }).await;
@@ -1343,11 +1395,10 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         send_system_message(&self.gate_ref, session.partner_session, &format!("租赁成功！获得 {} 金币，物品 {} 已出租", fee, item.item_index));
 
         // Persist to DB
-        let period_hours = session.period_hours.max(1);
         let expiry = chrono::Local::now().timestamp() + (period_hours as i64 * 3600);
         let now = chrono::Local::now().timestamp();
-        // item_json 用于重启后重建 UserItem（到期归还物主）
-        let item_json = serde_json::to_string(&item).unwrap_or_default();
+        // item_json 用于重启后重建 UserItem（到期归还物主；含 RentalInformation 绑定旗标）
+        let item_json = serde_json::to_string(&rented_item).unwrap_or_default();
         let _ = sqlx::query(
             "INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at, item_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
@@ -1367,7 +1418,7 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         self.player_rentals.entry(renter_record.name.clone())
             .or_default()
             .push(RentedItem {
-                item: item.clone(),
+                item: rented_item.clone(),
                 owner_name: owner_record.name.clone(),
                 renter_name: renter_record.name.clone(),
                 rental_fee: session.fee,
@@ -1411,6 +1462,39 @@ impl Message<GetRentedItemsRequest> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2208：C# ConfirmItemRental 绑定旗标 = DontDrop|DontStore|DontSell|DontTrade|UnableToRent|DontUpgrade|UnableToDisassemble = 0x305E
+    #[test]
+    fn rental_binding_flags_match_csharp() {
+        assert_eq!(rental_binding_flags().bits(), 0x305E);
+        let flags = rental_binding_flags();
+        assert!(flags.contains(mir2_shared::enums::BindMode::DONT_DROP));
+        assert!(flags.contains(mir2_shared::enums::BindMode::DONT_STORE));
+        assert!(flags.contains(mir2_shared::enums::BindMode::DONT_SELL));
+        assert!(flags.contains(mir2_shared::enums::BindMode::DONT_TRADE));
+        assert!(flags.contains(mir2_shared::enums::BindMode::UNABLE_TO_RENT));
+        assert!(flags.contains(mir2_shared::enums::BindMode::DONT_UPGRADE));
+        assert!(flags.contains(mir2_shared::enums::BindMode::UNABLE_TO_DISASSEMBLE));
+    }
+
+    /// #2208：rental_has_flag 判定租赁绑定（含无租赁信息时返回 false）
+    #[test]
+    fn rental_has_flag_checks_binding() {
+        let item = mir2_shared::data::item::UserItem {
+            rental_information: Some(mir2_shared::data::item::RentalInformation {
+                owner_name: "owner".into(),
+                binding_flags: rental_binding_flags(),
+                expiry_date_binary: 0,
+                rental_locked: false,
+            }),
+            ..Default::default()
+        };
+        assert!(crate::actors::world::rental_has_flag(&item, mir2_shared::enums::BindMode::DONT_SELL.bits()));
+        assert!(crate::actors::world::rental_has_flag(&item, mir2_shared::enums::BindMode::DONT_TRADE.bits()));
+        assert!(!crate::actors::world::rental_has_flag(&item, mir2_shared::enums::BindMode::NO_MAIL.bits()));
+        let free = mir2_shared::data::item::UserItem::default();
+        assert!(!crate::actors::world::rental_has_flag(&free, mir2_shared::enums::BindMode::DONT_SELL.bits()));
+    }
 
     #[test]
     fn auction_bid_validation() {
