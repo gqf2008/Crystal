@@ -2778,6 +2778,33 @@ impl Message<SetItemSoulBound> for PlayerActor {
     }
 }
 
+/// MergeItem 封印：设置物品 SealedInfo（C# PlayerObject.cs:7162；背包+装备）
+pub struct SetItemSealedInfo {
+    pub unique_id: u64,
+    pub sealed_info: Option<mir2_shared::data::item::SealedInfo>,
+}
+
+impl Message<SetItemSealedInfo> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetItemSealedInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        for slot in self.state.inventory.equipment.iter_mut().flatten() {
+            if slot.unique_id == msg.unique_id {
+                slot.sealed_info = msg.sealed_info.clone();
+                self.send_equipment_changed();
+                return;
+            }
+        }
+        for s in self.state.inventory.backpack.iter_mut().flatten() {
+            if s.item.unique_id == msg.unique_id {
+                s.item.sealed_info = msg.sealed_info.clone();
+                self.send_inventory_changed();
+                return;
+            }
+        }
+    }
+}
+
 /// #950：清空背包（GM @CLEARBAG；C# 逐格 S.DeleteItem + 清空 + RefreshStats）
 pub struct ClearBackpack;
 
