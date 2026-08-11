@@ -4673,6 +4673,28 @@ impl WorldActor {
                         .await;
                     let actor_ref = other_record.actor_ref.clone();
                     let damage = result.damage;
+                    // #1996：C# HumanObject.Attacked——吸血/反伤/EnergyShield（PvP 魔法）
+                    // 反伤：目标 Reflect 全额反伤给施法者（:7116-7123）
+                    if result.reflected > 0 {
+                        if let Some(caster_record) = self.players.get(&pending.session_id) {
+                            let _ = caster_record.actor_ref.ask(TakeDamage {
+                                attacker_id: other_state.object_id,
+                                attacker_session: *other_session,
+                                damage: result.reflected,
+                            }).await;
+                        }
+                        debug!("Player {} reflected {} to player {}", other_session, result.reflected, pending.session_id);
+                    }
+                    // 吸血：施法者 HPDrainRatePercent 回血（:7175-7183）
+                    if result.hp_drain > 0 {
+                        if let Some(caster_record) = self.players.get(&pending.session_id) {
+                            let _ = caster_record.actor_ref.ask(crate::actors::player::Heal { amount: result.hp_drain }).await;
+                        }
+                    }
+                    // EnergyShield：目标扣血前先回血（:7144-7154）
+                    if result.defender_heal > 0 {
+                        let _ = actor_ref.ask(crate::actors::player::Heal { amount: result.defender_heal }).await;
+                    }
                     let _ = actor_ref.ask(TakeDamage {
                         attacker_id: caster_state.object_id,
                         attacker_session: pending.session_id,
