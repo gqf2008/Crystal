@@ -499,7 +499,8 @@ impl PlayerInventory {
 
 
     /// 按 unique_id 拆分物品：从 uid 所在格拆出 count 数量到空位
-    pub fn split_item_by_uid(&mut self, uid: u64, count: u16) -> bool {
+    /// 拆分物品堆叠，返回拆出的新物品（C# SplitItem：新堆叠 + S.SplitItem{Item}）
+    pub fn split_item_by_uid(&mut self, uid: u64, count: u16) -> Option<UserItem> {
         let mut src_idx = None;
         for (i, slot) in self.backpack.iter().enumerate() {
             if let Some(s) = slot {
@@ -509,10 +510,10 @@ impl PlayerInventory {
                 }
             }
         }
-        let Some(idx) = src_idx else { return false; };
+        let Some(idx) = src_idx else { return None; };
         let item_data = match &self.backpack[idx] {
             Some(s) => s.item.clone(),
-            None => return false,
+            None => return None,
         };
         let mut new_grid = None;
         for g in 0..self.backpack.len() {
@@ -521,7 +522,7 @@ impl PlayerInventory {
                 break;
             }
         }
-        let Some(new_grid) = new_grid else { return false; };
+        let Some(new_grid) = new_grid else { return None; };
         if let Some(s) = &mut self.backpack[idx] {
             s.item.count -= count;
         }
@@ -530,9 +531,9 @@ impl PlayerInventory {
         new_item.unique_id = self.next_unique_id();
         self.backpack[new_grid] = Some(InventorySlot {
             grid: new_grid as u8,
-            item: new_item,
+            item: new_item.clone(),
         });
-        true
+        Some(new_item)
     }
 
     /// 按 unique_id 移除 count 数量（count >= 原数量时移除整叠），返回被移除的物品

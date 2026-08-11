@@ -87,38 +87,44 @@ impl Packet for ItemRepaired {
     }
 }
 
-/// Split item stack
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Split item stack（C# ServerPackets.cs SplitItem：Item(可选 UserItem) + Grid）
+#[derive(Debug, Clone, PartialEq)]
 pub struct SplitItem {
+    pub item: Option<UserItem>,
     pub grid: MirGridType,
-    pub unique_id: u64,
-    pub count: u16,
 }
 
 impl Packet for SplitItem {
     const OPCODE: i16 = ServerPacketIds::SplitItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let has_item = reader.read_u8()? != 0;
+        let item = if has_item {
+            Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?)
+        } else {
+            None
+        };
         let grid = MirGridType::try_from(reader.read_u8()?)?;
-        let unique_id = reader.read_u64::<LittleEndian>()?;
-        let count = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, count })
+        Ok(Self { item, grid })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(if self.item.is_some() { 1 } else { 0 })?;
+        if let Some(item) = &self.item {
+            item.write_to(writer)?;
+        }
         writer.write_u8(self.grid as u8)?;
-        writer.write_u64::<LittleEndian>(self.unique_id)?;
-        writer.write_u16::<LittleEndian>(self.count)?;
         Ok(())
     }
 }
 
-/// Split item stack (variant 1)
+/// Split item stack (variant 1)（C# ServerPackets.cs SplitItem1：Grid + UniqueID + Count + Success）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SplitItem1 {
     pub grid: MirGridType,
     pub unique_id: u64,
     pub count: u16,
+    pub success: bool,
 }
 
 impl Packet for SplitItem1 {
@@ -128,13 +134,15 @@ impl Packet for SplitItem1 {
         let grid = MirGridType::try_from(reader.read_u8()?)?;
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, count })
+        let success = reader.read_u8()? != 0;
+        Ok(Self { grid, unique_id, count, success })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u8(self.grid as u8)?;
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u16::<LittleEndian>(self.count)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
         Ok(())
     }
 }

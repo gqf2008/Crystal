@@ -3444,14 +3444,14 @@ pub struct InventorySplitItem {
 }
 
 impl Message<InventorySplitItem> for PlayerActor {
-    type Reply = bool;
+    type Reply = Option<mir2_shared::data::item::UserItem>;
 
     async fn handle(&mut self, msg: InventorySplitItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let success = self.state.inventory.split_item_by_uid(msg.unique_id, msg.count);
-        if success {
+        let result = self.state.inventory.split_item_by_uid(msg.unique_id, msg.count);
+        if result.is_some() {
             self.send_inventory_changed();
         }
-        success
+        result
     }
 }
 

@@ -183,18 +183,22 @@ impl PacketHandler for ItemHandler {
                 }
             }
 
-            // SplitItem
+            // SplitItem（C#：Item(可选 UserItem) + Grid）
             x if x == ServerPacketIds::SplitItem as u16 => {
                 if let Ok(packet) = server::SplitItem::read_body(&mut cursor) {
+                    let (unique_id, count) = match &packet.item {
+                        Some(i) => (i.unique_id, i.count as u32),
+                        None => (0, 0),
+                    };
                     events.push(NetworkEvent::ItemSplit {
                         grid: packet.grid,
-                        unique_id: packet.unique_id,
-                        count: packet.count as u32,
+                        unique_id,
+                        count,
                     });
                     tracing::debug!(
                         "✂️ Item split: uid={}, count={}",
-                        packet.unique_id,
-                        packet.count
+                        unique_id,
+                        count
                     );
                 }
             }

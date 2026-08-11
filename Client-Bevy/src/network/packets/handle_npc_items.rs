@@ -372,7 +372,9 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         x if x == ServerPacketIds::SplitItem as i16 => {
             // 拆分响应后服务端会跟完整 UserInformation 刷新（权威重建背包）
             if let Ok(p) = item::SplitItem::read_body(&mut cur) {
-                tracing::info!("🔪 拆分响应: grid={:?} uid={} count={}", p.grid, p.unique_id, p.count);
+                let uid = p.item.as_ref().map(|i| i.unique_id).unwrap_or(0);
+                let count = p.item.as_ref().map(|i| i.count).unwrap_or(0);
+                tracing::info!("🔪 拆分响应: grid={:?} uid={} count={}", p.grid, uid, count);
             }
         }
         x if x == ServerPacketIds::DropItem as i16 => {
