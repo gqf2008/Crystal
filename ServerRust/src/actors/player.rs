@@ -348,6 +348,8 @@ pub struct PlayerState {
     pub is_mentor: bool,
     /// 徒弟经验积累（C# PlayerObject.MenteeEXP：GainExp 时 += amount * MenteeExpBank(1)/100）
     pub mentee_exp: i64,
+    /// 导师经验银行（C# CharacterInfo.MentorExp：徒弟下线/解除时转入，导师 GainExp 结算）
+    pub mentor_exp: i64,
     /// 导师伤害加成是否激活（C# HasBuff(Mentor)：徒弟近身同组时 true）
     pub mentor_damage_bonus: bool,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
@@ -809,6 +811,7 @@ allow_group: false,
             level_effects: 0,
             is_mentor: false,
             mentee_exp: 0,
+            mentor_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
@@ -4456,6 +4459,19 @@ impl Message<SetMentor> for PlayerActor {
     }
 }
 
+/// 设置导师经验银行（C# CharacterInfo.MentorExp；SocialActor 下线转移 / 结算清零用）
+pub struct SetMentorExp {
+    pub amount: i64,
+}
+
+impl Message<SetMentorExp> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMentorExp, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.mentor_exp = msg.amount;
+    }
+}
+
 /// 设置导师伤害加成激活状态（C# BuffType.Mentor 存在性，WorldActor 近身检查后设置）
 pub struct SetMentorDamageBonus {
     pub active: bool,
@@ -6326,6 +6342,7 @@ allow_group: false,
             level_effects: 0,
             is_mentor: false,
             mentee_exp: 0,
+            mentor_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
