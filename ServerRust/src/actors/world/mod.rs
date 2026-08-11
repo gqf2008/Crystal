@@ -6464,6 +6464,7 @@ pub(crate) fn calculate_equipment_bonuses(
             b.item_drop_rate_percent += get(Stat::ItemDropRatePercent);
             b.gold_drop_rate_percent += get(Stat::GoldDropRatePercent);
             b.mine_rate_percent += get(Stat::MineRatePercent);
+            b.holy += get(Stat::Holy);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
             b.hand_weight += get(Stat::HandWeight);
@@ -8829,6 +8830,26 @@ mod set_bonus_tests {
         assert_eq!(d.max_mc, 1);
         assert_eq!(d.max_sc, 1);
         assert_eq!(d.agility, 1);
+    }
+
+    #[test]
+    fn test_equipment_holy_accumulated() {
+        // C# Stat.Holy：装备聚合 → 近战对亡灵加成（:3057-3060）
+        use mir2_shared::data::item::UserItem;
+        let mut info = test_item_info(1, 10);
+        info.stats.insert(mir2_shared::enums::Stat::Holy as u8, 5);
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, info);
+        let mut eq: Vec<Option<UserItem>> =
+            vec![None; crate::actors::inventory::EquipmentSlot::COUNT as usize];
+        eq[crate::actors::inventory::EquipmentSlot::Weapon as usize] = Some(UserItem {
+            item_index: 1,
+            current_dura: 10,
+            max_dura: 10,
+            ..Default::default()
+        });
+        let b = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b.holy, 5);
     }
 
     #[test]
