@@ -628,6 +628,14 @@ impl HeroCombatAI {
     }
 }
 
+/// 恢复持久化 AutoPot 解锁（C# HeroInfo.AutoPot；按当前出战英雄索引查找）
+fn hero_autopot_from_heroes(heroes: &[HeroInfo], hero_index: u8) -> bool {
+    heroes.iter()
+        .find(|h| h.index as u8 == hero_index)
+        .map(|h| h.autopot)
+        .unwrap_or(false)
+}
+
 impl WorldActor {
     /// 英雄战斗 AI 主循环（每 3 ticks 运行一次，约 300ms）
     ///
@@ -648,6 +656,8 @@ impl WorldActor {
         // (session_id, owner_state, class, hero_behaviour)
         struct HeroSnapshot {
             session_id: u64,
+            /// 当前出战英雄索引（C# player.CurrentHero；恢复持久化 AutoPot）
+            hero_index: u8,
             owner_x: i32,
             owner_y: i32,
             owner_map: u16,
@@ -722,6 +732,7 @@ impl WorldActor {
                 let hero_level = hero.as_ref().map(|h| h.level).unwrap_or(state.level);
                 snapshots.push(HeroSnapshot {
                     session_id: *session_id,
+                    hero_index: state.hero_index,
                     owner_x: state.x,
                     owner_y: state.y,
                     owner_map: state.map_index,
@@ -858,10 +869,12 @@ impl WorldActor {
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
+            let mut is_new_ai = false;
             let ai = self
                 .hero_ai_states
                 .entry(snap.session_id)
                 .or_insert_with(|| {
+                    is_new_ai = true;
                     HeroCombatAI::new_for_owner(
                         snap.owner_x,
                         snap.owner_y,
@@ -869,6 +882,13 @@ impl WorldActor {
                         snap.hero_max_mp,
                     )
                 });
+            // 恢复持久化的 AutoPot 解锁（C# HeroInfo.AutoPot；重召唤/重启不丢）
+            if is_new_ai {
+                let autopot = self.player_heroes.get(&snap.session_id)
+                    .map(|hs| hero_autopot_from_heroes(hs, snap.hero_index))
+                    .unwrap_or(false);
+                ai.autopot_unlocked = autopot;
+            }
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
             // #1208：支持类法术 ObjectMagic 广播的目标 oid
@@ -2601,7 +2621,7 @@ impl WorldActor {
                 .map(|hs| hs.iter().map(|h| db::DbHero {
                     index: h.index, name: h.name.clone(), level: h.level,
                     class: h.class as u8, gender: h.gender as u8,
-                    dead: h.dead, sealed: h.sealed,
+                    dead: h.dead, sealed: h.sealed, autopot: h.autopot,
                 }).collect())
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
@@ -2698,7 +2718,7 @@ impl WorldActor {
                 .map(|hs| hs.iter().map(|h| db::DbHero {
                     index: h.index, name: h.name.clone(), level: h.level,
                     class: h.class as u8, gender: h.gender as u8,
-                    dead: h.dead, sealed: h.sealed,
+                    dead: h.dead, sealed: h.sealed, autopot: h.autopot,
                 }).collect())
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
@@ -3542,6 +3562,23 @@ mod tests {
         // C#：Scroll 13 解锁前自动喝药不可用（HeroInfo.AutoPot 默认 false）
         let ai = HeroCombatAI::new_for_owner(0, 0, 100, 100);
         assert!(!ai.autopot_unlocked);
+    }
+
+    #[test]
+    fn hero_autopot_from_heroes_restores_persisted() {
+        // C#：AutoPot 解锁随 HeroInfo 持久化，重召唤后仍生效
+        let heroes = vec![
+            HeroInfo { index: 1, name: "H1".to_string(), level: 1, class: mir2_shared::enums::MirClass::Warrior,
+                gender: mir2_shared::enums::MirGender::Male, dead: false, sealed: false,
+                autopot: true, experience: 0, max_experience: 100 },
+            HeroInfo { index: 2, name: "H2".to_string(), level: 1, class: mir2_shared::enums::MirClass::Wizard,
+                gender: mir2_shared::enums::MirGender::Female, dead: false, sealed: false,
+                autopot: false, experience: 0, max_experience: 100 },
+        ];
+        assert!(hero_autopot_from_heroes(&heroes, 1));
+        assert!(!hero_autopot_from_heroes(&heroes, 2));
+        assert!(!hero_autopot_from_heroes(&heroes, 3)); // 未找到回退 false
+        assert!(!hero_autopot_from_heroes(&[], 1));
     }
 
     fn magic_info(base_cost: i32, level_cost: i32) -> crate::db::MagicInfo {

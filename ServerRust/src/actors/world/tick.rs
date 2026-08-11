@@ -3413,6 +3413,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                             gender: h.gender as u8,
                             dead: h.dead,
                             sealed: h.sealed,
+                            autopot: h.autopot,
                         }).collect();
                         if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                             warn!("Auto-save heroes failed for {}: {}", record.name, e);

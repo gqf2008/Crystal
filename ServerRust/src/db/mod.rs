@@ -140,6 +140,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             gender INTEGER NOT NULL DEFAULT 0,
             dead INTEGER NOT NULL DEFAULT 0,
             sealed INTEGER NOT NULL DEFAULT 0,
+            autopot INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (character_name, hero_index),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
@@ -796,6 +797,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN autopot INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN can_gain_exp INTEGER NOT NULL DEFAULT 1")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN luck INTEGER NOT NULL DEFAULT 0")
@@ -1142,11 +1145,12 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
                 gender INTEGER NOT NULL DEFAULT 0,
                 dead INTEGER NOT NULL DEFAULT 0,
                 sealed INTEGER NOT NULL DEFAULT 0,
+                autopot INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (character_name, hero_index)
             )"
         ).execute(&pool).await.unwrap();
         let heroes = vec![
-            DbHero { index: 1, name: "HeroOne".to_string(), level: 3, class: 1, gender: 0, dead: false, sealed: false },
+            DbHero { index: 1, name: "HeroOne".to_string(), level: 3, class: 1, gender: 0, dead: false, sealed: false, autopot: true },
         ];
         save_heroes(&pool, "TestChar", &heroes).await.unwrap();
         let loaded = load_heroes(&pool, "TestChar").await.unwrap();
@@ -1154,6 +1158,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         assert_eq!(loaded[0].name, "HeroOne");
         assert_eq!(loaded[0].level, 3);
         assert_eq!(loaded[0].class, 1);
+        assert!(loaded[0].autopot);
         // 覆盖保存（清空）
         save_heroes(&pool, "TestChar", &[]).await.unwrap();
         assert!(load_heroes(&pool, "TestChar").await.unwrap().is_empty());
@@ -2183,6 +2188,8 @@ pub struct DbHero {
     pub gender: u8,
     pub dead: bool,
     pub sealed: bool,
+    /// 自动喝药已解锁（C# HeroInfo.AutoPot；Scroll 13 解锁，持久化）
+    pub autopot: bool,
 }
 
 /// 保存角色英雄列表（DELETE + INSERT，事务内）
@@ -2194,7 +2201,7 @@ pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero])
         .await?;
     for h in heroes {
         sqlx::query(
-            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender, dead, sealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender, dead, sealed, autopot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(character_name)
         .bind(h.index)
@@ -2204,6 +2211,7 @@ pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero])
         .bind(h.gender as i32)
         .bind(if h.dead { 1 } else { 0 })
         .bind(if h.sealed { 1 } else { 0 })
+        .bind(if h.autopot { 1 } else { 0 })
         .execute(&mut *tx)
         .await?;
     }
@@ -2214,7 +2222,7 @@ pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero])
 /// 加载角色英雄列表
 pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<DbHero>> {
     let rows = sqlx::query(
-        "SELECT hero_index, name, level, class, gender, dead, sealed FROM heroes WHERE character_name = ? ORDER BY hero_index",
+        "SELECT hero_index, name, level, class, gender, dead, sealed, autopot FROM heroes WHERE character_name = ? ORDER BY hero_index",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2227,6 +2235,7 @@ pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<
         gender: r.get::<i32, _>("gender") as u8,
         dead: r.try_get::<i32, _>("dead").unwrap_or(0) != 0,
         sealed: r.try_get::<i32, _>("sealed").unwrap_or(0) != 0,
+        autopot: r.try_get::<i32, _>("autopot").unwrap_or(0) != 0,
     }).collect())
 }
 

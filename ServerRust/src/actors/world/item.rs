@@ -1228,6 +1228,24 @@ impl Message<UseItemRequest> for WorldActor {
                                 return;
                             }
                             ai.autopot_unlocked = true;
+                            // 持久化解锁状态（C# HeroInfo.AutoPot 随英雄存档，重召唤/重启不丢）
+                            if let Some(h) = self.player_heroes.get_mut(&msg.session_id)
+                                .and_then(|hs| hs.iter_mut().find(|h| h.index as u8 == player_state.hero_index))
+                            {
+                                h.autopot = true;
+                            }
+                            let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&msg.session_id)
+                                .map(|hs| hs.iter().map(|h| db::DbHero {
+                                    index: h.index, name: h.name.clone(), level: h.level,
+                                    class: h.class as u8, gender: h.gender as u8,
+                                    dead: h.dead, sealed: h.sealed, autopot: h.autopot,
+                                }).collect())
+                                .unwrap_or_default();
+                            if !db_heroes.is_empty() {
+                                if let Err(e) = db::save_heroes(&self.db_pool, &player_state.name, &db_heroes).await {
+                                    warn!("Failed to save heroes on autopot unlock: {}", e);
+                                }
+                            }
                             // C#：S.UnlockHeroAutoPot（SharedRust miscellaneous::UnlockHeroAutoPot，body=[unlocked u8]）
                             let pkt = mir2_shared::packets::server::miscellaneous::UnlockHeroAutoPot { unlocked: true };
                             let mut body = Vec::new();
@@ -1532,7 +1550,7 @@ impl Message<UseItemRequest> for WorldActor {
                     let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
                         index: h.index, name: h.name.clone(), level: h.level,
                         class: h.class as u8, gender: h.gender as u8,
-                        dead: h.dead, sealed: h.sealed,
+                        dead: h.dead, sealed: h.sealed, autopot: h.autopot,
                     }).collect();
                     if let Err(e) = db::save_heroes(&self.db_pool, &player_state.name, &db_heroes).await {
                         warn!("Failed to save heroes on unseal: {}", e);
