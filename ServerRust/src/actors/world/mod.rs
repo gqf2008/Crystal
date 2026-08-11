@@ -1846,8 +1846,72 @@ impl WorldActor {
         }
     }
 
+    /// C# FlashDash：UserDashAttack 给自己 + ObjectDashAttack（distance=实际突进格数）给同图他人
+    pub(crate) async fn broadcast_player_dash_attack(&self, session_id: u64, x: i32, y: i32, direction: u8, distance: i32) {
+        let dir_enum = mir2_shared::enums::MirDirection::try_from(direction).unwrap_or(mir2_shared::enums::MirDirection::Up);
+        let mut body = Vec::new();
+        let p = mir2_shared::packets::server::movement::UserDashAttack {
+            location_x: x,
+            location_y: y,
+            direction: dir_enum,
+        };
+        if p.write_body(&mut body).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserDashAttack as i16, &body);
+            let _ = self.gate_ref.tell(SendToClient { session_id, data: pkt }).await;
+        }
+        let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
+        let player_map: u16 = match self.players.get(&session_id) {
+            Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.map_index,
+                _ => 0,
+            },
+            None => 0,
+        };
+        let mut obody = Vec::new();
+        let op = mir2_shared::packets::server::movement::ObjectDashAttack {
+            object_id,
+            location_x: x,
+            location_y: y,
+            direction: dir_enum,
+            distance,
+        };
+        if op.write_body(&mut obody).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectDashAttack as i16, &obody);
+            let others: Vec<u64> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.session_id).collect();
+            for sid in others {
+                let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: pkt.clone() }).await;
+            }
+        }
+    }
+
+    /// C# FlashDash 未突进：ObjectAttack（spell=0）给自己 + 同图他人
+    pub(crate) async fn broadcast_player_object_attack(&self, session_id: u64, x: i32, y: i32, direction: u8) {
+        let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
+        let player_map: u16 = match self.players.get(&session_id) {
+            Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.map_index,
+                _ => 0,
+            },
+            None => 0,
+        };
+        let mut body = Vec::new();
+        body.extend_from_slice(&object_id.to_le_bytes());
+        body.extend_from_slice(&(x as u32).to_le_bytes());
+        body.extend_from_slice(&(y as u32).to_le_bytes());
+        body.push(direction);
+        body.push(0u8); // spell = None
+        body.push(0u8); // level
+        body.push(0u8); // type
+        let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &body);
+        let _ = self.gate_ref.tell(SendToClient { session_id, data: pkt.clone() }).await;
+        let others: Vec<u64> = self.same_map_players(session_id, player_map).await.into_iter().map(|r| r.session_id).collect();
+        for sid in others {
+            let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: pkt.clone() }).await;
+        }
+    }
+
     /// #1803：玩家后跳表现（C# BackStep：UserBackStep 给自己 + ObjectBackStep 给同图他人）
-    pub(crate) async fn broadcast_player_backstep(&self, session_id: u64, x: i32, y: i32, direction: u8) {
+    pub(crate) async fn broadcast_player_backstep(&self, session_id: u64, x: i32, y: i32, direction: u8, distance: i32) {
         let dir_enum = mir2_shared::enums::MirDirection::try_from(direction).unwrap_or(mir2_shared::enums::MirDirection::Up);
         let mut body = Vec::new();
         let p = mir2_shared::packets::server::movement::UserBackStep {
@@ -1873,7 +1937,7 @@ impl WorldActor {
             location_x: x,
             location_y: y,
             direction: dir_enum,
-            distance: 3,
+            distance,
         };
         if op.write_body(&mut obody).is_ok() {
             let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectBackStep as i16, &obody);
