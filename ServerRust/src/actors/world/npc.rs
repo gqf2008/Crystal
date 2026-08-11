@@ -162,6 +162,8 @@ impl Message<NPCCallRequest> for WorldActor {
             let normalized_key = current_key.to_uppercase();
             let script_key = (npc.db_index, normalized_key.clone());
             if let Some(lines) = self.npc_scripts.get(&script_key).cloned() {
+                // #2018：C# ParseInclude——运行时展开 #INCLUDE（Envir 根 = quest_dir 父目录）
+                let lines = npc_script::expand_includes(&lines, self.script_dir.parent().unwrap_or(std::path::Path::new("")));
                 // C# 格式（含 [@section]/#IF/#SAY 等指令）走新引擎
                 let joined = lines.join("\n");
                 if npc_script::is_csharp_format(&joined) {
