@@ -6054,7 +6054,7 @@ fn apply_set_complete_bonus(b: &mut EquipmentBonuses, set_type: i32) {
 }
 
 /// C# RefreshMirSetStats：Mir 套装按槽位组合加成（Rust 槽位：Weapon=0/Armour=1/Helmet=2/
-/// Necklace=3/BraceletL=4/BraceletR=5/RingL=6/RingR=7/Shoes=8/Pendant=9）
+/// Necklace=3/BraceletL=4/BraceletR=5/RingL=6/RingR=7/Shoes=8（靴）/Belt=12（腰）；Pendant=9 是项链坠）
 fn apply_mir_set_bonus(b: &mut EquipmentBonuses, slots: &[usize]) {
     let has = |s: usize| slots.contains(&s);
     if slots.len() >= 10 {
@@ -6079,11 +6079,11 @@ fn apply_mir_set_bonus(b: &mut EquipmentBonuses, slots: &[usize]) {
     if has(1) && has(2) && has(0) {
         b.max_atk += 2; b.max_mc += 1; b.max_sc += 1; b.agility += 1;
     }
-    if has(1) && has(8) && has(9) {
+    if has(1) && has(8) && has(12) {
         b.max_atk += 1; b.max_mc += 1; b.max_sc += 1;
-        b.hand_weight += 17; // C# 甲+靴+腰带 HandWeight+17（Rust Shoes/Pendant 近似靴/腰带）
+        b.hand_weight += 17; // C# 甲+靴+腰带 HandWeight+17（Rust Armour=1/Shoes=8/Belt=12）
     }
-    if has(1) && has(8) && has(9) && has(2) && has(0) {
+    if has(1) && has(8) && has(12) && has(2) && has(0) {
         b.min_atk += 1; b.max_atk += 1; b.min_mc += 1; b.max_mc += 1;
         b.min_sc += 1; b.max_sc += 1;
         b.hand_weight += 17; // C# 甲+靴+腰带+盔+武 HandWeight+17
@@ -7900,6 +7900,32 @@ mod tests {
         assert_eq!(WorldActor::party_gold_share(3, 5), None);
         assert_eq!(WorldActor::party_gold_share(100, 4), Some(25));
         assert_eq!(WorldActor::party_gold_share(101, 4), Some(25));
+    }
+
+    #[test]
+    fn mir_set_hand_weight_uses_belt_slot() {
+        // #2052：C# 甲+靴+腰（Rust 槽 1/8/12）→ HandWeight+17
+        let mut b = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut b, &[1, 8, 12]);
+        assert_eq!(b.hand_weight, 17);
+        // 甲+靴+Pendant(9)（项链坠槽，非腰带）→ 不触发
+        let mut b2 = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut b2, &[1, 8, 9]);
+        assert_eq!(b2.hand_weight, 0);
+        // 5 件：甲+靴+腰+盔+武（1/8/12/2/0）→ 3 件+5 件合计 34
+        let mut b3 = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut b3, &[0, 1, 2, 8, 12]);
+        assert_eq!(b3.hand_weight, 34);
+        // 双戒+双镯+项链（3/4/5/6/7）→ BagWeight 30+20 / WearWeight 17+10
+        let mut b4 = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut b4, &[3, 4, 5, 6, 7]);
+        assert_eq!(b4.bag_weight, 50);
+        assert_eq!(b4.wear_weight, 27);
+        // 10 件全 Mir（0-8 + 12）→ BagWeight 70+30+20 = 120
+        let mut b5 = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut b5, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 12]);
+        assert_eq!(b5.bag_weight, 120);
+        assert_eq!(b5.hand_weight, 34);
     }
 
     #[test]
