@@ -2904,8 +2904,21 @@ impl Message<AddItemToInventory> for PlayerActor {
             }).await;
             return true;
         }
+        // C# GainItem：Enqueue(new S.GainedItem { Item = clonedItem })——克隆原物品（AddItem 会合并数量）
+        let gained_item = msg.item.clone();
         match self.state.inventory.add_item(msg.item) {
             Some((_grid, _uid)) => {
+                // C# GainItem：S.GainedItem（获得物品入包，客户端提示）
+                let packet = mir2_shared::packets::server::drops::GainedItem { item: gained_item };
+                let mut body = Vec::new();
+                if mir2_shared::packets::base::serialize_packet(
+                    &mut std::io::Cursor::new(&mut body), &packet,
+                ).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: body,
+                    }).await;
+                }
                 // 发送 ItemChanged 通知客户端更新背包
                 self.send_inventory_changed();
                 true
