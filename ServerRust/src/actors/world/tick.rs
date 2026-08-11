@@ -2808,15 +2808,16 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                             && matches!(quest.status, QuestStatus::InProgress | QuestStatus::Accepted)
                             && now.saturating_sub(quest.start_time) >= quest.time_limit_seconds as u64
                         {
-                            let failed = record.actor_ref.ask(crate::actors::player::FailQuest {
+                            // C# CompleteQuest(TimeExpired)：AbandonQuest——移除 + RecalculateQuestBag（:11468-11469）
+                            let removed = record.actor_ref.ask(crate::actors::player::AbandonQuest {
                                 quest_index: quest.quest_index,
                             }).await.unwrap_or(false);
-                            if failed {
+                            if removed {
                                 send_system_message(
                                     &self.gate_ref, *session_id,
-                                    &format!("任务 '{}' 已超时失败", quest.title)
+                                    &format!("任务 '{}' 已超时，任务已移除", quest.title)
                                 );
-                                debug!("Quest expired: {} for session {}", quest.title, session_id);
+                                debug!("Quest expired & abandoned: {} for session {}", quest.title, session_id);
                             }
                         }
                     }
