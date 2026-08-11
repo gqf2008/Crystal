@@ -105,7 +105,7 @@ impl KirinBehavior {
             attack_type: 2,
         });
         // C# 每命中 1/5 Slow（玩家 4s，tick 1000）
-        let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
+        let hit: Vec<u64> = ctx.find_all_targets_in_cells(&cells, monster.map_index)
             .iter().map(|p| p.session_id).collect();
         for sid in hit {
             if fastrand::i32(0..5) == 0 {

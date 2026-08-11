@@ -280,6 +280,17 @@ fn current_target_in_range<'a>(
     }))
 }
 
+/// #2048：cells 顺序每格取第一个命中玩家（C# Halfmoon/Fullmoon/IceThrust break 语义）
+fn first_player_per_cell(positions: &[(u64, i32, i32)], cells: &[(i32, i32)]) -> Vec<u64> {
+    let mut ids = Vec::new();
+    for &(cx, cy) in cells {
+        if let Some((sid, _, _)) = positions.iter().find(|(_, x, y)| *x == cx && *y == cy) {
+            ids.push(*sid);
+        }
+    }
+    ids
+}
+
 impl<'a> AiCtx<'a> {
     /// 宠物目标选择（C# MonsterObject.ProcessSearch/ProcessTarget + Master.PMode）：
     /// - 非宠物：正常怪，最近玩家目标
@@ -307,8 +318,20 @@ impl<'a> AiCtx<'a> {
             .collect()
     }
 
-    /// 弧形/自定义格命中目标（C# HalfmoonAttack 每格取第一个可攻击对象；此处近似为格内全部玩家）
+    /// #2048：C# Halfmoon/FullmoonAttack/IceThrust（带 break）——cells 顺序每格取第一个可攻击玩家
     pub fn find_targets_in_cells(&self, cells: &[(i32, i32)], map_index: u16) -> Vec<&PlayerSnap> {
+        let positions: Vec<(u64, i32, i32)> = self.players.iter()
+            .filter(|p| p.map_index == map_index)
+            .map(|p| (p.session_id, p.x, p.y))
+            .collect();
+        let ids = first_player_per_cell(&positions, cells);
+        self.players.iter()
+            .filter(|p| ids.contains(&p.session_id))
+            .collect()
+    }
+
+    /// #2048：C# Kirin.IceThrust（无 break）——格内全部玩家
+    pub fn find_all_targets_in_cells(&self, cells: &[(i32, i32)], map_index: u16) -> Vec<&PlayerSnap> {
         self.players.iter()
             .filter(|p| p.map_index == map_index)
             .filter(|p| cells.contains(&(p.x, p.y)))
@@ -337,6 +360,7 @@ impl<'a> AiCtx<'a> {
 #[cfg(test)]
 mod tests {
     use super::current_target_in_range;
+    use super::first_player_per_cell;
     use crate::actors::world::ai::ctx::PlayerSnap;
 
     fn snap(id: u64, x: i32, y: i32, hp: i32) -> PlayerSnap {
@@ -347,6 +371,18 @@ mod tests {
     }
 
     /// #1870：C# 目标保持——当前目标即使比最近玩家更远也保持
+    #[test]
+    fn first_player_per_cell_matches_csharp() {
+        // #2048：C# Halfmoon/Fullmoon——cells 顺序每格取第一个可攻击玩家
+        let players = [(1, 5, 5), (2, 6, 5), (3, 5, 5)];
+        // 同格 (5,5) 有 1 和 3：每格只取第一个（玩家顺序 1）
+        assert_eq!(first_player_per_cell(&players, &[(5, 5), (6, 5)]), vec![1, 2]);
+        // 空 cells → 空
+        assert!(first_player_per_cell(&players, &[]).is_empty());
+        // 无命中格 → 空
+        assert!(first_player_per_cell(&players, &[(9, 9)]).is_empty());
+    }
+
     #[test]
     fn current_target_preferred_over_nearer() {
         // 当前目标 id=2 在 (91,100)（距离 9），最近玩家 id=1 在 (100,100)（距离 0）
