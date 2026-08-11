@@ -3404,6 +3404,162 @@ fn compute_sealed_info(minutes: i64, now_ticks: i64) -> mir2_shared::data::item:
     }
 }
 
+/// C# Settings.GemStatIndependent（Settings.cs:278，默认 true）——成功率按宝石主属性独立计算；Rust 暂无配置项，按默认常量
+const GEM_STAT_INDEPENDENT: bool = true;
+
+/// C# UserItem.GetTotal（ItemData.cs:511-514）：AddedStats[type] + Info.Stats[type]（DB stats 已 +3 转 SharedRust Stat 键）
+fn item_get_total(
+    item: &mir2_shared::data::item::UserItem,
+    info: &crate::db::ItemInfo,
+    stat: mir2_shared::enums::Stat,
+) -> i32 {
+    item.added_stats.get(stat) + info.stats.get(&(stat as u8)).copied().unwrap_or(0)
+}
+
+/// C# PlayerObject.GetGemType（PlayerObject.cs:7236-7310）：返回宝石的主属性（用于 GemStatIndependent 成功率）
+fn gem_type(item: &mir2_shared::data::item::UserItem, info: &crate::db::ItemInfo) -> Option<mir2_shared::enums::Stat> {
+    use mir2_shared::enums::Stat;
+    if item_get_total(item, info, Stat::MaxDC) > 0 {
+        return Some(Stat::MaxDC);
+    }
+    if item_get_total(item, info, Stat::MaxMC) > 0 {
+        return Some(Stat::MaxMC);
+    }
+    if item_get_total(item, info, Stat::MaxSC) > 0 {
+        return Some(Stat::MaxSC);
+    }
+    if item_get_total(item, info, Stat::MaxAC) > 0 {
+        return Some(Stat::MaxAC);
+    }
+    if item_get_total(item, info, Stat::MaxMAC) > 0 {
+        return Some(Stat::MaxMAC);
+    }
+    if item_get_total(item, info, Stat::AttackSpeed) > 0 {
+        return Some(Stat::AttackSpeed);
+    }
+    if item_get_total(item, info, Stat::Agility) > 0 {
+        return Some(Stat::Agility);
+    }
+    if item_get_total(item, info, Stat::Accuracy) > 0 {
+        return Some(Stat::Accuracy);
+    }
+    if item_get_total(item, info, Stat::PoisonAttack) > 0 {
+        return Some(Stat::PoisonAttack);
+    }
+    if item_get_total(item, info, Stat::Freezing) > 0 {
+        return Some(Stat::Freezing);
+    }
+    if item_get_total(item, info, Stat::MagicResist) > 0 {
+        return Some(Stat::MagicResist);
+    }
+    if item_get_total(item, info, Stat::PoisonResist) > 0 {
+        return Some(Stat::PoisonResist);
+    }
+    if item_get_total(item, info, Stat::Luck) > 0 {
+        return Some(Stat::Luck);
+    }
+    if item_get_total(item, info, Stat::PoisonRecovery) > 0 {
+        return Some(Stat::PoisonRecovery);
+    }
+    if item_get_total(item, info, Stat::HP) > 0 {
+        return Some(Stat::HP);
+    }
+    if item_get_total(item, info, Stat::MP) > 0 {
+        return Some(Stat::MP);
+    }
+    if item_get_total(item, info, Stat::HealthRecovery) > 0 {
+        return Some(Stat::HealthRecovery);
+    }
+    if item_get_total(item, info, Stat::HPRatePercent) > 0 {
+        return Some(Stat::HPRatePercent);
+    }
+    if item_get_total(item, info, Stat::MPRatePercent) > 0 {
+        return Some(Stat::MPRatePercent);
+    }
+    if item_get_total(item, info, Stat::SpellRecovery) > 0 {
+        return Some(Stat::SpellRecovery);
+    }
+    if item_get_total(item, info, Stat::Holy) > 0 {
+        return Some(Stat::Holy);
+    }
+    if item_get_total(item, info, Stat::Strong) > 0 {
+        return Some(Stat::Strong);
+    }
+    if item_get_total(item, info, Stat::HPDrainRatePercent) > 0 {
+        return Some(Stat::HPDrainRatePercent);
+    }
+    None
+}
+
+/// C# HumanObject.GetCurrentStatCount（HumanObject.cs:7508-7585）：目标物品当前已应用的宝石对应属性数
+fn current_stat_count(
+    gem: &mir2_shared::data::item::UserItem,
+    gem_info: &crate::db::ItemInfo,
+    target: &mir2_shared::data::item::UserItem,
+    target_info: &crate::db::ItemInfo,
+) -> i32 {
+    use mir2_shared::enums::Stat;
+    if item_get_total(gem, gem_info, Stat::MaxDC) > 0 {
+        return target.added_stats.get(Stat::MaxDC);
+    }
+    if item_get_total(gem, gem_info, Stat::MaxMC) > 0 {
+        return target.added_stats.get(Stat::MaxMC);
+    }
+    if item_get_total(gem, gem_info, Stat::MaxSC) > 0 {
+        return target.added_stats.get(Stat::MaxSC);
+    }
+    if item_get_total(gem, gem_info, Stat::MaxAC) > 0 {
+        return target.added_stats.get(Stat::MaxAC);
+    }
+    if item_get_total(gem, gem_info, Stat::MaxMAC) > 0 {
+        return target.added_stats.get(Stat::MaxMAC);
+    }
+    if gem_info.durability > 0 {
+        return if target_info.durability as i32 > target.max_dura as i32 {
+            0
+        } else {
+            ((target.max_dura as i32 - target_info.durability) / 1000)
+        };
+    }
+    if item_get_total(gem, gem_info, Stat::AttackSpeed) > 0 {
+        return target.added_stats.get(Stat::AttackSpeed);
+    }
+    if item_get_total(gem, gem_info, Stat::Agility) > 0 {
+        return target.added_stats.get(Stat::Agility);
+    }
+    if item_get_total(gem, gem_info, Stat::Accuracy) > 0 {
+        return target.added_stats.get(Stat::Accuracy);
+    }
+    if item_get_total(gem, gem_info, Stat::PoisonAttack) > 0 {
+        return target.added_stats.get(Stat::PoisonAttack);
+    }
+    if item_get_total(gem, gem_info, Stat::Freezing) > 0 {
+        return target.added_stats.get(Stat::Freezing);
+    }
+    if item_get_total(gem, gem_info, Stat::MagicResist) > 0 {
+        return target.added_stats.get(Stat::MagicResist);
+    }
+    if item_get_total(gem, gem_info, Stat::PoisonResist) > 0 {
+        return target.added_stats.get(Stat::PoisonResist);
+    }
+    if item_get_total(gem, gem_info, Stat::Luck) > 0 {
+        return target.added_stats.get(Stat::Luck);
+    }
+    if item_get_total(gem, gem_info, Stat::PoisonRecovery) > 0 {
+        return target.added_stats.get(Stat::PoisonRecovery);
+    }
+    if item_get_total(gem, gem_info, Stat::HP) > 0 {
+        return target.added_stats.get(Stat::HP);
+    }
+    if item_get_total(gem, gem_info, Stat::MP) > 0 {
+        return target.added_stats.get(Stat::MP);
+    }
+    if item_get_total(gem, gem_info, Stat::HealthRecovery) > 0 {
+        return target.added_stats.get(Stat::HealthRecovery);
+    }
+    0
+}
+
 impl Message<CombineItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: CombineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
@@ -3640,6 +3796,163 @@ impl Message<CombineItemRequest> for WorldActor {
             }
             self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, true, false);
             debug!("CombineItem(seal): {} sealed item={} minutes={}", state.name, target.unique_id, minutes);
+            return;
+        }
+
+        // C# CombineItem 升级分支（PlayerObject.cs:6867-7108 / 7145-7150）：宝石 Shape 3 = gems / Shape 4 = orbs
+        if matches!(source_info.shape, 3 | 4) {
+            // DontUpgrade(0x40)/Unique 或租用 DontUpgrade 不可升级（C# 6869-6879）
+            if super::has_bind_flag(target_info.bind_mode, 0x40) || target_info.special_mode != 0 {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法升级");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            if target.rental_information.as_ref().map(|r| r.binding_flags.contains(mir2_shared::enums::BindMode::DONT_UPGRADE)).unwrap_or(false) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法升级");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 属性上限（C# 6881-6886）：GemCount >= 宝石 CriticalDamage 或 已应用数 >= 宝石 HPDrainRatePercent
+            let gem_stat = |s: mir2_shared::enums::Stat| source_info.stats.get(&(s as u8)).copied().unwrap_or(0);
+            let gem_count = target.gem_count as i32;
+            if gem_count >= gem_stat(mir2_shared::enums::Stat::CriticalDamage)
+                || current_stat_count(&source, source_info, &target, target_info) >= gem_stat(mir2_shared::enums::Stat::HPDrainRatePercent) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品属性已达上限");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 成功率（C# 6888-6999）：successchance = 宝石 Reflect；GemStatIndependent 按主属性乘目标当前值，否则乘 GemCount
+            let mut successchance: i64 = gem_stat(mir2_shared::enums::Stat::Reflect) as i64;
+            let gem_type = gem_type(&source, source_info);
+            if GEM_STAT_INDEPENDENT {
+                successchance *= match gem_type {
+                    Some(mir2_shared::enums::Stat::MaxAC) => target.added_stats.get(mir2_shared::enums::Stat::MaxAC) as i64,
+                    Some(mir2_shared::enums::Stat::MaxMAC) => target.added_stats.get(mir2_shared::enums::Stat::MaxMAC) as i64,
+                    Some(mir2_shared::enums::Stat::MaxDC) => target.added_stats.get(mir2_shared::enums::Stat::MaxDC) as i64,
+                    Some(mir2_shared::enums::Stat::MaxMC) => target.added_stats.get(mir2_shared::enums::Stat::MaxMC) as i64,
+                    Some(mir2_shared::enums::Stat::MaxSC) => target.added_stats.get(mir2_shared::enums::Stat::MaxSC) as i64,
+                    Some(mir2_shared::enums::Stat::AttackSpeed) => target.added_stats.get(mir2_shared::enums::Stat::AttackSpeed) as i64,
+                    Some(mir2_shared::enums::Stat::Accuracy) => target.added_stats.get(mir2_shared::enums::Stat::Accuracy) as i64,
+                    Some(mir2_shared::enums::Stat::Agility) => target.added_stats.get(mir2_shared::enums::Stat::Agility) as i64,
+                    Some(mir2_shared::enums::Stat::Freezing) => target.added_stats.get(mir2_shared::enums::Stat::Freezing) as i64,
+                    Some(mir2_shared::enums::Stat::PoisonAttack) => target.added_stats.get(mir2_shared::enums::Stat::PoisonAttack) as i64,
+                    Some(mir2_shared::enums::Stat::MagicResist) => target.added_stats.get(mir2_shared::enums::Stat::MagicResist) as i64,
+                    Some(mir2_shared::enums::Stat::PoisonResist) => target.added_stats.get(mir2_shared::enums::Stat::PoisonResist) as i64,
+                    Some(mir2_shared::enums::Stat::HP) => target.added_stats.get(mir2_shared::enums::Stat::HP) as i64,
+                    Some(mir2_shared::enums::Stat::MP) => target.added_stats.get(mir2_shared::enums::Stat::MP) as i64,
+                    Some(mir2_shared::enums::Stat::HealthRecovery) => target.added_stats.get(mir2_shared::enums::Stat::HealthRecovery) as i64,
+                    Some(mir2_shared::enums::Stat::Luck) => target.added_stats.get(mir2_shared::enums::Stat::Luck) as i64,
+                    Some(mir2_shared::enums::Stat::Strong) => target.added_stats.get(mir2_shared::enums::Stat::Strong) as i64,
+                    Some(mir2_shared::enums::Stat::PoisonRecovery) => target.added_stats.get(mir2_shared::enums::Stat::PoisonRecovery) as i64,
+                    _ => gem_count as i64,
+                };
+            } else {
+                successchance *= gem_count as i64;
+            }
+            // C# 6999：>= 宝石 CriticalRate 则 0，否则 CriticalRate - successchance + 玩家 GemRatePercent（Rust 暂未聚合，按 0）
+            let critical_rate = gem_stat(mir2_shared::enums::Stat::CriticalRate) as i64;
+            successchance = if successchance >= critical_rate { 0 } else { critical_rate - successchance };
+            let succeeded = (fastrand::i32(0..100) as i64) < successchance;
+            // ValidGemForItem（C# 7007-7012；C# 先判定成败再校验）
+            if !valid_gem_for_item(source_info, target_info.item_type) {
+                send_system_message(&self.gate_ref, msg.session_id, "宝石与目标物品不匹配");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 按宝石主属性链确定效果（C# 7014-7087）：MaxDC/MaxMC/MaxSC/MaxAC/MaxMAC/耐久/AttackSpeed/Agility/Accuracy/PoisonAttack/Freezing/MagicResist/PoisonResist/Luck
+            enum GemUpgrade {
+                Stat(mir2_shared::enums::Stat, i32),
+                MaxDura(u16),
+            }
+            let effect = {
+                use mir2_shared::enums::Stat;
+                if item_get_total(&source, source_info, Stat::MaxDC) > 0 {
+                    GemUpgrade::Stat(Stat::MaxDC, item_get_total(&source, source_info, Stat::MaxDC))
+                } else if item_get_total(&source, source_info, Stat::MaxMC) > 0 {
+                    GemUpgrade::Stat(Stat::MaxMC, item_get_total(&source, source_info, Stat::MaxMC))
+                } else if item_get_total(&source, source_info, Stat::MaxSC) > 0 {
+                    GemUpgrade::Stat(Stat::MaxSC, item_get_total(&source, source_info, Stat::MaxSC))
+                } else if item_get_total(&source, source_info, Stat::MaxAC) > 0 {
+                    GemUpgrade::Stat(Stat::MaxAC, item_get_total(&source, source_info, Stat::MaxAC))
+                } else if item_get_total(&source, source_info, Stat::MaxMAC) > 0 {
+                    GemUpgrade::Stat(Stat::MaxMAC, item_get_total(&source, source_info, Stat::MaxMAC))
+                } else if source_info.durability > 0 {
+                    GemUpgrade::MaxDura(source.max_dura)
+                } else if item_get_total(&source, source_info, Stat::AttackSpeed) > 0 {
+                    GemUpgrade::Stat(Stat::AttackSpeed, item_get_total(&source, source_info, Stat::AttackSpeed))
+                } else if item_get_total(&source, source_info, Stat::Agility) > 0 {
+                    GemUpgrade::Stat(Stat::Agility, item_get_total(&source, source_info, Stat::Agility))
+                } else if item_get_total(&source, source_info, Stat::Accuracy) > 0 {
+                    GemUpgrade::Stat(Stat::Accuracy, item_get_total(&source, source_info, Stat::Accuracy))
+                } else if item_get_total(&source, source_info, Stat::PoisonAttack) > 0 {
+                    GemUpgrade::Stat(Stat::PoisonAttack, item_get_total(&source, source_info, Stat::PoisonAttack))
+                } else if item_get_total(&source, source_info, Stat::Freezing) > 0 {
+                    GemUpgrade::Stat(Stat::Freezing, item_get_total(&source, source_info, Stat::Freezing))
+                } else if item_get_total(&source, source_info, Stat::MagicResist) > 0 {
+                    GemUpgrade::Stat(Stat::MagicResist, item_get_total(&source, source_info, Stat::MagicResist))
+                } else if item_get_total(&source, source_info, Stat::PoisonResist) > 0 {
+                    GemUpgrade::Stat(Stat::PoisonResist, item_get_total(&source, source_info, Stat::PoisonResist))
+                } else if item_get_total(&source, source_info, Stat::Luck) > 0 {
+                    GemUpgrade::Stat(Stat::Luck, item_get_total(&source, source_info, Stat::Luck))
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "该宝石无法用于升级");
+                    self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                    return;
+                }
+            };
+            if !succeeded {
+                // 失败：Shape 3 且 Random(15)<3 摧毁目标（C# 7089-7099）；否则无效果（宝石仍消耗）
+                let destroy = source_info.shape == 3 && fastrand::i32(0..15) < 3;
+                if destroy {
+                    let _ = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory {
+                        unique_id: target.unique_id,
+                    }).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "升级失败，物品已摧毁！");
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "升级失败，无效果");
+                }
+                let _ = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: source.unique_id,
+                    count: 1,
+                }).await;
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, true, destroy);
+                debug!("CombineItem(upgrade fail): {} source={} destroy={}", state.name, source.unique_id, destroy);
+                return;
+            }
+            // 成功：应用属性/耐久 + GemCount++（C# 7145-7150）
+            let (add_stats, add_max_dura) = match effect {
+                GemUpgrade::Stat(s, v) => (vec![(s, v)], 0u16),
+                GemUpgrade::MaxDura(d) => (vec![], d),
+            };
+            let applied = record.actor_ref.ask(crate::actors::player::ApplyItemUpgrade {
+                unique_id: target.unique_id,
+                add_stats,
+                add_max_dura,
+            }).await.unwrap_or(false);
+            if !applied {
+                send_system_message(&self.gate_ref, msg.session_id, "升级失败");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // S.ItemUpgraded { Item = 升级后的物品 }（C# 7149）
+            if let Ok(Some(updated)) = record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: target.unique_id }).await {
+                let packet = mir2_shared::packets::server::item_operations::ItemUpgraded { item: updated };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemUpgraded as i16, &body),
+                    }).await;
+                }
+            }
+            send_system_message(&self.gate_ref, msg.session_id, "升级成功！");
+            // 消耗宝石（C# 7173-7174）
+            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                unique_id: source.unique_id,
+                count: 1,
+            }).await;
+            self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, true, false);
+            debug!("CombineItem(upgrade): {} upgraded item={}", state.name, target.unique_id);
             return;
         }
 
@@ -4037,6 +4350,63 @@ mod tests {
         // 0 分钟：Expiry = now（C# 语义：CurrentDura=0 时分钟数为 0）
         let info0 = super::compute_sealed_info(0, now_ticks);
         assert_eq!(info0.expiry_date_binary, now_ticks);
+    }
+
+    /// #2292：C# UserItem.GetTotal（ItemData.cs:511-514）——AddedStats + Info.Stats
+    #[test]
+    fn test_item_get_total() {
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::Stat;
+        let mut added = Stats::new();
+        added.set(Stat::MaxDC, 5);
+        let item = mir2_shared::data::item::UserItem { item_index: 1, added_stats: added, ..Default::default() };
+        let info = crate::db::ItemInfo {
+            index: 1,
+            stats: std::collections::HashMap::from([(Stat::MaxDC as u8, 10)]),
+            ..Default::default()
+        };
+        assert_eq!(super::item_get_total(&item, &info, Stat::MaxDC), 15);
+        assert_eq!(super::item_get_total(&item, &info, Stat::MaxMC), 0);
+    }
+
+    /// #2292：C# PlayerObject.GetGemType（7236-7310）——优先级 MaxDC > MaxMC > ... > HPDrainRatePercent
+    #[test]
+    fn test_gem_type() {
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::Stat;
+        let mut added = Stats::new();
+        added.set(Stat::MaxDC, 2);
+        added.set(Stat::MaxMC, 1);
+        let item = mir2_shared::data::item::UserItem { item_index: 1, added_stats: added, ..Default::default() };
+        let info = crate::db::ItemInfo::default();
+        assert_eq!(super::gem_type(&item, &info), Some(Stat::MaxDC));
+        // 无任何属性 → None
+        let plain = mir2_shared::data::item::UserItem::default();
+        assert_eq!(super::gem_type(&plain, &info), None);
+    }
+
+    /// #2292：C# HumanObject.GetCurrentStatCount（7508-7585）——按宝石主属性返回目标已应用数；耐久特例
+    #[test]
+    fn test_current_stat_count() {
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::Stat;
+        let mut gem_added = Stats::new();
+        gem_added.set(Stat::MaxDC, 3);
+        let gem = mir2_shared::data::item::UserItem { item_index: 1, added_stats: gem_added, ..Default::default() };
+        let gem_info = crate::db::ItemInfo::default();
+        let mut target_added = Stats::new();
+        target_added.set(Stat::MaxDC, 7);
+        let target = mir2_shared::data::item::UserItem { item_index: 2, added_stats: target_added, max_dura: 6000, ..Default::default() };
+        let target_info = crate::db::ItemInfo { index: 2, durability: 3000, ..Default::default() };
+        // MaxDC 优先：返回目标已应用 MaxDC
+        assert_eq!(super::current_stat_count(&gem, &gem_info, &target, &target_info), 7);
+        // 耐久宝石（Info.Durability>0 且无属性）：返回 (MaxDura - Info.Durability)/1000
+        let dura_gem = mir2_shared::data::item::UserItem::default();
+        let dura_gem_info = crate::db::ItemInfo { durability: 1000, ..Default::default() };
+        assert_eq!(super::current_stat_count(&dura_gem, &dura_gem_info, &target, &target_info), 3);
+        // 无属性/耐久 → 0
+        let empty = crate::db::ItemInfo::default();
+        assert_eq!(super::current_stat_count(&mir2_shared::data::item::UserItem::default(), &empty, &target, &target_info), 0);
     }
 
     #[test]
