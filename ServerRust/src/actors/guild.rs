@@ -302,6 +302,15 @@ impl Guild {
         Some(slot)
     }
 
+    /// 存入物品到指定仓库格子（C# GuildStorageItemChange type=0：存入 to 槽；越界/目标格非空失败）
+    pub fn deposit_item_at(&mut self, item: mir2_shared::data::item::UserItem, quantity: u32, slot: usize) -> bool {
+        if slot >= self.storage_items.len() || self.storage_items[slot].is_some() {
+            return false;
+        }
+        self.storage_items[slot] = Some((item, quantity));
+        true
+    }
+
     /// 从行会仓库取出物品
     /// 返回 Some((物品, 数量, 格子)) 或 None
     pub fn withdraw_item(&mut self, storage_grid: u8) -> Option<(mir2_shared::data::item::UserItem, u32, u8)> {
@@ -324,6 +333,19 @@ mod tests {
 
     fn make_guild() -> Guild {
         Guild::new("DragonSlayers".into(), "Alice".into(), 1)
+    }
+
+    #[test]
+    fn test_deposit_item_at_specific_slot() {
+        // C# type=0：存入目标槽；已占用/越界失败
+        let mut g = make_guild();
+        let it = mir2_shared::data::item::UserItem::default();
+        assert!(g.deposit_item_at(it.clone(), 1, 5));
+        assert_eq!(g.storage_items[5].as_ref().unwrap().1, 1);
+        // 目标格已占用失败
+        assert!(!g.deposit_item_at(it.clone(), 1, 5));
+        // 越界失败
+        assert!(!g.deposit_item_at(it, 1, 100));
     }
 
     #[test]

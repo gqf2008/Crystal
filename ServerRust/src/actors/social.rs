@@ -3657,8 +3657,9 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     let item_index = removed_item.item_index;
                     // #2012：C# 整件移动——存储数量服务端权威为整叠，忽略客户端 count（防部分存入数量不一致）
                     let stored_qty = removed_item.count as u32;
-                    let slot = guild.deposit_item(removed_item.clone(), stored_qty);
-                    if let Some(slot_val) = slot {
+                    // C# GuildStorageItemChange type=0（:10178）：存入 to 槽（msg.grid = 客户端点选的目标槽）
+                    let slot_val = msg.grid as usize;
+                    if guild.deposit_item_at(removed_item.clone(), stored_qty, slot_val) {
                         send_system_message(&self.gate_ref, msg.session_id, "物品已存入行会仓库");
                         debug!("GuildStorageItem: {} deposited item={} slot={}", state.name, item_index, slot_val);
                         // #295：实时通知（C# S.GuildStorageItemChange type=0 存入）
@@ -3673,7 +3674,7 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                         deposited = true;
                     } else {
                         let _ = record.ask(AddItemToInventory { item: removed_item }).await;
-                        send_system_message(&self.gate_ref, msg.session_id, "行会仓库已满");
+                        send_system_message(&self.gate_ref, msg.session_id, "该仓库格子已有物品或无效");
                     }
                 }
                 if deposited {
