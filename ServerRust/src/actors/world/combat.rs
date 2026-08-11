@@ -2180,6 +2180,15 @@ pub(crate) fn cast_out_of_range(
         && (target_x - caster_x).abs().max((target_y - caster_y).abs()) > range
 }
 
+/// #2050：C# FindAllNearby 环形序——按切比雪夫距离升序取前 k（MeteorShower 副目标）
+fn nearest_k_chebyshev(items: &[(u32, i32, i32)], cx: i32, cy: i32, k: usize) -> Vec<(u32, i32, i32)> {
+    let mut v: Vec<(u32, i32, i32, i32)> = items.iter()
+        .map(|(id, x, y)| (*id, *x, *y, (x - cx).abs().max((y - cy).abs())))
+        .collect();
+    v.sort_by_key(|(_, _, _, d)| *d);
+    v.into_iter().take(k).map(|(id, x, y, _)| (id, x, y)).collect()
+}
+
 impl Message<MagicRequest> for WorldActor {
     type Reply = ();
 
@@ -2379,9 +2388,8 @@ impl Message<MagicRequest> for WorldActor {
                             })
                             .map(|(id, mm)| (*id, mm.x, mm.y))
                             .collect();
-                        // 按距离升序取前 3（近似 C# FindAllNearby(4)）
-                        nearby.sort_by_key(|(_, x, y)| (x - m.x).abs() + (y - m.y).abs());
-                        ids = nearby.into_iter().take(3).collect();
+                        // #2050：C# FindAllNearby(4) 环形序——按切比雪夫距离升序取前 3
+                        ids = nearest_k_chebyshev(&nearby, m.x, m.y, 3);
                     }
                 }
                 ids
@@ -5503,14 +5511,32 @@ mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, cast_out_of_range,
         find_attack_skill, range_attack_out_of_range,
-        logout_blocked, player_attack_speed_ms, range_attack_min_reduction, range_flight_ticks,
-        ranged_chance_to_hit, should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
+        logout_blocked, nearest_k_chebyshev, player_attack_speed_ms, range_attack_min_reduction,
+        range_flight_ticks, ranged_chance_to_hit, should_grant_cast_exp, turn_undead_threshold,
+        ATTACK_SKILL_SPELLS,
         LOGOUT_DELAY_MS,
         DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
         SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
+
+    #[test]
+    fn nearest_k_chebyshev_matches_csharp() {
+        // #2050：C# FindAllNearby 环形序——按切比雪夫距离升序取前 k
+        let items = [(1, 0, 0), (2, 0, 1), (3, 1, 0), (4, 2, 0), (5, 1, 1)];
+        // 切比雪夫：1=(0), 2/3=(1), 5=(1), 4=(2) → 前 3 = 1, 2, 3（同环内序不敏感）
+        let top3 = nearest_k_chebyshev(&items, 0, 0, 3);
+        assert!(top3.contains(&(1, 0, 0)));
+        assert!(top3.contains(&(2, 0, 1)));
+        assert!(top3.contains(&(3, 1, 0)));
+        assert!(!top3.contains(&(4, 2, 0)));
+        assert!(!top3.contains(&(5, 1, 1)));
+        // k 截断：k=0 → 空
+        assert!(nearest_k_chebyshev(&items, 0, 0, 0).is_empty());
+        // 空列表 → 空
+        assert!(nearest_k_chebyshev(&[], 0, 0, 3).is_empty());
+    }
 
     #[test]
     fn test_find_attack_skill_converts_shared_to_cs() {
