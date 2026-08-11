@@ -9,6 +9,7 @@
 //! Attack（C# :30-138）：ranged→方向上 2 格；else 半圆 6 方向。
 
 use crate::actors::world::MonsterState;
+use mir2_shared::enums::SpellEffect;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
@@ -66,8 +67,9 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
                     ctx.find_targets_in_range(cx, cy, 0, monster.map_index)
                         .into_iter().copied().collect();
                 let mut dmg = base;
-                if fastrand::i32(0..10) == 0 {
-                    dmg += base / 2; // 暴击 +50%
+                let crit = fastrand::i32(0..10) == 0;
+                if crit {
+                    dmg += base / 2; // 暴击 +50%（C# critBonus = Round(damage*0.5)）
                 }
                 for h in hits {
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
@@ -77,6 +79,10 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
                         spell_id: 0,
                         attack_type: 0,
                     });
+                    if crit {
+                        // C# DelayedType.SpellEffect：暴击目标显示 FurbolgWarriorCritical
+                        ctx.out_effects.push((h.object_id, SpellEffect::FurbolgWarriorCritical, 0, 0));
+                    }
                 }
             }
         } else {
@@ -90,7 +96,8 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
                     ctx.find_targets_in_range(cx, cy, 0, monster.map_index)
                         .into_iter().copied().collect();
                 let mut dmg = base;
-                if fastrand::i32(0..10) == 0 {
+                let crit = fastrand::i32(0..10) == 0;
+                if crit {
                     dmg += base / 2;
                 }
                 for h in hits {
@@ -101,6 +108,10 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
                         spell_id: 0,
                         attack_type: 1,
                     });
+                    if crit {
+                        // C# DelayedType.SpellEffect：暴击目标显示 FurbolgWarriorCritical
+                        ctx.out_effects.push((h.object_id, SpellEffect::FurbolgWarriorCritical, 0, 0));
+                    }
                 }
                 d = (d + 1) % 8; // NextDir
             }

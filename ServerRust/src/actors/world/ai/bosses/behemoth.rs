@@ -4,8 +4,9 @@
 //! 机制：
 //!   - AttackRange=10，可移动追击
 //!   - 近战（贴身）：3/5 普攻 swipe / 1/5 FireCircle 自身 1 格 AOE / 1/5 推开 4 格 + Dazed
-//!     攻击后 Bleeding 15s
-//!   - 远程：1/2 追击；1/2 二选一：SpawnSlaves（投掷 huggers） / 远程 DC*3 弹道 + Paralysis
+//!     攻击后 Bleeding 5s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、5s）
+//!   - 远程：1/2 追击；1/2 二选一：SpawnSlaves（投掷 huggers） / 远程 DC*3 全体 AOE(10)
+//!     + SpellEffect.Behemoth + 1/15 Paralysis
 //!   - 死亡时所有 slave 一起死
 //!
 //! Attack（C# Behemoth.cs:22-100）：近战三形态 / 远程 SpawnSlaves+弹道。
@@ -13,7 +14,7 @@
 
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
+use mir2_shared::enums::{PoisonType, SpellEffect};
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
@@ -94,11 +95,11 @@ impl MonsterBehavior for BehemothBehavior {
                         });
                     }
                 }
-                // 近战命中后 Bleeding 15s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、值=SP）
+                // 近战命中后 Bleeding 5s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、5s、值=SP）
                 if fastrand::i32(0..15) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::BLEEDING, 15, poison_sc_value(monster), 1000),
+                        poison: Poison::new(PoisonType::BLEEDING, 5, poison_sc_value(monster), 1000),
                     });
                 }
             } else {
@@ -125,26 +126,28 @@ impl MonsterBehavior for BehemothBehavior {
                         });
                     }
                 } else {
-                    // 远程 DC*3 弹道 + Paralysis（C# CompleteRangeAttack）
+                    // 远程 DC*3 全体 AOE（C# CompleteRangeAttack FindAllTargets(AttackRange=10)）
                     let damage = (base * 3).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                         attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: ATTACK_RANGE,
                         damage,
                         spell_id: 0,
                     });
-                    // C# FindAllTargets(AttackRange) 全体 Paralysis
-                    let hit_sessions: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
-                        .iter().map(|p| p.session_id).collect();
-                    for sid in hit_sessions {
-                        // C# PoisonTarget 1/15
-                            if fastrand::i32(0..15) == 0 {
+                    // C# 每人广播 SpellEffect.Behemoth + 1/15 Paralysis（5s）
+                    let hit: Vec<crate::actors::world::ai::PlayerSnap> =
+                        ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+                            .into_iter().copied().collect();
+                    for h in hit {
+                        ctx.out_effects.push((h.object_id, SpellEffect::Behemoth, 0, 0));
+                        if fastrand::i32(0..15) == 0 {
                             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: sid,
+                                session_id: h.session_id,
                                 poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
                             });
-                            }
+                        }
                     }
                 }
             }

@@ -501,6 +501,9 @@ fn pet_exp_gain(name: &str, amount: i64) -> i64 {
 
 /// #1759：Boss Range 伤害防御类型（C# 各怪 DelayedAction RangeDamage / CompleteRangeAttack 的 DefenceType）
 /// 精确名匹配（不区分大小写）；未收录默认 ACAgility（C# 默认敏捷物防，保持 #1721 既有行为，安全回退）。
+/// 已知限制：OmaMage（ACAgility+MACAgility）、RhinoPriest（MAC+MACAgility）、
+/// TucsonGeneral（主分支 ProjectileAttack=MACAgility 3/4 + 副分支 RangeDamage=ACAgility 1/4）等
+/// 双分支 Boss 的 Range 动作无 attack_type 无法按分支区分，统一按主分支防御处理。
 fn boss_range_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
     use mir2_shared::enums::DefenceType;
     let n = name.to_ascii_lowercase();
