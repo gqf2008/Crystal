@@ -324,16 +324,16 @@ impl Packet for AllowMentorWire {
 }
 
 /// 市场客户端包（M34）
-/// ServerRust gate 实际解析 wire 与 SharedRust 客户端包结构不一致，手动构造：
-///   ConsignItem: [unique_id u32][price u32][duration u32]（gate 要求 ≥12 字节）
+/// 线格式对齐 SharedRust / ServerRust gate：
+///   ConsignItem: [unique_id u64][price u32][panel_type u8]（13 字节）
 ///   MarketSearch: [keyword DotNetString] MarketPage: [page u32]
-///   MarketBuy: [listing_id u32]      MarketGetBack: [listing_id u32]
-///   MarketSellNow: [unique_id u32][price u32]
+///   MarketBuy: [auction_id u64][bid_price u32]（12 字节）
+///   MarketGetBack: [mode u8][auction_id u64]   MarketSellNow: [auction_id u64]
 #[derive(Debug, Clone, Copy)]
 pub struct MarketConsignWire {
-    pub unique_id: u32,
+    pub unique_id: u64,
     pub price: u32,
-    pub duration: u32,
+    pub panel_type: u8,
 }
 
 impl Packet for MarketConsignWire {
@@ -344,9 +344,9 @@ impl Packet for MarketConsignWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            unique_id: reader.read_u32::<LittleEndian>()?,
+            unique_id: reader.read_u64::<LittleEndian>()?,
             price: reader.read_u32::<LittleEndian>()?,
-            duration: reader.read_u32::<LittleEndian>()?,
+            panel_type: reader.read_u8()?,
         })
     }
 
@@ -355,9 +355,9 @@ impl Packet for MarketConsignWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.unique_id)?;
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u32::<LittleEndian>(self.price)?;
-        writer.write_u32::<LittleEndian>(self.duration)?;
+        writer.write_u8(self.panel_type)?;
         Ok(())
     }
 }
@@ -417,7 +417,8 @@ impl Packet for MarketPageWire {
 
 #[derive(Debug, Clone, Copy)]
 pub struct MarketBuyWire {
-    pub listing_id: u32,
+    pub auction_id: u64,
+    pub bid_price: u32,
 }
 
 impl Packet for MarketBuyWire {
@@ -428,7 +429,8 @@ impl Packet for MarketBuyWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            listing_id: reader.read_u32::<LittleEndian>()?,
+            auction_id: reader.read_u64::<LittleEndian>()?,
+            bid_price: reader.read_u32::<LittleEndian>()?,
         })
     }
 
@@ -437,7 +439,8 @@ impl Packet for MarketBuyWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.listing_id)?;
+        writer.write_u64::<LittleEndian>(self.auction_id)?;
+        writer.write_u32::<LittleEndian>(self.bid_price)?;
         Ok(())
     }
 }

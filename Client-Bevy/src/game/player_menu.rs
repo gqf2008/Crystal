@@ -238,7 +238,7 @@ fn player_menu_ui_system(
             }
             PlayerMenuAction::Observe => {
                 net.send_packet(&crate::network::ObserveWire {
-                    target_id: state.object_id,
+                    name: state.name.clone(),
                 });
                 tracing::info!("👁️ 观察玩家 {}", state.name);
             }

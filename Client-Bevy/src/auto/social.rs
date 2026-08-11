@@ -1459,8 +1459,9 @@ pub(crate) fn auto_gameshop_test(
                     Some(it) => {
                         *bought_item = Some(it.item_index);
                         net.send_packet(&client_bevy::network::GameshopBuyWire {
-                            item_id: it.item_index as u32,
+                            g_index: it.item_index,
                             quantity: 1,
+                            p_type: 0,
                         });
                         tracing::info!(
                             "[SHOPTEST] 购买 #{} {} {}金币",
