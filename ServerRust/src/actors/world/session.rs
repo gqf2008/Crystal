@@ -3216,6 +3216,30 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
                     return;
                 }
+                Some("SETTIMER") => {
+                    // C# case "SETTIMER"（PlayerObject.cs:4126-4136）：@SETTIMER <key> <seconds> <type>
+                    // 注册 NPC 计时器（Rust npc_timers key 为 i32）并下发 S.SetTimer
+                    if parts.len() < 4 { return; }
+                    let Ok(key) = parts[1].parse::<i32>() else { return; };
+                    let Ok(seconds) = parts[2].parse::<i64>() else { return; };
+                    let _timer_type = parts[3].parse::<u8>().unwrap_or(0);
+                    // 世界循环 100ms/tick：1 秒 = 10 ticks（对齐 NPC 脚本 SETTIMER）
+                    let expire_tick = self.tick_count.saturating_add(seconds.max(0) as u64 * 10);
+                    self.npc_timers.entry(msg.session_id).or_default().insert(key, expire_tick);
+                    let packet = mir2_shared::packets::server::ui_events::SetTimer {
+                        timer_id: key,
+                        seconds: seconds as i32,
+                    };
+                    let mut body = Vec::new();
+                    if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: body,
+                        }).await;
+                    }
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("计时器已设置：key={} {}s", key, seconds));
+                    return;
+                }
                 Some("TOGGLETRANSFORM") => {
                     // C# case "TOGGLETRANSFORM"（~3836）：暂停/恢复变身 buff（无 GM 门槛）
                     let _ = record.actor_ref.ask(crate::actors::player::ToggleTransform).await;

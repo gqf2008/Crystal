@@ -51,7 +51,12 @@ impl MonsterBehavior for HellKeeperBehavior {
         // 护甲减伤（C# 按 DefenceType 取 AC 或 MAC 单值；无类型信息，取两者均值）
         let armour = (monster.min_ac + monster.max_ac) / 2;
         let mac = (monster.min_mac + monster.max_mac) / 2;
-        (damage - (armour + mac) / 2).max(0)
+        let final_damage = (damage - (armour + mac) / 2).max(0);
+        // C# HellKeeper.Attacked（:60-66 / :121-127）：破防受击后移除全部 LRParalysis 毒
+        if final_damage > 0 {
+            monster.poison_list.retain(|p| !p.p_type.contains(PoisonType::LR_PARALYSIS));
+        }
+        final_damage
     }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
