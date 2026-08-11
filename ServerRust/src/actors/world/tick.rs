@@ -1411,6 +1411,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             // 推进阶段，广播 ObjectEffect(type=1/1/2)，阶段 2 在目标当前位置结算 3×3 AoE。
             let mut delayed_effects: Vec<(u32, u8, u16)> = Vec::new(); // (object_id, stage, map_index)
             let mut pending_explosions: Vec<(u64, u16, i32, i32, i32)> = Vec::new(); // (caster, map, x, y, value)
+            let mut binding_releases: Vec<(u32, u16, i32, i32)> = Vec::new(); // (object_id, map, x, y)——BindingShot 定身解除广播
             for (_, monster) in &mut self.monsters {
                 // #1888：友军增益每 tick 减时，过期回退属性
                 tick_monster_buffs(monster);
@@ -1455,11 +1456,19 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         );
                     }
                 }
+                // BindingShot 定身解除检测（C# ReleaseBindingShot：ShockTime 到期清除效果）
+                let had_paralysis = monster.poison_list.iter()
+                    .any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::PARALYSIS));
                 let dmg = crate::combat::poison::tick_poisons(&mut monster.poison_list, 1);
                 if dmg > 0 {
                     monster.take_damage(dmg);
                     // C# MonsterObject.Process：毒伤归属毒源（LastHitter = poison.Owner）
                     monster.last_hitter_session = monster.poison_list.iter().find(|p| p.owner_session != 0).map(|p| p.owner_session);
+                }
+                if had_paralysis && !monster.poison_list.iter()
+                    .any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::PARALYSIS))
+                {
+                    binding_releases.push((monster.object_id, monster.map_index, monster.x, monster.y));
                 }
             }
             // #1797：怪物中毒视觉同步（C# CurrentPoison 变更 → ObjectPoisoned：客户端染绿/解毒）
@@ -1483,6 +1492,11 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         mir2_shared::enums::ServerPacketIds::ObjectPoisoned as i16, &body);
                     broadcast_to_map(&self.gate_ref, &self.players, map_index, &pkt).await;
                 }
+            }
+            // BindingShot 定身解除：效果清除广播（C# ReleaseBindingShot → 客户端移除效果）
+            for (oid, map_index, _x, _y) in binding_releases {
+                let bs_packet = build_set_binding_shot_packet(oid, false, 0);
+                broadcast_to_map(&self.gate_ref, &self.players, map_index, &bs_packet).await;
             }
             // #1799：玩家中毒同步（C# HumanObject.SendPoisoned：Poisoned 给自己 + ObjectPoisoned 同图广播）
             let mut player_poison_updates: Vec<(u64, u32, u16, mir2_shared::enums::PoisonType)> = Vec::new();
@@ -4980,10 +4994,13 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         }
                     }
 
-                    // BindingShot：命中后施加 Paralysis（定身 3s）
+                    // BindingShot：命中后施加 Paralysis（定身 3s）+ 效果广播
+                    // （C# centerTarget.Broadcast(SetBindingShot Enabled=true, Value=ShockTime ms)）
                     if spell == Spell::BindingShot {
                         poison::apply_poison(&mut monster.poison_list,
                             poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000));
+                        let bs_packet = build_set_binding_shot_packet(monster.object_id, true, 3000);
+                        broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &bs_packet).await;
                     }
 
                     // #1484：C# SpecialArrowShot——仅 PoisonShot buff 武装时命中施绿毒（C# 公式）

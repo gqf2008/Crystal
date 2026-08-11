@@ -1117,7 +1117,7 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
             NetworkEvent::BrowserOpened { url } => {
                 sys_chat(&mut cmds, format!("浏览器已打开: {}", url));
             }
-            NetworkEvent::BindingShotSet { enabled } => {
+            NetworkEvent::BindingShotSet { object_id: _, enabled, value: _ } => {
                 cmds.push(UiCommand::SetBindingShot { enabled: *enabled });
             }
             NetworkEvent::ConcentrationSet {

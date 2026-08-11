@@ -1913,7 +1913,9 @@ pub enum NetworkEvent {
         level_effects: u16,
     },
     BindingShotSet {
+        object_id: u32,
         enabled: bool,
+        value: i64,
     },
     OutputMessageReceived {
         message: String,

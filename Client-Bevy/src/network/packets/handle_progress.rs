@@ -351,7 +351,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         x if x == ServerPacketIds::SetBindingShot as i16 => {
             if let Ok(p) = ui_events::SetBindingShot::read_body(&mut cur) {
-                tracing::debug!("🎯 定身射击 enabled={}", p.enabled);
+                tracing::debug!("🎯 定身射击 id={} enabled={} value={}", p.object_id, p.enabled, p.value);
             }
         }
 
