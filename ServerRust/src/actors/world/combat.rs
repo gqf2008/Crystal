@@ -169,6 +169,11 @@ fn find_attack_skill<'a>(
     magics.iter().find(|m| m.spell == cs)
 }
 
+/// C# HumanObject.Attack（:2960）：Random.Next(12) <= magic.Level 则武装攻杀
+fn slaying_roll_procs(level: i32, roll: i32) -> bool {
+    roll <= level
+}
+
 impl WorldActor {
     /// #1256：C# CompleteAttack——近战命中给攻击技能经验（Random.Next(3)+1，与 MagicRequest 一致）
     async fn grant_attack_skill_exp(&self, session_id: u64, spell_shared: u8) {
@@ -346,6 +351,12 @@ impl Message<WorldAttackRequest> for WorldActor {
             }
         };
 
+        // C# HumanObject.Attack：spell=Slaying 请求即清除武装
+        // （覆盖 !CanAttack 失效 :2860-2863 + 武装消耗 :2907；未武装时无操作，语义等价）
+        if msg.spell == SPELL_SLAYING {
+            self.slaying_armed.remove(&msg.session_id);
+        }
+
         // 发送攻击请求到 PlayerActor，同时获取玩家属性用于伤害计算
         let attacker_state = record.actor_ref.ask(GetPlayerState).await.ok().flatten();
         if let Some(ref state) = attacker_state {
@@ -379,6 +390,18 @@ impl Message<WorldAttackRequest> for WorldActor {
             self.player_last_attack_ms.insert(msg.session_id, now_ms);
             // #1578：C# HumanObject.Attack LogTime——攻击后 10s 内不可下线
             self.player_logout_block_ms.insert(msg.session_id, now_ms + LOGOUT_DELAY_MS);
+            // C# HumanObject.Attack（:2956-2965）：攻杀武装——未武装且已学 Slaying 时 Random(12)<=Lv 掷骰，
+            // 任意近战攻击（含 miss/空挥）都掷骰；武装后 S.SpellToggle CanUse=true
+            if !self.slaying_armed.contains(&msg.session_id) {
+                if let Some(lv) = find_attack_skill(&state.magics, SPELL_SLAYING).map(|m| m.level as i32) {
+                    if slaying_roll_procs(lv, fastrand::i32(0..12)) {
+                        self.slaying_armed.insert(msg.session_id);
+                        // C# :2963 S.SpellToggle { Slaying, CanUse=true }
+                        self.send_spell_toggle(msg.session_id, state.object_id, SPELL_SLAYING_CS as u8, true).await;
+                        debug!("Player {} Slaying armed (level {})", state.object_id, lv);
+                    }
+                }
+            }
         }
 
         // 攻击时自动下坐骑
@@ -515,15 +538,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                     }
 
                     // ===== 战士近战技能触发 =====
-                    // #1517：Slaying（攻杀）——C# 无倍率配置 → GetDamage = base×1.0（主动命中无额外伤害）；
+                    // #1517：Slaying（攻杀）——C# GetDamage = base×1.0（无倍率配置）无额外伤害，
                     // 伤害来源是 RefreshSkills 被动 MaxDC +[5,6,7,8][Lv]（effective_max_attack 已计入）；
-                    // 触发：跑动时 Random(12) <= Lv 武装，下一次攻击消费（C# HumanObject.cs:2956/3148）
-                    let mut slaying_bonus = 0i32;
-                    if let Some(lv) = find_attack_skill(&state.magics, SPELL_SLAYING).map(|m| m.level as i32) {
-                        if fastrand::i32(0..12) <= lv {
-                            debug!("Player {} Slaying triggered (level {})", result.object_id, lv);
-                        }
-                    }
+                    // 武装状态机在 WorldAttackRequest 入口处理（Random(12)<=Lv 武装 + SpellToggle，C# :2956）
+                    let slaying_bonus = 0i32;
                     // #312：FlamingSword —— C# Envir.cs MultiplierBase=1.4（无等级加成）：单次 1.4×
                     // Rust 主击已按 base 结算，此处追加 0.4× 近似合计 1.4×（防御只算一次）
                     let mut flaming_bonus = 0i32;
@@ -5549,7 +5567,7 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, cast_out_of_range,
-        find_attack_skill, range_attack_out_of_range,
+        find_attack_skill, slaying_roll_procs, range_attack_out_of_range,
         logout_blocked, magic_get_power, nearest_k_chebyshev, player_attack_speed_ms,
         range_attack_min_reduction, range_flight_ticks, ranged_chance_to_hit, should_grant_cast_exp,
         turn_undead_threshold, ATTACK_SKILL_SPELLS,
@@ -5559,6 +5577,16 @@ mod tests {
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
+
+    #[test]
+    fn slaying_roll_procs_matches_csharp_random12() {
+        // C# HumanObject.Attack :2960：Random.Next(12) <= magic.Level 才武装
+        assert!(slaying_roll_procs(3, 0));
+        assert!(slaying_roll_procs(3, 3));
+        assert!(!slaying_roll_procs(3, 4));
+        assert!(slaying_roll_procs(0, 0));
+        assert!(!slaying_roll_procs(0, 1));
+    }
 
     #[test]
     fn magic_shield_duration_matches_csharp() {

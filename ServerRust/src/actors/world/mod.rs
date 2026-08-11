@@ -690,6 +690,7 @@ const SPELL_TWIN_DRAKE_BLADE: u8 = mir2_shared::enums::Spell::TwinDrakeBlade as 
 const SPELL_TWIN_DRAKE_BLADE_CS: i32 = mir2_shared::enums::Spell::TwinDrakeBlade as i32 - 3;
 const SPELL_FLAMING_SWORD_CS: i32 = mir2_shared::enums::Spell::FlamingSword as i32 - 3;
 const SPELL_COUNTER_ATTACK_CS: i32 = mir2_shared::enums::Spell::CounterAttack as i32 - 3;
+const SPELL_SLAYING_CS: i32 = mir2_shared::enums::Spell::Slaying as i32 - 3;
 const SPELL_SLASHING_BURST: u8 = mir2_shared::enums::Spell::SlashingBurst as u8;     // 15 战士·横扫千军（冲锋+伤害）
 const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（3列×3行前向 AoE）
 // 弓箭手法术（Archer，弹道物理系 + 自身 buff）
@@ -971,6 +972,8 @@ pub struct WorldActor {
     /// #448 致命一击状态（session → (到期 tick, 等级)）
     /// FatalSword 被动已触发（C# bool FatalSword，下一击消耗）
     pub(crate) fatal_sword_armed: HashSet<u64>,
+    /// Slaying 攻杀武装标记（C# bool Slaying：Random(12)<=Lv 武装，spell=Slaying 攻击消耗）
+    pub(crate) slaying_armed: HashSet<u64>,
     /// #448 宠物强化（怪物 oid → (到期 tick, DC 加成, AC 加成)）
     pub(crate) pet_enhanced: HashMap<u32, (u64, i32, i32)>,
     /// 召唤物等级（怪物 oid → 等级；C# MonsterObject.PetLevel = magic.Level）
@@ -1417,6 +1420,7 @@ impl WorldActor {
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
             fatal_sword_armed: HashSet::new(),
+        slaying_armed: HashSet::new(),
             boss_pending_attacks: Vec::new(),
             pet_enhanced: HashMap::new(),
             pet_levels: HashMap::new(),
@@ -4642,6 +4646,7 @@ impl Actor for WorldActor {
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
             fatal_sword_armed: HashSet::new(),
+        slaying_armed: HashSet::new(),
             boss_pending_attacks: Vec::new(),
             pet_enhanced: HashMap::new(),
             pet_levels: HashMap::new(),
