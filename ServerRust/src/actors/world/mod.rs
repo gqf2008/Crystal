@@ -8150,6 +8150,23 @@ impl Message<GetMapTitle> for WorldActor {
     }
 }
 
+/// #2012：查询坐标是否在安全区（C# InSafeZone；行会仓库存取用）
+pub struct IsInSafeZone {
+    pub map_index: u16,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Message<IsInSafeZone> for WorldActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: IsInSafeZone, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.maps.get(&msg.map_index)
+            .map(|m| m.is_safe_zone(msg.x, msg.y))
+            .unwrap_or(false)
+    }
+}
+
 /// #950：GM @GOTO——传送到指定玩家身边（独立消息，避免 Chat handler 借用冲突）
 pub struct GmGotoRequest {
     pub session_id: u64,
