@@ -1205,6 +1205,30 @@ impl Message<UseItemRequest> for WorldActor {
                             send_system_message(&self.gate_ref, msg.session_id, "已传送回皇宫");
                             debug!("HomeTeleport: {} -> palace map {} ({},{})", player_state.name, palace_map, rx, ry);
                         }
+                        // 13 Hero unlock autopot（C# UseItem Scroll case 13，PlayerObject.cs:6051-6059）
+                        13 => {
+                            // !HeroSpawned || Hero.AutoPot → 失败不消耗
+                            let Some(ai) = self.hero_ai_states.get_mut(&msg.session_id) else {
+                                send_system_message(&self.gate_ref, msg.session_id, "你没有出战英雄");
+                                return;
+                            };
+                            if ai.autopot_unlocked {
+                                send_system_message(&self.gate_ref, msg.session_id, "英雄自动喝药已解锁");
+                                return;
+                            }
+                            ai.autopot_unlocked = true;
+                            // C#：S.UnlockHeroAutoPot（SharedRust miscellaneous::UnlockHeroAutoPot，body=[unlocked u8]）
+                            let pkt = mir2_shared::packets::server::miscellaneous::UnlockHeroAutoPot { unlocked: true };
+                            let mut body = Vec::new();
+                            if pkt.write_body(&mut std::io::Cursor::new(&mut body)).is_ok() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UnlockHeroAutoPot as i16, &body),
+                                }).await;
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, "英雄自动喝药已解锁！");
+                            debug!("HeroAutopotScroll: {} unlocked hero autopot", player_state.name);
+                        }
                         _ => {
                             send_system_message(&self.gate_ref, msg.session_id, "该卷轴无法使用");
                             return;

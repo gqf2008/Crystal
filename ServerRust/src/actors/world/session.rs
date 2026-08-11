@@ -3725,6 +3725,10 @@ impl Message<SetAutoPotValueRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+        // C# SetAutoPotValue（PlayerObject.cs:9641）：!HeroSpawned || !Hero.AutoPot → return
+        if !self.hero_ai_states.get(&msg.session_id).map(|ai| ai.autopot_unlocked).unwrap_or(false) {
+            return;
+        }
         let _ = record.actor_ref.ask(SetAutoPotValue { stat: msg.stat, value: msg.value }).await;
         // Send SetAutoPotValue confirmation to client
         let mut body = Vec::new();
@@ -3749,6 +3753,10 @@ impl Message<SetAutoPotItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+        // C# SetAutoPotItem（PlayerObject.cs:9653）：!HeroSpawned || !Hero.AutoPot → return
+        if !self.hero_ai_states.get(&msg.session_id).map(|ai| ai.autopot_unlocked).unwrap_or(false) {
+            return;
+        }
         // C# SetAutoPotItem：物品不存在则置 0
         let item_index = if self.item_infos.contains_key(&msg.item_index) { msg.item_index } else { 0 };
         let _ = record.actor_ref.ask(SetAutoPotItem { grid: msg.grid, item_index }).await;

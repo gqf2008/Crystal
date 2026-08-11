@@ -584,6 +584,8 @@ pub struct HeroCombatAI {
     pub pot_mana: u32,
     /// 下次自动喝药检查 tick（#1182 C# AutoPotTime）
     pub next_autopot_tick: u64,
+    /// 英雄自动喝药是否已解锁（C# HeroInfo.AutoPot；Scroll 13 解锁，重召唤复位——持久化后续批次）
+    pub autopot_unlocked: bool,
     /// 当前 MP（#1186：C# Stats[MP]，施法耗蓝/回蓝）
     pub mp: i32,
     /// 最大 MP（#1186：C# Stats[MP]）
@@ -616,6 +618,7 @@ impl HeroCombatAI {
             pot_health: 0,
             pot_mana: 0,
             next_autopot_tick: 0,
+            autopot_unlocked: false,
             mp: max_mp,
             max_mp,
             last_sent_mp: max_mp,
@@ -921,7 +924,8 @@ impl WorldActor {
             // #1182/#1186：自动喝药检查（C# HeroObject.ProcessAutoPot，AutoPotDelay=1000ms）
             // HP：HP% < AutoHPPercent && HPItemIndex>0 && PotHealthAmount<=0
             // MP：MP% < AutoMPPercent && MPItemIndex>0 && PotManaAmount<=0
-            if ai_local.hp > 0 && self.tick_count >= ai_local.next_autopot_tick {
+            // C#：自动喝药需 Scroll 13 解锁（HeroInfo.AutoPot；PlayerObject.cs:6051/9641）
+            if ai_local.hp > 0 && ai_local.autopot_unlocked && self.tick_count >= ai_local.next_autopot_tick {
                 ai_local.next_autopot_tick = self.tick_count + HERO_AUTOPOT_INTERVAL_TICKS;
                 let hp_pct = if ai_local.max_hp > 0 {
                     (ai_local.hp * 100 / ai_local.max_hp) as u8
@@ -3532,6 +3536,13 @@ impl WorldActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hero_autopot_unlocked_defaults_false() {
+        // C#：Scroll 13 解锁前自动喝药不可用（HeroInfo.AutoPot 默认 false）
+        let ai = HeroCombatAI::new_for_owner(0, 0, 100, 100);
+        assert!(!ai.autopot_unlocked);
+    }
 
     fn magic_info(base_cost: i32, level_cost: i32) -> crate::db::MagicInfo {
         crate::db::MagicInfo {
