@@ -470,6 +470,25 @@ impl Message<StartGameRequest> for WorldActor {
             self.broadcast_hero_spawn(msg.session_id).await;
             // #203：下发完整英雄信息（背包/装备/自动药）
             self.send_hero_information_packet(msg.session_id).await;
+            // C# HeroObject.SendBaseStats（HeroObject.cs:1265）：下发英雄基础属性
+            if let Some(hero) = self.player_heroes.get(&msg.session_id)
+                .and_then(|hs| hs.iter().find(|h| h.index == loaded_state.hero_index as i32))
+            {
+                let hs = crate::actors::world::hero_stats::hero_base_stats(hero.class, hero.level as i32);
+                let stats = vec![
+                    hs.max_hp, hs.max_mp, hs.min_ac, hs.max_ac, hs.min_mac, hs.max_mac,
+                    hs.min_dc, hs.max_dc, hs.min_mc, hs.max_mc, hs.min_sc, hs.max_sc,
+                    hs.accuracy, hs.agility, hs.bag_weight, hs.wear_weight, hs.hand_weight, hs.poison_attack,
+                ];
+                let packet = mir2_shared::packets::server::miscellaneous::HeroBaseStatsInfo { stats };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HeroBaseStatsInfo as i16, &body),
+                    }).await;
+                }
+            }
         }
 
         // 通知 SocialActor 玩家上线（组队/好友/行会查询依赖在线表）
@@ -755,6 +774,22 @@ impl Message<StartGameRequest> for WorldActor {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DefaultNPC as i16, &body),
             }).await;
+        }
+
+        // C# SendBaseStats（HumanObject.cs:1726）：登录下发职业基础属性（BaseStats.Stats 按公式计算当前等级值）
+        {
+            let stats: Vec<i32> = mir2_shared::data::stats::BaseStats::new(loaded_state.class).stats
+                .iter()
+                .map(|bs| bs.calculate(loaded_state.class, loaded_state.level as i32))
+                .collect();
+            let packet = mir2_shared::packets::server::miscellaneous::BaseStatsInfo { stats };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::BaseStatsInfo as i16, &body),
+                }).await;
+            }
         }
 
         // C# StartGameSuccess "Restore buffs"：登录恢复后逐条下发 S.AddBuff（客户端 Buff 栏显示；wire [tag u8][remaining_ticks u32]）
