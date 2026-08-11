@@ -2646,9 +2646,12 @@ impl Message<DamageEquipment> for PlayerActor {
     ) -> Self::Reply {
         let (changed, broke) =
             if let Some(item) = self.state.inventory.equipment[msg.slot as usize].as_mut() {
-                // #1246：C# DamageItem——CurrentDura == 0 已破损直接返回（不再扣/不再发 DuraChanged）。
-                // 但 Torch 仍需返回 broke 供 tick 路径卸下删除（C# Process 对 0 耐久火把同样移除）。
-                if item.current_dura == 0 {
+                // C# DamageItem（HumanObject.cs:7852）：婚戒（RingL 且已婚绑定）不受耐久损耗
+                if msg.slot == crate::actors::inventory::EquipmentSlot::RingL && item.wedding_ring != 0 {
+                    (false, false)
+                } else if item.current_dura == 0 {
+                    // #1246：C# DamageItem——CurrentDura == 0 已破损直接返回（不再扣/不再发 DuraChanged）。
+                    // 但 Torch 仍需返回 broke 供 tick 路径卸下删除（C# Process 对 0 耐久火把同样移除）。
                     (
                         false,
                         msg.slot == crate::actors::inventory::EquipmentSlot::Torch,
