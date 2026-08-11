@@ -488,6 +488,33 @@ impl WorldActor {
             guild_name: guild_name.to_string(),
             buffs: buffs.to_vec(),
         }).await;
+
+        // #2174：C# 激活/停用后 RefreshStats 即时生效——立即刷新该行会在线成员加成缓存
+        //（原由 tick_partner_bonuses 每 50 tick 刷新，最长延迟 ~5s；此处幂等，tick 兜底保留）
+        let (mut exp, mut fish, mut mine) = (0i32, 0i32, 0i32);
+        for info in self.guild_buff_infos.values() {
+            if buffs.contains(&info.id) {
+                exp += info.buff_exp_rate;
+                fish += info.buff_fish_rate;
+                mine += info.buff_mine_rate;
+            }
+        }
+        for (sid, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                if state.guild_name.as_deref() != Some(guild_name) { continue; }
+                if state.guild_buff_exp_percent == exp
+                    && state.guild_buff_fish_rate_percent == fish
+                    && state.guild_buff_mine_rate_percent == mine
+                {
+                    continue;
+                }
+                let mut new_state = state;
+                new_state.guild_buff_exp_percent = exp;
+                new_state.guild_buff_fish_rate_percent = fish;
+                new_state.guild_buff_mine_rate_percent = mine;
+                let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+            }
+        }
     }
 
     /// 发送 GuildBuffList 完整包（C# S.GuildBuffList：Remove + ActiveBuffs + GuildBuffs）

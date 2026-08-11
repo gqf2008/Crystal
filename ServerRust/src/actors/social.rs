@@ -3460,6 +3460,12 @@ impl Message<GuildInviteReply> for SocialActor {
             // #918：C# JoinGuild（~10005）——加入行会后 EnableGuildInvite 重置 false
             if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
                 st.enable_guild_invite = false;
+                // #2174：C# 加入新手行会 → Newbie buff 即时生效（tick_newbie_bonus 每 50 tick 兜底）
+                if guild_name.eq_ignore_ascii_case(&self.config.newbie_guild)
+                    && self.config.newbie_guild_buff_enabled
+                {
+                    st.newbie_exp_bonus = true;
+                }
                 let _ = record.ask(SetPlayerState { state: st }).await;
             }
             send_guild_status_packet(&self.gate_ref, msg.session_id, true);
