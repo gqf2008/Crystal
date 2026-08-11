@@ -84,6 +84,27 @@ impl Message<SendMailRequest> for WorldActor {
             return;
         }
 
+        // #2008：C# PlayerObject.SendMail（11737-11749）——消息>500 拒绝；收件人不存在拒绝
+        if msg.body.len() > 500 {
+            send_system_message(&self.gate_ref, msg.session_id, "邮件内容过长（最多 500 字）");
+            return;
+        }
+        if !db::character_exists_by_name(&self.db_pool, &msg.receiver_name).await.unwrap_or(false) {
+            send_system_message(&self.gate_ref, msg.session_id, "找不到该玩家");
+            return;
+        }
+
+        // #2008：C# CannotBeMailed——DontTrade(0x10)/NoMail(0x4000) 绑定物品不可寄送（11800-11817）
+        for uid in &msg.item_uids {
+            let bind = sender_state.inventory.get_item(*uid)
+                .and_then(|it| self.item_infos.get(&it.item_index).map(|i| i.bind_mode))
+                .unwrap_or(0);
+            if super::has_bind_flag(bind, 16) || super::has_bind_flag(bind, 16384) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法邮寄");
+                return;
+            }
+        }
+
         // C# PlayerObject.GetMailCost：金币费用 floor(gold/1000)*CostPer1K + 物品保险 floor(price/100*Insurance)
         let (mail_cost_per_1k, mail_insurance_pct, mail_free_with_stamp) = self.social_ref
             .ask(crate::actors::social::NpcGetMailSettings)
