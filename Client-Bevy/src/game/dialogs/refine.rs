@@ -238,14 +238,10 @@ fn refine_ui_system(
     // 开始精炼
     for btn in &start_btn {
         if btn.clicked {
-            let item_id = state.deposited_index.unwrap_or(0) as u32;
-            if item_id > 0 {
-                net.send_packet(&crate::network::RefineItemWire {
-                    item_id,
-                    materials: 1,
-                });
+            if let Some(uid) = state.deposited_uid {
+                net.send_packet(&crate::network::RefineItemWire { unique_id: uid });
                 state.message = "精炼已开始（60 秒）".to_string();
-                tracing::info!("🔨 开始精炼 #{}", item_id);
+                tracing::info!("🔨 开始精炼 uid={}", uid);
             } else {
                 state.message = "请先存入物品".to_string();
             }

@@ -312,8 +312,7 @@ impl Packet for RefineRetrieveWire {
 
 #[derive(Debug, Clone, Copy)]
 pub struct RefineItemWire {
-    pub item_id: u32,
-    pub materials: u32,
+    pub unique_id: u64,
 }
 
 impl Packet for RefineItemWire {
@@ -324,8 +323,7 @@ impl Packet for RefineItemWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            item_id: reader.read_u32::<LittleEndian>()?,
-            materials: reader.read_u32::<LittleEndian>()?,
+            unique_id: reader.read_u64::<LittleEndian>()?,
         })
     }
 
@@ -334,8 +332,7 @@ impl Packet for RefineItemWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.item_id)?;
-        writer.write_u32::<LittleEndian>(self.materials)?;
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
         Ok(())
     }
 }
