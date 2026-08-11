@@ -6928,21 +6928,27 @@ fn compute_player_weights(
                 * i32::from(s.item.count)
         })
         .sum();
-    // C# CurrentWearWeight 不含武器（武器归 HandWeight）
+    // C# CurrentWearWeight 不含武器/火把（两者归 HandWeight）
     let wear_weight: i32 = inventory
         .equipment
         .iter()
         .enumerate()
-        .filter(|(idx, _)| *idx != crate::actors::inventory::EquipmentSlot::Weapon as usize)
+        .filter(|(idx, _)| {
+            *idx != crate::actors::inventory::EquipmentSlot::Weapon as usize
+                && *idx != crate::actors::inventory::EquipmentSlot::Torch as usize
+        })
         .flat_map(|(_, slot)| slot.iter())
         .map(|i| item_infos.get(&i.item_index).map(|i| i.weight).unwrap_or(0))
         .sum();
-    // C# HandWeight：武器（含火把）重量
-    let hand_weight: i32 = inventory
-        .get_equipment(crate::actors::inventory::EquipmentSlot::Weapon)
-        .and_then(|i| item_infos.get(&i.item_index))
+    // C# HandWeight：武器 + 火把 重量（HumanObject.cs:1825 Weapon || Torch）
+    let hand_weight: i32 = [
+        crate::actors::inventory::EquipmentSlot::Weapon,
+        crate::actors::inventory::EquipmentSlot::Torch,
+    ].iter()
+        .filter_map(|slot| inventory.get_equipment(*slot))
+        .filter_map(|i| item_infos.get(&i.item_index))
         .map(|i| i.weight)
-        .unwrap_or(0);
+        .sum();
     (bag_weight, wear_weight, hand_weight)
 }
 
@@ -8202,11 +8208,14 @@ mod set_bonus_tests {
         // 武器：weight10 → hand=10
         inv.equipment[crate::actors::inventory::EquipmentSlot::Weapon as usize] =
             Some(UserItem { item_index: 1, count: 1, ..Default::default() });
+        // #2056：火把（Torch 槽）weight10 → hand 加 10，不入 wear
+        inv.equipment[crate::actors::inventory::EquipmentSlot::Torch as usize] =
+            Some(UserItem { item_index: 1, count: 1, ..Default::default() });
 
         let (bag, wear, hand) = compute_player_weights(&inv, &infos);
         assert_eq!(bag, 70);
         assert_eq!(wear, 30);
-        assert_eq!(hand, 10);
+        assert_eq!(hand, 20); // 武器 10 + 火把 10
 
         // 空背包
         let empty = PlayerInventory::new();
