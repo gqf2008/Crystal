@@ -531,7 +531,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     // #1988：C# MonsterObject.Attacked（2578-2637）——Miss/护甲全挡返回 0，
                     // EXPOwner（LastHitter）/GatherElement 仅在实际造成伤害后设置
                     if damage > 0 {
-                        monster.set_last_hitter(msg.session_id);
+                        monster.register_hit(msg.session_id, self.tick_count);
                         self.pending_gather.push(msg.session_id);
                     }
                     // #1990：C# MonsterObject.Attacked:2641-2648 HPDrain——玩家吸血
@@ -564,7 +564,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                             // C# Envir.cs FlamingSword：1.4+0.4Lv 单次（主击已计 base，追加 0.4+0.4Lv）
                             flaming_bonus = (damage as f32 * (0.4 + 0.4 * lv as f32)) as i32;
                             monster.take_damage(flaming_bonus);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             debug!("Player {} FlamingSword bonus +{} on '{}' (#{})",
                                    result.object_id, flaming_bonus, monster.name, *oid);
                         }
@@ -576,7 +576,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         if self.tick_count < expire {
                             second_hit = (damage as f32 * (0.8 + 0.1 * lv as f32)) as i32;
                             monster.take_damage(second_hit);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             // TwinDrakeBlade 最终击：概率 Stun（C# HumanObject.cs:6803，Random(20)<=Lv+1）
                             if kind == 0 && fastrand::i32(0..20) <= lv as i32 + 1 {
                                 crate::combat::poison::apply_poison(&mut monster.poison_list,
@@ -602,7 +602,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         if fatal_armed {
                             let fatal_bonus = 5 * (magic.level as i32 + 1); // C# GetPower = (MPowerBase 20/4)*(Lv+1)
                             monster.take_damage(fatal_bonus);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             debug!("Player {} FatalSword bonus +{} on '{}' (#{})",
                                    result.object_id, fatal_bonus, monster.name, *oid);
                         }
@@ -759,7 +759,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     if let Some(mid) = mid {
                         if let Some(sm) = self.monsters.get_mut(&mid) {
                             sm.take_damage(splash_dmg);
-                            sm.set_last_hitter(msg.session_id);
+                            sm.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             // #1990：C# 溅射命中同样经 Attacked → HPDrain（按溅射净伤害近似）
                             let drain = ((splash_dmg as f32 * state.hp_drain_rate_percent as f32 / 100.0).floor() as i32).max(0);
@@ -2918,7 +2918,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             if r.is_hit && r.damage > 0 {
                                 m.take_damage(r.damage);
-                                m.set_last_hitter(msg.session_id);
+                                m.register_hit(msg.session_id, self.tick_count);
                                 self.pending_gather.push(msg.session_id);
                                 m.provoked = true;
                                 // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -3134,7 +3134,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -3193,7 +3193,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             if r.is_hit && r.damage > 0 {
                                 monster.take_damage(r.damage);
-                                monster.set_last_hitter(msg.session_id);
+                                monster.register_hit(msg.session_id, self.tick_count);
                                 self.pending_gather.push(msg.session_id);
                                 monster.provoked = true;
                                 // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -3272,7 +3272,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -3327,7 +3327,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -3372,7 +3372,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             if r.is_hit && r.damage > 0 {
                                 monster.take_damage(r.damage);
-                                monster.set_last_hitter(msg.session_id);
+                                monster.register_hit(msg.session_id, self.tick_count);
                                 self.pending_gather.push(msg.session_id);
                                 monster.provoked = true;
                                 // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -3688,6 +3688,8 @@ impl Message<MagicRequest> for WorldActor {
  sit_down_tick: 0,
                                 target_session: None,
                                 last_hitter_session: None,
+                                exp_owner_session: None,
+                                exp_owner_tick: 0,
                                 pending_brown_attacker: None,
                                 min_sc: 0, max_sc: 0, provoked: false,
                                 is_elite: false, is_boss: false,
@@ -3870,6 +3872,8 @@ impl Message<MagicRequest> for WorldActor {
  sit_down_tick: 0,
                                 target_session, provoked: target_session.is_some(),
                                 last_hitter_session: None,
+                                exp_owner_session: None,
+                                exp_owner_tick: 0,
                                 pending_brown_attacker: None,
                                 min_sc: 0, max_sc: 0,
                                 is_elite: false, is_boss: false,
@@ -3929,7 +3933,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::Mac, level_offset);
                         if r.is_hit && r.damage > 0 {
                             m.take_damage(r.damage);
-                            m.set_last_hitter(msg.session_id);
+                            m.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             m.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -4009,7 +4013,7 @@ impl Message<MagicRequest> for WorldActor {
                                 );
                                 if r.is_hit && r.damage > 0 {
                                     monster.take_damage(r.damage);
-                                    monster.set_last_hitter(msg.session_id);
+                                    monster.register_hit(msg.session_id, self.tick_count);
                                     self.pending_gather.push(msg.session_id);
                                     monster.provoked = true;
                                     // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -4052,7 +4056,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
                         if r.is_hit && r.damage > 0 {
                             m.take_damage(r.damage);
-                            m.set_last_hitter(msg.session_id);
+                            m.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             m.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -4118,7 +4122,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者
@@ -4389,6 +4393,8 @@ impl Message<MagicRequest> for WorldActor {
  sit_down_tick: 0,
                                 target_session: Some(msg.session_id),
                                 last_hitter_session: None,
+                                exp_owner_session: None,
+                                exp_owner_tick: 0,
                                 pending_brown_attacker: None,
                                 min_sc: 0, max_sc: 0, provoked: true,
                                 is_elite: false, is_boss: false,
@@ -4519,6 +4525,8 @@ impl Message<MagicRequest> for WorldActor {
  sit_down_tick: 0,
                                 target_session: Some(msg.session_id),
                                 last_hitter_session: None,
+                                exp_owner_session: None,
+                                exp_owner_tick: 0,
                                 pending_brown_attacker: None,
                                 min_sc: 0, max_sc: 0, provoked: true,
                                 is_elite: false, is_boss: false,
@@ -4761,7 +4769,7 @@ impl Message<MagicRequest> for WorldActor {
                                 );
                                 if r.is_hit && r.damage > 0 {
                                     m.take_damage(r.damage);
-                                    m.set_last_hitter(msg.session_id);
+                                    m.register_hit(msg.session_id, self.tick_count);
                                     self.pending_gather.push(msg.session_id);
                                     m.provoked = true;
                                     // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -4836,7 +4844,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -4920,7 +4928,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -5008,7 +5016,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
@@ -5522,7 +5530,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(msg.session_id);
+                            monster.register_hit(msg.session_id, self.tick_count);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）

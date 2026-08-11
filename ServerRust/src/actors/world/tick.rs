@@ -422,6 +422,11 @@ pub(crate) fn item_expired(expiry_date_binary: i64, now_ticks: i64) -> bool {
     (expiry_date_binary & DOTNET_BINARY_TICKS_MASK) <= now_ticks
 }
 
+/// C# MonsterObject.Process EXPOwnerDelay：EXPOwner 5000ms 未命中则过期（100ms/tick → 50 tick）
+pub(crate) fn exp_owner_expired(owner_tick: u64, now_tick: u64) -> bool {
+    owner_tick > 0 && now_tick.saturating_sub(owner_tick) >= 50
+}
+
 /// #914：C# HumanObject.ReduceExp——等级差经验衰减
 /// （玩家等级 >= 怪物等级+10 时：amount - Round(Max(amount/15,1)*(Level-(targetLevel+10)))，最低 1；
 ///  C# Settings.ExpMobLevelDifference 默认开启）
@@ -1557,7 +1562,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(caster_session);
+                            monster.register_hit(caster_session, self.tick_count);
                             self.pending_gather.push(caster_session);
                             monster.provoked = true;
                             monster.target_session = Some(caster_session);
@@ -2133,7 +2138,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
         // #1876：SnowWolfKing 死亡驯化（C# CompleteDeath：SlaveList → EXPOwner 宠物，上限 6）
         if monster.name.eq_ignore_ascii_case("SnowWolfKing") {
-            if let Some(owner) = monster.last_hitter_session {
+            if let Some(owner) = monster.exp_owner_session.or(monster.last_hitter_session) {
                 if self.players.contains_key(&owner) {
                     let mut pet_count = self.monsters.values()
                         .filter(|m| m.master_session == Some(owner) && m.hp > 0)
@@ -2205,6 +2210,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
  sit_down_tick: 0,
                         target_session: None,
                         last_hitter_session: None,
+                        exp_owner_session: None,
+                        exp_owner_tick: 0,
                         pending_brown_attacker: None,
                         min_sc: 0, max_sc: 0, provoked: false,
                         is_elite: false, is_boss: false,
@@ -2325,6 +2332,19 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 until_ms: now_ms + 60_000,
             }).await;
             debug!("Pet hit -> attacker {} brown 60s (master {})", attacker, master);
+        }
+    }
+
+    /// C# MonsterObject.Process：EXPOwnerDelay=5000ms——EXPOwner 5s 未命中则清除归属
+    pub(crate) async fn tick_monster_ownership_expiry(&mut self) {
+        if self.tick_count % 5 != 0 {
+            return;
+        }
+        for (_, m) in self.monsters.iter_mut() {
+            if exp_owner_expired(m.exp_owner_tick, self.tick_count) {
+                m.exp_owner_session = None;
+                m.exp_owner_tick = 0;
+            }
         }
     }
 
@@ -2600,6 +2620,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 sit_down_tick: 0,
                 target_session: None,
                 last_hitter_session: None,
+                exp_owner_session: None,
+                exp_owner_tick: 0,
                 pending_brown_attacker: None,
                 min_sc: 0, max_sc: 0,
                 provoked: false,
@@ -3469,6 +3491,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
+            exp_owner_session: None,
+            exp_owner_tick: 0,
             pending_brown_attacker: None,
             min_sc: 0, max_sc: 0,
             provoked: true,
@@ -4154,7 +4178,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     );
                     if r.is_hit && r.damage > 0 {
                         monster.take_damage(r.damage);
-                        monster.set_last_hitter(caster_session);
+                        monster.register_hit(caster_session, self.tick_count);
                         self.pending_gather.push(caster_session);
                         monster.provoked = true;
                         monster.target_session = Some(caster_session);
@@ -4405,7 +4429,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         }
                         // #1988：仅实际造成伤害才挂 LastHitter
                         if damage > 0 {
-                            monster.set_last_hitter(c.session_id);
+                            monster.register_hit(c.session_id, self.tick_count);
                         }
                         monster.provoked = true;
                         if monster.target_session.is_none() {
@@ -4677,7 +4701,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
                     // #1988：仅实际造成伤害才挂 LastHitter/元素收集
                     if result.damage > 0 {
-                        monster.set_last_hitter(pending.session_id);
+                        monster.register_hit(pending.session_id, self.tick_count);
                         self.pending_gather.push(pending.session_id);
                     }
                     monster.provoked = true;
@@ -4820,7 +4844,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
-                            monster.set_last_hitter(pending.session_id);
+                            monster.register_hit(pending.session_id, self.tick_count);
                             self.pending_gather.push(pending.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(pending.session_id);
@@ -6015,7 +6039,7 @@ impl Message<Tick> for WorldActor {
                     // #1741/#1988：C# EXPOwner = attacker.Master——宠物补刀击杀归属主人（经验/掉落）；
                     // 仅实际造成伤害才设置（Miss/全挡返回 0）
                     if actual > 0 {
-                        tm.set_last_hitter(*master);
+                        tm.register_hit(*master, self.tick_count);
                     }
                     // #1741：宠物协战命中反馈（与玩家/英雄/怪物一致：ObjectStruck/DamageIndicator/ObjectHealth）
                     let pet_x = if pet_x == 0 && pet_y == 0 { tm.x } else { pet_x };
@@ -6172,6 +6196,8 @@ impl Message<Tick> for WorldActor {
                     sit_down_tick: 0,
                     target_session: None,
                     last_hitter_session: None,
+                    exp_owner_session: None,
+                    exp_owner_tick: 0,
                     pending_brown_attacker: None,
                     min_sc: 0, max_sc: 0,
                     provoked: false,
@@ -6681,6 +6707,8 @@ impl Message<Tick> for WorldActor {
  sit_down_tick: 0,
                             target_session: None,
                             last_hitter_session: None,
+                            exp_owner_session: None,
+                            exp_owner_tick: 0,
                             pending_brown_attacker: None,
                             min_sc: 0, max_sc: 0, provoked: false,
                             is_elite: false, is_boss: false,
@@ -6771,6 +6799,8 @@ impl Message<Tick> for WorldActor {
                             sitting: false, hidden: false, sit_down_tick: 0,
                             target_session: Some(cr.target_session),
                             last_hitter_session: None,
+                            exp_owner_session: None,
+                            exp_owner_tick: 0,
                             pending_brown_attacker: None,
                             min_sc: 0, max_sc: 0, provoked: false,
                             is_elite: false, is_boss: false,
@@ -7030,8 +7060,8 @@ impl Message<Tick> for WorldActor {
 
                     // #1001/#1003：任务击杀进度（C# MonsterObject.Die → EXPOwner.CheckGroupQuestKill）
                     // 击杀者 = target_session（最后命中者，与掉落归属一致）；同组同图 16 格内未死成员共享
-                    // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
-                    if let Some(killer) = monster.last_hitter_session.or(monster.target_session) {
+                    // #1016：击杀归属用 EXPOwner（C# EXPOwner），回退 target_session
+                    if let Some(killer) = monster.exp_owner_session.or(monster.target_session) {
                         // 击杀者 + 同组同图 16 格内未死成员（C# CheckGroupQuestKill）
                         let quest_sessions = self.quest_participants(
                             killer, monster.map_index, monster.x, monster.y).await;
@@ -7070,7 +7100,7 @@ impl Message<Tick> for WorldActor {
                     let mut nearest_session: Option<u64> = None;
                     let mut nearest_group_id: Option<u64> = None;
                     let mut killer_level: u16 = 0;
-                    let killer = monster.last_hitter_session.or(monster.target_session);
+                    let killer = monster.exp_owner_session.or(monster.target_session);
                     if let Some(sid) = killer.filter(|sid| self.players.contains_key(sid)) {
                         if let Some(record) = self.players.get(&sid) {
                             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -7262,6 +7292,7 @@ impl Message<Tick> for WorldActor {
 
 
         self.tick_pk_decay().await;
+        self.tick_monster_ownership_expiry().await;
         self.tick_rested().await;
         self.tick_player_conditions().await;
 
