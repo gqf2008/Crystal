@@ -460,8 +460,8 @@ impl Message<StartGameRequest> for WorldActor {
                 dead: h.dead,
                 sealed: h.sealed,
                 autopot: h.autopot,
-                experience: 0,
-                max_experience: 100,
+                experience: h.experience,
+                max_experience: h.max_experience,
             }).collect());
         }
         let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
@@ -1546,6 +1546,8 @@ impl Message<PlayerDisconnected> for WorldActor {
                 dead: h.dead,
                 sealed: h.sealed,
                 autopot: h.autopot,
+                experience: h.experience,
+                max_experience: h.max_experience,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on disconnect: {}", record.name, e);
@@ -1688,6 +1690,8 @@ impl Message<PlayerLogOut> for WorldActor {
                 dead: h.dead,
                 sealed: h.sealed,
                 autopot: h.autopot,
+                experience: h.experience,
+                max_experience: h.max_experience,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on logout: {}", record.name, e);

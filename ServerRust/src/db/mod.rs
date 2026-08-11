@@ -141,6 +141,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             dead INTEGER NOT NULL DEFAULT 0,
             sealed INTEGER NOT NULL DEFAULT 0,
             autopot INTEGER NOT NULL DEFAULT 0,
+            experience INTEGER NOT NULL DEFAULT 0,
+            max_experience INTEGER NOT NULL DEFAULT 100,
             PRIMARY KEY (character_name, hero_index),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
@@ -799,6 +801,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN autopot INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN experience INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN max_experience INTEGER NOT NULL DEFAULT 100")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN can_gain_exp INTEGER NOT NULL DEFAULT 1")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN luck INTEGER NOT NULL DEFAULT 0")
@@ -1146,11 +1152,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
                 dead INTEGER NOT NULL DEFAULT 0,
                 sealed INTEGER NOT NULL DEFAULT 0,
                 autopot INTEGER NOT NULL DEFAULT 0,
+                experience INTEGER NOT NULL DEFAULT 0,
+                max_experience INTEGER NOT NULL DEFAULT 100,
                 PRIMARY KEY (character_name, hero_index)
             )"
         ).execute(&pool).await.unwrap();
         let heroes = vec![
-            DbHero { index: 1, name: "HeroOne".to_string(), level: 3, class: 1, gender: 0, dead: false, sealed: false, autopot: true },
+            DbHero { index: 1, name: "HeroOne".to_string(), level: 3, class: 1, gender: 0, dead: false, sealed: false, autopot: true, experience: 150, max_experience: 100 },
         ];
         save_heroes(&pool, "TestChar", &heroes).await.unwrap();
         let loaded = load_heroes(&pool, "TestChar").await.unwrap();
@@ -1159,6 +1167,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         assert_eq!(loaded[0].level, 3);
         assert_eq!(loaded[0].class, 1);
         assert!(loaded[0].autopot);
+        assert_eq!(loaded[0].experience, 150);
+        assert_eq!(loaded[0].max_experience, 100);
         // 覆盖保存（清空）
         save_heroes(&pool, "TestChar", &[]).await.unwrap();
         assert!(load_heroes(&pool, "TestChar").await.unwrap().is_empty());
@@ -2190,6 +2200,10 @@ pub struct DbHero {
     pub sealed: bool,
     /// 自动喝药已解锁（C# HeroInfo.AutoPot；Scroll 13 解锁，持久化）
     pub autopot: bool,
+    /// 英雄经验（C# HeroInfo.Experience，持久化）
+    pub experience: u32,
+    /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5，持久化保持一致）
+    pub max_experience: u32,
 }
 
 /// 保存角色英雄列表（DELETE + INSERT，事务内）
@@ -2201,7 +2215,7 @@ pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero])
         .await?;
     for h in heroes {
         sqlx::query(
-            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender, dead, sealed, autopot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender, dead, sealed, autopot, experience, max_experience) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(character_name)
         .bind(h.index)
@@ -2212,6 +2226,8 @@ pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero])
         .bind(if h.dead { 1 } else { 0 })
         .bind(if h.sealed { 1 } else { 0 })
         .bind(if h.autopot { 1 } else { 0 })
+        .bind(h.experience as i32)
+        .bind(h.max_experience as i32)
         .execute(&mut *tx)
         .await?;
     }
@@ -2222,7 +2238,7 @@ pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero])
 /// 加载角色英雄列表
 pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<DbHero>> {
     let rows = sqlx::query(
-        "SELECT hero_index, name, level, class, gender, dead, sealed, autopot FROM heroes WHERE character_name = ? ORDER BY hero_index",
+        "SELECT hero_index, name, level, class, gender, dead, sealed, autopot, experience, max_experience FROM heroes WHERE character_name = ? ORDER BY hero_index",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2236,6 +2252,8 @@ pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<
         dead: r.try_get::<i32, _>("dead").unwrap_or(0) != 0,
         sealed: r.try_get::<i32, _>("sealed").unwrap_or(0) != 0,
         autopot: r.try_get::<i32, _>("autopot").unwrap_or(0) != 0,
+        experience: r.try_get::<i32, _>("experience").unwrap_or(0).max(0) as u32,
+        max_experience: r.try_get::<i32, _>("max_experience").unwrap_or(100).max(0) as u32,
     }).collect())
 }
 

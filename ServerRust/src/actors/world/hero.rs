@@ -2622,6 +2622,8 @@ impl WorldActor {
                     index: h.index, name: h.name.clone(), level: h.level,
                     class: h.class as u8, gender: h.gender as u8,
                     dead: h.dead, sealed: h.sealed, autopot: h.autopot,
+                    experience: h.experience,
+                    max_experience: h.max_experience,
                 }).collect())
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
@@ -2719,6 +2721,8 @@ impl WorldActor {
                     index: h.index, name: h.name.clone(), level: h.level,
                     class: h.class as u8, gender: h.gender as u8,
                     dead: h.dead, sealed: h.sealed, autopot: h.autopot,
+                    experience: h.experience,
+                    max_experience: h.max_experience,
                 }).collect())
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
