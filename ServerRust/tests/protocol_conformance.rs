@@ -137,6 +137,7 @@ async fn start_server_with_world() -> u16 {
         exp_rate: 1.0,
         item_timeout_ticks: 300,
         max_drop_gold: 2000,
+        drop_gold: true,
         rarity_cfg: Default::default(),
         notice_path: String::new(),
         death_exp_penalty_percent: 0,
