@@ -538,6 +538,10 @@ pub struct MonsterState {
     pub target_session: Option<u64>,
     /// 最后造成伤害的玩家/施法者 session（C# MapObject.LastHitter；死亡经验/掉落归属用）
     pub last_hitter_session: Option<u64>,
+    /// C# EXPOwner：首个存活攻击者（Die 经验/掉落归属）；仅 EXPOwner 命中刷新 5s 过期
+    pub exp_owner_session: Option<u64>,
+    /// EXPOwner 上次命中 tick（0=未设置；C# EXPOwnerDelay=5000ms）
+    pub exp_owner_tick: u64,
     /// #1874：被玩家命中且为宠物时暂存攻击者（C# 灰名触发；每 tick 排水）
     pub pending_brown_attacker: Option<u64>,
     /// 是否已被激怒（Passive 怪物被攻击后变为 Aggressive）
@@ -784,6 +788,18 @@ impl MonsterState {
                 self.pending_brown_attacker = Some(session);
             }
         }
+    }
+
+    /// C# MonsterObject.Attacked（:2603-2609）：EXPOwner 首个存活攻击者绑定，
+    /// 仅 EXPOwner 命中刷新过期时间；LastHitter 始终为最后攻击者
+    pub fn register_hit(&mut self, session: u64, now_tick: u64) {
+        if self.exp_owner_session.is_none() {
+            self.exp_owner_session = Some(session);
+        }
+        if self.exp_owner_session == Some(session) {
+            self.exp_owner_tick = now_tick;
+        }
+        self.set_last_hitter(session);
     }
 
     /// 受击：经 behavior.on_attacked 过滤后扣血。
@@ -2342,7 +2358,7 @@ impl WorldActor {
     /// #2030：C# MonsterObject.DropGold——Settings.DropGold=false 且击杀者可收时直发（WinGold），否则落地
     pub(crate) async fn give_monster_gold(&mut self, monster: &MonsterState, gold: u64) {
         if !self.drop_gold {
-            if let Some(killer) = monster.last_hitter_session {
+            if let Some(killer) = monster.exp_owner_session.or(monster.last_hitter_session) {
                 if self.win_gold(killer, gold, monster.map_index, monster.x, monster.y).await {
                     return;
                 }
@@ -2385,7 +2401,7 @@ impl WorldActor {
                 y: monster.y,
                 map_index: monster.map_index,
                 // #1262：C# MonsterObject.DropItem——金币掉落绑定击杀者（Owner=EXPOwner，60s）
-                dropper_session: monster.last_hitter_session,
+                dropper_session: monster.exp_owner_session.or(monster.last_hitter_session),
                 drop_tick: self.tick_count,
                 death_drop: false,
                 gold_amount: pile,
@@ -2463,7 +2479,7 @@ impl WorldActor {
             y: dy,
             map_index: monster.map_index,
             // #1262：C# MonsterObject.DropItem——物品掉落绑定击杀者（Owner=EXPOwner，60s）
-            dropper_session: monster.last_hitter_session,
+            dropper_session: monster.exp_owner_session.or(monster.last_hitter_session),
             drop_tick: self.tick_count,
             death_drop: false,
             gold_amount: 0,
@@ -2501,8 +2517,8 @@ impl WorldActor {
         item_index: i32,
         count: u16,
     ) -> bool {
-        // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
-        let Some(killer) = monster.last_hitter_session.or(monster.target_session) else { return false };
+        // #1016：击杀归属用 EXPOwner（C# EXPOwner），回退 target_session
+        let Some(killer) = monster.exp_owner_session.or(monster.target_session) else { return false };
         let mut item = mir2_shared::data::item::UserItem {
             item_index,
             unique_id: generate_item_uid(),
@@ -2549,8 +2565,8 @@ impl WorldActor {
         // 玩家掉落相关（C# EXPOwner）：掉落 Buff（Potion shape 5 Drop）+ 装备掉落率加成（#1000）
         // 返回 (drop_multiplier, item_drop_rate_percent, gold_drop_rate_percent)
         let (player_drop_mul, item_drop_pct, gold_drop_pct): (f64, f64, f64) =
-            // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
-            if let Some(sid) = monster.last_hitter_session.or(monster.target_session) {
+            // #1016：击杀归属用 EXPOwner（C# EXPOwner），回退 target_session
+            if let Some(sid) = monster.exp_owner_session.or(monster.target_session) {
                 if let Some(record) = self.players.get(&sid) {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         let drop_mul = if self.tick_count < state.drop_multiplier_end_tick {
@@ -3913,6 +3929,8 @@ impl WorldActor {
                                     sit_down_tick: 0,
                                     target_session: None,
                                     last_hitter_session: None,
+                                    exp_owner_session: None,
+                                    exp_owner_tick: 0,
                                     pending_brown_attacker: None,
                                     min_sc: 0, max_sc: 0,
                                     provoked: true, // Boss is always aggressive
@@ -4213,6 +4231,8 @@ impl WorldActor {
                                         sit_down_tick: 0,
                                         target_session: None,
                                         last_hitter_session: None,
+                                        exp_owner_session: None,
+                                        exp_owner_tick: 0,
                                         pending_brown_attacker: None,
                                         min_sc: 0, max_sc: 0, provoked: false,
                                         is_elite: false, is_boss: false,
@@ -5124,6 +5144,8 @@ impl WorldActor {
                 sit_down_tick: 0,
                 target_session: None,
                 last_hitter_session: None,
+                exp_owner_session: None,
+                exp_owner_tick: 0,
                 pending_brown_attacker: None,
                 min_sc: 0, max_sc: 0,
                 provoked: false,
@@ -7593,6 +7615,8 @@ async fn spawn_npcs_and_monsters(
             sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
+            exp_owner_session: None,
+            exp_owner_tick: 0,
             pending_brown_attacker: None,
             min_sc: 0, max_sc: 0,
             provoked: false,
@@ -7686,6 +7710,8 @@ async fn spawn_npcs_and_monsters(
                         sit_down_tick: 0,
                         target_session: None,
                         last_hitter_session: None,
+                        exp_owner_session: None,
+                        exp_owner_tick: 0,
                         pending_brown_attacker: None,
                         min_sc: 0, max_sc: 0,
                         provoked: false,
@@ -7868,6 +7894,8 @@ mod tests {
             sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
+            exp_owner_session: None,
+            exp_owner_tick: 0,
             pending_brown_attacker: None,
             min_sc: 0, max_sc: 0,
             provoked: false,
@@ -7905,6 +7933,108 @@ mod tests {
         assert!(boss.is_boss);
         assert!(!boss.is_elite);
         assert_eq!(boss.ai_profile.ai_type, MonsterAiType::Boss);
+    }
+
+    fn test_monster_state() -> MonsterState {
+        MonsterState {
+            object_id: 1,
+            name: "TestBoss".to_string(),
+            image: 100,
+            monster_index: 50,
+            x: 100,
+            y: 100,
+            direction: 0,
+            hp: 10000,
+            max_hp: 10000,
+            min_dmg: 50,
+            max_dmg: 100,
+            xp: 5000,
+            spawn_x: 100,
+            spawn_y: 100,
+            spawn_spread: 0,
+            map_index: 0,
+            next_attack_tick: 0,
+            next_move_tick: 0,
+            next_summon_tick: 0,
+            ai_profile: MonsterAiProfile {
+                ai_type: MonsterAiType::Boss,
+                aggro_range: 10,
+                attack_range: 2,
+                attack_cooldown: 3,
+                move_interval: 1,
+                flee_threshold: 0.0,
+            },
+            ai_state: MonsterAiState::Idle,
+            sitting: false,
+            hidden: false,
+            sit_down_tick: 0,
+            target_session: None,
+            last_hitter_session: None,
+            exp_owner_session: None,
+            exp_owner_tick: 0,
+            pending_brown_attacker: None,
+            min_sc: 0, max_sc: 0,
+            provoked: false,
+            is_elite: false,
+            is_boss: true,
+            min_ac: 0,
+            max_ac: 0,
+            min_mac: 0,
+            max_mac: 0,
+            agility: 0,
+            accuracy: 0,
+            armour_rate: 1.0,
+            damage_rate: 1.0,
+            magic_resist: 0,
+            critical_rate: 0,
+            critical_damage: 0,
+            luck: 0,
+            reflect: 0,
+            level: 50,
+            effect: 0,
+            damage_reduction_percent: 0,
+            monster_buffs: Vec::new(),
+            poison_list: Vec::new(),
+            last_hit_damage: 0,
+            undead: false,
+            master_session: None,
+            rarity: 0,
+            pet_experience: 0,
+            max_pet_level: 0,
+            recall_at_tick: 0,
+            can_recall: false,
+            next_recall_tick: 0,
+            behavior: ai::make_behavior("TestBoss"),
+        }
+    }
+
+    #[test]
+    fn test_exp_owner_expired() {
+        // C# EXPOwnerDelay=5000ms → 100ms/tick = 50 tick
+        assert!(!super::tick::exp_owner_expired(0, 1000));   // 未设置
+        assert!(!super::tick::exp_owner_expired(100, 149));  // 4.9s 未过期
+        assert!(super::tick::exp_owner_expired(100, 150));   // 5.0s 过期
+        assert!(super::tick::exp_owner_expired(100, 1000));
+    }
+
+    #[test]
+    fn test_register_hit_exp_owner_semantics() {
+        // C# Attacked：EXPOwner 首绑 + 仅 EXPOwner 命中刷新；LastHitter 始终最后攻击者
+        let mut m = test_monster_state();
+        m.register_hit(1, 100);
+        assert_eq!(m.exp_owner_session, Some(1));
+        assert_eq!(m.exp_owner_tick, 100);
+        assert_eq!(m.last_hitter_session, Some(1));
+        // 第二个攻击者不替换 EXPOwner、不刷新
+        m.register_hit(2, 130);
+        assert_eq!(m.exp_owner_session, Some(1));
+        assert_eq!(m.exp_owner_tick, 100);
+        assert_eq!(m.last_hitter_session, Some(2));
+        // EXPOwner 自己命中刷新
+        m.register_hit(1, 140);
+        assert_eq!(m.exp_owner_tick, 140);
+        // 5s 后过期
+        assert!(super::tick::exp_owner_expired(m.exp_owner_tick, 190));
     }
 
     #[test]

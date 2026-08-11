@@ -2233,7 +2233,7 @@ impl WorldActor {
                     // #1163：英雄伤害同样记 LastHitter（C# MapObject.LastHitter）——
                     // tick_heroes 在死亡处理之后运行，仅靠 target_session 会在下一 tick
                     // 怪物循环 hp<=0 时被清掉，导致主人/英雄拿不到击杀经验归属
-                    monster.set_last_hitter(*session_id);
+                    monster.register_hit(*session_id, self.tick_count);
                     // #1735：英雄物理攻击命中广播（与玩家一致：ObjectStruck/DamageIndicator/ObjectHealth）
                     let owner_oid = self.players.get(session_id).map(|r| r.object_id).unwrap_or(0);
                     let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
@@ -2450,7 +2450,7 @@ impl WorldActor {
                     crate::combat::poison::Poison::new(*p_type, *duration, *value, *tick_ms),
                 );
                 monster.provoked = true;
-                monster.set_last_hitter(*session_id);
+                monster.register_hit(*session_id, self.tick_count);
                 if monster.target_session.is_none() {
                     monster.target_session = Some(*session_id);
                 }
@@ -2531,7 +2531,7 @@ impl WorldActor {
                     );
                     if r.is_hit && r.damage > 0 {
                         monster.hp = monster.hp.saturating_sub(r.damage);
-                        monster.set_last_hitter(*session_id);
+                        monster.register_hit(*session_id, self.tick_count);
                         monster.provoked = true;
                         if monster.target_session.is_none() {
                             monster.target_session = Some(*session_id);
@@ -2572,7 +2572,7 @@ impl WorldActor {
             if let Some(monster) = self.monsters.get_mut(oid) {
                 // C# TurnUndead 成功：直接击杀亡灵（死亡处理由怪物 tick 按 hp<=0 + LastHitter 结算）
                 monster.hp = 0;
-                monster.set_last_hitter(*session_id);
+                monster.register_hit(*session_id, self.tick_count);
                 monster.provoked = true;
                 debug!("Hero TurnUndead killed undead monster {}", oid);
             }
