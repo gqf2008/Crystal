@@ -248,6 +248,14 @@ impl Message<RefineItemRequest> for WorldActor {
         }
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
 
+        // C# RefineItem（:12703）：开始时发 S.RefineItem { UniqueID }
+        let mut rb = Vec::new();
+        rb.extend_from_slice(&deposited.unique_id.to_le_bytes());
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RefineItem as i16, &rb),
+        }).await;
+
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
         debug!("RefineItem: {} uid={}", state.name, msg.unique_id);
     }
@@ -280,10 +288,24 @@ impl Message<CheckRefineRequest> for WorldActor {
         if let Some(ref item) = state.refine_log.active_refine {
             if item.status == RefineStatus::Pending && current_time >= item.finish_time {
                 // 精炼完成，自动标记为完成
+                let refined_item = state.refine_log.active_refine.as_ref().and_then(|ri| ri.item.clone());
                 let mut log = state.refine_log;
                 let success = log.finish();
                 let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
                 if success {
+                    // C# CheckRefine（:12970）：成功发 S.ItemUpgraded { Item }
+                    if let Some(item) = refined_item {
+                        let pkt = mir2_shared::packets::server::ItemUpgraded { item };
+                        let mut body = Vec::new();
+                        if mir2_shared::packets::base::serialize_packet(
+                            &mut std::io::Cursor::new(&mut body), &pkt,
+                        ).is_ok() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: body,
+                            }).await;
+                        }
+                    }
                     send_system_message(&self.gate_ref, msg.session_id, "精炼成功！请取回物品");
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "精炼失败，请取回物品");
