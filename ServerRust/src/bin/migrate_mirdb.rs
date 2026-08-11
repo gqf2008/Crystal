@@ -194,6 +194,7 @@ struct ParsedMonsterInfo {
     can_tame: bool,
     auto_rev: bool,
     undead: bool,
+    can_recall: bool,
     drop_path: String,
 }
 
@@ -712,7 +713,9 @@ fn read_monster_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> st
     Ok(ParsedMonsterInfo {
         index, name, image, ai, effect, level, view_range, cool_eye, stats_json,
         light, attack_speed, move_speed, experience, can_push, can_tame,
-        auto_rev, undead, drop_path,
+        auto_rev, undead,
+        can_recall: false, // 旧格式二进制无 CanRecall（v115+ 字段），默认 false
+        drop_path,
     })
 }
 
@@ -1213,6 +1216,7 @@ async fn create_tables(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
             can_tame INTEGER NOT NULL DEFAULT 0,
             auto_rev INTEGER NOT NULL DEFAULT 0,
             undead INTEGER NOT NULL DEFAULT 0,
+            can_recall INTEGER NOT NULL DEFAULT 0,
             drop_path TEXT
         );
         CREATE TABLE IF NOT EXISTS npc_infos (
@@ -1543,8 +1547,8 @@ async fn insert_monster_info(pool: &sqlx::SqlitePool, m: &ParsedMonsterInfo) -> 
         r#"INSERT OR REPLACE INTO monster_infos (
             idx, name, image, ai, effect, level, view_range, cool_eye, stats_json,
             light, attack_speed, move_speed, experience, can_push, can_tame,
-            auto_rev, undead, drop_path
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+            auto_rev, undead, can_recall, drop_path
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
     )
     .bind(m.index).bind(&m.name).bind(m.image as i32).bind(m.ai as i32)
     .bind(m.effect as i32).bind(m.level as i32).bind(m.view_range as i32)
@@ -1552,6 +1556,7 @@ async fn insert_monster_info(pool: &sqlx::SqlitePool, m: &ParsedMonsterInfo) -> 
     .bind(m.attack_speed as i32).bind(m.move_speed as i32).bind(m.experience as i64)
     .bind(if m.can_push { 1 } else { 0 }).bind(if m.can_tame { 1 } else { 0 })
     .bind(if m.auto_rev { 1 } else { 0 }).bind(if m.undead { 1 } else { 0 })
+    .bind(if m.can_recall { 1 } else { 0 })
     .bind(&m.drop_path)
     .execute(pool).await?;
     Ok(())

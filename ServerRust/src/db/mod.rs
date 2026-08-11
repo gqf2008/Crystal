@@ -384,6 +384,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             can_tame INTEGER NOT NULL DEFAULT 0,
             auto_rev INTEGER NOT NULL DEFAULT 0,
             undead INTEGER NOT NULL DEFAULT 0,
+            can_recall INTEGER NOT NULL DEFAULT 0,
             drop_path TEXT
         );
         CREATE TABLE IF NOT EXISTS npc_infos (
@@ -2598,6 +2599,8 @@ pub struct MonsterInfo {
     pub can_tame: bool,
     pub auto_rev: bool,
     pub undead: bool,
+    /// 怪物可召回（C# MonsterInfo.CanRecall：远离目标时传送回目标附近防风筝）
+    pub can_recall: bool,
     pub drop_path: Option<String>,
 }
 
@@ -3166,6 +3169,7 @@ pub async fn load_monster_infos(pool: &DbPool) -> anyhow::Result<Vec<MonsterInfo
             can_tame: r.get::<i32, _>("can_tame") != 0,
             auto_rev: r.get::<i32, _>("auto_rev") != 0,
             undead: r.get::<i32, _>("undead") != 0,
+            can_recall: r.get::<i32, _>("can_recall") != 0,
             drop_path: r.get::<Option<String>, _>("drop_path"),
         }
     }).collect())
