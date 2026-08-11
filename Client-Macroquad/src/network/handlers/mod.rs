@@ -1901,7 +1901,7 @@ pub enum NetworkEvent {
     },
     ObjectDecoReceived {
         object_id: u32,
-        deco: u16,
+        image: i32,
         remove: bool,
     },
     ObjectSneakingReceived {

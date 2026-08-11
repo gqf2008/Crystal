@@ -240,12 +240,13 @@ impl Packet for SetElemental {
     }
 }
 
-/// 对象装饰（外观效果）
+/// 对象装饰（C# ServerPackets.cs ObjectDeco：ObjectID + Location + Image）
 #[derive(Debug, Clone)]
 pub struct ObjectDeco {
     pub object_id: u32, // 对象 ID
-    pub deco: u16,      // 装饰编号
-    pub remove: bool,   // 是否移除
+    pub location_x: i32,
+    pub location_y: i32,
+    pub image: i32,     // 装饰图像（C# DecoObject.Image）
 }
 
 impl Packet for ObjectDeco {
@@ -253,19 +254,22 @@ impl Packet for ObjectDeco {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<LittleEndian>()?;
-        let deco = reader.read_u16::<LittleEndian>()?;
-        let remove = reader.read_u8()? != 0;
+        let location_x = reader.read_i32::<LittleEndian>()?;
+        let location_y = reader.read_i32::<LittleEndian>()?;
+        let image = reader.read_i32::<LittleEndian>()?;
         Ok(Self {
             object_id,
-            deco,
-            remove,
+            location_x,
+            location_y,
+            image,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<LittleEndian>(self.object_id)?;
-        writer.write_u16::<LittleEndian>(self.deco)?;
-        writer.write_u8(if self.remove { 1 } else { 0 })?;
+        writer.write_i32::<LittleEndian>(self.location_x)?;
+        writer.write_i32::<LittleEndian>(self.location_y)?;
+        writer.write_i32::<LittleEndian>(self.image)?;
         Ok(())
     }
 }

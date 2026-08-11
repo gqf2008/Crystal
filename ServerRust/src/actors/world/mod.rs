@@ -717,6 +717,16 @@ pub(crate) struct NpcState {
     pub map_index: u16,
 }
 
+/// 装饰物运行时对象（C# DecoObject；@DECO 生成，内存态不持久化）
+#[derive(Debug, Clone)]
+pub(crate) struct DecoObjectInfo {
+    pub object_id: u32,
+    pub map_index: u16,
+    pub x: i32,
+    pub y: i32,
+    pub image: i32,
+}
+
 /// 方向增量 (8 方向 MirDirection)
 const MON_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const MON_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
@@ -1210,6 +1220,8 @@ pub struct WorldActor {
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 征服旗子 NPC（per-session 生成；object_id → 状态，供易主时广播更新）
     pub(crate) conquest_flags: HashMap<u32, ConquestFlagNpc>,
+    /// 装饰物对象（@DECO 生成；object_id → 状态，进图同步）
+    pub(crate) deco_objects: HashMap<u32, DecoObjectInfo>,
     /// 等待重生的怪物 (object_id → 重生 tick)
     pub(crate) respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
     /// 世界Boss存活队列 (object_id → 自动消失 tick)
@@ -1690,6 +1702,7 @@ impl WorldActor {
         last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
             conquest_flags: HashMap::new(),
+            deco_objects: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
@@ -5469,6 +5482,7 @@ Ok(Self {
         last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
             conquest_flags: HashMap::new(),
+            deco_objects: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
@@ -8254,6 +8268,17 @@ fn build_object_npc_packet_full(
     build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
 }
 
+/// 构建 ObjectDeco 数据包（C# ServerPackets.cs ObjectDeco：ObjectID + Location.X/Y + Image）
+fn build_object_deco_packet(object_id: u32, x: i32, y: i32, image: i32) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes()); // object_id
+    body.extend_from_slice(&x.to_le_bytes());         // location_x
+    body.extend_from_slice(&y.to_le_bytes());         // location_y
+    body.extend_from_slice(&image.to_le_bytes());     // image
+    build_packet_bytes(ServerPacketIds::ObjectDeco as i16, &body)
+}
+
 /// 构建 ObjectMonster 数据包（extra=false，name_colour=0）
 fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &str) -> Vec<u8> {
     build_object_monster_packet_extra(monster, object_id, name, false, 0)
@@ -8723,6 +8748,45 @@ impl WorldActor {
             for target_sid in targets {
                 let _ = self.gate_ref.tell(SendToClient { session_id: target_sid, data: buf.clone() }).await;
             }
+        }
+    }
+
+    /// 装饰物：向同图 DataRange(16) 内玩家广播（C# MapObject.Spawned → BroadcastInfo）
+    async fn broadcast_deco_on_map(
+        &mut self,
+        object_id: u32,
+        x: i32,
+        y: i32,
+        image: i32,
+        map_index: u16,
+        except_sid: Option<u64>,
+    ) {
+        let packet = build_object_deco_packet(object_id, x, y, image);
+        let mut targets: Vec<u64> = Vec::new();
+        for (sid, rec) in &self.players {
+            if Some(*sid) == except_sid {
+                continue;
+            }
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                if s.map_index == map_index && (s.x - x).abs().max((s.y - y).abs()) <= 16 {
+                    targets.push(*sid);
+                }
+            }
+        }
+        for sid in targets {
+            let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: packet.clone() }).await;
+        }
+    }
+
+    /// 进图同步装饰物（C# GetObjectsPassive 含 DecoObject）
+    async fn sync_decos_on_map(&mut self, session_id: u64, map_index: u16) {
+        let decos: Vec<DecoObjectInfo> = self.deco_objects.values()
+            .filter(|d| d.map_index == map_index)
+            .cloned()
+            .collect();
+        for d in decos {
+            let packet = build_object_deco_packet(d.object_id, d.x, d.y, d.image);
+            let _ = self.gate_ref.tell(SendToClient { session_id, data: packet }).await;
         }
     }
 }
@@ -9559,6 +9623,19 @@ mod tests {
         assert_eq!(changeflag_colour(0, 255, 0), 0xFF00FF00u32 as i32);
         assert_eq!(changeflag_colour(0, 0, 255), 0xFF0000FFu32 as i32);
         assert_eq!(changeflag_colour(255, 255, 255), -1);
+    }
+
+    /// 装饰物 ObjectDeco 包：C# 线格式（ObjectID + Location.X/Y + Image）回读校验
+    #[test]
+    fn test_build_object_deco_packet() {
+        use mir2_shared::packets::server::movement::ObjectDeco;
+        let bytes = build_object_deco_packet(7, 100, 200, 42);
+        let mut cursor = std::io::Cursor::new(&bytes[4..]);
+        let pkt = ObjectDeco::read_body(&mut cursor).expect("parse ObjectDeco");
+        assert_eq!(pkt.object_id, 7);
+        assert_eq!(pkt.location_x, 100);
+        assert_eq!(pkt.location_y, 200);
+        assert_eq!(pkt.image, 42);
     }
 
 }

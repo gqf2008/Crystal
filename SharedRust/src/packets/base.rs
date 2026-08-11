@@ -727,18 +727,21 @@ mod tests {
 
     #[test]
     fn roundtrip_object_deco() -> SharedResult<()> {
+        // C# ServerPackets.cs ObjectDeco：ObjectID + Location.X/Y + Image
         let packet = server::ObjectDeco {
             object_id: 789,
-            deco: 42,
-            remove: true,
+            location_x: 10,
+            location_y: 20,
+            image: 42,
         };
         let mut bytes = Vec::new();
         serialize_packet(&mut bytes, &packet)?;
         let mut cursor = Cursor::new(bytes);
         let decoded = deserialize_packet::<_, server::ObjectDeco>(&mut cursor)?;
         assert_eq!(decoded.object_id, 789);
-        assert_eq!(decoded.deco, 42);
-        assert!(decoded.remove);
+        assert_eq!(decoded.location_x, 10);
+        assert_eq!(decoded.location_y, 20);
+        assert_eq!(decoded.image, 42);
         Ok(())
     }
 

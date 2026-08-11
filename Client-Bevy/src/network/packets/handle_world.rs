@@ -314,10 +314,11 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
         x if x == ServerPacketIds::ObjectDeco as i16 => {
             if let Ok(p) = movement::ObjectDeco::read_body(&mut cur) {
                 tracing::debug!(
-                    "🎀 对象装饰 id={} deco={} remove={}",
+                    "🎀 对象装饰 id={} loc=({},{}) image={}",
                     p.object_id,
-                    p.deco,
-                    p.remove
+                    p.location_x,
+                    p.location_y,
+                    p.image
                 );
             }
         }

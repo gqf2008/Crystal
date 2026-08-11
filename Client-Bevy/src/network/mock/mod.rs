@@ -1835,8 +1835,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::movement::ObjectDeco {
                                                 object_id: 101,
-                                                deco: 3,
-                                                remove: false,
+                                                location_x: 0,
+                                                location_y: 0,
+                                                image: 3,
                                             },
                                         );
                                         // #254：小队成员位置
