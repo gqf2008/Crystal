@@ -826,6 +826,21 @@ impl PlayerInventory {
         false
     }
 
+    /// 修理锤/缝纫修理（C# CombineItem 修复分支：PlayerObject.cs:7125-7143）
+    /// 满修并返回 (max_dura, current_dura)；penalty 时（目标 Info.Shape 1/2）MaxDura 随机衰减 100*Random(10)
+    pub fn hammer_repair_item(&mut self, uid: u64, penalty: bool) -> Option<(u16, u16)> {
+        let item = self.get_item_mut(uid)?;
+        if penalty {
+            // C#：tempTo.MaxDura = max(0, min(MaxDura, MaxDura - 100 * Random.Next(10)))
+            let loss = 100 * fastrand::i32(0..10) as u16;
+            item.max_dura = item.max_dura.saturating_sub(loss);
+        }
+        item.current_dura = item.max_dura;
+        // C# CombineItem 修复后 DuraChanged=false（与普通 RepairItem 的 dura_changed=true 不同）
+        item.dura_changed = false;
+        Some((item.max_dura, item.current_dura))
+    }
+
     /// 获取装备
     pub fn get_equipment(&self, slot: EquipmentSlot) -> Option<&UserItem> {
         self.equipment[slot as usize].as_ref()
@@ -1288,6 +1303,46 @@ mod tests {
 
         // 修理不存在的物品
         assert!(!inv.repair_item(99999, false));
+    }
+
+    /// #2286：C# CombineItem 修复分支（PlayerObject.cs:7125-7143）——满修 + Shape 1/2 时 MaxDura 随机衰减 100*Random(10)
+    #[test]
+    fn test_hammer_repair_item() {
+        let mut inv = PlayerInventory::new();
+        let mut item = make_item(100, 1);
+        item.unique_id = 100;
+        item.max_dura = 1000;
+        item.current_dura = 300;
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item });
+
+        // 无衰减（目标 Info.Shape 非 1/2）：满修，dura_changed=false
+        let (max_dura, current_dura) = inv.hammer_repair_item(100, false).unwrap();
+        assert_eq!(max_dura, 1000);
+        assert_eq!(current_dura, 1000);
+        let it = inv.backpack[0].as_ref().unwrap().item.clone();
+        assert_eq!(it.max_dura, 1000);
+        assert_eq!(it.current_dura, 1000);
+        assert!(!it.dura_changed);
+
+        // 有衰减（目标 Info.Shape 1/2）：MaxDura 减少 100*Random(0..10)，满修
+        let old_max = it.max_dura;
+        inv.backpack[0].as_mut().unwrap().item.current_dura = 500;
+        let (max_dura, current_dura) = inv.hammer_repair_item(100, true).unwrap();
+        assert_eq!(current_dura, max_dura);
+        assert!(max_dura <= old_max);
+        assert_eq!((old_max - max_dura) % 100, 0);
+        let it = inv.backpack[0].as_ref().unwrap().item.clone();
+        assert!(!it.dura_changed);
+
+        // 衰减下限钳制到 0
+        inv.backpack[0].as_mut().unwrap().item.max_dura = 50;
+        inv.backpack[0].as_mut().unwrap().item.current_dura = 10;
+        let (max_dura, current_dura) = inv.hammer_repair_item(100, true).unwrap();
+        assert_eq!(current_dura, max_dura);
+        assert!(max_dura <= 50);
+
+        // 物品不存在
+        assert!(inv.hammer_repair_item(99999, false).is_none());
     }
 
     /// #2190：C# RetrieveRefineItem 目标格放置（空格成功/占用失败/越界失败）

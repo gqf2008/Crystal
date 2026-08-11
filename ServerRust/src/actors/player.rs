@@ -3510,6 +3510,25 @@ impl Message<RepairItem> for PlayerActor {
     }
 }
 
+/// 修理锤/缝纫修理（C# CombineItem 修复分支：PlayerObject.cs:7125-7143）
+pub struct HammerRepairItem {
+    pub unique_id: u64,
+    /// 目标装备 Info.Shape 为 1/2 时 MaxDura 随机衰减 100*Random(10)
+    pub penalty: bool,
+}
+
+impl Message<HammerRepairItem> for PlayerActor {
+    type Reply = Option<(u16, u16)>; // (max_dura, current_dura)
+
+    async fn handle(&mut self, msg: HammerRepairItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.hammer_repair_item(msg.unique_id, msg.penalty);
+        if result.is_some() {
+            self.send_inventory_changed();
+        }
+        result
+    }
+}
+
 /// 重置物品附加属性（洗点）
 pub struct ResetItemAddedStats {
     pub unique_id: u64,
