@@ -1832,14 +1832,9 @@ impl WorldActor {
                     let _ = target_session;
                     (*attacker_oid, *damage, monster.x, monster.y, vec![(monster.x, monster.y)])
                 }
-                // #1020：死亡回调直线攻击近似为半径=range 的方形 AOE
-                ai::AttackAction::Line { attacker_oid, origin_x, origin_y, range, damage, .. } => {
-                    let mut cells = Vec::new();
-                    for dx in -(*range)..=(*range) {
-                        for dy in -(*range)..=(*range) {
-                            cells.push((*origin_x + dx, *origin_y + dy));
-                        }
-                    }
+                // #2046：C# LineAttack——沿 direction 逐格（移除原“半径=range 方形 AOE”近似）
+                ai::AttackAction::Line { attacker_oid, origin_x, origin_y, direction, range, damage, .. } => {
+                    let cells = crate::actors::world::ai::helpers::line_cells(*origin_x, *origin_y, *direction, *range);
                     (*attacker_oid, *damage, *origin_x, *origin_y, cells)
                 }
                 // 死亡回调弧形：按 C# HalfmoonAttack 几何逐格命中

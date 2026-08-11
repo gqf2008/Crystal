@@ -66,6 +66,13 @@ pub fn triangle_cells(center_x: i32, center_y: i32, direction: u8, distance: u8,
     cells
 }
 
+/// #2046：C# LineAttack——沿 direction 逐格（1..=range，与 tick.rs Boss 实时路径同几何）
+pub fn line_cells(center_x: i32, center_y: i32, direction: u8, range: i32) -> Vec<(i32, i32)> {
+    let d = (direction as usize) % 8;
+    let (dx, dy) = (DIR_DX[d], DIR_DY[d]);
+    (1..=range.max(0)).map(|k| (center_x + dx * k, center_y + dy * k)).collect()
+}
+
 /// C# IceThrust（Kirin.cs:126 / ManectricClaw.cs:85）：3 列（prevdir/dir/nextdir 起点）× 3 深 = 9 格。
 /// 返回 (x, y, j)，j=0..depth-1 为纵深段（ManectricClaw 用 j<=1 近 DC / j==2 远 MC）。
 pub fn ice_thrust_cells(center_x: i32, center_y: i32, direction: u8, depth: u8) -> Vec<(i32, i32, i32)> {
@@ -168,6 +175,7 @@ mod tests {
     use super::arc_cells;
     use super::eight_dir_rings;
     use super::ice_thrust_cells;
+    use super::line_cells;
     use super::triangle_cells;
     use super::slave_spawn_count;
 
@@ -205,6 +213,20 @@ mod tests {
         for c in [(1, 0), (2, 0), (2, -1), (2, 1)] {
             assert!(cells.contains(&c), "missing {c:?}");
         }
+    }
+
+    #[test]
+    fn line_cells_matches_csharp() {
+        // #2046：C# LineAttack——沿 direction 逐格 1..=range
+        // dir=2(Right)：range 3 → (1,0),(2,0),(3,0)
+        assert_eq!(line_cells(0, 0, 2, 3), vec![(1, 0), (2, 0), (3, 0)]);
+        // dir=4(Down)：range 2 → (0,1),(0,2)
+        assert_eq!(line_cells(0, 0, 4, 2), vec![(0, 1), (0, 2)]);
+        // dir=1(UpRight) 斜向 → (1,-1),(2,-2)
+        assert_eq!(line_cells(0, 0, 1, 2), vec![(1, -1), (2, -2)]);
+        // range=0 / 负 → 空
+        assert!(line_cells(5, 5, 2, 0).is_empty());
+        assert!(line_cells(5, 5, 2, -3).is_empty());
     }
 
     #[test]
