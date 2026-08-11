@@ -592,9 +592,9 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
             attack_mode, pet_mode, level, experience, max_experience,
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
             gold, group_id, guild_name, guild_rank,
-            spouse_name, allow_mentor, mentor_name, hero_index,
+            spouse_name, allow_mentor, allow_marriage, mentor_name, hero_index,
             is_fishing, fishing_autocast
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
     )
     .bind(&character.name)
     .bind(&account.account_id)
@@ -621,6 +621,7 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
     .bind(2i32)
     .bind(spouse)
     .bind(if character.is_mentor { 1 } else { 0 })
+    .bind(0i32) // allow_marriage（C# AllowMarriage 默认 false）
     .bind(mentor)
     .bind(character.current_hero_index)
     .bind(0i32)
@@ -844,6 +845,7 @@ async fn main() -> anyhow::Result<()> {
             guild_rank INTEGER DEFAULT 2,
             spouse_name TEXT,
             allow_mentor INTEGER NOT NULL DEFAULT 0,
+            allow_marriage INTEGER NOT NULL DEFAULT 0,
             mentor_name TEXT,
             hero_index INTEGER NOT NULL DEFAULT 0,
             is_fishing INTEGER NOT NULL DEFAULT 0,

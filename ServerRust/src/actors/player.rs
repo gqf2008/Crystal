@@ -201,6 +201,8 @@ pub struct PlayerState {
     pub married_date: i64,
     /// 是否允许拜师
     pub allow_mentor: bool,
+    /// 是否允许接收求婚（C# AllowMarriage，ChangeMarriage 包切换；默认 false）
+    pub allow_marriage: bool,
     /// 导师名称
     pub mentor_name: Option<String>,
     /// 宠物信息
@@ -742,6 +744,7 @@ impl PlayerActor {
                 spouse_name: None,
                 married_date: 0,
                 allow_mentor: false,
+                allow_marriage: false,
                 mentor_name: None,
                 creature_log: CreatureLog::new(),
                 hero_index: 0,
@@ -4553,6 +4556,19 @@ impl Message<SetAllowMentor> for PlayerActor {
     }
 }
 
+/// 设置是否允许接收求婚（对应 C# AllowMarriage）
+pub struct SetAllowMarriage {
+    pub allow: bool,
+}
+
+impl Message<SetAllowMarriage> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetAllowMarriage, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.allow_marriage = msg.allow;
+    }
+}
+
 /// 设置导师名称
 pub struct SetMentor {
     pub mentor_name: Option<String>,
@@ -6396,6 +6412,7 @@ mod tests {
             spouse_name: None,
             married_date: 0,
             allow_mentor: false,
+            allow_marriage: false,
             mentor_name: None,
             creature_log: CreatureLog::new(),
             hero_index: 0,
@@ -6509,6 +6526,16 @@ allow_group: false,
         assert!(s.allow_mentor);
         s.allow_mentor = false;
         assert!(!s.allow_mentor);
+    }
+
+    #[test]
+    fn test_allow_marriage_toggle() {
+        let mut s = make_state();
+        assert!(!s.allow_marriage);
+        s.allow_marriage = true;
+        assert!(s.allow_marriage);
+        s.allow_marriage = false;
+        assert!(!s.allow_marriage);
     }
 
     #[test]
