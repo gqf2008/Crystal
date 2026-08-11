@@ -2474,6 +2474,14 @@ impl Message<EquipSlotItemRequest> for WorldActor {
     }
 }
 
+/// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125）
+const REPLACE_WEDRING_COST: i32 = 125;
+
+/// #2036：C# ReplaceWeddingRing（13100）——费用 (RequiredAmount*10)*ReplaceWedRingCost
+fn replace_wedring_cost(required_amount: i32) -> u64 {
+    ((required_amount.max(0) * 10) * REPLACE_WEDRING_COST) as u64
+}
+
 impl Message<ReplaceWedRingRequest> for WorldActor {
     type Reply = ();
 
@@ -2488,33 +2496,62 @@ impl Message<ReplaceWedRingRequest> for WorldActor {
             _ => return,
         };
 
-        // 检查物品是否在背包中
-        if state.inventory.get_item(msg.unique_id).is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+        // #2036：C# ReplaceWeddingRing（13052-13058）——需先与 NPC 对话（ReplaceWedRingKey 页面）
+        if self.session_npc.get(&msg.session_id).is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
             return;
         }
 
-        // 找到该物品在背包中的格子
-        let grid = state.inventory.backpack.iter()
-            .find_map(|s| s.as_ref().filter(|slot| slot.item.unique_id == msg.unique_id).map(|slot| slot.grid));
-
-        let Some(grid) = grid else {
-            send_system_message(&self.gate_ref, msg.session_id, "物品不在背包中");
+        // 新戒指在背包
+        let item = match state.inventory.get_item(msg.unique_id) {
+            Some(i) => i.clone(),
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                return;
+            }
+        };
+        let item_db = match self.item_infos.get(&item.item_index) {
+            Some(i) => i.clone(),
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                return;
+            }
+        };
+        // C#：新物品必须是指环（ItemType.Ring=7）
+        if item_db.item_type != 7 {
+            send_system_message(&self.gate_ref, msg.session_id, "只能用戒指替换结婚戒指");
             return;
-        };
+        }
+        // C# BindMode.NoWeddingRing(0x800)：不可作为婚戒
+        if (item_db.bind_mode & 0x0800) != 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "该戒指无法作为结婚戒指");
+            return;
+        }
+        // C#：当前左戒必须是婚戒（WeddingRing != -1；Rust wedding_ring != 0）
+        let current_wed = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL)
+            .map(|r| r.wedding_ring != 0)
+            .unwrap_or(false);
+        if !current_wed {
+            send_system_message(&self.gate_ref, msg.session_id, "当前左戒指不是结婚戒指");
+            return;
+        }
 
-        // 装备到戒指槽（优先左戒指槽，如果已有则右戒指槽）
-        let target_slot = if state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL).is_none() {
-            crate::actors::inventory::EquipmentSlot::RingL
-        } else {
-            crate::actors::inventory::EquipmentSlot::RingR
-        };
+        // #2036：C# 费用 (RequiredAmount*10)*ReplaceWedRingCost(125)
+        let cost = replace_wedring_cost(item_db.required_amount);
+        if state.inventory.gold < cost {
+            send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法更换结婚戒指");
+            return;
+        }
+        let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await;
+        super::send_gold_changed_packet(&self.gate_ref, msg.session_id, cost);
 
-        let result = record.actor_ref.ask(crate::actors::player::InventoryEquipItem { grid, slot: target_slot }).await.unwrap_or(None);
-        if result.is_some() {
-            send_system_message(&self.gate_ref, msg.session_id, "戒指已更换");
+        let ok = record.actor_ref.ask(crate::actors::player::ReplaceWeddingRingItem {
+            new_unique_id: msg.unique_id,
+        }).await.unwrap_or(false);
+        if ok {
+            send_system_message(&self.gate_ref, msg.session_id, "结婚戒指已更换");
         } else {
-            send_system_message(&self.gate_ref, msg.session_id, "戒指装备失败");
+            send_system_message(&self.gate_ref, msg.session_id, "戒指更换失败");
         }
     }
 }
@@ -3249,6 +3286,15 @@ mod tests {
         assert!(can_equip_by_weight(EquipmentSlot::Armour, 10, 200, 50, 0, &inv, MirClass::Warrior, 1, &infos));
     }
     /// #1159：C# 与 NPC 交互距离校验（切比雪夫 DataRange=16 + 同图）
+    #[test]
+    fn replace_wedring_cost_matches_csharp() {
+        // #2036：C# ReplaceWeddingRing——cost = (RequiredAmount*10)*ReplaceWedRingCost(125)
+        assert_eq!(super::replace_wedring_cost(0), 0);
+        assert_eq!(super::replace_wedring_cost(1), 1250);
+        assert_eq!(super::replace_wedring_cost(10), 12500);
+        assert_eq!(super::replace_wedring_cost(-5), 0);
+    }
+
     #[test]
     fn test_npc_in_range() {
         // 同图、斜向 10,10（切比雪夫 10 <= 16）→ 在范围内
