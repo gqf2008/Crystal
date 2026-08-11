@@ -4464,6 +4464,25 @@ impl Message<SocialMentorReply> for SocialActor {
         };
 
         // 双方互相记录（C#：student.Info.Mentor = mentor；mentor.Info.Mentor = student）
+        // C# MentorReply（:13605-13635）：接受侧复检（等待期间双方可能已建立师徒关系/换职业/升级）
+        if replier_state.mentor_name.is_some() {
+            send_system_message(&self.gate_ref, replier_session, "你已有师徒关系");
+            return;
+        }
+        if requester_state.mentor_name.is_some() {
+            send_system_message(&self.gate_ref, replier_session, &format!("{} 已有师徒关系", requester_state.name));
+            return;
+        }
+        if replier_state.class != requester_state.class {
+            send_system_message(&self.gate_ref, replier_session, "只能收同职业的徒弟");
+            return;
+        }
+        // C# :13631-13635：徒弟等级需低于师父至少 10 级（Settings.MentorLevelGap=10，与 AddMentor 一致）
+        if (requester_state.level as u32 + 10) > replier_state.level as u32 {
+            send_system_message(&self.gate_ref, replier_session, "徒弟等级需低于师父至少 10 级");
+            return;
+        }
+
         // C#：student.Info.Mentor = 导师；导师 Info.IsMentor = true（PlayerObject.cs:13637-13640）
         let _ = replier_record.ask(SetMentor { mentor_name: Some(requester_state.name.clone()), is_mentor: true }).await;
         let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()), is_mentor: false }).await;
