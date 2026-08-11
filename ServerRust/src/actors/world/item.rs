@@ -752,6 +752,7 @@ impl Message<UseItemRequest> for WorldActor {
                                 let _ = record.actor_ref.ask(SetExpMultiplier {
                                     multiplier: 1.0 + luck as f64 / 100.0,
                                     end_tick,
+                                    pause_in_safe: true, // C# BuffType.Exp PauseInSafeZone
                                 }).await;
                                 send_system_message(&self.gate_ref, msg.session_id,
                                     &format!("经验加成已启动：+{}%，持续 {} 分钟", luck, db.durability.max(1)));
@@ -766,6 +767,7 @@ impl Message<UseItemRequest> for WorldActor {
                                 let _ = record.actor_ref.ask(crate::actors::player::SetDropMultiplier {
                                     multiplier: 1.0 + luck as f64 / 100.0,
                                     end_tick,
+                                    pause_in_safe: true, // C# BuffType.Drop PauseInSafeZone
                                 }).await;
                                 send_system_message(&self.gate_ref, msg.session_id,
                                     &format!("掉落加成已启动：+{}%，持续 {} 分钟", luck, db.durability.max(1)));
@@ -1421,13 +1423,13 @@ impl Message<UseItemRequest> for WorldActor {
                             let exp_rate = get_added(Stat::ExpRatePercent);
                             if exp_rate > 0 {
                                 let end_tick = self.tick_count + ticks as u64;
-                                let _ = record.actor_ref.ask(SetExpMultiplier { multiplier: 1.0 + exp_rate as f64 / 100.0, end_tick }).await;
+                                let _ = record.actor_ref.ask(SetExpMultiplier { multiplier: 1.0 + exp_rate as f64 / 100.0, end_tick, pause_in_safe: true }).await;
                                 applied = true;
                             }
                             let drop_rate = get_added(Stat::ItemDropRatePercent);
                             if drop_rate > 0 {
                                 let end_tick = self.tick_count + ticks as u64;
-                                let _ = record.actor_ref.ask(SetDropMultiplier { multiplier: 1.0 + drop_rate as f64 / 100.0, end_tick }).await;
+                                let _ = record.actor_ref.ask(SetDropMultiplier { multiplier: 1.0 + drop_rate as f64 / 100.0, end_tick, pause_in_safe: true }).await;
                                 applied = true;
                             }
                             // C# HP/MP AddedStats 为 +MaxHP/+MaxMP（:6214 Stats(AddedStats)）

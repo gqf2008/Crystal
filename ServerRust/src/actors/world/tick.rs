@@ -427,6 +427,11 @@ pub(crate) fn exp_owner_expired(owner_tick: u64, now_tick: u64) -> bool {
     owner_tick > 0 && now_tick.saturating_sub(owner_tick) >= 50
 }
 
+/// C# BuffProperty.PauseInSafeZone：Exp/Drop buff 在安全区暂停计时
+pub(crate) fn multiplier_paused_in_safe(pause_in_safe: bool, in_safe: bool) -> bool {
+    pause_in_safe && in_safe
+}
+
 /// #914：C# HumanObject.ReduceExp——等级差经验衰减
 /// （玩家等级 >= 怪物等级+10 时：amount - Round(Max(amount/15,1)*(Level-(targetLevel+10)))，最低 1；
 ///  C# Settings.ExpMobLevelDifference 默认开启）
@@ -1758,21 +1763,45 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         if self.tick_count % 100 == 0 {
             for (session_id, record) in &self.players {
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    // C# PauseInSafeZone：安全区内到期顺延 100 tick（计时冻结）
+                    let in_safe = self.maps.get(&state.map_index)
+                        .map(|m| m.is_safe_zone(state.x, state.y))
+                        .unwrap_or(false);
                     if state.exp_multiplier > 1.0 && self.tick_count >= state.exp_multiplier_end_tick {
-                        let _ = record.actor_ref.ask(SetExpMultiplier {
-                            multiplier: 1.0,
-                            end_tick: 0,
-                        }).await;
-                        send_system_message(&self.gate_ref, *session_id, "双倍经验效果已结束");
-                        debug!("Exp multiplier expired for session {}", session_id);
+                        if multiplier_paused_in_safe(state.exp_multiplier_pause_in_safe, in_safe) {
+                            let _ = record.actor_ref.ask(SetExpMultiplier {
+                                multiplier: state.exp_multiplier,
+                                end_tick: self.tick_count + 100,
+                                pause_in_safe: true,
+                            }).await;
+                            debug!("Exp multiplier paused in safe zone for session {}", session_id);
+                        } else {
+                            let _ = record.actor_ref.ask(SetExpMultiplier {
+                                multiplier: 1.0,
+                                end_tick: 0,
+                                pause_in_safe: false,
+                            }).await;
+                            send_system_message(&self.gate_ref, *session_id, "双倍经验效果已结束");
+                            debug!("Exp multiplier expired for session {}", session_id);
+                        }
                     }
                     if state.drop_multiplier > 1.0 && self.tick_count >= state.drop_multiplier_end_tick {
-                        let _ = record.actor_ref.ask(SetDropMultiplier {
-                            multiplier: 1.0,
-                            end_tick: 0,
-                        }).await;
-                        send_system_message(&self.gate_ref, *session_id, "掉落加成效果已结束");
-                        debug!("Drop multiplier expired for session {}", session_id);
+                        if multiplier_paused_in_safe(state.drop_multiplier_pause_in_safe, in_safe) {
+                            let _ = record.actor_ref.ask(SetDropMultiplier {
+                                multiplier: state.drop_multiplier,
+                                end_tick: self.tick_count + 100,
+                                pause_in_safe: true,
+                            }).await;
+                            debug!("Drop multiplier paused in safe zone for session {}", session_id);
+                        } else {
+                            let _ = record.actor_ref.ask(SetDropMultiplier {
+                                multiplier: 1.0,
+                                end_tick: 0,
+                                pause_in_safe: false,
+                            }).await;
+                            send_system_message(&self.gate_ref, *session_id, "掉落加成效果已结束");
+                            debug!("Drop multiplier expired for session {}", session_id);
+                        }
                     }
                 }
             }
