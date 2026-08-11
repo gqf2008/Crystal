@@ -5037,6 +5037,17 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                             let next_dist = ((mx - nx).abs() + (my - ny).abs()) as u64;
                             let next_delay_ms = next_dist * 50; // 后续弹跳无 +500
                             let next_fire = self.tick_count + (next_delay_ms / 100).max(1);
+                            // C# HumanObject.cs:5826：弹射动画 S.ObjectProjectile（Source=当前目标, Destination=下一目标）
+                            let proj = mir2_shared::packets::server::magic_combat::ObjectProjectile {
+                                spell,
+                                source: target_id,
+                                destination: next_id,
+                            };
+                            let mut pbody = Vec::new();
+                            if proj.write_body(&mut pbody).is_ok() {
+                                let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectProjectile as i16, &pbody);
+                                broadcast_to_map(&self.gate_ref, &self.players, hit_map, &data).await;
+                            }
                             self.pending_spell_completions.push(PendingSpellCompletion {
                                 fire_at_tick: next_fire,
                                 session_id: pending.session_id,
