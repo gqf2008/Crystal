@@ -3484,6 +3484,9 @@ impl Message<GuildInviteReply> for SocialActor {
         }
 
         debug!("Guild invite accepted: {} joined {}", invitee_name, guild_name);
+        // #2170：成员变更持久化（guild_members 表，重启后保持）
+        self.save_guild_to_db(&guild_name).await;
+
     }
 }
 
@@ -3625,6 +3628,7 @@ impl Message<EditGuildMemberRequest> for SocialActor {
 
                 if guild.remove_member(&msg.member_name) {
                     // 更新被踢玩家
+                    guild_changed = true;
                     if let Some(sid) = kicked_session {
                         if let Some(rec) = self.players.get(&sid) {
                             let _ = rec.ask(SetGuildInfo {
@@ -3660,11 +3664,13 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     m.rank = match target { 0 => GuildRank::Leader, 1 => GuildRank::Officer, _ => GuildRank::Member };
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已调整职务", msg.member_name));
                 }
+                guild_changed = true;
             }
             3 => { // 降职
                 if guild.set_rank(&msg.member_name, GuildRank::Member) {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已降职为成员", msg.member_name));
                 }
+                guild_changed = true;
             }
             4 => { // #1395：添加职务（C# EditGuildMember ChangeType=4 add rank）
                 if msg.rank_name.trim().is_empty() {
@@ -3869,6 +3875,8 @@ impl Message<LeaveGuildRequest> for SocialActor {
         if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
             self.broadcast_ride_appearance(msg.session_id, &fresh).await;
         }
+        // #2170：成员变更持久化（guild_members 表，重启后保持）
+        self.save_guild_to_db(&guild_name).await;
     }
 }
 
