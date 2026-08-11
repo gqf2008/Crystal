@@ -561,6 +561,14 @@ impl Message<StartGameRequest> for WorldActor {
             &self.recipe_infos,
         ).await;
 
+        // C# StartGame GetGameShop（:1205）：登录下发商城商品列表（客户端只在购买时发包，目录靠登录推送）
+        super::npc::send_game_shop_catalog(
+            &self.gate_ref,
+            msg.session_id,
+            loaded_state.inventory.gold as u32,
+            &self.game_shop_items,
+        );
+
         // C# PlayerObject 构造（~1219）：登录下发 S.SwitchGroup 同步客户端“允许组队”开关
         {
             let sg = mir2_shared::packets::server::group::SwitchGroup {
