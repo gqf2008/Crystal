@@ -366,6 +366,9 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
         let mut buffs = self.guild_buffs(guild_name).await;
         if buffs.contains(&msg.buff_id) {
             buffs.retain(|b| *b != msg.buff_id);
+            if let Some(exp) = self.guild_buff_expiries.get_mut(guild_name) {
+                exp.remove(&msg.buff_id);
+            }
             send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已停用", msg.buff_id));
         } else {
             // C# PlayerObject.GuildBuffUpdate（:10375-10408）：购买校验
@@ -404,6 +407,11 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
                 points: info.points_req,
                 gold: gold_cost as u32,
             }).await;
+            // #2136：C# GuildObject.Process 时限——激活时记录到期 tick（TimeLimit 分钟 × 600，100ms/tick）
+            if info.time_limit_minutes > 0 {
+                let expires = self.tick_count + info.time_limit_minutes as u64 * 600;
+                self.guild_buff_expiries.entry(guild_name.clone()).or_default().insert(msg.buff_id, expires);
+            }
             buffs.push(msg.buff_id);
             send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已激活", msg.buff_id));
         }
@@ -464,12 +472,12 @@ impl WorldActor {
     }
 
     /// 读取行会激活的 Buff 列表
-    async fn guild_buffs(&self, guild_name: &str) -> Vec<u32> {
+    pub(crate) async fn guild_buffs(&self, guild_name: &str) -> Vec<u32> {
         self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs { guild_name: guild_name.to_string() }).await.unwrap_or_default()
     }
 
     /// 写入行会激活的 Buff 列表
-    async fn set_guild_buffs(&self, guild_name: &str, buffs: &[u32]) {
+    pub(crate) async fn set_guild_buffs(&self, guild_name: &str, buffs: &[u32]) {
         let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildBuffs {
             guild_name: guild_name.to_string(),
             buffs: buffs.to_vec(),
