@@ -841,6 +841,15 @@ impl PlayerInventory {
         Some((item.max_dura, item.current_dura))
     }
 
+    /// 槽位扩展：槽位数组长度 +1（C# CombineItem SetSlotSize(Slots.Length+1)，PlayerObject.cs:7152-7157），返回新槽位数
+    pub fn expand_item_slots(&mut self, uid: u64) -> Option<usize> {
+        let item = self.get_item_mut(uid)?;
+        let info = item.info.clone();
+        let new_size = item.slots.len() + 1;
+        item.set_slot_size(info.as_ref(), Some(new_size));
+        Some(item.slots.len())
+    }
+
     /// 获取装备
     pub fn get_equipment(&self, slot: EquipmentSlot) -> Option<&UserItem> {
         self.equipment[slot as usize].as_ref()
@@ -1343,6 +1352,30 @@ mod tests {
 
         // 物品不存在
         assert!(inv.hammer_repair_item(99999, false).is_none());
+    }
+
+    /// #2288：C# CombineItem 槽位扩展分支（PlayerObject.cs:7152-7157）——SetSlotSize(Slots.Length+1)
+    #[test]
+    fn test_expand_item_slots() {
+        let mut inv = PlayerInventory::new();
+        let mut item = make_item(200, 1);
+        item.unique_id = 200;
+        item.slots = vec![None, None];
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item });
+
+        // 2 槽 → 3 槽
+        let new_size = inv.expand_item_slots(200).unwrap();
+        assert_eq!(new_size, 3);
+        let it = inv.backpack[0].as_ref().unwrap().item.clone();
+        assert_eq!(it.slots.len(), 3);
+        assert!(it.slots.iter().all(|s| s.is_none()));
+
+        // 空槽位数组 → 1 槽
+        inv.backpack[0].as_mut().unwrap().item.slots.clear();
+        assert_eq!(inv.expand_item_slots(200).unwrap(), 1);
+
+        // 物品不存在
+        assert!(inv.expand_item_slots(99999).is_none());
     }
 
     /// #2190：C# RetrieveRefineItem 目标格放置（空格成功/占用失败/越界失败）

@@ -3529,6 +3529,23 @@ impl Message<HammerRepairItem> for PlayerActor {
     }
 }
 
+/// 槽位扩展（C# CombineItem 槽位分支：PlayerObject.cs:7152-7157）
+pub struct ExpandItemSlots {
+    pub unique_id: u64,
+}
+
+impl Message<ExpandItemSlots> for PlayerActor {
+    type Reply = Option<usize>;
+
+    async fn handle(&mut self, msg: ExpandItemSlots, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.expand_item_slots(msg.unique_id);
+        if result.is_some() {
+            self.send_inventory_changed();
+        }
+        result
+    }
+}
+
 /// 重置物品附加属性（洗点）
 pub struct ResetItemAddedStats {
     pub unique_id: u64,

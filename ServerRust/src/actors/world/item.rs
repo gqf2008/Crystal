@@ -3375,6 +3375,25 @@ impl Message<BuyItemBackRequest> for WorldActor {
     }
 }
 
+/// C# ValidGemForItem（PlayerObject.cs:7184-7234）：槽位石(Shape 7)的 SpecialItemMode 需匹配目标装备类型
+fn valid_gem_for_item(source_info: &crate::db::ItemInfo, target_type: i32) -> bool {
+    let unique = source_info.special_mode;
+    match target_type {
+        1 => unique & 0x0001 != 0, // Weapon ← Paralize
+        2 => unique & 0x0002 != 0, // Armour ← Teleport
+        4 => unique & 0x0004 != 0, // Helmet ← ClearRing
+        5 => unique & 0x0008 != 0, // Necklace ← Protection
+        6 => unique & 0x0010 != 0, // Bracelet ← Revival
+        7 => unique & 0x0020 != 0, // Ring ← Muscle
+        8 => unique & 0x0040 != 0, // Amulet ← Flame
+        9 => unique & 0x0080 != 0, // Belt ← Healing
+        10 => unique & 0x0100 != 0, // Boots ← Probe
+        11 => unique & 0x0200 != 0, // Stone ← Skill
+        12 => unique & 0x0400 != 0, // Torch ← NoDuraLoss（C# 早期类型检查已排除 12）
+        _ => false,
+    }
+}
+
 impl Message<CombineItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: CombineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
@@ -3487,6 +3506,73 @@ impl Message<CombineItemRequest> for WorldActor {
                 debug!("CombineItem(repair): {} repaired item={} max_dura={} current_dura={}", state.name, target.unique_id, max_dura, current_dura);
             } else {
                 send_system_message(&self.gate_ref, msg.session_id, "修理失败");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+            }
+            return;
+        }
+
+        // C# CombineItem 槽位扩展分支（PlayerObject.cs:6812-6843 / 7152-7157）：宝石 Shape 7 = 槽位石
+        if source_info.shape == 7 {
+            // BindMode.DontUpgrade(0x40) 或特殊物品不可升级（C# 6813-6817）
+            if super::has_bind_flag(target_info.bind_mode, 0x40) || target_info.special_mode != 0 {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法扩展槽位");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 租用物品绑定 DontUpgrade 不可升级（C# 6818-6822）
+            if target.rental_information.as_ref().map(|r| r.binding_flags.contains(mir2_shared::enums::BindMode::DONT_UPGRADE)).unwrap_or(false) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法扩展槽位");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // ValidGemForItem：槽位石 Unique 标志需匹配目标类型（C# 6823-6828 / 7184-7234）
+            if !valid_gem_for_item(source_info, target_info.item_type) {
+                send_system_message(&self.gate_ref, msg.session_id, "宝石与目标物品不匹配");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 无 RandomStats 配置（random_stats_id 越界）或已达槽位上限（C# 6829-6840）
+            let slot_max = self.random_item_stats.get(target_info.random_stats_id as usize).map(|s| s.slot_max_stat as usize);
+            match slot_max {
+                None => {
+                    send_system_message(&self.gate_ref, msg.session_id, "该物品无法扩展槽位");
+                    self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                    return;
+                }
+                Some(max) if max <= target.slots.len() => {
+                    send_system_message(&self.gate_ref, msg.session_id, "该物品槽位已达上限");
+                    self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                    return;
+                }
+                _ => {}
+            }
+            // 扩展 1 槽（C# SetSlotSize(Slots.Length+1)，7152-7157）
+            let expanded = record.actor_ref.ask(crate::actors::player::ExpandItemSlots {
+                unique_id: target.unique_id,
+            }).await.ok().flatten();
+            if let Some(new_size) = expanded {
+                // 消耗 1 颗宝石（C# 7173-7174）
+                let _ = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: source.unique_id,
+                    count: 1,
+                }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "槽位扩展成功！");
+                // S.ItemSlotSizeChanged { UniqueID, SlotSize }（C# 7156）
+                let packet = mir2_shared::packets::server::ItemSlotSizeChanged {
+                    unique_id: target.unique_id,
+                    slot_size: new_size as i32,
+                };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemSlotSizeChanged as i16, &body),
+                    }).await;
+                }
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, true, false);
+                debug!("CombineItem(slot): {} expanded slots item={} new_size={}", state.name, target.unique_id, new_size);
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "槽位扩展失败");
                 self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
             }
             return;
