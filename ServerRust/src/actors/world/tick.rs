@@ -5682,8 +5682,11 @@ impl Message<Tick> for WorldActor {
                     tm.take_damage(actual);
                     tm.provoked = true;
                     tm.target_session = Some(*master);
-                    // #1741：C# EXPOwner = attacker.Master——宠物补刀击杀归属主人（经验/掉落）
-                    tm.set_last_hitter(*master);
+                    // #1741/#1988：C# EXPOwner = attacker.Master——宠物补刀击杀归属主人（经验/掉落）；
+                    // 仅实际造成伤害才设置（Miss/全挡返回 0）
+                    if actual > 0 {
+                        tm.set_last_hitter(*master);
+                    }
                     // #1741：宠物协战命中反馈（与玩家/英雄/怪物一致：ObjectStruck/DamageIndicator/ObjectHealth）
                     let pet_x = if pet_x == 0 && pet_y == 0 { tm.x } else { pet_x };
                     let pet_y = if pet_x == 0 && pet_y == 0 { tm.y } else { pet_y };
