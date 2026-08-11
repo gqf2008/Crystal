@@ -1913,6 +1913,12 @@ async fn exec_action(
                     send_player_msg(world, session_id, crate::actors::player::ApplyBuff {
                         buff: crate::combat::buff::BuffInstance::new(bt, ticks, 1),
                     }).await;
+                    // C# AddBuff(BuffType.MoonLight/DarkBody) → Sneaking=true（MapObject.cs:659-661）
+                    if bt == crate::combat::buff::BuffType::Invisibility
+                        && (buff_name.eq_ignore_ascii_case("MOONLIGHT") || buff_name.eq_ignore_ascii_case("DARKBODY"))
+                    {
+                        world.set_sneaking(session_id, true).await;
+                    }
                     debug!("NPC GIVEBUFF: '{}' {}s -> {} ticks", buff_name, secs, ticks);
                 }
             } else {

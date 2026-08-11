@@ -1858,6 +1858,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             for (session_id, state) in to_reveal {
                 self.invisible_sessions.remove(&session_id);
                 self.reveal_player_to_others(session_id, &state).await;
+                // C#：MoonLight/DarkBody buff 移除后 Sneaking=false（HumanObject.cs:474-478）
+                self.set_sneaking(session_id, false).await;
                 send_system_message(&self.gate_ref, session_id, "隐身效果已结束");
             }
         }
@@ -7538,6 +7540,7 @@ impl Message<Tick> for WorldActor {
         self.tick_environment_damage().await;
 
         self.tick_exp_events_and_invisibility().await;
+        self.tick_sneak_radius().await;
 
 
         self.tick_pet_hit_brown().await;
