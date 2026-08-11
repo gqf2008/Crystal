@@ -1273,15 +1273,17 @@ impl SocialActor {
             Ok(Some(s)) => s, _ => return,
         };
 
-        // 收集所有在线 object_ids
+        // 收集所有在线 object_ids 与名字（离线添加的好友按名字判定在线）
         let mut online_object_ids: Vec<u32> = Vec::new();
+        let mut online_names: Vec<String> = Vec::new();
         for r in self.players.values() {
             if let Ok(Some(s)) = r.ask(GetPlayerState).await {
                 online_object_ids.push(s.object_id);
+                online_names.push(s.name.clone());
             }
         }
 
-        send_friends_list_packet(&self.gate_ref, session_id, &state.friend_list.friends, &state.friend_list.blocked, &online_object_ids);
+        send_friends_list_packet(&self.gate_ref, session_id, &state.friend_list.friends, &state.friend_list.blocked, &online_object_ids, &online_names);
     }
 
     /// 向所有在线行会成员广播完整行会信息
@@ -2099,6 +2101,32 @@ impl Message<SocialPlayerJoined> for SocialActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+
+        // 离线添加的好友上线：校正对方列表里同名字条目的 object_id 为运行时 ID，并刷新其好友列表（在线状态翻转）
+        let new_oid = state.object_id;
+        let new_name = state.name.clone();
+        for (sid, r) in &self.players {
+            if *sid == msg.session_id { continue; }
+            if let Ok(Some(mut os)) = r.ask(GetPlayerState).await {
+                let mut changed = false;
+                for f in os.friend_list.friends.iter_mut() {
+                    if f.name.eq_ignore_ascii_case(&new_name) && f.object_id != new_oid {
+                        f.object_id = new_oid;
+                        changed = true;
+                    }
+                }
+                for b in os.friend_list.blocked.iter_mut() {
+                    if b.name.eq_ignore_ascii_case(&new_name) && b.object_id != new_oid {
+                        b.object_id = new_oid;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let _ = r.ask(SetPlayerState { state: os }).await;
+                    self.send_friends_list(*sid).await;
+                }
+            }
+        }
         if let Some(guild_name) = &state.guild_name {
             if let Some(guild) = self.guilds.get_mut(guild_name) {
                 guild.set_online(&state.name, msg.session_id);
@@ -3216,70 +3244,89 @@ impl Message<AddFriendRequest> for SocialActor {
             return;
         }
 
-        // 遍历所有玩家查找匹配名称
+        // 遍历所有玩家查找匹配名称（忽略大小写，对齐 C# Envir.GetPlayer）
         let mut found: Option<(u64, u32, String)> = None;
         for (sid, r) in &self.players {
             if let Ok(Some(s)) = r.ask(GetPlayerState).await {
-                if s.name == msg.friend_name {
+                if s.name.eq_ignore_ascii_case(&msg.friend_name) {
                     found = Some((*sid, s.object_id, s.name));
                     break;
                 }
             }
         }
 
-        if let Some((target_session, target_oid, target_name)) = found {
-            // 检查是否已在黑名单
-            if msg.blocked {
-                let record = match self.players.get(&msg.session_id) {
-                    Some(r) => r, None => return,
-                };
-                let mut state = match record.ask(GetPlayerState).await {
-                    Ok(Some(s)) => s, _ => return,
-                };
-                state.friend_list.add_blocked(target_oid, target_name.clone());
-                let _ = record.ask(SetPlayerState { state }).await;
-                self.send_friends_list(msg.session_id).await;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 加入黑名单", target_name));
-                return;
-            }
-
-            // 检查是否已是好友
-            let is_already_friend = {
-                let record = match self.players.get(&msg.session_id) {
-                    Some(r) => r, None => return,
-                };
-                match record.ask(GetPlayerState).await {
-                    Ok(Some(s)) => s.friend_list.is_friend(target_oid),
-                    _ => return,
+        // 在线未命中 → C# AddFriend（PlayerObject.cs:12428）：Envir.GetCharacterInfo(name) 全局角色信息，离线也可添加
+        let (target_session, target_oid, target_name) = if let Some(f) = found {
+            f
+        } else {
+            let canonical = match db::find_character_name(&self.db_pool, &msg.friend_name).await {
+                Ok(Some(n)) => n,
+                _ => {
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("找不到名为 '{}' 的玩家", msg.friend_name));
+                    return;
                 }
             };
-            if is_already_friend {
-                send_system_message(&self.gate_ref, msg.session_id, "已是你的好友");
+            // 离线条目：用规范名 FNV-1a 哈希作稳定 object_id（friend_id_from_name），
+            // 上线后由 SocialPlayerJoined 校正为运行时 ID
+            let synthetic_id = crate::actors::friend::friend_id_from_name(&canonical);
+            (0u64, synthetic_id, canonical)
+        };
+
+        // 检查是否已在黑名单（按名字忽略大小写，防离线/在线双份）
+        if msg.blocked {
+            let record = match self.players.get(&msg.session_id) {
+                Some(r) => r, None => return,
+            };
+            let mut state = match record.ask(GetPlayerState).await {
+                Ok(Some(s)) => s, _ => return,
+            };
+            if state.friend_list.is_blocked_name(&target_name) || state.friend_list.is_blocked(target_oid) {
+                send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已在黑名单", target_name));
                 return;
             }
-
-            // 添加好友（双方互相添加）
-            {
-                let record = match self.players.get(&msg.session_id) {
-                    Some(r) => r, None => return,
-                };
-                let _ = record.ask(AddFriendToSelf { friend_oid: target_oid, friend_name: target_name.clone() }).await;
-            }
-            {
-                let target_r = match self.players.get(&target_session) {
-                    Some(r) => r, None => return,
-                };
-                let _ = target_r.ask(AddFriendToSelf { friend_oid: state.object_id, friend_name: state.name.clone() }).await;
-            }
-
-            // 通知双方
+            state.friend_list.add_blocked(target_oid, target_name.clone());
+            let _ = record.ask(SetPlayerState { state }).await;
             self.send_friends_list(msg.session_id).await;
-            self.send_friends_list(target_session).await;
-
-            send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 添加为好友", target_name));
-        } else {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("找不到名为 '{}' 的玩家", msg.friend_name));
+            send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 加入黑名单", target_name));
+            return;
         }
+
+        // 检查是否已是好友（按名字忽略大小写，防离线/在线双份）
+        let is_already_friend = {
+            let record = match self.players.get(&msg.session_id) {
+                Some(r) => r, None => return,
+            };
+            match record.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.friend_list.is_friend_name(&target_name) || s.friend_list.is_friend(target_oid),
+                _ => return,
+            }
+        };
+        if is_already_friend {
+            send_system_message(&self.gate_ref, msg.session_id, "已是你的好友");
+            return;
+        }
+
+        // 添加好友（在线目标双方互相添加；离线目标仅添加自己——C# AddFriend 本身只加自己）
+        {
+            let record = match self.players.get(&msg.session_id) {
+                Some(r) => r, None => return,
+            };
+            let _ = record.ask(AddFriendToSelf { friend_oid: target_oid, friend_name: target_name.clone() }).await;
+        }
+        if target_session != 0 {
+            let target_r = match self.players.get(&target_session) {
+                Some(r) => r, None => return,
+            };
+            let _ = target_r.ask(AddFriendToSelf { friend_oid: state.object_id, friend_name: state.name.clone() }).await;
+        }
+
+        // 通知（离线添加只通知自己）
+        self.send_friends_list(msg.session_id).await;
+        if target_session != 0 {
+            self.send_friends_list(target_session).await;
+        }
+
+        send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 添加为好友", target_name));
     }
 }
 

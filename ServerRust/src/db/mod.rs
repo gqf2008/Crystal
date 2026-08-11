@@ -1010,11 +1010,21 @@ pub async fn get_character_last_access(pool: &DbPool, character_name: &str) -> a
 
 /// 判断角色名是否存在（C# Envir.GetCharacterInfo(name) != null；邮件收件人校验用）
 pub async fn character_exists_by_name(pool: &DbPool, character_name: &str) -> anyhow::Result<bool> {
-    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM characters WHERE name = ?")
+    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM characters WHERE name = ? COLLATE NOCASE")
         .bind(character_name)
         .fetch_optional(pool)
         .await?;
     Ok(row.is_some())
+}
+
+/// 按名称查找角色规范名（不区分大小写；C# Envir.GetCharacterInfo 语义，
+/// 离线加好友时取 DB 里的真实名字大小写）
+pub async fn find_character_name(pool: &DbPool, character_name: &str) -> anyhow::Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT name FROM characters WHERE name = ? COLLATE NOCASE")
+        .bind(character_name)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|r| r.0))
 }
 
 /// 更新角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
