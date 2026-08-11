@@ -1224,29 +1224,63 @@ impl WorldActor {
                     if hero_magic_level(&snap.hero_magics, spell as u8) > 0 {
                         ai_local.direction = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
                         let raw = hero_attack_power(&hero_combat);
-                        // C# Thrusting 命中防御 Agility（HumanObject.cs:3225）+ 倍率 0.25+0.25Lv（Envir.cs）
-                        let (dmg, def) = if spell == Spell::Thrusting {
+                        let dir_u = direction_towards(ai_local.x, ai_local.y, target.x, target.y) as usize % 8;
+                        let used = if spell == Spell::Thrusting {
+                            // C# Thrusting 命中防御 Agility（HumanObject.cs:3225）+ 倍率 0.25+0.25Lv（Envir.cs）
                             let lv = hero_magic_level(&snap.hero_magics, Spell::Thrusting as u8);
                             let cs = (Spell::Thrusting as i32).saturating_sub(3);
-                            let d = self.magic_infos.get(&(cs as u32))
+                            let dmg = self.magic_infos.get(&(cs as u32))
                                 .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
                                 .unwrap_or(raw);
-                            (d, DefenceType::Agility)
+                            attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Agility, true));
+                            support_intents.push((snap.session_id, 0, Spell::Thrusting as u8, false));
+                            true
                         } else {
-                            (raw, DefenceType::Ac) // HeavenlySword 保持既有
+                            // C# HeavenlySword（HumanObject.cs:5239 + Map.cs:1222-1248）：
+                            // BeginMagic 扣蓝；弹道 500ms；沿朝向 3 格直线每格首个目标；防御 MAC；伤害 magic.GetDamage(DC)
+                            let lv = hero_magic_level(&snap.hero_magics, Spell::HeavenlySword as u8);
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::HeavenlySword as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                let cs = (Spell::HeavenlySword as i32).saturating_sub(3);
+                                let dmg = self.magic_infos.get(&(cs as u32))
+                                    .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
+                                    .unwrap_or(raw);
+                                let mut hit_any = false;
+                                for i in 1..=3i32 {
+                                    let lx = ai_local.x + crate::actors::world::ai::helpers::DIR_DX[dir_u] * i;
+                                    let ly = ai_local.y + crate::actors::world::ai::helpers::DIR_DY[dir_u] * i;
+                                    if let Some(m) = monster_snaps.iter().find(|m| {
+                                        m.map_index == snap.owner_map && m.x == lx && m.y == ly
+                                    }) {
+                                        attack_intents.push((snap.session_id, m.oid, dmg, DefenceType::Mac, true));
+                                        hit_any = true;
+                                        break;
+                                    }
+                                }
+                                if !hit_any {
+                                    // 直线无目标时兜底打主目标（C# 每格取第一个可攻击对象；主目标通常在直线内）
+                                    attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Mac, true));
+                                }
+                                // C# BeginMagic → ObjectMagic 广播（英雄施法弹道动画）
+                                magic_anim_intents.push((snap.session_id, Spell::HeavenlySword as u8, target.oid));
+                                true
+                            } else {
+                                false // 蓝不足 → 不施放，走下方移动/近战（C# HasHeavenlySword=false → MoveTo）
+                            }
                         };
-                        attack_intents.push((snap.session_id, target.oid, dmg, def, true));
-                        support_intents.push((snap.session_id, 0, spell as u8, false));
-                        ai_local.next_attack_tick = self.tick_count + 6;
-                        // #1190：Haste 缩短攻击冷却
-                        if haste_ticks > 0 {
-                            ai_local.next_attack_tick = ai_local
-                                .next_attack_tick
-                                .saturating_sub(haste_ticks)
-                                .max(self.tick_count + 2);
+                        if used {
+                            ai_local.next_attack_tick = self.tick_count + 6;
+                            // #1190：Haste 缩短攻击冷却
+                            if haste_ticks > 0 {
+                                ai_local.next_attack_tick = ai_local
+                                    .next_attack_tick
+                                    .saturating_sub(haste_ticks)
+                                    .max(self.tick_count + 2);
+                            }
+                            *ai = ai_local;
+                            continue;
                         }
-                        *ai = ai_local;
-                        continue;
                     }
                 }
             }
