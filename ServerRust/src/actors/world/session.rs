@@ -3146,6 +3146,18 @@ impl Message<ChatRequest> for WorldActor {
                             let cur = state.flags.get(&key).copied().unwrap_or(0);
                             state.flags.insert(key, if cur == 0 { 1 } else { 0 });
                             let _ = target.actor_ref.ask(SetPlayerState { state }).await;
+                            // 旗标任务进度（C# QuestFlagTask：按 flag 号置满）
+                            let updates = target.actor_ref.ask(crate::actors::player::ProcessFlagQuest {
+                                flag_number: flag,
+                            }).await.unwrap_or_default();
+                            for (quest_index, _, _) in &updates {
+                                if let Ok(Some(q)) = target.actor_ref.ask(crate::actors::player::GetQuest {
+                                    quest_index: *quest_index,
+                                }).await {
+                                    crate::actors::social_packets::send_quest_change_packet(
+                                        &self.gate_ref, target_sid, &q);
+                                }
+                            }
                             // 990-998 等级特效即时刷新
                             if (990..=998).contains(&flag) {
                                 if let Some(world_ref) = self.self_ref.clone() {

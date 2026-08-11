@@ -4317,6 +4317,19 @@ impl Message<ProcessKillQuest> for PlayerActor {
     }
 }
 
+/// 处理旗标设置（C# QuestFlagTask：SETFLAG 后置满旗标任务进度）
+pub struct ProcessFlagQuest {
+    pub flag_number: i32,
+}
+
+impl Message<ProcessFlagQuest> for PlayerActor {
+    type Reply = Vec<(i32, i32, bool)>;
+
+    async fn handle(&mut self, msg: ProcessFlagQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.process_flag(msg.flag_number)
+    }
+}
+
 /// 任务物品拾取（C# CheckNeedQuestItem）：活跃任务含该物品 ItemTask 且未完成 →
 /// 入背包 + 更新任务进度。返回是否拾取（背包满返回 false，掉落仍落地）。
 pub struct TryQuestItemPickup {
