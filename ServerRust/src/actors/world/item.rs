@@ -1324,10 +1324,120 @@ impl Message<UseItemRequest> for WorldActor {
                         send_system_message(&self.gate_ref, msg.session_id, "这本技能书无法使用");
                     }
                 }
-                // Pets（C# UseItem Pets：shape>=20 为智能宠物物品；shape<20（蛋）无效果但消耗）
+                // Pets（C# UseItem Pets：shape<20 宠物蛋，>=20 智能宠物道具；PlayerObject.cs:6118-6248）
                 t if t == 36 => {
-                    if db.shape >= 20 {
-                        send_system_message(&self.gate_ref, msg.session_id, "智能宠物功能暂未开放");
+                    use mir2_shared::enums::Stat;
+                    use crate::combat::buff::{BuffType, BuffInstance};
+                    use crate::actors::creature::{CreatureType, IntelligentCreature};
+                    let get_added = |stat: Stat| user_item.as_ref()
+                        .map(|u| u.added_stats.get(stat))
+                        .unwrap_or(0);
+                    let ticks = (db.durability.max(1) as u32).saturating_mul(600);
+                    match db.shape {
+                        // 宠物蛋（C# :6228-6248）：未拥有且 <10 只 → 加入拥有列表
+                        0..=19 => {
+                            let creature_type = CreatureType::from(db.shape as u8);
+                            let mut log = player_state.creature_log;
+                            if log.owned_creatures.len() >= 10
+                                || log.owned_creatures.iter().any(|c| c.creature_type == creature_type) {
+                                send_system_message(&self.gate_ref, msg.session_id, "已拥有该宠物或宠物栏已满");
+                                return;
+                            }
+                            log.owned_creatures.push(IntelligentCreature::new(creature_type));
+                            super::send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+                            let _ = record.actor_ref.ask(crate::actors::player::SetCreature { creature_log: log }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "获得新宠物！");
+                        }
+                        // 20 Mirror（C# :6123-6127）：启用重命名
+                        20 => {
+                            let pkt = mir2_shared::packets::server::special_systems::IntelligentCreatureEnableRename { can_rename: true };
+                            let mut body = Vec::new();
+                            if pkt.write_body(&mut std::io::Cursor::new(&mut body)).is_ok() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::IntelligentCreatureEnableRename as i16, &body),
+                                }).await;
+                            }
+                        }
+                        // 22 Nuts（C# :6138-6153）：MaintainfoodTime = Effect*Hour（Rust 无该字段，近似喂满）
+                        // 23 FairyMoss 等（C# :6154-6172）：IncreaseFullness(Effect*100)（0-10000 → Rust hunger 0-100 = Effect）
+                        // 24 WonderPill（C# :6173-6191）：Fullness==0 时 +100（=1%）
+                        22 | 23 | 24 => {
+                            let amount: u8 = match db.shape {
+                                22 => 100,
+                                23 => db.effect.max(1) as u8,
+                                _ => 1,
+                            };
+                            // C#：无召唤宠物 / WonderPill 饥饿非 0 时跳过动作，但物品仍消耗
+                            let should_feed = match db.shape {
+                                24 => player_state.creature_log.active_creature.as_ref().map(|c| c.hunger == 0).unwrap_or(false),
+                                _ => player_state.creature_log.active_creature.is_some(),
+                            };
+                            if should_feed {
+                                let _ = record.actor_ref.ask(crate::actors::player::FeedCreature { amount }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "宠物吃饱了！");
+                            }
+                        }
+                        // 26 Wonderdrug（C# :6203-6215）：AddedStats → 属性 buff，时长 Durability 分钟
+                        26 => {
+                            let mut applied = false;
+                            let apply = |bt: BuffType| {
+                                let rec = record.clone();
+                                async move {
+                                    let _ = rec.actor_ref.ask(crate::actors::player::ApplyBuff {
+                                        buff: BuffInstance::new(bt, ticks, 1),
+                                    }).await;
+                                }
+                            };
+                            let added_maxdc = get_added(Stat::MaxDC).max(get_added(Stat::MinDC));
+                            if added_maxdc > 0 { apply(BuffType::AttackBoost { bonus: added_maxdc }).await; applied = true; }
+                            let added_maxmc = get_added(Stat::MaxMC).max(get_added(Stat::MinMC));
+                            if added_maxmc > 0 { apply(BuffType::McBoost { bonus: added_maxmc }).await; applied = true; }
+                            let added_maxsc = get_added(Stat::MaxSC).max(get_added(Stat::MinSC));
+                            if added_maxsc > 0 { apply(BuffType::ScBoost { bonus: added_maxsc }).await; applied = true; }
+                            let added_as = get_added(Stat::AttackSpeed);
+                            if added_as > 0 { apply(BuffType::AttackSpeedBoost { percent: added_as }).await; applied = true; }
+                            let added_ac = get_added(Stat::MaxAC).max(get_added(Stat::MinAC));
+                            if added_ac > 0 { apply(BuffType::AcDefenseBoost { bonus: added_ac }).await; applied = true; }
+                            let added_mac = get_added(Stat::MaxMAC).max(get_added(Stat::MinMAC));
+                            if added_mac > 0 { apply(BuffType::MacDefenseBoost { bonus: added_mac }).await; applied = true; }
+                            let added_bw = get_added(Stat::BagWeight);
+                            if added_bw > 0 { apply(BuffType::BagWeightBoost { bonus: added_bw }).await; applied = true; }
+                            // C#：ExpRatePercent / ItemDropRatePercent（强箱产出的动态 WonderDrug）
+                            let exp_rate = get_added(Stat::ExpRatePercent);
+                            if exp_rate > 0 {
+                                let end_tick = self.tick_count + ticks as u64;
+                                let _ = record.actor_ref.ask(SetExpMultiplier { multiplier: 1.0 + exp_rate as f64 / 100.0, end_tick }).await;
+                                applied = true;
+                            }
+                            let drop_rate = get_added(Stat::ItemDropRatePercent);
+                            if drop_rate > 0 {
+                                let end_tick = self.tick_count + ticks as u64;
+                                let _ = record.actor_ref.ask(SetDropMultiplier { multiplier: 1.0 + drop_rate as f64 / 100.0, end_tick }).await;
+                                applied = true;
+                            }
+                            // C# HP/MP AddedStats 为 +MaxHP/+MaxMP（MaxHp/MaxMpBoost 未实现，跳过）
+                            debug!("Pets: {} used Wonderdrug added_stats applied={}", player_state.name, applied);
+                        }
+                        // 27 FortuneCookies（C# :6217-6218）：无效果但消耗
+                        27 => {
+                            debug!("Pets: {} used FortuneCookies (no effect)", player_state.name);
+                        }
+                        // 28 Knapsack（C# :6219-6224）：BagWeight = Luck，时长 Durability 分钟
+                        28 => {
+                            let luck = get_added(Stat::Luck)
+                                + db.stats.get(&(Stat::Luck as u8)).copied().unwrap_or(0);
+                            if luck > 0 {
+                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                                    buff: BuffInstance::new(BuffType::BagWeightBoost { bonus: luck }, ticks, 1),
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "背包负重上限提升！");
+                            }
+                        }
+                        // 21 BlackStone / 25 Strongbox：奖励表未实现（C# BlackstoneDrops/StrongboxDrops）
+                        _ => {
+                            send_system_message(&self.gate_ref, msg.session_id, "智能宠物功能暂未开放");
+                        }
                     }
                     debug!("Pets: {} used pets item shape={}", player_state.name, db.shape);
                 }

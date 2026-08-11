@@ -197,6 +197,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_restore_hunger_clamps() {
+        // C# IncreaseFullness：恢复饥饿值且封顶 100（Pets 食物 23/24 用）
+        let mut c = IntelligentCreature::new(CreatureType::BabyPanda);
+        c.hunger = 90;
+        c.restore_hunger(50);
+        assert_eq!(c.hunger, 100);
+        c.hunger = 0;
+        c.restore_hunger(1);
+        assert_eq!(c.hunger, 1);
+    }
+
+    #[test]
     fn test_creature_type_from() {
         assert_eq!(CreatureType::from(0u8), CreatureType::None);
         assert_eq!(CreatureType::from(1u8), CreatureType::BabyPanda);
