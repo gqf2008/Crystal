@@ -1717,11 +1717,11 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
             }
             NetworkEvent::ObjectDecoReceived {
                 object_id,
-                deco,
+                image,
                 remove,
             } => {
-                tracing::trace!("🎭 Object {} deco={} remove={}", object_id, deco, remove);
-                deco_updates.push((*object_id, *deco, *remove));
+                tracing::trace!("🎭 Object {} deco={} remove={}", object_id, image, remove);
+                deco_updates.push((*object_id, *image, *remove));
             }
             NetworkEvent::ObjectSneakingReceived {
                 object_id,
@@ -3514,7 +3514,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
     }
 
     // 对象装饰更新
-    for (object_id, deco, remove) in deco_updates {
+    for (object_id, image, remove) in deco_updates {
         if let Some(&e) = entity_index.get(&object_id) {
             if remove {
                 let _ = ctx
@@ -3524,7 +3524,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 NetworkApplySystem::upsert_component(
                     ctx,
                     e,
-                    crate::components::render::ObjectDeco { deco_id: deco },
+                    crate::components::render::ObjectDeco { deco_id: image as u16 },
                 );
             }
         }

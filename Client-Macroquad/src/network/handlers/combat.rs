@@ -721,14 +721,15 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectDeco::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectDecoReceived {
                         object_id: packet.object_id,
-                        deco: packet.deco,
-                        remove: packet.remove,
+                        image: packet.image,
+                        remove: false,
                     });
                     tracing::debug!(
-                        "🎭 ObjectDecoReceived: object={} deco={} remove={}",
+                        "🎭 ObjectDecoReceived: object={} loc=({},{}) image={}",
                         packet.object_id,
-                        packet.deco,
-                        packet.remove
+                        packet.location_x,
+                        packet.location_y,
+                        packet.image
                     );
                 }
             }

@@ -643,6 +643,8 @@ impl Message<StartGameRequest> for WorldActor {
         for flag in new_flags {
             self.conquest_flags.insert(flag.object_id, flag);
         }
+        // 装饰物同步（C# GetObjectsPassive 含 DecoObject）
+        self.sync_decos_on_map(msg.session_id, loaded_state.map_index).await;
         // M53：发送 NewMapInfo（大地图 NPC 列表，供 BigMapDialog 显示）
         let map_npcs: Vec<crate::actors::world::NpcState> = self.npcs.values()
             .filter(|n| n.map_index == loaded_state.map_index)
@@ -1204,6 +1206,8 @@ impl Message<WorldMoveRequest> for WorldActor {
                         for flag in new_flags {
                             self.conquest_flags.insert(flag.object_id, flag);
                         }
+                        // 装饰物同步（C# GetObjectsPassive 含 DecoObject）
+                        self.sync_decos_on_map(msg.session_id, dest_map_index as u16).await;
                         let elite_broadcasts: Vec<String> = new_monsters.iter()
                             .filter(|m| m.rarity > 0).map(|m| m.name.clone()).collect();
                         for monster in new_monsters {
@@ -2168,7 +2172,7 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS" | "BACKUPPLAYER" | "ARCHIVEPLAYER" | "LOADPLAYER" | "RESTOREPLAYER") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "DECO" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS" | "BACKUPPLAYER" | "ARCHIVEPLAYER" | "LOADPLAYER" | "RESTOREPLAYER") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2966,6 +2970,36 @@ impl Message<ChatRequest> for WorldActor {
                                     send_system_message(&self.gate_ref, msg.session_id, "已退出观战模式");
                                 }
                             }
+                        }
+
+                        // @deco <image>（C# case "DECO"：GM 生成装饰物；C# 还允许 TestServer，Rust 仅 GM）
+                        "DECO" => {
+                            let image = parts.get(1).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+                            let state = match record.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let object_id = self.next_object_id;
+                            self.next_object_id += 1;
+                            self.deco_objects.insert(object_id, DecoObjectInfo {
+                                object_id,
+                                map_index: state.map_index,
+                                x: state.x,
+                                y: state.y,
+                                image,
+                            });
+                            // 发给自己（C# Enqueue GetInfo）
+                            let packet = build_object_deco_packet(object_id, state.x, state.y, image);
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: packet,
+                            }).await;
+                            // 广播同图 DataRange(16) 内其他玩家（C# Spawned → BroadcastInfo）
+                            self.broadcast_deco_on_map(
+                                object_id, state.x, state.y, image, state.map_index, Some(msg.session_id),
+                            ).await;
+                            send_system_message(&self.gate_ref, msg.session_id,
+                                &format!("已生成装饰物 Image={}（ID={}）", image, object_id));
                         }
 
                         // @changeclass [玩家] <职业>（C# case "CHANGECLASS"：GM 转职）
