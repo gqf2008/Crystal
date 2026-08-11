@@ -5571,9 +5571,9 @@ impl Message<Tick> for WorldActor {
                 let (pet_x, pet_y) = self.monsters.get(pid).map(|m| (m.x, m.y)).unwrap_or((0, 0));
                 let pet_stats = self.monsters.get(pid).map(|m| m.to_combat_stats()).unwrap_or_default();
                 if let Some(tm) = self.monsters.get_mut(tmid) {
-                    // #1982：C# 宠物 IsAttackTarget——石化/免疫/隐身怪不可被宠物攻击
-                    if !tm.behavior.is_attackable() {
-                        debug!("Pet #{} target monster {} not attackable, skip", pid, tmid);
+                    // #1982/#1984：C# 宠物 IsAttackTarget(MonsterObject)——石化/免疫/隐身/TownArcher 不可被宠物攻击
+                    if !tm.behavior.is_attackable_by_monster() {
+                        debug!("Pet #{} target monster {} not attackable by monster, skip", pid, tmid);
                         continue;
                     }
                     // #1768：宠物攻击按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中
@@ -5641,8 +5641,8 @@ impl Message<Tick> for WorldActor {
                     .map(|m| (m.x, m.y, m.direction))
                     .unwrap_or((0, 0, 0));
                 if let Some(tm) = self.monsters.get_mut(tmid) {
-                    // #1982：C# Attacked(MonsterObject) IsAttackTarget——石化/免疫/隐身怪不可被怪物攻击
-                    if !tm.behavior.is_attackable() {
+                    // #1982/#1984：C# Attacked(MonsterObject) IsAttackTarget(MonsterObject)——石化/免疫/隐身/TownArcher 不可被怪物攻击
+                    if !tm.behavior.is_attackable_by_monster() {
                         continue;
                     }
                     // #1768：怪物互伤按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中

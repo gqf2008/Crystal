@@ -27,6 +27,11 @@ impl TownArcherBehavior {
 }
 
 impl MonsterBehavior for TownArcherBehavior {
+    /// 不可被怪物攻击（C# TownArcher.cs IsAttackTarget(MonsterObject)=false）；玩家可攻击
+    fn is_attackable_by_monster(&self) -> bool {
+        false
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if ctx.tick_count < monster.next_attack_tick {
             return;

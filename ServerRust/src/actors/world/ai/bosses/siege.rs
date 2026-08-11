@@ -17,6 +17,10 @@ impl SiegeBehavior {
 }
 
 impl MonsterBehavior for SiegeBehavior {
+    /// 不可被怪物攻击（C# Siege.cs IsAttackTarget(MonsterObject)=false）；玩家可攻击
+    fn is_attackable_by_monster(&self) -> bool {
+        false
+    }
     fn can_move(&self) -> bool {
         false
     }
