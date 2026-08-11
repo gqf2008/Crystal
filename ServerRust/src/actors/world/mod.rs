@@ -3459,6 +3459,15 @@ impl WorldActor {
                                     send_system_message(&self.gate_ref, session_id, "任务不存在");
                                     continue;
                                 };
+                                // #2014：C# AcceptQuest——当前对话 NPC 需可接该任务（数据驱动：未关联时放行）
+                                if self.quest_has_npc_link(quest_index, false)
+                                    && !(npc.db_index > 0 && self.npc_infos.get(&npc.db_index)
+                                        .map(|n| n.collect_quest_indexes.contains(&quest_index))
+                                        .unwrap_or(false))
+                                {
+                                    send_system_message(&self.gate_ref, session_id, "该 NPC 无法接取此任务");
+                                    continue;
+                                }
                                 // Check level
                                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                                     if state.level < quest_db.required_min_level as u16 {
@@ -3494,6 +3503,15 @@ impl WorldActor {
                         let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         if quest_index > 0 {
                             if let Some(record) = self.players.get(&session_id) {
+                                // #2014：C# FinishQuest——当前对话 NPC 需可交该任务（数据驱动：未关联时放行）
+                                if self.quest_has_npc_link(quest_index, true)
+                                    && !(npc.db_index > 0 && self.npc_infos.get(&npc.db_index)
+                                        .map(|n| n.finish_quest_indexes.contains(&quest_index))
+                                        .unwrap_or(false))
+                                {
+                                    send_system_message(&self.gate_ref, session_id, "该 NPC 无法交付此任务");
+                                    continue;
+                                }
                                 // #2002：C# FinishQuest——交任务前检查背包空间（CanGainItems → 拒绝）
                                 if let Some(quest_db) = self.quest_infos.get(&quest_index) {
                                     if !quest_db.fixed_rewards.is_empty() {
