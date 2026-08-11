@@ -614,6 +614,25 @@ impl Message<NpcGuildGoldChange> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 给指定行会增加金币（C# PurchaseGuildTerritory 卖家收款，:10502）
+pub struct NpcGuildGoldGive {
+    pub guild_name: String,
+    pub amount: u32,
+}
+
+impl Message<NpcGuildGoldGive> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcGuildGoldGive, _ctx: &mut Context<Self, Self::Reply>) {
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return };
+        let add = (msg.amount as u64).min((u32::MAX as u64).saturating_sub(guild.gold.min(u32::MAX as u64)));
+        guild.gold += add;
+        self.save_guild_to_db(&msg.guild_name).await;
+        self.broadcast_guild_info(&msg.guild_name).await;
+        debug!("NPC GuildGoldGive: {} +{}", msg.guild_name, add);
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 强制离婚（对齐 C# ActionType.ForceDivorce：NPCDivorce）
 pub struct NpcForceDivorce {
     pub session_id: u64,
