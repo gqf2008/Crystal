@@ -2232,6 +2232,16 @@ impl Message<GroupInviteRequest> for SocialActor {
             }
         }
 
+        // #2028：C# GroupMaxMembers——邀请者所在组已满时提前拒绝（避免对方接受后 add_member 失败）
+        if let Some(gid) = inviter_state.group_id {
+            if let Some(group) = self.groups.get(&gid) {
+                if group.member_count() >= crate::actors::group::MAX_GROUP_SIZE {
+                    send_system_message(&self.gate_ref, msg.session_id, "你的队伍已满，无法再邀请");
+                    return;
+                }
+            }
+        }
+
         // 发送邀请给目标玩家
         send_group_invite_packet(&self.gate_ref, target_session, &inviter_state.name, msg.session_id);
         // 记录待处理邀请

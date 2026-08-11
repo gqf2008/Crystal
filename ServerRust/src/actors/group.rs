@@ -1,8 +1,8 @@
 // Group/Party system - 组队数据结构
 // 纯数据结构，由 WorldActor 调用
 
-/// 组队最大成员数
-pub const MAX_GROUP_SIZE: usize = 5;
+/// 组队最大成员数（C# Globals.MaxGroup = 15）
+pub const MAX_GROUP_SIZE: usize = 15;
 
 /// 组队模式（掉落分配）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,15 +189,16 @@ mod tests {
 
     #[test]
     fn test_max_group_size() {
+        // #2028：C# Globals.MaxGroup = 15
         let leader = make_member(1, true);
         let mut group = Group::new(100, leader);
-        for i in 2..=5 {
+        for i in 2..=15 {
             assert!(group.add_member(make_member(i, false)));
         }
-        assert_eq!(group.member_count(), 5);
-        // 第 6 个应该失败
-        assert!(!group.add_member(make_member(6, false)));
-        assert_eq!(group.member_count(), 5);
+        assert_eq!(group.member_count(), 15);
+        // 第 16 个应该失败
+        assert!(!group.add_member(make_member(16, false)));
+        assert_eq!(group.member_count(), 15);
     }
 
     #[test]
