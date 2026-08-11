@@ -35,6 +35,12 @@ impl Message<NPCCallRequest> for WorldActor {
         }
         let player_pos = (player_state.x, player_state.y);
 
+        // C# MirConnection.cs:1508-1511：ObjectID = uint.MaxValue → 默认 NPC [@_Client]
+        if msg.npc_object_id == u32::MAX {
+            self.queue_default_npc(msg.session_id, "_client");
+            return;
+        }
+
         // 查找对应的 NPC
         let npc = match self.npcs.get(&msg.npc_object_id) {
             Some(n) => n.clone(),

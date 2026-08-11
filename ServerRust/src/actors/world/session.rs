@@ -1693,6 +1693,11 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
+                // 默认 NPC 自定义命令（C# PlayerObject.cs:4151-4156：Envir.CustomCommands，玩家可用无 GM 门槛）
+                if self.custom_commands.iter().any(|c| *c == cmd) {
+                    self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
+                    return;
+                }
                 if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
