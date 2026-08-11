@@ -96,9 +96,12 @@ impl QuestLog {
         true
     }
 
-    /// 完成任务
+    /// 完成任务（C# FinishQuest：`quest.Completed` 门控——进度未满不可交）
     pub fn complete_quest(&mut self, quest_index: i32) -> Option<QuestInstance> {
         if let Some(idx) = self.quests.iter().position(|q| q.quest_index == quest_index) {
+            if !self.quests[idx].is_progress_complete() {
+                return None;
+            }
             let mut quest = self.quests.remove(idx);
             quest.status = QuestStatus::Completed;
             self.completed_indices.push(quest_index);
@@ -155,6 +158,27 @@ impl QuestLog {
         }
         updated
     }
+
+    /// 处理旗标设置：为所有需要该旗标号的活跃任务置满进度（C# QuestFlagTask）
+    /// 返回更新的任务列表: (quest_index, progress_id, is_complete)
+    pub fn process_flag(&mut self, flag_number: i32) -> Vec<(i32, i32, bool)> {
+        let mut updated = Vec::new();
+        for quest in &mut self.quests {
+            let mut changed = false;
+            for p in &mut quest.progress {
+                if p.progress_id == flag_number && p.current < p.target {
+                    p.current = p.target; // 旗标任务为布尔置位
+                    changed = true;
+                    break;
+                }
+            }
+            if changed {
+                let complete = quest.is_progress_complete();
+                updated.push((quest.quest_index, flag_number, complete));
+            }
+        }
+        updated
+    }
 }
 
 #[cfg(test)]
@@ -192,7 +216,11 @@ mod tests {
     fn test_complete_quest() {
         let mut log = QuestLog::new();
         log.accept_quest(make_quest(1));
+        // C# FinishQuest：quest.Completed 门控——进度未满拒绝
+        assert!(log.complete_quest(1).is_none());
 
+        // 进度满 → 完成
+        log.update_quest_progress(1, 1, 10);
         let quest = log.complete_quest(1).unwrap();
         assert_eq!(quest.status, QuestStatus::Completed);
         assert_eq!(log.quests.len(), 0);
@@ -232,5 +260,24 @@ mod tests {
 
         quest.update_progress(1, 10);
         assert!(quest.is_progress_complete());
+    }
+
+    #[test]
+    fn test_process_flag() {
+        // 旗标任务：progress_id=flag 号，SETFLAG 后置满（C# QuestFlagTask）
+        let mut quest = make_quest(1);
+        quest.progress = vec![
+            QuestProgress { progress_id: 5, current: 0, target: 1 },
+        ];
+        let mut log = QuestLog::new();
+        log.accept_quest(quest);
+        // 无关旗标号不推进
+        assert!(log.process_flag(4).is_empty());
+        let updates = log.process_flag(5);
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].2); // complete
+        assert!(log.get_quest(1).unwrap().is_progress_complete());
+        // 已完成任务再设置无变化
+        assert!(log.process_flag(5).is_empty());
     }
 }

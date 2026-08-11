@@ -4242,8 +4242,24 @@ impl WorldActor {
                         if !key.is_empty() {
                             if let Some(record) = self.players.get(&session_id) {
                                 if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
-                                    state.flags.insert(key, value);
+                                    state.flags.insert(key.clone(), value);
                                     let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                    // 旗标任务进度（C# QuestFlagTask：按 flag 号置满）
+                                    let flag_number = key.strip_prefix("NPC_FLAG_").unwrap_or(&key)
+                                        .parse::<i32>().ok();
+                                    if let Some(flag_number) = flag_number {
+                                        let updates = record.actor_ref.ask(crate::actors::player::ProcessFlagQuest {
+                                            flag_number,
+                                        }).await.unwrap_or_default();
+                                        for (quest_index, _, _) in &updates {
+                                            if let Ok(Some(q)) = record.actor_ref.ask(crate::actors::player::GetQuest {
+                                                quest_index: *quest_index,
+                                            }).await {
+                                                crate::actors::social_packets::send_quest_change_packet(
+                                                    &self.gate_ref, session_id, &q);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
