@@ -8,12 +8,59 @@ pub struct MarketSearchRequest {
     pub session_id: u64,
     /// 搜索关键字（C# MarketSearch.Match：名称子串；纯数字兼容按编号）
     pub keyword: String,
+    /// C# MarketSearch.Type（ItemType C# 原始值；0=不过滤）
+    pub item_type: u8,
+    /// C# MarketSearch.Usermode（只看自己寄售）
+    pub user_mode: bool,
+    /// C# MarketSearch.MinShape（形状下限；0=不过滤）
+    pub min_shape: i16,
+    /// C# MarketSearch.MaxShape（形状上限；0=不过滤）
+    pub max_shape: i16,
+    /// C# MarketSearch.MarketType（MarketPanelType C# 原始值：0=Market 1=Consign 2=Auction；0=不过滤）
+    pub market_type: u8,
+}
+
+/// C# MarketSearch 过滤（ClientPackets.MarketSearch）：类型/形状范围/市场面板/用户模式
+/// item_type/shape 为 C# ItemType 原始值（DB）；auction_market_type 为内部 0=Consign 1=Auction
+fn market_search_matches(
+    filter_item_type: u8,
+    user_mode: bool,
+    min_shape: i16,
+    max_shape: i16,
+    filter_market_type: u8,
+    seller_name: &str,
+    self_name: &str,
+    auction_item_type: u8,
+    auction_shape: i16,
+    auction_market_type: u8,
+) -> bool {
+    if user_mode && seller_name != self_name {
+        return false;
+    }
+    if filter_item_type != 0 && auction_item_type != filter_item_type {
+        return false;
+    }
+    if min_shape > 0 && auction_shape < min_shape {
+        return false;
+    }
+    if max_shape > 0 && auction_shape > max_shape {
+        return false;
+    }
+    match filter_market_type {
+        1 => { if auction_market_type != 0 { return false; } } // Consign
+        2 => { if auction_market_type != 1 { return false; } } // Auction
+        _ => {} // Market/其他：不过滤
+    }
+    true
 }
 
 impl Message<MarketSearchRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketSearchRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("MarketSearch: session={} kw={}", msg.session_id, msg.keyword);
+
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         // Collect indices of unsold auctions matching criteria（C# MarketSearch：名称 Contains + 编号兼容）
         let kw = msg.keyword.trim().to_lowercase();
@@ -33,6 +80,24 @@ impl Message<MarketSearchRequest> for WorldActor {
                 if !name.contains(&kw) && !by_index {
                     continue;
                 }
+            }
+            // C# MarketSearch 过滤字段（类型/形状/市场面板/用户模式）
+            let item_info = self.item_infos.get(&auction.item.item_index);
+            let auction_item_type = item_info.map(|i| i.item_type as u8).unwrap_or(0);
+            let auction_shape = item_info.map(|i| i.shape as i16).unwrap_or(0);
+            if !market_search_matches(
+                msg.item_type,
+                msg.user_mode,
+                msg.min_shape,
+                msg.max_shape,
+                msg.market_type,
+                &auction.seller_name,
+                &state.name,
+                auction_item_type,
+                auction_shape,
+                auction.item_type,
+            ) {
+                continue;
             }
             results.push(idx);
         }
@@ -1351,5 +1416,26 @@ mod tests {
         assert!(auction_bid_validate(1000, 1000, 1001).is_ok(), "高于当前价应通过");
         assert!(auction_bid_validate(1000, 2000, 1500).is_err(), "低于当前价应拒绝");
         assert!(auction_bid_validate(1000, 2000, 2001).is_ok());
+    }
+
+    /// #2198：C# MarketSearch 过滤字段（类型/形状/市场面板/用户模式）
+    #[test]
+    fn market_search_filters_match_csharp() {
+        // 默认：全部通过
+        assert!(market_search_matches(0, false, 0, 0, 0, "A", "B", 0, 0, 0));
+        // 类型过滤（C# ItemType 原始值：Weapon=1）
+        assert!(market_search_matches(1, false, 0, 0, 0, "A", "B", 1, 0, 0));
+        assert!(!market_search_matches(1, false, 0, 0, 0, "A", "B", 2, 0, 0));
+        // 形状范围
+        assert!(market_search_matches(0, false, 10, 20, 0, "A", "B", 0, 15, 0));
+        assert!(!market_search_matches(0, false, 10, 20, 0, "A", "B", 0, 9, 0));
+        assert!(!market_search_matches(0, false, 10, 20, 0, "A", "B", 0, 21, 0));
+        // 市场面板：1=Consign 2=Auction（内部 0=Consign 1=Auction）
+        assert!(market_search_matches(0, false, 0, 0, 1, "A", "B", 0, 0, 0));
+        assert!(!market_search_matches(0, false, 0, 0, 1, "A", "B", 0, 0, 1));
+        assert!(market_search_matches(0, false, 0, 0, 2, "A", "B", 0, 0, 1));
+        // 用户模式：只看自己寄售
+        assert!(market_search_matches(0, true, 0, 0, 0, "A", "A", 0, 0, 0));
+        assert!(!market_search_matches(0, true, 0, 0, 0, "A", "B", 0, 0, 0));
     }
 }
