@@ -4064,6 +4064,27 @@ impl Message<MarriageRequest> for SocialActor {
             return;
         }
 
+        // C# MarriageRequest（:13140-13144）：离婚冷却（MarriedDate.AddDays(MarriageCooldown=7) > Now）
+        const MARRIAGE_COOLDOWN_DAYS: i64 = 7;
+        if requester_state.married_date > 0 {
+            let now_unix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if now_unix < requester_state.married_date + MARRIAGE_COOLDOWN_DAYS * 86_400 {
+                send_system_message(&self.gate_ref, msg.session_id,
+                    &format!("离婚后 {} 天内无法再次结婚", MARRIAGE_COOLDOWN_DAYS));
+                return;
+            }
+        }
+        // C# MarriageRequest（:13146-13150）：等级要求（Settings.MarriageLevelRequired=10）
+        const MARRIAGE_LEVEL_REQUIRED: u16 = 10;
+        if requester_state.level < MARRIAGE_LEVEL_REQUIRED {
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("需要达到 {} 级才能结婚", MARRIAGE_LEVEL_REQUIRED));
+            return;
+        }
+
         // 查找目标玩家
         let target_session = match self.find_player_by_name(&msg.target_name, msg.session_id).await {
             Some(sid) => sid,
@@ -4150,6 +4171,16 @@ impl Message<MarriageReply> for SocialActor {
         };
 
         // #1329：结婚写入同一时刻（C# Info.MarriedDate = Envir.Now，unix 秒）
+        // C# MarriageReply（:13253-13265）：双方已婚复检（邀请等待期间可能已结婚）
+        if replier_state.spouse_name.is_some() {
+            send_system_message(&self.gate_ref, replier_session, "你已经结婚了");
+            return;
+        }
+        if requester_state.spouse_name.is_some() {
+            send_system_message(&self.gate_ref, replier_session, &format!("{} 已经结婚了", requester_state.name));
+            return;
+        }
+
         let married_date = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -4238,24 +4269,28 @@ impl Message<SocialDivorceReply> for SocialActor {
             return;
         }
 
-        // 双方解除婚姻关系
+        // 双方解除婚姻关系（C# DivorceReply :13378-13387：MarriedDate = Envir.Now = 离婚冷却起点）
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
         let spouse_name = replier_state.spouse_name.clone();
-        let _ = replier_record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
+        let _ = replier_record.ask(SetSpouse { spouse_name: None, married_date: now_unix }).await;
 
         // 通知前配偶
         if let Some(ref name) = spouse_name {
             if let Some(target_session) = self.find_player_by_name(name, msg.session_id).await {
                 if let Some(target_record) = self.players.get(&target_session) {
-                    let _ = target_record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
+                    let _ = target_record.ask(SetSpouse { spouse_name: None, married_date: now_unix }).await;
                     send_system_message(&self.gate_ref, target_session, "你已离婚");
                     // M49：前配偶状态同步（原实现只更新确认方）
-                    send_lover_update_packet(&self.gate_ref, target_session, "", 0, "", 0);
+                    send_lover_update_packet(&self.gate_ref, target_session, "", now_unix, "", 0);
                 }
             }
         }
 
         send_system_message(&self.gate_ref, msg.session_id, "离婚成功");
-        send_lover_update_packet(&self.gate_ref, msg.session_id, "", 0, "", 0);
+        send_lover_update_packet(&self.gate_ref, msg.session_id, "", now_unix, "", 0);
         debug!("DivorceReply: {} divorced", replier_state.name);
     }
 }
