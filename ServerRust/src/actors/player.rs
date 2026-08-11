@@ -5261,6 +5261,19 @@ impl Message<CanGainItems> for PlayerActor {
     }
 }
 
+/// C# CanGainItems：检查一批物品能否放入背包（空格或叠入已有堆叠）
+pub struct CanGainItemsFor {
+    pub items: Vec<mir2_shared::data::item::UserItem>,
+}
+
+impl Message<CanGainItemsFor> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: CanGainItemsFor, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.can_gain_items_for(&msg.items)
+    }
+}
+
 /// 检查能否获得金币（是否超过上限）
 pub struct CanGainGold {
     pub amount: u32,

@@ -1489,7 +1489,10 @@ impl SocialActor {
         // A 能否接收 B 的物品和金币
         let a_can_receive = match self.players.get(&s1) {
             Some(rec) => {
-                let items_ok = items_b.is_empty() || rec.ask(CanGainItems).await.unwrap_or(false);
+                let incoming_b: Vec<mir2_shared::data::item::UserItem> =
+                    items_b.iter().filter_map(|t| t.item_data.clone()).collect();
+                let items_ok = incoming_b.is_empty()
+                    || rec.ask(crate::actors::player::CanGainItemsFor { items: incoming_b }).await.unwrap_or(false);
                 let gold_ok = gold_b == 0 || rec.ask(CanGainGold { amount: (gold_b as u32).min(u32::MAX) }).await.unwrap_or(false);
                 items_ok && gold_ok
             }
@@ -1498,7 +1501,10 @@ impl SocialActor {
         // B 能否接收 A 的物品和金币
         let b_can_receive = match self.players.get(&s2) {
             Some(rec) => {
-                let items_ok = items_a.is_empty() || rec.ask(CanGainItems).await.unwrap_or(false);
+                let incoming_a: Vec<mir2_shared::data::item::UserItem> =
+                    items_a.iter().filter_map(|t| t.item_data.clone()).collect();
+                let items_ok = incoming_a.is_empty()
+                    || rec.ask(crate::actors::player::CanGainItemsFor { items: incoming_a }).await.unwrap_or(false);
                 let gold_ok = gold_a == 0 || rec.ask(CanGainGold { amount: (gold_a as u32).min(u32::MAX) }).await.unwrap_or(false);
                 items_ok && gold_ok
             }
