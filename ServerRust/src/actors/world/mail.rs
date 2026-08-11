@@ -79,6 +79,18 @@ impl Message<SendMailRequest> for WorldActor {
             Ok(Some(s)) => s, _ => return,
         };
 
+        // #2044：C# SendMail（11674-11683）——10s 发信冷却（NextMailTime，防刷信）
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(last) = self.last_mail_time.get(&msg.session_id).copied() {
+            if now_ms - last < 10_000 {
+                send_system_message(&self.gate_ref, msg.session_id, "发送邮件过于频繁，请稍后再试");
+                return;
+            }
+        }
+
         if msg.receiver_name == sender_state.name {
             send_system_message(&self.gate_ref, msg.session_id, "不能给自己发送邮件");
             return;
@@ -91,6 +103,40 @@ impl Message<SendMailRequest> for WorldActor {
         }
         if !db::character_exists_by_name(&self.db_pool, &msg.receiver_name).await.unwrap_or(false) {
             send_system_message(&self.gate_ref, msg.session_id, "找不到该玩家");
+            return;
+        }
+
+        // #2044：C# RecipientsMailboxFull——收件箱 >50 拒绝（在线用 state，离线查 DB）
+        let mut recipient_mail_count = 0usize;
+        let mut recipient_online = false;
+        for (_, r) in &self.players {
+            if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                if st.name == msg.receiver_name {
+                    recipient_mail_count = st.mailbox.inbox.len();
+                    recipient_online = true;
+                    break;
+                }
+            }
+        }
+        if !recipient_online {
+            recipient_mail_count = db::load_mail(&self.db_pool, &msg.receiver_name).await
+                .map(|m| m.inbox.len()).unwrap_or(0);
+        }
+        if recipient_mail_count > 50 {
+            send_system_message(&self.gate_ref, msg.session_id, "对方邮箱已满");
+            return;
+        }
+        // #2044：C# CannotMailPlayerOnBlacklist——发送者拉黑收件人
+        if sender_state.friend_list.is_blocked_name(&msg.receiver_name) {
+            send_system_message(&self.gate_ref, msg.session_id, "你已将该玩家加入黑名单，无法发送");
+            return;
+        }
+        // #2044：C# PlayerNotAcceptingMail——收件人拉黑发送者
+        let receiver_blocked = db::load_friends(&self.db_pool, &msg.receiver_name).await
+            .map(|fl| fl.is_blocked(sender_state.object_id))
+            .unwrap_or(false);
+        if receiver_blocked {
+            send_system_message(&self.gate_ref, msg.session_id, "对方不接受你的邮件");
             return;
         }
 
@@ -197,6 +243,7 @@ impl Message<SendMailRequest> for WorldActor {
             debug!("Mail saved offline: {} -> {}", sender_state.name, msg.receiver_name);
         }
 
+        self.last_mail_time.insert(msg.session_id, now_ms);
         send_system_message(&self.gate_ref, msg.session_id, "邮件已发送");
     }
 }

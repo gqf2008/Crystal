@@ -84,6 +84,12 @@ impl FriendList {
     pub fn is_blocked(&self, object_id: u32) -> bool {
         self.blocked.iter().any(|b| b.object_id == object_id)
     }
+
+    /// 是否已拉黑（按名称，忽略大小写；离线收件人 object_id 不可得时用）
+    pub fn is_blocked_name(&self, name: &str) -> bool {
+        let n = name.to_lowercase();
+        self.blocked.iter().any(|b| b.name.to_lowercase() == n)
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +132,15 @@ mod tests {
         assert!(list.is_blocked(2001));
         assert!(list.remove_blocked(2001));
         assert!(!list.is_blocked(2001));
+    }
+
+    #[test]
+    fn test_blocked_by_name_case_insensitive() {
+        let mut list = FriendList::new();
+        list.add_blocked(2001, "Enemy".into());
+        assert!(list.is_blocked_name("Enemy"));
+        assert!(list.is_blocked_name("enemy"));
+        assert!(list.is_blocked_name("ENEMY"));
+        assert!(!list.is_blocked_name("Friend"));
     }
 }
