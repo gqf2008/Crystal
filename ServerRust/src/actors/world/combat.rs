@@ -480,6 +480,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                         monster.set_last_hitter(msg.session_id);
                         self.pending_gather.push(msg.session_id);
                     }
+                    // #1990：C# MonsterObject.Attacked:2641-2648 HPDrain——玩家吸血
+                    if attack_result.hp_drain > 0 {
+                        if let Some(r) = self.players.get(&msg.session_id) {
+                            let _ = r.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.hp_drain }).await;
+                        }
+                    }
                     monster.provoked = true;
                     // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（Target == null 才设置）
                     if monster.target_session.is_none() {
@@ -706,6 +712,13 @@ impl Message<WorldAttackRequest> for WorldActor {
                             sm.take_damage(splash_dmg);
                             sm.set_last_hitter(msg.session_id);
                             self.pending_gather.push(msg.session_id);
+                            // #1990：C# 溅射命中同样经 Attacked → HPDrain（按溅射净伤害近似）
+                            let drain = ((splash_dmg as f32 * state.hp_drain_rate_percent as f32 / 100.0).floor() as i32).max(0);
+                            if drain > 0 {
+                                if let Some(r) = self.players.get(&msg.session_id) {
+                                    let _ = r.actor_ref.ask(crate::actors::player::Heal { amount: drain }).await;
+                                }
+                            }
                             sm.provoked = true;
                             // C# MonsterObject.Attacked：仅当无目标时锁定攻击者
                             if sm.target_session.is_none() {
