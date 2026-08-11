@@ -836,6 +836,11 @@ impl Message<DefaultNpcEvent> for WorldActor {
     }
 }
 
+/// C# PlayerObject.Process（:506-511）：仓库扩容是否已到期（纯逻辑）
+fn storage_expiry_passed(has_expanded: bool, expiry: i64, now_unix: i64) -> bool {
+    has_expanded && expiry > 0 && now_unix > expiry
+}
+
 impl WorldActor {
 
     /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。
@@ -939,7 +944,77 @@ impl WorldActor {
         }
     }
 
-    /// S.SpellToggle 下发（body：[object_id u32][spell u8][can_use u8]，spell 用 C# 号；
+    /// C# PlayerObject.Process（:506-511）：仓库扩容到期 → 禁用 + 通知 + S.ResizeStorage(HasExpandedStorage=false) + DB 持久化
+async fn tick_storage_expiry(&mut self) {
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut expired: Vec<(u64, String, u32)> = Vec::new();
+    for (sid, record) in &self.players {
+        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+            if storage_expiry_passed(st.has_expanded_storage, st.expanded_storage_expiry_date, now_unix) {
+                let len = st.inventory.storage.len() as u32;
+                let mut ns = st.clone();
+                ns.has_expanded_storage = false;
+                ns.expanded_storage_expiry_date = 0;
+                let _ = record.actor_ref.ask(SetPlayerState { state: ns }).await;
+                expired.push((*sid, record.account_username.clone(), len));
+            }
+        }
+    }
+    for (sid, username, len) in expired {
+        send_system_message(&self.gate_ref, sid, "仓库扩容已到期");
+        let resize = mir2_shared::packets::server::ui_events::ResizeStorage {
+            size: len as i32,
+            has_expanded_storage: false,
+            expiry_time: 0,
+        };
+        let mut body = Vec::new();
+        if resize.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: sid,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeStorage as i16, &body),
+            }).await;
+        }
+        if let Err(e) = db::update_account_storage_expansion(&self.db_pool, &username, false, 0).await {
+            warn!("Failed to persist storage expansion expiry for {}: {}", username, e);
+        }
+    }
+}
+
+/// C# PlayerObject.Process（:519-529）/ CheckGroupValidityOnMap（:9573-9585）：RequiredGroup 地图组员不足 → 强制离开（传送到绑定点）
+async fn tick_required_group(&mut self) {
+    let mut to_remove: Vec<(u64, i32, i32, i32)> = Vec::new();
+    for (sid, record) in &self.players {
+        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+            if st.is_gm || st.is_dead { continue; }
+            let Some(mi) = self.map_infos.get(&(st.map_index as i32)).cloned() else { continue };
+            if !mi.required_group { continue; }
+            let required = 2.max(mi.required_group_size);
+            let have = if st.group_id.is_some() { self.group_member_count(*sid).await } else { 0 };
+            if (have as i32) < required {
+                to_remove.push((*sid, st.bind_map_index, st.bind_x, st.bind_y));
+            }
+        }
+    }
+    for (sid, bm, bx, by) in to_remove {
+        send_system_message(&self.gate_ref, sid, "你不再满足该地图的组队要求，已传送离开");
+        // C# ForceLeaveGroupRequiredMap：LastValidMap/Bind 回退；Rust 用绑定点（无效则仅提示）
+        if bm > 0 {
+            crate::actors::world::npc_script::teleport_player(self, sid, bm as u16, bx, by).await;
+        }
+    }
+}
+
+/// C# PlayerObject.Process 周期条件（每 5 tick）：扩容到期 + RequiredGroup 停留强制
+pub(crate) async fn tick_player_conditions(&mut self) {
+    if self.tick_count % 5 != 0 { return; }
+    self.tick_storage_expiry().await;
+    self.tick_required_group().await;
+}
+
+/// S.SpellToggle 下发（body：[object_id u32][spell u8][can_use u8]，spell 用 C# 号；
     /// 与登录下发 magic.spell / C# S.SpellToggle 一致）
     pub(crate) async fn send_spell_toggle(&self, session_id: u64, object_id: u32, spell_cs: u8, can_use: bool) {
         let mut body = Vec::new();
@@ -7188,6 +7263,7 @@ impl Message<Tick> for WorldActor {
 
         self.tick_pk_decay().await;
         self.tick_rested().await;
+        self.tick_player_conditions().await;
 
         self.tick_fishing().await;
 
@@ -7265,9 +7341,19 @@ mod tests {
         slow_adjusted_ticks, monster_control_blocked, combined_poison_flags,
         PARTY_EXP_RATE,
         cell_has_blocking_object,
+        storage_expiry_passed,
     };
 
     #[test]
+    #[test]
+    fn storage_expiry_passed_matches_csharp_process() {
+        // C# PlayerObject.Process :506：HasExpandedStorage && Now > ExpiryDate → 到期
+        assert!(!storage_expiry_passed(false, 1000, 2000));
+        assert!(!storage_expiry_passed(true, 0, 2000));
+        assert!(!storage_expiry_passed(true, 2000, 2000)); // 边界：相等未到期（C# > 严格）
+        assert!(storage_expiry_passed(true, 2000, 2001));
+    }
+
     fn cell_has_blocking_object_matches_csharp_checkstacked() {
         // C# MapObject.CheckStacked：同格存在 NPC/怪物/玩家任一即重叠
         let npcs = [(5, 5), (10, 10)];
