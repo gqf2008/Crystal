@@ -979,6 +979,21 @@ pub struct BuybackItem {
     pub npc_object_id: u32,
 }
 
+/// BlackStone/Strongbox 奖励表条目（C# DropInfo.FromLine：Chance + 物品 index）
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RewardDrop {
+    /// 分母（C# DropInfo.Chance；Random(0, Chance)）
+    pub chance: u32,
+    pub item_index: i32,
+}
+
+/// 奖励表类型（C# Settings.BlackstoneDropFilename / StrongboxDropFilename）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RewardDropKind {
+    Blackstone,
+    Strongbox,
+}
+
 /// 钓鱼掉落条目（C# DropInfo，Type = FishingAttribute；Chance 为分母，`1/4500` → 4500）
 #[derive(Debug, Clone)]
 pub(crate) struct FishingDropInfo {
@@ -1211,6 +1226,9 @@ pub struct WorldActor {
     pub(crate) pending_mine_effects: Vec<PendingMineEffect>,
     /// #2108：可采集怪物尸体（C# HarvestMonster 死亡保留，玩家 Harvest 采集）
     pub(crate) corpses: std::collections::HashMap<u32, CorpseState>,
+    /// #2112：BlackStone/Strongbox 奖励表（懒加载；None=未加载）
+    pub(crate) blackstone_drops: Option<Vec<RewardDrop>>,
+    pub(crate) strongbox_drops: Option<Vec<RewardDrop>>,
     /// #1659：每个玩家上次聊天时间（ms，防刷屏广播）
     pub(crate) last_chat_ms: std::collections::HashMap<u64, i64>,
     /// #1269：每个玩家上次攻击时间（ms；C# AttackTime = Envir.Time + AttackSpeed）
@@ -1589,6 +1607,8 @@ impl WorldActor {
         last_harvest_ms: std::collections::HashMap::new(),
         pending_mine_effects: Vec::new(),
         corpses: std::collections::HashMap::new(),
+        blackstone_drops: None,
+        strongbox_drops: None,
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
@@ -2616,6 +2636,101 @@ impl WorldActor {
             }
         }
         false
+    }
+
+    /// #2112：懒加载 BlackStone/Strongbox 奖励表（C# Settings.BlackstoneDropFilename/StrongboxDropFilename）
+    pub(crate) fn load_reward_drops(&mut self, kind: RewardDropKind) -> Vec<RewardDrop> {
+        let (field, file_name) = match kind {
+            RewardDropKind::Blackstone => (&mut self.blackstone_drops, "00Blackstone.txt"),
+            RewardDropKind::Strongbox => (&mut self.strongbox_drops, "00Strongbox.txt"),
+        };
+        if let Some(ref drops) = *field {
+            return drops.clone();
+        }
+        let mut drops = Vec::new();
+        let item_name_index: std::collections::HashMap<String, i32> = self.item_infos.iter()
+            .map(|(idx, info)| (info.name.to_lowercase(), *idx))
+            .collect();
+        let path = self.map_dir.join("Envir").join("Drops").join(file_name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+                let Some(slash) = parts[0].find('/') else { continue };
+                let Ok(chance) = parts[0][slash + 1..].parse::<u32>() else { continue };
+                let Some(&item_index) = item_name_index.get(&parts[1].to_lowercase()) else {
+                    warn!("Reward drop item '{}' not found in item infos", parts[1]);
+                    continue;
+                };
+                drops.push(RewardDrop { chance, item_index });
+            }
+        }
+        *field = Some(drops.clone());
+        drops
+    }
+
+    /// C# BlackstoneRewardItem（:12323-12342）：最小 rate 掉落 → 背包空间校验 → GainItem
+    pub(crate) async fn blackstone_reward(&mut self, session_id: u64, drops: Vec<RewardDrop>) {
+        let rolls: Vec<i32> = drops.iter().map(|d| fastrand::i32(0..d.chance.max(1) as i32)).collect();
+        let Some(item_index) = pick_lowest_rate_drop(&drops, self.drop_rate, &rolls) else { return };
+        let Some(record) = self.players.get(&session_id) else { return };
+        let can = record.actor_ref.ask(crate::actors::player::CanGainItems).await.unwrap_or(false);
+        if !can {
+            send_system_message(&self.gate_ref, session_id, "背包已满");
+            return;
+        }
+        let mut item = mir2_shared::data::item::UserItem {
+            item_index,
+            unique_id: generate_item_uid(),
+            count: 1,
+            ..Default::default()
+        };
+        if let Some(info) = self.item_infos.get(&item_index) {
+            item.max_dura = info.durability as u16;
+            item.current_dura = info.durability as u16;
+        }
+        enrich_item_info(&mut item, &self.item_infos);
+        let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+    }
+
+    /// C# StrongboxRewardItem（:12284-12342）：同上 + 动态 WonderDrug（Pets shape 26）按 boxtype 加成
+    pub(crate) async fn strongbox_reward(&mut self, session_id: u64, boxtype: u8, drops: Vec<RewardDrop>) {
+        let rolls: Vec<i32> = drops.iter().map(|d| fastrand::i32(0..d.chance.max(1) as i32)).collect();
+        let Some(item_index) = pick_lowest_rate_drop(&drops, self.drop_rate, &rolls) else {
+            send_system_message(&self.gate_ref, session_id, "什么也没找到");
+            return;
+        };
+        let Some(info) = self.item_infos.get(&item_index).cloned() else { return };
+        let mut item = mir2_shared::data::item::UserItem {
+            item_index,
+            unique_id: generate_item_uid(),
+            count: 1,
+            ..Default::default()
+        };
+        if info.item_type == 36 /* C# ItemType.Pets */ && info.shape == 26 {
+            // C# CreateDynamicWonderDrug：CurrentDura=1 + AddedStats 按 Effect×boxtype
+            item.current_dura = 1;
+            for (stat, value) in dynamic_wonderdrug_stats(info.effect as u8, boxtype) {
+                item.added_stats.set(stat, value);
+            }
+        } else {
+            item.max_dura = info.durability as u16;
+            item.current_dura = info.durability as u16;
+        }
+        enrich_item_info(&mut item, &self.item_infos);
+        let Some(record) = self.players.get(&session_id) else { return };
+        let can = record.actor_ref.ask(crate::actors::player::CanGainItems).await.unwrap_or(false);
+        if !can {
+            send_system_message(&self.gate_ref, session_id, "背包已满");
+            return;
+        }
+        let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
     }
 
     pub(crate) async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
@@ -4956,6 +5071,8 @@ Ok(Self {
         last_harvest_ms: std::collections::HashMap::new(),
         pending_mine_effects: Vec::new(),
         corpses: std::collections::HashMap::new(),
+        blackstone_drops: None,
+        strongbox_drops: None,
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
@@ -5012,6 +5129,36 @@ fn default_conquest_instances() -> Vec<conquest::ConquestInstance> {
 
 /// 从 `Drops/00Fishing.txt` 加载钓鱼掉落表（C# Envir.cs：FishingDropFilename="00Fishing"，
 /// 前缀替换为 00..18 → Type=文件序号；行格式 `1/4500 MossyBox` → Chance=4500）
+/// C# BlackstoneRewardItem/StrongboxRewardItem：rate = Random(0,Chance)/DropRate（min 1），取最小 rate（首个平局）
+pub(crate) fn pick_lowest_rate_drop(drops: &[RewardDrop], drop_rate: f64, rolls: &[i32]) -> Option<i32> {
+    let mut best: Option<(i32, i32)> = None;
+    for (i, drop) in drops.iter().enumerate() {
+        let roll = rolls.get(i).copied().unwrap_or(0).max(0);
+        let raw = (roll as f64 / drop_rate.max(0.001)) as i32;
+        let rate = raw.max(1);
+        if best.map(|(br, _)| rate < br).unwrap_or(true) {
+            best = Some((rate, drop.item_index));
+        }
+    }
+    best.map(|(_, idx)| idx)
+}
+
+/// C# CreateDynamicWonderDrug（:12345-12388）：Effect 0-6 → EXP/DROP/HP/MP/AC/MAC/A.SPEED，按 boxtype 分档
+pub(crate) fn dynamic_wonderdrug_stats(effect: u8, boxtype: u8) -> Vec<(mir2_shared::enums::Stat, i32)> {
+    use mir2_shared::enums::Stat;
+    let tier = if boxtype > 1 { 2 } else if boxtype > 0 { 1 } else { 0 };
+    match effect {
+        0 => vec![(Stat::ExpRatePercent, [5, 10, 20][tier as usize])],
+        1 => vec![(Stat::ItemDropRatePercent, [10, 20, 50][tier as usize])],
+        2 => vec![(Stat::HP, [50, 100, 200][tier as usize])],
+        3 => vec![(Stat::MP, [50, 100, 200][tier as usize])],
+        4 => vec![(Stat::MaxAC, [1, 3, 5][tier as usize])],
+        5 => vec![(Stat::MaxMAC, [1, 3, 5][tier as usize])],
+        6 => vec![(Stat::AttackSpeed, [2, 3, 4][tier as usize])],
+        _ => Vec::new(),
+    }
+}
+
 fn load_fishing_drops(drop_dir: &Path, item_name_index: &HashMap<String, i32>) -> Vec<FishingDropInfo> {
     let mut out = Vec::new();
     for i in 0..19u8 {
@@ -7841,6 +7988,38 @@ fn should_despawn_boss(tick_count: u64, despawn_tick: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pick_lowest_rate_drop() {
+        // C# BlackstoneRewardItem：rate = Random(0,Chance)/DropRate（min 1），取最小 rate（首个平局）
+        let drops = vec![
+            RewardDrop { chance: 100, item_index: 1 },
+            RewardDrop { chance: 100, item_index: 2 },
+            RewardDrop { chance: 10, item_index: 3 },
+        ];
+        assert_eq!(pick_lowest_rate_drop(&drops, 1.0, &[50, 50, 1]), Some(3));
+        assert_eq!(pick_lowest_rate_drop(&drops, 1.0, &[90, 10, 9]), Some(3));
+        assert_eq!(pick_lowest_rate_drop(&drops, 1.0, &[20, 20, 20]), Some(1)); // 平局首个
+        assert_eq!(pick_lowest_rate_drop(&[], 1.0, &[]), None);
+        // DropRate=2：roll 10 → rate 5
+        assert_eq!(pick_lowest_rate_drop(&drops, 2.0, &[10, 50, 50]), Some(1));
+    }
+
+    #[test]
+    fn test_dynamic_wonderdrug_stats() {
+        use mir2_shared::enums::Stat;
+        // C# CreateDynamicWonderDrug：Effect 0-6 × boxtype 低/中/高
+        assert_eq!(dynamic_wonderdrug_stats(0, 0), vec![(Stat::ExpRatePercent, 5)]);
+        assert_eq!(dynamic_wonderdrug_stats(0, 1), vec![(Stat::ExpRatePercent, 10)]);
+        assert_eq!(dynamic_wonderdrug_stats(0, 2), vec![(Stat::ExpRatePercent, 20)]);
+        assert_eq!(dynamic_wonderdrug_stats(1, 2), vec![(Stat::ItemDropRatePercent, 50)]);
+        assert_eq!(dynamic_wonderdrug_stats(2, 0), vec![(Stat::HP, 50)]);
+        assert_eq!(dynamic_wonderdrug_stats(3, 1), vec![(Stat::MP, 100)]);
+        assert_eq!(dynamic_wonderdrug_stats(4, 2), vec![(Stat::MaxAC, 5)]);
+        assert_eq!(dynamic_wonderdrug_stats(5, 0), vec![(Stat::MaxMAC, 1)]);
+        assert_eq!(dynamic_wonderdrug_stats(6, 1), vec![(Stat::AttackSpeed, 3)]);
+        assert!(dynamic_wonderdrug_stats(7, 2).is_empty());
+    }
 
     #[test]
     fn test_multiplier_paused_in_safe() {
