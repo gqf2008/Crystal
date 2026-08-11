@@ -80,6 +80,12 @@ impl FriendList {
         self.friends.iter().any(|f| f.object_id == object_id)
     }
 
+    /// 是否已好友（按名称，忽略大小写；离线添加的条目 object_id 为名字哈希，需按名查重）
+    pub fn is_friend_name(&self, name: &str) -> bool {
+        let n = name.to_lowercase();
+        self.friends.iter().any(|f| f.name.to_lowercase() == n)
+    }
+
     /// 是否已拉黑
     pub fn is_blocked(&self, object_id: u32) -> bool {
         self.blocked.iter().any(|b| b.object_id == object_id)
@@ -90,6 +96,30 @@ impl FriendList {
         let n = name.to_lowercase();
         self.blocked.iter().any(|b| b.name.to_lowercase() == n)
     }
+}
+
+/// 离线添加好友/黑名单的稳定 object_id（近似 C# CharacterInfo.Index：
+/// 客户端用它做唯一标识/移除/备注；离线时运行时 object_id 不可得，用名字 FNV-1a 哈希，
+/// 上线后由 SocialActor 校正为运行时 ID）
+pub fn friend_id_from_name(name: &str) -> u32 {
+    let mut hash: u32 = 0x811c9dc5;
+    for b in name.to_lowercase().bytes() {
+        hash ^= b as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    if hash == 0 { 1 } else { hash }
+}
+
+/// 好友在线判定：object_id 命中在线列表，或名字忽略大小写命中在线名字列表
+/// （离线添加的好友 object_id 为名字哈希，上线后尚未校正时也能正确显示在线）
+pub fn friend_is_online(
+    object_id: u32,
+    name: &str,
+    online_object_ids: &[u32],
+    online_names: &[String],
+) -> bool {
+    online_object_ids.contains(&object_id)
+        || online_names.iter().any(|n| n.eq_ignore_ascii_case(name))
 }
 
 #[cfg(test)]
@@ -142,5 +172,35 @@ mod tests {
         assert!(list.is_blocked_name("enemy"));
         assert!(list.is_blocked_name("ENEMY"));
         assert!(!list.is_blocked_name("Friend"));
+    }
+
+    #[test]
+    fn test_friend_id_from_name_stable_and_case_insensitive() {
+        // 大小写不同 → 同一稳定 id；非零
+        assert_eq!(super::friend_id_from_name("Alice"), super::friend_id_from_name("alice"));
+        assert_eq!(super::friend_id_from_name("Alice"), super::friend_id_from_name("ALICE"));
+        assert_ne!(super::friend_id_from_name("Alice"), 0);
+        // 不同名字大概率不同
+        assert_ne!(super::friend_id_from_name("Alice"), super::friend_id_from_name("Bob"));
+    }
+
+    #[test]
+    fn test_is_friend_name_case_insensitive() {
+        let mut list = FriendList::new();
+        list.add_friend(1001, "Alice".into());
+        assert!(list.is_friend_name("Alice"));
+        assert!(list.is_friend_name("alice"));
+        assert!(list.is_friend_name("ALICE"));
+        assert!(!list.is_friend_name("Bob"));
+    }
+
+    #[test]
+    fn test_friend_is_online_by_id_or_name() {
+        let ids = vec![1001u32, 1002];
+        let names = vec!["Online".to_string()];
+        assert!(super::friend_is_online(1001, "X", &ids, &names));
+        assert!(super::friend_is_online(0, "ONLINE", &ids, &names));
+        assert!(!super::friend_is_online(0, "Offline", &ids, &names));
+        assert!(!super::friend_is_online(9999, "X", &ids, &names));
     }
 }
