@@ -2594,8 +2594,12 @@ impl Message<TradeAddItem> for SocialActor {
             None => return,
         };
 
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
         // C# CanTradeItem：BindMode.DontTrade(0x10) 物品不可交易
-        if let Ok(Some(state)) = record.ask(GetPlayerState).await {
+        {
             let infos = self.config.item_infos.read().await;
             let bind = state.inventory.get_item(msg.unique_id)
                 .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
@@ -2607,7 +2611,13 @@ impl Message<TradeAddItem> for SocialActor {
         }
 
         // #923：C# TradeItem——放入交易即从背包移除并锁定（防交易中消耗/重复放入）
-        let removed = record.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.ok().flatten();
+        // #2006：部分堆叠按数量拆分（C# 原堆扣减 count、剩余保留）；全叠/非堆叠整件移除
+        let full_count = state.inventory.get_item(msg.unique_id).map(|it| it.count).unwrap_or(0);
+        let removed = if msg.count > 0 && msg.count < full_count {
+            record.ask(crate::actors::player::RemoveItemFromInventoryCount { unique_id: msg.unique_id, count: msg.count }).await.ok().flatten()
+        } else {
+            record.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.ok().flatten()
+        };
         let Some(item_data) = removed else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
