@@ -1425,6 +1425,7 @@ async fn exec_action(
                         npc_object_id: npc_oid,
                         section: "main".to_string(),
                         target_db_index: Some(script_id),
+                        teleport: None,
                     },
                 );
                 debug!("NPC CALL: script {} [@MAIN] queued", script_id);
@@ -2153,16 +2154,22 @@ async fn exec_action(
         "PARAM3" => {
             flow.param3 = arg0().parse::<i32>().unwrap_or(0);
         }
-        // TIMERECALL <秒> [section] —— 延迟执行当前 NPC 脚本段（对齐 C# ActionType.TimeRecall + DelayedAction）
+        // TIMERECALL <秒> [section] —— 延迟传送回下达命令时的位置 + 可选执行脚本段
+        // （对齐 C# ActionType.TimeRecall + DelayedAction + CompleteNPC data.Count==5）
         "TIMERECALL" => {
             let secs = arg0().parse::<i64>().unwrap_or(0).max(0);
-            let section = if arg1().is_empty() { "main".to_string() } else { arg1().to_string() };
+            // C#：无 section 参数 → page=""（到点仅传送，不执行脚本段）
+            let section = arg1().to_string();
             if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
+                // C#：记录下达命令时玩家当前地图/坐标，到点先传送
+                let teleport = current_player_state(world, session_id).await
+                    .map(|st| (st.map_index, st.x, st.y));
                 world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None },
+                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None, teleport },
                 );
-                debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {})", session_id, section, secs, expire_tick);
+                debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {}) teleport={:?}",
+                    session_id, section, secs, expire_tick, teleport);
             } else {
                 warn!("NPC TIMERECALL: no current NPC for session {}", session_id);
             }
@@ -2170,7 +2177,8 @@ async fn exec_action(
         // TIMERECALLGROUP <秒> [section] —— 给所有组员注册延迟执行（对齐 C# ActionType.TimeRecallGroup）
         "TIMERECALLGROUP" => {
             let secs = arg0().parse::<i64>().unwrap_or(0).max(0);
-            let section = if arg1().is_empty() { "main".to_string() } else { arg1().to_string() };
+            // C#：无 section 参数 → page=""（到点仅传送，不执行脚本段）
+            let section = arg1().to_string();
             if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let Some(st) = current_player_state(world, session_id).await else { return };
                 let gid = st.group_id;
@@ -2185,8 +2193,11 @@ async fn exec_action(
                 }
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 for sid in &targets {
+                    // C#：每位组员记录自己当前地图/坐标，到点各自传送
+                    let teleport = current_player_state(world, *sid).await
+                        .map(|os| (os.map_index, os.x, os.y));
                     world.npc_delayed_actions.entry(*sid).or_default().push(
-                        crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None },
+                        crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None, teleport },
                     );
                 }
                 debug!("NPC TIMERECALLGROUP: {} players section='{}' in {}s", targets.len(), section, secs);
@@ -2206,7 +2217,7 @@ async fn exec_action(
             } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section, target_db_index: None },
+                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section, target_db_index: None, teleport: None },
                 );
             }
         }
@@ -2277,7 +2288,7 @@ async fn exec_action(
                     let expire_tick = world.tick_count;
                     for sid in &targets {
                         world.npc_delayed_actions.entry(*sid).or_default().push(
-                            crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None },
+                            crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None, teleport: None },
                         );
                     }
                     debug!("NPC GROUPGOTO: {} players section='{}'", targets.len(), section);

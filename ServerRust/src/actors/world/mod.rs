@@ -195,6 +195,13 @@ pub struct DelayedNpcAction {
     pub section: String,
     /// CALL 目标：直接指定脚本 db_index（覆盖 npc_object_id 查到的 db_index）
     pub target_db_index: Option<i32>,
+    /// 到点先传送回下达命令时的地图/坐标（C# CompleteNPC data.Count==5：Teleport 先于脚本调用）
+    pub teleport: Option<(u16, i32, i32)>,
+}
+
+/// C# CompleteNPC：page.Length > 0 才调用脚本段；否则（TIMERECALL 无 section）仅传送
+pub(crate) fn delayed_npc_page_present(section: &str) -> bool {
+    !section.is_empty()
 }
 
 /// 地图刷怪配置
@@ -4181,29 +4188,38 @@ impl WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::SetHair { hair }).await;
                         }
                     }
-                    // TIMERECALL <秒> [section]：延迟执行当前 NPC 脚本段（对齐 C# ActionType.TimeRecall + DelayedAction DelayedType.NPC）
+                    // TIMERECALL <秒> [section]：延迟传送回下达命令时的位置 + 可选执行脚本段
+                    // （对齐 C# ActionType.TimeRecall + DelayedAction DelayedType.NPC + CompleteNPC data.Count==5）
                     "TIMERECALL" => {
                         let secs = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        // C#：无 section 参数 → page=""（到点仅传送，不执行脚本段）
                         let section = parts.next()
                             .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| "main".to_string());
+                            .unwrap_or_default();
                         let expire_tick = self.tick_count.saturating_add(secs * 10);
+                        // C#：记录下达命令时玩家当前地图/坐标，到点先传送
+                        let teleport = if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                Some((st.map_index, st.x, st.y))
+                            } else { None }
+                        } else { None };
                         self.npc_delayed_actions.entry(session_id).or_default().push(DelayedNpcAction {
                             expire_tick,
                             npc_object_id: npc.object_id,
                             section: section.clone(),
                             target_db_index: None,
+                            teleport,
                         });
-                        debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {})", session_id, section, secs, expire_tick);
+                        debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {}) teleport={:?}",
+                            session_id, section, secs, expire_tick, teleport);
                     }
                     // TIMERECALLGROUP <秒> [section]：给所有组员注册延迟执行（对齐 C# ActionType.TimeRecallGroup）
                     "TIMERECALLGROUP" => {
                         let secs = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        // C#：无 section 参数 → page=""（到点仅传送，不执行脚本段）
                         let section = parts.next()
                             .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| "main".to_string());
+                            .unwrap_or_default();
                         let gid = if let Some(record) = self.players.get(&session_id) {
                             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                                 state.group_id
@@ -4222,11 +4238,18 @@ impl WorldActor {
                         }
                         let expire_tick = self.tick_count.saturating_add(secs * 10);
                         for sid in &targets {
+                            // C#：每位组员记录自己当前地图/坐标，到点各自传送
+                            let teleport = if let Some(record) = self.players.get(sid) {
+                                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                    Some((st.map_index, st.x, st.y))
+                                } else { None }
+                            } else { None };
                             self.npc_delayed_actions.entry(*sid).or_default().push(DelayedNpcAction {
                                 expire_tick,
                                 npc_object_id: npc.object_id,
                                 section: section.clone(),
                                 target_db_index: None,
+                                teleport,
                             });
                         }
                         debug!("NPC TIMERECALLGROUP: session={} targets={} section='{}' in {}s",
@@ -4246,6 +4269,7 @@ impl WorldActor {
                                     npc_object_id: npc.object_id,
                                     section: section.clone(),
                                     target_db_index: None,
+                                    teleport: None,
                                 });
                                 debug!("NPC DELAYGOTO: session={} section='{}' in {}s", session_id, section, secs);
                             }
@@ -5099,6 +5123,16 @@ impl WorldActor {
         }
         // 逐个执行
         for (session_id, act) in due {
+            // C# CompleteNPC：data.Count==5 时先 Teleport(map, coords) 再执行脚本段
+            if let Some((map_index, tx, ty)) = act.teleport {
+                npc_script::teleport_player(self, session_id, map_index, tx, ty).await;
+            }
+            // C# CompleteNPC：page 为空 → 仅传送，不调用脚本段（TIMERECALL 无 section 参数）
+            if !delayed_npc_page_present(&act.section) {
+                debug!("NPC delayed action (recall only): session={} npc={} teleport={:?}",
+                       session_id, act.npc_object_id, act.teleport);
+                continue;
+            }
             let Some(npc) = self.npcs.get(&act.npc_object_id).cloned() else { continue };
             // CALL 用 target_db_index 覆盖（目标脚本是另一个 NPC），否则用 npc.db_index
             let db_index = act.target_db_index.unwrap_or(npc.db_index);
@@ -7642,6 +7676,31 @@ fn should_despawn_boss(tick_count: u64, despawn_tick: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_delayed_npc_page_present() {
+        // C# CompleteNPC：page.Length > 0 才调用脚本段；TIMERECALL 无 section = 仅传送
+        assert!(!delayed_npc_page_present(""));
+        assert!(delayed_npc_page_present("main"));
+        assert!(delayed_npc_page_present("[@MAIN]"));
+        assert!(delayed_npc_page_present("_useitem(3)"));
+    }
+
+    #[test]
+    fn test_delayed_npc_recall_teleport_field() {
+        // C# CompleteNPC：data.Count==5 → 到点先 Teleport(map, coords) 再执行段
+        let act = DelayedNpcAction {
+            expire_tick: 100,
+            npc_object_id: 7,
+            section: String::new(),
+            target_db_index: None,
+            teleport: Some((5, 10, 20)),
+        };
+        assert!(act.teleport == Some((5, 10, 20)));
+        assert!(!delayed_npc_page_present(&act.section));
+        let act2 = DelayedNpcAction { teleport: None, ..act };
+        assert!(act2.teleport.is_none());
+    }
 
     #[test]
     fn test_upgrade_item_zero_chance_no_change() {
