@@ -131,6 +131,13 @@ enum ParseMode {
 // 解析器
 // =============================================================================
 
+/// 加载默认 NPC 脚本（C# Settings.DefaultNPCFilename="00Default"，位于 NPC 脚本目录；文件不存在 → None）
+pub fn load_default_npc(script_dir: &std::path::Path) -> Option<ParsedScript> {
+    let path = script_dir.join("00Default.txt");
+    let content = std::fs::read_to_string(path).ok()?;
+    Some(ParsedScript::parse(&content))
+}
+
 impl ParsedScript {
     /// 把整份脚本文本解析为 ParsedScript。
     ///
@@ -140,7 +147,7 @@ impl ParsedScript {
     /// - 其余非空行按当前模式分发为 check/action/say。
     /// - `#INSERT [path] @section`：仅记录日志，不真正加载外部文件
     ///   （文件包含需要 IO，调用方在需要时单独处理）。
-    pub fn parse(content: &str) -> ParsedScript {
+pub fn parse(content: &str) -> ParsedScript {
         let mut script = ParsedScript::default();
         let mut cur_sec: Option<usize> = None;
         let mut seg = Segment::default();
@@ -3282,6 +3289,17 @@ pub fn is_csharp_format(script_text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_npc_section_names_match_csharp() {
+        // C# CallDefaultNPC：[@_Login]/[@_UseItem(N)] 段名（Rust 归一化为小写）
+        let script = ParsedScript::parse("[@_Login]\n#SAY\nhi\n\n[@_UseItem(3)]\n#ACT\nBREAK\n");
+        assert!(script.find("_login").is_some());
+        assert!(script.find("_useitem(3)").is_some());
+        assert!(script.find("_die").is_none());
+        // 文件不存在 → None（默认关闭，无副作用）
+        assert!(load_default_npc(std::path::Path::new("C:/definitely/not/exist")).is_none());
+    }
 
     const SAMPLE: &str = r#"
 ; 注释行

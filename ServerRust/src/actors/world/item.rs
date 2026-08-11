@@ -613,6 +613,7 @@ impl Message<UseItemRequest> for WorldActor {
         let usable = item_type == 13 // Potion
             || item_type == 17 // Scroll
             || item_type == 20 // Book
+            || item_type == 21 // Script（C# ItemType.Script=21：CallDefaultNPC UseItem）
             || item_type == 27 // Food
             || item_type == 36 // Pets（C#：蛋/智能宠物物品使用后消耗）
             || item_type == 37 // Transform（C#：变身面具/卷轴）
@@ -1505,6 +1506,12 @@ impl Message<UseItemRequest> for WorldActor {
                     }
                     send_system_message(&self.gate_ref, msg.session_id,
                         &format!("英雄 {} 已从封印符中恢复", hero_name));
+                }
+                // Script（C# UseItem ItemType.Script=21：CallDefaultNPC(UseItem, shape) → [@_UseItem(shape)]）
+                t if t == 21 => {
+                    let section = format!("_useitem({})", db.shape);
+                    self.call_default_npc(msg.session_id, &section).await;
+                    debug!("ScriptItem: {} used script item shape={}", player_state.name, db.shape);
                 }
                 _ => {}
             }
