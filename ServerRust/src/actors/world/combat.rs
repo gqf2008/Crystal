@@ -3078,13 +3078,20 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Entrapment -> monster {} pulled {} tiles ({}s paralysis)",
                     state.name, mid, moved, duration);
             }
-            // ShoulderDash：野蛮冲撞（C# HumanObject.cs：只冲刺 2 格 + 推开路径上等级更低的目标 1 格，无伤害）
+            // ShoulderDash：野蛮冲撞（C# HumanObject.cs：dist=Random(2)+Lv+2，推开路径上等级更低的目标 1 格，无伤害）
             SPELL_SHOULDER_DASH => {
                 let dir = msg.direction as usize % 8;
+                // C# HumanObject.cs:5060：InTrapRock || !CanWalk 直接 return
+                if self.in_trap_rock.contains(&msg.session_id) {
+                    return;
+                }
+                // C#：dist = Random.Next(2) + magic.Level + 2
+                let dist = fastrand::i32(0..2) + spell_level as i32 + 2;
                 let mut new_x = state.x;
                 let mut new_y = state.y;
                 let mut pushed = 0usize;
-                for step in 0..2 {
+                let mut travelled = 0i32;
+                for _ in 0..dist {
                     let nx = new_x + MON_DIR_DX[dir];
                     let ny = new_y + MON_DIR_DY[dir];
                     let walkable = self.maps.get(&state.map_index)
@@ -3103,14 +3110,45 @@ impl Message<MagicRequest> for WorldActor {
                     }
                     new_x = nx;
                     new_y = ny;
-                    let _ = step;
+                    travelled += 1;
                 }
-                if new_x != state.x || new_y != state.y {
+                if travelled > 0 {
                     let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
                         x: new_x, y: new_y, direction: msg.direction,
                         map_index: None, is_mounted: None,
                     }).await;
                     self.broadcast_player_dash(msg.session_id, new_x, new_y, msg.direction).await;
+                } else {
+                    // C# HumanObject.ShoulderDash（:5130-5131）：未突进 → S.UserDashFail + ObjectDashFail
+                    let fail = mir2_shared::packets::server::combat::UserDashFail {
+                        location_x: state.x as u32,
+                        location_y: state.y as u32,
+                        direction: msg.direction,
+                    };
+                    let mut body = Vec::new();
+                    if fail.write_body(&mut body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserDashFail as i16, &body),
+                        }).await;
+                    }
+                    let ofail = mir2_shared::packets::server::combat::ObjectDashFail {
+                        object_id: state.object_id,
+                        location_x: state.x as u32,
+                        location_y: state.y as u32,
+                        direction: msg.direction,
+                    };
+                    let mut obody = Vec::new();
+                    if ofail.write_body(&mut obody).is_ok() {
+                        let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectDashFail as i16, &obody);
+                        broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &data).await;
+                    }
+                    let msg_text = if self.maps.get(&state.map_index).map(|m| m.is_safe_zone(state.x, state.y)).unwrap_or(false) {
+                        "安全区内无法冲撞".to_string()
+                    } else {
+                        "冲撞推力不足".to_string()
+                    };
+                    send_system_message(&self.gate_ref, msg.session_id, &msg_text);
                 }
                 debug!("Magic: {} casts ShoulderDash (dashed to {},{}, pushed {} monsters)",
                     state.name, new_x, new_y, pushed);
