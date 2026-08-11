@@ -1,5 +1,33 @@
 use super::*;
 
+impl WorldActor {
+    /// #2014：quest 是否已关联到任意 NPC（collect/finish 列表）；未关联（数据未配置）时不做 NPC 强制校验
+    pub(crate) fn quest_has_npc_link(&self, quest_index: i32, finish: bool) -> bool {
+        self.npc_infos.values().any(|info| {
+            if finish {
+                info.finish_quest_indexes.contains(&quest_index)
+            } else {
+                info.collect_quest_indexes.contains(&quest_index)
+            }
+        })
+    }
+
+    /// #2014：C# AcceptQuest/FinishQuest——同图 + DataRange(16) 内存在可接/可交该任务的 NPC
+    pub(crate) fn quest_npc_in_range(&self, player_map: u16, px: i32, py: i32, quest_index: i32, finish: bool) -> bool {
+        self.npcs.values().any(|npc| {
+            npc.map_index == player_map
+                && crate::actors::world::ai::max_distance(px, py, npc.x, npc.y) <= 16
+                && self.npc_infos.get(&npc.db_index)
+                    .map(|info| if finish {
+                        info.finish_quest_indexes.contains(&quest_index)
+                    } else {
+                        info.collect_quest_indexes.contains(&quest_index)
+                    })
+                    .unwrap_or(false)
+        })
+    }
+}
+
 /// 接受任务
 pub struct AcceptQuestRequest {
     pub session_id: u64,
@@ -34,6 +62,15 @@ impl Message<AcceptQuestRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "任务不存在");
             return;
         };
+
+        // #2014：C# AcceptQuest（11251-11264）——同图 DataRange(16) 内存在可接该任务的 NPC（数据驱动）
+        if self.quest_has_npc_link(msg.quest_index, false) {
+            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+            if !self.quest_npc_in_range(state.map_index, state.x, state.y, msg.quest_index, false) {
+                send_system_message(&self.gate_ref, msg.session_id, "请到对应 NPC 处接取任务");
+                return;
+            }
+        }
 
         // Check level requirement
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -110,6 +147,15 @@ impl Message<FinishQuestRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r, None => return,
         };
+
+        // #2014：C# FinishQuest（11350-11363）——同图 DataRange(16) 内存在可交该任务的 NPC（数据驱动）
+        if self.quest_has_npc_link(msg.quest_index, true) {
+            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+            if !self.quest_npc_in_range(state.map_index, state.x, state.y, msg.quest_index, true) {
+                send_system_message(&self.gate_ref, msg.session_id, "请到对应 NPC 处交付任务");
+                return;
+            }
+        }
 
         // #2002：C# FinishQuest——交任务前检查背包空间（CanGainItems → CannotHandInQuestBagFull）
         if let Some(quest_db) = self.quest_infos.get(&msg.quest_index) {
