@@ -41,6 +41,12 @@ impl Message<NPCCallRequest> for WorldActor {
             return;
         }
 
+        // C# MirConnection.cs:1502-1504：ObjectID == 默认 NPC 对象 ID → 默认 NPC 脚本（key 为页面名）
+        if msg.npc_object_id == self.default_npc_object_id {
+            self.queue_default_npc(msg.session_id, &msg.key);
+            return;
+        }
+
         // 查找对应的 NPC
         let npc = match self.npcs.get(&msg.npc_object_id) {
             Some(n) => n.clone(),
@@ -1842,6 +1848,8 @@ impl Message<OpendoorRequest> for WorldActor {
 pub struct NPCConfirmInputRequest {
     pub session_id: u64,
     pub npc_id: u32,
+    /// C# C.NPCConfirmInput.PageName（默认 NPC 路由用段名）
+    pub page_name: String,
     pub input_text: String,
 }
 
@@ -1851,7 +1859,13 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("NPCConfirmInput: {} npc_id={} input={}", state.name, msg.npc_id, msg.input_text);
+        debug!("NPCConfirmInput: {} npc_id={} page={} input={}", state.name, msg.npc_id, msg.page_name, msg.input_text);
+
+        // C# MirConnection.cs:2166-2168：NPCID == 默认 NPC 对象 ID → 默认 NPC 脚本（PageName 为段名）
+        if msg.npc_id == self.default_npc_object_id {
+            self.queue_default_npc(msg.session_id, &msg.page_name);
+            return;
+        }
 
         // Try to match input as a quest file_name for quick acceptance
         let npc = match self.npcs.get(&msg.npc_id) {
