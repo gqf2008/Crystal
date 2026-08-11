@@ -1483,6 +1483,7 @@ impl Message<PlayerDisconnected> for WorldActor {
         self.player_stacking.remove(&msg.session_id);
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
+        self.transform_appearance.remove(&msg.session_id);
 
         info!("Player removed from world (session={})", msg.session_id);
 
@@ -1589,6 +1590,7 @@ impl Message<PlayerLogOut> for WorldActor {
         self.player_stacking.remove(&msg.session_id);
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
+        self.transform_appearance.remove(&msg.session_id);
 
         // Clean up active rental sessions involving this player
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {

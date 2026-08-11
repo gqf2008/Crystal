@@ -1347,6 +1347,8 @@ pub struct WorldActor {
     pub(crate) sneaking_sessions: HashMap<u64, bool>,
     /// 困敌状态（session；C# TrapRock Target.InTrapRock：S.InTrapRock + 服务端禁走）
     pub(crate) in_trap_rock: HashSet<u64>,
+    /// 变身外观（session -> TransformType；C# HumanObject.TransformType，S.TransformUpdate 广播用）
+    pub(crate) transform_appearance: HashMap<u64, u8>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
@@ -1740,6 +1742,7 @@ impl WorldActor {
             tamed_pets: HashMap::new(),
             sneaking_sessions: HashMap::new(),
             in_trap_rock: HashSet::new(),
+            transform_appearance: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
@@ -2679,6 +2682,42 @@ impl WorldActor {
                 self.sneaking_sessions.insert(session_id, active);
                 self.broadcast_object_sneaking(st.object_id, active, st.map_index).await;
             }
+        }
+        // 变身外观同步（覆盖 buff 过期/移除回退；C# TransformUpdate）
+        let sessions: Vec<u64> = self.players.keys().copied().collect();
+        for session_id in sessions {
+            self.sync_transform_appearance(session_id).await;
+        }
+    }
+
+    /// 同步变身外观（C# HumanObject.cs:2348：TransformType 变化 → S.TransformUpdate 广播同图）
+    pub(crate) async fn sync_transform_appearance(&mut self, session_id: u64) {
+        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        // C#：TransformType = Transform buff Values[0]（无 buff = 0）
+        let transform_type: u8 = st.buffs.iter()
+            .find_map(|b| match b.buff_type {
+                crate::combat::buff::BuffType::Transform { shape } => Some(shape as u8),
+                _ => None,
+            })
+            .unwrap_or(0);
+        let prev = self.transform_appearance.get(&session_id).copied().unwrap_or(0);
+        if prev == transform_type {
+            return;
+        }
+        if transform_type == 0 {
+            self.transform_appearance.remove(&session_id);
+        } else {
+            self.transform_appearance.insert(session_id, transform_type);
+        }
+        let packet = mir2_shared::packets::server::social_system::TransformUpdate {
+            object_id: st.object_id,
+            transform_type,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::TransformUpdate as i16, &body);
+            broadcast_to_map(&self.gate_ref, &self.players, st.map_index, &data).await;
         }
     }
 
@@ -5474,6 +5513,7 @@ Ok(Self {
             tamed_pets: HashMap::new(),
             sneaking_sessions: HashMap::new(),
             in_trap_rock: HashSet::new(),
+            transform_appearance: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
