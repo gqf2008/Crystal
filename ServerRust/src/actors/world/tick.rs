@@ -2437,7 +2437,25 @@ pub(crate) async fn tick_player_conditions(&mut self) {
     }
 
     /// #2114：C# GuildInfo.HasGT（GTRent > Now）——领地租期到期释放归属
-    pub(crate) fn tick_gt_rent_expiry(&mut self) {
+    /// C# GuildObject.EndGT（:852-863）：把领地地图上的存活玩家传送回绑定点
+    pub(crate) async fn evict_gt_map_players(&mut self, map_index: u16) {
+        let mut to_evict: Vec<(u64, i32, i32, i32)> = Vec::new();
+        for (sid, record) in &self.players {
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                if st.map_index == map_index && !st.is_dead {
+                    to_evict.push((*sid, st.bind_map_index, st.bind_x, st.bind_y));
+                }
+            }
+        }
+        for (sid, bm, bx, by) in to_evict {
+            send_system_message(&self.gate_ref, sid, "领地已失效，你被传送回绑定点");
+            if bm > 0 {
+                crate::actors::world::npc_script::teleport_player(self, sid, bm as u16, bx, by).await;
+            }
+        }
+    }
+
+    pub(crate) async fn tick_gt_rent_expiry(&mut self) {
         let now = self.tick_count;
         let mut expired: Vec<usize> = Vec::new();
         for (i, c) in self.conquest_instances.iter().enumerate() {
@@ -2446,12 +2464,15 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             }
         }
         for i in expired {
+            let map_index = self.conquest_instances[i].map_index as u16;
             let inst = &mut self.conquest_instances[i];
             let guild = inst.owner_guild.take();
             inst.rent_expire_tick = 0;
             inst.for_sale = false;
             inst.sale_price = 0;
             debug!("Conquest #{} rent expired for guild {:?}", inst.id, guild);
+            // C# EndGT：踢出领地地图玩家（传送回绑定点）
+            self.evict_gt_map_players(map_index).await;
         }
     }
 
@@ -7441,7 +7462,7 @@ impl Message<Tick> for WorldActor {
         self.tick_monster_ownership_expiry().await;
         self.tick_mine_effects().await;
         self.tick_corpse_expiry().await;
-        self.tick_gt_rent_expiry();
+        self.tick_gt_rent_expiry().await;
         self.tick_rested().await;
         self.tick_player_conditions().await;
 

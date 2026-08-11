@@ -566,6 +566,7 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             }
         }
         // C# :10512-10522 买家获得领地（GTRent = Now + GTDays+1；EndGT 释放卖家）
+        let gt_map_index = self.conquest_instances[idx].map_index as u16;
         let inst = &mut self.conquest_instances[idx];
         inst.owner_guild = Some(guild_name.clone());
         inst.for_sale = false;
@@ -574,6 +575,8 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             + (self.conquest_cfg.gt_days as u64 + 1) * crate::actors::world::conquest::TICKS_PER_DAY;
         send_system_message(&self.gate_ref, msg.session_id,
             &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id));
+        // C# 卖家 EndGT（:10504）：踢出领地地图玩家（传送回绑定点）
+        self.evict_gt_map_players(gt_map_index).await;
     }
 }
 
