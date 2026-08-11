@@ -177,3 +177,29 @@ impl Packet for LoseCredit {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn gained_item_roundtrip() {
+        // C# ServerPackets.cs GainedItem：UserItem 完整序列化（GainItem 克隆原物品）
+        let mut item = UserItem::new(100);
+        item.unique_id = 12345;
+        item.count = 5;
+        item.current_dura = 10;
+        item.max_dura = 20;
+        let pkt = GainedItem { item };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cursor = Cursor::new(&buf);
+        let parsed = GainedItem::read_body(&mut cursor).unwrap();
+        assert_eq!(parsed.item.unique_id, 12345);
+        assert_eq!(parsed.item.item_index, 100);
+        assert_eq!(parsed.item.count, 5);
+        assert_eq!(parsed.item.current_dura, 10);
+        assert_eq!(parsed.item.max_dura, 20);
+    }
+}
