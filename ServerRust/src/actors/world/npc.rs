@@ -1421,6 +1421,19 @@ impl WorldActor {
                 }).await;
             }
         }
+        // C# TakeCredit（NPCSegment.cs:3304）：S.LoseCredit（客户端积分浮字，仅负向）
+        if delta < 0 {
+            let packet = mir2_shared::packets::server::drops::LoseCredit {
+                credit: (-delta).min(u32::MAX as i64) as u32,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseCredit as i16, &body),
+                }).await;
+            }
+        }
         debug!("NPC ChangeCredit: {} delta={} current={}", username, delta, current);
     }
 }
