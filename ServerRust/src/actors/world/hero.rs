@@ -511,6 +511,8 @@ const HERO_MELEE_RANGE: i32 = 1;
 const HERO_RANGED_RANGE: i32 = 7;
 /// 英雄自动喝药检查间隔（tick 数，C# AutoPotDelay=1000ms）
 const HERO_AUTOPOT_INTERVAL_TICKS: u64 = 10;
+/// C# HeroBehaviour.Attack = 0（#1198：0=Attack, 1=CounterAttack, 2=Follow, 3=Custom）
+const HERO_BEHAVIOUR_ATTACK: u8 = 0;
 
 /// 英雄自身增益类型（#1190：C# HumanObject 各职业 ProcessFriend 自增益）
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1487,6 +1489,7 @@ impl WorldActor {
                                 // 蓝不足：1 格内近战兜底
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
@@ -1531,6 +1534,7 @@ impl WorldActor {
                                     // 蓝不足：1 格内近战兜底
                                     let _ = hero_melee_fallback(
                                         snap.session_id, target.oid, target_dist,
+                                        snap.class, &snap.hero_magics, snap.behaviour,
                                         &hero_combat, &mut attack_intents, &mut support_intents,
                                     );
                                     ai_local.next_attack_tick = self.tick_count + 6;
@@ -1594,6 +1598,7 @@ impl WorldActor {
                                             // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
                                             let _ = hero_melee_fallback(
                                                 snap.session_id, target.oid, target_dist,
+                                                snap.class, &snap.hero_magics, snap.behaviour,
                                                 &hero_combat, &mut attack_intents, &mut support_intents,
                                             );
                                             ai_local.next_attack_tick = self.tick_count + 6;
@@ -1603,6 +1608,7 @@ impl WorldActor {
                                         // 未学任何弹道技能：近战兜底
                                         let _ = hero_melee_fallback(
                                             snap.session_id, target.oid, target_dist,
+                                            snap.class, &snap.hero_magics, snap.behaviour,
                                             &hero_combat, &mut attack_intents, &mut support_intents,
                                         );
                                         ai_local.next_attack_tick = self.tick_count + 6;
@@ -1667,6 +1673,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
@@ -1708,6 +1715,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
@@ -1733,6 +1741,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
@@ -1763,6 +1772,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
@@ -1770,6 +1780,7 @@ impl WorldActor {
                         } else {
                             let _ = hero_melee_fallback(
                                 snap.session_id, target.oid, target_dist,
+                                snap.class, &snap.hero_magics, snap.behaviour,
                                 &hero_combat, &mut attack_intents, &mut support_intents,
                             );
                             ai_local.next_attack_tick = self.tick_count + 10;
@@ -1822,6 +1833,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
@@ -1841,6 +1853,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
@@ -1889,6 +1902,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
+                                    snap.class, &snap.hero_magics, snap.behaviour,
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
@@ -1896,6 +1910,7 @@ impl WorldActor {
                         } else {
                             let _ = hero_melee_fallback(
                                 snap.session_id, target.oid, target_dist,
+                                snap.class, &snap.hero_magics, snap.behaviour,
                                 &hero_combat, &mut attack_intents, &mut support_intents,
                             );
                             ai_local.next_attack_tick = self.tick_count + 6;
@@ -3225,6 +3240,18 @@ fn hero_warrior_melee_skill(hero_magics: &[(i32, u8)]) -> Option<(mir2_shared::e
     None
 }
 
+/// C# Globals.RangedSpells（Shared/Globals.cs:52-68）：命中任一即远程英雄（HasRangedSpell）
+fn hero_has_ranged_spell(hero_magics: &[(i32, u8)]) -> bool {
+    use mir2_shared::enums::Spell;
+    const RANGED: &[Spell] = &[
+        Spell::FireBall, Spell::ThunderBolt, Spell::FireBang, Spell::FireWall,
+        Spell::FrostCrunch, Spell::Vampirism, Spell::FlameDisruptor, Spell::IceStorm,
+        Spell::MeteorStrike, Spell::Blizzard, Spell::SoulFireBall, Spell::StraightShot,
+        Spell::ElementalShot, Spell::PoisonShot,
+    ];
+    RANGED.iter().any(|s| hero_magic_level(hero_magics, *s as u8) > 0)
+}
+
 /// 英雄法术伤害（#1188：C# GetDamage = (DamageBase + GetPower()) * GetMultiplier()）
 /// DamageBase = 英雄自身 MC/SC 中值；Power/Multiplier 来自魔法表 + 实际等级。
 fn hero_spell_damage(
@@ -3256,13 +3283,25 @@ fn hero_melee_fallback(
     session_id: u64,
     target_oid: u32,
     target_dist: i32,
+    class: mir2_shared::enums::MirClass,
+    hero_magics: &[(i32, u8)],
+    behaviour: u8,
     combat: &crate::combat::attack::CombatStats,
     attack_intents: &mut Vec<(u64, u32, i32, mir2_shared::enums::DefenceType, bool)>,
     support_intents: &mut Vec<(u64, u64, u8, bool)>,
 ) -> bool {
-    if target_dist <= 1 {
+    // C# WizardHero/TaoistHero.ProcessTarget：近战需 !HasRangedSpell 或（Attack 行为 && dist==1）；
+    // 远程英雄（有 Globals.RangedSpells 技能）在其他行为下不近战（C# 返回/走位）。
+    // ArcherHero 近战条件不同（有职业武器即可近战），保持既有行为。
+    let may_melee = match class {
+        mir2_shared::enums::MirClass::Wizard | mir2_shared::enums::MirClass::Taoist =>
+            (!hero_has_ranged_spell(hero_magics) || behaviour == HERO_BEHAVIOUR_ATTACK) && target_dist <= 1,
+        _ => target_dist <= 1,
+    };
+    if may_melee {
         let mraw = hero_attack_power(combat);
-        attack_intents.push((session_id, target_oid, mraw, mir2_shared::enums::DefenceType::Ac, false));
+        // C# HumanObject.cs:3066 默认近战防御 ACAgility
+        attack_intents.push((session_id, target_oid, mraw, mir2_shared::enums::DefenceType::AcAgility, false));
         support_intents.push((session_id, 0, mir2_shared::enums::Spell::None as u8, false));
         true
     } else {
@@ -3607,6 +3646,21 @@ mod tests {
     }
 
     #[test]
+    fn hero_has_ranged_spell_detects_globals_ranged() {
+        use mir2_shared::enums::Spell;
+        let mk = |s: Spell, lv: u8| ((s as u8).saturating_sub(3) as i32, lv);
+        // 无技能 → 非远程
+        assert!(!hero_has_ranged_spell(&[]));
+        // 近战技能（Slaying）→ 非远程
+        assert!(!hero_has_ranged_spell(&[mk(Spell::Slaying, 1)]));
+        // 远程技能（FireBall / StraightShot）→ 远程
+        assert!(hero_has_ranged_spell(&[mk(Spell::FireBall, 1)]));
+        assert!(hero_has_ranged_spell(&[mk(Spell::StraightShot, 2)]));
+        // 混合（Slaying + SoulFireBall）
+        assert!(hero_has_ranged_spell(&[mk(Spell::Slaying, 1), mk(Spell::SoulFireBall, 1)]));
+    }
+
+    #[test]
     fn first_learned_spell_respects_priority() {
         use mir2_shared::enums::Spell;
         let magics = vec![
@@ -3651,27 +3705,37 @@ mod tests {
 
     #[test]
     fn hero_melee_fallback_only_at_range1() {
-        use mir2_shared::enums::DefenceType;
+        use mir2_shared::enums::{DefenceType, MirClass};
         let combat = crate::combat::attack::CombatStats {
             min_atk: 5,
             max_atk: 9,
             ..Default::default()
         };
-        let mut atk = Vec::new();
-        let mut sup = Vec::new();
-        let hit = hero_melee_fallback(1, 100, 1, &combat, &mut atk, &mut sup);
+        let mut atk: Vec<(u64, u32, i32, DefenceType, bool)> = Vec::new();
+        let mut sup: Vec<(u64, u64, u8, bool)> = Vec::new();
+        // 近战职业：dist<=1 命中，防御 ACAgility（C# HumanObject.cs:3066）
+        let hit = hero_melee_fallback(1, 100, 1, MirClass::Warrior, &[], HERO_BEHAVIOUR_ATTACK, &combat, &mut atk, &mut sup);
         assert!(hit);
         assert_eq!(atk.len(), 1);
         assert_eq!(atk[0].0, 1);
         assert_eq!(atk[0].1, 100);
         assert!((5..=9).contains(&atk[0].2), "damage out of range: {}", atk[0].2); // #1414：GetAttackPower 随机 5..9
-        assert_eq!(atk[0].3, DefenceType::Ac);
+        assert_eq!(atk[0].3, DefenceType::AcAgility);
         assert!(!atk[0].4);
         assert_eq!(sup.len(), 1);
         // 距离 2 不攻击
-        let hit2 = hero_melee_fallback(1, 100, 2, &combat, &mut atk, &mut sup);
+        let hit2 = hero_melee_fallback(1, 100, 2, MirClass::Warrior, &[], HERO_BEHAVIOUR_ATTACK, &combat, &mut atk, &mut sup);
         assert!(!hit2);
         assert_eq!(atk.len(), 1);
+        // 远程法师（已学 FireBall）+ CounterAttack 行为：dist1 也不近战（C# ProcessTarget 门控）
+        let magics = vec![((mir2_shared::enums::Spell::FireBall as u8).saturating_sub(3) as i32, 1u8)];
+        let hit3 = hero_melee_fallback(1, 100, 1, MirClass::Wizard, &magics, 1, &combat, &mut atk, &mut sup);
+        assert!(!hit3);
+        assert_eq!(atk.len(), 1);
+        // 远程法师 + Attack 行为：dist1 近战（C# Attack 行为豁免）
+        let hit4 = hero_melee_fallback(1, 100, 1, MirClass::Wizard, &magics, HERO_BEHAVIOUR_ATTACK, &combat, &mut atk, &mut sup);
+        assert!(hit4);
+        assert_eq!(atk.len(), 2);
     }
 
     #[test]
