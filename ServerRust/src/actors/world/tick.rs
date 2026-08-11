@@ -3893,6 +3893,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         // 1) 战争调度：开始/结束（每 tick 检查时间）
         //    先收集需要广播的消息，避免在借用 instance 时借用 gate_ref
         let mut messages: Vec<String> = Vec::new();
+        // 易主广播（领地 id, 行会, 地图）——循环结束后统一调用避免借用冲突
+        let mut owner_changes: Vec<(i32, String, i32)> = Vec::new();
 
         for instance in &mut self.conquest_instances {
             let now = chrono::Local::now().naive_local();
@@ -3915,6 +3917,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             if instance.state == conquest::WarState::InProgress {
                 let elapsed = chrono::Utc::now().timestamp() - instance.war_start_time;
                 if elapsed >= instance.war_duration_secs {
+                    // 易主广播需要旧 owner（C# WinGame 对新旧行会都 UpdatePlayers）
+                    let prev_owner = instance.owner_guild.clone();
                     // 战争结束：根据模式判定胜者
                     let winner = match instance.game {
                         conquest::ConquestGame::ControlPoints => {
@@ -3936,6 +3940,13 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     }
                     if let Some(ref g) = winner {
                         messages.push(format!("🏰 攻城战结束！{} 取得了区域 #{} 的控制权！", g, instance.id));
+                        // 易主广播：旗子外观 + 行会名（新 owner；旧 owner 不同则一并更新）
+                        owner_changes.push((instance.id, g.clone(), instance.map_index));
+                        if let Some(ref p) = prev_owner {
+                            if p != g {
+                                owner_changes.push((instance.id, p.clone(), instance.map_index));
+                            }
+                        }
                     } else {
                         messages.push(format!("🏰 攻城战结束！区域 #{} 无人占领", instance.id));
                     }
@@ -3944,6 +3955,11 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
         for msg in &messages {
             broadcast_system_message(&self.gate_ref, &self.players, msg);
+        }
+        // 易主广播（C# ConquestObject.WinGame：旗子 NPCImageUpdate + 行会名 ObjectGuildNameChanged）
+        for (conquest_id, guild, map_index) in &owner_changes {
+            self.broadcast_conquest_flag_updates(*conquest_id).await;
+            self.broadcast_conquest_guild_name_changed(guild, *map_index).await;
         }
 
         // 2) 攻城战斗：攻城器（Catapult）每 tick 对最近城墙/城门造成伤害。

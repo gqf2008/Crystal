@@ -1802,6 +1802,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &server::npc_interaction::NPCImageUpdate {
                                                 npc_id: 110,
                                                 image: 2,
+                                                colour: 0,
                                             },
                                         );
                                         send(

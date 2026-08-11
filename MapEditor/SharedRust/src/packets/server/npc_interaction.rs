@@ -104,11 +104,12 @@ impl Packet for NPCUpdate {
     }
 }
 
-/// NPC 图像更新
+/// NPC 图像更新（C# ServerPackets.cs：ObjectID + Image + Colour）
 #[derive(Debug, Clone)]
 pub struct NPCImageUpdate {
     pub npc_id: u32,  // NPC ID
     pub image: u16,   // 新图像
+    pub colour: i32,  // 新染色（C# Color.ToArgb；征服旗子 FlagColour）
 }
 
 impl Packet for NPCImageUpdate {
@@ -117,12 +118,14 @@ impl Packet for NPCImageUpdate {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let npc_id = reader.read_u32::<LittleEndian>()?;
         let image = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { npc_id, image })
+        let colour = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { npc_id, image, colour })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<LittleEndian>(self.npc_id)?;
         writer.write_u16::<LittleEndian>(self.image)?;
+        writer.write_i32::<LittleEndian>(self.colour)?;
         Ok(())
     }
 }
