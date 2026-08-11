@@ -4501,6 +4501,21 @@ impl Message<SetCreature> for PlayerActor {
     }
 }
 
+/// 喂养激活宠物（C# IntelligentCreatureObject.IncreaseFullness；恢复饥饿值）
+pub struct FeedCreature {
+    pub amount: u8,
+}
+
+impl Message<FeedCreature> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: FeedCreature, _ctx: &mut Context<Self, Self::Reply>) {
+        if let Some(c) = &mut self.state.creature_log.active_creature {
+            c.restore_hunger(msg.amount);
+        }
+    }
+}
+
 /// 宠物饥饿计时
 pub struct TickCreatureHunger {
     pub dt_seconds: u32,
