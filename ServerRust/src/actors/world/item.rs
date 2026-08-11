@@ -352,6 +352,12 @@ impl Message<PickUpRequest> for WorldActor {
                 let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
                 if !updates.is_empty() {
                     send_system_message(&self.gate_ref, msg.session_id, "任务进度更新：获得物品");
+                    // #2038：C# CheckNeedQuestItem → SendUpdateQuest——推 M43 ChangeQuest（与击杀路径一致）
+                    for (quest_index, _, _) in &updates {
+                        if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: *quest_index }).await {
+                            crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, msg.session_id, &q);
+                        }
+                    }
                 }
                 for (quest_index, _item_index, complete) in updates {
                     debug!("QuestItem: session={} quest={} complete={}", msg.session_id, quest_index, complete);
@@ -2181,6 +2187,12 @@ impl Message<BuyItemRequest> for WorldActor {
         let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
         if !updates.is_empty() {
             send_system_message(&self.gate_ref, msg.session_id, "任务进度更新：获得物品");
+            // #2038：C# CheckNeedQuestItem → SendUpdateQuest——推 M43 ChangeQuest（与击杀路径一致）
+            for (quest_index, _, _) in &updates {
+                if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: *quest_index }).await {
+                    crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, msg.session_id, &q);
+                }
+            }
         }
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} {})", total_price, if is_pearl { "珍珠" } else { "金币" }));
         let npc_name = self.npcs.get(&npc_oid).map(|n| n.name.as_str()).unwrap_or("?");
