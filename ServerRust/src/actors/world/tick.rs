@@ -2436,6 +2436,25 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
     }
 
+    /// #2114：C# GuildInfo.HasGT（GTRent > Now）——领地租期到期释放归属
+    pub(crate) fn tick_gt_rent_expiry(&mut self) {
+        let now = self.tick_count;
+        let mut expired: Vec<usize> = Vec::new();
+        for (i, c) in self.conquest_instances.iter().enumerate() {
+            if c.rent_expire_tick > 0 && now >= c.rent_expire_tick {
+                expired.push(i);
+            }
+        }
+        for i in expired {
+            let inst = &mut self.conquest_instances[i];
+            let guild = inst.owner_guild.take();
+            inst.rent_expire_tick = 0;
+            inst.for_sale = false;
+            inst.sale_price = 0;
+            debug!("Conquest #{} rent expired for guild {:?}", inst.id, guild);
+        }
+    }
+
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
             let mut colour_changes = Vec::new();
@@ -7402,6 +7421,7 @@ impl Message<Tick> for WorldActor {
         self.tick_monster_ownership_expiry().await;
         self.tick_mine_effects().await;
         self.tick_corpse_expiry().await;
+        self.tick_gt_rent_expiry();
         self.tick_rested().await;
         self.tick_player_conditions().await;
 

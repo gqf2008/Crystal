@@ -1492,7 +1492,9 @@ impl WorldActor {
             session_id, amount: buy_gold as u32, change_type: 2,
         }).await;
         self.conquest_instances[idx].owner_guild = Some(guild_name.clone());
-        self.conquest_instances[idx].rent_days = self.conquest_cfg.gt_days;
+        // C# BUYGT：GTRent = Now + GTDays
+        self.conquest_instances[idx].rent_expire_tick =
+            self.tick_count + self.conquest_cfg.gt_days as u64 * crate::actors::world::conquest::TICKS_PER_DAY;
         send_system_message(&self.gate_ref, session_id, "领地购买成功");
         debug!("NPC BuyGT: {} bought conquest {}", guild_name, self.conquest_instances[idx].id);
     }
@@ -1544,9 +1546,12 @@ impl WorldActor {
             session_id, amount: extend_gold as u32, change_type: 2,
         }).await;
         let days = self.conquest_cfg.gt_days;
-        self.conquest_instances[gt].rent_days += days;
-        send_system_message(&self.gate_ref, session_id, &format!("领地租期延长 {} 天（剩余 {} 天）", days, self.conquest_instances[gt].rent_days));
-        debug!("NPC ExtendGT: {} +7d", guild_name);
+        // C# EXTENDGT：GTRent += GTDays
+        self.conquest_instances[gt].rent_expire_tick = self.conquest_instances[gt].rent_expire_tick
+            .saturating_add(days as u64 * crate::actors::world::conquest::TICKS_PER_DAY);
+        let left = self.conquest_instances[gt].gt_days_left(self.tick_count);
+        send_system_message(&self.gate_ref, session_id, &format!("领地租期延长 {} 天（剩余 {} 天）", days, left));
+        debug!("NPC ExtendGT: {} +{}d (left {})", guild_name, days, left);
     }
 
     /// NPC 脚本 DISPLAYGTRENTALDAYS：显示剩余天数（对齐 C# ActionType.DisplayGTRentalDays）
@@ -1558,8 +1563,9 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
             return;
         };
-        send_system_message(&self.gate_ref, session_id, &format!("领地剩余 {} 天", self.conquest_instances[gt].rent_days));
-        debug!("NPC DisplayGTRentalDays: {} days={}", guild_name, self.conquest_instances[gt].rent_days);
+        let left = self.conquest_instances[gt].gt_days_left(self.tick_count);
+        send_system_message(&self.gate_ref, session_id, &format!("领地剩余 {} 天", left));
+        debug!("NPC DisplayGTRentalDays: {} days={}", guild_name, left);
     }
 
     /// NPC 脚本 GTALLRECALL：会长召回所有在线同公会玩家（对齐 C# ActionType.GTAllRecall）

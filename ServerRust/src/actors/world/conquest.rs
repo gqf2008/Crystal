@@ -3,6 +3,9 @@
 
 use chrono::{Datelike, Timelike};
 
+/// 世界 tick 数/天（100ms/tick × 86400s）
+pub(crate) const TICKS_PER_DAY: u64 = 864_000;
+
 /// 征服游戏模式
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConquestGame {
@@ -72,8 +75,8 @@ pub struct ConquestInstance {
     pub for_sale: bool,
     /// 挂售价格（GTSALE <price>）
     pub sale_price: u64,
-    /// 领地剩余租期（天，EXTENDGT 延长）
-    pub rent_days: u32,
+    /// 领地租期到期 tick（0=未拥有/已到期；C# GTRent > Now 语义）
+    pub rent_expire_tick: u64,
 }
 
 /// 领地守卫/箭塔落点（对应 C# ConquestArcherInfo / ConquestGuildArcherInfo）
@@ -130,7 +133,16 @@ impl ConquestInstance {
             tax_rate: 0,
             for_sale: false,
             sale_price: 0,
-            rent_days: 30,
+            rent_expire_tick: 0,
+        }
+    }
+
+    /// C# GuildInfo.HasGT（GTRent > Now）：剩余租期天数（向上取整；0 = 无/已到期）
+    pub fn gt_days_left(&self, now_tick: u64) -> u32 {
+        if self.rent_expire_tick == 0 || now_tick >= self.rent_expire_tick {
+            0
+        } else {
+            (((self.rent_expire_tick - now_tick) + (TICKS_PER_DAY - 1)) / TICKS_PER_DAY) as u32
         }
     }
 

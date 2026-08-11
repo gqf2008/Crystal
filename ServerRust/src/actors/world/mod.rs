@@ -8022,6 +8022,20 @@ mod tests {
     }
 
     #[test]
+    fn test_gt_days_left_matches_csharp_grent() {
+        // C# GTRent > Now：剩余天数向上取整，到期为 0
+        use crate::actors::world::conquest::{ConquestGame, ConquestInstance, TICKS_PER_DAY};
+        let mut inst = ConquestInstance::new(1, 1, 1, ConquestGame::Classic);
+        assert_eq!(inst.gt_days_left(0), 0); // 未拥有
+        inst.rent_expire_tick = 30 * TICKS_PER_DAY;
+        assert_eq!(inst.gt_days_left(0), 30);
+        assert_eq!(inst.gt_days_left(TICKS_PER_DAY - 1), 30); // 边界向上取整
+        assert_eq!(inst.gt_days_left(TICKS_PER_DAY), 29);
+        assert_eq!(inst.gt_days_left(30 * TICKS_PER_DAY), 0); // 到期
+        assert_eq!(inst.gt_days_left(31 * TICKS_PER_DAY), 0);
+    }
+
+    #[test]
     fn test_multiplier_paused_in_safe() {
         // C# BuffProperty.PauseInSafeZone：仅 pausable 且身处安全区才暂停
         assert!(!super::tick::multiplier_paused_in_safe(false, false));
