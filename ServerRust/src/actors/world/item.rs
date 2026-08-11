@@ -2239,86 +2239,35 @@ impl Message<MergeItemRequest> for WorldActor {
         let actor_ref = match self.players.get(&msg.session_id) {            Some(r) => r.actor_ref.clone(),            None => return,
         };
 
-        // C# MergeItem：Shape==8 封印道具 → 封印目标物品（PlayerObject.cs :6848-7175 + S.ItemSealChanged）
-        if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
-            let from = state.inventory.backpack.iter().flatten()
-                .find(|s| s.item.unique_id == msg.from_uid).map(|s| s.item.clone());
-            let to = state.inventory.backpack.iter().flatten()
-                .find(|s| s.item.unique_id == msg.to_uid).map(|s| s.item.clone());
-            if let (Some(from_item), Some(to_item)) = (from, to) {
-                let is_seal = self.item_infos.get(&from_item.item_index).map(|i| i.shape == 8).unwrap_or(false);
-                if is_seal {
-                    // C#：目标不可 DontUpgrade / Unique
-                    if let Some(info) = self.item_infos.get(&to_item.item_index) {
-                        let bind = super::has_bind_flag(info.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits());
-                        let unique = info.special_mode != 0;
-                        if bind || unique {
-                            send_system_message(&self.gate_ref, msg.session_id, "该物品无法封印");
-                            return;
-                        }
-                    }
-                    let now_ticks = crate::actors::world::tick::dotnet_now_ticks();
-                    if let Some(seal) = &to_item.sealed_info {
-                        if seal.expiry_date_binary > now_ticks {
-                            send_system_message(&self.gate_ref, msg.session_id, "该物品已被封印");
-                            return;
-                        }
-                        if seal.next_seal_date_binary > now_ticks {
-                            send_system_message(&self.gate_ref, msg.session_id, "封印冷却中，暂时无法再次封印");
-                            return;
-                        }
-                    }
-                    // C#：分钟数 = 封印道具 CurrentDura；Expiry = now + 分钟；NextSeal = Expiry + ItemSealDelay(60min)
-                    let minutes = from_item.current_dura.max(1) as i64;
-                    let expiry = now_ticks + minutes * 60 * 10_000_000;
-                    let next_seal = expiry + 60 * 60 * 10_000_000;
-                    let sealed_info = Some(mir2_shared::data::item::SealedInfo {
-                        expiry_date_binary: expiry,
-                        next_seal_date_binary: next_seal,
-                    });
-                    let _ = actor_ref.ask(crate::actors::player::SetItemSealedInfo {
-                        unique_id: msg.to_uid,
-                        sealed_info,
-                    }).await;
-                    // 消耗封印道具（1 个）
-                    let _ = actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
-                        unique_id: msg.from_uid,
-                        count: 1,
-                    }).await;
-                    // S.ItemSealChanged（C# :7170；SharedRust 含 grid_type）
-                    let packet = mir2_shared::packets::server::item::ItemSealChanged {
-                        grid_type: mir2_shared::enums::MirGridType::Inventory,
-                        unique_id: msg.to_uid,
-                        expiry_date: expiry,
-                    };
-                    let mut body = Vec::new();
-                    if packet.write_body(&mut body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemSealChanged as i16, &body),
-                        }).await;
-                    }
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("物品已封印 {} 分钟", minutes));
-                    // 完整 UserInformation 刷新
-                    if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
-                        let packet = super::build_user_information_packet(&state, &self.item_infos);
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: packet,
-                        }).await;
-                    }
-                    return;
-                }
+        // C# MergeItem（PlayerObject.cs:6473-6689）：同类可堆叠物品合并；失败也回 S.MergeItem{Success=false}
+        let from = match actor_ref.ask(GetItemInfo { unique_id: msg.from_uid }).await {
+            Ok(Some(i)) => i,
+            _ => {
+                send_merge_item_response(&self.gate_ref, msg.session_id, msg.grid_from, msg.grid_to, msg.from_uid, msg.to_uid, false);
+                return;
             }
+        };
+        let to = match actor_ref.ask(GetItemInfo { unique_id: msg.to_uid }).await {
+            Ok(Some(i)) => i,
+            _ => {
+                send_merge_item_response(&self.gate_ref, msg.session_id, msg.grid_from, msg.grid_to, msg.from_uid, msg.to_uid, false);
+                return;
+            }
+        };
+        // C# 6617：源物品 StackSize == 1 不可合并（封印石等不可堆叠物品不在此路径，封印走 CombineItem）
+        let from_stackable = self.item_infos.get(&from.item_index).map(|i| i.stack_size > 1).unwrap_or(false);
+        if !from_stackable {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法合并");
+            send_merge_item_response(&self.gate_ref, msg.session_id, msg.grid_from, msg.grid_to, msg.from_uid, msg.to_uid, false);
+            return;
         }
-
+        // 同物品 + 目标未满（C# 6644）由 merge_item_by_uid 校验（同 item_index + count <= StackSize）
         let success = actor_ref.ask(MergeInventoryItemByUid {
             from_uid: msg.from_uid,
             to_uid: msg.to_uid,
         }).await.unwrap_or(false);
-
+        send_merge_item_response(&self.gate_ref, msg.session_id, msg.grid_from, msg.grid_to, msg.from_uid, msg.to_uid, success);
         if success {
-            send_merge_item_response(&self.gate_ref, msg.session_id, msg.grid_from, msg.grid_to, msg.from_uid, msg.to_uid, true);
             // 完整 UserInformation 刷新（含背包/装备，客户端按权威状态重建）
             // 注意：build_user_information_packet 已含包头发送帧，直接 SendToClient
             if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {

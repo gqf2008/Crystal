@@ -419,6 +419,13 @@ impl PlayerInventory {
     }
 
     /// 合并物品：将 from_grid 合并到 to_grid
+    /// 堆叠上限（C# ItemData.StackSize；info 缺失时回退 max_dura（旧行为））
+    fn stack_limit(&self, item: &UserItem) -> u32 {
+        item.info.as_ref()
+            .map(|i| i.stack_size as u32)
+            .unwrap_or_else(|| item.max_dura.max(1) as u32)
+    }
+
     pub fn merge_item(&mut self, from_grid: u8, to_grid: u8) -> bool {
         let fi = from_grid as usize;
         let ti = to_grid as usize;
@@ -440,15 +447,15 @@ impl PlayerInventory {
             return false;
         }
 
-        let max_stack = to_item.max_dura.max(1);
-        let new_count = from_item.count + to_item.count;
+        let max_stack = self.stack_limit(&to_item);
+        let new_count = from_item.count as u32 + to_item.count as u32;
         if new_count > max_stack {
             return false; // 超出堆叠上限
         }
 
         // 合并到目标格
         if let Some(s) = &mut self.backpack[ti] {
-            s.item.count = new_count;
+            s.item.count = new_count as u16;
         }
         self.backpack[fi] = None;
         true
@@ -584,7 +591,7 @@ impl PlayerInventory {
         if from_item.item_index != to_item.item_index {
             return false;
         }
-        let max_stack = to_item.max_dura.max(1);
+        let max_stack = self.stack_limit(&to_item);
         let new_count = from_item.count as u32 + to_item.count as u32;
         if new_count > max_stack as u32 {
             return false;
@@ -1377,6 +1384,42 @@ mod tests {
         // 物品不存在
         assert!(inv.expand_item_slots(99999).is_none());
     }
+
+    /// #2294：C# MergeItem 堆叠上限 = Info.StackSize（药水 durability=0/stack_size=20 可堆叠；超上限失败；无 info 回退旧行为）
+    #[test]
+    fn test_merge_item_by_uid_stack_size() {
+        let mut inv = PlayerInventory::new();
+        let make_potion = |uid: u64, count: u16| {
+            let mut item = make_item(658, 1); // (HP)DrugSmall
+            item.unique_id = uid;
+            item.max_dura = 0;
+            item.count = count;
+            item.info = Some(mir2_shared::data::item::ItemInfo { index: 658, stack_size: 20, ..Default::default() });
+            item
+        };
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: make_potion(1, 5) });
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: make_potion(2, 3) });
+        // 5 + 3 <= 20 → 合并成功
+        assert!(inv.merge_item_by_uid(1, 2));
+        assert_eq!(inv.backpack[1].as_ref().unwrap().item.count, 8);
+        assert!(inv.backpack[0].is_none());
+
+        // 15 + 10 > 20 → 超上限失败
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: make_potion(3, 15) });
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: make_potion(4, 10) });
+        assert!(!inv.merge_item_by_uid(3, 4));
+        assert!(inv.backpack[0].is_some() && inv.backpack[1].is_some());
+
+        // 无 info 回退 max_dura.max(1)：durability=0 → 上限 1，1+1 失败（旧行为）
+        let mut a = make_potion(5, 1);
+        a.info = None;
+        let mut b = make_potion(6, 1);
+        b.info = None;
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: a });
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: b });
+        assert!(!inv.merge_item_by_uid(5, 6));
+    }
+
 
     /// #2190：C# RetrieveRefineItem 目标格放置（空格成功/占用失败/越界失败）
     #[test]
