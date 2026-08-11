@@ -5533,6 +5533,19 @@ impl Message<MagicRequest> for WorldActor {
                                 self.broadcast_object_name(mid, &name).await;
                                 debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
                                 send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
+                                // #2218：驯服宠物持久化（C# Info.Pets）；宠物等级从 1 开始
+                                if let Some(monster) = self.monsters.get(&mid) {
+                                    self.pet_levels.insert(mid, 1);
+                                    self.tamed_pets.entry(msg.session_id).or_default().push(TamedPetInfo {
+                                        object_id: mid,
+                                        monster_index: monster.monster_index,
+                                        name: name.clone(),
+                                        hp: monster.hp,
+                                        experience: monster.pet_experience,
+                                        level: 1,
+                                        max_pet_level: monster.max_pet_level,
+                                    });
+                                }
                             }
                             // #1256：C# 驯服成功必给经验
                             self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;

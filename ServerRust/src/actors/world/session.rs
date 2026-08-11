@@ -560,6 +560,13 @@ impl Message<StartGameRequest> for WorldActor {
             &self.recipe_infos,
         ).await;
 
+        // C# StartGameSuccess：复活已驯服宠物（Info.Pets 循环；Spawn(CurrentMap, Back)）
+        if let Ok(pets) = db::load_player_pets(&self.db_pool, &player_name).await {
+            for pet in pets {
+                self.spawn_tamed_pet(msg.session_id, &pet, loaded_state.map_index, loaded_state.x, loaded_state.y).await;
+            }
+        }
+
         // C# StartGame GetGameShop（:1205）：登录下发商城商品列表（客户端只在购买时发包，目录靠登录推送）
         super::npc::send_game_shop_catalog(
             &self.gate_ref,
@@ -1442,6 +1449,8 @@ impl Message<PlayerDisconnected> for WorldActor {
 
         // 保存玩家数据到数据库
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            // #2218：驯服宠物持久化（C# Info.Pets；仅存活且 master 匹配）
+            self.persist_tamed_pets(msg.session_id, &state.name).await;
             if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
                 warn!("Failed to save player {} on disconnect: {}", record.name, e);
             } else {
@@ -1564,6 +1573,8 @@ impl Message<PlayerLogOut> for WorldActor {
 
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             info!("Player {} logged out (session={})", state.name, msg.session_id);
+            // #2218：驯服宠物持久化（必须在清理地图生成前，避免宠物先被移除）
+            self.persist_tamed_pets(msg.session_id, &state.name).await;
             // M61：该地图无其他玩家时清理 NPC/怪物
             self.cleanup_map_spawns(state.map_index).await;
         // 通知 SocialActor 玩家下线（组队/好友在线表清理）

@@ -899,6 +899,19 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         )"#
     ).execute(&pool).await?;
 
+    // 驯服宠物持久化（C# CharacterInfo.Pets）
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS player_pets (
+            character_name TEXT NOT NULL,
+            monster_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            hp INTEGER NOT NULL DEFAULT 1,
+            experience INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
+            max_pet_level INTEGER NOT NULL DEFAULT 0
+        )"#
+    ).execute(&pool).await?;
+
     info!("SQLite database initialized: {}", db_url);
     Ok(pool)
 }
@@ -977,6 +990,39 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             .execute(&pool).await.unwrap();
         let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
         assert!(removed.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_player_pets_roundtrip() {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS player_pets (character_name TEXT NOT NULL, monster_index INTEGER NOT NULL, name TEXT NOT NULL, hp INTEGER NOT NULL DEFAULT 1, experience INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1, max_pet_level INTEGER NOT NULL DEFAULT 0)")
+            .execute(&pool).await.unwrap();
+
+        let pets = vec![
+            crate::actors::world::TamedPetInfo {
+                object_id: 999, // 运行时字段不持久化
+                monster_index: 271,
+                name: "TamedWolf".into(),
+                hp: 120,
+                experience: 50u64,
+                level: 3u8,
+                max_pet_level: 7u8,
+            },
+        ];
+        save_player_pets(&pool, "Hero", &pets).await.unwrap();
+        let loaded = load_player_pets(&pool, "Hero").await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].monster_index, 271);
+        assert_eq!(loaded[0].name, "TamedWolf");
+        assert_eq!(loaded[0].hp, 120);
+        assert_eq!(loaded[0].experience, 50);
+        assert_eq!(loaded[0].level, 3);
+        assert_eq!(loaded[0].max_pet_level, 7);
+        assert_eq!(loaded[0].object_id, 0);
+
+        // 覆盖写：再次保存只保留新列表
+        save_player_pets(&pool, "Hero", &[]).await.unwrap();
+        assert!(load_player_pets(&pool, "Hero").await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -2649,6 +2695,57 @@ async fn load_player_buffs(pool: &DbPool, character_name: &str) -> anyhow::Resul
         }
     }
     Ok(buffs)
+}
+
+/// 保存驯服宠物（C# CharacterInfo.Pets；delete+insert）
+pub(crate) async fn save_player_pets(
+    pool: &DbPool,
+    character_name: &str,
+    pets: &[crate::actors::world::TamedPetInfo],
+) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM player_pets WHERE character_name = ?")
+        .bind(character_name)
+        .execute(pool)
+        .await?;
+    for pet in pets {
+        sqlx::query("INSERT INTO player_pets (character_name, monster_index, name, hp, experience, level, max_pet_level) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(character_name)
+            .bind(pet.monster_index)
+            .bind(&pet.name)
+            .bind(pet.hp)
+            .bind(pet.experience as i64)
+            .bind(pet.level as i64)
+            .bind(pet.max_pet_level as i64)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+/// 加载驯服宠物（C# CharacterInfo.Pets；object_id 运行时 0，登录时重新分配）
+pub(crate) async fn load_player_pets(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Vec<crate::actors::world::TamedPetInfo>> {
+    let rows = sqlx::query(
+        "SELECT monster_index, name, hp, experience, level, max_pet_level FROM player_pets WHERE character_name = ? ORDER BY rowid ASC"
+    )
+    .bind(character_name)
+    .fetch_all(pool)
+    .await?;
+    let mut pets = Vec::new();
+    for row in rows {
+        pets.push(crate::actors::world::TamedPetInfo {
+            object_id: 0,
+            monster_index: row.get("monster_index"),
+            name: row.get("name"),
+            hp: row.get("hp"),
+            experience: row.get::<i64, _>("experience") as u64,
+            level: row.get::<i64, _>("level") as u8,
+            max_pet_level: row.get::<i64, _>("max_pet_level") as u8,
+        });
+    }
+    Ok(pets)
 }
 
 async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {

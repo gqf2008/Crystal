@@ -1341,6 +1341,8 @@ pub struct WorldActor {
     pub(crate) rental_sessions: HashMap<u64, RentalSession>,
     /// 已生效的租赁记录 (owner_name -> list of RentedItem；C# Info.RentedItems 归属物主)
     pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,
+    /// 驯服宠物（session -> list；C# Info.Pets；登出持久化，登录重生）
+    pub(crate) tamed_pets: HashMap<u64, Vec<TamedPetInfo>>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
@@ -1455,6 +1457,22 @@ pub(crate) struct RentedItem {
     renter_name: String,
     rental_fee: u32,
     expiry_timestamp: i64,
+}
+
+/// 驯服宠物信息（C# CharacterInfo.Pets：MonsterIndex/HP/Experience/Level/MaxPetLevel）
+#[derive(Debug, Clone)]
+pub(crate) struct TamedPetInfo {
+    /// 运行时对象 ID（不持久化；登录重生时重新分配）
+    pub object_id: u32,
+    pub monster_index: i32,
+    pub name: String,
+    pub hp: i32,
+    /// C# PetInfo.Experience（uint）
+    pub experience: u64,
+    /// C# PetInfo.Level（byte）
+    pub level: u8,
+    /// C# PetInfo.MaxPetLevel（byte）
+    pub max_pet_level: u8,
 }
 
 /// 寄售列表项
@@ -1715,6 +1733,7 @@ impl WorldActor {
             market_search_cache: HashMap::new(),
             rental_sessions: HashMap::new(),
             player_rentals: HashMap::new(),
+            tamed_pets: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
@@ -2474,6 +2493,110 @@ impl WorldActor {
                 if other_state.map_index != player_map_index { continue; }
             }
             let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+        }
+    }
+
+    /// 登录复活驯服宠物（C# StartGameSuccess Info.Pets 循环；落点玩家身后 Back）
+    pub(crate) async fn spawn_tamed_pet(
+        &mut self,
+        session_id: u64,
+        pet: &TamedPetInfo,
+        map_index: u16,
+        px: i32,
+        py: i32,
+    ) -> Option<u32> {
+        let info = self.monster_infos.get(&pet.monster_index).cloned()?;
+        let new_oid = self.alloc_object_id();
+        let hp = pet.hp.max(1);
+        let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+        let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+        // C# Spawn(CurrentMap, Back)：玩家身后 1 格
+        let dir = match self.players.get(&session_id) {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(st)) => st.direction as usize % 8,
+                _ => 0,
+            },
+            None => 0,
+        };
+        let (dx, dy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);
+        let (sx, sy) = (px - dx, py - dy);
+        let spawn = MonsterSpawn {
+            name: info.name.clone(),
+            image: info.image as u16,
+            monster_index: pet.monster_index,
+            x: sx, y: sy,
+            direction: 0,
+            hp, min_dmg, max_dmg,
+            xp: info.experience,
+            map_index,
+            count: 1,
+            spread: 0,
+        };
+        let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+        broadcast_to_map(&self.gate_ref, &self.players, map_index, &packet).await;
+        let ai_profile = MonsterAiProfile::from_info(&info);
+        self.monsters.insert(new_oid, MonsterState {
+            object_id: new_oid,
+            name: spawn.name.clone(),
+            image: spawn.image,
+            monster_index: pet.monster_index,
+            x: sx, y: sy, direction: 0,
+            hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+            spawn_x: sx, spawn_y: sy, map_index,
+            spawn_spread: 0,
+            next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+            ai_profile, ai_state: MonsterAiState::Idle,
+            sitting: false, hidden: false, sit_down_tick: 0,
+            target_session: None,
+            last_hitter_session: None,
+            exp_owner_session: None,
+            exp_owner_tick: 0,
+            pending_brown_attacker: None,
+            min_sc: 0, max_sc: 0, provoked: false,
+            is_elite: false, is_boss: false,
+            min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+            agility: 0, accuracy: 0,
+            armour_rate: 1.0, damage_rate: 1.0,
+            magic_resist: 0, critical_rate: 0, critical_damage: 0,
+            luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+            monster_buffs: Vec::new(),
+            poison_list: Vec::new(),
+            last_hit_damage: 0,
+            undead: info.undead,
+            master_session: Some(session_id),
+            rarity: 0,
+            pet_experience: pet.experience,
+            max_pet_level: pet.max_pet_level,
+            recall_at_tick: 0,
+            can_recall: false,
+            next_recall_tick: 0,
+            behavior: crate::actors::world::ai::make_behavior(&spawn.name),
+        });
+        self.pet_levels.insert(new_oid, pet.level.max(1) as i32);
+        // 追踪以便登出持久化（object_id 为运行时）
+        self.tamed_pets.entry(session_id).or_default().push(TamedPetInfo {
+            object_id: new_oid,
+            monster_index: pet.monster_index,
+            name: spawn.name,
+            hp,
+            experience: pet.experience,
+            level: pet.level,
+            max_pet_level: pet.max_pet_level,
+        });
+        Some(new_oid)
+    }
+
+    /// 登出持久化驯服宠物（仅保留存活且 master 匹配的；C# Info.Pets 登出保存）
+    pub(crate) async fn persist_tamed_pets(&mut self, session_id: u64, player_name: &str) {
+        let alive: Vec<TamedPetInfo> = self.tamed_pets.remove(&session_id)
+            .map(|pets| pets.into_iter()
+                .filter(|p| self.monsters.get(&p.object_id)
+                    .map(|m| m.master_session == Some(session_id))
+                    .unwrap_or(false))
+                .collect())
+            .unwrap_or_default();
+        if let Err(e) = db::save_player_pets(&self.db_pool, player_name, &alive).await {
+            warn!("Failed to save player pets for {}: {}", player_name, e);
         }
     }
 
@@ -5240,6 +5363,7 @@ Ok(Self {
             market_search_cache: HashMap::new(),
             rental_sessions: HashMap::new(),
             player_rentals,
+            tamed_pets: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
