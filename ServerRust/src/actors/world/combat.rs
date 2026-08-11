@@ -64,6 +64,24 @@ impl WorldActor {
             );
             let damage = attack_result.damage;
             if damage > 0 {
+                // #1996：C# HumanObject.Attacked——吸血/反伤/EnergyShield（PvP 法术溅射）
+                // 反伤：目标 Reflect 全额反伤给施法者（:7116-7123）
+                if attack_result.reflected > 0 {
+                    let _ = record.actor_ref.ask(TakeDamage {
+                        attacker_id: other_state.object_id,
+                        attacker_session: target_session,
+                        damage: attack_result.reflected,
+                    }).await;
+                    debug!("Player {} reflected {} to player {}", target_session, attack_result.reflected, caster_session);
+                }
+                // 吸血：施法者 HPDrainRatePercent 回血（:7175-7183）
+                if attack_result.hp_drain > 0 {
+                    let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.hp_drain }).await;
+                }
+                // EnergyShield：目标扣血前先回血（:7144-7154）
+                if attack_result.defender_heal > 0 {
+                    let _ = other_actor.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.defender_heal }).await;
+                }
                 let _ = other_actor.actor_ref.ask(TakeDamage {
                     attacker_id: caster_state.object_id,
                     attacker_session: target_session,
