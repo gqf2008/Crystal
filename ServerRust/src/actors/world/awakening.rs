@@ -118,6 +118,16 @@ impl Message<RefineCancelRequest> for WorldActor {
     }
 }
 
+/// 精炼费用系数（C# Settings.RefineCost = 125）
+const REFINE_COST: i32 = 125;
+/// 精炼时长（分钟，C# Settings.RefineTime = 20）
+const REFINE_TIME_MINUTES: u64 = 20;
+
+/// #2034：C# RefineItem（12676）——费用 (RequiredAmount*10)*RefineCost
+fn refine_cost(required_amount: i32) -> u64 {
+    ((required_amount.max(0) * 10) * REFINE_COST) as u64
+}
+
 /// 开始精炼
 pub struct RefineItemRequest {
     pub session_id: u64,
@@ -144,15 +154,41 @@ impl Message<RefineItemRequest> for WorldActor {
             return;
         }
 
-        // 开始精炼（60 秒完成，80% 成功率）
+        // #2034：C# RefineItem（12676-12683）——费用 (RequiredAmount*10)*RefineCost
+        let item_db = match self.item_infos.get(&(msg.item_id as i32)) {
+            Some(i) => i.clone(),
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                return;
+            }
+        };
+        // C# Settings.OnlyRefineWeapon = true：仅武器（ItemType.Weapon=1）
+        if item_db.item_type != 1 {
+            send_system_message(&self.gate_ref, msg.session_id, "只有武器可以精炼");
+            return;
+        }
+        // C# BindMode.DontUpgrade(0x40)：不可精炼（与 DepositRefineItem #926 一致）
+        if super::has_bind_flag(item_db.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits()) {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法精炼");
+            return;
+        }
+        let cost = refine_cost(item_db.required_amount);
+        if state.inventory.gold < cost {
+            send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法精炼");
+            return;
+        }
+        let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await;
+        super::send_gold_changed_packet(&self.gate_ref, msg.session_id, cost);
+
+        // 开始精炼（C# Settings.RefineTime=20 分钟完成；成功率公式待材料系统，暂保持 80%）
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
         let mut log = state.refine_log;
-        let duration = 60u64; // 1 分钟
-        let success_chance = 80u8; // 80%
+        let duration = REFINE_TIME_MINUTES * 60; // C# Settings.RefineTime=20 分钟
+        let success_chance = 80u8; // 80%（材料公式后续批次）
         log.start_refine(msg.item_id, current_time, duration, success_chance);
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
 
@@ -629,5 +665,19 @@ impl Message<ResetAddedItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "找不到该物品或无法重置");
             debug!("ResetAddedItem: {} uid={} - failed", state.name, msg.unique_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refine_cost_matches_csharp() {
+        // #2034：C# RefineItem——cost = (RequiredAmount*10)*RefineCost(125)
+        assert_eq!(refine_cost(0), 0);
+        assert_eq!(refine_cost(1), 1250);
+        assert_eq!(refine_cost(10), 12500);
+        assert_eq!(refine_cost(-5), 0); // RequiredAmount 负数按 0
     }
 }
