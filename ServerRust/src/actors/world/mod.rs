@@ -979,6 +979,94 @@ pub struct BuybackItem {
     pub npc_object_id: u32,
 }
 
+/// 矿脉掉落条目（C# MineDrop：ItemName/MinSlot/MaxSlot/MinDura/MaxDura/BonusChance/MaxBonusDura）
+#[derive(Debug, Clone)]
+pub(crate) struct MineDropConfig {
+    pub item_index: i32,
+    pub min_slot: u8,
+    pub max_slot: u8,
+    pub min_dura: u8,
+    pub max_dura: u8,
+    pub bonus_chance: u8,
+    pub max_bonus_dura: u8,
+}
+
+/// 矿脉配置（C# MineSet；Mines.ini [Mine{i}]，MapInfo.MineIndex 1-based）
+#[derive(Debug, Clone)]
+pub(crate) struct MineSetConfig {
+    pub name: String,
+    pub spot_regen_rate: u8,
+    pub max_stones: u8,
+    pub hit_rate: u8,
+    pub drop_rate: u8,
+    pub total_slots: u8,
+    pub drops: Vec<MineDropConfig>,
+}
+
+/// C# Settings.LoadMines：解析 Mines.ini（[Mine{i}]，SpotRegenRate!=255 终止；物品名查 item_name_index）
+pub(crate) fn parse_mine_sets(content: &str, item_name_index: &std::collections::HashMap<String, i32>) -> Vec<MineSetConfig> {
+    let parsed = crate::util::ini::parse_ini(content);
+    let mut sets = Vec::new();
+    let mut i = 0usize;
+    loop {
+        let section = format!("mine{}", i);
+        let spot_regen = crate::util::ini::ini_get_i64(&parsed, &section, "SpotRegenRate", 255) as u8;
+        if spot_regen == 255 {
+            break;
+        }
+        let mut cfg = MineSetConfig {
+            name: crate::util::ini::ini_get(&parsed, &section, "Name").unwrap_or("").to_string(),
+            spot_regen_rate: spot_regen,
+            max_stones: crate::util::ini::ini_get_i64(&parsed, &section, "MaxStones", 80) as u8,
+            hit_rate: crate::util::ini::ini_get_i64(&parsed, &section, "HitRate", 25) as u8,
+            drop_rate: crate::util::ini::ini_get_i64(&parsed, &section, "DropRate", 10) as u8,
+            total_slots: crate::util::ini::ini_get_i64(&parsed, &section, "TotalSlots", 100) as u8,
+            drops: Vec::new(),
+        };
+        let mut j = 0usize;
+        loop {
+            let min_slot = crate::util::ini::ini_get_i64(&parsed, &section, &format!("D{}-MinSlot", j), 255) as u8;
+            if min_slot == 255 {
+                break;
+            }
+            let item_name = crate::util::ini::ini_get(&parsed, &section, &format!("D{}-ItemName", j)).unwrap_or("");
+            if let Some(&item_index) = item_name_index.get(&item_name.to_lowercase()) {
+                cfg.drops.push(MineDropConfig {
+                    item_index,
+                    min_slot,
+                    max_slot: crate::util::ini::ini_get_i64(&parsed, &section, &format!("D{}-MaxSlot", j), min_slot as i64) as u8,
+                    min_dura: crate::util::ini::ini_get_i64(&parsed, &section, &format!("D{}-MinDura", j), 1) as u8,
+                    max_dura: crate::util::ini::ini_get_i64(&parsed, &section, &format!("D{}-MaxDura", j), 1) as u8,
+                    bonus_chance: crate::util::ini::ini_get_i64(&parsed, &section, &format!("D{}-BonusChance", j), 0) as u8,
+                    max_bonus_dura: crate::util::ini::ini_get_i64(&parsed, &section, &format!("D{}-MaxBonusDura", j), 1) as u8,
+                });
+            }
+            j += 1;
+        }
+        sets.push(cfg);
+        i += 1;
+    }
+    sets
+}
+
+/// C# GetMinePayout：槽位选取（MinSlot<=slot<=MaxSlot 首个命中）
+pub(crate) fn pick_mine_drop<'a>(drops: &'a [MineDropConfig], slot: u32) -> Option<&'a MineDropConfig> {
+    drops.iter().find(|d| slot >= d.min_slot as u32 && slot <= d.max_slot as u32)
+}
+
+/// C# GetMinePayout：Ore 纯度 CurrentDura = (MinDura+Random(MaxDura-MinDura))*1000，BonusChance% +Random(MaxBonusDura)*1000
+pub(crate) fn ore_durability(min_dura: u8, max_dura: u8, bonus_chance: u8, max_bonus_dura: u8, roll_dura: u32, roll_bonus: u32) -> u16 {
+    let base_range = max_dura.saturating_sub(min_dura) as u32;
+    let base = (min_dura as u32 + if base_range > 0 { roll_dura % base_range } else { 0 }) * 1000;
+    let bonus = if bonus_chance > 0 && roll_bonus % 100 <= bonus_chance as u32 {
+        let b = if max_bonus_dura > 0 { roll_bonus % max_bonus_dura as u32 } else { 0 };
+        b * 1000
+    } else {
+        0
+    };
+    (base + bonus).min(u16::MAX as u32) as u16
+}
+
 /// BlackStone/Strongbox 奖励表条目（C# DropInfo.FromLine：Chance + 物品 index）
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RewardDrop {
@@ -1229,6 +1317,8 @@ pub struct WorldActor {
     /// #2112：BlackStone/Strongbox 奖励表（懒加载；None=未加载）
     pub(crate) blackstone_drops: Option<Vec<RewardDrop>>,
     pub(crate) strongbox_drops: Option<Vec<RewardDrop>>,
+    /// #2116：矿脉配置（Mines.ini；懒加载；None=未加载）
+    pub(crate) mine_sets: Option<Vec<MineSetConfig>>,
     /// #1659：每个玩家上次聊天时间（ms，防刷屏广播）
     pub(crate) last_chat_ms: std::collections::HashMap<u64, i64>,
     /// #1269：每个玩家上次攻击时间（ms；C# AttackTime = Envir.Time + AttackSpeed）
@@ -1609,6 +1699,7 @@ impl WorldActor {
         corpses: std::collections::HashMap::new(),
         blackstone_drops: None,
         strongbox_drops: None,
+        mine_sets: None,
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
@@ -2636,6 +2727,23 @@ impl WorldActor {
             }
         }
         false
+    }
+
+    /// #2116：懒加载 Mines.ini 矿脉配置（C# Settings.LoadMines；MapInfo.MineIndex 1-based → index-1）
+    pub(crate) fn load_mine_sets(&mut self) -> Vec<MineSetConfig> {
+        if let Some(ref sets) = self.mine_sets {
+            return sets.clone();
+        }
+        let mut sets = Vec::new();
+        let item_name_index: std::collections::HashMap<String, i32> = self.item_infos.iter()
+            .map(|(idx, info)| (info.name.to_lowercase(), *idx))
+            .collect();
+        let path = self.map_dir.join("Configs").join("Mines.ini");
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            sets = parse_mine_sets(&content, &item_name_index);
+        }
+        self.mine_sets = Some(sets.clone());
+        sets
     }
 
     /// #2112：懒加载 BlackStone/Strongbox 奖励表（C# Settings.BlackstoneDropFilename/StrongboxDropFilename）
@@ -5073,6 +5181,7 @@ Ok(Self {
         corpses: std::collections::HashMap::new(),
         blackstone_drops: None,
         strongbox_drops: None,
+        mine_sets: None,
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
@@ -7988,6 +8097,52 @@ fn should_despawn_boss(tick_count: u64, despawn_tick: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_mine_sets_matches_mines_ini() {
+        // C# Settings.LoadMines：SpotRegenRate!=255 有效段；D{j}-* 字段解析
+        let ini = "[Mine0]\nName=BichonMines\nSpotRegenRate=5\nMaxStones=80\nHitRate=25\nDropRate=10\nTotalSlots=120\nD0-ItemName=GoldOre\nD0-MinSlot=1\nD0-MaxSlot=2\nD0-MinDura=3\nD0-MaxDura=16\nD0-BonusChance=20\nD0-MaxBonusDura=10\nD1-MinSlot=255\n[Mine1]\nSpotRegenRate=255\n";
+        let idx: std::collections::HashMap<String, i32> = [("goldore".to_string(), 501)].into_iter().collect();
+        let sets = parse_mine_sets(ini, &idx);
+        assert_eq!(sets.len(), 1); // Mine1 是终止段
+        let m = &sets[0];
+        assert_eq!(m.name, "BichonMines");
+        assert_eq!(m.spot_regen_rate, 5);
+        assert_eq!(m.max_stones, 80);
+        assert_eq!(m.hit_rate, 25);
+        assert_eq!(m.drop_rate, 10);
+        assert_eq!(m.total_slots, 120);
+        assert_eq!(m.drops.len(), 1);
+        assert_eq!(m.drops[0].item_index, 501);
+        assert_eq!(m.drops[0].min_slot, 1);
+        assert_eq!(m.drops[0].max_slot, 2);
+        assert_eq!(m.drops[0].min_dura, 3);
+        assert_eq!(m.drops[0].max_dura, 16);
+        assert_eq!(m.drops[0].bonus_chance, 20);
+        assert_eq!(m.drops[0].max_bonus_dura, 10);
+    }
+
+    #[test]
+    fn test_pick_mine_drop_and_ore_durability() {
+        // C# GetMinePayout：Slot 落在 MinSlot..MaxSlot；Ore 纯度 = (MinDura+Random(MaxDura-MinDura))*1000 + bonus
+        let drops = vec![
+            MineDropConfig { item_index: 1, min_slot: 1, max_slot: 2, min_dura: 3, max_dura: 16, bonus_chance: 20, max_bonus_dura: 10 },
+            MineDropConfig { item_index: 2, min_slot: 3, max_slot: 20, min_dura: 3, max_dura: 16, bonus_chance: 0, max_bonus_dura: 1 },
+        ];
+        assert!(pick_mine_drop(&drops, 0).is_none()); // Slot 0 无匹配（C# 1-based 槽）
+        assert_eq!(pick_mine_drop(&drops, 1).unwrap().item_index, 1);
+        assert_eq!(pick_mine_drop(&drops, 2).unwrap().item_index, 1);
+        assert_eq!(pick_mine_drop(&drops, 3).unwrap().item_index, 2);
+        assert_eq!(pick_mine_drop(&drops, 20).unwrap().item_index, 2);
+        assert!(pick_mine_drop(&drops, 21).is_none());
+        // 纯度：min=3,max=16,roll_dura=0 → 3000；roll_dura=5 → 8000
+        assert_eq!(ore_durability(3, 16, 0, 10, 0, 0), 3000);
+        assert_eq!(ore_durability(3, 16, 0, 10, 5, 0), 8000);
+        // bonus：chance=100 必触发，roll_bonus=7 → +7000
+        assert_eq!(ore_durability(3, 16, 100, 10, 0, 7), 10_000);
+        // bonus 未命中：chance=0 → 不加
+        assert_eq!(ore_durability(3, 16, 0, 10, 0, 7), 3000);
+    }
 
     #[test]
     fn test_pick_lowest_rate_drop() {

@@ -1387,6 +1387,20 @@ impl Message<HarvestRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "这里没有什么可采集的");
             return;
         }
+        // #2116：C# Map.cs:599——MineIndex 1-based → MineSetList[MineIndex-1]（Mines.ini）
+        let mine_sets = self.load_mine_sets();
+        let mine_cfg = mine_sets.get(mine_index.saturating_sub(1) as usize);
+        let (max_stones, regen_ticks, hit_rate, drop_rate, total_slots, drops) = match mine_cfg {
+            Some(cfg) => (
+                cfg.max_stones as i32,
+                cfg.spot_regen_rate as u64 * 600, // C# SpotRegenRate 分钟 → 100ms tick
+                cfg.hit_rate as i32,
+                cfg.drop_rate as i32,
+                cfg.total_slots as i32,
+                cfg.drops.clone(),
+            ),
+            None => (MINE_MAX_STONES as i32, MINE_REGEN_TICKS, MINE_HIT_RATE_BASE, 10, 100, Vec::new()),
+        };
 
         // 目标格需在矿区范围内（C# MineSpot 判定）
         let in_mine_zone = map_info.mine_zones.iter().any(|z| {
@@ -1430,16 +1444,16 @@ impl Message<HarvestRequest> for WorldActor {
             }).await;
         }
 
-        // 矿脉储量：取/初始化（C# MineSpot.StonesLeft），枯竭则等待再生
+        // 矿脉储量：取/初始化（C# MineSpot.StonesLeft），枯竭则等待再生（per-mine MaxStones/SpotRegenRate）
         let spot_key = (state.map_index, target_x, target_y);
         {
             let spot = self.mine_spot_state.entry(spot_key).or_insert(MineSpotState {
-                stones_left: fastrand::i32(0..MINE_MAX_STONES as i32) as u8,
+                stones_left: fastrand::i32(0..max_stones.max(1)) as u8,
                 last_regen_tick: 0,
             });
             if spot.stones_left == 0 {
-                if self.tick_count >= spot.last_regen_tick + MINE_REGEN_TICKS {
-                    spot.stones_left = fastrand::i32(0..MINE_MAX_STONES as i32) as u8;
+                if self.tick_count >= spot.last_regen_tick + regen_ticks {
+                    spot.stones_left = fastrand::i32(0..max_stones.max(1)) as u8;
                     spot.last_regen_tick = self.tick_count;
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "这里的矿脉已枯竭，稍后再来");
@@ -1449,9 +1463,9 @@ impl Message<HarvestRequest> for WorldActor {
             spot.stones_left -= 1;
         }
 
-        // 命中判定（C# Random(100) < HitRate + Accuracy*10；命中才出废墟/掉落/耗耐久）
-        // C# Random(100) < (HitRate + Weapon.GetTotal(Accuracy)*10)；accuracy 含装备/技能加成
-        let hit = fastrand::i32(0..100) < MINE_HIT_RATE_BASE + state.accuracy * 10;
+        // 命中判定（C# Random(100) < Mine.HitRate + Accuracy*10；命中才出废墟/掉落/耗耐久）
+        // accuracy 含装备/技能加成
+        let hit = fastrand::i32(0..100) < hit_rate + state.accuracy * 10;
         let mut result_msg = "没有挖到东西".to_string();
         if hit {
             // Rubble 废墟：玩家脚下创建/刷新（C# CurrentLocation 格，5 分钟）
@@ -1512,34 +1526,39 @@ impl Message<HarvestRequest> for WorldActor {
                 });
             }
 
-            // 掉落判定（保留现有按矿种的掉落表）
-            let roll = fastrand::i32(0..100);
-            let (drop_item_index, drop_count, drop_name) = match mine_index {
-                1 if roll < 40 => (500, 1 + (roll % 3) as u16, "铁矿石"),
-                1 if roll < 65 => (503, 1, "铜矿石"),
-                1 if roll < 70 => (504, 1, "银矿石"),
-                1 if roll < 71 => (505, 1, "黑铁矿石"),
-                2 if roll < 40 => (501, 1, "金矿石"),
-                2 if roll < 60 => (504, 1 + (roll % 2) as u16, "银矿石"),
-                2 if roll < 70 => (506, 1, "铂金矿石"),
-                2 if roll < 75 => (507, 1, "红宝石原石"),
-                3 if roll < 20 => (508, 1, "软玉原石"),
-                3 if roll < 35 => (509, 1, "紫水晶原石"),
-                3 if roll < 40 => (510, 1, "钻石原石"),
-                3 if roll < 43 => (511, 1, "蓝宝石原石"),
-                _ => (0, 0, ""),
-            };
-            if drop_item_index > 0 {
-                let item_name = self.item_infos.get(&drop_item_index)
-                    .map(|i| i.name.clone())
-                    .unwrap_or_else(|| drop_name.to_string());
-                let item = mir2_shared::data::item::UserItem {
-                    item_index: drop_item_index,
-                    count: drop_count,
-                    ..Default::default()
-                };
-                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
-                result_msg = format!("采集成功！获得了 {} x{}", item_name, drop_count);
+            // 掉落判定（C# :3347-3352：Random(100) < Mine.DropRate + MineRatePercent → GetMinePayout）
+            if drops.is_empty() || fastrand::i32(0..100) >= drop_rate + 0 /* Rust 未跟踪 MineRatePercent */ {
+                result_msg = "采集成功，但这次什么也没有挖到".to_string();
+            } else if total_slots > 0 {
+                // C# GetMinePayout：Slot = Random(TotalSlots)，按 MinSlot<=Slot<=MaxSlot 选掉落
+                let slot = fastrand::u32(0..total_slots as u32);
+                match pick_mine_drop(&drops, slot) {
+                    Some(drop) => {
+                        // C#：Ore 类 CurrentDura = (MinDura+Random(MaxDura-MinDura))*1000，BonusChance% 再 +Random(MaxBonusDura)*1000
+                        let dura = ore_durability(
+                            drop.min_dura, drop.max_dura, drop.bonus_chance, drop.max_bonus_dura,
+                            fastrand::u32(0..1000), fastrand::u32(0..1000),
+                        );
+                        let item = mir2_shared::data::item::UserItem {
+                            item_index: drop.item_index,
+                            count: 1,
+                            current_dura: dura,
+                            ..Default::default()
+                        };
+                        // C# GetMinePayout：背包满 → 静默返回（不掉落）
+                        let can = record.actor_ref.ask(crate::actors::player::CanGainItems).await.unwrap_or(false);
+                        if can {
+                            let item_name = self.item_infos.get(&drop.item_index)
+                                .map(|i| i.name.clone())
+                                .unwrap_or_default();
+                            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                            result_msg = format!("采集成功！获得了 {}", item_name);
+                        }
+                    }
+                    None => {
+                        result_msg = "采集成功，但这次什么也没有挖到".to_string();
+                    }
+                }
             } else {
                 result_msg = "采集成功，但这次什么也没有挖到".to_string();
             }
