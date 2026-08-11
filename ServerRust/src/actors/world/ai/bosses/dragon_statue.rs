@@ -6,7 +6,6 @@
 
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
-use crate::actors::world::ai::helpers::*;
 use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;

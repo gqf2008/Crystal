@@ -11,7 +11,6 @@ use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
-const VIEW_RANGE: i32 = 12;
 const ATTACK_RANGE: i32 = 9;
 
 pub struct FrozenMagicianBehavior;

@@ -9,11 +9,9 @@
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
-use crate::actors::world::ai::helpers::*;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
-const VIEW_RANGE: i32 = 12;
 const AOE_RADIUS: i32 = 1;
 const DEATH_RADIUS: i32 = 7;
 

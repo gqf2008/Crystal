@@ -15,7 +15,6 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
-const ATTACK_RANGE: i32 = 3;
 const THRUST_COOLDOWN: u64 = 50; // 5s
 
 pub struct ManectricClawBehavior {

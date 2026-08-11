@@ -12,7 +12,6 @@ use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
 const VIEW_RANGE: i32 = 12;
-const ATTACK_RANGE: i32 = 4;
 const LINE_RANGE: i32 = 4;
 
 pub struct DarkWraithBehavior {
