@@ -414,6 +414,20 @@ impl Message<StartGameRequest> for WorldActor {
         // C# PlayerObject.cs:1121：登录触发默认 NPC [@_Login]（独立消息）
         self.queue_default_npc(msg.session_id, "_login");
 
+        // C# PlayerObject.cs:1123-1127：新的一天首次登录触发默认 NPC [@_Daily]（last_access 日期近似 NewDay）
+        if let Some(r) = self.players.get(&msg.session_id) {
+            if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                let today = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0)
+                    / 86400;
+                if st.last_access / 86400 < today {
+                    self.queue_default_npc(msg.session_id, "_daily");
+                }
+            }
+        }
+
         // 行会在线状态由 SocialActor 管理
 
         // #937：登录进图后同步装备临时技能（C# RefreshEquipmentStats → AddTempSkills）
@@ -1679,7 +1693,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2210,6 +2224,27 @@ impl Message<ChatRequest> for WorldActor {
                                     send_system_message(&self.gate_ref, msg.session_id, &format!("已击杀 {}", st.name));
                                 }
                             }
+                        }
+
+                        // @trigger <id> [玩家名]（C# case "TRIGGER"：GM 触发目标玩家默认 NPC [@_Trigger(id)]）
+                        "TRIGGER" => {
+                            let Some(id) = parts.get(1).copied() else { return; };
+                            let target_session = match parts.get(2).copied() {
+                                Some(name) => {
+                                    let mut found = None;
+                                    for (sid, other) in &self.players {
+                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if os.name.eq_ignore_ascii_case(name) { found = Some(*sid); break; }
+                                        }
+                                    }
+                                    match found {
+                                        Some(sid) => sid, None => { send_system_message(&self.gate_ref, msg.session_id, "未找到玩家"); return; }
+                                    }
+                                }
+                                None => msg.session_id,
+                            };
+                            self.queue_default_npc(target_session, &format!("_trigger({})", id));
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("已触发默认 NPC 事件 [@_Trigger({})]", id));
                         }
 
                         // @die（C# case "DIE"：自杀）
