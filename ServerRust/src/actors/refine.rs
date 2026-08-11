@@ -25,6 +25,8 @@ pub struct RefiningItem {
     pub status: RefineStatus,
     /// 精炼成功率（0-100）
     pub success_chance: u8,
+    /// 精炼物品完整数据（C# Info.CurrentRefine；存入时克隆，取回/取消时返还）
+    pub item: Option<mir2_shared::data::item::UserItem>,
 }
 
 /// 精炼日志（每个玩家一个）
@@ -52,24 +54,38 @@ impl RefineLog {
             finish_time: current_time + duration_seconds,
             status: RefineStatus::Pending,
             success_chance,
+            item: None,
         };
         self.active_refine = Some(item.clone());
         item
     }
 
-    /// 存入精炼物品
-    pub fn deposit_item(&mut self, unique_id: u64) -> bool {
+    /// 开始精炼（C# RefineItem：已存入物品转 Pending + finish_time + 成功率，保留 item）
+    pub fn begin_refine(&mut self, current_time: u64, duration_seconds: u64, success_chance: u8) -> bool {
+        let Some(item) = self.active_refine.as_mut() else { return false };
+        if item.status != RefineStatus::None { return false; }
+        item.start_time = current_time;
+        item.finish_time = current_time + duration_seconds;
+        item.status = RefineStatus::Pending;
+        item.success_chance = success_chance;
+        true
+    }
+
+    /// 存入精炼物品（C# RefineItem：完整物品克隆进 CurrentRefine，WorldActor 负责从背包移除）
+    pub fn deposit_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
         if self.active_refine.is_some() {
             return false; // 已有精炼进行中
         }
-        // 标记待精炼物品
+        let uid = item.unique_id;
+        let item_index = item.item_index as u32;
         self.active_refine = Some(RefiningItem {
-            original_uid: unique_id,
-            item_index: 0,
+            original_uid: uid,
+            item_index,
             start_time: 0,
             finish_time: 0,
             status: RefineStatus::None,
             success_chance: 0,
+            item: Some(item),
         });
         true
     }
@@ -127,7 +143,9 @@ mod tests {
     #[test]
     fn test_deposit_and_cancel() {
         let mut log = RefineLog::new();
-        assert!(log.deposit_item(12345));
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 12345;
+        assert!(log.deposit_item(it));
         assert!(log.active_refine.is_some());
         let retrieved = log.cancel();
         assert!(retrieved.is_some());
@@ -138,8 +156,12 @@ mod tests {
     #[test]
     fn test_deposit_twice_fails() {
         let mut log = RefineLog::new();
-        assert!(log.deposit_item(1));
-        assert!(!log.deposit_item(2)); // 已有物品
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 1;
+        assert!(log.deposit_item(it));
+        let mut it2 = mir2_shared::data::item::UserItem::default();
+        it2.unique_id = 2;
+        assert!(!log.deposit_item(it2)); // 已有物品
     }
 
     #[test]
@@ -152,6 +174,27 @@ mod tests {
         if let Some(item) = &log.active_refine {
             assert_eq!(item.status, RefineStatus::Ready);
         }
+    }
+
+    #[test]
+    fn test_deposit_retrieve_roundtrip_keeps_item() {
+        // C# CollectRefine：返还完整物品（唯一 ID / 索引一致）
+        let mut log = RefineLog::new();
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 77;
+        it.item_index = 5;
+        assert!(log.deposit_item(it.clone()));
+        assert!(log.begin_refine(0, 3600, 80));
+        let retrieved = log.retrieve().unwrap();
+        assert_eq!(retrieved.original_uid, 77);
+        assert_eq!(retrieved.item.as_ref().unwrap().unique_id, 77);
+        assert_eq!(retrieved.item.as_ref().unwrap().item_index, 5);
+    }
+
+    #[test]
+    fn test_begin_refine_requires_deposit() {
+        let mut log = RefineLog::new();
+        assert!(!log.begin_refine(0, 3600, 80));
     }
 
     #[test]

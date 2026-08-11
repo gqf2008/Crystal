@@ -254,6 +254,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             active_finish_time INTEGER NOT NULL DEFAULT 0,
             active_status INTEGER NOT NULL DEFAULT 0,
             active_success_chance INTEGER NOT NULL DEFAULT 0,
+            active_item_json TEXT,
             total_refines INTEGER NOT NULL DEFAULT 0,
             successful_refines INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (character_name) REFERENCES characters(name)
@@ -627,6 +628,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_parent_id INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_random INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_first INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+    // refinefix：精炼日志持久化完整物品（safe to re-run；新库 CREATE 已含）
+    let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN active_item_json TEXT").execute(&pool).await;
 
     // Migration: add quest timer columns (safe to re-run)
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN start_time INTEGER NOT NULL DEFAULT 0")
@@ -2231,12 +2234,17 @@ async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
             (None, 0, 0, 0, 0, 0)
         };
 
+    let item_json = log.active_refine.as_ref()
+        .and_then(|i| i.item.as_ref())
+        .map(|it| serde_json::to_string(it).unwrap_or_default());
+
     sqlx::query(
         r#"INSERT OR REPLACE INTO refine_log (
             character_name, active_original_uid, active_item_index,
             active_start_time, active_finish_time, active_status, active_success_chance,
+            active_item_json,
             total_refines, successful_refines
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(character_name)
     .bind(uid)
@@ -2245,6 +2253,7 @@ async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
     .bind(finish_time)
     .bind(status)
     .bind(success_chance)
+    .bind(item_json)
     .bind(log.total_refines as i32)
     .bind(log.successful_refines as i32)
     .execute(&mut *conn).await?;
@@ -2255,7 +2264,7 @@ async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
 async fn load_refine(pool: &DbPool, character_name: &str) -> anyhow::Result<RefineLog> {
     let row = sqlx::query(
         "SELECT active_original_uid, active_item_index, active_start_time, active_finish_time,
-                active_status, active_success_chance, total_refines, successful_refines
+                active_status, active_success_chance, active_item_json, total_refines, successful_refines
          FROM refine_log WHERE character_name = ?"
     )
     .bind(character_name)
@@ -2275,6 +2284,9 @@ async fn load_refine(pool: &DbPool, character_name: &str) -> anyhow::Result<Refi
                     finish_time: r.get::<i64, _>("active_finish_time") as u64,
                     status: RefineStatus::from_i32(status).unwrap_or(RefineStatus::None),
                     success_chance: r.get::<i32, _>("active_success_chance") as u8,
+                    item: r.try_get::<Option<String>, _>("active_item_json").unwrap_or(None)
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<mir2_shared::data::item::UserItem>(s).ok()),
                 })
             } else {
                 None
