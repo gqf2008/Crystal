@@ -34,9 +34,14 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             return;
         }
 
+        // C# RefineItem（:12705）：从背包移除物品并存入精炼日志（含完整物品数据）
+        let Some(item) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None) else {
+            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+            return;
+        };
         // 更新精炼日志
         let mut log = state.refine_log;
-        if !log.deposit_item(msg.unique_id) {
+        if !log.deposit_item(item) {
             send_system_message(&self.gate_ref, msg.session_id, "已有精炼进行中");
             return;
         }
@@ -79,7 +84,11 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
         }
 
         let mut log = state.refine_log;
-        if let Some(_item) = log.retrieve() {
+        if let Some(ri) = log.retrieve() {
+            // C# CollectRefine（:12895）：返还完整物品到背包
+            if let Some(item) = ri.item {
+                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+            }
             let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
             send_system_message(&self.gate_ref, msg.session_id, "精炼物品已取回");
             debug!("RetrieveRefineItem: {} uid={}", state.name, msg.unique_id);
@@ -111,7 +120,12 @@ impl Message<RefineCancelRequest> for WorldActor {
         }
 
         let mut log = state.refine_log;
-        log.cancel();
+        if let Some(ri) = log.cancel() {
+            // 取消同样返还物品（C# CollectRefine 返还语义）
+            if let Some(item) = ri.item {
+                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+            }
+        }
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
         send_system_message(&self.gate_ref, msg.session_id, "精炼已取消");
         debug!("RefineCancel: {}", state.name);
@@ -188,8 +202,11 @@ impl Message<RefineItemRequest> for WorldActor {
 
         let mut log = state.refine_log;
         let duration = REFINE_TIME_MINUTES * 60; // C# Settings.RefineTime=20 分钟
-        let success_chance = 80u8; // 80%（材料公式后续批次）
-        log.start_refine(msg.item_id, current_time, duration, success_chance);
+        let success_chance = 80u8; // 80%（材料槽公式后续批次）
+        if !log.begin_refine(current_time, duration, success_chance) {
+            send_system_message(&self.gate_ref, msg.session_id, "没有待精炼的物品");
+            return;
+        }
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
 
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
@@ -228,9 +245,9 @@ impl Message<CheckRefineRequest> for WorldActor {
                 let success = log.finish();
                 let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
                 if success {
-                    send_system_message(&self.gate_ref, msg.session_id, "精炼成功！物品已提升");
+                    send_system_message(&self.gate_ref, msg.session_id, "精炼成功！请取回物品");
                 } else {
-                    send_system_message(&self.gate_ref, msg.session_id, "精炼失败，物品已损毁");
+                    send_system_message(&self.gate_ref, msg.session_id, "精炼失败，请取回物品");
                 }
                 debug!("CheckRefine: {} result={}", state.name, success);
             } else if item.status == RefineStatus::Ready {
