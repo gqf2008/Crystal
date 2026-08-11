@@ -428,6 +428,14 @@ impl Message<MoveItemRequest> for WorldActor {
     }
 }
 
+// C# UseItem Scroll case 12（PlayerObject.cs:6015-6050）：六档奖品概率分母 = Effect × 32/16/8/4/2/1
+const LOTTERY_MULTIPLIERS: [u32; 6] = [32, 16, 8, 4, 2, 1];
+
+/// 给定 6 次独立掷骰（C# Random.Next(Effect*mult) 结果），返回最先命中的奖档 index（0=一等）；全不中 None
+fn lottery_prize_index(rolls: &[u32; 6]) -> Option<usize> {
+    rolls.iter().position(|r| *r == 1)
+}
+
 impl Message<UseItemRequest> for WorldActor {
     type Reply = ();
 
@@ -1054,9 +1062,9 @@ impl Message<UseItemRequest> for WorldActor {
                             }
                             debug!("CreditScroll: {} price={}", player_state.name, db.price);
                         }
-                        // 12 LotteryTicket（C# Scroll shape 12：按 Effect 概率中奖）
+                        // 12 LotteryTicket（C# Scroll shape 12：六档奖品概率分母 = Effect × 32/16/8/4/2/1）
                         12 => {
-                            let effect = db.effect.max(1) as usize;
+                            let effect = db.effect.max(1) as u32;
                             let prizes: [(&str, i64); 6] = [
                                 ("一等奖！获得 1,000,000 金币", 1_000_000),
                                 ("二等奖！获得 200,000 金币", 200_000),
@@ -1065,19 +1073,26 @@ impl Message<UseItemRequest> for WorldActor {
                                 ("五等奖！获得 1,000 金币", 1_000),
                                 ("六等奖！获得 500 金币", 500),
                             ];
-                            let mut won = false;
-                            for (i, (msg_text, gold)) in prizes.iter().enumerate() {
-                                if fastrand::usize(..effect * (i + 1)) == 0 {
+                            // C#：Random.Next(Effect*32)==1 一等 ... Random.Next(Effect)==1 六等（独立掷骰）
+                            let rolls = [
+                                fastrand::u32(..effect * LOTTERY_MULTIPLIERS[0]),
+                                fastrand::u32(..effect * LOTTERY_MULTIPLIERS[1]),
+                                fastrand::u32(..effect * LOTTERY_MULTIPLIERS[2]),
+                                fastrand::u32(..effect * LOTTERY_MULTIPLIERS[3]),
+                                fastrand::u32(..effect * LOTTERY_MULTIPLIERS[4]),
+                                fastrand::u32(..effect * LOTTERY_MULTIPLIERS[5]),
+                            ];
+                            match lottery_prize_index(&rolls) {
+                                Some(i) => {
+                                    let (msg_text, gold) = prizes[i];
                                     let _ = record.actor_ref.ask(crate::actors::player::AddGold {
-                                        amount: *gold as u64,
+                                        amount: gold as u64,
                                     }).await;
                                     send_system_message(&self.gate_ref, msg.session_id, msg_text);
-                                    won = true;
-                                    break;
                                 }
-                            }
-                            if !won {
-                                send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
+                                None => {
+                                    send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
+                                }
                             }
                         }
                         // 15 Increase Hero inventory（C# HeroObject.cs:482：上限 42，每次 +8）
@@ -1095,6 +1110,85 @@ impl Message<UseItemRequest> for WorldActor {
                                 send_system_message(&self.gate_ref, msg.session_id, "英雄背包已达上限");
                                 return; // C# 满上限不消耗
                             }
+                        }
+                        // 10 GuildSkillScroll（C# UseItem Scroll case 10：MyGuild.NewBuff(Effect, charge=false)，GuildObject.cs:912）
+                        10 => {
+                            let Some(guild_name) = player_state.guild_name.clone() else {
+                                send_system_message(&self.gate_ref, msg.session_id, "你没有行会");
+                                return;
+                            };
+                            let buff_id = db.effect as u32;
+                            // C# NewBuff：GetBuff(Id) != null → false（不消耗）
+                            let current = self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs {
+                                guild_name: guild_name.clone(),
+                            }).await.unwrap_or_default();
+                            if current.contains(&buff_id) {
+                                send_system_message(&self.gate_ref, msg.session_id, "该行会技能已激活");
+                                return;
+                            }
+                            let mut next = current.clone();
+                            next.push(buff_id);
+                            let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildBuffs {
+                                guild_name: guild_name.clone(),
+                                buffs: next,
+                            }).await;
+                            // C# NewBuff 尾部：给在线成员下发 S.GuildBuffList（ActiveBuffs=[新 buff]）
+                            for (sid, rec) in &self.players {
+                                if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                                    if s.guild_name.as_deref() == Some(guild_name.as_str()) {
+                                        self.send_guild_buff_list(*sid, &[buff_id]).await;
+                                    }
+                                }
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, "行会技能已激活");
+                            debug!("GuildSkillScroll: {} activated guild buff {} for {}", player_state.name, buff_id, guild_name);
+                        }
+                        // 11 HomeTeleport（C# UseItem Scroll case 11：行会拥有征服且未开战 → 随机传送王座地图）
+                        11 => {
+                            let Some(guild_name) = player_state.guild_name.clone() else {
+                                send_system_message(&self.gate_ref, msg.session_id, "你没有行会");
+                                return;
+                            };
+                            let Some(conq) = self.conquest_instances.iter().find(|c| {
+                                c.owner_guild.as_deref() == Some(guild_name.as_str())
+                                    && c.state == crate::actors::world::conquest::WarState::Idle
+                            }) else {
+                                send_system_message(&self.gate_ref, msg.session_id, "你的行会未占领任何皇宫");
+                                return;
+                            };
+                            let palace_map = conq.palace_map;
+                            let Some(dest_mi) = self.map_infos.get(&palace_map).cloned() else {
+                                send_system_message(&self.gate_ref, msg.session_id, "皇宫地图不存在");
+                                return;
+                            };
+                            let dest_file = dest_mi.file_name.clone();
+                            let _ = self.get_or_load_map(&dest_file, palace_map as u16);
+                            // C# MapObject.TeleportRandom（:803-812）：随机取地图 WalkableCells 一格
+                            let (rx, ry) = match self.maps.get(&(palace_map as u16)) {
+                                Some(map) => {
+                                    let (max_x, max_y) = (map.width as i32, map.height as i32);
+                                    let mut rx = player_state.x;
+                                    let mut ry = player_state.y;
+                                    let mut attempts = 0;
+                                    while attempts < 200 {
+                                        let cx = fastrand::i32(0..max_x);
+                                        let cy = fastrand::i32(0..max_y);
+                                        if map.is_walkable(cx, cy) {
+                                            rx = cx;
+                                            ry = cy;
+                                            break;
+                                        }
+                                        attempts += 1;
+                                    }
+                                    (rx, ry)
+                                }
+                                None => (player_state.x, player_state.y),
+                            };
+                            crate::actors::world::npc_script::teleport_player(
+                                self, msg.session_id, palace_map as u16, rx, ry,
+                            ).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "已传送回皇宫");
+                            debug!("HomeTeleport: {} -> palace map {} ({},{})", player_state.name, palace_map, rx, ry);
                         }
                         _ => {
                             send_system_message(&self.gate_ref, msg.session_id, "该卷轴无法使用");
@@ -3159,6 +3253,26 @@ impl Message<DisassembleItemRequest> for WorldActor {
 mod tests {
 
     use super::apply_conquest_tax;
+
+    use super::{lottery_prize_index, LOTTERY_MULTIPLIERS};
+
+    /// C# UseItem Scroll case 12：六档概率分母 [32,16,8,4,2,1]
+    #[test]
+    fn lottery_multipliers_match_csharp() {
+        assert_eq!(LOTTERY_MULTIPLIERS, [32, 16, 8, 4, 2, 1]);
+    }
+
+    #[test]
+    fn lottery_prize_index_matches_csharp_roll_order() {
+        // 全部未中 → None
+        assert_eq!(lottery_prize_index(&[0, 2, 3, 4, 5, 6]), None);
+        // 一等命中（roll==1）→ Some(0)
+        assert_eq!(lottery_prize_index(&[1, 0, 0, 0, 0, 0]), Some(0));
+        // 四等命中 → Some(3)
+        assert_eq!(lottery_prize_index(&[0, 0, 0, 1, 0, 0]), Some(3));
+        // 多档命中取最先（C# if-else 链）
+        assert_eq!(lottery_prize_index(&[0, 1, 0, 1, 0, 0]), Some(1));
+    }
 
     /// #1866：征服领地 NPC 加税（所有者免加价）
     #[test]
