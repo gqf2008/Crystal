@@ -3717,6 +3717,61 @@ impl Message<ChatRequest> for WorldActor {
                     );
                     return;
                 }
+                Some("CHANGEFLAG") | Some("CHANGEFLAGCOLOUR") => {
+                    // C# case "CHANGEFLAG"/"CHANGEFLAGCOLOUR"（~4004/4028）：行会领地旗标外观
+                    // 守卫：有行会 + 行会拥有领地 + CanChangeRank（默认仅会长）+ 非开战
+                    let state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    let Some(guild) = state.guild_name.clone() else {
+                        send_system_message(&self.gate_ref, msg.session_id, "没有行会，无法修改旗标");
+                        return;
+                    };
+                    if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+                        send_system_message(&self.gate_ref, msg.session_id, "没有权限修改旗标");
+                        return;
+                    }
+                    let Some(inst) = self.conquest_instances.iter()
+                        .find(|c| c.owner_guild.as_deref() == Some(guild.as_str()))
+                        .cloned()
+                    else {
+                        send_system_message(&self.gate_ref, msg.session_id, "你的行会没有领地");
+                        return;
+                    };
+                    if inst.state == crate::actors::world::conquest::WarState::InProgress {
+                        send_system_message(&self.gate_ref, msg.session_id, "攻城期间无法修改旗标");
+                        return;
+                    }
+                    let is_colour = parts[0].eq_ignore_ascii_case("CHANGEFLAGCOLOUR");
+                    // 当前旗标外观（C# 在现有值基础上改）
+                    let current = self.social_ref.ask(crate::actors::social::NpcGetGuildFlagAppearance {
+                        guild_name: guild.clone(),
+                    }).await.unwrap_or(None).unwrap_or((1000, 0));
+                    let (new_image, new_colour) = if is_colour {
+                        // CHANGEFLAGCOLOUR [r] [g] [b]：缺省随机（C# Random(255)）
+                        let r = parts.get(1).and_then(|v| v.parse::<u8>().ok())
+                            .unwrap_or_else(|| fastrand::u8(0..255));
+                        let g = parts.get(2).and_then(|v| v.parse::<u8>().ok())
+                            .unwrap_or_else(|| fastrand::u8(0..255));
+                        let b = parts.get(3).and_then(|v| v.parse::<u8>().ok())
+                            .unwrap_or_else(|| fastrand::u8(0..255));
+                        (current.0, changeflag_colour(r, g, b))
+                    } else {
+                        // CHANGEFLAG [index]：缺省随机 0..12；C# FlagImage = 1000 + flag
+                        (changeflag_image(parts.get(1).copied()), current.1)
+                    };
+                    let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildFlagAppearance {
+                        guild_name: guild.clone(),
+                        flag_image: new_image,
+                        flag_colour: new_colour,
+                    }).await;
+                    // 广播旗子外观更新（C# FlagList[i].UpdateImage/UpdateColour）
+                    self.broadcast_conquest_flag_updates(inst.id).await;
+                    send_system_message(&self.gate_ref, msg.session_id,
+                        &format!("领地旗标已更新（Image={} Colour=#{:08X}）", new_image, new_colour as u32));
+                    return;
+                }
                 Some("STARTCONQUEST") | Some("RESETCONQUEST") => {
                     // C# case "STARTCONQUEST"（~3854）/ "RESETCONQUEST"（~3900）：攻城 GM 命令
                     let (is_gm, my_guild) = match record.actor_ref.ask(GetPlayerState).await {
