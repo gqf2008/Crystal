@@ -2892,7 +2892,7 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "DEFENSEBOOST" | "DEFENSE" => Some(BuffType::DefenseBoost { bonus: 0 }),
         "ACDEFENSEBOOST" | "BLESSEDARMOUR" | "BLESSEDARMOR" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
         "MACDEFENSEBOOST" | "SOULSHIELD" => Some(BuffType::MacDefenseBoost { bonus: 0 }),
-        "DAMAGEREDUCTION" | "MAGICSHIELD" | "ELEMENTALBARRIER" => Some(BuffType::DamageReduction { percent: 0 }),
+        "DAMAGEREDUCTION" | "MAGICSHIELD" | "ELEMENTALBARRIER" => Some(BuffType::DamageReduction { percent: 0, kind: crate::combat::buff::ShieldKind::Other }),
         "POISON" | "POISONSHOT" => Some(BuffType::Poison { damage_per_tick: 0 }),
         "SILENCE" => Some(BuffType::Silence),
         "STUN" => Some(BuffType::Stun),
@@ -2906,7 +2906,7 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "REFLECT" | "ENERGYSHIELD" | "COUNTERATTACK" => Some(BuffType::Reflect { percent: 0 }),
         "TAUNT" | "LIONROAR" => Some(BuffType::Taunt),
         // 法术批已实现的 C# BuffType 别名：ProtectionField/ImmortalSkin/UltimateEnhancer
-        "PROTECTIONFIELD" => Some(BuffType::DamageReduction { percent: 0 }),
+        "PROTECTIONFIELD" => Some(BuffType::DamageReduction { percent: 0, kind: crate::combat::buff::ShieldKind::Other }),
         "IMMORTALSKIN" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
         "ULTIMATEENHANCER" => Some(BuffType::McBoost { bonus: 0 }),
         // #1508：C# Curse 降低目标输出（MaxDC/MC/SC RatePercent）；脚本 GIVEBUFF CURSE 用独立 Curse debuff

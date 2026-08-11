@@ -2377,6 +2377,44 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
     }
 
+    /// C# CompleteMine：采矿命中 400ms 后广播 MapEffect(Mine) + Rubble 方向步进
+    pub(crate) async fn tick_mine_effects(&mut self) {
+        if self.pending_mine_effects.is_empty() {
+            return;
+        }
+        let now = self.tick_count;
+        let mut due = Vec::new();
+        self.pending_mine_effects.retain(|e| {
+            if e.fire_tick <= now {
+                due.push(*e);
+                false
+            } else {
+                true
+            }
+        });
+        for e in due {
+            // C# CompleteMine（:6769）：Broadcast(MapEffect { Effect=Mine, Location=Rubble, Value=Direction })
+            let packet = mir2_shared::packets::server::object::MapEffect {
+                location: mir2_shared::map::Point { x: e.x, y: e.y },
+                effect: mir2_shared::enums::SpellEffect::Mine,
+                value: e.direction as i32,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::MapEffect as i16, &body);
+                broadcast_to_map(&self.gate_ref, &self.players, e.map_index, &pkt).await;
+            }
+            // C# CompleteMine（:6770-6772）：Rubble.Direction < 6 → ++；
+            // Rust ObjectSpell 协议无 direction 字段，方向仅存服务端状态（GetInfo 重广播省略）
+            if let Some(rubble) = self.spell_objects.get_mut(&e.rubble_oid) {
+                if rubble.direction < 6 {
+                    rubble.direction += 1;
+                }
+            }
+            debug!("Mine effect fired: rubble={} at ({},{}), dir={}", e.rubble_oid, e.x, e.y, e.direction);
+        }
+    }
+
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
             let mut colour_changes = Vec::new();
@@ -7322,6 +7360,7 @@ impl Message<Tick> for WorldActor {
 
         self.tick_pk_decay().await;
         self.tick_monster_ownership_expiry().await;
+        self.tick_mine_effects().await;
         self.tick_rested().await;
         self.tick_player_conditions().await;
 
