@@ -6673,6 +6673,11 @@ fn guild_enemy_attackable(
     }
 }
 
+/// #2020：C# RedBrown——红名（PK>=200）或灰名窗口内（now < BrownTime）可攻击
+pub(crate) fn red_brown_attackable(pk_points: i32, brown_until_ms: i64) -> bool {
+    pk_points >= 200 || is_brown(brown_until_ms)
+}
+
 /// 检查攻击者是否可以在当前攻击模式下攻击目标玩家
 fn can_attack_player(
     attacker: &PlayerState,
@@ -6695,8 +6700,8 @@ fn can_attack_player(
             guild_enemy_attackable(attacker.guild_name.as_deref(), target.guild_name.as_deref(), guild_wars)
         }
         AttackMode::RedBrown => {
-            // 只能攻击红名/橙名玩家
-            target.pk_points >= 100
+            // #2020：C# PlayerObject.IsAttackTarget（4670）——红名（PK>=200）或灰名窗口内（BrownTime）可攻击
+            red_brown_attackable(target.pk_points, target.brown_until_ms)
         }
         AttackMode::All => true,
     }
@@ -7783,6 +7788,24 @@ mod tests {
         assert!(!guild_enemy_attackable(None, Some("B"), &wars));
         assert!(!guild_enemy_attackable(Some("A"), None, &wars));
         assert!(!guild_enemy_attackable(Some("A"), Some("A"), &wars));
+    }
+
+    #[test]
+    fn red_brown_attackable_matches_csharp() {
+        // #2020：C# PlayerObject.IsAttackTarget（4670）——RedBrown = PK>=200 || now < BrownTime
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        // 红名 PK>=200 → 可攻击
+        assert!(red_brown_attackable(200, 0));
+        // 棕名（PK=100~199）且灰名窗口内 → 可攻击（C# Envir.Time < BrownTime）
+        assert!(red_brown_attackable(150, now + 60_000));
+        // 棕名但灰名窗口已过期 → 不可攻击（C# 仅红名或 BrownTime 内）
+        assert!(!red_brown_attackable(150, now - 1));
+        // 普通玩家（PK<100 且非灰名）→ 不可攻击
+        assert!(!red_brown_attackable(50, 0));
     }
 
 }

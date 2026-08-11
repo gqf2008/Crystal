@@ -122,6 +122,10 @@ impl Message<MarkBrown> for WorldActor {
         if victim_state.pk_points >= 200 {
             return;
         }
+        // #2020：C# HumanObject.Attacked（7199）——受害者已灰名（BrownTime 内）时攻击者不再变灰名
+        if crate::actors::world::is_brown(victim_state.brown_until_ms) {
+            return;
+        }
         let attacker = match self.players.get(&msg.attacker_session) {
             Some(r) => r.clone(),
             None => return,
