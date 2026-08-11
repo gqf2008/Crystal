@@ -6024,13 +6024,40 @@ impl Message<Tick> for WorldActor {
                             .find(|(ps, _, _, _, _, _, _, _, _, _)| ps == sid)
                             .map(|(_, tx, ty, oid, _, _, _, _, _, _)| (*oid, *tx, *ty)))
                         .unwrap_or((0, 0, 0));
-                    build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
-                        &build_object_range_attack_body(
-                            attacker_oid, boss_x, boss_y, boss_dir,
-                            target_oid, target_x, target_y, 0u8, spell_id,
-                        ),
-                    )
+                    if spell_id != 0 {
+                        // C# 法术型 Boss（HumanWizard 等）：ObjectMagic 施法动画（C# HumanWizard.cs:30
+                        // Broadcast ObjectMagic ThunderBolt Cast=true）；伤害仍走延迟弹道结算
+                        let om = mir2_shared::packets::server::magic_combat::ObjectMagic {
+                            object_id: attacker_oid,
+                            location_x: boss_x,
+                            location_y: boss_y,
+                            direction: mir2_shared::enums::MirDirection::try_from(boss_dir)
+                                .unwrap_or(mir2_shared::enums::MirDirection::Up),
+                            spell: mir2_shared::enums::Spell::try_from(spell_id)
+                                .unwrap_or(mir2_shared::enums::Spell::None),
+                            target_id: target_oid,
+                            target_x,
+                            target_y,
+                            cast: true,
+                            level: 0,
+                            self_broadcast: false,
+                            secondary_target_ids: Vec::new(),
+                        };
+                        let mut om_body = Vec::new();
+                        if om.write_body(&mut om_body).is_err() {
+                            om_body.clear();
+                        }
+                        build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectMagic as i16, &om_body)
+                    } else {
+                        build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
+                            &build_object_range_attack_body(
+                                attacker_oid, boss_x, boss_y, boss_dir,
+                                target_oid, target_x, target_y, 0u8, spell_id,
+                            ),
+                        )
+                    }
                 } else {
                     let mut attack_body = Vec::new();
                     attack_body.extend_from_slice(&attacker_oid.to_le_bytes());
