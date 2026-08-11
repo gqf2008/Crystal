@@ -126,6 +126,24 @@ impl Message<FinishQuestRequest> for WorldActor {
             if !quest_db.fixed_rewards.is_empty() {
                 let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
             }
+            // #1998：C# PlayerObject.FinishQuest（11394-11414）——selectedItemIndex>=0 时
+            // 按 SelectRewards 列表下标发放可选奖励（越界/负数不发放）
+            if msg.selected_item_index >= 0 {
+                if let Some(reward) = quest_db.select_rewards.get(msg.selected_item_index as usize) {
+                    let mut item = mir2_shared::data::item::UserItem {
+                        item_index: reward.item_index,
+                        count: reward.count,
+                        ..Default::default()
+                    };
+                    if let Some(info) = self.item_infos.get(&reward.item_index) {
+                        item.max_dura = info.durability as u16;
+                        item.current_dura = info.durability as u16;
+                    }
+                    let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                    debug!("Quest {} select reward #{} (item {}) granted to session {}",
+                           msg.quest_index, msg.selected_item_index, reward.item_index, msg.session_id);
+                }
+            }
         }
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("任务完成！获得 {} 经验，{} 金币", completed_quest.exp_reward, completed_quest.gold_reward));
