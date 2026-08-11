@@ -3235,6 +3235,12 @@ impl WorldActor {
                             let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
                             if !updates.is_empty() {
                                 send_system_message(&self.gate_ref, session_id, "任务进度更新：获得物品");
+                                // #2038：C# CheckNeedQuestItem → SendUpdateQuest——推 M43 ChangeQuest（与击杀路径一致）
+                                for (quest_index, _, _) in &updates {
+                                    if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: *quest_index }).await {
+                                        crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, session_id, &q);
+                                    }
+                                }
                             }
                         }
                     }
