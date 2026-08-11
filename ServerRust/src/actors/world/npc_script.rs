@@ -3131,7 +3131,7 @@ pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map
             .actor_ref
             .ask(SetPlayerPosition { x, y, direction: 4, map_index: Some(map_index), is_mounted: None })
             .await;
-        let map_pkt = build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, false);
+        let map_pkt = build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, 4, Some(&dest_mi));
         let _ = world.gate_ref.tell(SendToClient { session_id, data: map_pkt }).await;
         let mut body = Vec::new();
         body.extend_from_slice(&x.to_le_bytes());

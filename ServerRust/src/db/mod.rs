@@ -2570,7 +2570,8 @@ pub struct MapInfo {
     pub title: String,
     pub mini_map: i32,
     pub light: i32,
-    pub big_map: bool,
+    /// C# MapInfo.BigMap（ushort 原始值：0=普通图，非 0=大地图 ID）
+    pub big_map: u16,
     pub no_teleport: bool,
     pub no_reconnect: bool,
     pub no_reconnect_map: String,
@@ -3002,7 +3003,7 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             title: row.get("title"),
             mini_map: row.get("mini_map"),
             light: row.get("light"),
-            big_map: row.get::<i32, _>("big_map") != 0,
+            big_map: row.get::<i32, _>("big_map") as u16,
             no_teleport: row.get::<i32, _>("no_teleport") != 0,
             no_reconnect: row.get::<i32, _>("no_reconnect") != 0,
             no_reconnect_map: row.get::<Option<String>, _>("no_reconnect_map").unwrap_or_default(),

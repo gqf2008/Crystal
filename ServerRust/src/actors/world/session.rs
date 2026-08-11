@@ -548,14 +548,13 @@ impl Message<StartGameRequest> for WorldActor {
         self.send_player_to_map(msg.session_id, &loaded_state, loaded_state.map_index).await;
 
         // 发送游戏进入序列（使用真实状态数据）
-        let is_big_map = self.map_infos.get(&map_info_idx).map(|m| m.big_map).unwrap_or(false);
         send_game_entry_sequence(
             self.gate_ref.clone(),
             msg.session_id,
             &loaded_state,
             &map_file,
             &map_title,
-            is_big_map,
+            self.map_infos.get(&map_info_idx),
             &self.item_infos,
             &self.quest_infos,
             &self.recipe_infos,
@@ -995,7 +994,6 @@ impl Message<WorldMoveRequest> for WorldActor {
 
                     let dest_file = dest_mi.file_name.clone();
                     let dest_title = dest_mi.title.clone();
-                    let is_big_map = dest_mi.big_map;
                     let player_ref = record.actor_ref.clone();
                     let player_name = record.name.clone();
 
@@ -1023,7 +1021,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                         // Send MapChanged packet
                         let _ = self.gate_ref.tell(SendToClient {
                             session_id: msg.session_id,
-                            data: build_map_changed_packet(dest_map_index as u16, &dest_file, &dest_title, dest_x, dest_y, is_big_map),
+                            data: build_map_changed_packet(dest_map_index as u16, &dest_file, &dest_title, dest_x, dest_y, state.direction, Some(&dest_mi)),
                         }).await;
 
                         // Send UserLocation to confirm new position

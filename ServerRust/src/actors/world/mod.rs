@@ -7028,7 +7028,7 @@ async fn send_game_entry_sequence(
     state: &PlayerState,
     map_file: &str,
     map_title: &str,
-    is_big_map: bool,
+    mi: Option<&db::MapInfo>,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
     quest_infos: &std::collections::HashMap<i32, db::QuestInfo>,
     recipe_infos: &[db::RecipeInfo],
@@ -7047,7 +7047,7 @@ async fn send_game_entry_sequence(
     }).await;
 
     // 2. MapChanged
-    let map_changed = build_map_changed_packet(state.map_index, map_file, map_title, state.x, state.y, is_big_map);
+    let map_changed = build_map_changed_packet(state.map_index, map_file, map_title, state.x, state.y, state.direction, mi);
     let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: map_changed,
@@ -7130,7 +7130,8 @@ fn build_map_changed_packet(
     title: &str,
     spawn_x: i32,
     spawn_y: i32,
-    is_big_map: bool,
+    direction: u8,
+    mi: Option<&db::MapInfo>,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -7138,15 +7139,16 @@ fn build_map_changed_packet(
     body.extend_from_slice(&(map_index as i32).to_le_bytes());
     write_dotnet_string(&mut body, file_name);
     write_dotnet_string(&mut body, title);
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.push(if is_big_map { 1u8 } else { 0u8 });
+    // C# S.MapChanged 线格式（ServerPackets.cs）：MiniMap u16/BigMap u16/Lights u8/Location i32x2/Direction u8/MapDarkLight u8/Music u16/Weather u16
+    body.extend_from_slice(&mi.map(|m| m.mini_map as u16).unwrap_or(0).to_le_bytes());
+    body.extend_from_slice(&mi.map(|m| m.big_map).unwrap_or(0).to_le_bytes());
+    body.push(mi.map(|m| m.light as u8).unwrap_or(0));
     body.extend_from_slice(&spawn_x.to_le_bytes());
     body.extend_from_slice(&spawn_y.to_le_bytes());
-    body.push(4u8);
-    body.push(1u8);
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
+    body.push(direction);
+    body.push(mi.map(|m| m.map_dark_light as u8).unwrap_or(0));
+    body.extend_from_slice(&mi.map(|m| if m.music { 1u16 } else { 0u16 }).unwrap_or(0).to_le_bytes());
+    body.extend_from_slice(&mi.map(|m| if m.weather_particles { 1u16 } else { 0u16 }).unwrap_or(0).to_le_bytes());
 
     build_packet_bytes(ServerPacketIds::MapChanged as i16, &body)
 }
@@ -7196,7 +7198,7 @@ pub(crate) fn build_world_map_setup_packet(
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
-    let icons: Vec<&db::MapInfo> = map_infos.values().filter(|m| m.big_map).take(64).collect();
+    let icons: Vec<&db::MapInfo> = map_infos.values().filter(|m| m.big_map != 0).take(64).collect();
     body.push(1u8); // enabled
     body.extend_from_slice(&(icons.len() as i32).to_le_bytes());
     for (i, m) in icons.iter().enumerate() {
@@ -9381,7 +9383,7 @@ impl Message<GmGotoRequest> for WorldActor {
                     x: dest_x, y: dest_y, direction: 4, map_index: Some(dest_map), is_mounted: None,
                 }).await;
             }
-            let map_pkt = build_map_changed_packet(dest_map, &mi.file_name, &mi.title, dest_x, dest_y, false);
+            let map_pkt = build_map_changed_packet(dest_map, &mi.file_name, &mi.title, dest_x, dest_y, 4, Some(&mi));
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: map_pkt,
