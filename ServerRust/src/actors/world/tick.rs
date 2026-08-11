@@ -4020,6 +4020,11 @@ impl WorldActor {
                             debug!("RangeAttack resolve: monster {} already dead, arrow whiffs", monster_id);
                             continue;
                         }
+                        // #1980：C# IsAttackTarget——石化/免疫/隐身怪箭矢落空（不结算/不挂仇恨）
+                        if !monster.behavior.is_attackable() {
+                            debug!("RangeAttack resolve: monster {} not attackable, arrow whiffs", monster_id);
+                            continue;
+                        }
                         if !c.hit {
                             // 未命中：Miss 飘字（C# BroadcastDamageIndicator(DamageType.Miss)）
                             let mut dmg_body = Vec::new();
@@ -4199,7 +4204,10 @@ impl WorldActor {
 
         // 查找目标怪物
         let monster_hit = {
-            let monster = self.monsters.iter().find(|(_, m)| m.object_id == target_id);
+            // #1980：C# CompleteMagic IsAttackTarget——石化/免疫/隐身怪法术落空
+            let monster = self.monsters.iter().find(|(_, m)| {
+                m.object_id == target_id && m.behavior.is_attackable()
+            });
             if let Some((_, m)) = monster {
                 // 防移动 miss：目标当前位置 vs 弹道快照位置，InRange(2)
                 let dist = (m.x - pending.target_x).abs() + (m.y - pending.target_y).abs();

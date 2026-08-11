@@ -68,3 +68,28 @@ pub trait MonsterBehavior: Send + Sync + 'static {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MonsterBehavior;
+
+    /// #1980：is_attackable 钩子——石化/隐身 Boss 初始不可被选中（玩家攻击目标校验用）
+    #[test]
+    fn stoned_and_hidden_behaviors_report_not_attackable() {
+        let zuma = crate::actors::world::ai::bosses::zuma_monster::ZumaMonsterBehavior::new();
+        assert!(!zuma.is_attackable(), "石化祖玛初始不可攻击");
+        let earth = crate::actors::world::ai::bosses::earth_golem::EarthGolemBehavior::new();
+        assert!(!earth.is_attackable(), "石化土傀儡初始不可攻击");
+        let dig = crate::actors::world::ai::bosses::dig_out_zombie::DigOutZombieBehavior::new();
+        assert!(!dig.is_attackable(), "钻地僵尸初始隐身不可攻击");
+        let evil = crate::actors::world::ai::bosses::evil_centipede::EvilCentipedeBehavior::new();
+        assert!(!evil.is_attackable(), "地蜈蚣初始隐身不可攻击");
+    }
+
+    /// #1980：默认行为可攻击（绝大多数 Boss）
+    #[test]
+    fn default_behavior_is_attackable() {
+        let d = crate::actors::world::ai::DefaultBehavior::new();
+        assert!(d.is_attackable());
+    }
+}

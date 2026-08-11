@@ -450,7 +450,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                 }
                 // 近战只打正前方那一格（C# 语义）：dist==0 才命中。此前 <=1 会把
                 // 攻击格旁边的守卫/怪物一并命中（#77 实测守卫被打死都不掉血挡住击杀）
-                if dist == 0 {
+                // #1980：C# HumanObject.Attack:3033 `ob.IsAttackTarget(this)`——石化/免疫/隐身怪跳过
+                if dist == 0 && monster.behavior.is_attackable() {
                     // 命中怪物 - 使用完整战斗公式（命中/护甲/暴击/反伤/吸血/负面）
                     let attacker_stats = state.to_combat_stats();
                     let defender_stats = monster.to_combat_stats();
@@ -692,7 +693,9 @@ impl Message<WorldAttackRequest> for WorldActor {
                 let splash_dmg = halfmoon_splash[0].1;
                 for (cx, cy) in &halfmoon_cells {
                     let mid = self.monsters.iter()
-                        .find(|(id, m)| **id != primary_target_oid && m.hp > 0 && m.map_index == state.map_index && m.x == *cx && m.y == *cy)
+                        .find(|(id, m)| **id != primary_target_oid && m.hp > 0
+                            && m.behavior.is_attackable() && m.map_index == state.map_index
+                            && m.x == *cx && m.y == *cy)
                         .map(|(id, _)| *id);
                     if let Some(mid) = mid {
                         if let Some(sm) = self.monsters.get_mut(&mid) {
@@ -1600,7 +1603,9 @@ impl Message<RangeAttackRequest> for WorldActor {
         // 目标怪物解析（客户端 C.RangeAttack.TargetID = 怪物 object_id）
         let attacker_stats = state.to_combat_stats();
         let targeted_monster_level = if msg.target_id != 0 {
-            self.monsters.get(&msg.target_id).map(|m| m.level.max(0) as u16)
+            self.monsters.get(&msg.target_id)
+                .filter(|m| m.behavior.is_attackable())
+                .map(|m| m.level.max(0) as u16)
         } else {
             None
         };
