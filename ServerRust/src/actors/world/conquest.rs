@@ -67,6 +67,8 @@ pub struct ConquestInstance {
     pub gates: Vec<ConquestGuardInfo>,
     /// 城墙（C# ConquestInfo.ConquestWalls；启动生成 SiegeStructure）
     pub walls: Vec<ConquestGuardInfo>,
+    /// 领地旗子 NPC 落点（C# ConquestInfo.ConquestFlags；登录/换图时生成 ObjectNpc）
+    pub flags: Vec<ConquestFlagInfo>,
     /// 攻城金库（C# GuildInfo.GoldStorage，TAKECONQUESTGOLD 取走）
     pub gold_storage: u64,
     /// NPC 税率（C# GuildInfo.NPCRate，SETCONQUESTRATE 设置）
@@ -88,6 +90,16 @@ pub struct ConquestGuardInfo {
     pub mob_index: i32,
     pub name: String,
     pub repair_cost: u32,
+}
+
+/// 领地旗子 NPC 落点（对应 C# ConquestFlagInfo：ConquestInfo.ConquestFlags）
+#[derive(Debug, Clone)]
+pub struct ConquestFlagInfo {
+    pub index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub name: String,
+    pub file_name: String,
 }
 
 /// 控制点占领状态（对应 C# ControlPoints dict 的 entry）
@@ -129,6 +141,7 @@ impl ConquestInstance {
             guards: Vec::new(),
             gates: Vec::new(),
             walls: Vec::new(),
+            flags: Vec::new(),
             gold_storage: 0,
             tax_rate: 0,
             for_sale: false,
@@ -254,6 +267,12 @@ impl ConquestInstance {
         }
         out
     }
+}
+
+/// 旗子 NPC 外观（C# ConquestGuildFlagInfo.Spawn：默认 Image=1000/Colour=0；
+/// 归属行会 FlagImage/FlagColour 待行会数据补齐后在此接入）
+pub fn conquest_flag_appearance(_inst: &ConquestInstance) -> (u16, i32) {
+    (1000, 0)
 }
 
 /// 城门/城墙状态（对应 C# Gate/Wall/CastleGate）
@@ -542,6 +561,13 @@ mod tests {
         // 若只有开门城门 → 无目标
         map.remove(&10);
         assert_eq!(find_nearest_target(0, 0, 1, &map, &ids), None);
+    }
+
+    #[test]
+    fn test_conquest_flag_appearance_default() {
+        // C# ConquestGuildFlagInfo.Spawn：默认 Image=1000 / Colour=0
+        let inst = ConquestInstance::new(1, 0, 0, ConquestGame::ControlPoints);
+        assert_eq!(conquest_flag_appearance(&inst), (1000, 0));
     }
 }
 

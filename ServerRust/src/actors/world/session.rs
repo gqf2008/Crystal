@@ -630,6 +630,17 @@ impl Message<StartGameRequest> for WorldActor {
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
+        // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
+        let new_flags = spawn_conquest_flags(
+            self.gate_ref.clone(),
+            &self.conquest_instances,
+            loaded_state.map_index,
+            msg.session_id,
+            &mut self.next_object_id,
+        ).await;
+        for flag in new_flags {
+            self.conquest_flags.insert(flag.object_id, flag);
+        }
         // M53：发送 NewMapInfo（大地图 NPC 列表，供 BigMapDialog 显示）
         let map_npcs: Vec<crate::actors::world::NpcState> = self.npcs.values()
             .filter(|n| n.map_index == loaded_state.map_index)
@@ -1178,6 +1189,17 @@ impl Message<WorldMoveRequest> for WorldActor {
                         ).await;
                         for npc in new_npcs {
                             self.npcs.insert(npc.object_id, npc);
+                        }
+                        // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
+                        let new_flags = spawn_conquest_flags(
+                            self.gate_ref.clone(),
+                            &self.conquest_instances,
+                            dest_map_index as u16,
+                            msg.session_id,
+                            &mut self.next_object_id,
+                        ).await;
+                        for flag in new_flags {
+                            self.conquest_flags.insert(flag.object_id, flag);
                         }
                         let elite_broadcasts: Vec<String> = new_monsters.iter()
                             .filter(|m| m.rarity > 0).map(|m| m.name.clone()).collect();
