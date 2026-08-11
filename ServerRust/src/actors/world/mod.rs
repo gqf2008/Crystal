@@ -8279,6 +8279,16 @@ fn build_object_deco_packet(object_id: u32, x: i32, y: i32, image: i32) -> Vec<u
     build_packet_bytes(ServerPacketIds::ObjectDeco as i16, &body)
 }
 
+/// 构建 SetBindingShot 数据包（C# ServerPackets.cs SetBindingShot：ObjectID + Enabled + Value(Int64)）
+fn build_set_binding_shot_packet(object_id: u32, enabled: bool, value: i64) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());       // object_id
+    body.push(if enabled { 1 } else { 0 });                 // enabled
+    body.extend_from_slice(&value.to_le_bytes());           // value (i64, C# Int64)
+    build_packet_bytes(ServerPacketIds::SetBindingShot as i16, &body)
+}
+
 /// 构建 ObjectMonster 数据包（extra=false，name_colour=0）
 fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &str) -> Vec<u8> {
     build_object_monster_packet_extra(monster, object_id, name, false, 0)
@@ -9636,6 +9646,18 @@ mod tests {
         assert_eq!(pkt.location_x, 100);
         assert_eq!(pkt.location_y, 200);
         assert_eq!(pkt.image, 42);
+    }
+
+    /// 定身射击包：C# 线格式（ObjectID + Enabled + Value(Int64)）回读校验
+    #[test]
+    fn test_build_set_binding_shot_packet() {
+        use mir2_shared::packets::server::ui_events::SetBindingShot;
+        let bytes = build_set_binding_shot_packet(9, true, 3000);
+        let mut cursor = std::io::Cursor::new(&bytes[4..]);
+        let pkt = SetBindingShot::read_body(&mut cursor).expect("parse SetBindingShot");
+        assert_eq!(pkt.object_id, 9);
+        assert!(pkt.enabled);
+        assert_eq!(pkt.value, 3000);
     }
 
 }

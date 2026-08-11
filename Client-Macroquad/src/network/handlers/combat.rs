@@ -768,9 +768,11 @@ impl PacketHandler for CombatHandler {
             x if x == ServerPacketIds::SetBindingShot as u16 => {
                 if let Ok(packet) = server::SetBindingShot::read_body(&mut cursor) {
                     events.push(NetworkEvent::BindingShotSet {
+                        object_id: packet.object_id,
                         enabled: packet.enabled,
+                        value: packet.value,
                     });
-                    tracing::debug!("🎯 BindingShotSet: enabled={}", packet.enabled);
+                    tracing::debug!("🎯 BindingShotSet: id={} enabled={} value={}", packet.object_id, packet.enabled, packet.value);
                 }
             }
 

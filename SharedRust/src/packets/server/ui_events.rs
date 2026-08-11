@@ -329,23 +329,29 @@ impl Packet for SendOutputMessage {
 /// SetBindingShot - 设置捆绑射击 (220)
 #[derive(Debug, Clone)]
 pub struct SetBindingShot {
-    pub enabled: bool, // 是否启用
+    pub object_id: u32,
+    pub enabled: bool,
+    pub value: i64, // C# Value(Int64)：定身时长 ms
 }
 
 impl Packet for SetBindingShot {
     const OPCODE: i16 = ServerPacketIds::SetBindingShot as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
+        use byteorder::{LittleEndian, WriteBytesExt};
 
+        writer.write_u32::<LittleEndian>(self.object_id)?;
         writer.write_u8(if self.enabled { 1 } else { 0 })?;
+        writer.write_i64::<LittleEndian>(self.value)?;
 
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
         let enabled = reader.read_u8()? != 0;
-        Ok(Self { enabled })
+        let value = reader.read_i64::<LittleEndian>()?;
+        Ok(Self { object_id, enabled, value })
     }
 }
 
@@ -405,5 +411,20 @@ mod tests {
         assert_eq!(read2.size, 80);
         assert!(!read2.has_expanded_storage);
         assert_eq!(read2.expiry_time, 0);
+    }
+
+    #[test]
+    fn set_binding_shot_roundtrip() {
+        // C# ServerPackets.cs SetBindingShot：ObjectID + Enabled + Value(Int64)
+        let pkt = SetBindingShot { object_id: 42, enabled: true, value: 3000 };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        // u32 + u8 + i64 = 13 bytes
+        assert_eq!(buf.len(), 13);
+        let mut cursor = Cursor::new(&buf);
+        let parsed = SetBindingShot::read_body(&mut cursor).unwrap();
+        assert_eq!(parsed.object_id, 42);
+        assert!(parsed.enabled);
+        assert_eq!(parsed.value, 3000);
     }
 }

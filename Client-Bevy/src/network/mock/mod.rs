@@ -1975,7 +1975,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         send(
                                             &to_client,
-                                            &server::ui_events::SetBindingShot { enabled: true },
+                                            &server::ui_events::SetBindingShot {
+                                                object_id: 101,
+                                                enabled: true,
+                                                value: 3000,
+                                            },
                                         );
                                         // #264：改名 / 杂项
                                         send(

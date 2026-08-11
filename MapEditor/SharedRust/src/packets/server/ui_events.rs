@@ -322,23 +322,29 @@ impl Packet for SendOutputMessage {
 /// SetBindingShot - 设置捆绑射击 (220)
 #[derive(Debug, Clone)]
 pub struct SetBindingShot {
-    pub enabled: bool,              // 是否启用
+    pub object_id: u32,
+    pub enabled: bool,
+    pub value: i64, // C# Value(Int64)：定身时长 ms
 }
 
 impl Packet for SetBindingShot {
     const OPCODE: i16 = ServerPacketIds::SetBindingShot as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        
+        use byteorder::{LittleEndian, WriteBytesExt};
+
+        writer.write_u32::<LittleEndian>(self.object_id)?;
         writer.write_u8(if self.enabled { 1 } else { 0 })?;
-        
+        writer.write_i64::<LittleEndian>(self.value)?;
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
         let enabled = reader.read_u8()? != 0;
-        Ok(Self { enabled })
+        let value = reader.read_i64::<LittleEndian>()?;
+        Ok(Self { object_id, enabled, value })
     }
 }
 
