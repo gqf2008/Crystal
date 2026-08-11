@@ -1210,12 +1210,12 @@ pub struct WorldActor {
 
 /// 英雄信息（#188：C# ClientHeroInformation 语义，内存态）
 
-/// 英雄创建结果码（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success）
-pub(crate) fn hero_create_result(name: &str, has_hero: bool) -> u8 {
-    if has_hero {
-        4
-    } else if name.trim().is_empty() {
+/// 英雄创建结果码（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success；CreateHero :9595-9599）
+pub(crate) fn hero_create_result(name: &str, hero_count: usize, max_count: u8) -> u8 {
+    if name.trim().is_empty() {
         1
+    } else if hero_count as u8 >= max_count {
+        4
     } else {
         10
     }
@@ -8059,10 +8059,11 @@ mod hero_tests {
     #[test]
     fn hero_create_result_codes() {
         // C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success
-        assert_eq!(hero_create_result("", false), 1);
-        assert_eq!(hero_create_result("   ", false), 1);
-        assert_eq!(hero_create_result("Hero", true), 4);
-        assert_eq!(hero_create_result("Hero", false), 10);
+        assert_eq!(hero_create_result("", 0, 1), 1);
+        assert_eq!(hero_create_result("   ", 0, 1), 1);
+        assert_eq!(hero_create_result("Hero", 1, 1), 4);
+        assert_eq!(hero_create_result("Hero", 0, 1), 10);
+        assert_eq!(hero_create_result("Hero", 1, 2), 10);
     }
 }
 
