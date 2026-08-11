@@ -636,6 +636,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             max_experience: 100,
         can_gain_exp: true,
         pearl_count: 0,
+        maximum_hero_count: 1,
         step_counter: 0,
         run_counter: 0,
         run_time_ms: 0,
@@ -956,13 +957,16 @@ impl Message<NewHeroRequest> for WorldActor {
             }).await;
             return;
         }
-        // #188：真正创建英雄（内存态；DB 持久化后续批次）
-        // C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success
-        let has_hero = self.player_heroes.get(&msg.session_id).is_some_and(|v| !v.is_empty());
-        let result = hero_create_result(&msg.name, has_hero);
+        // #188：创建英雄（C# CreateHero :9595-9599：heroCount >= MaximumHeroCount → Result=4；成功分配下一空闲 index）
+        let hero_count = self.player_heroes.get(&msg.session_id).map(|v| v.len()).unwrap_or(0);
+        let result = hero_create_result(&msg.name, hero_count, state.maximum_hero_count);
         if result == 10 {
+            // 下一空闲 index（1..=maximum_hero_count）
+            let next_index = (1..=state.maximum_hero_count as i32)
+                .find(|i| !self.player_heroes.get(&msg.session_id).map(|hs| hs.iter().any(|h| h.index == *i)).unwrap_or(false))
+                .unwrap_or(hero_count as i32 + 1) as u8;
             self.player_heroes.entry(msg.session_id).or_default().push(HeroInfo {
-                index: 1,
+                index: next_index as i32,
                 name: msg.name.clone(),
                 level: 1,
                 class: msg.class,
@@ -980,7 +984,7 @@ impl Message<NewHeroRequest> for WorldActor {
             if let Some(si) = seal_item {
                 if state.inventory.has_space() {
                     if let Some(hs) = self.player_heroes.get_mut(&msg.session_id) {
-                        if let Some(h) = hs.iter_mut().find(|h| h.index == 1) {
+                        if let Some(h) = hs.iter_mut().find(|h| h.index == next_index as i32) {
                             h.sealed = true;
                         }
                     }
@@ -989,7 +993,7 @@ impl Message<NewHeroRequest> for WorldActor {
                         count: 1,
                         added_stats: {
                             let mut m = mir2_shared::data::stats::Stats::default();
-                            m.set(mir2_shared::enums::Stat::Hero, 1);
+                            m.set(mir2_shared::enums::Stat::Hero, next_index as i32);
                             m
                         },
                         ..Default::default()
@@ -998,12 +1002,12 @@ impl Message<NewHeroRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id,
                         "英雄已创建，封印符已放入背包，使用后即可出战");
                 } else {
-                    let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
+                    let _ = record.actor_ref.ask(SetHeroIndex { hero_index: next_index }).await;
                     self.broadcast_hero_spawn(msg.session_id).await;
                     self.send_hero_information_packet(msg.session_id).await;
                 }
             } else {
-                let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
+                let _ = record.actor_ref.ask(SetHeroIndex { hero_index: next_index }).await;
                 // #198：创建成功后生成英雄对象
                 self.broadcast_hero_spawn(msg.session_id).await;
                 // #203：下发完整英雄信息（背包/装备/自动药）

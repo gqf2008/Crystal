@@ -207,6 +207,8 @@ pub struct PlayerState {
     pub creature_log: CreatureLog,
     /// 英雄索引（0 = 无英雄）
     pub hero_index: u8,
+    /// 英雄槽位上限（C# CharacterInfo.MaximumHeroCount 默认 1 / Settings.MaximumHeroCount=9；Scroll 14 递增）
+    pub maximum_hero_count: u8,
     /// 英雄是否被收起（C# HeroSpawned 反义，@SUMMONHERO 切换；运行时状态不持久化）
     pub hero_despawned: bool,
     /// 英雄行为模式 (0=Attack, 1=Follow, etc.)
@@ -666,6 +668,7 @@ impl PlayerActor {
                 max_experience: 100,
         can_gain_exp: true,
         pearl_count: 0,
+        maximum_hero_count: 1,
         step_counter: 0,
         run_counter: 0,
         run_time_ms: 0,
@@ -4729,6 +4732,19 @@ pub struct SetHeroIndex {
     pub hero_index: u8,
 }
 
+/// 设置英雄槽位上限（Scroll 14；C# CharacterInfo.MaximumHeroCount）
+pub struct SetMaximumHeroCount {
+    pub count: u8,
+}
+
+impl Message<SetMaximumHeroCount> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMaximumHeroCount, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.maximum_hero_count = msg.count;
+    }
+}
+
 impl Message<SetHeroIndex> for PlayerActor {
     type Reply = ();
 
@@ -6083,6 +6099,7 @@ mod tests {
             max_experience: 100,
         can_gain_exp: true,
         pearl_count: 0,
+        maximum_hero_count: 1,
         step_counter: 0,
         run_counter: 0,
         run_time_ms: 0,

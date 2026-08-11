@@ -3888,6 +3888,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         max_experience: 100,
         can_gain_exp: true,
         pearl_count: 0,
+        maximum_hero_count: 1,
         step_counter: 0,
         run_counter: 0,
         run_time_ms: 0,

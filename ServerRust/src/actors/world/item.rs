@@ -1231,6 +1231,18 @@ impl Message<UseItemRequest> for WorldActor {
                             send_system_message(&self.gate_ref, msg.session_id, "英雄自动喝药已解锁！");
                             debug!("HeroAutopotScroll: {} unlocked hero autopot", player_state.name);
                         }
+                        // 14 Increase maximum hero count（C# UseItem Scroll case 14，:6061-6069；Settings.MaximumHeroCount=9）
+                        14 => {
+                            const MAX_HERO_COUNT: u8 = 9; // C# Settings.MaximumHeroCount
+                            if player_state.maximum_hero_count >= MAX_HERO_COUNT {
+                                send_system_message(&self.gate_ref, msg.session_id, "英雄数量已达上限");
+                                return;
+                            }
+                            let new_count = player_state.maximum_hero_count + 1;
+                            let _ = record.actor_ref.ask(crate::actors::player::SetMaximumHeroCount { count: new_count }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("英雄槽位已增至 {}", new_count));
+                            debug!("HeroSlotScroll: {} maximum_hero_count -> {}", player_state.name, new_count);
+                        }
                         _ => {
                             send_system_message(&self.gate_ref, msg.session_id, "该卷轴无法使用");
                             return;

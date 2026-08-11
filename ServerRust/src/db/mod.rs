@@ -768,6 +768,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN pearl_count INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // heroslots：英雄槽位上限（safe to re-run）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN maximum_hero_count INTEGER NOT NULL DEFAULT 1")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN dead INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
@@ -1181,9 +1184,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             gold, group_id, guild_name, guild_rank,
             spouse_name, married_date, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
-            is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count,
+            is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count, maximum_hero_count,
             last_access, bind_map_index, bind_x, bind_y, is_mentor, backpack_size
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1241,6 +1244,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.pk_kill_count as i32)
     .bind(if state.can_gain_exp { 1 } else { 0 })
     .bind(state.pearl_count)
+    .bind(state.maximum_hero_count as i32)
     .bind(state.last_access)
     .bind(state.bind_map_index)
     .bind(state.bind_x)
@@ -1344,6 +1348,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         max_experience: row.get("max_experience"),
         can_gain_exp: row.try_get("can_gain_exp").unwrap_or(1) != 0,
         pearl_count: row.try_get("pearl_count").unwrap_or(0),
+        maximum_hero_count: row.try_get("maximum_hero_count").unwrap_or(1) as u8,
         step_counter: 0,
         run_counter: 0,
         run_time_ms: 0,
