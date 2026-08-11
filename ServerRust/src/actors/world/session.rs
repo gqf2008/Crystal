@@ -750,6 +750,17 @@ impl Message<StartGameRequest> for WorldActor {
             }).await;
         }
 
+        // C# StartGameSuccess "Restore buffs"：登录恢复后逐条下发 S.AddBuff（客户端 Buff 栏显示；wire [tag u8][remaining_ticks u32]）
+        for buff in &loaded_state.buffs {
+            let mut body = Vec::new();
+            body.push(crate::actors::player::buff_tag(&buff.buff_type));
+            body.extend_from_slice(&buff.remaining_ticks.to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AddBuff as i16, &body),
+            }).await;
+        }
+
         // 发送自动药水设置（恢复持久化数据）
         if loaded_state.auto_pot_hp > 0 {
             let mut body = Vec::new();

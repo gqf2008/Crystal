@@ -891,6 +891,14 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // 老库迁移：rentals 补 item_json（用于重建 UserItem 到期归还）
     let _ = sqlx::query("ALTER TABLE rentals ADD COLUMN item_json TEXT NOT NULL DEFAULT ''").execute(&pool).await;
 
+    // Buff 持久化（C# CharacterInfo.Buffs；SavedBuff JSON，墙钟到期）
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS player_buffs (
+            character_name TEXT NOT NULL,
+            buff_json TEXT NOT NULL
+        )"#
+    ).execute(&pool).await?;
+
     info!("SQLite database initialized: {}", db_url);
     Ok(pool)
 }
@@ -969,6 +977,51 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             .execute(&pool).await.unwrap();
         let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
         assert!(removed.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_buffs_persistence_roundtrip() {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS player_buffs (character_name TEXT NOT NULL, buff_json TEXT NOT NULL)")
+            .execute(&pool).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        let buffs = vec![
+            crate::combat::buff::BuffInstance::new(
+                crate::combat::buff::BuffType::AttackBoost { bonus: 5 }, 300, 10,
+            ),
+            crate::combat::buff::BuffInstance::new(
+                crate::combat::buff::BuffType::Invisibility, 120, 1,
+            ),
+        ];
+        save_buffs(&mut conn, "Hero", &buffs).await.unwrap();
+
+        // 立即加载：数量/时长保持
+        let loaded = load_player_buffs(&pool, "Hero").await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        // save/load 之间可能有毫秒级流逝：remaining_ticks 在 299..=300 范围（30000ms/100ms）
+        assert!((299..=300).contains(&loaded[0].remaining_ticks));
+        assert_eq!(loaded[1].buff_type, crate::combat::buff::BuffType::Invisibility);
+
+        // 已过期记录：手动插入过去到期 → 加载时丢弃
+        let expired = crate::combat::buff::SavedBuff {
+            buff_type: crate::combat::buff::BuffType::Stun,
+            tick_interval: 1,
+            tick_counter: 0,
+            source_id: None,
+            paused: false,
+            expire_at_ms: now_ms - 1000,
+        };
+        let json = serde_json::to_string(&expired).unwrap();
+        sqlx::query("INSERT INTO player_buffs (character_name, buff_json) VALUES ('Hero', ?)")
+            .bind(&json).execute(&pool).await.unwrap();
+        let loaded2 = load_player_buffs(&pool, "Hero").await.unwrap();
+        assert_eq!(loaded2.len(), 2, "过期 buff 应被丢弃");
     }
 
     #[tokio::test]
@@ -1291,7 +1344,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
         "inventory_backpack", "inventory_equipment", "inventory_storage", "quest_inventory_backpack",
         "hero_inventory_backpack", "heroes", "friends", "blocked_list", "mail",
         "quests", "completed_quests", "player_magics", "player_flags",
-        "creatures", "refine_log",
+        "creatures", "refine_log", "player_buffs",
     ] {
         sqlx::query(&format!("DELETE FROM {tbl} WHERE character_name = ?"))
             .bind(&state.name)
@@ -1412,6 +1465,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
 
     // Save flags
     save_flags(&mut *tx, &state.name, &state.flags).await?;
+
+    // Save buffs（C# CharacterInfo.Buffs；墙钟到期，离线衰减）
+    save_buffs(&mut *tx, &state.name, &state.buffs).await?;
 
     // 提交事务 — 所有写入原子生效
     tx.commit().await?;
@@ -1603,7 +1659,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         allow_group: row.get::<Option<i32>, _>("allow_group").map(|v| v != 0).unwrap_or(false),
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
-        buffs: Vec::new(),
+        buffs: load_player_buffs(pool, character_name).await?,
         magics,
         flags,
         exp_multiplier: 1.0,
@@ -2556,6 +2612,45 @@ async fn load_hero_magics(
     }
     Ok(magics)
 }
+async fn save_buffs(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, buffs: &[crate::combat::buff::BuffInstance]) -> anyhow::Result<()> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    for buff in buffs {
+        let saved = buff.to_saved(now_ms);
+        let json = serde_json::to_string(&saved)?;
+        sqlx::query("INSERT INTO player_buffs (character_name, buff_json) VALUES (?, ?)")
+            .bind(character_name)
+            .bind(&json)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// 加载角色 Buff（C# CharacterInfo.Buffs 恢复；离线时间计入衰减，已过期丢弃）
+async fn load_player_buffs(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<crate::combat::buff::BuffInstance>> {
+    let rows = sqlx::query("SELECT buff_json FROM player_buffs WHERE character_name = ?")
+        .bind(character_name)
+        .fetch_all(pool)
+        .await?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let mut buffs = Vec::new();
+    for row in rows {
+        let json: String = row.get("buff_json");
+        if let Ok(saved) = serde_json::from_str::<crate::combat::buff::SavedBuff>(&json) {
+            if let Some(b) = saved.into_instance(now_ms) {
+                buffs.push(b);
+            }
+        }
+    }
+    Ok(buffs)
+}
+
 async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM player_flags WHERE character_name = ?")
         .bind(character_name)

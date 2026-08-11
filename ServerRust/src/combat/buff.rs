@@ -1,8 +1,10 @@
 // Buff/Debuff 系统
 // 纯函数 + 数据结构，由 WorldActor 调用
 
+use serde::{Deserialize, Serialize};
+
 /// 减伤 buff 来源（C# ProcessBuffs 过期 Down 特效：MagicShield/ElementalBarrier；Other 无特效）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShieldKind {
     MagicShield,
     ElementalBarrier,
@@ -10,7 +12,7 @@ pub enum ShieldKind {
 }
 
 /// Buff 类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuffType {
     /// HP 持续回复
     HpRegen { amount_per_tick: i32 },
@@ -74,7 +76,7 @@ pub enum BuffType {
 }
 
 /// Buff 实例
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuffInstance {
     pub buff_type: BuffType,
     pub remaining_ticks: u32,
@@ -103,6 +105,51 @@ impl BuffInstance {
     pub fn with_source(mut self, source_id: u32) -> Self {
         self.source_id = Some(source_id);
         self
+    }
+
+    /// 转持久化形态：remaining_ticks × 世界 tick(100ms) → 墙钟到期（C# ExpireTime 语义）
+    pub fn to_saved(&self, now_ms: i64) -> SavedBuff {
+        SavedBuff {
+            buff_type: self.buff_type,
+            tick_interval: self.tick_interval,
+            tick_counter: self.tick_counter,
+            source_id: self.source_id,
+            paused: self.paused,
+            expire_at_ms: now_ms + (self.remaining_ticks as i64 * BUFF_TICK_MS as i64),
+        }
+    }
+}
+
+/// 世界 tick 时长（ms）：BuffInstance.remaining_ticks 按世界 tick 递减；生产配置 tick_ms=100
+pub const BUFF_TICK_MS: u64 = 100;
+
+/// Buff 持久化形态（对齐 C# CharacterInfo.Buffs：绝对到期时间，离线时间计入衰减）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedBuff {
+    pub buff_type: BuffType,
+    pub tick_interval: u32,
+    pub tick_counter: u32,
+    pub source_id: Option<u32>,
+    pub paused: bool,
+    /// 墙钟到期毫秒（C# Buff.ExpireTime）
+    pub expire_at_ms: i64,
+}
+
+impl SavedBuff {
+    /// 还原为 BuffInstance：按离线时长衰减 remaining_ticks；已过期返回 None
+    pub fn into_instance(self, now_ms: i64) -> Option<BuffInstance> {
+        let remaining_ms = self.expire_at_ms - now_ms;
+        if remaining_ms <= 0 {
+            return None;
+        }
+        Some(BuffInstance {
+            buff_type: self.buff_type,
+            remaining_ticks: (((remaining_ms as u64) / BUFF_TICK_MS).max(1)).min(u32::MAX as u64) as u32,
+            tick_interval: self.tick_interval,
+            tick_counter: self.tick_counter,
+            source_id: self.source_id,
+            paused: self.paused,
+        })
     }
 }
 
@@ -257,6 +304,33 @@ pub fn is_slowed(buffs: &[BuffInstance]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// #2212：SavedBuff/BuffType serde roundtrip + 离线衰减/过期丢弃
+    #[test]
+    fn saved_buff_roundtrip_and_decay() {
+        let buff = BuffInstance::new(BuffType::AttackBoost { bonus: 5 }, 300, 10).with_source(42);
+        let now = 1_700_000_000_000i64;
+        let saved = buff.to_saved(now);
+        // 300 ticks * 100ms = 30s
+        assert_eq!(saved.expire_at_ms, now + 30_000);
+
+        let json = serde_json::to_string(&saved).unwrap();
+        let back: SavedBuff = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.buff_type, BuffType::AttackBoost { bonus: 5 });
+        assert_eq!(back.tick_interval, 10);
+        assert_eq!(back.source_id, Some(42));
+
+        // 立即还原：剩余 ticks 不变（30000/100=300）
+        let restored = back.clone().into_instance(now).unwrap();
+        assert_eq!(restored.remaining_ticks, 300);
+        assert_eq!(restored.paused, false);
+
+        // 离线 15s：剩余 150 ticks
+        let half = back.clone().into_instance(now + 15_000).unwrap();
+        assert_eq!(half.remaining_ticks, 150);
+
+        // 离线超时：丢弃
+        assert!(back.into_instance(now + 31_000).is_none());
+    }
     use super::*;
 
     #[test]
