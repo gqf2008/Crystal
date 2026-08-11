@@ -50,21 +50,30 @@ impl Message<LockMailRequest> for WorldActor {
 
 pub struct MailLockedItemRequest {
     pub session_id: u64,
-    pub mail_id: u64,
-    pub item_index: u32,
+    /// C# C.MailLockedItem.UniqueID（邮件附件的物品 uid）
+    pub unique_id: u64,
+    /// C# C.MailLockedItem.Locked
+    pub locked: bool,
 }
 
 impl Message<MailLockedItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MailLockedItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let mut state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
-
-        if let Some(mail) = state.mailbox.get_mail_mut(msg.mail_id) {
-            mail.locked = true;
-            let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
-            debug!("MailLockedItem: {} mail_id={} item_index={}", state.name, msg.mail_id, msg.item_index);
+        // C# MirConnection.cs:677-678：MailLockedItem 仅回显给客户端（无服务端状态）
+        let mut body = Vec::new();
+        if mir2_shared::packets::base::serialize_packet(
+            &mut std::io::Cursor::new(&mut body),
+            &mir2_shared::packets::server::mail_system::MailLockedItem {
+                unique_id: msg.unique_id,
+                locked: msg.locked,
+            },
+        ).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: body,
+            }).await;
         }
+        debug!("MailLockedItem: session={} uid={} locked={}", msg.session_id, msg.unique_id, msg.locked);
     }
 }
 

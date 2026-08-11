@@ -337,6 +337,9 @@ impl WorldActor {
 
 pub struct GuildBuffUpdateRequest {
     pub session_id: u64,
+    /// C# C.GuildBuffUpdate.Action（0=请求列表 1=启用 2=激活）
+    pub action: u8,
+    /// C# C.GuildBuffUpdate.Id
     pub buff_id: u32,
 }
 
@@ -353,8 +356,8 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
             return;
         };
 
-        // buff_id=0 means "request list" - send current active buffs
-        if msg.buff_id == 0 {
+        // action=0 means "request list" - send current active buffs（C# GuildBuffUpdate）
+        if msg.action == 0 {
             let buffs = self.guild_buffs(guild_name).await;
             self.send_guild_buff_list(msg.session_id, &buffs).await;
             return;
