@@ -686,6 +686,10 @@ const SPELL_FIRE_BURST: u8 = mir2_shared::enums::Spell::FireBurst as u8;        
 const SPELL_TRAP: u8 = mir2_shared::enums::Spell::Trap as u8;                       // 98 刺客·陷阱（目标 60s 麻痹）
 const SPELL_FLAMING_SWORD: u8 = mir2_shared::enums::Spell::FlamingSword as u8;     // 8 战士·烈焰剑（下一次近战附加火焰加成）
 const SPELL_TWIN_DRAKE_BLADE: u8 = mir2_shared::enums::Spell::TwinDrakeBlade as u8;   // 6 战士·双龙斩（下一次近战双段伤害）
+// 武装类 SpellToggle：客户端协议号 = C# + 3，SpellToggleRequest 需还原 C# 号匹配（C# HumanObject.SpellToggle）
+const SPELL_TWIN_DRAKE_BLADE_CS: i32 = mir2_shared::enums::Spell::TwinDrakeBlade as i32 - 3;
+const SPELL_FLAMING_SWORD_CS: i32 = mir2_shared::enums::Spell::FlamingSword as i32 - 3;
+const SPELL_COUNTER_ATTACK_CS: i32 = mir2_shared::enums::Spell::CounterAttack as i32 - 3;
 const SPELL_SLASHING_BURST: u8 = mir2_shared::enums::Spell::SlashingBurst as u8;     // 15 战士·横扫千军（冲锋+伤害）
 const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（3列×3行前向 AoE）
 // 弓箭手法术（Archer，弹道物理系 + 自身 buff）

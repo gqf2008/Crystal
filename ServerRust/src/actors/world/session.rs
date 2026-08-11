@@ -3603,19 +3603,80 @@ impl Message<SpellToggleRequest> for WorldActor {
         // can_use: -1 = hero toggle (skip for now), 0 = off, 1 = on
         if msg.can_use < 0 { return; }
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => return,
         };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        if state.is_dead { return; }
+        // 客户端协议编号 = C# 编号 + 3（与 ToggleSpell 注释一致）
+        let spell_cs = msg.spell.saturating_sub(3);
+        let learned = state.magics.iter().any(|m| m.spell == spell_cs);
+        let magic_level = state.magics.iter()
+            .find(|m| m.spell == spell_cs)
+            .map(|m| m.level)
+            .unwrap_or(0);
+        let spell_info = self.magic_infos.get(&(spell_cs as u32));
+
+        // ===== 武装类技能：C# HumanObject.SpellToggle（:8526-8570）=====
+        if spell_cs == SPELL_FLAMING_SWORD_CS
+            || spell_cs == SPELL_COUNTER_ATTACK_CS
+            || spell_cs == SPELL_TWIN_DRAKE_BLADE_CS
+        {
+            // C# GetMagic(spell) 为 null 直接返回（未学习）
+            if !learned { return; }
+            // C#：cost = BaseCost + Lv*LevelCost；cost >= MP 拒绝（需严格大于）
+            let cost = spell_info.map(|m| crate::combat::magic::magic_cost(m, magic_level)).unwrap_or(5);
+            if cost >= state.mp { return; }
+            match spell_cs {
+                _ if spell_cs == SPELL_FLAMING_SWORD_CS => {
+                    // C# :8539 已武装且未过期 → return（到期后可重新武装）
+                    if let Some((expire, _)) = self.flaming_sword.get(&msg.session_id).copied() {
+                        if self.tick_count < expire { return; }
+                    }
+                    self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, magic_level));
+                    // C# :8547 S.SpellToggle CanUse=true
+                    self.send_spell_toggle(msg.session_id, record.object_id, SPELL_FLAMING_SWORD_CS as u8, true).await;
+                }
+                _ if spell_cs == SPELL_COUNTER_ATTACK_CS => {
+                    // C# :8551 已武装且未过期 → return
+                    if let Some((expire, _)) = self.counter_attack.get(&msg.session_id).copied() {
+                        if self.tick_count < expire { return; }
+                    }
+                    self.counter_attack.insert(msg.session_id, (self.tick_count + 70, magic_level));
+                    // C# :8568 AddBuff(CounterAttack, 7s, MinAC/MaxAC/MinMAC/MaxMAC = 11+Lv*3)
+                    let bonus = crate::combat::magic::counterattack_ac_bonus(magic_level as i32);
+                    for bt in [
+                        crate::combat::buff::BuffType::AcDefenseBoost { bonus },
+                        crate::combat::buff::BuffType::MacDefenseBoost { bonus },
+                    ] {
+                        let buff = crate::combat::buff::BuffInstance::new(bt, 70, 5);
+                        let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                    }
+                }
+                _ => {
+                    // TwinDrakeBlade（C# :8526-8537）：已武装 → return；武装直至下一次近战消耗
+                    if self.double_hit_melee.contains_key(&msg.session_id) { return; }
+                    self.double_hit_melee.insert(msg.session_id, (self.tick_count + 100, magic_level, 0));
+                }
+            }
+            // C#：ChangeMP(-cost)
+            let _ = record.actor_ref.ask(crate::actors::player::DeductMP { amount: cost }).await;
+            return;
+        }
+
+        // ===== 常驻开关技能：保持原 ToggleSpell 行为 =====
         let toggled = msg.can_use > 0;
-        let object_id = record.object_id;
         let _ = record.actor_ref.ask(ToggleSpell {
             spell: msg.spell,
             toggled,
         }).await;
-        // Send SpellToggle confirmation to client
+        // 确认包 spell 用 C# 号（与登录下发 magic.spell 一致；此前误发 +3 客户端号）
         let mut body = Vec::new();
-        body.extend_from_slice(&object_id.to_le_bytes());
-        body.push(msg.spell as u8);
+        body.extend_from_slice(&record.object_id.to_le_bytes());
+        body.push(spell_cs as u8);
         body.push(if toggled { 1u8 } else { 0u8 });
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,

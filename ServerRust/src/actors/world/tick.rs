@@ -925,6 +925,55 @@ impl WorldActor {
         }
     }
 
+    /// S.SpellToggle 下发（body：[object_id u32][spell u8][can_use u8]，spell 用 C# 号；
+    /// 与登录下发 magic.spell / C# S.SpellToggle 一致）
+    pub(crate) async fn send_spell_toggle(&self, session_id: u64, object_id: u32, spell_cs: u8, can_use: bool) {
+        let mut body = Vec::new();
+        body.extend_from_slice(&object_id.to_le_bytes());
+        body.push(spell_cs);
+        body.push(if can_use { 1u8 } else { 0u8 });
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SpellToggle as i16, &body),
+        }).await;
+    }
+
+    /// C# HumanObject.Process（:263-272）：武装技能到期清理
+    /// FlamingSword 到期 → S.SpellToggle CanUse=false（:266）复位客户端按钮；
+    /// CounterAttack 到期仅清理表项（C# 无包）；TwinDrakeBlade 沿用 Rust 10s 过期约定
+    pub(crate) async fn tick_spell_toggles(&mut self) {
+        if self.flaming_sword.is_empty() && self.counter_attack.is_empty() && self.double_hit_melee.is_empty() {
+            return;
+        }
+        // FlamingSword 到期：清理 + 下发 CanUse=false
+        let expired_flaming: Vec<(u64, u32)> = self.flaming_sword.iter()
+            .filter(|(_, (expire, _))| self.tick_count >= *expire)
+            .map(|(sid, _)| (*sid, self.players.get(sid).map(|r| r.object_id).unwrap_or(0)))
+            .collect();
+        for (sid, oid) in expired_flaming {
+            self.flaming_sword.remove(&sid);
+            if oid != 0 {
+                self.send_spell_toggle(sid, oid, SPELL_FLAMING_SWORD_CS as u8, false).await;
+            }
+        }
+        // CounterAttack 到期：仅清理
+        let expired_counter: Vec<u64> = self.counter_attack.iter()
+            .filter(|(_, (expire, _))| self.tick_count >= *expire)
+            .map(|(sid, _)| *sid)
+            .collect();
+        for sid in expired_counter {
+            self.counter_attack.remove(&sid);
+        }
+        // TwinDrakeBlade 到期：清理
+        let expired_double: Vec<u64> = self.double_hit_melee.iter()
+            .filter(|(_, (expire, _, _))| self.tick_count >= *expire)
+            .map(|(sid, _)| *sid)
+            .collect();
+        for sid in expired_double {
+            self.double_hit_melee.remove(&sid);
+        }
+    }
+
     /// #1290：C# ProcessRegen PotTime——药水池每 200ms 处理（PerTickRegen = 5 + Level/10）
     /// #1703：怪物远程伤害延迟结算（C# DelayedAction RangeDamage）
     pub(crate) async fn tick_ranged_pending(&mut self) {
@@ -7112,6 +7161,8 @@ impl Message<Tick> for WorldActor {
         self.tick_potion_pools().await;
 
         self.tick_stacking().await;
+
+        self.tick_spell_toggles().await;
 
         self.tick_environment_damage().await;
 
