@@ -1984,8 +1984,8 @@ fn game_shop_catalog_fallback() -> &'static [ShopItem] {
     ]
 }
 
-/// 发送游戏商店目录给玩家
-fn send_game_shop_catalog(gate_ref: &ActorRef<GateActor>, session_id: u64, gold: u32, shop_items: &[db::GameShopItem]) {
+/// 发送游戏商店目录给玩家（登录 GetGameShop 与请求目录共用；C# S.GameShopInfo）
+pub(crate) fn send_game_shop_catalog(gate_ref: &ActorRef<GateActor>, session_id: u64, gold: u32, shop_items: &[db::GameShopItem]) {
     use mir2_shared::packets::server::special_systems::{GameShopInfo, GameShopItem as ProtoItem};
 
     let items: Vec<ProtoItem> = if shop_items.is_empty() {
