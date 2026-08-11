@@ -938,12 +938,12 @@ impl PlayerInventory {
         self.backpack.resize(new_len, None);
         new_len
     }
-    /// 镶嵌宝石：将 from_grid 的宝石插入 to_grid 装备的第一个空槽位
+    /// 镶嵌宝石：将 from_uid 的宝石插入 to_uid 装备的第一个空槽位（C# CombineItem：按 unique_id 查找）
     /// 返回 (source_uid, target_uid) 或 None
-    pub fn socket_gem(&mut self, from_grid: u8, to_grid: u8, target_slot_count: usize) -> Option<(u64, u64)> {
-        let fi = from_grid as usize;
-        let ti = to_grid as usize;
-        if fi >= self.backpack.len() || ti >= self.backpack.len() || fi == ti {
+    pub fn socket_gem_by_uid(&mut self, from_uid: u64, to_uid: u64, target_slot_count: usize) -> Option<(u64, u64)> {
+        let fi = self.backpack.iter().position(|s| s.as_ref().map_or(false, |slot| slot.item.unique_id == from_uid))?;
+        let ti = self.backpack.iter().position(|s| s.as_ref().map_or(false, |slot| slot.item.unique_id == to_uid))?;
+        if fi == ti {
             return None;
         }
 
@@ -1291,8 +1291,8 @@ mod tests {
         equip.slots = vec![None, None];
         inv.backpack[1] = Some(InventorySlot { grid: 1, item: equip });
 
-        // 镶嵌成功
-        let result = inv.socket_gem(0, 1, 2);
+        // 镶嵌成功（按 unique_id）
+        let result = inv.socket_gem_by_uid(1, 2, 2);
         assert!(result.is_some());
         let (source_uid, target_uid) = result.unwrap();
         assert_eq!(source_uid, 1);
@@ -1322,7 +1322,7 @@ mod tests {
         inv.backpack[1] = Some(InventorySlot { grid: 1, item: equip });
 
         // 镶嵌失败（无空槽）
-        assert!(inv.socket_gem(0, 1, 1).is_none());
+        assert!(inv.socket_gem_by_uid(1, 2, 1).is_none());
         // 源物品应保留
         assert!(inv.backpack[0].is_some());
     }
@@ -1333,8 +1333,11 @@ mod tests {
         let gem = make_item(100, 1);
         inv.backpack[0] = Some(InventorySlot { grid: 0, item: gem });
 
-        // 同格子镶嵌应失败
-        assert!(inv.socket_gem(0, 0, 2).is_none());
+        // 同物品（同 uid）镶嵌应失败
+        let gem2 = make_item(100, 1);
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: gem2.clone() });
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: gem2 });
+        assert!(inv.socket_gem_by_uid(100, 100, 2).is_none());
     }
 
     /// #1159：C# RepairItem——非特殊修理 MaxDura 衰减 (MaxDura-CurrentDura)/30，特殊修理不衰减
