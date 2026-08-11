@@ -3621,7 +3621,9 @@ impl WorldActor {
                             } else {
                                 spell_obj.cells.contains(&(m.x, m.y))
                             };
+                            // #1982：C# SpellObject.ProcessSpell IsAttackTarget——石化/免疫/隐身怪不受地面法术
                             in_area && m.hp > 0 && m.map_index == spell_obj.map_index
+                                && m.behavior.is_attackable()
                         })
                         .map(|(id, _)| *id)
                         .collect();
@@ -5569,6 +5571,11 @@ impl Message<Tick> for WorldActor {
                 let (pet_x, pet_y) = self.monsters.get(pid).map(|m| (m.x, m.y)).unwrap_or((0, 0));
                 let pet_stats = self.monsters.get(pid).map(|m| m.to_combat_stats()).unwrap_or_default();
                 if let Some(tm) = self.monsters.get_mut(tmid) {
+                    // #1982：C# 宠物 IsAttackTarget——石化/免疫/隐身怪不可被宠物攻击
+                    if !tm.behavior.is_attackable() {
+                        debug!("Pet #{} target monster {} not attackable, skip", pid, tmid);
+                        continue;
+                    }
                     // #1768：宠物攻击按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中
                     let (actual, is_miss) = resolve_monster_vs_monster(
                         &pet_stats, &tm.to_combat_stats(), *damage,
@@ -5634,6 +5641,10 @@ impl Message<Tick> for WorldActor {
                     .map(|m| (m.x, m.y, m.direction))
                     .unwrap_or((0, 0, 0));
                 if let Some(tm) = self.monsters.get_mut(tmid) {
+                    // #1982：C# Attacked(MonsterObject) IsAttackTarget——石化/免疫/隐身怪不可被怪物攻击
+                    if !tm.behavior.is_attackable() {
+                        continue;
+                    }
                     // #1768：怪物互伤按 C# MonsterObject.Attacked(MonsterObject) 结算——目标护甲减免 + 命中
                     let (actual, is_miss) = resolve_monster_vs_monster(
                         &attacker_stats, &tm.to_combat_stats(), *damage,
