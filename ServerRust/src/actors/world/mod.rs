@@ -1349,6 +1349,8 @@ pub struct WorldActor {
     pub(crate) in_trap_rock: HashSet<u64>,
     /// 变身外观（session -> TransformType；C# HumanObject.TransformType，S.TransformUpdate 广播用）
     pub(crate) transform_appearance: HashMap<u64, u8>,
+    /// @LOGIN GM 密码待验证会话（C# GMLogin；下一条聊天消息作为密码）
+    pub(crate) gm_login_pending: HashSet<u64>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
@@ -1743,6 +1745,7 @@ impl WorldActor {
             sneaking_sessions: HashMap::new(),
             in_trap_rock: HashSet::new(),
             transform_appearance: HashMap::new(),
+            gm_login_pending: HashSet::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
@@ -5514,6 +5517,7 @@ Ok(Self {
             sneaking_sessions: HashMap::new(),
             in_trap_rock: HashSet::new(),
             transform_appearance: HashMap::new(),
+            gm_login_pending: HashSet::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
