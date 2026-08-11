@@ -3,6 +3,7 @@
 
 /// 好友条目
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct FriendEntry {
     /// 角色 ID（object_id）
     pub object_id: u32,
@@ -14,6 +15,7 @@ pub struct FriendEntry {
 
 /// 黑名单条目
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct BlockedEntry {
     pub object_id: u32,
     pub name: String,
@@ -21,6 +23,7 @@ pub struct BlockedEntry {
 
 /// 玩家好友列表
 #[derive(Debug, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct FriendList {
     pub friends: Vec<FriendEntry>,
     pub blocked: Vec<BlockedEntry>,

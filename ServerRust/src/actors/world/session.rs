@@ -2118,13 +2118,48 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS" | "BACKUPPLAYER") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
                         return;
                     }
                     match cmd.as_str() {
+                        // @BACKUPPLAYER <name>（C# PlayerObject.cs:2690：Envir.SaveArchivedCharacter）
+                        "BACKUPPLAYER" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            if name.is_empty() {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法: @BACKUPPLAYER <角色名>");
+                                return;
+                            }
+                            // 在线 → 用实时状态；离线 → 从 DB 加载（C# GetCharacterInfo 等价）
+                            let mut state = None;
+                            for (_sid, rec) in &self.players {
+                                if rec.name.eq_ignore_ascii_case(&name) {
+                                    if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                                        state = Some(s);
+                                    }
+                                    break;
+                                }
+                            }
+                            if state.is_none() {
+                                if let Ok(Some(s)) = db::load_character(&self.db_pool, &name).await {
+                                    state = Some(s);
+                                }
+                            }
+                            match state {
+                                Some(s) => {
+                                    match serde_json::to_string(&s) {
+                                        Ok(json) => match db::archive_player_json(&self.db_pool, &s.name, &json).await {
+                                            Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已存档", s.name)),
+                                            Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档失败: {}", e)),
+                                        },
+                                        Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档序列化失败: {}", e)),
+                                    }
+                                }
+                                None => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {}", name)),
+                            }
+                        }
                         // @level [玩家] <等级>（#1468：C# GM LEVEL parts>=3 改目标玩家）
                         "LEVEL" => {
                             let lv = parts.last().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).min(200);

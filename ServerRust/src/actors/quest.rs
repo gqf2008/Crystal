@@ -3,6 +3,7 @@
 
 /// 任务状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum QuestStatus {
     Accepted,
     InProgress,
@@ -23,6 +24,7 @@ pub struct QuestProgress {
 
 /// 任务实例
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct QuestInstance {
     /// 任务索引/ID
     pub quest_index: i32,
@@ -60,6 +62,7 @@ impl QuestInstance {
 
 /// 玩家任务列表
 #[derive(Debug, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct QuestLog {
     pub quests: Vec<QuestInstance>,
     /// 已完成的任务索引（用于追踪）
