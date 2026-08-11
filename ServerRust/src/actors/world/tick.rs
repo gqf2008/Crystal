@@ -3772,6 +3772,12 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             if let Some(set) = self.guild_wars.get_mut(&b) {
                 set.remove(&a);
             }
+            // #2138：停战后同步解除 SocialActor 战争镜像（解除退会/解散限制）
+            let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildWar {
+                guild_name: a.clone(),
+                other: b.clone(),
+                at_war: false,
+            }).await;
             // C# EndWar：通知双方行会
             for (sid, rec) in &self.players {
                 if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
