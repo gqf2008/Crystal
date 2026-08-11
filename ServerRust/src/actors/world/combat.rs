@@ -297,9 +297,10 @@ fn cast_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> boo
     })
 }
 
-/// #1312：延迟弹道法术（C# CompleteMagic 结算时 `Attacked()>0 → LevelMagic`；
-/// 命中才给经验，miss/0 伤害不给；FireBounce 每跳命中都给）
-const DELAYED_HIT_EXP_SPELLS: [u8; 18] = [
+/// #1312：延迟弹道法术 + 命中/成功才给经验的技能（C# CompleteMagic 结算时 `Attacked()>0 → LevelMagic`；
+/// 命中才给经验，miss/0 伤害不给；FireBounce 每跳命中都给；
+/// FlashDash 命中才给 / BackStep 成功跳步才给（C# HumanObject.cs:5505/5606））
+const DELAYED_HIT_EXP_SPELLS: [u8; 20] = [
     SPELL_FIREBALL,
     SPELL_GREAT_FIREBALL,
     SPELL_THUNDERBOLT,
@@ -318,10 +319,22 @@ const DELAYED_HIT_EXP_SPELLS: [u8; 18] = [
     SPELL_CRIPPLE_SHOT,
     SPELL_ELEMENTAL_SHOT,
     SPELL_CAT_TONGUE,
+    SPELL_FLASH_DASH,
+    SPELL_BACK_STEP,
 ];
 
 /// #1312：C# CompleteMagic——延迟弹道法术不在施法时给经验（移到命中结算）；
 /// 基础攻击/ElectricShock 已处理也不加
+/// C# FlashDash（HumanObject.cs:5419）：jumpDistance = Lv<=1 ? 0 : 1（最多 1 格）
+fn flashdash_jump_distance(level: i32) -> i32 {
+    if level <= 1 { 0 } else { 1 }
+}
+
+/// C# BackStep（HumanObject.cs:5571）：jumpDistance = Lv==0 ? 1 : Lv（最多 3）
+fn backstep_jump_distance(level: i32) -> i32 {
+    (if level == 0 { 1 } else { level }).min(3)
+}
+
 fn should_grant_cast_exp(spell: u8, basic: bool, electric_handled: bool) -> bool {
     if basic || electric_handled || DELAYED_HIT_EXP_SPELLS.contains(&spell) {
         return false;
@@ -4051,41 +4064,164 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts CrescentSlash (fan 3 AoE)", state.name);
             }
-            // FlashDash：向前突进 4 格（纯位移，成功率 (level+1)/4）
+            // FlashDash：突进 + 落点前方命中（对齐 C# HumanObject.FlashDash :5412-5509）
             SPELL_FLASH_DASH => {
-                if fastrand::i32(0..4) >= spell_level as i32 + 1 {
-                    debug!("Magic: {} FlashDash failed (random)", state.name);
-                    // 失败仍消耗 MP，不 return（继续走 XP 流程）
-                } else {
-                    let dir = msg.direction as usize % 8;
-                    let (max_x, max_y) = self.maps.get(&state.map_index)
-                        .map(|m| (m.width as i32, m.height as i32))
-                        .unwrap_or((i32::MAX, i32::MAX));
-                    let tx = (state.x + MON_DIR_DX[dir] * 4).clamp(0, max_x - 1);
-                    let ty = (state.y + MON_DIR_DY[dir] * 4).clamp(0, max_y - 1);
+                let dir = msg.direction as usize % 8;
+                // C#：无成功率随机；jumpDistance = Lv<=1 ? 0 : 1
+                let jump_distance = flashdash_jump_distance(spell_level as i32);
+                // C#：逐格前移，遇不可行走/阻挡停止
+                let mut travel = 0;
+                let mut cx = state.x;
+                let mut cy = state.y;
+                if jump_distance > 0 {
+                    let nx = state.x + MON_DIR_DX[dir];
+                    let ny = state.y + MON_DIR_DY[dir];
+                    let walkable = self.maps.get(&state.map_index)
+                        .map(|m| nx >= 0 && ny >= 0 && nx < m.width as i32 && ny < m.height as i32 && m.is_walkable(nx, ny))
+                        .unwrap_or(false);
+                    if walkable {
+                        travel = 1;
+                        cx = nx;
+                        cy = ny;
+                    }
+                }
+                if travel > 0 {
                     let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                        x: tx, y: ty, direction: msg.direction,
+                        x: cx, y: cy, direction: msg.direction,
                         map_index: None, is_mounted: None,
                     }).await;
-                    self.broadcast_player_dash(msg.session_id, tx, ty, msg.direction).await;
-                    debug!("Magic: {} casts FlashDash to ({},{})", state.name, tx, ty);
+                    self.broadcast_player_dash_attack(msg.session_id, cx, cy, msg.direction, travel).await;
+                } else {
+                    // C#：未突进 → ObjectAttack（仍结算前方命中）
+                    self.broadcast_player_object_attack(msg.session_id, state.x, state.y, msg.direction).await;
                 }
+                // C#：落点前方 1 格命中（DelayedAction Damage @ AttackTime → 立即结算）
+                let hx = cx + MON_DIR_DX[dir];
+                let hy = cy + MON_DIR_DY[dir];
+                let attacker_stats = state.to_combat_stats();
+                let raw = crate::combat::attack::get_attack_power(
+                    attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                ).max(1);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| m.map_index == state.map_index && m.x == hx && m.y == hy && m.hp > 0)
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut hit_count = 0;
+                let mut stunned: Vec<(u32, u16)> = Vec::new(); // (object_id, map_index) 延迟广播
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let ds = monster.to_combat_stats();
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &ds, raw,
+                            mir2_shared::enums::DefenceType::Ac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.take_damage(r.damage);
+                            monster.set_last_hitter(msg.session_id);
+                            self.pending_gather.push(msg.session_id);
+                            monster.provoked = true;
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
+                            // C# FlashDash 毒掷骰：Random(15) <= Lv+1 → Stun（duration=Lv+1s）+ TwinDrakeBlade 特效
+                            if fastrand::i32(0..15) <= spell_level as i32 + 1 {
+                                crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                    crate::combat::poison::Poison::new(
+                                        mir2_shared::enums::PoisonType::STUN, spell_level as u32 + 1, 0, 1000,
+                                    ));
+                                stunned.push((monster.object_id, monster.map_index));
+                                debug!("Player {} FlashDash stunned '{}' ({}s)",
+                                       state.name, monster.name, spell_level as u32 + 1);
+                            }
+                            // 受击广播（ObjectStruck/DamageIndicator/ObjectHealth，与普攻命中一致）
+                            monster.direction = crate::actors::world::ai::direction_towards(
+                                monster.x, monster.y, state.x, state.y,
+                            );
+                            let mut struck_body = Vec::new();
+                            struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                            struck_body.extend_from_slice(&state.object_id.to_le_bytes());
+                            struck_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
+                            struck_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
+                            struck_body.push(monster.direction);
+                            let struck_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                            let mut dmg_body = Vec::new();
+                            dmg_body.extend_from_slice(&r.damage.to_le_bytes());
+                            dmg_body.push(if r.is_critical { 5u8 } else { 0u8 });
+                            dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                            let dmg_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                            let percent = ((monster.hp.max(0) as f32 / monster.max_hp as f32) * 100.0) as u8;
+                            let mut health_body = Vec::new();
+                            health_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                            health_body.push(percent);
+                            health_body.extend_from_slice(&3u16.to_le_bytes());
+                            let health_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &struck_packet).await;
+                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &dmg_packet).await;
+                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &health_packet).await;
+                            hit_count += 1;
+                        }
+                    }
+                }
+                // C#：if(success) LevelMagic（命中才给经验）
+                if hit_count > 0 {
+                    self.grant_attack_skill_exp(msg.session_id, SPELL_FLASH_DASH).await;
+                }
+                // C# CompletePoison：广播 ObjectEffect(TwinDrakeBlade)（延后到可变借用结束）
+                for (oid, map_index) in stunned {
+                    self.broadcast_object_effect(oid,
+                        mir2_shared::enums::SpellEffect::TwinDrakeBlade, 0, 0, map_index).await;
+                }
+                debug!("Magic: {} casts FlashDash (travel={} hit={})", state.name, travel, hit_count);
             }
-            // BackStep：向后跳跃 3 格（direction 相反方向）
+            // BackStep：向后跳跃（对齐 C# HumanObject.BackStep :5564-5618）
             SPELL_BACK_STEP => {
                 let dir = msg.direction as usize % 8;
                 let back_dir = (dir + 4) % 8; // 反方向
-                let (max_x, max_y) = self.maps.get(&state.map_index)
-                    .map(|m| (m.width as i32, m.height as i32))
-                    .unwrap_or((i32::MAX, i32::MAX));
-                let tx = (state.x + MON_DIR_DX[back_dir] * 3).clamp(0, max_x - 1);
-                let ty = (state.y + MON_DIR_DY[back_dir] * 3).clamp(0, max_y - 1);
-                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                    x: tx, y: ty, direction: back_dir as u8,
-                    map_index: None, is_mounted: None,
-                }).await;
-                self.broadcast_player_backstep(msg.session_id, tx, ty, back_dir as u8).await;
-                debug!("Magic: {} casts BackStep to ({},{})", state.name, tx, ty);
+                // C#：jumpDistance = Lv==0 ? 1 : Lv（最多 3）
+                let jump_distance = backstep_jump_distance(spell_level as i32);
+                let mut travel = 0;
+                let mut cx = state.x;
+                let mut cy = state.y;
+                for _ in 0..jump_distance {
+                    let nx = cx + MON_DIR_DX[back_dir];
+                    let ny = cy + MON_DIR_DY[back_dir];
+                    let walkable = self.maps.get(&state.map_index)
+                        .map(|m| nx >= 0 && ny >= 0 && nx < m.width as i32 && ny < m.height as i32 && m.is_walkable(nx, ny))
+                        .unwrap_or(false);
+                    if !walkable { break; }
+                    cx = nx;
+                    cy = ny;
+                    travel += 1;
+                }
+                if travel > 0 {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                        x: cx, y: cy, direction: back_dir as u8,
+                        map_index: None, is_mounted: None,
+                    }).await;
+                    self.broadcast_player_backstep(msg.session_id, cx, cy, back_dir as u8, travel).await;
+                    // C#：成功跳步 → LevelMagic（Random.Next(3)+1）
+                    let info = self.magic_infos.get(&(SPELL_BACK_STEP as u32 - 3)).cloned();
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
+                    let _ = record.actor_ref.ask(crate::actors::player::GainSpellExp {
+                        spell: SPELL_BACK_STEP,
+                        amount: (1 + fastrand::i32(0..3)) as u16,
+                        cast_time: now_ms,
+                        info,
+                    }).await;
+                } else {
+                    // C#：跳步失败 → ObjectBackStep(distance=0) + 系统消息
+                    self.broadcast_player_backstep(msg.session_id, state.x, state.y, back_dir as u8, 0).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "跳跃能力不足");
+                }
+                debug!("Magic: {} casts BackStep (travel={})", state.name, travel);
             }
             // --- 召唤系法术（道士/法师/弓箭手）：在施法者前方 1 格 spawn 一只战斗召唤物 ---
             SPELL_SUMMON_SKELETON | SPELL_SUMMON_SHINSU | SPELL_SUMMON_HOLY_DEVA
@@ -5443,6 +5579,25 @@ fn best_dir(dx: i32, dy: i32) -> usize {
 #[cfg(test)]
 mod spell_geometry_tests {
     use super::*;
+
+    #[test]
+    fn flashdash_jump_distance_matches_csharp() {
+        // C# HumanObject.cs:5419：Lv<=1 → 0，Lv>=2 → 1（最多 1 格）
+        assert_eq!(flashdash_jump_distance(0), 0);
+        assert_eq!(flashdash_jump_distance(1), 0);
+        assert_eq!(flashdash_jump_distance(2), 1);
+        assert_eq!(flashdash_jump_distance(3), 1);
+    }
+
+    #[test]
+    fn backstep_jump_distance_matches_csharp() {
+        // C# HumanObject.cs:5571：Lv==0 → 1，否则 Lv（最多 3）
+        assert_eq!(backstep_jump_distance(0), 1);
+        assert_eq!(backstep_jump_distance(1), 1);
+        assert_eq!(backstep_jump_distance(2), 2);
+        assert_eq!(backstep_jump_distance(3), 3);
+        assert_eq!(backstep_jump_distance(4), 3);
+    }
 
     #[test]
     fn hellfire_lv0_single_line() {
