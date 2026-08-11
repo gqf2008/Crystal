@@ -121,9 +121,8 @@ pub struct WorldMapIcon {
 
 #[derive(Debug, Clone)]
 pub struct SearchMapResult {
-    pub map_index: i32,
-    pub location_x: u32,
-    pub location_y: u32,
+    pub map_index: i32, // C# MapIndex（默认 -1）
+    pub npc_index: u32, // C# NPCIndex（NPC 运行时 ObjectID）
 }
 
 // ==================== 解析函数 ====================
@@ -426,15 +425,13 @@ impl Packet for SearchMapResult {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         Ok(SearchMapResult {
             map_index: reader.read_i32::<LittleEndian>()?,
-            location_x: reader.read_u32::<LittleEndian>()?,
-            location_y: reader.read_u32::<LittleEndian>()?,
+            npc_index: reader.read_u32::<LittleEndian>()?,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.map_index)?;
-        writer.write_u32::<LittleEndian>(self.location_x)?;
-        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u32::<LittleEndian>(self.npc_index)?;
         Ok(())
     }
 }
@@ -474,5 +471,27 @@ mod tests {
         assert_eq!(read.world_maps[1].image_index, 2);
         assert_eq!(read.world_maps[1].map_index, 1);
         assert_eq!(read.teleport_cost, 1000);
+    }
+
+    #[test]
+    fn search_map_result_roundtrip() {
+        // C# ServerPackets.cs SearchMapResult：MapIndex(int) + NPCIndex(uint)
+        let pkt = SearchMapResult { map_index: 5, npc_index: 12345 };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        // i32 + u32 = 8 bytes
+        assert_eq!(buf.len(), 8);
+        let mut cur = Cursor::new(&buf);
+        let read = SearchMapResult::read_body(&mut cur).unwrap();
+        assert_eq!(read.map_index, 5);
+        assert_eq!(read.npc_index, 12345);
+        // 未找到：MapIndex=-1
+        let pkt2 = SearchMapResult { map_index: -1, npc_index: 0 };
+        let mut buf2 = Vec::new();
+        pkt2.write_body(&mut buf2).unwrap();
+        let mut cur2 = Cursor::new(&buf2);
+        let read2 = SearchMapResult::read_body(&mut cur2).unwrap();
+        assert_eq!(read2.map_index, -1);
+        assert_eq!(read2.npc_index, 0);
     }
 }

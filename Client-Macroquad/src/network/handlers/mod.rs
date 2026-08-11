@@ -948,8 +948,7 @@ pub enum NetworkEvent {
     },
     SearchMapResultReceived {
         map_index: i32,
-        location_x: u32,
-        location_y: u32,
+        npc_index: u32,
     },
     TimeOfDayChanged {
         time_of_day: u8,
