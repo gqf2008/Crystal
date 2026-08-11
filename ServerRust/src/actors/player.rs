@@ -4330,6 +4330,19 @@ impl Message<ProcessFlagQuest> for PlayerActor {
     }
 }
 
+/// 清理每日任务（C# ProcessNewDay → ClearDailyQuests：次日可重接）
+pub struct ClearDailyQuests {
+    pub quest_indices: Vec<i32>,
+}
+
+impl Message<ClearDailyQuests> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ClearDailyQuests, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.clear_daily_quests(&msg.quest_indices);
+    }
+}
+
 /// 任务物品拾取（C# CheckNeedQuestItem）：活跃任务含该物品 ItemTask 且未完成 →
 /// 入背包 + 更新任务进度。返回是否拾取（背包满返回 false，掉落仍落地）。
 pub struct TryQuestItemPickup {

@@ -44,6 +44,9 @@ pub struct QuestInstance {
     pub start_time: u64,
     /// 时间限制（秒，0=无限制）
     pub time_limit_seconds: i32,
+    /// 任务类型（C# QuestType：0=General 1=Daily 2=Repeatable 3=Story；serde default 兼容旧存档）
+    #[serde(default)]
+    pub quest_type: i32,
 }
 
 impl QuestInstance {
@@ -102,13 +105,22 @@ impl QuestLog {
             if !self.quests[idx].is_progress_complete() {
                 return None;
             }
+            // C# FinishQuest：Repeatable 不进 CompletedQuests（可再次接取）
+            let repeatable = self.quests[idx].quest_type == 2;
             let mut quest = self.quests.remove(idx);
             quest.status = QuestStatus::Completed;
-            self.completed_indices.push(quest_index);
+            if !repeatable {
+                self.completed_indices.push(quest_index);
+            }
             Some(quest)
         } else {
             None
         }
+    }
+
+    /// 清理每日任务（C# ProcessNewDay → ClearDailyQuests：从已完成记录移除，次日可重接）
+    pub fn clear_daily_quests(&mut self, daily_indices: &[i32]) {
+        self.completed_indices.retain(|i| !daily_indices.contains(i));
     }
 
     /// 放弃任务
@@ -198,6 +210,7 @@ mod tests {
             credit_reward: 0,
             start_time: 0,
             time_limit_seconds: 0,
+            quest_type: 0,
         }
     }
 
@@ -279,5 +292,37 @@ mod tests {
         assert!(log.get_quest(1).unwrap().is_progress_complete());
         // 已完成任务再设置无变化
         assert!(log.process_flag(5).is_empty());
+    }
+
+    #[test]
+    fn test_repeatable_quest_not_recorded() {
+        // C# FinishQuest：Repeatable 不进 CompletedQuests（可再次接取）
+        let mut quest = make_quest(1);
+        quest.quest_type = 2; // Repeatable
+        let mut log = QuestLog::new();
+        log.accept_quest(quest);
+        log.update_quest_progress(1, 1, 10);
+        assert!(log.complete_quest(1).is_some());
+        assert!(!log.completed_indices.contains(&1));
+        // 可再次接取
+        assert!(log.accept_quest(make_quest(1)));
+    }
+
+    #[test]
+    fn test_clear_daily_quests() {
+        // C# ProcessNewDay → ClearDailyQuests：Daily 从已完成移除，次日可重接
+        let mut log = QuestLog::new();
+        let mut daily = make_quest(1);
+        daily.quest_type = 1; // Daily
+        log.accept_quest(daily);
+        log.update_quest_progress(1, 1, 10);
+        assert!(log.complete_quest(1).is_some());
+        assert!(log.completed_indices.contains(&1));
+        log.clear_daily_quests(&[1, 2]);
+        assert!(!log.completed_indices.contains(&1));
+        // 非每日索引保留
+        log.completed_indices.push(99);
+        log.clear_daily_quests(&[1]);
+        assert!(log.completed_indices.contains(&99));
     }
 }

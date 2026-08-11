@@ -184,6 +184,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             exp_reward INTEGER NOT NULL DEFAULT 0,
             gold_reward INTEGER NOT NULL DEFAULT 0,
             credit_reward INTEGER NOT NULL DEFAULT 0,
+            start_time INTEGER NOT NULL DEFAULT 0,
+            time_limit_seconds INTEGER NOT NULL DEFAULT 0,
+            quest_type INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (character_name, quest_index),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
@@ -650,6 +653,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN start_time INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN time_limit_seconds INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE quests ADD COLUMN quest_type INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // Migration: add GM flag to accounts (safe to re-run)
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN credit INTEGER NOT NULL DEFAULT 0")
@@ -2300,8 +2305,8 @@ async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
             QuestStatus::Failed => "Failed",
         };
         sqlx::query(
-            "INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward, credit_reward, start_time, time_limit_seconds)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward, credit_reward, start_time, time_limit_seconds, quest_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(character_name)
         .bind(q.quest_index)
@@ -2313,6 +2318,7 @@ async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
         .bind(q.credit_reward)
         .bind(q.start_time as i64)
         .bind(q.time_limit_seconds)
+        .bind(q.quest_type)
         .execute(&mut *conn).await?;
     }
 
@@ -2329,7 +2335,7 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
     let mut log = QuestLog::new();
 
     let rows = sqlx::query(
-        "SELECT quest_index, title, status, progress_json, exp_reward, gold_reward, credit_reward, start_time, time_limit_seconds
+        "SELECT quest_index, title, status, progress_json, exp_reward, gold_reward, credit_reward, start_time, time_limit_seconds, quest_type
          FROM quests WHERE character_name = ?"
     )
     .bind(character_name)
@@ -2358,6 +2364,7 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
             credit_reward: row.get("credit_reward"),
             start_time: row.get::<i64, _>("start_time") as u64,
             time_limit_seconds: row.get("time_limit_seconds"),
+            quest_type: row.try_get::<i32, _>("quest_type").unwrap_or(0),
         });
     }
 
