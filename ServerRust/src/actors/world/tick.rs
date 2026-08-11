@@ -108,7 +108,7 @@ async fn apply_monster_hit_player(
                 return 0;
             }
             // #1721：完整 C# Attacked 结算（命中/护甲/反伤/减伤，复用 resolve_attack）
-            let (actual, reflected, is_miss, is_critical) = resolve_monster_vs_player(
+            let (actual, reflected, is_miss, is_critical, defender_heal) = resolve_monster_vs_player(
                 attacker_stats, attacker_level, &defender, damage, defence_type,
             );
             if is_miss {
@@ -117,6 +117,10 @@ async fn apply_monster_hit_player(
                     players, gate_ref, map_index, target_session, defender.object_id,
                 ).await;
                 return reflected;
+            }
+            // #1990：C# HumanObject.Attacked:7144-7154 EnergyShield——扣血前先回血
+            if defender_heal > 0 {
+                let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: defender_heal }).await;
             }
             let died = record.actor_ref.ask(TakeDamage {
                 attacker_id: attacker_oid,
@@ -205,21 +209,21 @@ async fn apply_monster_hit_player(
 }
 
 /// #1721：怪物→玩家完整结算（C# HumanObject.Attacked 的 GetArmour/护甲/反伤/减伤，复用 resolve_attack）
-/// 返回 (实际伤害, 反伤量, 是否未命中或护甲全挡)
+/// 返回 (实际伤害, 反伤量, 是否未命中或护甲全挡, 是否暴击, EnergyShield 回血量)
 fn resolve_monster_vs_player(
     attacker_stats: &crate::combat::attack::CombatStats,
     attacker_level: i32,
     defender: &crate::actors::player::PlayerState,
     raw_damage: i32,
     defence_type: mir2_shared::enums::DefenceType,
-) -> (i32, i32, bool, bool) {
+) -> (i32, i32, bool, bool, i32) {
     let defender_stats = defender.to_combat_stats();
     let level_offset = crate::combat::attack::level_offset(attacker_level as u16, defender.level);
     let result = crate::combat::attack::resolve_attack(
         attacker_stats, &defender_stats, raw_damage, defence_type, level_offset,
     );
     let is_miss = !result.is_hit || (result.damage == 0 && result.reflected == 0);
-    (result.damage, result.reflected, is_miss, result.is_critical)
+    (result.damage, result.reflected, is_miss, result.is_critical, result.defender_heal)
 }
 
 /// #1768：怪物/宠物互伤结算（C# MonsterObject.Attacked(MonsterObject)：GetArmour + ArmourRate/DamageRate + armour>=damage→Miss）
@@ -906,11 +910,13 @@ impl WorldActor {
                     .map(|m| m.name.as_str())
                     .unwrap_or("");
                 let mut is_critical = false;
+                let mut defender_heal = 0;
                 let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
-                    let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
+                    let (actual, reflected, is_miss, crit, dh) = resolve_monster_vs_player(
                         &attacker_stats, attacker_level, &defender, hit.damage,
                         boss_range_defence_type(attacker_name),
                     );
+                    defender_heal = dh;
                     is_critical = crit;
                     if reflected > 0 {
                         if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
@@ -927,6 +933,10 @@ impl WorldActor {
                         actual
                     }
                 } else { hit.damage };
+                // #1990：C# HumanObject.Attacked:7144-7154 EnergyShield——扣血前先回血
+                if defender_heal > 0 {
+                    let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: defender_heal }).await;
+                }
                 let _ = record.actor_ref.ask(TakeDamage {
                     attacker_id: hit.attacker_oid,
                     attacker_session: hit.target_session,
@@ -1002,11 +1012,13 @@ impl WorldActor {
                     .map(|m| m.level)
                     .unwrap_or(0);
                 let mut is_critical = false;
+                let mut defender_heal = 0;
                 let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
-                    let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
+                    let (actual, reflected, is_miss, crit, dh) = resolve_monster_vs_player(
                         &attacker_stats, attacker_level, &defender, hit.damage,
                         hit.defence,
                     );
+                    defender_heal = dh;
                     is_critical = crit;
                     if reflected > 0 {
                         if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
@@ -1023,6 +1035,10 @@ impl WorldActor {
                         actual
                     }
                 } else { hit.damage };
+                // #1990：C# HumanObject.Attacked:7144-7154 EnergyShield——扣血前先回血
+                if defender_heal > 0 {
+                    let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: defender_heal }).await;
+                }
                 let _ = record.actor_ref.ask(TakeDamage {
                     attacker_id: hit.attacker_oid,
                     attacker_session: hit.target_session,
@@ -1835,10 +1851,12 @@ impl WorldActor {
                 if !hit_cells.contains(&(*px, *py)) { continue; }
                 if let Some(record) = self.players.get(sid) {
                     let mut is_critical = false;
+                    let mut defender_heal = 0;
                     let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
-                        let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
+                        let (actual, reflected, is_miss, crit, dh) = resolve_monster_vs_player(
                             &death_stats, death_level, &defender, damage, death_def,
                         );
+                        defender_heal = dh;
                         is_critical = crit;
                         if reflected > 0 {
                             if let Some(m) = self.monsters.get_mut(&attacker_oid) {
@@ -1855,6 +1873,10 @@ impl WorldActor {
                             actual
                         }
                     } else { damage };
+                    // #1990：C# HumanObject.Attacked:7144-7154 EnergyShield——扣血前先回血
+                    if defender_heal > 0 {
+                        let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: defender_heal }).await;
+                    }
                     let _ = record.actor_ref.ask(crate::actors::player::TakeDamage {
                         attacker_id: attacker_oid,
                         attacker_session: *sid,
@@ -4131,7 +4153,16 @@ impl WorldActor {
                         );
                         let damage = attack_result.damage;
                         monster.take_damage(damage);
-                        monster.set_last_hitter(c.session_id);
+                        // #1990：C# MonsterObject.Attacked:2641-2648 HPDrain——玩家吸血
+                        if attack_result.hp_drain > 0 {
+                            if let Some(r) = self.players.get(&c.session_id) {
+                                let _ = r.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.hp_drain }).await;
+                            }
+                        }
+                        // #1988：仅实际造成伤害才挂 LastHitter
+                        if damage > 0 {
+                            monster.set_last_hitter(c.session_id);
+                        }
                         monster.provoked = true;
                         if monster.target_session.is_none() {
                             monster.target_session = Some(c.session_id);
@@ -4364,6 +4395,12 @@ impl WorldActor {
                 };
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
+                    // #1990：C# MonsterObject.Attacked:2641-2648 HPDrain——玩家吸血（弹道法术）
+                    if result.hp_drain > 0 {
+                        if let Some(r) = self.players.get(&pending.session_id) {
+                            let _ = r.actor_ref.ask(crate::actors::player::Heal { amount: result.hp_drain }).await;
+                        }
+                    }
                     // #1724：魔法弹道命中广播——与近战/弓手一致（C# CompleteMagic → Attacked → ObjectStruck/DamageIndicator/ObjectHealth）
                     monster.direction = crate::actors::world::ai::direction_towards(
                         monster.x, monster.y, caster_state.x, caster_state.y,
@@ -4394,8 +4431,11 @@ impl WorldActor {
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &dmg_packet).await;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
-                    monster.set_last_hitter(pending.session_id);
-                    self.pending_gather.push(pending.session_id);
+                    // #1988：仅实际造成伤害才挂 LastHitter/元素收集
+                    if result.damage > 0 {
+                        monster.set_last_hitter(pending.session_id);
+                        self.pending_gather.push(pending.session_id);
+                    }
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
 
@@ -6211,6 +6251,7 @@ impl Message<Tick> for WorldActor {
                                 .unwrap_or("");
                             // #1721：Boss 攻击完整结算（C# Attacked：命中/护甲/反伤/减伤）
                             let mut is_critical = false;
+                            let mut defender_heal = 0;
                             let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
                                 // #1878/#1880：按攻击动作种类 + attack_type 选防御类型
                                 let defence_kind = match atk {
@@ -6226,11 +6267,12 @@ impl Message<Tick> for WorldActor {
                                     ai::AttackAction::Aoe { radius, .. } => *radius,
                                     _ => 0,
                                 };
-                                let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
+                                let (actual, reflected, is_miss, crit, dh) = resolve_monster_vs_player(
                                     &boss_stats, boss_level, &defender, damage,
                                     monster_melee_defence_type_for_kind(boss_name, defence_kind, attack_type, aoe_radius),
                                 );
                                 is_critical = crit;
+                                defender_heal = dh;
                                 if reflected > 0 {
                                     if let Some(m) = self.monsters.get_mut(&attacker_oid) {
                                         m.take_damage(reflected);
@@ -6246,6 +6288,10 @@ impl Message<Tick> for WorldActor {
                                     actual
                                 }
                             } else { damage };
+                            // #1990：C# HumanObject.Attacked:7144-7154 EnergyShield——扣血前先回血
+                            if defender_heal > 0 {
+                                let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: defender_heal }).await;
+                            }
                             let _ = record.actor_ref.ask(TakeDamage {
                                 attacker_id: attacker_oid,
                                 attacker_session: *sid,
