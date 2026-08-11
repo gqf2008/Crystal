@@ -1641,6 +1641,11 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
             return;
         };
+        // C# GTForSale：gt.Price > 0 → 已在挂售（:874-878）
+        if self.conquest_instances[gt].for_sale {
+            send_system_message(&self.gate_ref, session_id, "领地已在挂售中，请先取消挂售");
+            return;
+        }
         if price < self.conquest_cfg.gt_sale_min_price {
             send_system_message(&self.gate_ref, session_id, &format!("挂售价格最低 {}", self.conquest_cfg.gt_sale_min_price));
             return;
@@ -1661,6 +1666,11 @@ impl WorldActor {
         }
         let Some(guild_name) = &state.guild_name else { return };
         let Some(gt) = self.guild_gt(guild_name) else { return };
+        // C# EndGTSale：gt.Price <= 0 → 未在挂售（:892-896）
+        if !self.conquest_instances[gt].for_sale {
+            send_system_message(&self.gate_ref, session_id, "领地未在挂售");
+            return;
+        }
         self.conquest_instances[gt].for_sale = false;
         self.conquest_instances[gt].sale_price = 0;
         send_system_message(&self.gate_ref, session_id, "已取消领地挂售");
