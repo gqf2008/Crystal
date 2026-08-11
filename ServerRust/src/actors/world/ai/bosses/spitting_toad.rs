@@ -38,13 +38,10 @@ impl MonsterBehavior for SpittingToadBehavior {
             None => return,
         };
         monster.target_session = Some(target.session_id);
-        let dx = (target.x - monster.x).abs();
-        let dy = (target.y - monster.y).abs();
         // C# InAttackRange：12 格十字/对角（(x<=12&&y<=12) 恒真，实际无限制）
         if max_distance(monster.x, monster.y, target.x, target.y) > VIEW_RANGE {
             return;
         }
-        let _ = (dx, dy);
         if ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
