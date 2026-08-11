@@ -941,6 +941,11 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     attacker_session: msg.session_id,
                                     damage: splash_dmg,
                                 }).await;
+                                // #1992：PvP 溅射吸血（按溅射净伤害近似，与怪溅射一致）
+                                let drain = ((splash_dmg as f32 * state.hp_drain_rate_percent as f32 / 100.0).floor() as i32).max(0);
+                                if drain > 0 {
+                                    let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: drain }).await;
+                                }
                                 // #895：PvP 溅射受击装备耐久损耗（C# Struck → DamageDura）
                                 self.damage_armor_on_pvp_hit(*sid).await;
                             }
@@ -973,6 +978,24 @@ impl Message<WorldAttackRequest> for WorldActor {
                             debug!("Player {} counter-attacked player {} ({} dmg)",
                                    other_session, msg.session_id, counter_dmg);
                         }
+                    }
+                    // #1992：C# HumanObject.Attacked——吸血/反伤/EnergyShield（PvP）
+                    // 反伤：防御方 Reflect 全额反伤给攻击方（:7116-7123）
+                    if attack_result.reflected > 0 {
+                        let _ = record.actor_ref.ask(TakeDamage {
+                            attacker_id: other_state.object_id,
+                            attacker_session: other_session,
+                            damage: attack_result.reflected,
+                        }).await;
+                        debug!("Player {} reflected {} to player {}", other_session, attack_result.reflected, msg.session_id);
+                    }
+                    // 吸血：攻击方 HPDrainRatePercent 回血（:7175-7183）
+                    if attack_result.hp_drain > 0 {
+                        let _ = record.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.hp_drain }).await;
+                    }
+                    // EnergyShield：防御方扣血前先回血（:7144-7154）
+                    if attack_result.defender_heal > 0 {
+                        let _ = other_actor.ask(crate::actors::player::Heal { amount: attack_result.defender_heal }).await;
                     }
                     let pvp_died = other_actor.ask(TakeDamage {
                                 attacker_id: result.object_id,
