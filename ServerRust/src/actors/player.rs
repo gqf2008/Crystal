@@ -2251,6 +2251,56 @@ impl Message<ToggleTransform> for PlayerActor {
     }
 }
 
+/// C# @REMOVEAWAKENING（PlayerObject.cs:3561-3593）：按 ItemType 移除装备上最后一级觉醒
+pub struct RemoveAwakeningByItemType {
+    pub item_type: mir2_shared::enums::ItemType,
+}
+
+impl Message<RemoveAwakeningByItemType> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: RemoveAwakeningByItemType, _ctx: &mut Context<Self, Self::Reply>) {
+        let mut updated: Vec<(mir2_shared::data::item::UserItem, usize)> = Vec::new();
+        let mut failed_count = 0usize;
+        for eq in self.state.inventory.equipment.iter_mut() {
+            let Some(item) = eq else { continue };
+            let Some(info) = item.info.as_ref() else { continue };
+            if info.item_type != msg.item_type { continue; }
+            // C# RemoveAwake：无等级返回 0 → 失败消息；有等级移除最后一级（清空后置 None）
+            if item.awake.levels.is_empty() {
+                failed_count += 1;
+                continue;
+            }
+            let remaining = remove_one_awake_level(&mut item.awake);
+            updated.push((item.clone(), remaining));
+        }
+        for (snapshot, remaining) in updated {
+            self.send_refresh_item(&snapshot);
+            crate::actors::world::send_system_message(
+                &self.gate_ref,
+                self.state.session_id,
+                &format!("移除成功，剩余觉醒等级 {}", remaining),
+            );
+        }
+        for _ in 0..failed_count {
+            crate::actors::world::send_system_message(&self.gate_ref, self.state.session_id, "该物品没有觉醒等级可移除");
+        }
+    }
+}
+
+/// C# Awake.RemoveAwake（Shared/Data/ItemData.cs:1009-1025）：移除最后一级，清空后置 None；返回剩余等级
+pub(crate) fn remove_one_awake_level(awake: &mut mir2_shared::data::item::Awake) -> usize {
+    if awake.levels.is_empty() {
+        awake.awake_type = mir2_shared::enums::AwakeType::None;
+        return 0;
+    }
+    awake.levels.pop();
+    if awake.levels.is_empty() {
+        awake.awake_type = mir2_shared::enums::AwakeType::None;
+    }
+    awake.levels.len()
+}
+
 /// #965：清除全部 Buff（@CLEARBUFFS，C# FlagForRemoval；逐 buff 下发 S.RemoveBuff）
 pub struct ClearAllBuffs;
 
@@ -6897,9 +6947,29 @@ allow_group: false,
         assert_eq!(s.equipped_poison_shape(), 0);
         assert!(!s.consume_poison_amulet(1));
 
+
         // 未装备：detect=0
         let s = make_state();
         assert_eq!(s.equipped_poison_shape(), 0);
+    }
+
+    /// #2146：C# Awake.RemoveAwake——移除最后一级，清空后置 None
+    #[test]
+    fn remove_one_awake_level_matches_csharp() {
+        use mir2_shared::data::item::Awake;
+        use mir2_shared::enums::AwakeType;
+        let mut a = Awake { awake_type: AwakeType::Dc, levels: vec![1, 2, 3] };
+        assert_eq!(super::remove_one_awake_level(&mut a), 2);
+        assert_eq!(a.levels, vec![1, 2]);
+        assert_eq!(a.awake_type, AwakeType::Dc); // 未清空时保留类型
+        assert_eq!(super::remove_one_awake_level(&mut a), 1);
+        assert_eq!(super::remove_one_awake_level(&mut a), 0);
+        assert!(a.levels.is_empty());
+        assert_eq!(a.awake_type, AwakeType::None); // 清空后置 None
+        // 空列表：返回 0 且 Type=None
+        let mut b = Awake { awake_type: AwakeType::Mc, levels: vec![] };
+        assert_eq!(super::remove_one_awake_level(&mut b), 0);
+        assert_eq!(b.awake_type, AwakeType::None);
     }
 }
 
