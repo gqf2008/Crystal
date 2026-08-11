@@ -948,6 +948,8 @@ pub struct WorldActor {
     pub(crate) default_npc: Option<npc_script::ParsedScript>,
     /// 默认 NPC 自定义命令（C# Envir.CustomCommands；00Default.txt 中 CUSTOMCOMMAND(x) 指令，玩家 @x 触发）
     pub(crate) custom_commands: Vec<String>,
+    /// 地图活动坐标（C# MapInfo.ActiveCoords；默认 NPC 脚本 [@_MapCoord(map,x,y)] 段头注册，移动踩点触发）
+    pub(crate) active_coords: HashMap<i32, Vec<(i32, i32)>>,
     /// 下一个对象 ID
     pub(crate) next_object_id: u32,
     /// 活跃怪物（按 object_id 索引）
@@ -1416,6 +1418,7 @@ impl WorldActor {
             script_dir: PathBuf::from("."),
             default_npc: None,
             custom_commands: Vec::new(),
+            active_coords: HashMap::new(),
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
@@ -4657,7 +4660,20 @@ impl Actor for WorldActor {
             }
         }
 
-        Ok(Self {
+                // 默认 NPC 脚本 [@_MapCoord(map,x,y)] 段头 → 地图活动坐标（C# MapInfo.ActiveCoords）
+        let active_coords: HashMap<i32, Vec<(i32, i32)>> = {
+            let mut ac: HashMap<i32, Vec<(i32, i32)>> = HashMap::new();
+            let default_content = std::fs::read_to_string(args.quest_dir.join("00Default.txt")).unwrap_or_default();
+            for (file, x, y) in npc_script::extract_map_coords(&default_content) {
+                if let Some(mi) = map_infos.values().find(|mi| mi.file_name.eq_ignore_ascii_case(&file)) {
+                    let entry = ac.entry(mi.index).or_default();
+                    if !entry.contains(&(x, y)) { entry.push((x, y)); }
+                }
+            }
+            ac
+        };
+
+Ok(Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
             session_last_movement: HashMap::new(),
@@ -4798,6 +4814,7 @@ impl Actor for WorldActor {
             player_heroes: HashMap::new(),
             default_npc: npc_script::load_default_npc(&args.quest_dir),
             custom_commands: npc_script::load_custom_commands(&args.quest_dir),
+            active_coords,
         })
     }
 }

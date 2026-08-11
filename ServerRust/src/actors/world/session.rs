@@ -833,6 +833,15 @@ impl Message<WorldMoveRequest> for WorldActor {
             // 检查是否踩到地图传送点（Movement）— O(1) index lookup
             let mv = self.movement_index.get(&(state.map_index as i32, state.x, state.y)).cloned();
 
+            // C# PlayerObject.CheckMovement（:4459-4471）：落点命中 ActiveCoords → 默认 NPC [@_MapCoord(map,x,y)]
+            if let Some(coords) = self.active_coords.get(&(state.map_index as i32)) {
+                if coords.contains(&(state.x, state.y)) {
+                    if let Some(file) = self.map_infos.get(&(state.map_index as i32)).map(|m| m.file_name.clone()) {
+                        self.queue_default_npc(msg.session_id, &format!("_mapcoord({},{},{})", file, state.x, state.y));
+                    }
+                }
+            }
+
             if let Some(mv) = mv {
                 // C# MovementInfo.NeedHole：需源格有 DigOutZombie/DigOutArmadillo 洞口 SpellObject 才能传送
                 if mv.need_hole {
