@@ -230,6 +230,31 @@ impl Message<BroadcastObjectEffect> for WorldActor {
     }
 }
 
+/// C# MonsterObject.DeadDelay 默认：180s（100ms/tick = 1800）
+pub(crate) const CORPSE_DEFAULT_TICKS: u64 = 1800;
+/// C# HarvestMonster RemainingSkinCount=2
+pub(crate) const HARVEST_SKIN_COUNT: u8 = 2;
+
+/// 可采集怪物尸体（C# HarvestMonster：死亡后保留 DeadDelay，玩家 Harvest 采集）
+#[derive(Debug, Clone)]
+pub(crate) struct CorpseState {
+    pub object_id: u32,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub map_index: u16,
+    pub direction: u8,
+    pub monster_index: i32,
+    pub exp_owner_session: Option<u64>,
+    pub target_session: Option<u64>,
+    /// 尸体到期 tick（C# DeadDelay；默认 180s = 1800 tick）
+    pub dead_until_tick: u64,
+    /// 剩余剥皮次数（C# RemainingSkinCount=2）
+    pub remaining_skins: u8,
+    /// 已生成的采集掉落（最后一次剥皮后生成）
+    pub drops: Vec<mir2_shared::data::item::UserItem>,
+}
+
 /// C# CompleteNPC：page.Length > 0 才调用脚本段；否则（TIMERECALL 无 section）仅传送
 pub(crate) fn delayed_npc_page_present(section: &str) -> bool {
     !section.is_empty()
@@ -1184,6 +1209,8 @@ pub struct WorldActor {
     pub(crate) last_harvest_ms: std::collections::HashMap<u64, i64>,
     /// 采矿命中 400ms 后的视觉结算队列（C# DelayedAction DelayedType.Mine）
     pub(crate) pending_mine_effects: Vec<PendingMineEffect>,
+    /// #2108：可采集怪物尸体（C# HarvestMonster 死亡保留，玩家 Harvest 采集）
+    pub(crate) corpses: std::collections::HashMap<u32, CorpseState>,
     /// #1659：每个玩家上次聊天时间（ms，防刷屏广播）
     pub(crate) last_chat_ms: std::collections::HashMap<u64, i64>,
     /// #1269：每个玩家上次攻击时间（ms；C# AttackTime = Envir.Time + AttackSpeed）
@@ -1561,6 +1588,7 @@ impl WorldActor {
         last_turn_ms: std::collections::HashMap::new(),
         last_harvest_ms: std::collections::HashMap::new(),
         pending_mine_effects: Vec::new(),
+        corpses: std::collections::HashMap::new(),
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
@@ -1958,6 +1986,17 @@ impl WorldActor {
         for sid in others {
             let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: pkt.clone() }).await;
         }
+    }
+
+    /// #2108：广播 ObjectHarvested（C# HarvestMonster：ObjectID + Location + Direction）
+    pub(crate) async fn broadcast_object_harvested(&self, object_id: u32, x: i32, y: i32, map_index: u16, direction: u8) {
+        let mut b = Vec::new();
+        b.extend_from_slice(&object_id.to_le_bytes());
+        b.extend_from_slice(&x.to_le_bytes());
+        b.extend_from_slice(&y.to_le_bytes());
+        b.push(direction);
+        let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHarvested as i16, &b);
+        broadcast_to_map(&self.gate_ref, &self.players, map_index, &pkt).await;
     }
 
     /// #1803：玩家后跳表现（C# BackStep：UserBackStep 给自己 + ObjectBackStep 给同图他人）
@@ -4916,6 +4955,7 @@ Ok(Self {
         last_turn_ms: std::collections::HashMap::new(),
         last_harvest_ms: std::collections::HashMap::new(),
         pending_mine_effects: Vec::new(),
+        corpses: std::collections::HashMap::new(),
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),

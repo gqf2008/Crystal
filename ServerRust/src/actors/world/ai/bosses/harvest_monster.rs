@@ -25,6 +25,10 @@ impl HarvestMonsterBehavior {
 }
 
 impl MonsterBehavior for HarvestMonsterBehavior {
+    fn is_harvestable(&self) -> bool {
+        true
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
             Some(t) => *t,

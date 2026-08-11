@@ -43,6 +43,10 @@ impl CannibalPlantBehavior {
 }
 
 impl MonsterBehavior for CannibalPlantBehavior {
+    fn is_harvestable(&self) -> bool {
+        true
+    }
+
     fn can_move(&self) -> bool { false }
 
     fn is_attackable(&self) -> bool {
