@@ -14,7 +14,6 @@ use crate::actors::world::ai::helpers::*;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
-const VIEW_RANGE: i32 = 12;
 const ATTACK_RANGE: i32 = 9;
 
 pub struct SnowYetiBehavior;

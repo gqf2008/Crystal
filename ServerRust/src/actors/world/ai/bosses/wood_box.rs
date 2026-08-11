@@ -6,9 +6,7 @@
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
-use crate::actors::world::ai::helpers::*;
 
-const VIEW_RANGE: i32 = 12;
 const AOE_RADIUS: i32 = 1;
 
 pub struct WoodBoxBehavior;

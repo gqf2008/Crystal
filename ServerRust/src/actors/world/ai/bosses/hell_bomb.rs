@@ -7,7 +7,6 @@
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
-use crate::actors::world::ai::helpers::*;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 

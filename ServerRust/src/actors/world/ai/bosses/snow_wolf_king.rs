@@ -10,8 +10,6 @@
 //!   - 死亡时 1 格内全体 MAC 爆炸 + 驯化奴仆（tick 层转移给击杀者，上限 6）
 
 use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
