@@ -3470,7 +3470,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         let mut expired_renters: Vec<String> = Vec::new();
         let mut expired: Vec<RentedItem> = Vec::new();
 
-        for (renter_name, rentals) in &mut self.player_rentals {
+        // player_rentals 以物主为 key（C# Info.RentedItems 归属物主；承租人见 rental.renter_name）
+        for (owner_name, rentals) in &mut self.player_rentals {
             let mut still_valid: Vec<RentedItem> = Vec::new();
             for rental in rentals.drain(..) {
                 if rental.expiry_timestamp > now {
@@ -3480,7 +3481,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 }
             }
             if still_valid.is_empty() {
-                expired_renters.push(renter_name.clone());
+                expired_renters.push(owner_name.clone());
             } else {
                 *rentals = still_valid;
             }

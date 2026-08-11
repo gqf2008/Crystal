@@ -1,10 +1,11 @@
 // 租赁系统相关数据包
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::Read;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// GetRentedItems - 获取租赁物品 (252)
 #[derive(Debug, Clone)]
@@ -18,6 +19,8 @@ pub struct RentalItemInfo {
     pub rental_fee: u32,    // 租金
     pub rental_period: i32, // 租赁期限(小时)
     pub expiry_date: i64,   // 到期日期
+    /// 承租人姓名（C# ItemRentalInformation.RentingPlayerName；物主视角列表）
+    pub renting_player_name: String,
 }
 
 impl Packet for GetRentedItems {
@@ -33,6 +36,7 @@ impl Packet for GetRentedItems {
             writer.write_u32::<LittleEndian>(info.rental_fee)?;
             writer.write_i32::<LittleEndian>(info.rental_period)?;
             writer.write_i64::<LittleEndian>(info.expiry_date)?;
+            write_dotnet_string(writer, &info.renting_player_name)?;
         }
 
         Ok(())
@@ -47,12 +51,14 @@ impl Packet for GetRentedItems {
             let rental_fee = reader.read_u32::<LittleEndian>()?;
             let rental_period = reader.read_i32::<LittleEndian>()?;
             let expiry_date = reader.read_i64::<LittleEndian>()?;
+            let renting_player_name = read_dotnet_string(reader)?;
 
             items.push(RentalItemInfo {
                 item,
                 rental_fee,
                 rental_period,
                 expiry_date,
+                renting_player_name,
             });
         }
 
@@ -342,5 +348,34 @@ impl Packet for ConfirmItemRental {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let success = reader.read_u8()? != 0;
         Ok(Self { success })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::packets::base::Packet;
+    use super::*;
+
+    /// #2214：GetRentedItems 物主视角线格式 roundtrip（含 renting_player_name）
+    #[test]
+    fn get_rented_items_roundtrip() -> SharedResult<()> {
+        let pkt = GetRentedItems {
+            items: vec![RentalItemInfo {
+                item: UserItem::new(1001),
+                rental_fee: 5000,
+                rental_period: 7,
+                expiry_date: 1_700_000_000_000,
+                renting_player_name: "Renter".to_string(),
+            }],
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf)?;
+        let mut cur = std::io::Cursor::new(&buf);
+        let back = GetRentedItems::read_body(&mut cur)?;
+        assert_eq!(back.items.len(), 1);
+        assert_eq!(back.items[0].item.item_index, 1001);
+        assert_eq!(back.items[0].rental_fee, 5000);
+        assert_eq!(back.items[0].renting_player_name, "Renter");
+        Ok(())
     }
 }

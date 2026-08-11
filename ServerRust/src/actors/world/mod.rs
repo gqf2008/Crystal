@@ -1339,7 +1339,7 @@ pub struct WorldActor {
     pub(crate) market_search_cache: HashMap<u64, MarketSearchCache>,
     /// 物品租赁会话 (initiator_session_id -> RentalSession)
     pub(crate) rental_sessions: HashMap<u64, RentalSession>,
-    /// 已生效的租赁记录 (renter_name -> list of RentedItem)
+    /// 已生效的租赁记录 (owner_name -> list of RentedItem；C# Info.RentedItems 归属物主)
     pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
@@ -5032,7 +5032,7 @@ impl Actor for WorldActor {
                         expiry_timestamp: expires_at,
                     };
                     if rental.expiry_timestamp > now {
-                        player_rentals.entry(rental.renter_name.clone()).or_default().push(rental);
+                        player_rentals.entry(rental.owner_name.clone()).or_default().push(rental);
                         active += 1;
                     } else if crate::db::remove_rented_item_from_character(
                         &args.db_pool, &rental.renter_name, rental.item.unique_id,
