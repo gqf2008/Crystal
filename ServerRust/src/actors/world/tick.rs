@@ -3170,6 +3170,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 let mut expired_equip: Vec<usize> = Vec::new();
                 let mut expired_storage: Vec<usize> = Vec::new();
                 let mut deleted_packets: Vec<(u64, u32)> = Vec::new();
+                let mut expired_msgs: Vec<String> = Vec::new();
                 let mut any_change = false;
 
                 // 背包
@@ -3184,11 +3185,17 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         if let Some(rental) = &mut s.item.rental_information {
                             if rental.rental_locked && item_expired(rental.expiry_date_binary, now_ticks) {
                                 // C#：租赁锁定到期 → 清掉 RentalInformation（解锁）
+                                let name = self.item_infos.get(&s.item.item_index).map(|i| i.name.clone())
+                                    .unwrap_or_else(|| format!("#{}", s.item.item_index));
+                                expired_msgs.push(format!("{} 的租赁锁定已到期解除", name));
                                 s.item.rental_information = None;
                                 any_change = true;
                             }
                         }
                         if remove {
+                            let name = self.item_infos.get(&s.item.item_index).map(|i| i.name.clone())
+                                .unwrap_or_else(|| format!("#{}", s.item.item_index));
+                            expired_msgs.push(format!("背包中的 {} 已过期并被移除", name));
                             expired_backpack.push(i);
                             deleted_packets.push((s.item.unique_id, s.item.count as u32));
                             any_change = true;
@@ -3206,11 +3213,17 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         }
                         if let Some(rental) = &mut item.rental_information {
                             if rental.rental_locked && item_expired(rental.expiry_date_binary, now_ticks) {
+                                let name = self.item_infos.get(&item.item_index).map(|i| i.name.clone())
+                                    .unwrap_or_else(|| format!("#{}", item.item_index));
+                                expired_msgs.push(format!("{} 的租赁锁定已到期解除", name));
                                 item.rental_information = None;
                                 any_change = true;
                             }
                         }
                         if remove {
+                            let name = self.item_infos.get(&item.item_index).map(|i| i.name.clone())
+                                .unwrap_or_else(|| format!("#{}", item.item_index));
+                            expired_msgs.push(format!("装备 {} 已过期并被移除", name));
                             expired_equip.push(i);
                             deleted_packets.push((item.unique_id, item.count as u32));
                             any_change = true;
@@ -3228,11 +3241,17 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         }
                         if let Some(rental) = &mut s.item.rental_information {
                             if rental.rental_locked && item_expired(rental.expiry_date_binary, now_ticks) {
+                                let name = self.item_infos.get(&s.item.item_index).map(|i| i.name.clone())
+                                    .unwrap_or_else(|| format!("#{}", s.item.item_index));
+                                expired_msgs.push(format!("{} 的租赁锁定已到期解除", name));
                                 s.item.rental_information = None;
                                 any_change = true;
                             }
                         }
                         if remove {
+                            let name = self.item_infos.get(&s.item.item_index).map(|i| i.name.clone())
+                                .unwrap_or_else(|| format!("#{}", s.item.item_index));
+                            expired_msgs.push(format!("仓库中的 {} 已过期并被移除", name));
                             expired_storage.push(i);
                             deleted_packets.push((s.item.unique_id, s.item.count as u32));
                             any_change = true;
@@ -3264,8 +3283,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         }).await;
                     }
                 }
-                if !deleted_packets.is_empty() {
-                    send_system_message(&self.gate_ref, *session_id, "部分物品已过期并被移除。");
+                for m in &expired_msgs {
+                    send_system_message(&self.gate_ref, *session_id, m);
                 }
                 if equip_removed {
                     if let Some(st) = self.recalculate_and_set_stat_bonuses(*session_id).await {
