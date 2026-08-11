@@ -84,6 +84,8 @@ pub struct BuffInstance {
     pub tick_counter: u32,
     /// 来源对象 ID（可选，用于区分来源）
     pub source_id: Option<u32>,
+    /// 是否暂停（C# Buff.Paused：暂停期间不倒计时/不触发效果；@TOGGLETRANSFORM #2144）
+    pub paused: bool,
 }
 
 impl BuffInstance {
@@ -94,6 +96,7 @@ impl BuffInstance {
             tick_interval,
             tick_counter: 0,
             source_id: None,
+            paused: false,
         }
     }
 
@@ -117,6 +120,10 @@ pub fn tick_buffs(buffs: &mut [BuffInstance], _dt: u32) -> Vec<BuffTickResult> {
 
     for buff in buffs.iter_mut() {
         if buff.remaining_ticks == 0 {
+            continue;
+        }
+        // C# Buff.Process：Paused 期间不递减剩余时长、不触发效果
+        if buff.paused {
             continue;
         }
 
@@ -337,5 +344,21 @@ mod tests {
 
         let def_bonus = get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 });
         assert_eq!(def_bonus, 5);
+    }
+
+    #[test]
+    fn test_paused_buff_does_not_tick() {
+        // C# PauseBuff：暂停期间剩余时长冻结、不触发效果（@TOGGLETRANSFORM #2144）
+        let mut buffs = vec![BuffInstance::new(BuffType::HpRegen { amount_per_tick: 5 }, 3, 1)];
+        buffs[0].paused = true;
+        let results = tick_buffs(&mut buffs, 1);
+        assert!(results.is_empty());
+        assert_eq!(buffs[0].remaining_ticks, 3);
+        // 恢复后继续倒计时
+        buffs[0].paused = false;
+        let results2 = tick_buffs(&mut buffs, 1);
+        assert_eq!(results2.len(), 1);
+        assert_eq!(results2[0].hp_change, 5);
+        assert_eq!(buffs[0].remaining_ticks, 2);
     }
 }

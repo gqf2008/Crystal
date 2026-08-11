@@ -885,7 +885,7 @@ allow_group: false,
         let fast_run = self.state.inventory.equipment.iter().flatten()
             .any(|it| it.info.as_ref().map(|i| i.can_fast_run).unwrap_or(false))
             || self.state.buffs.iter()
-                .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }));
+                .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }) && !b.paused);
         can_run_now(self.state.step_counter, fast_run)
     }
 
@@ -2212,6 +2212,42 @@ impl Message<RemoveBuff> for PlayerActor {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
         }).try_send();
+    }
+}
+
+/// C# @TOGGLETRANSFORM（PlayerObject.cs:3836-3852）：暂停/恢复变身 buff
+pub struct ToggleTransform;
+
+impl Message<ToggleTransform> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ToggleTransform, _ctx: &mut Context<Self, Self::Reply>) {
+        let Some(buff) = self.state.buffs.iter_mut()
+            .find(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }))
+        else {
+            return; // C#：无 Transform buff 时 no-op
+        };
+        buff.paused = !buff.paused;
+        let paused = buff.paused;
+        // C# HumanObject.PauseBuff/UnpauseBuff：S.PauseBuff {Type, ObjectID, Paused}
+        let packet = mir2_shared::packets::server::buff::PauseBuff {
+            buff_type: mir2_shared::enums::BuffType::Transform,
+            object_id: self.state.object_id,
+            paused,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::PauseBuff as i16, &body),
+            }).try_send();
+        }
+        // C#：RefreshStats 后提示 TransformDisabled / TransformEnabled
+        crate::actors::world::send_system_message(
+            &self.gate_ref,
+            self.state.session_id,
+            if paused { "变身效果已暂停" } else { "变身效果已恢复" },
+        );
     }
 }
 
