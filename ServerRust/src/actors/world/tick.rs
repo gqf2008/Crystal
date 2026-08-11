@@ -513,6 +513,16 @@ fn pet_exp_gain(name: &str, amount: i64) -> i64 {
     }
 }
 
+/// #2040：C# MonsterObject.LevelUp（818-830）——Skeleton/Shinsu/Angel 召唤宠物
+/// MoveSpeed -= MaxPetLevel*130、AttackSpeed -= MaxPetLevel*70（下限 400ms）
+fn pet_speed_interval_ticks(base_ticks: u64, name: &str, max_pet_level: u32, is_attack: bool) -> u64 {
+    if !matches!(name, "Skeleton" | "Shinsu" | "Angel") {
+        return base_ticks;
+    }
+    let reduce = if is_attack { max_pet_level * 70 } else { max_pet_level * 130 };
+    (base_ticks * 100).saturating_sub(reduce as u64).max(400) / 100
+}
+
 /// #1759：Boss Range 伤害防御类型（C# 各怪 DelayedAction RangeDamage / CompleteRangeAttack 的 DefenceType）
 /// 精确名匹配（不区分大小写）；未收录默认 ACAgility（C# 默认敏捷物防，保持 #1721 既有行为，安全回退）。
 /// 已知限制：OmaMage（ACAgility+MACAgility）、RhinoPriest（MAC+MACAgility）、
@@ -5035,8 +5045,11 @@ impl Message<Tick> for WorldActor {
                                     monster.x, monster.y, tx, ty,
                                 );
                                 pet_attacks.push((monster.object_id, tmid, damage, master));
+                                // #2040：C# 召唤宠物 AttackSpeed - MaxPetLevel*70（下限 400ms）
+                                let atk_ticks = pet_speed_interval_ticks(
+                                    monster.ai_profile.attack_cooldown, &monster.name, monster.max_pet_level as u32, true);
                                 monster.next_attack_tick = self.tick_count + slow_adjusted_ticks(
-                                    monster.ai_profile.attack_cooldown,
+                                    atk_ticks,
                                     crate::combat::poison::is_slowed(&monster.poison_list),
                                 );
                                 monster.ai_state = MonsterAiState::Attack;
@@ -5068,8 +5081,11 @@ impl Message<Tick> for WorldActor {
                                         path.remove(0);
                                     }
                                 }
+                                // #2040：C# 召唤宠物 MoveSpeed - MaxPetLevel*130（下限 400ms）
+                                let mv_ticks = pet_speed_interval_ticks(
+                                    monster.ai_profile.move_interval, &monster.name, monster.max_pet_level as u32, false);
                                 monster.next_move_tick = self.tick_count + slow_adjusted_ticks(
-                                    monster.ai_profile.move_interval,
+                                    mv_ticks,
                                     crate::combat::poison::is_slowed(&monster.poison_list),
                                 );
                                 monster.ai_state = MonsterAiState::Chase;
@@ -7045,12 +7061,26 @@ impl Message<Tick> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::{
-        dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
-        collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, monster_melee_defence_type,
-        build_object_range_attack_body, resolve_monster_vs_monster, slow_adjusted_ticks,
-        monster_control_blocked, combined_poison_flags,
+        dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, pet_speed_interval_ticks,
+        reduce_exp, collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type,
+        monster_melee_defence_type, build_object_range_attack_body, resolve_monster_vs_monster,
+        slow_adjusted_ticks, monster_control_blocked, combined_poison_flags,
         PARTY_EXP_RATE,
     };
+
+    #[test]
+    fn pet_speed_interval_matches_csharp() {
+        // #2040：C# Skeleton/Shinsu/Angel 召唤宠物 MoveSpeed-MaxPetLevel*130 / AttackSpeed-MaxPetLevel*70，下限 400ms
+        // 基础 1800ms（18 tick）/ 2500ms（25 tick）
+        assert_eq!(pet_speed_interval_ticks(18, "Skeleton", 5, false), (1800u64.saturating_sub(5 * 130)).max(400) / 100);
+        assert_eq!(pet_speed_interval_ticks(25, "Shinsu", 5, true), (2500u64.saturating_sub(5 * 70)).max(400) / 100);
+        // 非召唤宠物不变
+        assert_eq!(pet_speed_interval_ticks(18, "Wolf", 5, false), 18);
+        // 下限 400ms（4 tick）：MaxPetLevel 很大时
+        assert_eq!(pet_speed_interval_ticks(18, "Angel", 99, false), 4);
+        // 未识别名即使 is_attack 也原样
+        assert_eq!(pet_speed_interval_ticks(25, "Oma", 3, true), 25);
+    }
 
     #[test]
     fn test_natural_regen_amount() {
