@@ -3546,6 +3546,33 @@ impl Message<ExpandItemSlots> for PlayerActor {
     }
 }
 
+/// 应用 CombineItem 升级成功效果（C# CombineItem Shape 3/4：加属性/加耐久 + GemCount++，PlayerObject.cs:7145-7150）
+pub struct ApplyItemUpgrade {
+    pub unique_id: u64,
+    /// 要增加的属性（Stat → 数量，C# 7014-7081）
+    pub add_stats: Vec<(mir2_shared::enums::Stat, i32)>,
+    /// 要增加的 MaxDura（耐久宝石，C# 7041）
+    pub add_max_dura: u16,
+}
+
+impl Message<ApplyItemUpgrade> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ApplyItemUpgrade, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) else {
+            return false;
+        };
+        for (stat, value) in msg.add_stats {
+            let cur = item.added_stats.get(stat);
+            item.added_stats.set(stat, cur + value);
+        }
+        item.max_dura = item.max_dura.saturating_add(msg.add_max_dura).min(u16::MAX);
+        item.gem_count = item.gem_count.saturating_add(1);
+        self.send_inventory_changed();
+        true
+    }
+}
+
 /// 重置物品附加属性（洗点）
 pub struct ResetItemAddedStats {
     pub unique_id: u64,
