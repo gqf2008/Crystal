@@ -40,6 +40,31 @@ impl WorldActor {
             }).await;
         }
     }
+
+    /// #2024：C# FinishQuest——GainCredit(CreditReward)（账户积分，上限 uint.MaxValue + S.GainedCredit）
+    pub(crate) async fn grant_quest_credit(&self, session_id: u64, credit_reward: i64) {
+        if credit_reward <= 0 { return; }
+        let Some(record) = self.players.get(&session_id) else { return };
+        let username = record.account_username.clone();
+        let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+        let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
+        let delta = (credit_reward as u64).min(remaining) as i64;
+        if delta > 0 {
+            if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
+                warn!("Quest CreditReward failed for {}: {}", username, e);
+            } else {
+                // C# GainCredit：S.GainedCredit（客户端积分浮字）
+                let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
+                    }).await;
+                }
+            }
+        }
+    }
 }
 
 /// 接受任务
@@ -216,28 +241,8 @@ impl Message<FinishQuestRequest> for WorldActor {
             let gold = (completed_quest.gold_reward as f64 * self.drop_rate) as u64;
             let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
         }
-        // #2000：C# FinishQuest——GainCredit(CreditReward)（账户积分，上限 uint.MaxValue）
-        if completed_quest.credit_reward > 0 {
-            let username = record.account_username.clone();
-            let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
-            let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
-            let delta = (completed_quest.credit_reward as u64).min(remaining) as i64;
-            if delta > 0 {
-                if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
-                    warn!("Quest CreditReward failed for {}: {}", username, e);
-                } else {
-                    // C# GainCredit：S.GainedCredit（客户端积分浮字）
-                    let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
-                    let mut body = Vec::new();
-                    if packet.write_body(&mut body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
-                        }).await;
-                    }
-                }
-            }
-        }
+        // #2000/#2024：C# FinishQuest——GainCredit(CreditReward)（统一 helper）
+        self.grant_quest_credit(msg.session_id, completed_quest.credit_reward).await;
 
         // 发放固定物品奖励
         if let Some(quest_db) = self.quest_infos.get(&msg.quest_index) {
