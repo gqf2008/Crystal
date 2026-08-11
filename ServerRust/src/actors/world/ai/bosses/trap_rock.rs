@@ -101,6 +101,8 @@ impl MonsterBehavior for TrapRockBehavior {
                 session_id: target.session_id,
                 poison: Poison::new(PoisonType::PARALYSIS, 3, 0, 1000),
             });
+            // C# Show（TrapRock.cs:200）：Target.InTrapRock = true（S.InTrapRock，服务端禁走）
+            ctx.out_trap_state.push((target.session_id, true));
             // #1437：C# Show——其余三角生成 ChildRock（立即可见、同目标、slave 归属父岩）
             for c in trap_rock_child_corners(corner as u8) {
                 ctx.out_child_rocks.push(crate::actors::world::ai::ChildRockSpawn {
@@ -115,8 +117,9 @@ impl MonsterBehavior for TrapRockBehavior {
             }
             return;
         }
-        // C# 目标移动/死亡 → 自毁
+        // C# 目标移动/死亡 → 自毁（TrapRock.Die：Target.InTrapRock = false）
         if target.x != self.target_loc.0 || target.y != self.target_loc.1 || target.hp <= 0 {
+            ctx.out_trap_state.push((target.session_id, false));
             monster.hp = 0;
             return;
         }

@@ -1345,6 +1345,8 @@ pub struct WorldActor {
     pub(crate) tamed_pets: HashMap<u64, Vec<TamedPetInfo>>,
     /// 潜行状态（session -> 是否生效；C# MapObject.Sneaking/SneakingActive；MoonLight buff 触发）
     pub(crate) sneaking_sessions: HashMap<u64, bool>,
+    /// 困敌状态（session；C# TrapRock Target.InTrapRock：S.InTrapRock + 服务端禁走）
+    pub(crate) in_trap_rock: HashSet<u64>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
@@ -1737,6 +1739,7 @@ impl WorldActor {
             player_rentals: HashMap::new(),
             tamed_pets: HashMap::new(),
             sneaking_sessions: HashMap::new(),
+            in_trap_rock: HashSet::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
@@ -2677,6 +2680,29 @@ impl WorldActor {
                 self.broadcast_object_sneaking(st.object_id, active, st.map_index).await;
             }
         }
+    }
+
+    /// 设置/解除困敌状态（C# TrapRock Target.InTrapRock：S.InTrapRock + 服务端禁走）
+    pub(crate) async fn set_in_trap_rock(&mut self, session_id: u64, trapped: bool) {
+        let changed = if trapped {
+            self.in_trap_rock.insert(session_id)
+        } else {
+            self.in_trap_rock.remove(&session_id)
+        };
+        if !changed {
+            return;
+        }
+        let Some(record) = self.players.get(&session_id) else { return };
+        let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        let packet = mir2_shared::packets::server::miscellaneous::InTrapRock { in_trap: trapped };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::InTrapRock as i16, &body),
+            }).await;
+        }
+        debug!("InTrapRock: session={} trapped={} (oid={})", session_id, trapped, st.object_id);
     }
 
     /// 强制玩家下坐骑并广播外观更新
@@ -5444,6 +5470,7 @@ Ok(Self {
             player_rentals,
             tamed_pets: HashMap::new(),
             sneaking_sessions: HashMap::new(),
+            in_trap_rock: HashSet::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
