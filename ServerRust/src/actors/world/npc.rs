@@ -364,8 +364,46 @@ impl Message<TeleportToNPCRequest> for WorldActor {
         };
         if state.is_dead { return; }
 
-        let new_x = npc.x;
-        let new_y = npc.y;
+        // #2032：C# TeleportToNPC（7579-7598）——同图（CurrentMap.NPCs）+ CanTeleportTo 校验
+        if npc.map_index != state.map_index {
+            send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不在当前地图");
+            return;
+        }
+        let can_teleport = self.npc_infos.get(&npc.db_index)
+            .map(|i| i.can_teleport_to)
+            .unwrap_or(false);
+        if !can_teleport {
+            send_system_message(&self.gate_ref, msg.session_id, "该 NPC 无法传送到达");
+            return;
+        }
+        // #2032：C# cost = Settings.TeleportToNPCCost（3000），金币不足拒绝
+        let cost = super::TELEPORT_TO_NPC_COST as u64;
+        if state.inventory.gold < cost {
+            send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法传送");
+            return;
+        }
+        let _ = record.actor_ref.ask(DeductGold { amount: cost }).await;
+        super::send_gold_changed_packet(&self.gate_ref, msg.session_id, cost);
+
+        // #2032：C# 落点 = NPC 前方格（ob.Front）；不可走则从当前格周围 7 向兜底（ShiftDirection）
+        let dir = npc.direction as usize;
+        let walkable = |x: i32, y: i32| self.maps.get(&npc.map_index)
+            .map(|m| m.is_walkable(x, y))
+            .unwrap_or(false);
+        let (mut tx, mut ty) = (npc.x + super::MON_DIR_DX[dir], npc.y + super::MON_DIR_DY[dir]);
+        if !walkable(tx, ty) {
+            (tx, ty) = (state.x, state.y);
+            for j in 0..7 {
+                let d = (dir + j) % 8;
+                let (cx, cy) = (state.x + super::MON_DIR_DX[d], state.y + super::MON_DIR_DY[d]);
+                if walkable(cx, cy) {
+                    (tx, ty) = (cx, cy);
+                    break;
+                }
+            }
+        }
+        let new_x = tx;
+        let new_y = ty;
 
         // 更新玩家位置
         let _ = record.actor_ref.ask(SetPlayerPosition { x: new_x, y: new_y, direction: npc.direction, map_index: None, is_mounted: None }).await;
