@@ -1486,6 +1486,8 @@ impl Message<UseItemRequest> for WorldActor {
                     let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
                         buff: BuffInstance::new(BuffType::Transform { shape: db.shape as i16 }, ticks, 1),
                     }).await;
+                    // C#：变身类型变化 → S.TransformUpdate 广播（其他玩家渲染变身外观）
+                    self.sync_transform_appearance(msg.session_id).await;
                     send_system_message(&self.gate_ref, msg.session_id,
                         &format!("变身效果已生效，持续 {} 秒", db.durability.max(1)));
                     debug!("Transform: {} used transform item shape={} ticks={}", player_state.name, db.shape, ticks);
