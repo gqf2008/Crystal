@@ -66,13 +66,25 @@ pub struct QuestLog {
     pub completed_indices: Vec<i32>,
 }
 
+/// 并发任务上限（C# Globals.MaxConcurrentQuests=20）
+pub const MAX_CONCURRENT_QUESTS: usize = 20;
+
 impl QuestLog {
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// 并发任务是否已满（C# AcceptQuest：CurrentQuests.Count >= Globals.MaxConcurrentQuests）
+    pub fn can_accept(&self) -> bool {
+        self.quests.len() < MAX_CONCURRENT_QUESTS
+    }
+
     /// 接受任务
     pub fn accept_quest(&mut self, quest: QuestInstance) -> bool {
+        // #2016：C# AcceptQuest（11276）——并发任务上限
+        if !self.can_accept() {
+            return false;
+        }
         // 检查是否已接受相同任务
         if self.quests.iter().any(|q| q.quest_index == quest.quest_index) {
             return false;
