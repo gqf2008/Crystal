@@ -19,8 +19,6 @@ use crate::actors::world::ai::helpers::*;
 const VIEW_RANGE: i32 = 20;
 /// 远程攻击距离（C# AttackRange = 7）
 const ATTACK_RANGE: i32 = 7;
-/// 近战判定（C# InAttackRange：x<=1 && y<=1）
-const MELEE_RANGE: i32 = 1;
 /// 召唤周期（约 25s）
 const SUMMON_INTERVAL_TICKS: u64 = 250;
 /// 召唤池（C# 奥玛系：OmaFighter/OmaSlasher/OmaWitcher/OmaAxeman 等）
@@ -73,10 +71,14 @@ impl MonsterBehavior for OmaKingBehavior {
         monster.target_session = Some(target.session_id);
 
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
+        let dx = (target.x - monster.x).abs();
+        let dy = (target.y - monster.y).abs();
+        // C# OmaKing.cs InAttackRange：x,y<=2 且（贴身 或 对角/同奇偶）
+        let in_melee = dx <= 2 && dy <= 2 && ((dx <= 1 && dy <= 1) || dx == dy || dx % 2 == dy % 2);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let is_melee = dist <= MELEE_RANGE;
+            let is_melee = in_melee;
             if is_melee && fastrand::i32(0..3) > 0 {
                 // 2/3：LineAttack（DC）—— C# LineAttack(damage, 2, 300)：沿朝向每格命中第一个目标
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
@@ -96,19 +98,21 @@ impl MonsterBehavior for OmaKingBehavior {
                         });
                     }
                 }
-                // 概率麻痹（C# Random(8)==0 → Paralysis 5s）
-                if fastrand::i32(0..8) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                // C# OmaKing.cs:74-99：等级门控 Random(20) < 4+(60-目标等级) 才推挤；
+                // 推挤成功且 Random(8)==0 才麻痹（推挤结果无法回读，近似为门控内 1/8）
+                if fastrand::i32(0..20) < 4 + (60 - target.level as i32) {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                        dir: crate::actors::world::ai::direction_towards(monster.x, monster.y, target.x, target.y),
+                        distance: 3 + fastrand::i32(0..3),
                     });
+                    if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                        });
+                    }
                 }
-                // C# OmaKing.cs:86 Pushed(..., DirectionFromPoint, 3 + Random(3))
-                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                    session_id: target.session_id,
-                    dir: crate::actors::world::ai::direction_towards(monster.x, monster.y, target.x, target.y),
-                    distance: 3 + fastrand::i32(0..3),
-                });
             } else {
                 // 1/3 或远距离：远程 MC 弹道（C# Type=1，DefenceType.MAC）
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);

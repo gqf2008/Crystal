@@ -2,7 +2,7 @@
 //!
 //! C# 参考：Server/MirObjects/Monsters/ArmadilloElder.cs（继承 Armadillo）
 //! 机制：近战（dist<=1）：
-//!   1/6 撤退（远离）；1/6 Type=1 推挤 2 格；4/6 双倍伤害近战（DC*2）
+//!   1/6 撤退（远离）；1/6 Type=1 推挤 2 格（不造成伤害）；4/6 双倍伤害近战（DC*2）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -39,13 +39,7 @@ impl MonsterBehavior for ArmadilloElderBehavior {
                     ctx.out_moves.push((monster.object_id, nx, ny, d2));
                 }
                 1 => {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    // C# ArmadilloElder.cs case 1：Type=1 只推挤 2 格，不造成伤害（damage 仅用于判 0）
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: target.session_id,
                         dir,

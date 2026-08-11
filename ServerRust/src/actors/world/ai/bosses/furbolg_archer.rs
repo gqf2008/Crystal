@@ -33,11 +33,17 @@ impl MonsterBehavior for FurbolgArcherBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            // C# dist<=2 且 1/5：JumpBack(2)（反向 2 格；out_backsteps 应用时校验 walkable + 广播 ObjectBackStep）
+            let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+            // C# FurbolgArcher.cs:39-46：dist<=2 且 1/5，且后跳落点 ValidPoint 才 JumpBack(2)；
+            // 落点不可走则落入普通投射（不空过）
             if dist <= 2 && fastrand::i32(0..5) == 0 {
-                let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as i32 + 4).rem_euclid(8) as u8;
-                ctx.out_backsteps.push((monster.object_id, dir, 2));
-                return;
+                let back = (dir as i32 + 4).rem_euclid(8) as usize;
+                let bx = monster.x + DIR_DX[back] * 2;
+                let by = monster.y + DIR_DY[back] * 2;
+                if (ctx.is_walkable)(bx, by) {
+                    ctx.out_backsteps.push((monster.object_id, back as u8, 2));
+                    return;
+                }
             }
             // C# 80% 普通投射 / 20% Type=1 强化投射（DC*1.5）
             let powered = fastrand::i32(0..5) == 0;

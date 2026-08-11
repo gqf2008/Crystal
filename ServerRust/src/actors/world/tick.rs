@@ -574,6 +574,8 @@ fn monster_melee_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
 pub(crate) enum MonsterDefenceKind {
     /// 近战单体（C# DelayedType.Damage）
     Melee,
+    /// 远程弹道（C# DelayedType.RangeDamage）
+    Ranged,
     /// 直线（C# LineAttack）
     Line,
     /// 范围（C# AOE / Triangle）
@@ -584,7 +586,7 @@ pub(crate) enum MonsterDefenceKind {
 
 /// #1878：混合 Boss 分支防御类型（近战/直线/弧形各分支 C# 不同）。
 /// 仅覆盖已确认的 Boss；未覆盖回退 monster_melee_defence_type（零回归）。
-fn monster_melee_defence_type_for_kind(name: &str, kind: MonsterDefenceKind, attack_type: u8) -> mir2_shared::enums::DefenceType {
+fn monster_melee_defence_type_for_kind(name: &str, kind: MonsterDefenceKind, attack_type: u8, radius: i32) -> mir2_shared::enums::DefenceType {
     use mir2_shared::enums::DefenceType;
     let n = name.to_ascii_lowercase();
     match kind {
@@ -598,6 +600,19 @@ fn monster_melee_defence_type_for_kind(name: &str, kind: MonsterDefenceKind, att
             if matches!(n.as_str(), "seedingsgeneral") {
                 return if attack_type == 1 { DefenceType::MacAgility } else { DefenceType::AcAgility };
             }
+            // AssassinBird.cs:43-50：Type=2 SinglePushAttack 默认 DefenceType.AC（非 ACAgility）
+            if matches!(n.as_str(), "assassinbird") && attack_type == 2 {
+                return DefenceType::Ac;
+            }
+            // Kirin.cs:99：Type=1 强攻 DefenceType.AC；base.Attack()（Type=0）为 ACAgility
+            if matches!(n.as_str(), "kirin") {
+                return if attack_type == 1 { DefenceType::Ac } else { DefenceType::AcAgility };
+            }
+        }
+        // 远程弹道（C# DelayedType.RangeDamage）
+        MonsterDefenceKind::Ranged => {
+            // KingGuard.cs:80-93：远程单体 RangeDamage=MAC
+            if matches!(n.as_str(), "kingguard") { return DefenceType::Mac; }
         }
         MonsterDefenceKind::Line => {
             if matches!(n.as_str(), "crystalspider") { return DefenceType::MacAgility; }
@@ -606,6 +621,12 @@ fn monster_melee_defence_type_for_kind(name: &str, kind: MonsterDefenceKind, att
         // SandSnail.cs:48：毒分支 FindAllTargets(1) AOE=MAC（Halfmoon Arc 保持 ACAgility 默认）
         MonsterDefenceKind::Aoe => {
             if matches!(n.as_str(), "sandsnail") { return DefenceType::Mac; }
+            // Kirin.cs:167：IceThrust Attacked(..., DefenceType.MAC)
+            if matches!(n.as_str(), "kirin") { return DefenceType::Mac; }
+            // KingGuard.cs：近战重击 AOE(3)=AC（:48）；远程重击 AOE(10)=MAC（:125）
+            if matches!(n.as_str(), "kingguard") {
+                return if radius <= 3 { DefenceType::Ac } else { DefenceType::Mac };
+            }
         }
         // HellSlasher.cs:41：HalfmoonAttack(damage, 500, AC)
         MonsterDefenceKind::Arc => {
@@ -6056,14 +6077,20 @@ impl Message<Tick> for WorldActor {
                                 // #1878/#1880：按攻击动作种类 + attack_type 选防御类型
                                 let defence_kind = match atk {
                                     ai::AttackAction::Melee { .. } => MonsterDefenceKind::Melee,
+                                    ai::AttackAction::Range { .. } => MonsterDefenceKind::Ranged,
                                     ai::AttackAction::Line { .. } => MonsterDefenceKind::Line,
                                     ai::AttackAction::Aoe { .. } => MonsterDefenceKind::Aoe,
                                     ai::AttackAction::Arc { .. } => MonsterDefenceKind::Arc,
                                     _ => MonsterDefenceKind::Aoe,
                                 };
+                                // KingGuard 防御区分依赖 AOE 半径（近战重击 3=AC / 远程重击 10=MAC）
+                                let aoe_radius = match atk {
+                                    ai::AttackAction::Aoe { radius, .. } => *radius,
+                                    _ => 0,
+                                };
                                 let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
                                     &boss_stats, boss_level, &defender, damage,
-                                    monster_melee_defence_type_for_kind(boss_name, defence_kind, attack_type),
+                                    monster_melee_defence_type_for_kind(boss_name, defence_kind, attack_type, aoe_radius),
                                 );
                                 is_critical = crit;
                                 if reflected > 0 {
@@ -7080,26 +7107,36 @@ mod tests {
     fn test_mixed_boss_branch_defence() {
         use mir2_shared::enums::DefenceType;
         // DemonWolf：近战 MACAgility / 直线 ACAgility
-        assert_eq!(super::monster_melee_defence_type_for_kind("DemonWolf", super::MonsterDefenceKind::Melee, 0), DefenceType::MacAgility);
-        assert_eq!(super::monster_melee_defence_type_for_kind("DemonWolf", super::MonsterDefenceKind::Line, 0), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("DemonWolf", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::MacAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("DemonWolf", super::MonsterDefenceKind::Line, 0, 0), DefenceType::AcAgility);
         // CrystalSpider：近战 ACAgility / 直线 MACAgility
-        assert_eq!(super::monster_melee_defence_type_for_kind("CrystalSpider", super::MonsterDefenceKind::Melee, 0), DefenceType::AcAgility);
-        assert_eq!(super::monster_melee_defence_type_for_kind("CrystalSpider", super::MonsterDefenceKind::Line, 0), DefenceType::MacAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("CrystalSpider", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("CrystalSpider", super::MonsterDefenceKind::Line, 0, 0), DefenceType::MacAgility);
         // HellSlasher：近战 ACAgility / 半月（Arc）AC
-        assert_eq!(super::monster_melee_defence_type_for_kind("HellSlasher", super::MonsterDefenceKind::Melee, 0), DefenceType::AcAgility);
-        assert_eq!(super::monster_melee_defence_type_for_kind("HellSlasher", super::MonsterDefenceKind::Arc, 0), DefenceType::Ac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("HellSlasher", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("HellSlasher", super::MonsterDefenceKind::Arc, 0, 0), DefenceType::Ac);
         // SandSnail：毒分支 AOE=MAC / 半月 Arc=ACAgility
-        assert_eq!(super::monster_melee_defence_type_for_kind("SandSnail", super::MonsterDefenceKind::Aoe, 0), DefenceType::Mac);
-        assert_eq!(super::monster_melee_defence_type_for_kind("SandSnail", super::MonsterDefenceKind::Arc, 0), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("SandSnail", super::MonsterDefenceKind::Aoe, 0, 0), DefenceType::Mac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("SandSnail", super::MonsterDefenceKind::Arc, 0, 0), DefenceType::AcAgility);
         // ScalyBeast：2/3 近战=MAC / 1/3 践踏 AOE=ACAgility
-        assert_eq!(super::monster_melee_defence_type_for_kind("ScalyBeast", super::MonsterDefenceKind::Melee, 0), DefenceType::Mac);
-        assert_eq!(super::monster_melee_defence_type_for_kind("ScalyBeast", super::MonsterDefenceKind::Aoe, 0), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("ScalyBeast", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::Mac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("ScalyBeast", super::MonsterDefenceKind::Aoe, 0, 0), DefenceType::AcAgility);
         // SeedingsGeneral：Type0=ACAgility / Type1=MACAgility
-        assert_eq!(super::monster_melee_defence_type_for_kind("SeedingsGeneral", super::MonsterDefenceKind::Melee, 0), DefenceType::AcAgility);
-        assert_eq!(super::monster_melee_defence_type_for_kind("SeedingsGeneral", super::MonsterDefenceKind::Melee, 1), DefenceType::MacAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("SeedingsGeneral", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::AcAgility);
+        assert_eq!(super::monster_melee_defence_type_for_kind("SeedingsGeneral", super::MonsterDefenceKind::Melee, 1, 0), DefenceType::MacAgility);
         // 未覆盖回退原函数（零回归）
-        assert_eq!(super::monster_melee_defence_type_for_kind("CaveMaggot", super::MonsterDefenceKind::Melee, 0), DefenceType::MacAgility);
-        assert_eq!(super::monster_melee_defence_type_for_kind("Kirin", super::MonsterDefenceKind::Aoe, 0), DefenceType::Ac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("CaveMaggot", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::MacAgility);
+        // AssassinBird：Type=2 推挤=AC（C# SinglePushAttack 默认 AC）；Type=1/0 回退 ACAgility
+        assert_eq!(super::monster_melee_defence_type_for_kind("AssassinBird", super::MonsterDefenceKind::Melee, 2, 0), DefenceType::Ac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("AssassinBird", super::MonsterDefenceKind::Melee, 1, 0), DefenceType::AcAgility);
+        // Kirin：IceThrust（Aoe/Cells）=MAC（C# Kirin.cs:167）；近战 Type=1 强攻=AC / Type=0 普攻=ACAgility
+        assert_eq!(super::monster_melee_defence_type_for_kind("Kirin", super::MonsterDefenceKind::Aoe, 2, 0), DefenceType::Mac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("Kirin", super::MonsterDefenceKind::Melee, 1, 0), DefenceType::Ac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("Kirin", super::MonsterDefenceKind::Melee, 0, 0), DefenceType::AcAgility);
+        // KingGuard：近战重击 AOE(3)=AC / 远程重击 AOE(10)=MAC / 远程单体弹道（Ranged）=MAC
+        assert_eq!(super::monster_melee_defence_type_for_kind("KingGuard", super::MonsterDefenceKind::Aoe, 0, 3), DefenceType::Ac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("KingGuard", super::MonsterDefenceKind::Aoe, 0, 10), DefenceType::Mac);
+        assert_eq!(super::monster_melee_defence_type_for_kind("KingGuard", super::MonsterDefenceKind::Ranged, 0, 0), DefenceType::Mac);
     }
 
     /// #1852：TreeGuardian 近战 ACAgility（远程仍 MACAgility；C# TreeGuardian.cs:49/70）
