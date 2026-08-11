@@ -1837,6 +1837,24 @@ impl WorldActor {
                 attack_result.is_critical,
             ).await;
         }
+        // #1994：C# HumanObject.Attacked——吸血/反伤/EnergyShield（PvP 远程）
+        // 反伤：防御方 Reflect 全额反伤给攻击方（:7116-7123）
+        if attack_result.reflected > 0 {
+            let _ = attacker_record.actor_ref.ask(TakeDamage {
+                attacker_id: defender_state.object_id,
+                attacker_session: defender_session,
+                damage: attack_result.reflected,
+            }).await;
+            debug!("Player {} reflected {} to player {}", defender_session, attack_result.reflected, attacker_session);
+        }
+        // 吸血：攻击方 HPDrainRatePercent 回血（:7175-7183）
+        if attack_result.hp_drain > 0 {
+            let _ = attacker_record.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.hp_drain }).await;
+        }
+        // EnergyShield：防御方扣血前先回血（:7144-7154）
+        if attack_result.defender_heal > 0 {
+            let _ = defender_record.actor_ref.ask(crate::actors::player::Heal { amount: attack_result.defender_heal }).await;
+        }
         let pvp_died = defender_record.actor_ref.ask(TakeDamage {
                     attacker_id: attacker_object_id,
                     attacker_session,
