@@ -697,6 +697,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                     let mut raw_damage = combat_attack::get_attack_power(
                         attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
                     );
+                    // C# HumanObject.cs:3057-3060：对亡灵目标近战伤害 + Stat.Holy（在倍率之前）
+                    if monster.undead {
+                        raw_damage = raw_damage.saturating_add(state.holy.max(0));
+                    }
                     // C# Hemorrhage：武装状态（下次命中触发）时触发击伤害 = base × (0.2+0.05Lv)
                     let hemorrhage_armed = self.hemorrhage_armed.remove(&msg.session_id);
                     if hemorrhage_armed {
