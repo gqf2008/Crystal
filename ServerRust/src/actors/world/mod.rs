@@ -984,6 +984,8 @@ pub struct WorldActor {
     pub(crate) player_targets: HashMap<u64, u32>,
     /// 玩家宠物模式（session → PetMode；C# PlayerObject.PMode，AI 按模式选择目标）
     pub(crate) player_pet_modes: HashMap<u64, mir2_shared::enums::PetMode>,
+    /// 上次发信时间（session → unix ms；C# NextMailTime，SendMail 10s 冷却）
+    pub(crate) last_mail_time: HashMap<u64, i64>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -1417,6 +1419,7 @@ impl WorldActor {
             monster_targets: HashMap::new(),
             player_targets: HashMap::new(),
             player_pet_modes: HashMap::new(),
+        last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -4640,6 +4643,7 @@ impl Actor for WorldActor {
             monster_targets: HashMap::new(),
             player_targets: HashMap::new(),
             player_pet_modes: HashMap::new(),
+        last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),

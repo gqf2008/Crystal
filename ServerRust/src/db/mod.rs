@@ -1764,7 +1764,7 @@ async fn save_friends(conn: &mut sqlx::sqlite::SqliteConnection, character_name:
     Ok(())
 }
 
-async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result<FriendList> {
+pub async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result<FriendList> {
     let mut list = FriendList::new();
 
     let friend_rows = sqlx::query(
@@ -1831,7 +1831,7 @@ async fn save_mail(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &s
     Ok(())
 }
 
-async fn load_mail(pool: &DbPool, character_name: &str) -> anyhow::Result<Mailbox> {
+pub async fn load_mail(pool: &DbPool, character_name: &str) -> anyhow::Result<Mailbox> {
     let mut mailbox = Mailbox::new();
 
     let rows = sqlx::query(
