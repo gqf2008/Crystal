@@ -3615,6 +3615,14 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                                 guild_name: None, rank: GuildRank::Member,
                             }).await;
                             send_guild_status_packet(&self.gate_ref, sid, false);
+                            // C# RefreshStats：行会关系结束后立即清除行会/新手 buff 加成缓存
+                            if let Ok(Some(mut st)) = rec.ask(GetPlayerState).await {
+                                st.guild_buff_exp_percent = 0;
+                                st.guild_buff_fish_rate_percent = 0;
+                                st.guild_buff_mine_rate_percent = 0;
+                                st.newbie_exp_bonus = false;
+                                let _ = rec.ask(SetPlayerState { state: st }).await;
+                            }
                         }
                     }
                     // 通知行会成员
@@ -3789,6 +3797,14 @@ impl Message<LeaveGuildRequest> for SocialActor {
                         if let Some(rec) = self.players.get(&sid) {
                             let _ = rec.ask(SetGuildInfo { guild_name: None, rank: GuildRank::Member }).await;
                             send_guild_status_packet(&self.gate_ref, sid, false);
+                            // C# RefreshStats：行会关系结束后立即清除行会/新手 buff 加成缓存
+                            if let Ok(Some(mut st)) = rec.ask(GetPlayerState).await {
+                                st.guild_buff_exp_percent = 0;
+                                st.guild_buff_fish_rate_percent = 0;
+                                st.guild_buff_mine_rate_percent = 0;
+                                st.newbie_exp_bonus = false;
+                                let _ = rec.ask(SetPlayerState { state: st }).await;
+                            }
                             if let Ok(Some(fresh)) = rec.ask(GetPlayerState).await {
                                 self.broadcast_ride_appearance(sid, &fresh).await;
                             }
@@ -3819,6 +3835,15 @@ impl Message<LeaveGuildRequest> for SocialActor {
         send_guild_status_packet(&self.gate_ref, msg.session_id, false);
 
         // 通知其他行会成员
+        // C# LEAVEGUILD（:3259-3260）：退会立即清除行会/新手 buff 加成缓存（RemoveBuff(Guild)/RemoveBuff(Newbie)）
+        if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
+            st.guild_buff_exp_percent = 0;
+            st.guild_buff_fish_rate_percent = 0;
+            st.guild_buff_mine_rate_percent = 0;
+            st.newbie_exp_bonus = false;
+            let _ = record.ask(SetPlayerState { state: st }).await;
+        }
+
         for sid in guild.online_sessions(0) {
             send_guild_member_change_packet(&self.gate_ref, sid, &state.name, false);
         }
