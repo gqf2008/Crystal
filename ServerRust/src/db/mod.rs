@@ -225,7 +225,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             max_experience INTEGER NOT NULL DEFAULT 0,
             spare_points INTEGER NOT NULL DEFAULT 0,
             member_cap INTEGER NOT NULL DEFAULT 50,
-            rank_defs_json TEXT NOT NULL DEFAULT '[]'
+            rank_defs_json TEXT NOT NULL DEFAULT '[]',
+            flag_image INTEGER NOT NULL DEFAULT 1000,
+            flag_colour INTEGER NOT NULL DEFAULT -1
         );
         CREATE TABLE IF NOT EXISTS guild_members (
             guild_name TEXT NOT NULL,
@@ -842,6 +844,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN spare_points INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN member_cap INTEGER NOT NULL DEFAULT 50")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN flag_image INTEGER NOT NULL DEFAULT 1000")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN flag_colour INTEGER NOT NULL DEFAULT -1")
         .execute(&pool).await;
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
@@ -2350,7 +2356,7 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
     let notice_json = serde_json::to_string(&guild.notice)?;
     let storage_items_json = serde_json::to_string(&guild.storage_items)?;
     let rank_defs_json = serde_json::to_string(&guild.rank_defs)?;
-    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json, flag_image, flag_colour) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&guild.name)
         .bind(&notice_json)
         .bind(guild.gold as i64)
@@ -2361,6 +2367,8 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
         .bind(guild.spare_points as i32)
         .bind(guild.member_cap)
         .bind(&rank_defs_json)
+        .bind(guild.flag_image as i32)
+        .bind(guild.flag_colour)
         .execute(pool)
         .await?;
 
@@ -2394,7 +2402,7 @@ pub async fn delete_guild(pool: &DbPool, guild_name: &str) -> anyhow::Result<()>
 pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>> {
     let mut guilds = HashMap::new();
 
-    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json FROM guilds")
+    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json, flag_image, flag_colour FROM guilds")
         .fetch_all(pool)
         .await?;
 
@@ -2425,6 +2433,9 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             rank_index: r.get::<i32, _>("rank_index").clamp(0, 255) as u8,
         }).collect();
 
+        let flag_image: i32 = row.get("flag_image");
+        let flag_colour: i32 = row.get("flag_colour");
+
         guilds.insert(name.clone(), Guild {
             name,
             notice,
@@ -2438,6 +2449,8 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             max_experience,
             spare_points: spare_points.clamp(0, 255) as u8,
             member_cap,
+            flag_image: flag_image.clamp(0, u16::MAX as i32) as u16,
+            flag_colour,
             next_exp_update: 0,
         });
     }
@@ -4943,6 +4956,20 @@ mod tests {
         assert_eq!(list[0].flags[0].y, 6);
         assert_eq!(list[0].flags[0].name, "旗子");
         assert_eq!(list[0].flags[0].file_name, "flag.txt");
+    }
+
+    #[tokio::test]
+    async fn test_guild_flag_appearance_roundtrip() {
+        // C# GuildInfo.FlagImage/FlagColour：保存/加载往返
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        let mut guild = Guild::new("旗标行会".to_string(), "Alice".to_string(), 1);
+        guild.flag_image = 1200;
+        guild.flag_colour = 0xFFFF0000u32 as i32;
+        save_guild(&pool, &guild).await.unwrap();
+        let loaded = load_guilds(&pool).await.unwrap();
+        let g = loaded.get("旗标行会").expect("guild exists");
+        assert_eq!(g.flag_image, 1200);
+        assert_eq!(g.flag_colour, 0xFFFF0000u32 as i32);
     }
 }
 

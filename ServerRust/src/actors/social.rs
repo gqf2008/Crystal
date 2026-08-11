@@ -338,6 +338,19 @@ impl Message<NpcGetGuildBuffs> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 读取行会领地旗标外观（C# GuildInfo.FlagImage/FlagColour）
+pub struct NpcGetGuildFlagAppearance {
+    pub guild_name: String,
+}
+
+impl Message<NpcGetGuildFlagAppearance> for SocialActor {
+    type Reply = Option<(u16, i32)>;
+
+    async fn handle(&mut self, msg: NpcGetGuildFlagAppearance, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.guilds.get(&msg.guild_name).map(|g| (g.flag_image, g.flag_colour))
+    }
+}
+
 /// WorldActor -> SocialActor: 写入行会激活的 Buff 列表
 pub struct NpcSetGuildBuffs {
     pub guild_name: String,

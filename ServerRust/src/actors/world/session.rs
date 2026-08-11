@@ -633,6 +633,7 @@ impl Message<StartGameRequest> for WorldActor {
         // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
         let new_flags = spawn_conquest_flags(
             self.gate_ref.clone(),
+            self.social_ref.clone(),
             &self.conquest_instances,
             loaded_state.map_index,
             msg.session_id,
@@ -1193,6 +1194,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                         // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
                         let new_flags = spawn_conquest_flags(
                             self.gate_ref.clone(),
+                            self.social_ref.clone(),
                             &self.conquest_instances,
                             dest_map_index as u16,
                             msg.session_id,
