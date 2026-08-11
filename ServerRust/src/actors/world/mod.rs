@@ -6982,6 +6982,45 @@ async fn broadcast_group_locations(world: &mut WorldActor) {
 // 游戏进入序列
 // ============================================================
 
+/// C# CheckQuestInfo：DB QuestInfo → 客户端 ClientQuestInfo（登录下发 NewQuestInfo 的任务定义）
+fn build_client_quest_info(q: &db::QuestInfo) -> mir2_shared::data::client_data::ClientQuestInfo {
+    use mir2_shared::enums::{QuestType, RequiredClass};
+    // C# QuestType：General=0 Daily=1 Repeatable=2 Story=3；SharedRust 枚举 +3
+    let quest_type = QuestType::try_from(q.quest_type as u8 + 3).unwrap_or(QuestType::General);
+    mir2_shared::data::client_data::ClientQuestInfo {
+        index: q.index,
+        npc_index: 0, // 暂无任务 NPC 索引（C# CreateClientQuestInfo 从任务文件取）
+        name: q.name.clone(),
+        group: q.group_name.clone(),
+        description: q.goto_message.iter().cloned().collect(),
+        task_description: vec![
+            q.kill_message.clone().unwrap_or_default(),
+            q.item_message.clone().unwrap_or_default(),
+            q.flag_message.clone().unwrap_or_default(),
+        ],
+        return_description: Vec::new(),
+        completion_description: Vec::new(),
+        min_level_needed: q.required_min_level,
+        max_level_needed: q.required_max_level,
+        quest_needed: q.required_quest,
+        class_needed: RequiredClass::from_bits_truncate(q.required_class as u8),
+        quest_type,
+        time_limit_in_seconds: q.time_limit_seconds,
+        reward_gold: q.gold_reward.max(0) as u32,
+        reward_exp: q.exp_reward.max(0) as u32,
+        reward_credit: q.credit_reward.max(0) as u32,
+        rewards_fixed_item: q.fixed_rewards.iter().map(|r| mir2_shared::data::shared_data::QuestItemReward {
+            item_index: r.item_index,
+            count: r.count,
+        }).collect(),
+        rewards_select_item: q.select_rewards.iter().map(|r| mir2_shared::data::shared_data::QuestItemReward {
+            item_index: r.item_index,
+            count: r.count,
+        }).collect(),
+        finish_npc_index: 0,
+    }
+}
+
 /// 发送完整的游戏进入序列到客户端
 async fn send_game_entry_sequence(
     gate_ref: ActorRef<GateActor>,
@@ -6991,6 +7030,8 @@ async fn send_game_entry_sequence(
     map_title: &str,
     is_big_map: bool,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+    quest_infos: &std::collections::HashMap<i32, db::QuestInfo>,
+    recipe_infos: &[db::RecipeInfo],
 ) {
     use mir2_shared::enums::ServerPacketIds;
 
@@ -7035,6 +7076,35 @@ async fn send_game_entry_sequence(
         {
             crate::actors::social_packets::send_quest_change_packet(&gate_ref, session_id, quest);
         }
+    }
+
+    // C# StartGame GetQuestInfo（:1185）：登录下发全部任务定义（客户端任务日志依赖 NewQuestInfo）
+    for q in quest_infos.values() {
+        let client_quest = build_client_quest_info(q);
+        let packet = mir2_shared::packets::server::quest::NewQuestInfo { quest: client_quest };
+        let mut body = Vec::new();
+        if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+            let _ = gate_ref.tell(SendToClient { session_id: sid, data: body }).await;
+        }
+    }
+
+    // C# StartGame GetRecipeInfo（:1186）：登录下发配方 ID 列表
+    for recipe in recipe_infos {
+        let packet = mir2_shared::packets::server::ui_events::NewRecipeInfo { recipe_id: recipe.recipe_id };
+        let mut body = Vec::new();
+        if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+            let _ = gate_ref.tell(SendToClient { session_id: sid, data: body }).await;
+        }
+    }
+
+    // C# StartGame GetCompletedQuests（:1188）：登录下发已完成任务
+    for qi in &state.quest_log.completed_indices {
+        crate::actors::social_packets::send_quest_complete_packet(&gate_ref, session_id, *qi);
+    }
+
+    // C# StartGame GetMail（:1190）：登录下发邮件列表（摘要）
+    for mail in &state.mailbox.inbox {
+        send_mail_received_packet(&gate_ref, session_id, mail);
     }
 
     // 5. UserLocation
