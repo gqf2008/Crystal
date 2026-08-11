@@ -488,6 +488,22 @@ impl PlayerState {
         (self.max_mac + self.bonus_max_mac + buff_bonus).max(self.effective_min_mac())
     }
 
+    /// 最大 HP（基础+装备+MaxHpBoost buff；C# Stats[Stat.HP]，HealthAid/MaxHpBoost 计入）
+    pub fn effective_max_hp(&self) -> i32 {
+        self.max_hp + crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 },
+        )
+    }
+
+    /// 最大 MP（基础+装备+MaxMpBoost buff；C# Stats[Stat.MP]，ManaAid/MaxMpBoost 计入）
+    pub fn effective_max_mp(&self) -> i32 {
+        self.max_mp + crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 },
+        )
+    }
+
     /// 构建战斗公式用的属性快照（对齐 C# Stats 投影到 CombatStats）
     pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
         use crate::combat::attack::CombatStats;
@@ -617,6 +633,7 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::Curse { .. } => 25,
         BuffType::RhinoPriestDebuff { .. } => 26,
         BuffType::BagWeightBoost { .. } => 27,
+        BuffType::MaxHpBoost { .. } => 28,
     }
 }
 
@@ -1191,8 +1208,8 @@ impl Message<RevivePlayer> for PlayerActor {
         self.state.is_dead = false;
         self.state.x = msg.x;
         self.state.y = msg.y;
-        self.state.hp = self.state.max_hp;
-        self.state.mp = self.state.max_mp;
+        self.state.hp = self.state.effective_max_hp();
+        self.state.mp = self.state.effective_max_mp();
         // 发送位置更新
         self.send_user_location();
         true
@@ -1777,7 +1794,7 @@ impl Message<Heal> for PlayerActor {
             return 0;
         }
         let before = self.state.hp;
-        self.state.hp = (self.state.hp + msg.amount).min(self.state.max_hp);
+        self.state.hp = (self.state.hp + msg.amount).min(self.state.effective_max_hp());
         let healed = self.state.hp - before;
 
         // 发送 HealthChanged 给客户端
@@ -1840,13 +1857,13 @@ impl Message<TickPotionPool> for PlayerActor {
         if self.state.pot_hp_amount > 0 {
             let (heal, rem) = potion_tick_regen(self.state.pot_hp_amount, msg.per_tick);
             self.state.pot_hp_amount = rem;
-            self.state.hp = (self.state.hp + heal as i32).min(self.state.max_hp);
+            self.state.hp = (self.state.hp + heal as i32).min(self.state.effective_max_hp());
             changed = true;
         }
         if self.state.pot_mp_amount > 0 {
             let (add, rem) = potion_tick_regen(self.state.pot_mp_amount, msg.per_tick);
             self.state.pot_mp_amount = rem;
-            self.state.mp = (self.state.mp + add as i32).min(self.state.max_mp);
+            self.state.mp = (self.state.mp + add as i32).min(self.state.effective_max_mp());
             changed = true;
         }
         if changed {
@@ -1882,8 +1899,8 @@ impl Message<Revive> for PlayerActor {
             return;
         }
         self.state.is_dead = false;
-        self.state.hp = self.state.max_hp;
-        self.state.mp = self.state.max_mp;
+        self.state.hp = self.state.effective_max_hp();
+        self.state.mp = self.state.effective_max_mp();
 
         // 发送 HealthChanged
         let mut body = Vec::new();
@@ -2202,10 +2219,10 @@ impl Message<TickBuff> for PlayerActor {
             total_mp += r.mp_change;
         }
         if total_hp != 0 {
-            self.state.hp = (self.state.hp + total_hp).clamp(0, self.state.max_hp);
+            self.state.hp = (self.state.hp + total_hp).clamp(0, self.state.effective_max_hp());
         }
         if total_mp != 0 {
-            self.state.mp = (self.state.mp + total_mp).clamp(0, self.state.max_mp);
+            self.state.mp = (self.state.mp + total_mp).clamp(0, self.state.effective_max_mp());
         }
         // 收集过期 buff 的 tag（C# RemoveBuff 客户端通知，格式与 M44 AddBuff 一致：[tag u8]）
         let expired_tags: Vec<u8> = self.state.buffs.iter()
@@ -2349,8 +2366,8 @@ impl Message<SetStatBonuses> for PlayerActor {
             self.state.max_sc += d_max_sc;
 
             // Clamp HP/MP within new max
-            self.state.hp = self.state.hp.min(self.state.max_hp);
-            self.state.mp = self.state.mp.min(self.state.max_mp);
+            self.state.hp = self.state.hp.min(self.state.effective_max_hp());
+            self.state.mp = self.state.mp.min(self.state.effective_max_mp());
 
             self.state.bonus_min_attack = msg.bonus_min_attack;
             self.state.bonus_max_attack = msg.bonus_max_attack;
@@ -3503,7 +3520,7 @@ impl Message<AddMP> for PlayerActor {
 
     async fn handle(&mut self, msg: AddMP, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         if msg.amount <= 0 { return; }
-        self.state.mp = (self.state.mp + msg.amount).min(self.state.max_mp);
+        self.state.mp = (self.state.mp + msg.amount).min(self.state.effective_max_mp());
         // 同步客户端
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
@@ -3684,7 +3701,7 @@ impl Message<RestoreMp> for PlayerActor {
             return 0;
         }
         let before = self.state.mp;
-        self.state.mp = (self.state.mp + msg.amount).min(self.state.max_mp);
+        self.state.mp = (self.state.mp + msg.amount).min(self.state.effective_max_mp());
         let restored = self.state.mp - before;
         if restored > 0 {
             let mut body = Vec::new();
@@ -5831,8 +5848,10 @@ impl PlayerActor {
         body.push(0u8);                                                 // observer=false
 
         // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
-        body.extend_from_slice(&(self.state.max_hp + self.state.bonus_max_hp).to_le_bytes());
-        body.extend_from_slice(&(self.state.max_mp + self.state.bonus_max_mp).to_le_bytes());
+        body.extend_from_slice(&(self.state.max_hp + self.state.bonus_max_hp
+            + crate::combat::buff::get_stat_bonus(&self.state.buffs, &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 })).to_le_bytes());
+        body.extend_from_slice(&(self.state.max_mp + self.state.bonus_max_mp
+            + crate::combat::buff::get_stat_bonus(&self.state.buffs, &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 })).to_le_bytes());
         for v in [
             self.state.min_ac + self.state.bonus_min_ac,
             self.state.max_ac + self.state.bonus_max_ac,
@@ -6028,6 +6047,20 @@ mod tests {
         assert_eq!(st.effective_max_ac(), 17);
         assert_eq!(st.effective_min_mac(), 9);
         assert_eq!(st.effective_max_mac(), 14);
+    }
+
+    #[test]
+    fn effective_max_hp_mp_includes_boost_buffs() {
+        // C# HealthAid/ManaAid：+MaxHP/+MaxMP（Buff 药水 shape 3 / Wonderdrug）
+        let mut st = make_state();
+        st.max_hp = 120;
+        st.max_mp = 60;
+        st.buffs.push(crate::combat::buff::BuffInstance::new(
+            crate::combat::buff::BuffType::MaxHpBoost { bonus: 30 }, 600, 1));
+        st.buffs.push(crate::combat::buff::BuffInstance::new(
+            crate::combat::buff::BuffType::MaxMpBoost { bonus: 20 }, 600, 1));
+        assert_eq!(st.effective_max_hp(), 150);
+        assert_eq!(st.effective_max_mp(), 80);
     }
 
     fn make_state() -> PlayerState {

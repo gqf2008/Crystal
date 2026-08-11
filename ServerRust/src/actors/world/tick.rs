@@ -2799,8 +2799,8 @@ impl WorldActor {
                             self.mana_regen_weight,
                         )
                     };
-                    let new_hp = (state.hp + hp_regen).min(state.max_hp);
-                    let new_mp = (state.mp + mp_regen).min(state.max_mp);
+                    let new_hp = (state.hp + hp_regen).min(state.effective_max_hp());
+                    let new_mp = (state.mp + mp_regen).min(state.effective_max_mp());
 
                     if new_hp != state.hp || new_mp != state.mp {
                         // 发送 HealthChanged

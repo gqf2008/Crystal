@@ -3324,9 +3324,9 @@ impl WorldActor {
                     "HEAL" => {
                         if let Some(record) = self.players.get(&session_id) {
                             if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
-                                if state.hp < state.max_hp || state.mp < state.max_mp {
-                                    state.hp = state.max_hp;
-                                    state.mp = state.max_mp;
+                                if state.hp < state.effective_max_hp() || state.mp < state.effective_max_mp() {
+                                    state.hp = state.effective_max_hp();
+                                    state.mp = state.effective_max_mp();
                                     let (hp, mp) = (state.hp, state.mp);
                                     let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state }).await;
                                     let mut body = Vec::new();
@@ -7088,8 +7088,10 @@ fn build_user_information_packet(
     body.push(0u8);                                           // observer=false
 
     // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
-    body.extend_from_slice(&(state.max_hp + state.bonus_max_hp).to_le_bytes());
-    body.extend_from_slice(&(state.max_mp + state.bonus_max_mp).to_le_bytes());
+    body.extend_from_slice(&(state.max_hp + state.bonus_max_hp
+        + crate::combat::buff::get_stat_bonus(&state.buffs, &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 })).to_le_bytes());
+    body.extend_from_slice(&(state.max_mp + state.bonus_max_mp
+        + crate::combat::buff::get_stat_bonus(&state.buffs, &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 })).to_le_bytes());
     for v in [
         state.min_ac + state.bonus_min_ac,
         state.max_ac + state.bonus_max_ac,
