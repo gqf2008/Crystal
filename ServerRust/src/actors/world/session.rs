@@ -4027,6 +4027,8 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             exp_bonus_newbie_percent: 0,
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
+            mine_rate_percent: 0,
+            guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,

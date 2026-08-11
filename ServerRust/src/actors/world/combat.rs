@@ -496,6 +496,11 @@ impl WorldActor {
     }
 }
 
+/// C# HumanObject.cs:3348：Random(100) < Mine.DropRate + Stats[MineRatePercent]（装备 + 行会 Buff）
+pub(crate) fn mine_drop_succeeds(drop_rate: i32, mine_rate_percent: i32, guild_mine_rate: i32, roll: i32) -> bool {
+    roll < drop_rate + mine_rate_percent + guild_mine_rate
+}
+
 /// C# HarvestMonster.Harvest AttemptDrop：逐条 roll（跳过 QuestRequired/组子条目/金币；Meat Quality 简化 0）
 pub(crate) fn roll_harvest_drops(
     drops: &[crate::db::MonsterDropInfo],
@@ -1526,8 +1531,10 @@ impl Message<HarvestRequest> for WorldActor {
                 });
             }
 
-            // 掉落判定（C# :3347-3352：Random(100) < Mine.DropRate + MineRatePercent → GetMinePayout）
-            if drops.is_empty() || fastrand::i32(0..100) >= drop_rate + 0 /* Rust 未跟踪 MineRatePercent */ {
+            // 掉落判定（C# :3347-3352：Random(100) < Mine.DropRate + Stats[MineRatePercent] → GetMinePayout）
+            if drops.is_empty()
+                || !mine_drop_succeeds(drop_rate, state.mine_rate_percent, state.guild_buff_mine_rate_percent, fastrand::i32(0..100))
+            {
                 result_msg = "采集成功，但这次什么也没有挖到".to_string();
             } else if total_slots > 0 {
                 // C# GetMinePayout：Slot = Random(TotalSlots)，按 MinSlot<=Slot<=MaxSlot 选掉落
@@ -5802,6 +5809,19 @@ fn best_dir(dx: i32, dy: i32) -> usize {
 #[cfg(test)]
 mod spell_geometry_tests {
     use super::*;
+
+    #[test]
+    fn mine_drop_succeeds_matches_csharp_gate() {
+        // C# :3348 Random(100) < DropRate + MineRatePercent（装备 + 行会 Buff）
+        assert!(mine_drop_succeeds(10, 0, 0, 9));
+        assert!(!mine_drop_succeeds(10, 0, 0, 10));
+        // 装备 MineRatePercent +20 → 30 以下成功
+        assert!(mine_drop_succeeds(10, 20, 0, 29));
+        assert!(!mine_drop_succeeds(10, 20, 0, 30));
+        // 行会 Buff +15 叠加
+        assert!(mine_drop_succeeds(10, 20, 15, 44));
+        assert!(!mine_drop_succeeds(10, 20, 15, 45));
+    }
 
     #[test]
     fn roll_harvest_drops_forces_and_skips() {
