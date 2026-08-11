@@ -3469,6 +3469,11 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, "邀请已发送，等待对方回复");
                     return;
                 }
+                // C# PlayerObject.cs:9880-9884：MyGuild.IsAtWar() -> CannotRecruitDuringWar（仅拦截招募）
+                if self.guild_wars.get(&guild_name).map(|s| !s.is_empty()).unwrap_or(false) {
+                    send_system_message(&self.gate_ref, msg.session_id, "行会处于战争状态，无法招募成员");
+                    return;
+                }
                 self.pending_guild_invites.insert(target, (msg.session_id, guild_name.clone()));
                 send_guild_invite_packet(&self.gate_ref, target, &guild_name);
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已向 {} 发送行会邀请", msg.member_name));
