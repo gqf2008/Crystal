@@ -1205,6 +1205,8 @@ pub struct WorldActor {
     pub(crate) fishing_drops: Vec<FishingDropInfo>,
     /// 行会 Buff 定义（id → info，C# Envir.FindGuildBuffInfo）
     pub(crate) guild_buff_infos: HashMap<u32, crate::util::ini::GuildBuffInfo>,
+    /// #2136：行会 Buff 到期 tick（guild → buff_id → expire_tick；C# GuildObject.Process 时限）
+    pub(crate) guild_buff_expiries: std::collections::HashMap<String, std::collections::HashMap<u32, u64>>,
     /// 地面掉落物品
     pub(crate) ground_items: Vec<GroundItem>,
     /// #1434：召唤物 slave 归属索引（slave oid → master oid；C# MonsterObject.SlaveList）
@@ -1643,6 +1645,7 @@ impl WorldActor {
             random_item_stats: Vec::new(),
             fishing_drops: Vec::new(),
             guild_buff_infos: HashMap::new(),
+            guild_buff_expiries: std::collections::HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             slave_master: std::collections::HashMap::new(),
@@ -5124,6 +5127,7 @@ Ok(Self {
             random_item_stats: args.random_item_stats,
             fishing_drops,
             guild_buff_infos: args.guild_buff_infos.into_iter().map(|b| (b.id, b)).collect(),
+            guild_buff_expiries: std::collections::HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             slave_master: std::collections::HashMap::new(),

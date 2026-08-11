@@ -2437,6 +2437,48 @@ pub(crate) async fn tick_player_conditions(&mut self) {
     }
 
     /// #2114：C# GuildInfo.HasGT（GTRent > Now）——领地租期到期释放归属
+    /// #2136：C# GuildObject.Process（:795-813）——行会 Buff 时限到期自动停用
+    pub(crate) async fn tick_guild_buff_expiry(&mut self) {
+        if self.tick_count % 10 != 0 || self.guild_buff_expiries.is_empty() {
+            return;
+        }
+        let now = self.tick_count;
+        let mut expired_guilds: Vec<(String, Vec<u32>)> = Vec::new();
+        for (guild, exp) in &mut self.guild_buff_expiries {
+            let expired: Vec<u32> = exp.iter()
+                .filter(|(_, expire)| **expire <= now)
+                .map(|(id, _)| *id)
+                .collect();
+            if !expired.is_empty() {
+                for id in &expired {
+                    exp.remove(id);
+                }
+                expired_guilds.push((guild.clone(), expired));
+            }
+        }
+        for (guild_name, expired) in expired_guilds {
+            // 从 SocialActor 激活列表移除（停用）
+            let mut buffs = self.guild_buffs(&guild_name).await;
+            let before = buffs.len();
+            buffs.retain(|b| !expired.contains(b));
+            if buffs.len() != before {
+                self.set_guild_buffs(&guild_name, &buffs).await;
+            }
+            // 通知在线成员（GuildBuffList 更新）
+            let online: Vec<u64> = self.players.keys().copied().collect();
+            for sid in online {
+                if let Some(r) = self.players.get(&sid) {
+                    if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                        if os.guild_name.as_deref() == Some(guild_name.as_str()) {
+                            self.send_guild_buff_list(sid, &buffs).await;
+                        }
+                    }
+                }
+            }
+            debug!("Guild buffs expired for {}: {:?}", guild_name, expired);
+        }
+    }
+
     /// C# GuildObject.EndGT（:852-863）：把领地地图上的存活玩家传送回绑定点
     pub(crate) async fn evict_gt_map_players(&mut self, map_index: u16) {
         let mut to_evict: Vec<(u64, i32, i32, i32)> = Vec::new();
@@ -7463,6 +7505,7 @@ impl Message<Tick> for WorldActor {
         self.tick_mine_effects().await;
         self.tick_corpse_expiry().await;
         self.tick_gt_rent_expiry().await;
+        self.tick_guild_buff_expiry().await;
         self.tick_rested().await;
         self.tick_player_conditions().await;
 
