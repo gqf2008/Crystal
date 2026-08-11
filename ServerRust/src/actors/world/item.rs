@@ -3039,6 +3039,14 @@ impl Message<CombineItemRequest> for WorldActor {
     }
 }
 
+/// #2058：C# DisassemblePrice（ItemData.cs:583-591）——1500*Grade*((AddedStats.Count+AwakeLevel)*0.1+1)
+fn disassemble_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
+    let grade = info.grade.max(1) as u64;
+    let stats = item.added_stats.len() as u64;
+    let awake = item.awake.awake_level() as u64;
+    ((1500u64 * grade) as f64 * ((stats + awake) as f64 * 0.1 + 1.0)) as u64
+}
+
 impl Message<DisassembleItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: DisassembleItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
@@ -3068,6 +3076,15 @@ impl Message<DisassembleItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法分解");
             return;
         }
+
+        // #2058：C# DisassemblePrice——费用 1500*Grade*((AddedStats.Count+AwakeLevel)*0.1+1)
+        let gold_cost = disassemble_price(&item, item_info);
+        if state.inventory.gold < gold_cost {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，分解需要 {} 金币", gold_cost));
+            return;
+        }
+        let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: gold_cost }).await;
+        super::send_gold_changed_packet(&self.gate_ref, msg.session_id, gold_cost);
 
         // 分解产出 = 根据等级和类型决定
         let grade = item_info.grade.max(1);
@@ -3305,6 +3322,29 @@ mod tests {
         assert_eq!(super::replace_wedring_cost(1), 1250);
         assert_eq!(super::replace_wedring_cost(10), 12500);
         assert_eq!(super::replace_wedring_cost(-5), 0);
+    }
+
+    #[test]
+    fn disassemble_price_matches_csharp() {
+        // #2058：C# DisassemblePrice = 1500*Grade*((AddedStats.Count+AwakeLevel)*0.1+1)
+        use mir2_shared::data::item::{Awake, UserItem};
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::AwakeType;
+        use mir2_shared::enums::Stat;
+        let mut added = Stats::new();
+        added.set(Stat::Luck, 50); // 1 条附加属性
+        let item = UserItem {
+            item_index: 1,
+            added_stats: added,
+            awake: Awake { awake_type: AwakeType::Dc, levels: vec![1, 2] }, // 2 级
+            ..Default::default()
+        };
+        let info = crate::db::ItemInfo { index: 1, grade: 3, ..Default::default() };
+        // 1500*3 * ((1+2)*0.1+1) = 4500 * 1.3 = 5850
+        assert_eq!(super::disassemble_price(&item, &info), 5850);
+        // 无附加/无觉醒：1500*3*1.0 = 4500
+        let plain = UserItem { item_index: 1, ..Default::default() };
+        assert_eq!(super::disassemble_price(&plain, &info), 4500);
     }
 
     #[test]
