@@ -441,7 +441,7 @@ impl WorldActor {
     }
 
     /// 发送 GuildBuffList 完整包（C# S.GuildBuffList：Remove + ActiveBuffs + GuildBuffs）
-    async fn send_guild_buff_list(&self, session_id: u64, buffs: &[u32]) {
+    pub(crate) async fn send_guild_buff_list(&self, session_id: u64, buffs: &[u32]) {
         let packet = mir2_shared::packets::server::special_systems::GuildBuffList {
             active_buffs: buffs.iter().map(|b| *b as i32).collect(),
         };
