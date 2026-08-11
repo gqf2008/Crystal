@@ -7341,6 +7341,9 @@ impl Message<Tick> for WorldActor {
                                                 &self.gate_ref, sid, &q);
                                         }
                                     }
+                                    // C# ProcessKill（:11586）：YouKilled 任务输出消息
+                                    crate::actors::world::send_quest_output_message(
+                                        &self.gate_ref, sid, format!("你击杀了 {}", monster.name));
                                     send_system_message(&self.gate_ref, sid, "任务进度更新：击杀目标");
                                 }
                             }
