@@ -425,7 +425,6 @@ pub(crate) fn auto_refine_test(
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut uid: Local<Option<u64>>,
-    mut item_index: Local<Option<i32>>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -453,7 +452,6 @@ pub(crate) fn auto_refine_test(
             match first {
                 Some((_i, item)) => {
                     *uid = Some(item.unique_id);
-                    *item_index = Some(item.item_index);
                     net.send_packet(&client_bevy::network::RefineDepositWire {
                         unique_id: item.unique_id,
                     });
@@ -480,8 +478,7 @@ pub(crate) fn auto_refine_test(
             if chat_has(&chat, "精炼物品已存入") {
                 tracing::info!("[REFINETEST] ✅ 存入成功");
                 net.send_packet(&client_bevy::network::RefineItemWire {
-                    item_id: item_index.unwrap_or(0) as u32,
-                    materials: 1,
+                    unique_id: uid.unwrap_or(0),
                 });
                 tracing::info!("[REFINETEST] 开始精炼");
                 *stage = 2;
