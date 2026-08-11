@@ -8647,6 +8647,20 @@ fn nearby_guild_name_targets(
         .collect()
 }
 
+/// C# CHANGEFLAG：FlagImage = 1000 + flag（flag 0..=11，缺省随机 0..12）
+fn changeflag_image(arg: Option<&str>) -> u16 {
+    let flag = arg
+        .and_then(|v| v.parse::<u16>().ok())
+        .filter(|v| *v <= 11)
+        .unwrap_or_else(|| fastrand::u8(0..12) as u16);
+    1000 + flag
+}
+
+/// C# CHANGEFLAGCOLOUR：Color.FromArgb(255, r, g, b).ToArgb()
+fn changeflag_colour(r: u8, g: u8, b: u8) -> i32 {
+    0xFF000000u32 as i32 | ((r as i32) << 16) | ((g as i32) << 8) | b as i32
+}
+
 impl WorldActor {
     /// 领地易主：旗子外观更新广播（C# ConquestGuildFlagInfo.UpdateImage/UpdateColour
     /// → NPCImageUpdate；per-session 定向下发并同步运行时外观）
@@ -9522,6 +9536,27 @@ mod tests {
         let pkt2 = ObjectGuildNameChanged::read_body(&mut cur2).unwrap();
         assert_eq!(pkt2.object_id, 9);
         assert_eq!(pkt2.guild_name, "沙巴克");
+    }
+
+    /// C# CHANGEFLAG：FlagImage = 1000 + flag（0..=11，缺省/越界随机）
+    #[test]
+    fn test_changeflag_image() {
+        assert_eq!(changeflag_image(Some("0")), 1000);
+        assert_eq!(changeflag_image(Some("11")), 1011);
+        // 越界参数忽略 → 随机（1000..=1011）
+        let v = changeflag_image(Some("99"));
+        assert!((1000..=1011).contains(&v));
+        let v = changeflag_image(None);
+        assert!((1000..=1011).contains(&v));
+    }
+
+    /// C# CHANGEFLAGCOLOUR：Color.FromArgb(255, r, g, b).ToArgb()
+    #[test]
+    fn test_changeflag_colour() {
+        assert_eq!(changeflag_colour(255, 0, 0), 0xFFFF0000u32 as i32);
+        assert_eq!(changeflag_colour(0, 255, 0), 0xFF00FF00u32 as i32);
+        assert_eq!(changeflag_colour(0, 0, 255), 0xFF0000FFu32 as i32);
+        assert_eq!(changeflag_colour(255, 255, 255), -1);
     }
 
 }

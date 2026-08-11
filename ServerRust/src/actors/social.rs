@@ -351,6 +351,25 @@ impl Message<NpcGetGuildFlagAppearance> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 设置行会领地旗标外观并持久化（C# @CHANGEFLAG/@CHANGEFLAGCOLOUR）
+pub struct NpcSetGuildFlagAppearance {
+    pub guild_name: String,
+    pub flag_image: u16,
+    pub flag_colour: i32,
+}
+
+impl Message<NpcSetGuildFlagAppearance> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: NpcSetGuildFlagAppearance, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return false };
+        guild.flag_image = msg.flag_image;
+        guild.flag_colour = msg.flag_colour;
+        self.save_guild_to_db(&msg.guild_name).await;
+        true
+    }
+}
+
 /// WorldActor -> SocialActor: 写入行会激活的 Buff 列表
 pub struct NpcSetGuildBuffs {
     pub guild_name: String,
