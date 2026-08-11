@@ -1412,6 +1412,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             let mut delayed_effects: Vec<(u32, u8, u16)> = Vec::new(); // (object_id, stage, map_index)
             let mut pending_explosions: Vec<(u64, u16, i32, i32, i32)> = Vec::new(); // (caster, map, x, y, value)
             let mut binding_releases: Vec<(u32, u16, i32, i32)> = Vec::new(); // (object_id, map, x, y)——BindingShot 定身解除广播
+            let mut delayed_removals: Vec<(u32, u16)> = Vec::new(); // (object_id, map)——炸弹延迟爆炸移除清理广播
             for (_, monster) in &mut self.monsters {
                 // #1888：友军增益每 tick 减时，过期回退属性
                 tick_monster_buffs(monster);
@@ -1450,6 +1451,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         }
                     }
                     if remove_delayed {
+                        // C# HumanObject.cs:6261-6272：移除延迟爆炸时广播 S.RemoveDelayedExplosion（清理客户端特效）
+                        delayed_removals.push((monster.object_id, monster.map_index));
                         crate::combat::poison::remove_poison(
                             &mut monster.poison_list,
                             mir2_shared::enums::PoisonType::DELAYED_EXPLOSION,
@@ -1497,6 +1500,14 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             for (oid, map_index, _x, _y) in binding_releases {
                 let bs_packet = build_set_binding_shot_packet(oid, false, 0);
                 broadcast_to_map(&self.gate_ref, &self.players, map_index, &bs_packet).await;
+            }
+            // 延迟爆炸移除：清理广播（C# RemoveDelayedExplosion { ObjectID }）
+            for (oid, map_index) in delayed_removals {
+                let mut rb = Vec::new();
+                rb.extend_from_slice(&oid.to_le_bytes());
+                let pkt = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::RemoveDelayedExplosion as i16, &rb);
+                broadcast_to_map(&self.gate_ref, &self.players, map_index, &pkt).await;
             }
             // #1799：玩家中毒同步（C# HumanObject.SendPoisoned：Poisoned 给自己 + ObjectPoisoned 同图广播）
             let mut player_poison_updates: Vec<(u64, u32, u16, mir2_shared::enums::PoisonType)> = Vec::new();
