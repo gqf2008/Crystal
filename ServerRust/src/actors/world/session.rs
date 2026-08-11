@@ -1566,6 +1566,55 @@ impl WorldActor {
     }
 }
 
+/// C# ItemType 枚举名 → shared ItemType（C# `Enum.TryParse(parts[1], true, out ItemType)`）
+fn parse_item_type(name: &str) -> Option<mir2_shared::enums::ItemType> {
+    Some(match name.to_uppercase().as_str() {
+        "NOTHING" => mir2_shared::enums::ItemType::Nothing,
+        "WEAPON" => mir2_shared::enums::ItemType::Weapon,
+        "ARMOUR" => mir2_shared::enums::ItemType::Armour,
+        "HELMET" => mir2_shared::enums::ItemType::Helmet,
+        "NECKLACE" => mir2_shared::enums::ItemType::Necklace,
+        "BRACELET" => mir2_shared::enums::ItemType::Bracelet,
+        "RING" => mir2_shared::enums::ItemType::Ring,
+        "AMULET" => mir2_shared::enums::ItemType::Amulet,
+        "BELT" => mir2_shared::enums::ItemType::Belt,
+        "BOOTS" => mir2_shared::enums::ItemType::Boots,
+        "STONE" => mir2_shared::enums::ItemType::Stone,
+        "TORCH" => mir2_shared::enums::ItemType::Torch,
+        "POTION" => mir2_shared::enums::ItemType::Potion,
+        "ORE" => mir2_shared::enums::ItemType::Ore,
+        "MEAT" => mir2_shared::enums::ItemType::Meat,
+        "CRAFTINGMATERIAL" => mir2_shared::enums::ItemType::CraftingMaterial,
+        "SCROLL" => mir2_shared::enums::ItemType::Scroll,
+        "GEM" => mir2_shared::enums::ItemType::Gem,
+        "MOUNT" => mir2_shared::enums::ItemType::Mount,
+        "BOOK" => mir2_shared::enums::ItemType::Book,
+        "SCRIPT" => mir2_shared::enums::ItemType::Script,
+        "REINS" => mir2_shared::enums::ItemType::Reins,
+        "BELLS" => mir2_shared::enums::ItemType::Bells,
+        "SADDLE" => mir2_shared::enums::ItemType::Saddle,
+        "RIBBON" => mir2_shared::enums::ItemType::Ribbon,
+        "MASK" => mir2_shared::enums::ItemType::Mask,
+        "FOOD" => mir2_shared::enums::ItemType::Food,
+        "HOOK" => mir2_shared::enums::ItemType::Hook,
+        "FLOAT" => mir2_shared::enums::ItemType::Float,
+        "BAIT" => mir2_shared::enums::ItemType::Bait,
+        "FINDER" => mir2_shared::enums::ItemType::Finder,
+        "REEL" => mir2_shared::enums::ItemType::Reel,
+        "FISH" => mir2_shared::enums::ItemType::Fish,
+        "QUEST" => mir2_shared::enums::ItemType::Quest,
+        "AWAKENING" => mir2_shared::enums::ItemType::Awakening,
+        "PETS" => mir2_shared::enums::ItemType::Pets,
+        "TRANSFORM" => mir2_shared::enums::ItemType::Transform,
+        "DECO" => mir2_shared::enums::ItemType::Deco,
+        "SOCKET" => mir2_shared::enums::ItemType::Socket,
+        "MONSTERSPAWN" => mir2_shared::enums::ItemType::MonsterSpawn,
+        "SIEGEAMMO" => mir2_shared::enums::ItemType::SiegeAmmo,
+        "SEALEDHERO" => mir2_shared::enums::ItemType::SealedHero,
+        _ => return None,
+    })
+}
+
 impl Message<ChatRequest> for WorldActor {
     type Reply = ();
 
@@ -1707,7 +1756,7 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1741,6 +1790,15 @@ impl Message<ChatRequest> for WorldActor {
                                 let _ = record.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
                                 send_system_message(&self.gate_ref, msg.session_id, &format!("等级已设置为 {}", lv));
                             }
+                        }
+                        // @removedawakening <ItemType>（C# case "REMOVEAWAKENING" ~3561：GM/TestServer 按类型移除装备觉醒）
+                        "REMOVEAWAKENING" => {
+                            let Some(type_name) = parts.get(1).copied() else { return; };
+                            let Some(item_type) = parse_item_type(type_name) else {
+                                send_system_message(&self.gate_ref, msg.session_id, "无效的物品类型");
+                                return;
+                            };
+                            let _ = record.actor_ref.ask(crate::actors::player::RemoveAwakeningByItemType { item_type }).await;
                         }
                         // @gold <n>
                         "GOLD" => {
