@@ -326,7 +326,7 @@ impl SiegeStructure {
         }
     }
 
-    /// 箭塔（守方自动射击，本简化版仅作为可被摧毁的目标）
+    /// 箭塔（守方自动射击已实现：#1513 tick_conquest 战争期间每 3s 攻击非守方玩家）
     pub fn archer_tower(object_id: u32) -> Self {
         Self {
             object_id,

@@ -4,11 +4,12 @@
 //! 机制：
 //!   - 不可移动、不可攻击（CanMove=false, CanAttack=false）
 //!   - 仅关门（Closed）时阻挡 + 可被攻击；开门时透人
-//!   - 自动门：公会成员靠近 4 格开门，10s 后自动关门（简化：POC 无公会系统，保持关门）
+//!   - 自动门：owner 公会成员靠近 4 格开门，10s 后自动关门（#1948 在 conquest siege_structures 上实现）
 //!   - 死亡时关闭门墙阻挡（ActiveDoorWall(false)）
 //!
 //! ProcessSearch（C# :83-105）：Closed && AutoOpen → 公会成员靠近开门。
-//! 注意：本 POC 无公会/攻城系统，简化为固定关门阻挡的木桩。
+//! 注意：公会/攻城系统已存在（conquest.rs）；本怪物版城门保持固定关门阻挡，
+//! 自动门/修复/开关由 siege_structures + NPC 脚本（OPENGATE/REPAIRGATE）处理。
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
