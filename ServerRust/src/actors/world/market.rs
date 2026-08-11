@@ -425,13 +425,21 @@ impl Message<MarketBuyRequest> for WorldActor {
 
 pub struct MarketGetBackRequest {
     pub session_id: u64,
-    pub listing_id: u64,
+    /// C# C.MarketGetBack.Mode（0=取回物品；金币领取暂未实现）
+    pub mode: u8,
+    /// C# C.MarketGetBack.AuctionID
+    pub auction_id: u64,
 }
 
 impl Message<MarketGetBackRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketGetBackRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("MarketGetBack: session={} listing={}", msg.session_id, msg.listing_id);
+        // C# MarketCollectionMode：0=取回物品；mode=1 领取金币暂未实现
+        if msg.mode != 0 {
+            debug!("MarketGetBack: mode={} not supported (session={})", msg.mode, msg.session_id);
+            return;
+        }
+        debug!("MarketGetBack: session={} auction={}", msg.session_id, msg.auction_id);
 
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
@@ -443,7 +451,7 @@ impl Message<MarketGetBackRequest> for WorldActor {
         };
 
         let auction_idx = match self.auctions.iter().position(|a| {
-            a.auction_id == msg.listing_id && a.seller_name == state.name && !a.sold
+            a.auction_id == msg.auction_id && a.seller_name == state.name && !a.sold
         }) {
             Some(idx) => idx,
             None => {
@@ -461,7 +469,7 @@ impl Message<MarketGetBackRequest> for WorldActor {
             return;
         }
 
-        let _ = db::delete_auction(&self.db_pool, msg.listing_id as i64).await;
+        let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
         self.auctions.remove(auction_idx);
         send_system_message(&self.gate_ref, msg.session_id, "取回寄售物品成功");
 
@@ -583,14 +591,14 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
 
 pub struct MarketSellNowRequest {
     pub session_id: u64,
-    pub unique_id: u64,
-    pub price: u64,
+    /// C# C.MarketSellNow.AuctionID（立即出售的拍卖ID）
+    pub auction_id: u64,
 }
 
 impl Message<MarketSellNowRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketSellNowRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("MarketSellNow: session={} uid={} price={}", msg.session_id, msg.unique_id, msg.price);
+        debug!("MarketSellNow: session={} auction={}", msg.session_id, msg.auction_id);
 
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
@@ -607,7 +615,7 @@ impl Message<MarketSellNowRequest> for WorldActor {
         }
 
         let auction_idx = match self.auctions.iter().position(|a| {
-            a.auction_id == msg.unique_id && a.seller_name == state.name && !a.sold
+            a.auction_id == msg.auction_id && a.seller_name == state.name && !a.sold
         }) {
             Some(idx) => idx,
             None => {
@@ -622,7 +630,7 @@ impl Message<MarketSellNowRequest> for WorldActor {
         let commission = price * 5 / 100;
         let seller_gold = price - commission;
 
-        let _ = db::delete_auction(&self.db_pool, msg.unique_id as i64).await;
+        let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
         self.auctions.remove(auction_idx);
 
         let _ = record.actor_ref.ask(AddGold { amount: seller_gold }).await;
@@ -851,13 +859,35 @@ impl Message<ItemRentalRequestMsg> for WorldActor {
 
 pub struct DepositRentalItemRequest {
     pub session_id: u64,
-    pub unique_id: u64,
+    /// C# C.DepositRentalItem.From：背包格索引
+    pub from: i32,
+    /// C# C.DepositRentalItem.To：租赁栏格索引（Rust 单槽，须为 0）
+    pub to: i32,
 }
 
 impl Message<DepositRentalItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: DepositRentalItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        // C# DepositRentalItem（:14112）：From=背包格、To=租赁栏格（Rust 单槽 to=0）
+        let from = msg.from;
+        if from < 0 || from as usize >= state.inventory.backpack.len() || msg.to != 0 {
+            self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::DepositRentalItem {
+                unique_id: 0,
+                success: false,
+            });
+            return;
+        }
+        let Some(item) = state.inventory.backpack[from as usize].as_ref().map(|s| s.item.clone()) else {
+            self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::DepositRentalItem {
+                unique_id: 0,
+                success: false,
+            });
+            return;
+        };
+        let uid = item.unique_id;
 
         // Find the rental session where this player is the partner (owner)
         let initiator = self.rental_sessions.iter()
@@ -872,11 +902,11 @@ impl Message<DepositRentalItemRequest> for WorldActor {
             }
         };
 
-        let item = match record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: msg.unique_id }).await {
+        let item = match record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: uid }).await {
             Ok(Some(i)) => i,
             _ => {
                 self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::DepositRentalItem {
-                    unique_id: msg.unique_id,
+                    unique_id: uid,
                     success: false,
                 });
                 return;
@@ -888,7 +918,7 @@ impl Message<DepositRentalItemRequest> for WorldActor {
         }
 
         self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::DepositRentalItem {
-            unique_id: msg.unique_id,
+            unique_id: uid,
             success: true,
         });
         // Also update the renter's dialog
@@ -897,19 +927,40 @@ impl Message<DepositRentalItemRequest> for WorldActor {
             rental_fee: self.rental_sessions.get(&initiator).map(|s| s.fee).unwrap_or(0),
             rental_period: self.rental_sessions.get(&initiator).map(|s| s.period_hours as i32).unwrap_or(0),
         });
-        debug!("DepositRentalItem: session={} uid={}", msg.session_id, msg.unique_id);
+        debug!("DepositRentalItem: session={} from={} uid={}", msg.session_id, from, uid);
     }
 }
 
 pub struct RetrieveRentalItemRequest {
     pub session_id: u64,
-    pub unique_id: u64,
+    /// C# C.RetrieveRentalItem.From：租赁栏格索引（Rust 单槽，须为 0）
+    pub from: i32,
+    /// C# C.RetrieveRentalItem.To：背包格索引
+    pub to: i32,
 }
 
 impl Message<RetrieveRentalItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: RetrieveRentalItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        // C# RetrieveRentalItem（:14178）：From=租赁栏格（Rust 单槽 0）、To=背包格
+        if msg.from != 0 {
+            self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::RetrieveRentalItem {
+                unique_id: 0,
+                success: false,
+            });
+            return;
+        }
+        let to = msg.to;
+        if to < 0 || to as usize >= state.inventory.backpack.len() || state.inventory.backpack[to as usize].is_some() {
+            self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::RetrieveRentalItem {
+                unique_id: 0,
+                success: false,
+            });
+            return;
+        }
 
         let initiator = self.rental_sessions.iter()
             .find(|(_, s)| s.partner_session == msg.session_id)
@@ -930,9 +981,13 @@ impl Message<RetrieveRentalItemRequest> for WorldActor {
         };
 
         if let Some(item) = item {
-            let added = record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await.unwrap_or(false);
+            // C# RetrieveRentalItem：返还到指定背包格；失败回退自动空格
+            let mut added = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
+            if !added {
+                added = record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await.unwrap_or(false);
+            }
             self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::RetrieveRentalItem {
-                unique_id: msg.unique_id,
+                unique_id: item.unique_id,
                 success: added,
             });
             // Update renter's dialog (clear item)
@@ -941,10 +996,10 @@ impl Message<RetrieveRentalItemRequest> for WorldActor {
                 rental_fee: 0,
                 rental_period: 0,
             });
-            debug!("RetrieveRentalItem: session={} uid={}", msg.session_id, msg.unique_id);
+            debug!("RetrieveRentalItem: session={} to={} uid={}", msg.session_id, to, item.unique_id);
         } else {
             self.send_rental_packet(msg.session_id, mir2_shared::packets::server::rental_system::RetrieveRentalItem {
-                unique_id: msg.unique_id,
+                unique_id: 0,
                 success: false,
             });
         }

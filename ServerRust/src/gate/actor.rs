@@ -3065,23 +3065,23 @@ fn forward_market_buy(
         .try_send();
 }
 
-/// MarketGetBack: [listing_id: u32]
+/// MarketGetBack: [mode: u8][auction_id: u64]（C# C.MarketGetBack 线格式）
 fn forward_market_get_back(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let listing_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("MarketGetBack: session={} listing={}", session_id, listing_id);
+    if payload.len() < 9 { return; }
+    let mode = payload[0];
+    let auction_id = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+    debug!("MarketGetBack: session={} mode={} auction={}", session_id, mode, auction_id);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::MarketGetBackRequest { session_id, listing_id: listing_id as u64 }).try_send();
+    let _ = world_ref.tell(crate::actors::world::MarketGetBackRequest { session_id, mode, auction_id }).try_send();
 }
 
-/// MarketSellNow: [item_index: u32][price: u32]
+/// MarketSellNow: [auction_id: u64]（C# C.MarketSellNow 线格式，仅拍卖ID）
 fn forward_market_sell_now(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 8 { return; }
-    let unique_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let price = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    debug!("MarketSellNow: session={} uid={} price={}", session_id, unique_id, price);
+    let auction_id = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+    debug!("MarketSellNow: session={} auction={}", session_id, auction_id);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::MarketSellNowRequest { session_id, unique_id: unique_id as u64, price: price as u64 }).try_send();
+    let _ = world_ref.tell(crate::actors::world::MarketSellNowRequest { session_id, auction_id }).try_send();
 }
 
 /// FishingCast: [type: u8]
@@ -3296,22 +3296,24 @@ fn forward_item_rental_period(world_ref: &Option<ActorRef<crate::actors::world::
     let _ = world_ref.tell(crate::actors::world::ItemRentalPeriodMsg { session_id, duration }).try_send();
 }
 
-/// DepositRentalItem: [unique_id: u64]
+/// DepositRentalItem: [from: i32][to: i32]（C# C.DepositRentalItem 槽位线格式）
 fn forward_deposit_rental_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 8 { return; }
-    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
-    debug!("DepositRentalItem: session={} uid={}", session_id, uid);
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("DepositRentalItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::DepositRentalItemRequest { session_id, unique_id: uid }).try_send();
+    let _ = world_ref.tell(crate::actors::world::DepositRentalItemRequest { session_id, from, to }).try_send();
 }
 
-/// RetrieveRentalItem: [unique_id: u64]
+/// RetrieveRentalItem: [from: i32][to: i32]（C# C.RetrieveRentalItem 槽位线格式）
 fn forward_retrieve_rental_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 8 { return; }
-    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
-    debug!("RetrieveRentalItem: session={} uid={}", session_id, uid);
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("RetrieveRentalItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::RetrieveRentalItemRequest { session_id, unique_id: uid }).try_send();
+    let _ = world_ref.tell(crate::actors::world::RetrieveRentalItemRequest { session_id, from, to }).try_send();
 }
 
 /// CancelItemRental: []
