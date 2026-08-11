@@ -1808,6 +1808,28 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                                     return;
                                 }
                             }
+                            // #2026：C# QuestInfo.CanAccept——RequiredClass 位掩码 + RequiredQuest 前置（对齐包路径 #2004）
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                if quest_db.required_class != 0 {
+                                    let class_bit: i32 = match st.class {
+                                        mir2_shared::enums::MirClass::Warrior => 1,
+                                        mir2_shared::enums::MirClass::Wizard => 2,
+                                        mir2_shared::enums::MirClass::Taoist => 4,
+                                        mir2_shared::enums::MirClass::Assassin => 8,
+                                        mir2_shared::enums::MirClass::Archer => 16,
+                                    };
+                                    if quest_db.required_class & class_bit == 0 {
+                                        send_system_message(&self.gate_ref, msg.session_id, "职业不符合");
+                                        return;
+                                    }
+                                }
+                            }
+                            if quest_db.required_quest > 0 {
+                                if let Ok(false) = record.actor_ref.ask(HasCompletedQuest { quest_index: quest_db.required_quest }).await {
+                                    send_system_message(&self.gate_ref, msg.session_id, "需要先完成前置任务");
+                                    return;
+                                }
+                            }
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs())
@@ -1816,6 +1838,10 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                             if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
                                 send_system_message(&self.gate_ref, msg.session_id,
                                     &format!("任务已接受: {}", quest_db.name));
+                                // #2026：M43 ChangeQuest 任务日志推送（与包路径一致）
+                                if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
+                                    crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, msg.session_id, &q);
+                                }
                             }
                             return;
                         }
