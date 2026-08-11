@@ -231,6 +231,14 @@ pub struct PlayerState {
     pub is_mounted: bool,
     /// 坐骑类型（0 = 无坐骑，>0 = 坐骑外观ID）
     pub mount_type: i16,
+    /// C# HumanObject._stepCounter：最近移动步数（跑步热身，静止超时清零；CanRun 需 >0 或 FastRun）
+    pub step_counter: i32,
+    /// C# HumanObject._runCounter：跑步疲劳计数（每次跑 +1，每 1500ms 回充 1，>10 时 -8 并扣 1 HP）
+    pub run_counter: i32,
+    /// C# HumanObject.RunTime：下次 _runCounter 回充时间（Unix 毫秒）
+    pub run_time_ms: i64,
+    /// C# HumanObject.CellTime：上次移动后 CellTime = now + 500ms（静止超时用于清 _stepCounter）
+    pub cell_time_ms: i64,
     /// 是否死亡（对应 C# Dead）
     pub is_dead: bool,
     /// 是否已解除诅咒锁定（C# UnlockCurse，神秘水使用后为 true，卸下诅咒装备后复位）
@@ -624,6 +632,10 @@ impl PlayerActor {
                 max_experience: 100,
         can_gain_exp: true,
         pearl_count: 0,
+        step_counter: 0,
+        run_counter: 0,
+        run_time_ms: 0,
+        cell_time_ms: 0,
                 hp: 120,
                 max_hp: 120,
                 mp: 60,
@@ -812,6 +824,43 @@ allow_group: false,
     pub fn turn(&mut self, direction: u8) {
         if direction < 8 {
             self.state.direction = direction;
+        }
+    }
+
+    /// C# HumanObject.CanRun（:131-137）：跑步需最近走过一步（_stepCounter>0）或 FastRun
+    /// （装备 CanFastRun → FastRun=true :1886；Transform buff → FastRun=true :2340）
+    fn can_run(&self) -> bool {
+        let fast_run = self.state.inventory.equipment.iter().flatten()
+            .any(|it| it.info.as_ref().map(|i| i.can_fast_run).unwrap_or(false))
+            || self.state.buffs.iter()
+                .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }));
+        can_run_now(self.state.step_counter, fast_run)
+    }
+
+    /// C# HumanObject.Run（:2621-2625）疲劳扣血：ChangeHP(-1) + HealthChanged；0 血进入死亡状态
+    /// （与 TakeDamage 死亡路径一致：清 Buff/毒/灰名 + 下发 S.Death，客户端才能进入死亡态）
+    fn apply_stamina_damage(&mut self) {
+        self.state.hp = (self.state.hp - 1).max(0);
+        let mut body = Vec::new();
+        body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+        body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+        }).try_send();
+        if self.state.hp == 0 && !self.state.is_dead {
+            self.state.is_dead = true;
+            // #1319：C# Die()——清 Buff + PoisonList + 灰名，并逐 buff 下发 S.RemoveBuff
+            self.clear_death_state();
+            // S.Death：客户端解析失败会卡在存活状态（#55），补发坐标+朝向
+            let mut death_body = Vec::new();
+            death_body.extend_from_slice(&self.state.x.to_le_bytes());
+            death_body.extend_from_slice(&self.state.y.to_le_bytes());
+            death_body.push(self.state.direction);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &death_body),
+            }).try_send();
         }
     }
 
@@ -1163,6 +1212,10 @@ impl Message<MoveRequest> for PlayerActor {
         if movement_blocked_by_poison(&self.state.poison_list) {
             return false;
         }
+        // C# HumanObject.Run：CanRun 需 _stepCounter>0 或 FastRun（HumanObject.cs :131-137 / :2523）
+        if msg.is_run && !self.can_run() {
+            return false;
+        }
         // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2；Walk = 1
         let steps = if msg.is_run {
             if self.state.is_mounted
@@ -1177,6 +1230,24 @@ impl Message<MoveRequest> for PlayerActor {
         let success = self.try_move(msg.direction, steps);
 
         if success {
+            // C# HumanObject.Walk/Run：移动成功后 CellTime = Envir.Time + 500（Process :259 静止超时判定用）
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            self.state.cell_time_ms = now_ms + 500;
+            if msg.is_run {
+                // C# HumanObject.Run：!_RidingMount 时 _runCounter++；>10 → -8 且 ChangeHP(-1)（:2618-2625）
+                if !self.state.is_mounted {
+                    self.state.run_counter += 1;
+                    if run_stamina_damage(&mut self.state.run_counter) {
+                        self.apply_stamina_damage();
+                    }
+                }
+            } else {
+                // C# HumanObject.Walk：_stepCounter++（:2478）
+                self.state.step_counter += 1;
+            }
             debug!(
                 "Player {} moved {} to ({}, {}) dir={}",
                 self.state.name,
@@ -1203,6 +1274,8 @@ impl Message<TurnRequest> for PlayerActor {
         if self.has_buff(crate::combat::buff::BuffType::Stun) {
             return;
         }
+        // C# PlayerObject.Turn（:4266）：转向后 _stepCounter 清零（跑步热身失效）
+        self.state.step_counter = 0;
         self.turn(msg.direction);
         debug!("Player {} turned to dir={}", self.state.name, msg.direction);
         self.send_user_location();
@@ -2074,6 +2147,10 @@ impl Message<TickBuff> for PlayerActor {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
+        // C# HumanObject.Process（:259）：静止超过 CellTime+700ms 后 _stepCounter 清零（跑步热身失效）
+        reset_step_counter_if_idle(&mut self.state.step_counter, self.state.cell_time_ms, now_ms);
+        // C# HumanObject.Process（:288-292）：RunTime 每 1500ms 回充 1 点 _runCounter（带 idle catch-up）
+        recharge_run_counter(&mut self.state.run_counter, &mut self.state.run_time_ms, now_ms);
         if now_ms >= self.state.mount_loyalty_increase_time {
             self.state.mount_loyalty_increase_time = now_ms + 60_000;
             let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
@@ -5779,6 +5856,36 @@ impl PlayerActor {
     }
 }
 
+/// C# HumanObject.CanRun（:131-137）：跑步需 _stepCounter>0 或 FastRun（纯逻辑）
+fn can_run_now(step_counter: i32, fast_run: bool) -> bool {
+    step_counter > 0 || fast_run
+}
+
+/// C# HumanObject.Run（:2621-2625）：_runCounter>10 时 -8 并返回是否触发 ChangeHP(-1)
+fn run_stamina_damage(run_counter: &mut i32) -> bool {
+    if *run_counter > 10 {
+        *run_counter -= 8;
+        true
+    } else {
+        false
+    }
+}
+
+/// C# HumanObject.Process（:288-292）：RunTime 每 1500ms 回充 1 点 _runCounter（带 idle catch-up）
+fn recharge_run_counter(run_counter: &mut i32, run_time_ms: &mut i64, now_ms: i64) {
+    while now_ms > *run_time_ms && *run_counter > 0 {
+        *run_counter -= 1;
+        *run_time_ms += 1500;
+    }
+}
+
+/// C# HumanObject.Process（:259）：静止超过 CellTime+700ms 后 _stepCounter 清零
+fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms: i64) {
+    if now_ms > cell_time_ms + 700 {
+        *step_counter = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -5811,6 +5918,61 @@ mod tests {
 
 
     use super::*;
+    #[test]
+    fn can_run_now_matches_csharp_step_counter_requirement() {
+        // C# HumanObject.CanRun：_stepCounter>0 或 FastRun 才能跑
+        assert!(can_run_now(1, false));
+        assert!(!can_run_now(0, false));
+        assert!(can_run_now(0, true));
+        assert!(can_run_now(5, true));
+    }
+
+    #[test]
+    fn run_stamina_damage_threshold_matches_csharp() {
+        // C# HumanObject.Run：_runCounter>10 → -=8 且 ChangeHP(-1)；10 及以下不扣
+        let mut c = 10;
+        assert!(!run_stamina_damage(&mut c));
+        assert_eq!(c, 10);
+        let mut c = 11;
+        assert!(run_stamina_damage(&mut c));
+        assert_eq!(c, 3);
+        let mut c = 19;
+        assert!(run_stamina_damage(&mut c));
+        assert_eq!(c, 11);
+    }
+
+    #[test]
+    fn recharge_run_counter_1500ms_cadence_matches_csharp() {
+        // 未到期不回充
+        let mut c = 5;
+        let mut t = 1000;
+        recharge_run_counter(&mut c, &mut t, 999);
+        assert_eq!((c, t), (5, 1000));
+        // 到期回充 1 点并推进 RunTime
+        recharge_run_counter(&mut c, &mut t, 1001);
+        assert_eq!((c, t), (4, 2500));
+        // idle catch-up：一次补齐多个 1500ms 间隔
+        let mut c = 5;
+        let mut t = 1000;
+        recharge_run_counter(&mut c, &mut t, 1000 + 5 * 1500 + 1);
+        assert_eq!((c, t), (0, 1000 + 5 * 1500));
+        // 计数为 0 不回充（C# 条件 _runCounter > 0）
+        let mut c = 0;
+        let mut t = 1000;
+        recharge_run_counter(&mut c, &mut t, 99999);
+        assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn reset_step_counter_if_idle_matches_csharp_celltime() {
+        // C# Process：CellTime + 700 < Envir.Time 时清零（严格小于）
+        let mut s = 3;
+        reset_step_counter_if_idle(&mut s, 5000, 5000 + 700);
+        assert_eq!(s, 3);
+        reset_step_counter_if_idle(&mut s, 5000, 5000 + 701);
+        assert_eq!(s, 0);
+    }
+
 
     fn make_state() -> PlayerState {
         PlayerState {
@@ -5832,6 +5994,10 @@ mod tests {
             max_experience: 100,
         can_gain_exp: true,
         pearl_count: 0,
+        step_counter: 0,
+        run_counter: 0,
+        run_time_ms: 0,
+        cell_time_ms: 0,
             hp: 120,
             max_hp: 120,
             mp: 60,
