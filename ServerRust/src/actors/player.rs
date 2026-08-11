@@ -616,7 +616,7 @@ pub struct PlayerActor {
 
 
 /// M44：Buff 类型 → 客户端 tag（与 Client-Bevy buff.rs 名称表对应）
-fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
+pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
     use crate::combat::buff::BuffType;
     match t {
         BuffType::HpRegen { .. } => 0,
