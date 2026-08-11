@@ -3394,6 +3394,16 @@ fn valid_gem_for_item(source_info: &crate::db::ItemInfo, target_type: i32) -> bo
     }
 }
 
+/// C# CombineItem 封印（PlayerObject.cs:7161-7166）：分钟数=封印石 CurrentDura；Expiry=now+minutes；NextSeal=Expiry+ItemSealDelay(60min)
+fn compute_sealed_info(minutes: i64, now_ticks: i64) -> mir2_shared::data::item::SealedInfo {
+    let expiry = now_ticks + minutes * 60 * 10_000_000;
+    let next_seal = expiry + 60 * 60 * 10_000_000;
+    mir2_shared::data::item::SealedInfo {
+        expiry_date_binary: expiry,
+        next_seal_date_binary: next_seal,
+    }
+}
+
 impl Message<CombineItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: CombineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
@@ -3575,6 +3585,61 @@ impl Message<CombineItemRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "槽位扩展失败");
                 self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
             }
+            return;
+        }
+
+        // C# CombineItem 封印分支（PlayerObject.cs:6844-6866 / 7159-7171）：宝石 Shape 8 = 封印石
+        if source_info.shape == 8 {
+            // BindMode.DontUpgrade(0x40) 或特殊物品不可封印（C# 6845-6849）
+            if super::has_bind_flag(target_info.bind_mode, 0x40) || target_info.special_mode != 0 {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法封印");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            let now_ticks = crate::actors::world::tick::dotnet_now_ticks();
+            // 已封印且未到期（C# 6850-6855）
+            if let Some(seal) = &target.sealed_info {
+                if seal.expiry_date_binary > now_ticks {
+                    send_system_message(&self.gate_ref, msg.session_id, "该物品已被封印");
+                    self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                    return;
+                }
+                // 封印冷却中（C# 6856-6863）
+                if seal.next_seal_date_binary > now_ticks {
+                    send_system_message(&self.gate_ref, msg.session_id, "封印冷却中，暂时无法再次封印");
+                    self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                    return;
+                }
+            }
+            // 分钟数 = 封印石 CurrentDura（C# 7161）
+            let minutes = source.current_dura as i64;
+            let sealed_info = compute_sealed_info(minutes, now_ticks);
+            let expiry = sealed_info.expiry_date_binary;
+            let _ = record.actor_ref.ask(crate::actors::player::SetItemSealedInfo {
+                unique_id: target.unique_id,
+                sealed_info: Some(sealed_info),
+            }).await;
+            // 消耗 1 颗封印石（C# 7173-7174）
+            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                unique_id: source.unique_id,
+                count: 1,
+            }).await;
+            send_system_message(&self.gate_ref, msg.session_id, &format!("物品已封印 {} 分钟", minutes));
+            // S.ItemSealChanged { UniqueID, ExpiryDate }（C# 7170；SharedRust 含 grid_type）
+            let packet = mir2_shared::packets::server::item::ItemSealChanged {
+                grid_type: mir2_shared::enums::MirGridType::Inventory,
+                unique_id: target.unique_id,
+                expiry_date: expiry,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemSealChanged as i16, &body),
+                }).await;
+            }
+            self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, true, false);
+            debug!("CombineItem(seal): {} sealed item={} minutes={}", state.name, target.unique_id, minutes);
             return;
         }
 
@@ -3958,6 +4023,20 @@ mod tests {
         // 无附加/无觉醒：1500*3*1.0 = 4500
         let plain = UserItem { item_index: 1, ..Default::default() };
         assert_eq!(super::disassemble_price(&plain, &info), 4500);
+    }
+
+    /// #2290：C# CombineItem 封印（PlayerObject.cs:7161-7166）——Expiry = now + minutes；NextSeal = Expiry + 60min
+    #[test]
+    fn test_compute_sealed_info() {
+        let now_ticks = 638_714_592_000_000_000i64;
+        let info = super::compute_sealed_info(5, now_ticks);
+        // 5 分钟 = 5 * 60s * 10_000_000 ticks
+        assert_eq!(info.expiry_date_binary, now_ticks + 5 * 60 * 10_000_000);
+        // NextSeal = Expiry + ItemSealDelay(60min)
+        assert_eq!(info.next_seal_date_binary, info.expiry_date_binary + 60 * 60 * 10_000_000);
+        // 0 分钟：Expiry = now（C# 语义：CurrentDura=0 时分钟数为 0）
+        let info0 = super::compute_sealed_info(0, now_ticks);
+        assert_eq!(info0.expiry_date_binary, now_ticks);
     }
 
     #[test]
