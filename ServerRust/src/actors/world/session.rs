@@ -683,7 +683,11 @@ impl Message<WorldMoveRequest> for WorldActor {
 
             // #1426：负重超限——C# CanWalk 不含负重（超重可走）；CanRun 含负重 → Run 退化为 Walk（HumanObject.Run :2516）
             let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
-            let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos);
+            let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos)
+                + crate::combat::buff::get_stat_bonus(
+                    &state.buffs,
+                    &crate::combat::buff::BuffType::BagWeightBoost { bonus: 0 },
+                );
             let overweight = bag_weight > limit;
             // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2
             run = effective_run(msg.is_run, overweight);

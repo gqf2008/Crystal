@@ -616,6 +616,7 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::TeleportManaPenalty { .. } => 24,
         BuffType::Curse { .. } => 25,
         BuffType::RhinoPriestDebuff { .. } => 26,
+        BuffType::BagWeightBoost { .. } => 27,
     }
 }
 
