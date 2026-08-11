@@ -725,6 +725,31 @@ impl Message<StartGameRequest> for WorldActor {
         // 发送当前昼夜光照给新玩家
         self.send_time_of_day(msg.session_id, self.current_light);
 
+        // C# StartGameSuccess（:1177-1179）：登录下发攻击/宠物模式同步（客户端本地显示与持久化值一致）
+        {
+            let body = vec![loaded_state.attack_mode as u8];
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeAMode as i16, &body),
+            }).await;
+        }
+        {
+            let body = vec![loaded_state.pet_mode as u8];
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangePMode as i16, &body),
+            }).await;
+        }
+        // C# StartGameSuccess（:1221）：下发默认 NPC ObjectID（客户端默认 NPC 按钮路由）
+        {
+            let mut body = Vec::new();
+            body.extend_from_slice(&self.default_npc_object_id.to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DefaultNPC as i16, &body),
+            }).await;
+        }
+
         // 发送自动药水设置（恢复持久化数据）
         if loaded_state.auto_pot_hp > 0 {
             let mut body = Vec::new();

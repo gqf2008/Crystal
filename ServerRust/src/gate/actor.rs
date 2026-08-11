@@ -3359,14 +3359,19 @@ fn forward_confirm_item_rental(world_ref: &Option<ActorRef<crate::actors::world:
     let _ = world_ref.tell(crate::actors::world::ConfirmItemRentalMsg { session_id }).try_send();
 }
 
-/// NPCConfirmInput: [npc_id: u32][input: DotNetString]
+/// NPCConfirmInput: [npc_id: u32][page_name: DotNetString][value: DotNetString]（C# C.NPCConfirmInput）
 fn forward_npc_confirm_input(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let npc_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let input_text = parse_dotnet_string(&payload[4..]);
-    debug!("NPCConfirmInput: session={} npc_id={} input={}", session_id, npc_id, input_text);
+    let mut cursor = std::io::Cursor::new(&payload[4..]);
+    use mir2_shared::binary::read_dotnet_string;
+    let (page_name, input_text) = match (read_dotnet_string(&mut cursor), read_dotnet_string(&mut cursor)) {
+        (Ok(p), Ok(v)) => (p, v),
+        _ => (String::new(), String::new()),
+    };
+    debug!("NPCConfirmInput: session={} npc_id={} page={} input={}", session_id, npc_id, page_name, input_text);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::NPCConfirmInputRequest { session_id, npc_id, input_text }).try_send();
+    let _ = world_ref.tell(crate::actors::world::NPCConfirmInputRequest { session_id, npc_id, page_name, input_text }).try_send();
 }
 
 /// GameshopBuy: [g_index: i32][quantity: u8][p_type: i32]（C# C.GameshopBuy 线格式；Rust 仅金币购买，PType 忽略）

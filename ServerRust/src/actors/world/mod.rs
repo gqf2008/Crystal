@@ -1128,6 +1128,8 @@ pub struct WorldActor {
     pub(crate) script_dir: PathBuf,
     /// 默认 NPC 脚本（C# Envir.DefaultNPC；<script_dir>/00Default.txt，Login/LevelUp/Die/UseItem 事件段）
     pub(crate) default_npc: Option<npc_script::ParsedScript>,
+    /// 默认 NPC 对象 ID（C# Envir.DefaultNPC.LoadedObjectID；启动时 1_000_000..2_000_000 随机，CallNPC/NPCConfirmInput 路由用）
+    pub(crate) default_npc_object_id: u32,
     /// 默认 NPC 自定义命令（C# Envir.CustomCommands；00Default.txt 中 CUSTOMCOMMAND(x) 指令，玩家 @x 触发）
     pub(crate) custom_commands: Vec<String>,
     /// 地图活动坐标（C# MapInfo.ActiveCoords；默认 NPC 脚本 [@_MapCoord(map,x,y)] 段头注册，移动踩点触发）
@@ -1610,6 +1612,7 @@ impl WorldActor {
             spawn_dir,
             script_dir: PathBuf::from("."),
             default_npc: None,
+            default_npc_object_id: 1_500_000,
             custom_commands: Vec::new(),
             active_coords: HashMap::new(),
             next_object_id: 1000,
@@ -5048,6 +5051,9 @@ impl Actor for WorldActor {
             Err(e) => warn!("Failed to load rentals from DB: {}", e),
         }
 
+        // 默认 NPC 对象 ID（C# Envir.cs:3404：Random.Next(1000000,1999999)；CallNPC/NPCConfirmInput 路由用）
+        let default_npc_object_id = 1_000_000 + fastrand::u32(..1_000_000);
+
         // Build movement trigger index for O(1) lookup: (map_index, source_x, source_y) -> MapMovementInfo
         let movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo> = {
             let mut idx = HashMap::new();
@@ -5265,6 +5271,7 @@ Ok(Self {
             hero_ai_states: HashMap::new(),
             player_heroes: HashMap::new(),
             default_npc: npc_script::load_default_npc(&args.quest_dir),
+            default_npc_object_id,
             custom_commands: npc_script::load_custom_commands(&args.quest_dir),
             active_coords,
         })
