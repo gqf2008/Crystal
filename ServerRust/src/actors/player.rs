@@ -457,19 +457,35 @@ impl PlayerState {
     // ===== 战斗公式扩展：AC/MAC 防御 =====
 
     pub fn effective_min_ac(&self) -> i32 {
-        (self.min_ac + self.bonus_min_ac).max(0)
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::AcDefenseBoost { bonus: 0 },
+        );
+        (self.min_ac + self.bonus_min_ac + buff_bonus).max(0)
     }
 
     pub fn effective_max_ac(&self) -> i32 {
-        (self.max_ac + self.bonus_max_ac).max(self.effective_min_ac())
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::AcDefenseBoost { bonus: 0 },
+        );
+        (self.max_ac + self.bonus_max_ac + buff_bonus).max(self.effective_min_ac())
     }
 
     pub fn effective_min_mac(&self) -> i32 {
-        (self.min_mac + self.bonus_min_mac).max(0)
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::MacDefenseBoost { bonus: 0 },
+        );
+        (self.min_mac + self.bonus_min_mac + buff_bonus).max(0)
     }
 
     pub fn effective_max_mac(&self) -> i32 {
-        (self.max_mac + self.bonus_max_mac).max(self.effective_min_mac())
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::MacDefenseBoost { bonus: 0 },
+        );
+        (self.max_mac + self.bonus_max_mac + buff_bonus).max(self.effective_min_mac())
     }
 
     /// 构建战斗公式用的属性快照（对齐 C# Stats 投影到 CombatStats）
@@ -5979,6 +5995,24 @@ mod tests {
         assert_eq!(s, 0);
     }
 
+
+    #[test]
+    fn effective_ac_mac_includes_defense_buffs() {
+        // C# buff Stats：AcDefenseBoost/MacDefenseBoost 加 Min+Max（SoulShield/BlessedArmour/CounterAttack）
+        let mut st = make_state();
+        st.min_ac = 5;
+        st.max_ac = 10;
+        st.min_mac = 3;
+        st.max_mac = 8;
+        st.buffs.push(crate::combat::buff::BuffInstance::new(
+            crate::combat::buff::BuffType::AcDefenseBoost { bonus: 7 }, 70, 5));
+        st.buffs.push(crate::combat::buff::BuffInstance::new(
+            crate::combat::buff::BuffType::MacDefenseBoost { bonus: 6 }, 70, 5));
+        assert_eq!(st.effective_min_ac(), 12);
+        assert_eq!(st.effective_max_ac(), 17);
+        assert_eq!(st.effective_min_mac(), 9);
+        assert_eq!(st.effective_max_mac(), 14);
+    }
 
     fn make_state() -> PlayerState {
         PlayerState {

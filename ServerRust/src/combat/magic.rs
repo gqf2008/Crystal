@@ -61,6 +61,11 @@ pub fn magic_cost(info: &MagicInfo, level: u8) -> i32 {
     info.base_cost + (level as i32 * info.level_cost)
 }
 
+/// C# HumanObject.SpellToggle CounterAttack（:8562-8565）：MinAC/MaxAC/MinMAC/MaxMAC = 11 + Lv*3
+pub fn counterattack_ac_bonus(level: i32) -> i32 {
+    11 + level * 3
+}
+
 /// 巫师：MC 转额外伤害（对应 C# SC/MC 属性对法术的加成）
 pub fn wizard_magic_bonus(mc: i32) -> f64 {
     mc as f64
@@ -74,6 +79,14 @@ pub fn taoist_magic_bonus(sc: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counterattack_ac_bonus_matches_csharp() {
+        // C# HumanObject.SpellToggle CounterAttack：AC/MAC = 11 + Lv*3
+        assert_eq!(counterattack_ac_bonus(0), 11);
+        assert_eq!(counterattack_ac_bonus(1), 14);
+        assert_eq!(counterattack_ac_bonus(3), 20);
+    }
 
     #[test]
     fn magic_power_with_base_matches_csharp() {

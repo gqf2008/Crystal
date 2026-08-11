@@ -178,6 +178,8 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
             (BuffType::MoveSpeedBoost { percent }, BuffType::MoveSpeedBoost { .. }) => *percent,
             (BuffType::Curse { percent }, BuffType::Curse { .. }) => *percent,
             (BuffType::Reflect { percent }, BuffType::Reflect { .. }) => *percent,
+            (BuffType::AcDefenseBoost { bonus }, BuffType::AcDefenseBoost { .. }) => *bonus,
+            (BuffType::MacDefenseBoost { bonus }, BuffType::MacDefenseBoost { .. }) => *bonus,
             _ => 0,
         })
         .sum()
@@ -235,6 +237,18 @@ pub fn is_slowed(buffs: &[BuffInstance]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_stat_bonus_includes_ac_mac_defense_boosts() {
+        // C# buff Stats：AcDefenseBoost/MacDefenseBoost 应计入属性加成
+        let buffs = vec![
+            BuffInstance::new(BuffType::AcDefenseBoost { bonus: 7 }, 70, 5),
+            BuffInstance::new(BuffType::MacDefenseBoost { bonus: 6 }, 70, 5),
+        ];
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::AcDefenseBoost { bonus: 0 }), 7);
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::MacDefenseBoost { bonus: 0 }), 6);
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }), 0);
+    }
 
     #[test]
     fn test_apply_and_expire_buff() {

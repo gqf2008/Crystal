@@ -4495,11 +4495,23 @@ impl Message<MagicRequest> for WorldActor {
             }
             // CounterAttack：反击（C# HumanObject.cs:8550）——施放进入 7 秒窗口，受击时反击并消耗
             SPELL_COUNTER_ATTACK => {
-                if self.counter_attack.contains_key(&msg.session_id) {
-                    debug!("Magic: {} casts CounterAttack but already active", state.name);
-                    return;
+                // C# HumanObject.SpellToggle :8551——已武装且未过期拒绝重复武装
+                if let Some((expire, _)) = self.counter_attack.get(&msg.session_id).copied() {
+                    if self.tick_count < expire {
+                        debug!("Magic: {} casts CounterAttack but already active", state.name);
+                        return;
+                    }
                 }
                 self.counter_attack.insert(msg.session_id, (self.tick_count + 70, spell_level));
+                // C# :8568 AddBuff(CounterAttack, 7s, MinAC/MaxAC/MinMAC/MaxMAC = 11+Lv*3)
+                let bonus = crate::combat::magic::counterattack_ac_bonus(spell_level as i32);
+                for bt in [
+                    crate::combat::buff::BuffType::AcDefenseBoost { bonus },
+                    crate::combat::buff::BuffType::MacDefenseBoost { bonus },
+                ] {
+                    let buff = crate::combat::buff::BuffInstance::new(bt, 70, 5);
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                }
                 debug!("Magic: {} arms CounterAttack (7s window)", state.name);
             }
             // --- 法师系 ---
@@ -4982,7 +4994,16 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
+                // C# HumanObject.SpellToggle :8539——已武装且未过期拒绝重复武装
+                if let Some((expire, _)) = self.flaming_sword.get(&msg.session_id).copied() {
+                    if self.tick_count < expire {
+                        debug!("Magic: {} casts FlamingSword but already armed", state.name);
+                        return;
+                    }
+                }
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
+                // C# :8547 S.SpellToggle CanUse=true
+                self.send_spell_toggle(msg.session_id, state.object_id, SPELL_FLAMING_SWORD_CS as u8, true).await;
                 debug!("Magic: {} casts FlamingSword (next melee +{:.2}x, 10s)",
                        state.name, 1.4 + 0.4 * spell_level as f32);
             }
