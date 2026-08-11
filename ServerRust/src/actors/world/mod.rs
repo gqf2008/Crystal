@@ -7072,11 +7072,27 @@ fn send_merge_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gri
     }).try_send();
 }
 
-fn send_split_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, count: u32) {
+/// S.SplitItem1：Grid + UniqueID + Count + Success（C# PlayerObject.SplitItem 结果包，失败也发）
+fn send_split_item1_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, count: u32, success: bool) {
     let mut body = Vec::new();
     body.push(grid);
     body.extend_from_slice(&uid.to_le_bytes());
-    body.extend_from_slice(&(count as u16).to_le_bytes()); // SellItem 包：count 是 u16（与 SharedRust 一致）
+    body.extend_from_slice(&(count as u16).to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SplitItem1 as i16, &body),
+    }).try_send();
+}
+
+/// S.SplitItem：Item(新堆叠) + Grid（C# SplitItem 成功后补充包）
+fn send_split_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, item: mir2_shared::data::item::UserItem, grid: u8) {
+    let mut body = Vec::new();
+    body.push(1u8); // has_item（C# ReadBoolean 前缀）
+    if item.write_to(&mut body).is_err() {
+        return;
+    }
+    body.push(grid);
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SplitItem as i16, &body),

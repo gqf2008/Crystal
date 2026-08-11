@@ -1311,19 +1311,33 @@ mod tests {
 
     #[test]
     fn roundtrip_split_item_server() -> SharedResult<()> {
+        // C# ServerPackets.cs SplitItem：Item(可选 UserItem) + Grid
+        let mut item = crate::data::item::UserItem::new(88888);
+        item.count = 20;
         roundtrip(&server::item::SplitItem {
+            item: Some(item),
             grid: MirGridType::Inventory,
-            unique_id: 88888,
-            count: 20,
+        })?;
+        roundtrip(&server::item::SplitItem {
+            item: None,
+            grid: MirGridType::Inventory,
         })
     }
 
     #[test]
     fn roundtrip_split_item1() -> SharedResult<()> {
+        // C# ServerPackets.cs SplitItem1：Grid + UniqueID + Count + Success
         roundtrip(&server::item::SplitItem1 {
             grid: MirGridType::Storage,
             unique_id: 99999,
             count: 15,
+            success: true,
+        })?;
+        roundtrip(&server::item::SplitItem1 {
+            grid: MirGridType::Storage,
+            unique_id: 99999,
+            count: 15,
+            success: false,
         })
     }
 

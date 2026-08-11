@@ -2339,13 +2339,16 @@ impl Message<SplitItemRequest> for WorldActor {
         let actor_ref = match self.players.get(&msg.session_id) {            Some(r) => r.actor_ref.clone(),            None => return,
         };
 
-        let success = actor_ref.ask(InventorySplitItem {
+        let split_result = actor_ref.ask(InventorySplitItem {
             unique_id: msg.unique_id,
             count: msg.count as u16,
-        }).await.unwrap_or(false);
+        }).await.unwrap_or(None);
 
-        if success {
-            send_split_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.count);
+        // C# S.SplitItem1：Grid + UniqueID + Count + Success（失败也发，Success=false）
+        send_split_item1_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.count, split_result.is_some());
+        if let Some(new_item) = split_result {
+            // C# S.SplitItem：Item(新堆叠) + Grid（成功后补充包）
+            send_split_item_packet(&self.gate_ref, msg.session_id, new_item, msg.grid);
             // 完整 UserInformation 刷新（含背包/装备，客户端按权威状态重建）
             // 注意：build_user_information_packet 已含包头发送帧，直接 SendToClient
             if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
