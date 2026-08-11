@@ -493,41 +493,87 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
 
         debug!("PurchaseGuildTerritory: {} territory={}", state.name, msg.territory_id);
 
-        if state.guild_name.is_none() {
+        let Some(guild_name) = state.guild_name.clone() else {
             send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
             return;
-        }
-
+        };
         if state.guild_rank != GuildRank::Leader {
             send_system_message(&self.gate_ref, msg.session_id, "只有行会会长才能购买领地");
             return;
         }
+        // C# AlreadyOwnATerritory（:10483）：已有领地禁止再买
+        if self.conquest_instances.iter().any(|c| c.owner_guild.as_deref() == Some(guild_name.as_str())) {
+            send_system_message(&self.gate_ref, msg.session_id, "行会已拥有领地");
+            return;
+        }
 
-        // Check if territory exists and is purchasable
-        let instance = self.conquest_instances.iter_mut()
-            .find(|i| i.id == msg.territory_id as i32);
-        match instance {
-            Some(inst) if inst.owner_guild.is_none() => {
-                let cost = 1000000; // 1M gold base cost
-                let guild = state.guild_name.clone().unwrap();
-                // Deduct gold from guild storage via PlayerActor
+        let Some(idx) = self.conquest_instances.iter().position(|i| i.id == msg.territory_id as i32) else {
+            send_system_message(&self.gate_ref, msg.session_id, "领地不存在");
+            return;
+        };
+        let (for_sale, sale_price, owner) = {
+            let inst = &self.conquest_instances[idx];
+            (inst.for_sale, inst.sale_price, inst.owner_guild.clone())
+        };
+
+        // C# PurchaseGuildTerritory（:10455-10525）：仅挂售领地（gt.Price > 0）
+        if !for_sale || sale_price == 0 {
+            if owner.is_none() {
+                // 无主领地 → 回退 BUYGT 近似（固定 1M 玩家金币），并补租期（C# BUYGT GTDays）
+                let cost = 1000000u64;
                 if record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false) {
-                    inst.owner_guild = Some(guild.clone());
+                    let inst = &mut self.conquest_instances[idx];
+                    inst.owner_guild = Some(guild_name.clone());
+                    inst.rent_expire_tick = self.tick_count
+                        + self.conquest_cfg.gt_days as u64 * crate::actors::world::conquest::TICKS_PER_DAY;
                     send_system_message(&self.gate_ref, msg.session_id,
-                        &format!("行会 {} 成功购买了领地 #{}！", guild, msg.territory_id));
+                        &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id));
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "金币不足，购买领地需要 1,000,000 金币");
                 }
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "该领地未在挂售");
             }
-            Some(inst) => {
-                let owner = inst.owner_guild.as_deref().unwrap_or("未知");
-                send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("该领地已被 {} 占领", owner));
-            }
-            None => {
-                send_system_message(&self.gate_ref, msg.session_id, "领地不存在");
+            return;
+        }
+        // C# AlreadyOwnTerritory（:10477）：不能买自己挂售的领地
+        if owner.as_deref() == Some(guild_name.as_str()) {
+            send_system_message(&self.gate_ref, msg.session_id, "行会已拥有该领地");
+            return;
+        }
+        // C# 行会资金（:10489-10493）
+        let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id: msg.session_id }).await.unwrap_or(0);
+        if gold < sale_price {
+            send_system_message(&self.gate_ref, msg.session_id, "行会资金不足");
+            return;
+        }
+        // C# :10495-10496 扣买家行会资金（GuildStorageGoldChange Type=2）
+        let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
+            session_id: msg.session_id, amount: sale_price as u32, change_type: 2,
+        }).await;
+        // C# :10499-10510 卖家行会收款 + EndGT + 提示
+        if let Some(seller) = owner {
+            let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldGive {
+                guild_name: seller.clone(), amount: sale_price as u32,
+            }).await;
+            // 通知卖家在线成员「领地已出售」（C# TerritorySold）
+            for (sid, rec) in &self.players {
+                if let Ok(Some(os)) = rec.actor_ref.ask(GetPlayerState).await {
+                    if os.guild_name.as_deref() == Some(seller.as_str()) {
+                        send_system_message(&self.gate_ref, *sid, "您的领地已出售");
+                    }
+                }
             }
         }
+        // C# :10512-10522 买家获得领地（GTRent = Now + GTDays+1；EndGT 释放卖家）
+        let inst = &mut self.conquest_instances[idx];
+        inst.owner_guild = Some(guild_name.clone());
+        inst.for_sale = false;
+        inst.sale_price = 0;
+        inst.rent_expire_tick = self.tick_count
+            + (self.conquest_cfg.gt_days as u64 + 1) * crate::actors::world::conquest::TICKS_PER_DAY;
+        send_system_message(&self.gate_ref, msg.session_id,
+            &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id));
     }
 }
 
