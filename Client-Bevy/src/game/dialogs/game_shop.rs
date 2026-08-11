@@ -297,8 +297,9 @@ fn game_shop_ui_system(
     if !*requested {
         *requested = true;
         net.send_packet(&crate::network::GameshopBuyWire {
-            item_id: 0,
+            g_index: 0,
             quantity: 0,
+            p_type: 0,
         });
         tracing::info!("🛒 请求商城目录");
     }
@@ -406,8 +407,9 @@ fn game_shop_ui_system(
             if let Some(idx) = shop.selected {
                 let it = &shop.items[idx];
                 net.send_packet(&crate::network::GameshopBuyWire {
-                    item_id: it.item_index as u32,
+                    g_index: it.item_index,
                     quantity: 1,
+                    p_type: 0,
                 });
                 tracing::info!("🛒 购买商城商品 #{} {}", it.item_index, it.name);
             } else {

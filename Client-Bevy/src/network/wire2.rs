@@ -1,11 +1,12 @@
 use mir2_shared::packets::base::Packet;
 
 
-/// 商城购买（ServerRust gate 解析 [item_id u32][quantity u32]，与 SharedRust 结构不一致）
+/// 商城购买（对齐 SharedRust GameshopBuy / C# C.GameshopBuy：[g_index i32][quantity u8][p_type i32]）
 #[derive(Debug, Clone, Copy)]
 pub struct GameshopBuyWire {
-    pub item_id: u32,
-    pub quantity: u32,
+    pub g_index: i32,
+    pub quantity: u8,
+    pub p_type: i32,
 }
 
 impl Packet for GameshopBuyWire {
@@ -16,8 +17,9 @@ impl Packet for GameshopBuyWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            item_id: reader.read_u32::<LittleEndian>()?,
-            quantity: reader.read_u32::<LittleEndian>()?,
+            g_index: reader.read_i32::<LittleEndian>()?,
+            quantity: reader.read_u8()?,
+            p_type: reader.read_i32::<LittleEndian>()?,
         })
     }
 
@@ -26,8 +28,9 @@ impl Packet for GameshopBuyWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.item_id)?;
-        writer.write_u32::<LittleEndian>(self.quantity)?;
+        writer.write_i32::<LittleEndian>(self.g_index)?;
+        writer.write_u8(self.quantity)?;
+        writer.write_i32::<LittleEndian>(self.p_type)?;
         Ok(())
     }
 }
@@ -364,10 +367,10 @@ impl Packet for RefineCheckWire {
     }
 
 }
-/// 观察玩家（gate 解析 [target_id u32]，对齐 C# PlayerInfoDialog ObserveButton → C.Observe）
-#[derive(Debug, Clone, Copy)]
+/// 观察玩家（gate 解析 [name DotNetString]，对齐 SharedRust Observe / C# C.Observe）
+#[derive(Debug, Clone, Default)]
 pub struct ObserveWire {
-    pub target_id: u32,
+    pub name: String,
 }
 
 impl Packet for ObserveWire {
@@ -376,9 +379,8 @@ impl Packet for ObserveWire {
     fn read_body<R: std::io::Read>(
         reader: &mut R,
     ) -> mir2_shared::data::stats::SharedResult<Self> {
-        use byteorder::ReadBytesExt;
         Ok(Self {
-            target_id: reader.read_u32::<byteorder::LittleEndian>()?,
+            name: mir2_shared::binary::read_dotnet_string(reader)?,
         })
     }
 
@@ -386,8 +388,7 @@ impl Packet for ObserveWire {
         &self,
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        writer.write_u32::<byteorder::LittleEndian>(self.target_id)?;
+        mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
         Ok(())
     }
 }
@@ -397,14 +398,13 @@ mod tests {
 
     #[test]
     fn observe_wire_roundtrip() {
-        let w = ObserveWire { target_id: 0x12345678 };
+        let w = ObserveWire { name: "测试玩家".to_string() };
         let mut buf = Vec::new();
         w.write_body(&mut buf).unwrap();
-        // gate 解析 [target_id u32 LE]
-        assert_eq!(buf, vec![0x78, 0x56, 0x34, 0x12]);
+        // gate 解析 [name DotNetString]（对齐 SharedRust Observe / C# C.Observe）
         let mut cur = std::io::Cursor::new(buf);
         let r = ObserveWire::read_body(&mut cur).unwrap();
-        assert_eq!(r.target_id, 0x12345678);
+        assert_eq!(r.name, "测试玩家");
     }
 }
 /// 大地图 NPC 搜索（gate 解析 [keyword: u16 len + bytes]，对齐 C# BigMapDialog SearchButton → C.SearchMap）
