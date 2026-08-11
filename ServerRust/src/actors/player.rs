@@ -318,6 +318,10 @@ pub struct PlayerState {
     pub drop_multiplier: f64,
     /// 掉落倍率过期时间（WorldActor tick count）
     pub drop_multiplier_end_tick: u64,
+    /// C# BuffProperty.PauseInSafeZone：Exp 加成在安全区暂停计时（到期顺延，BuffInfo.cs:70）
+    pub exp_multiplier_pause_in_safe: bool,
+    /// C# BuffProperty.PauseInSafeZone：Drop 加成在安全区暂停计时（到期顺延，BuffInfo.cs:71）
+    pub drop_multiplier_pause_in_safe: bool,
     /// 装备掉落率加成 %（C# Stat.ItemDropRatePercent）
     pub item_drop_rate_percent: i32,
     /// 装备金币掉落率加成 %（C# Stat.GoldDropRatePercent）
@@ -787,6 +791,8 @@ allow_group: false,
                 exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            exp_multiplier_pause_in_safe: false,
+            drop_multiplier_pause_in_safe: false,
             item_drop_rate_percent: 0,
             gold_drop_rate_percent: 0,
             elements_level: 0,
@@ -997,6 +1003,8 @@ pub struct SetMapData {
 pub struct SetExpMultiplier {
     pub multiplier: f64,
     pub end_tick: u64,
+    /// C# BuffProperty.PauseInSafeZone：安全区内到期顺延（药水/卷轴类加成）
+    pub pause_in_safe: bool,
 }
 
 impl Message<SetExpMultiplier> for PlayerActor {
@@ -1009,6 +1017,7 @@ impl Message<SetExpMultiplier> for PlayerActor {
     ) -> Self::Reply {
         self.state.exp_multiplier = msg.multiplier.max(1.0);
         self.state.exp_multiplier_end_tick = msg.end_tick;
+        self.state.exp_multiplier_pause_in_safe = msg.pause_in_safe;
     }
 }
 
@@ -1016,6 +1025,8 @@ impl Message<SetExpMultiplier> for PlayerActor {
 pub struct SetDropMultiplier {
     pub multiplier: f64,
     pub end_tick: u64,
+    /// C# BuffProperty.PauseInSafeZone：安全区内到期顺延（药水/卷轴类加成）
+    pub pause_in_safe: bool,
 }
 
 impl Message<SetDropMultiplier> for PlayerActor {
@@ -1028,6 +1039,7 @@ impl Message<SetDropMultiplier> for PlayerActor {
     ) -> Self::Reply {
         self.state.drop_multiplier = msg.multiplier.max(1.0);
         self.state.drop_multiplier_end_tick = msg.end_tick;
+        self.state.drop_multiplier_pause_in_safe = msg.pause_in_safe;
     }
 }
 
@@ -6213,6 +6225,8 @@ allow_group: false,
             exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            exp_multiplier_pause_in_safe: false,
+            drop_multiplier_pause_in_safe: false,
             item_drop_rate_percent: 0,
             gold_drop_rate_percent: 0,
             auto_pot_hp: 0,

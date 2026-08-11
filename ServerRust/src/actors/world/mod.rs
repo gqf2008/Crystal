@@ -7768,6 +7768,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_multiplier_paused_in_safe() {
+        // C# BuffProperty.PauseInSafeZone：仅 pausable 且身处安全区才暂停
+        assert!(!super::tick::multiplier_paused_in_safe(false, false));
+        assert!(!super::tick::multiplier_paused_in_safe(false, true));
+        assert!(!super::tick::multiplier_paused_in_safe(true, false));
+        assert!(super::tick::multiplier_paused_in_safe(true, true));
+    }
+
+    #[test]
     fn test_delayed_npc_page_present() {
         // C# CompleteNPC：page.Length > 0 才调用脚本段；TIMERECALL 无 section = 仅传送
         assert!(!delayed_npc_page_present(""));
