@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use std::sync::Arc;
 use tracing::{debug, warn, info};
 
-use crate::actors::player::{PlayerActor, GetPlayerState, SetPlayerState, SetGroupId, SetSpouse, SetGuildInfo, SetAllowMentor, SetMentor, SetPlayerPosition, SetLastRecallTime, SetEnableGroupRecall, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddGold, DeductGold, AddItemToInventory, RemoveItemFromInventory, GetItemInfo, CanGainItems, CanGainGold};
+use crate::actors::player::{PlayerActor, GetPlayerState, SetPlayerState, SetGroupId, SetSpouse, SetGuildInfo, SetAllowMentor, SetMentor, SetMentorExp, SetPlayerPosition, SetLastRecallTime, SetEnableGroupRecall, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddGold, DeductGold, AddItemToInventory, RemoveItemFromInventory, GetItemInfo, CanGainItems, CanGainGold};
 use crate::actors::inventory::EquipmentSlot;
 use crate::actors::group::{Group, GroupMember};
 use crate::actors::trade::TradeSession;
@@ -2043,8 +2043,8 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             partner_name,
                             partner_state.level as u32,
                             true,
-                            // C# MentorUpdate.MenteeEXP：徒弟经验积累（msg.session_id 视角）
-                            state.mentee_exp,
+                            // C# GetMentor：MenteeEXP = Info.MentorExp（接收者自己的导师银行）
+                            state.mentor_exp,
                         );
                         // 对方视角：上线者信息
                         send_mentor_update_packet(
@@ -2053,7 +2053,7 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             &state.name,
                             state.level as u32,
                             true,
-                            state.mentee_exp,
+                            partner_state.mentor_exp,
                         );
                         let rel = if partner_state.mentor_name.as_deref() == Some(state.name.as_str()) {
                             "徒弟"
@@ -2071,7 +2071,7 @@ impl Message<SocialPlayerJoined> for SocialActor {
                     partner_name,
                     0,
                     false,
-                    0,
+                    state.mentor_exp,
                 );
             }
         }
@@ -2130,7 +2130,7 @@ impl Message<SocialPlayerLeft> for SocialActor {
         // 提前取师徒/配偶信息（随后从 players 移除）
         let leaving_mentor = if let Some(rec) = self.players.get(&msg.session_id) {
             match rec.ask(GetPlayerState).await {
-                Ok(Some(s)) => Some((s.name.clone(), s.level, s.mentor_name.clone())),
+                Ok(Some(s)) => Some((s.name.clone(), s.level, s.mentor_name.clone(), s.is_mentor, s.mentee_exp)),
                 _ => None,
             }
         } else {
@@ -2148,18 +2148,32 @@ impl Message<SocialPlayerLeft> for SocialActor {
 
         self.players.remove(&msg.session_id);
 
-        // 师徒下线通知（对方在线 → 刷新在线状态）
-        if let Some((name, level, Some(partner_name))) = leaving_mentor {
+        // 师徒下线通知 + MentorExp 转移（C# LogoutMentor：徒弟下线 → mentor.MentorExp += MenteeEXP）
+        if let Some((name, level, Some(partner_name), is_mentor, mentee_exp)) = leaving_mentor {
             if let Some(partner_sid) = self.find_player_by_name(&partner_name, msg.session_id).await {
-                send_mentor_update_packet(
-                    &self.gate_ref,
-                    partner_sid,
-                    &name,
-                    level as u32,
-                    false,
-                    0,
-                );
-                send_system_message(&self.gate_ref, partner_sid, &format!("{} 下线了", name));
+                if let Some(partner_record) = self.players.get(&partner_sid) {
+                    if let Ok(Some(partner_state)) = partner_record.ask(GetPlayerState).await {
+                        let partner_mentor_exp = if !is_mentor && mentee_exp > 0 {
+                            let updated = partner_state.mentor_exp + mentee_exp;
+                            let _ = partner_record.ask(SetMentorExp { amount: updated }).await;
+                            updated
+                        } else {
+                            partner_state.mentor_exp
+                        };
+                        send_mentor_update_packet(
+                            &self.gate_ref,
+                            partner_sid,
+                            &name,
+                            level as u32,
+                            false,
+                            partner_mentor_exp,
+                        );
+                        send_system_message(&self.gate_ref, partner_sid, &format!("{} 下线了", name));
+                    }
+                }
+            } else if !is_mentor && mentee_exp > 0 {
+                // 导师离线：直接写库（C# CharacterInfo.MentorExp 持久化）
+                let _ = crate::db::add_mentor_exp(&self.db_pool, &partner_name, mentee_exp).await;
             }
         }
 
@@ -4334,7 +4348,7 @@ impl Message<SocialMentorReply> for SocialActor {
             &requester_state.name,
             requester_state.level as u32,
             true,
-            requester_state.mentee_exp,
+            replier_state.mentor_exp,
         );
         send_mentor_update_packet(
             &self.gate_ref,
@@ -4342,7 +4356,7 @@ impl Message<SocialMentorReply> for SocialActor {
             &replier_state.name,
             replier_state.level as u32,
             true,
-            requester_state.mentee_exp,
+            requester_state.mentor_exp,
         );
         debug!("Mentor: {} is mentor of {}", replier_state.name, requester_state.name);
     }
@@ -4385,20 +4399,105 @@ impl Message<SocialCancelMentor> for SocialActor {
         }
 
         let partner_name = state.mentor_name.clone().unwrap_or_default();
-        let _ = record.ask(SetMentor { mentor_name: None, is_mentor: false }).await;
+        let self_is_mentor = state.is_mentor;
+
+        // C# MentorBreak：取对方在线状态（partnerP）
+        let partner_online: Option<(u64, crate::actors::player::PlayerState)> =
+            match self.find_player_by_name(&partner_name, msg.session_id).await {
+                Some(sid) => match self.players.get(&sid) {
+                    Some(prec) => match prec.ask(GetPlayerState).await {
+                        Ok(Some(ps)) => Some((sid, ps)),
+                        _ => None,
+                    },
+                    None => None,
+                },
+                None => None,
+            };
+
+        // C# MentorBreak 转移（仅对方在线：Info.MentorExp += partnerP.MenteeEXP / partner.MentorExp += MenteeEXP）
+        let (new_self_mentor_exp, new_self_mentee_exp, new_partner_mentor_exp, new_partner_mentee_exp) =
+            mentor_break_transfer(
+                self_is_mentor,
+                state.mentor_exp,
+                state.mentee_exp,
+                partner_online.as_ref().map(|(_, s)| s.mentor_exp).unwrap_or(0),
+                partner_online.as_ref().map(|(_, s)| s.mentee_exp).unwrap_or(0),
+                partner_online.is_some(),
+            );
+
+        // 清除自身师徒关系 + 写入新银行（C# Info.Mentor=0 → GetMentor(false)）
+        let mut new_self_state = state.clone();
+        new_self_state.mentor_name = None;
+        new_self_state.is_mentor = false;
+        new_self_state.mentor_exp = new_self_mentor_exp;
+        new_self_state.mentee_exp = new_self_mentee_exp;
+        let _ = record.ask(SetPlayerState { state: new_self_state }).await;
+        // C#：自身结算 IsMentor && MentorExp > 0 → GainExp + 清零
+        if mentor_settle_amount(self_is_mentor, new_self_mentor_exp) > 0 {
+            if let Some(world) = &self.world_ref {
+                let _ = world.ask(crate::actors::world::partners::SettleMentorExp { session_id: msg.session_id }).await;
+            }
+        }
         send_mentor_cancel_packet(&self.gate_ref, msg.session_id);
         send_system_message(&self.gate_ref, msg.session_id, "已解除师徒关系");
 
-        // 对方在线则同步清除（C# 双方 Info.Mentor 同时清空）
-        if let Some(partner_sid) = self.find_player_by_name(&partner_name, msg.session_id).await {
+        // 对方同步（C# 双方 Info.Mentor 同时清空 + partner 结算）
+        if let Some((partner_sid, partner_state)) = partner_online {
             if let Some(partner_record) = self.players.get(&partner_sid) {
-                let _ = partner_record.ask(SetMentor { mentor_name: None, is_mentor: false }).await;
+                let mut ps = partner_state.clone();
+                ps.mentor_name = None;
+                ps.is_mentor = false;
+                ps.mentor_exp = new_partner_mentor_exp;
+                ps.mentee_exp = new_partner_mentee_exp;
+                let _ = partner_record.ask(SetPlayerState { state: ps }).await;
+                if mentor_settle_amount(!self_is_mentor, new_partner_mentor_exp) > 0 {
+                    if let Some(world) = &self.world_ref {
+                        let _ = world.ask(crate::actors::world::partners::SettleMentorExp { session_id: partner_sid }).await;
+                    }
+                }
                 send_mentor_cancel_packet(&self.gate_ref, partner_sid);
                 send_system_message(&self.gate_ref, partner_sid, &format!("{} 解除了师徒关系", state.name));
+            }
+        } else if !self_is_mentor {
+            // 对方（导师）离线：C# partner.Experience += partner.MentorExp 直接入账 + 清零
+            if let Ok(Some(partner_db)) = crate::db::load_character(&self.db_pool, &partner_name).await {
+                if partner_db.is_mentor && partner_db.mentor_exp > 0 {
+                    let _ = crate::db::add_character_experience(&self.db_pool, &partner_name, partner_db.mentor_exp).await;
+                    let _ = crate::db::reset_mentor_exp(&self.db_pool, &partner_name).await;
+                }
             }
         }
         debug!("CancelMentor: {} removed mentor", state.name);
     }
+}
+
+/// C# MentorBreak 经验转移计算（纯函数）：仅对方在线时转移——
+/// 自己是导师则收徒弟 MenteeEXP；自己是徒弟则把 MenteeEXP 转给导师 MentorExp。
+/// 返回 (self_mentor_exp, self_mentee_exp, partner_mentor_exp, partner_mentee_exp)
+fn mentor_break_transfer(
+    self_is_mentor: bool,
+    self_mentor_exp: i64,
+    self_mentee_exp: i64,
+    partner_mentor_exp: i64,
+    partner_mentee_exp: i64,
+    partner_online: bool,
+) -> (i64, i64, i64, i64) {
+    if !partner_online {
+        // C#：离线不转移；关系结束自身 MenteeEXP 清零
+        return (self_mentor_exp, 0, partner_mentor_exp, partner_mentee_exp);
+    }
+    if self_is_mentor {
+        // C#：Info.MentorExp += partnerP.MenteeEXP; partnerP.MenteeEXP = 0
+        (self_mentor_exp + partner_mentee_exp, 0, partner_mentor_exp, 0)
+    } else {
+        // C#：partner.MentorExp += MenteeEXP; MenteeEXP = 0
+        (self_mentor_exp, 0, partner_mentor_exp + self_mentee_exp, partner_mentee_exp)
+    }
+}
+
+/// C# MentorBreak 结算：IsMentor && MentorExp > 0 → GainExp(MentorExp)（返回应入账经验）
+fn mentor_settle_amount(is_mentor: bool, mentor_exp: i64) -> i64 {
+    if is_mentor && mentor_exp > 0 { mentor_exp } else { 0 }
 }
 
 impl SocialActor {
@@ -4530,5 +4629,21 @@ mod tests {
         // 停战不存在的对：无副作用
         apply_guild_war_mirror(&mut wars, "X", "Y", false);
         assert!(wars.is_empty());
+    }
+
+    /// #2142：C# MentorBreak 转移（仅对方在线）+ 结算金额
+    #[test]
+    fn mentor_break_transfer_and_settle_matches_csharp() {
+        use super::{mentor_break_transfer, mentor_settle_amount};
+        // 自己是导师、对方（徒弟）在线：收徒弟 MenteeEXP，徒弟清零
+        assert_eq!(mentor_break_transfer(true, 100, 5, 0, 30, true), (130, 0, 0, 0));
+        // 自己是徒弟、对方（导师）在线：MenteeEXP 转导师，自身清零
+        assert_eq!(mentor_break_transfer(false, 0, 30, 100, 0, true), (0, 0, 130, 0));
+        // 对方离线：不转移，自身 MenteeEXP 清零
+        assert_eq!(mentor_break_transfer(false, 0, 30, 100, 0, false), (0, 0, 100, 0));
+        // 结算：仅导师且银行 > 0
+        assert_eq!(mentor_settle_amount(true, 130), 130);
+        assert_eq!(mentor_settle_amount(true, 0), 0);
+        assert_eq!(mentor_settle_amount(false, 130), 0);
     }
 }

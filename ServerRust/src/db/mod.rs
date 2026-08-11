@@ -805,6 +805,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_mentor INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mentor_exp INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
@@ -1019,6 +1021,35 @@ pub async fn update_last_access(pool: &DbPool, character_name: &str, now_unix: i
     Ok(())
 }
 
+/// 导师经验银行增加（C# LogoutMentor：mentor.MentorExp += MenteeEXP；导师离线也直接写库）
+pub async fn add_mentor_exp(pool: &DbPool, character_name: &str, amount: i64) -> anyhow::Result<()> {
+    sqlx::query("UPDATE characters SET mentor_exp = mentor_exp + ? WHERE name = ?")
+        .bind(amount)
+        .bind(character_name)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 导师经验银行清零（C# MentorBreak 结算后 Info.MentorExp = 0）
+pub async fn reset_mentor_exp(pool: &DbPool, character_name: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE characters SET mentor_exp = 0 WHERE name = ?")
+        .bind(character_name)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 离线角色直接加经验（C# MentorBreak 离线导师：partner.Experience += partner.MentorExp）
+pub async fn add_character_experience(pool: &DbPool, character_name: &str, amount: i64) -> anyhow::Result<()> {
+    sqlx::query("UPDATE characters SET experience = experience + ? WHERE name = ?")
+        .bind(amount)
+        .bind(character_name)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// #200：账号是否设置了仓库密码（仓库解锁门）
 pub async fn account_has_storage_password(pool: &DbPool, username: &str) -> anyhow::Result<bool> {
     let row: Option<(Option<String>,)> =
@@ -1185,8 +1216,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             spouse_name, married_date, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count, maximum_hero_count,
-            last_access, bind_map_index, bind_x, bind_y, is_mentor, backpack_size
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            last_access, bind_map_index, bind_x, bind_y, is_mentor, mentor_exp, backpack_size
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1250,6 +1281,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.bind_x)
     .bind(state.bind_y)
     .bind(if state.is_mentor { 1 } else { 0 })
+    .bind(state.mentor_exp)
     .bind(state.inventory.backpack.len() as i32)
     .execute(&mut *tx)
     .await?;
@@ -1497,6 +1529,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             bind_y: row.try_get("bind_y").unwrap_or(0),
             level_effects: row.try_get("level_effects").unwrap_or(0) as u16,
             is_mentor: row.try_get("is_mentor").unwrap_or(0) != 0,
+            mentor_exp: row.try_get("mentor_exp").unwrap_or(0),
             mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,

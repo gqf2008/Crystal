@@ -768,6 +768,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             level_effects: 0,
             is_mentor: false,
             mentee_exp: 0,
+            mentor_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,

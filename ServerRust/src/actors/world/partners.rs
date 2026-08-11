@@ -100,6 +100,37 @@ impl Message<GetMenteeExpBonus> for WorldActor {
     }
 }
 
+/// SocialActor -> WorldActor: 导师 MentorExp 结算（C# MentorBreak：IsMentor && MentorExp>0 → GainExp 后清零）
+pub struct SettleMentorExp {
+    pub session_id: u64,
+}
+
+impl Message<SettleMentorExp> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SettleMentorExp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        // C# MentorBreak：IsMentor && MentorExp > 0 → GainExp(Info.MentorExp) + 清零
+        if !state.is_mentor || state.mentor_exp <= 0 {
+            return;
+        }
+        let amount = state.mentor_exp;
+        let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+            amount: self.apply_global_exp_multiplier(amount as i32),
+            experience_list: self.experience_list.clone(),
+        }).await;
+        let _ = record.actor_ref.ask(crate::actors::player::SetMentorExp { amount: 0 }).await;
+        debug!("SettleMentorExp: {} gained {} mentor exp", state.name, amount);
+    }
+}
+
 /// PvP 灰名标记（C# HumanObject.Attacked：受害者 PK<200 且不在开战时，攻击者 BrownTime=1 分钟）
 pub struct MarkBrown {
     pub attacker_session: u64,
