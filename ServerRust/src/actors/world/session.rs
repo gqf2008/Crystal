@@ -1,5 +1,76 @@
 use super::*;
 
+/// 聊天频道（对齐 C# PlayerObject.Chat 前缀：/ 私聊、!! 组队、!~ 行会、!# 师徒、:) 夫妻、@! GM公告、! 喊话）
+#[derive(Debug, PartialEq, Eq)]
+enum ChatChannel {
+    /// 私聊：目标名 + 消息（C# /name message；兼容旧 /w name message 别名）
+    Whisper { target: String, message: String },
+    /// 组队频道（C# !!message）
+    Group(String),
+    /// 行会频道（C# !~message）
+    Guild(String),
+    /// 师徒频道（C# !#message）
+    Mentor(String),
+    /// 夫妻频道（C# :)message）
+    Spouse(String),
+    /// GM 全服公告（C# @!message）
+    GmAnnouncement(String),
+    /// 喊话（C# !message；由原逻辑处理卷轴/冷却/范围）
+    Shout(String),
+}
+
+/// 解析聊天频道前缀（对齐 C# PlayerObject.Chat：1962-2150 的 /、!!、!~、!#、:)、@!、!）
+fn parse_chat_channel(message: &str) -> Option<ChatChannel> {
+    // 私聊 /name message（C# 1962；兼容旧 /w name message 别名）
+    if let Some(rest) = message.strip_prefix('/') {
+        let mut parts = rest.splitn(2, ' ');
+        let first = parts.next().unwrap_or("").trim();
+        let second = parts.next().unwrap_or("").trim();
+        if first.eq_ignore_ascii_case("w") && !second.is_empty() {
+            let mut it = second.splitn(2, ' ');
+            let target = it.next().unwrap_or("").trim().to_string();
+            let msg = it.next().unwrap_or("").trim().to_string();
+            if !target.is_empty() && !msg.is_empty() {
+                return Some(ChatChannel::Whisper { target, message: msg });
+            }
+        } else if !first.is_empty() && !second.is_empty() {
+            return Some(ChatChannel::Whisper { target: first.to_string(), message: second.to_string() });
+        }
+        return None;
+    }
+    // 组队 !!（C# 2001；必须先于单 ! 判断）
+    if let Some(rest) = message.strip_prefix("!!") {
+        let m = rest.trim();
+        return if m.is_empty() { None } else { Some(ChatChannel::Group(m.to_string())) };
+    }
+    // 行会 !~（C# 2014）
+    if let Some(rest) = message.strip_prefix("!~") {
+        let m = rest.trim();
+        return if m.is_empty() { None } else { Some(ChatChannel::Guild(m.to_string())) };
+    }
+    // 师徒 !#（C# 2026）
+    if let Some(rest) = message.strip_prefix("!#") {
+        let m = rest.trim();
+        return if m.is_empty() { None } else { Some(ChatChannel::Mentor(m.to_string())) };
+    }
+    // 夫妻 :)（C# 2116）
+    if let Some(rest) = message.strip_prefix(":)") {
+        let m = rest.trim();
+        return if m.is_empty() { None } else { Some(ChatChannel::Spouse(m.to_string())) };
+    }
+    // GM 全服公告 @!（C# 2140；必须先于 @ 命令判断）
+    if let Some(rest) = message.strip_prefix("@!") {
+        let m = rest.trim();
+        return if m.is_empty() { None } else { Some(ChatChannel::GmAnnouncement(m.to_string())) };
+    }
+    // 喊话 !（C# 2050）
+    if let Some(rest) = message.strip_prefix('!') {
+        let m = rest.trim();
+        return if m.is_empty() { None } else { Some(ChatChannel::Shout(m.to_string())) };
+    }
+    None
+}
+
 impl WorldActor {
     /// 登录公告（C# Settings.Notice + S.UpdateNotice）
     async fn send_login_notice(&mut self, session_id: u64, character_name: &str) {
@@ -1668,6 +1739,179 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
         self.last_chat_ms.insert(msg.session_id, now_ms);
+
+        // C# Chat（PlayerObject.cs:1958）：$pos 替换为当前坐标 "X, Y"
+        let message = if message.contains("$pos") {
+            let pos = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                format!("{}, {}", st.x, st.y)
+            } else {
+                "0, 0".to_string()
+            };
+            message.replace("$pos", &pos)
+        } else {
+            message
+        };
+
+        // C# 聊天频道前缀（PlayerObject.Chat：1962-2150）：/ 私聊、!! 组队、!~ 行会、!# 师徒、:) 夫妻、@! GM公告
+        // 喊话（!）保留下方原逻辑（卷轴/冷却/范围）；此处只处理其余频道
+        if let Some(channel) = parse_chat_channel(&message) {
+            match channel {
+                ChatChannel::Shout(_) => {}
+                ChatChannel::Whisper { target, message } => {
+                    let self_name = record.name.clone();
+                    // 自己拉黑对方 → 拒绝（C# CannotMessageBlacklistedPlayer）
+                    let self_blocked = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                        st.friend_list.is_blocked_name(&target)
+                    } else {
+                        false
+                    };
+                    if self_blocked {
+                        send_system_message(&self.gate_ref, msg.session_id, "不能给黑名单玩家发消息");
+                        return;
+                    }
+                    let mut found = false;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.name.eq_ignore_ascii_case(&target) {
+                                found = true;
+                                // 对方拉黑自己 → 拒绝（C# PlayerNotAcceptingMessages）
+                                if os.friend_list.is_blocked_name(&self_name) {
+                                    send_system_message(&self.gate_ref, msg.session_id, "对方不接收你的消息");
+                                    return;
+                                }
+                                // WhisperIn 给目标（C#："{Name}=>{msg}"）
+                                let mut in_body = Vec::new();
+                                write_dotnet_string(&mut in_body, &format!("{}=>{}", self_name, message));
+                                in_body.push(mir2_shared::enums::ChatType::WhisperIn as u8);
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &in_body),
+                                }).await;
+                                // WhisperOut 给自己（C#："/" + 原消息）
+                                let mut out_body = Vec::new();
+                                write_dotnet_string(&mut out_body, &format!("/{} {}", target, message));
+                                out_body.push(mir2_shared::enums::ChatType::WhisperOut as u8);
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &out_body),
+                                }).await;
+                                debug!("Whisper: {} -> {}: {}", self_name, target, message);
+                                break;
+                            }
+                        }
+                    }
+                    if !found {
+                        send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
+                    }
+                    return;
+                }
+                ChatChannel::Group(gmsg) => {
+                    let group_id = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.group_id } else { return; };
+                    let Some(gid) = group_id else {
+                        send_system_message(&self.gate_ref, msg.session_id, "你不在队伍中");
+                        return;
+                    };
+                    let self_name = record.name.clone();
+                    let mut body = Vec::new();
+                    write_dotnet_string(&mut body, &format!("{}: {}", self_name, gmsg));
+                    body.push(mir2_shared::enums::ChatType::Group as u8);
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.group_id == Some(gid) {
+                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                            }
+                        }
+                    }
+                    return;
+                }
+                ChatChannel::Guild(gmsg) => {
+                    let guild_name = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.guild_name.clone() } else { return; };
+                    let Some(gname) = guild_name else {
+                        send_system_message(&self.gate_ref, msg.session_id, "你不在公会中");
+                        return;
+                    };
+                    let self_name = record.name.clone();
+                    let mut body = Vec::new();
+                    write_dotnet_string(&mut body, &format!("{}: {}", self_name, gmsg));
+                    body.push(mir2_shared::enums::ChatType::Guild as u8);
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.guild_name.as_ref() == Some(&gname) {
+                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                            }
+                        }
+                    }
+                    return;
+                }
+                ChatChannel::Mentor(mmsg) => {
+                    let mentor_name = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.mentor_name.clone() } else { return; };
+                    let Some(mentor_name) = mentor_name else { return; }; // C# 无师徒关系直接 return
+                    let self_name = record.name.clone();
+                    let mut body = Vec::new();
+                    write_dotnet_string(&mut body, &format!("{}: {}", self_name, mmsg));
+                    body.push(mir2_shared::enums::ChatType::Mentor as u8);
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let mut found = false;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.name.eq_ignore_ascii_case(&mentor_name) {
+                                found = true;
+                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                                break;
+                            }
+                        }
+                    }
+                    if found {
+                        let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: packet }).await;
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "导师不在线");
+                    }
+                    return;
+                }
+                ChatChannel::Spouse(smsg) => {
+                    let spouse_name = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.spouse_name.clone() } else { return; };
+                    let Some(spouse_name) = spouse_name else { return; }; // C# 未结婚直接 return
+                    let self_name = record.name.clone();
+                    let mut body = Vec::new();
+                    write_dotnet_string(&mut body, &format!("{}: {}", self_name, smsg));
+                    body.push(mir2_shared::enums::ChatType::Relationship as u8);
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let mut found = false;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.name.eq_ignore_ascii_case(&spouse_name) {
+                                found = true;
+                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                                break;
+                            }
+                        }
+                    }
+                    if found {
+                        let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: packet }).await;
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "配偶不在线");
+                    }
+                    return;
+                }
+                ChatChannel::GmAnnouncement(amsg) => {
+                    let is_gm = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.is_gm } else { false };
+                    if !is_gm {
+                        return; // C#：非 GM 直接 return
+                    }
+                    let self_name = record.name.clone();
+                    let mut body = Vec::new();
+                    write_dotnet_string(&mut body, &format!("(*){}:{}", self_name, amsg));
+                    body.push(mir2_shared::enums::ChatType::Announcement as u8);
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                    }
+                    return;
+                }
+            }
+        }
 
         // C#：! 前缀喊话（HasMapShout/HasServerShout 卷轴 + 8 级门槛 + 10 秒冷却）
         if let Some(shout_msg) = message.strip_prefix('!') {
@@ -4211,13 +4455,39 @@ mod tests {
     use mir2_shared::packets::Packet;
     use super::{
         effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by,
-        user_location_body,
+        user_location_body, parse_chat_channel, ChatChannel,
     };
 
     #[test]
     fn test_roll_message_format() {
         assert_eq!(format_roll_message("张三", 4), "张三 掷出了 4 点");
         assert_eq!(format_roll_message("Legacy", 1), "Legacy 掷出了 1 点");
+    }
+
+    /// #2184：C# PlayerObject.Chat 频道前缀解析（/、!!、!~、!#、:)、@!、!）
+    #[test]
+    fn test_parse_chat_channel_prefixes() {
+        assert_eq!(
+            parse_chat_channel("/Alice hello"),
+            Some(ChatChannel::Whisper { target: "Alice".into(), message: "hello".into() })
+        );
+        assert_eq!(
+            parse_chat_channel("/w Alice hello"),
+            Some(ChatChannel::Whisper { target: "Alice".into(), message: "hello".into() })
+        );
+        assert_eq!(parse_chat_channel("!!大家好"), Some(ChatChannel::Group("大家好".into())));
+        assert_eq!(parse_chat_channel("!~行会消息"), Some(ChatChannel::Guild("行会消息".into())));
+        assert_eq!(parse_chat_channel("!#师徒消息"), Some(ChatChannel::Mentor("师徒消息".into())));
+        assert_eq!(parse_chat_channel(":)亲爱的"), Some(ChatChannel::Spouse("亲爱的".into())));
+        assert_eq!(parse_chat_channel("@!全体公告"), Some(ChatChannel::GmAnnouncement("全体公告".into())));
+        assert_eq!(parse_chat_channel("!喊话"), Some(ChatChannel::Shout("喊话".into())));
+        // 普通消息 / @ 命令不在此解析
+        assert_eq!(parse_chat_channel("hello world"), None);
+        assert_eq!(parse_chat_channel("@ALLOWTRADE"), None);
+        // 空频道内容不解析
+        assert_eq!(parse_chat_channel("!!"), None);
+        assert_eq!(parse_chat_channel("!!   "), None);
+        assert_eq!(parse_chat_channel("/Alice"), None);
     }
 
     #[test]
