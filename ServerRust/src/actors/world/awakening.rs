@@ -649,11 +649,38 @@ pub struct ResetAddedItemRequest {
     pub unique_id: u64,
 }
 
+/// #2058：C# ResetPrice（ItemData.cs:605-611）——3000*Grade*(AddedStats.Count*0.2+1)
+fn reset_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
+    let grade = info.grade.max(1) as u64;
+    let stats = item.added_stats.len() as u64;
+    ((3000u64 * grade) as f64 * (stats as f64 * 0.2 + 1.0)) as u64
+}
+
 impl Message<ResetAddedItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ResetAddedItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        // #2058：C# ResetPrice——费用 3000*Grade*(AddedStats.Count*0.2+1)
+        let item = match record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await {
+            Ok(Some(i)) => i,
+            _ => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
+                return;
+            }
+        };
+        let Some(item_info) = self.item_infos.get(&item.item_index).cloned() else {
+            send_system_message(&self.gate_ref, msg.session_id, "物品信息不存在");
+            return;
+        };
+        let gold_cost = reset_price(&item, &item_info);
+        if state.inventory.gold < gold_cost {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，重置需要 {} 金币", gold_cost));
+            return;
+        }
+        let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: gold_cost }).await;
+        super::send_gold_changed_packet(&self.gate_ref, msg.session_id, gold_cost);
 
         let success = record.actor_ref.ask(crate::actors::player::ResetItemAddedStats {
             unique_id: msg.unique_id,
@@ -671,6 +698,28 @@ impl Message<ResetAddedItemRequest> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_price_matches_csharp() {
+        // #2058：C# ResetPrice = 3000*Grade*(AddedStats.Count*0.2+1)
+        use mir2_shared::data::item::UserItem;
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::Stat;
+        let mut added = Stats::new();
+        added.set(Stat::Luck, 50);
+        added.set(Stat::Agility, 30); // 2 条
+        let item = UserItem {
+            item_index: 1,
+            added_stats: added,
+            ..Default::default()
+        };
+        let info = crate::db::ItemInfo { index: 1, grade: 2, ..Default::default() };
+        // 3000*2 * (2*0.2+1) = 6000 * 1.4 = 8400
+        assert_eq!(reset_price(&item, &info), 8400);
+        // 无附加：3000*2*1.0 = 6000
+        let plain = UserItem { item_index: 1, ..Default::default() };
+        assert_eq!(reset_price(&plain, &info), 6000);
+    }
 
     #[test]
     fn refine_cost_matches_csharp() {
