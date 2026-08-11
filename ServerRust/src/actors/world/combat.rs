@@ -2189,6 +2189,18 @@ fn nearest_k_chebyshev(items: &[(u32, i32, i32)], cx: i32, cy: i32, k: usize) ->
     v.into_iter().take(k).map(|(id, x, y, _)| (id, x, y)).collect()
 }
 
+/// #2060：C# MagicInfo.GetPower(p) = Round(p/4*(Level+1)+DefPower())；
+/// DefPower = power_bonus>0 时 random(PowerBase, PowerBase+PowerBonus)，否则 PowerBase。
+/// roll 为注入的随机偏移（0..=power_bonus），便于测试。
+fn magic_get_power(p: i64, level: i64, power_base: i32, power_bonus: i32, roll: i32) -> i64 {
+    let def = if power_bonus > 0 {
+        (power_base + (roll % (power_bonus + 1))) as i64
+    } else {
+        power_base as i64
+    };
+    ((p as f64 / 4.0) * (level + 1) as f64 + def as f64).round() as i64
+}
+
 impl Message<MagicRequest> for WorldActor {
     type Reply = ();
 
@@ -2571,8 +2583,14 @@ impl Message<MagicRequest> for WorldActor {
             // 强度 = (level+2)*10%（Lv0=20/Lv1=30/Lv2=40），持续 = GetPower(MC+15) 秒
             SPELL_MAGIC_SHIELD => {
                 let reduction_pct = ((spell_level as i32 + 2) * 10).min(80);
-                // 持续时间近似：power 已含 MC 加成，转成 ticks（100ms/tick）
-                let duration_ticks = ((power.max(15) as u32) * 10).min(6000); // 上限 10 分钟
+                // #2060：C# GetPower(MaxMC+15)——时长 = GetPower 秒（含等级缩放 + DefPower）
+                let p = state.effective_max_mc() as i64 + 15;
+                let lv = spell_level as i64;
+                let pb = spell_db.map(|m| m.power_base).unwrap_or(0);
+                let pbon = spell_db.map(|m| m.power_bonus).unwrap_or(0);
+                let roll = if pbon > 0 { fastrand::i32(0..=pbon) } else { 0 };
+                let power_val = magic_get_power(p, lv, pb, pbon, roll);
+                let duration_ticks = (power_val.max(1) as u32) * 10; // 秒 → ticks
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
                     percent: reduction_pct,
                     duration_ticks,
@@ -5511,15 +5529,29 @@ mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, cast_out_of_range,
         find_attack_skill, range_attack_out_of_range,
-        logout_blocked, nearest_k_chebyshev, player_attack_speed_ms, range_attack_min_reduction,
-        range_flight_ticks, ranged_chance_to_hit, should_grant_cast_exp, turn_undead_threshold,
-        ATTACK_SKILL_SPELLS,
+        logout_blocked, magic_get_power, nearest_k_chebyshev, player_attack_speed_ms,
+        range_attack_min_reduction, range_flight_ticks, ranged_chance_to_hit, should_grant_cast_exp,
+        turn_undead_threshold, ATTACK_SKILL_SPELLS,
         LOGOUT_DELAY_MS,
         DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
         SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
+
+    #[test]
+    fn magic_shield_duration_matches_csharp() {
+        // #2060：C# GetPower(p) = Round(p/4*(Lv+1)+DefPower())
+        // 无 power_bonus：DefPower = power_base（确定性）
+        // p = MaxMC+15 = 115，Lv=2，power_base=10 → 115/4*3+10 = 96.25 → round 96 秒
+        assert_eq!(magic_get_power(115, 2, 10, 0, 0), 96);
+        // 有 power_bonus=4：DefPower = 10 + roll(0..=4)，roll=4 → 115/4*3+14 = 100.25 → 100
+        assert_eq!(magic_get_power(115, 2, 10, 4, 4), 100);
+        // roll 越界被取模：roll=5 % 5 = 0 → DefPower=10 → 96
+        assert_eq!(magic_get_power(115, 2, 10, 4, 5), 96);
+        // 时长 = 秒 × 10 ticks
+        assert_eq!(magic_get_power(115, 2, 10, 0, 0).max(1) as u64 * 10, 960);
+    }
 
     #[test]
     fn nearest_k_chebyshev_matches_csharp() {
