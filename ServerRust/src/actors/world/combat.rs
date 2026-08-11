@@ -1675,14 +1675,13 @@ pub struct ObservePlayerRequest {
     pub name: String,
 }
 
-impl Message<ObservePlayerRequest> for WorldActor {
-    type Reply = ();
-
-    async fn handle(&mut self, msg: ObservePlayerRequest, _ctx: &mut Context<Self, Self::Reply>) {
+impl WorldActor {
+    /// 观察玩家（C# C.Observe / @OBSERVE 共用）：目标 AllowObserve 校验 → AllowObserve(true) + PlayerInspect
+    pub(crate) async fn observe_player(&mut self, observer_session: u64, target_name: &str) {
         let mut target_state: Option<crate::actors::player::PlayerState> = None;
         for r in self.players.values() {
             if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
-                if s.name.eq_ignore_ascii_case(&msg.name) {
+                if s.name.eq_ignore_ascii_case(target_name) {
                     target_state = Some(s);
                     break;
                 }
@@ -1703,12 +1702,20 @@ impl Message<ObservePlayerRequest> for WorldActor {
         let mut allow_body = Vec::new();
         allow_body.push(1u8);
         let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
+            session_id: observer_session,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AllowObserve as i16, &allow_body),
         }).await;
 
         // Send PlayerInspect with target info
-        send_inspect_packet(&self.gate_ref, msg.session_id, &target);
+        send_inspect_packet(&self.gate_ref, observer_session, &target);
+    }
+}
+
+impl Message<ObservePlayerRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ObservePlayerRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        self.observe_player(msg.session_id, &msg.name).await;
     }
 }
 

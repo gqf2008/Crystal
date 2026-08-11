@@ -3758,6 +3758,15 @@ impl Message<ChatRequest> for WorldActor {
                     );
                     return;
                 }
+                Some("OBSERVE") => {
+                    // C# case "OBSERVE"（~2481）：观察玩家——非 GM 也可用（目标 AllowObserve 开启时）
+                    let Some(name) = parts.get(1).copied() else {
+                        send_system_message(&self.gate_ref, msg.session_id, "用法：@OBSERVE <玩家名>");
+                        return;
+                    };
+                    self.observe_player(msg.session_id, name).await;
+                    return;
+                }
                 Some("CHANGEFLAG") | Some("CHANGEFLAGCOLOUR") => {
                     // C# case "CHANGEFLAG"/"CHANGEFLAGCOLOUR"（~4004/4028）：行会领地旗标外观
                     // 守卫：有行会 + 行会拥有领地 + CanChangeRank（默认仅会长）+ 非开战
