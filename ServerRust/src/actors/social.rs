@@ -2862,6 +2862,22 @@ impl Message<TradeAddItem> for SocialActor {
             }
         }
 
+        // C# CharacterInfo.Trade = new UserItem[10]：交易槽位上限 10
+        if msg.grid >= 10 {
+            send_system_message(&self.gate_ref, msg.session_id, "无效的交易槽位");
+            return;
+        }
+        {
+            let trade_full = match self.find_trade(msg.session_id) {
+                Some(t) => t.side_of(msg.session_id).map(|side| !side.can_add_item(msg.unique_id)).unwrap_or(false),
+                None => false,
+            };
+            if trade_full {
+                send_system_message(&self.gate_ref, msg.session_id, "交易物品已满（最多 10 件）");
+                return;
+            }
+        }
+
         // #923：C# TradeItem——放入交易即从背包移除并锁定（防交易中消耗/重复放入）
         // #2006：部分堆叠按数量拆分（C# 原堆扣减 count、剩余保留）；全叠/非堆叠整件移除
         let full_count = state.inventory.get_item(msg.unique_id).map(|it| it.count).unwrap_or(0);

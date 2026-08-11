@@ -61,6 +61,11 @@ impl TradeSide {
         }
     }
 
+    /// C# CharacterInfo.Trade = new UserItem[10]：交易槽位上限 10（同 uid 更新数量不算新增）
+    pub fn can_add_item(&self, uid: u64) -> bool {
+        self.items.len() < 10 || self.items.iter().any(|i| i.uid == uid)
+    }
+
     /// 移除物品
     pub fn remove_item(&mut self, uid: u64) -> Option<TradeItem> {
         if let Some(idx) = self.items.iter().position(|i| i.uid == uid) {
@@ -201,6 +206,19 @@ mod tests {
         assert_eq!(session.other_session(1), Some(2));
         assert_eq!(session.other_session(2), Some(1));
         assert_eq!(session.other_session(99), None);
+    }
+
+    #[test]
+    fn test_can_add_item_limit_10() {
+        // C# CharacterInfo.Trade = new UserItem[10]：槽位上限 10；同 uid 更新数量不受限
+        let mut session = make_session();
+        let side_a = session.side_of_mut(1).unwrap();
+        for i in 0..10 {
+            assert!(side_a.can_add_item(1000 + i));
+            side_a.add_item(1000 + i, i as u8, 1, None);
+        }
+        assert!(!side_a.can_add_item(9999)); // 第 11 件不同物品拒绝
+        assert!(side_a.can_add_item(1000)); // 同 uid 更新数量允许
     }
 
     #[test]
