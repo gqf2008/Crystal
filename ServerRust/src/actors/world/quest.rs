@@ -26,6 +26,20 @@ impl WorldActor {
                     .unwrap_or(false)
         })
     }
+
+    /// #2022：C# FinishQuest（11432-11434）——交任务扣除携带物品（TakeQuestItem）
+    pub(crate) async fn take_quest_carry_items(&self, session_id: u64, quest_index: i32) {
+        let Some(quest_db) = self.quest_infos.get(&quest_index) else { return };
+        if quest_db.carry_items.is_empty() { return; }
+        let Some(record) = self.players.get(&session_id) else { return };
+        for task in &quest_db.carry_items {
+            if task.count <= 0 { continue; }
+            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
+                item_index: task.item_index,
+                count: task.count.min(u16::MAX as i32) as u16,
+            }).await;
+        }
+    }
 }
 
 /// 接受任务
@@ -186,6 +200,9 @@ impl Message<FinishQuestRequest> for WorldActor {
                 return;
             }
         };
+
+        // #2022：C# FinishQuest——交任务扣除携带物品
+        self.take_quest_carry_items(msg.session_id, msg.quest_index).await;
 
         // 发放奖励
         if completed_quest.exp_reward > 0 {

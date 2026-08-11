@@ -2679,7 +2679,7 @@ pub struct QuestItemReward {
     pub count: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct QuestInfo {
     pub index: i32,
     pub name: String,
@@ -2703,6 +2703,8 @@ pub struct QuestInfo {
     pub kill_tasks: Vec<QuestKillTask>,
     pub item_tasks: Vec<QuestItemTask>,
     pub flag_tasks: Vec<QuestFlagTask>,
+    /// 携带物品（C# QuestInfo.CarryItems：交任务时 TakeQuestItem 扣除）
+    pub carry_items: Vec<QuestItemTask>,
     pub fixed_rewards: Vec<QuestItemReward>,
     pub select_rewards: Vec<QuestItemReward>,
 }
@@ -3653,6 +3655,7 @@ pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
         kill_tasks: Vec::new(),
         item_tasks: Vec::new(),
         flag_tasks: Vec::new(),
+        carry_items: Vec::new(),
         fixed_rewards: Vec::new(),
         select_rewards: Vec::new(),
     }).collect())
@@ -3724,6 +3727,28 @@ pub fn resolve_quest_tasks(
                 "[@SELECTREWARDS]" => {
                     if let Some(reward) = parse_reward(line, &item_by_name) {
                         quest.select_rewards.push(reward);
+                    }
+                }
+                // #2022：C# QuestInfo.ParseFile——EXPREWARD/GOLDREWARD/CREDITREWARD 数值行
+                "[@EXPREWARD]" => {
+                    if let Ok(v) = line.parse::<i32>() {
+                        quest.exp_reward = v;
+                    }
+                }
+                "[@GOLDREWARD]" => {
+                    if let Ok(v) = line.parse::<i32>() {
+                        quest.gold_reward = v;
+                    }
+                }
+                "[@CREDITREWARD]" => {
+                    if let Ok(v) = line.parse::<i32>() {
+                        quest.credit_reward = v;
+                    }
+                }
+                // #2022：C# QuestInfo.ParseFile——CARRYITEMS 携带物品（交任务扣除）
+                "[@CARRYITEMS]" => {
+                    if let Some(task) = parse_item_task(line, &item_by_name) {
+                        quest.carry_items.push(task);
                     }
                 }
                 _ => {}
@@ -4222,6 +4247,30 @@ mod tests {
             )"
         ).execute(&pool).await.unwrap();
         pool
+    }
+
+    #[test]
+    fn resolve_quest_tasks_parses_rewards_and_carry_items() {
+        // #2022：C# QuestInfo.ParseFile——EXPREWARD/GOLDREWARD/CREDITREWARD/CARRYITEMS
+        let dir = std::env::temp_dir().join(format!("quest_parse_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let content = "[@CARRYITEMS]\nCannibalLeaves 5\n[@EXPREWARD]\n10\n[@GOLDREWARD]\n60\n[@CREDITREWARD]\n150\n";
+        std::fs::write(dir.join("1.txt"), content).unwrap();
+
+        let mut item_infos = HashMap::new();
+        item_infos.insert(1, ItemInfo { index: 1, name: "CannibalLeaves".to_string(), ..Default::default() });
+        let monster_infos = HashMap::new();
+
+        let mut quest = QuestInfo { index: 1, name: "Test".to_string(), file_name: "1".to_string(), ..Default::default() };
+        resolve_quest_tasks(std::slice::from_mut(&mut quest), &dir, &monster_infos, &item_infos);
+
+        assert_eq!(quest.exp_reward, 10);
+        assert_eq!(quest.gold_reward, 60);
+        assert_eq!(quest.credit_reward, 150);
+        assert_eq!(quest.carry_items.len(), 1);
+        assert_eq!(quest.carry_items[0].item_index, 1);
+        assert_eq!(quest.carry_items[0].count, 5);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
