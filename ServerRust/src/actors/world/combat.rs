@@ -1668,10 +1668,11 @@ impl Message<InspectPlayerRequest> for WorldActor {
         send_inspect_packet(&self.gate_ref, msg.session_id, &target);
     }
 }
-/// 观察玩家
+/// 观察玩家（C# C.Observe：目标玩家名）
 pub struct ObservePlayerRequest {
     pub session_id: u64,
-    pub target_id: u32,
+    /// C# C.Observe.Name：目标玩家名（忽略大小写）
+    pub name: String,
 }
 
 impl Message<ObservePlayerRequest> for WorldActor {
@@ -1681,7 +1682,7 @@ impl Message<ObservePlayerRequest> for WorldActor {
         let mut target_state: Option<crate::actors::player::PlayerState> = None;
         for r in self.players.values() {
             if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
-                if s.object_id == msg.target_id {
+                if s.name.eq_ignore_ascii_case(&msg.name) {
                     target_state = Some(s);
                     break;
                 }
