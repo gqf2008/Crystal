@@ -2339,7 +2339,31 @@ impl Message<GroupInviteRequest> for SocialActor {
             _ => return,
         };
 
-        // 通过名称查找目标玩家
+        // C# AddMember（:9278-9282）：邀请者必须是队长
+        if let Some(gid) = inviter_state.group_id {
+            if let Some(group) = self.groups.get(&gid) {
+                if group.leader_session() != Some(msg.session_id) {
+                    send_system_message(&self.gate_ref, msg.session_id, "只有队长可以邀请组队");
+                    return;
+                }
+            }
+        }
+        // C# AddMember（:9290-9295）：邀请者所在地图 NoGroup → 不能邀请
+        {
+            let map_infos = self.config.map_infos.read().await;
+            if let Some(mi) = map_infos.get(&(inviter_state.map_index as i32)) {
+                if mi.no_group {
+                    send_system_message(&self.gate_ref, msg.session_id, "当前地图无法邀请组队");
+                    return;
+                }
+            }
+        }
+        // C# AddMember（:9304-9308）：不能邀请自己
+        if msg.target_name.eq_ignore_ascii_case(&inviter_state.name) {
+            send_system_message(&self.gate_ref, msg.session_id, "不能邀请自己");
+            return;
+        }
+
         let Some(target_session) = self.find_player_by_name(&msg.target_name, msg.session_id).await else {
             send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
             return;
@@ -2356,6 +2380,28 @@ impl Message<GroupInviteRequest> for SocialActor {
         };
 
         // C# AddMember（PlayerObject.cs ~9310）：目标关闭组队 → 拒绝
+        // C# AddMember（:9316-9320）：目标已在任意队伍 → 拒绝
+        if target_state.group_id.is_some() {
+            send_system_message(&self.gate_ref, msg.session_id, "对方已在其他队伍中");
+            return;
+        }
+        // C# AddMember（:9322-9326）：目标已有待处理邀请
+        if self.pending_invites.contains_key(&target_session) {
+            send_system_message(&self.gate_ref, msg.session_id, "对方已有待处理的组队邀请");
+            return;
+        }
+        // C# AddMember（:9328-9333）：目标所在地图 NoGroup
+        {
+            let map_infos = self.config.map_infos.read().await;
+            if let Some(mi) = map_infos.get(&(target_state.map_index as i32)) {
+                if mi.no_group {
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("对方所在地图无法组队（{}）", target_state.name));
+                    send_system_message(&self.gate_ref, target_session, "对方无法接受组队邀请（当前地图禁止组队）");
+                    return;
+                }
+            }
+        }
+
         if !target_state.allow_group {
             send_system_message(&self.gate_ref, msg.session_id, "对方未开启组队（请对方先开启允许组队）");
             return;
@@ -2418,6 +2464,40 @@ impl Message<GroupInviteReply> for SocialActor {
         if !inviter_state.allow_group {
             send_system_message(&self.gate_ref, msg.session_id, "邀请者已关闭组队");
             return;
+        }
+
+        // C# GroupInvite（:9387-9392）：接受者已在队伍 → 拒绝
+        {
+            let record = match self.players.get(&msg.session_id) {
+                Some(r) => r,
+                None => return,
+            };
+            if let Ok(Some(rs)) = record.ask(GetPlayerState).await {
+                if rs.group_id.is_some() {
+                    send_system_message(&self.gate_ref, msg.session_id, "你已在队伍中");
+                    return;
+                }
+            }
+        }
+        // C# GroupInvite（:9394-9399）：邀请者不再是队长 → 拒绝
+        if let Some(gid) = inviter_state.group_id {
+            if let Some(group) = self.groups.get(&gid) {
+                if group.leader_session() != Some(inviter_id) {
+                    send_system_message(&self.gate_ref, msg.session_id, "邀请者不再是队长");
+                    return;
+                }
+            }
+        }
+        // C# GroupInvite（:9420-9426）：邀请者所在地图 NoGroup → 双方拒绝
+        {
+            let map_infos = self.config.map_infos.read().await;
+            if let Some(mi) = map_infos.get(&(inviter_state.map_index as i32)) {
+                if mi.no_group {
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("对方所在地图无法组队（{}）", inviter_state.name));
+                    send_system_message(&self.gate_ref, inviter_id, "对方无法接受组队邀请（当前地图禁止组队）");
+                    return;
+                }
+            }
         }
 
         // 邀请者接受：将回复者加入邀请者的组队
