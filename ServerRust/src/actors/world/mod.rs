@@ -683,6 +683,27 @@ fn random_spawn_pos(map: Option<&MapData>, cx: i32, cy: i32, spread: i32) -> (i3
     (cx, cy)
 }
 
+/// 征服旗子 NPC 运行时状态（对应 C# ConquestGuildFlagInfo；per-session 生成，
+/// 供下一批易主时按会话定向下发 NPCImageUpdate/ObjectGuildNameChanged）
+#[derive(Debug, Clone)]
+pub(crate) struct ConquestFlagNpc {
+    pub object_id: u32,
+    /// 所属会话（该旗子实体只对该会话可见；广播更新时定向下发）
+    pub session_id: u64,
+    pub map_index: u16,
+    /// 所属征服领地 ID
+    pub conquest_id: i32,
+    /// 旗子索引（C# ConquestFlagInfo.Index）
+    pub flag_index: i32,
+    /// 旗子当前图像（C# NPCInfo.Image：默认 1000 / 归属行会 FlagImage）
+    pub image: u16,
+    /// 旗子当前染色（C# NPCInfo.Colour：归属行会 FlagColour）
+    pub colour: i32,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+}
+
 /// 运行时 NPC 状态
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -1187,6 +1208,8 @@ pub struct WorldActor {
     pub(crate) last_mail_time: HashMap<u64, i64>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
+    /// 征服旗子 NPC（per-session 生成；object_id → 状态，供易主时广播更新）
+    pub(crate) conquest_flags: HashMap<u32, ConquestFlagNpc>,
     /// 等待重生的怪物 (object_id → 重生 tick)
     pub(crate) respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
     /// 世界Boss存活队列 (object_id → 自动消失 tick)
@@ -1664,6 +1687,7 @@ impl WorldActor {
             player_pet_modes: HashMap::new(),
         last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
+            conquest_flags: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
@@ -5363,6 +5387,13 @@ impl Actor for WorldActor {
                     name: g.name,
                     repair_cost: g.repair_cost.max(0) as u32,
                 }).collect();
+                inst.flags = c.flags.into_iter().map(|f| conquest::ConquestFlagInfo {
+                    index: f.index,
+                    x: f.x,
+                    y: f.y,
+                    name: f.name,
+                    file_name: f.file_name,
+                }).collect();
                 inst
             }).collect()
         };
@@ -5435,6 +5466,7 @@ Ok(Self {
             player_pet_modes: HashMap::new(),
         last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
+            conquest_flags: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
@@ -8188,19 +8220,33 @@ fn build_object_colour_changed_packet(object_id: u32, name_colour: i32) -> Vec<u
     build_packet_bytes(ServerPacketIds::ObjectColourChanged as i16, &body)
 }
 
-/// 构建 ObjectNpc 数据包
+/// 构建 ObjectNpc 数据包（普通 NPC：name_colour/colour 均为 0）
 fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
+    build_object_npc_packet_full(&npc.name, npc.image, 0, 0, npc.x, npc.y, npc.direction, object_id)
+}
+
+/// 构建 ObjectNpc 数据包（通用；征服旗子用 Image/Colour，C# ConquestGuildFlagInfo.Spawn）
+fn build_object_npc_packet_full(
+    name: &str,
+    image: u16,
+    name_colour: i32,
+    colour: i32,
+    x: i32,
+    y: i32,
+    direction: u8,
+    object_id: u32,
+) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
     body.extend_from_slice(&object_id.to_le_bytes());   // object_id
-    write_dotnet_string(&mut body, &npc.name);          // name
-    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
-    body.extend_from_slice(&npc.image.to_le_bytes());   // image (NPC/Monster enum)
-    body.extend_from_slice(&0i32.to_le_bytes());        // colour
-    body.extend_from_slice(&npc.x.to_le_bytes());       // location_x
-    body.extend_from_slice(&npc.y.to_le_bytes());       // location_y
-    body.push(npc.direction);                           // direction
+    write_dotnet_string(&mut body, name);               // name
+    body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
+    body.extend_from_slice(&image.to_le_bytes());       // image (NPC/Monster enum)
+    body.extend_from_slice(&colour.to_le_bytes());      // colour
+    body.extend_from_slice(&x.to_le_bytes());           // location_x
+    body.extend_from_slice(&y.to_le_bytes());           // location_y
+    body.push(direction);                               // direction
     body.extend_from_slice(&0i32.to_le_bytes());        // quest_ids count=0
 
     build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
@@ -8519,6 +8565,52 @@ async fn spawn_npcs_and_monsters(
     }
 
     (npcs, monsters)
+}
+
+/// 登录/换图时按领地地图生成征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn：
+/// 默认 Image=1000/Colour=0；归属行会 FlagImage/FlagColour 数据源待行会侧补齐后接入）
+async fn spawn_conquest_flags(
+    gate_ref: ActorRef<GateActor>,
+    conquest_instances: &[conquest::ConquestInstance],
+    map_index: u16,
+    session_id: u64,
+    next_object_id: &mut u32,
+) -> Vec<ConquestFlagNpc> {
+    let mut out = Vec::new();
+    for inst in conquest_instances {
+        if inst.map_index != map_index as i32 {
+            continue;
+        }
+        for flag in &inst.flags {
+            let object_id = *next_object_id;
+            *next_object_id += 1;
+            let (image, colour) = conquest::conquest_flag_appearance(inst);
+            let packet = build_object_npc_packet_full(
+                &flag.name,
+                image, // C# ConquestGuildFlagInfo.Spawn 默认 Image=1000
+                0,
+                colour,
+                flag.x,
+                flag.y,
+                0,
+                object_id,
+            );
+            let _ = gate_ref.tell(SendToClient { session_id, data: packet }).await;
+            out.push(ConquestFlagNpc {
+                object_id,
+                session_id,
+                map_index,
+                conquest_id: inst.id,
+                flag_index: flag.index,
+                image,
+                colour,
+                name: flag.name.clone(),
+                x: flag.x,
+                y: flag.y,
+            });
+        }
+    }
+    out
 }
 
 fn drop_count_multiplier(is_boss: bool, is_elite: bool) -> u16 {
@@ -9256,6 +9348,23 @@ mod tests {
         assert!(!red_brown_attackable(150, now - 1));
         // 普通玩家（PK<100 且非灰名）→ 不可攻击
         assert!(!red_brown_attackable(50, 0));
+    }
+
+    /// 征服旗子 ObjectNpc 包：Image/Colour 落位（C# ConquestGuildFlagInfo.Spawn 外观）
+    #[test]
+    fn test_build_object_npc_packet_full() {
+        use mir2_shared::packets::server::objects::ObjectNpc;
+        let bytes = build_object_npc_packet_full("沙巴克旗", 1000, 0, 0x00FF0000, 10, 20, 0, 42);
+        let mut cursor = std::io::Cursor::new(&bytes[4..]);
+        let pkt = ObjectNpc::read_body(&mut cursor).expect("parse ObjectNpc");
+        assert_eq!(pkt.object_id, 42);
+        assert_eq!(pkt.name, "沙巴克旗");
+        assert_eq!(pkt.image, 1000);
+        assert_eq!(pkt.colour, 0x00FF0000);
+        assert_eq!(pkt.location_x, 10);
+        assert_eq!(pkt.location_y, 20);
+        assert_eq!(pkt.direction, mir2_shared::enums::MirDirection::Up);
+        assert!(pkt.quest_ids.is_empty());
     }
 
 }

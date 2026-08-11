@@ -548,6 +548,15 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             repair_cost INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (conquest_idx, idx)
         );
+        CREATE TABLE IF NOT EXISTS conquest_flags (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            file_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (conquest_idx, idx)
+        );
         CREATE TABLE IF NOT EXISTS monster_drops (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             monster_index INTEGER NOT NULL,
@@ -3427,6 +3436,17 @@ pub struct ConquestGuardRow {
     pub repair_cost: i32,
 }
 
+/// 征服旗子（对应 C# ConquestFlagInfo：领地旗子 NPC 落点）
+#[derive(Debug, Clone)]
+pub struct ConquestFlagRow {
+    pub conquest_idx: i32,
+    pub index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub name: String,
+    pub file_name: String,
+}
+
 /// 征服领地配置（对应 C# ConquestInfo，含守卫）
 #[derive(Debug, Clone)]
 pub struct ConquestInfoRow {
@@ -3456,6 +3476,7 @@ pub struct ConquestInfoRow {
     pub guards: Vec<ConquestGuardRow>,
     pub gates: Vec<ConquestGuardRow>,
     pub walls: Vec<ConquestGuardRow>,
+    pub flags: Vec<ConquestFlagRow>,
 }
 
 /// 加载全部征服领地配置（含守卫坐标；C# ConquestInfo.ConquestGuards）
@@ -3464,6 +3485,7 @@ pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestIn
     let guard_rows = sqlx::query("SELECT * FROM conquest_guards ORDER BY conquest_idx, idx").fetch_all(pool).await?;
     let gate_rows = sqlx::query("SELECT * FROM conquest_gates ORDER BY conquest_idx, idx").fetch_all(pool).await?;
     let wall_rows = sqlx::query("SELECT * FROM conquest_walls ORDER BY conquest_idx, idx").fetch_all(pool).await?;
+    let flag_rows = sqlx::query("SELECT * FROM conquest_flags ORDER BY conquest_idx, idx").fetch_all(pool).await?;
     let mut guards_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
     for r in guard_rows {
         let cidx: i32 = r.get("conquest_idx");
@@ -3501,6 +3523,18 @@ pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestIn
             mob_index: r.get("mob_index"),
             name: r.get("name"),
             repair_cost: r.get("repair_cost"),
+        });
+    }
+    let mut flags_by_conquest: HashMap<i32, Vec<ConquestFlagRow>> = HashMap::new();
+    for r in flag_rows {
+        let cidx: i32 = r.get("conquest_idx");
+        flags_by_conquest.entry(cidx).or_default().push(ConquestFlagRow {
+            conquest_idx: cidx,
+            index: r.get("idx"),
+            x: r.get("x"),
+            y: r.get("y"),
+            name: r.get("name"),
+            file_name: r.get("file_name"),
         });
     }
     let mut out = Vec::new();
@@ -3541,6 +3575,7 @@ pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestIn
             guards: guards_by_conquest.remove(&index).unwrap_or_default(),
             gates: gates_by_conquest.remove(&index).unwrap_or_default(),
             walls: walls_by_conquest.remove(&index).unwrap_or_default(),
+            flags: flags_by_conquest.remove(&index).unwrap_or_default(),
         });
     }
     Ok(out)
@@ -4886,6 +4921,28 @@ mod tests {
         let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
         assert!(loaded.has_expanded_storage);
         assert_eq!(loaded.expanded_storage_expiry_date, 1_800_864_000);
+    }
+
+    #[tokio::test]
+    async fn test_load_conquest_infos_flags() {
+        // 征服旗子：conquest_flags 表 → ConquestInfoRow.flags 联查（C# ConquestInfo.ConquestFlags）
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query(
+            "INSERT INTO conquest_infos (idx, full_map, location_x, location_y, size, name, map_index, palace_index, guard_index, gate_index, wall_index, siege_index, flag_index, extra_maps_json, start_hour, war_length, conquest_type, conquest_game, monday, tuesday, wednesday, thursday, friday, saturday, sunday, king_x, king_y, king_size, control_point_index) VALUES (1,0,0,0,0,'测试领地',0,0,0,0,0,0,0,'[]',0,60,0,0,0,0,0,0,0,0,0,0,0,0,0)"
+        )
+        .execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO conquest_flags (conquest_idx, idx, x, y, name, file_name) VALUES (1, 1, 5, 6, '旗子', 'flag.txt')"
+        )
+        .execute(&pool).await.unwrap();
+        let list = load_conquest_infos(&pool).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].flags.len(), 1);
+        assert_eq!(list[0].flags[0].index, 1);
+        assert_eq!(list[0].flags[0].x, 5);
+        assert_eq!(list[0].flags[0].y, 6);
+        assert_eq!(list[0].flags[0].name, "旗子");
+        assert_eq!(list[0].flags[0].file_name, "flag.txt");
     }
 }
 

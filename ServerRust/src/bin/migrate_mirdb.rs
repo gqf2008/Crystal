@@ -317,6 +317,14 @@ struct ParsedConquestGate {
     repair_cost: i32,
 }
 
+struct ParsedConquestFlag {
+    index: i32,
+    x: i32,
+    y: i32,
+    name: String,
+    file_name: String,
+}
+
 struct ParsedConquestInfo {
     index: i32,
     full_map: bool,
@@ -344,6 +352,7 @@ struct ParsedConquestInfo {
     guards: Vec<ParsedConquestGuard>,
     gates: Vec<ParsedConquestGate>,
     walls: Vec<ParsedConquestGate>,
+    flags: Vec<ParsedConquestFlag>,
 }
 
 struct ParsedGTMap {
@@ -1024,9 +1033,9 @@ fn read_conquest_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> s
 
     // ConquestFlags - Save always writes this
     let cf_count = reader.read_raw_i32()?;
-    let mut conquest_flags = Vec::new();
+    let mut flags = Vec::new();
     for _ in 0..cf_count {
-        conquest_flags.push(read_conquest_flag(reader)?);
+        flags.push(read_conquest_flag(reader)?);
     }
 
     let start_hour = reader.read_raw_u8()?;
@@ -1069,6 +1078,9 @@ fn read_conquest_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> s
         }).collect(),
         walls: walls.into_iter().map(|g| ParsedConquestGate {
             index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
+        }).collect(),
+        flags: flags.into_iter().map(|g| ParsedConquestFlag {
+            index: g.0, x: g.1, y: g.2, name: g.3, file_name: g.4,
         }).collect(),
     })
 }
@@ -1375,6 +1387,15 @@ async fn create_tables(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
             mob_index INTEGER NOT NULL,
             name TEXT NOT NULL,
             repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
+        );
+        CREATE TABLE IF NOT EXISTS conquest_flags (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            file_name TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (conquest_idx, idx)
         );
         CREATE TABLE IF NOT EXISTS gt_maps (
@@ -1719,6 +1740,18 @@ async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -
             .bind(&g.name).bind(g.repair_cost as i64)
             .execute(pool).await?;
         }
+    }
+    // 旗子（C# ConquestInfo.ConquestFlags）
+    sqlx::query("DELETE FROM conquest_flags WHERE conquest_idx = ?")
+        .bind(c.index)
+        .execute(pool).await?;
+    for f in &c.flags {
+        sqlx::query(
+            "INSERT OR REPLACE INTO conquest_flags (conquest_idx, idx, x, y, name, file_name) VALUES (?,?,?,?,?,?)"
+        )
+        .bind(c.index).bind(f.index).bind(f.x).bind(f.y)
+        .bind(&f.name).bind(&f.file_name)
+        .execute(pool).await?;
     }
     Ok(())
 }
