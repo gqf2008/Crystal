@@ -61,6 +61,11 @@ pub trait MonsterBehavior: Send + Sync + 'static {
         false
     }
 
+    /// #2108：是否可被采集（C# HarvestMonster 子类：死亡后保留尸体 + Harvest 交互）
+    fn is_harvestable(&self) -> bool {
+        false
+    }
+
     /// #1399：标记死亡已广播；返回是否首次（tick.rs 死亡处理首次发 ObjectDied，避免每 tick 重复）
     fn mark_death_announced(&mut self) -> bool {
         false

@@ -2415,6 +2415,27 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
     }
 
+    /// #2108：C# MonsterObject.Process DeadDelay——尸体到期移除 + ObjectRemove 广播
+    pub(crate) async fn tick_corpse_expiry(&mut self) {
+        if self.corpses.is_empty() {
+            return;
+        }
+        let now = self.tick_count;
+        let mut expired: Vec<u32> = Vec::new();
+        for (oid, c) in &self.corpses {
+            if c.dead_until_tick <= now {
+                expired.push(*oid);
+            }
+        }
+        for oid in expired {
+            if let Some(corpse) = self.corpses.remove(&oid) {
+                let remove_packet = Self::build_object_remove_packet(oid);
+                broadcast_to_map(&self.gate_ref, &self.players, corpse.map_index, &remove_packet).await;
+                debug!("Corpse '{}' (#{}) expired", corpse.name, oid);
+            }
+        }
+    }
+
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
             let mut colour_changes = Vec::new();
@@ -7117,13 +7138,32 @@ impl Message<Tick> for WorldActor {
                         *oid, monster.x, monster.y, monster.direction,
                                     Self::monster_death_type(&monster.name, monster.master_session.is_some()),
                                 );
-                    // 发送 ObjectRemove（清理实体）
-                    let remove_packet = Self::build_object_remove_packet(*oid);
                     broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &died_packet).await;
-                    broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
-
-                    // 生成掉落物品
-                    self.spawn_monster_drops(&monster).await;
+                    // #2108：可采集怪物 → 保留尸体（跳过 ObjectRemove + 地面掉落；C# HarvestMonster.Drop() 空）
+                    let harvestable = monster.behavior.is_harvestable();
+                    if harvestable {
+                        let corpse = CorpseState {
+                            object_id: monster.object_id,
+                            name: monster.name.clone(),
+                            x: monster.x,
+                            y: monster.y,
+                            map_index: monster.map_index,
+                            direction: monster.direction,
+                            monster_index: monster.monster_index,
+                            exp_owner_session: monster.exp_owner_session,
+                            target_session: monster.target_session,
+                            dead_until_tick: self.tick_count + CORPSE_DEFAULT_TICKS,
+                            remaining_skins: HARVEST_SKIN_COUNT,
+                            drops: Vec::new(),
+                        };
+                        self.corpses.insert(monster.object_id, corpse);
+                        debug!("Monster '{}' (#{}) corpse kept for harvest", monster.name, oid);
+                    } else {
+                        let remove_packet = Self::build_object_remove_packet(*oid);
+                        broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
+                        // 生成掉落物品
+                        self.spawn_monster_drops(&monster).await;
+                    }
 
                     // #1001/#1003：任务击杀进度（C# MonsterObject.Die → EXPOwner.CheckGroupQuestKill）
                     // 击杀者 = target_session（最后命中者，与掉落归属一致）；同组同图 16 格内未死成员共享
@@ -7361,6 +7401,7 @@ impl Message<Tick> for WorldActor {
         self.tick_pk_decay().await;
         self.tick_monster_ownership_expiry().await;
         self.tick_mine_effects().await;
+        self.tick_corpse_expiry().await;
         self.tick_rested().await;
         self.tick_player_conditions().await;
 

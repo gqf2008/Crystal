@@ -342,6 +342,186 @@ fn should_grant_cast_exp(spell: u8, basic: bool, electric_handled: bool) -> bool
     true
 }
 
+// ============================================================
+// 尸体采集（C# HarvestMonster）
+// ============================================================
+
+impl WorldActor {
+    /// C# PlayerObject.Harvest（:4318-4352）：前方 3×3 找死亡可采集尸体（EXPOwner 归属校验）
+    async fn try_harvest_corpse(
+        &mut self,
+        session_id: u64,
+        state: &crate::actors::player::PlayerState,
+        dir: usize,
+    ) -> bool {
+        let front_x = state.x + MON_DIR_DX[dir];
+        let front_y = state.y + MON_DIR_DY[dir];
+        let mut nearby: Vec<(u32, Option<u64>)> = Vec::new(); // (corpse_id, exp_owner)
+        for d in 0..=1i32 {
+            for y in (front_y - d)..=(front_y + d) {
+                for x in (front_x - d)..=(front_x + d) {
+                    if let Some((oid, c)) = self.corpses.iter().find(|(_, c)| c.map_index == state.map_index && c.x == x && c.y == y) {
+                        nearby.push((*oid, c.exp_owner_session));
+                    }
+                }
+            }
+        }
+        if nearby.is_empty() {
+            return false;
+        }
+        let mut denied_owner = false;
+        for (cid, owner) in nearby {
+            if let Some(owner) = owner {
+                if owner != session_id {
+                    // C# IsMember：EXPOwner 为同组成员可采集
+                    let is_member = if let Some(gid) = state.group_id {
+                        let mut member = false;
+                        if let Some(record) = self.players.get(&owner) {
+                            if let Ok(Some(os)) = record.actor_ref.ask(GetPlayerState).await {
+                                member = os.group_id == Some(gid);
+                            }
+                        }
+                        member
+                    } else {
+                        false
+                    };
+                    if !is_member {
+                        denied_owner = true;
+                        continue;
+                    }
+                }
+            }
+            self.harvest_corpse(session_id, cid).await;
+            return true;
+        }
+        if denied_owner {
+            // C#：附近有归属他人尸体 → 提示（Harvest 已消耗）
+            send_system_message(&self.gate_ref, session_id, "附近没有可采集的猎物");
+        }
+        true
+    }
+
+    /// C# HarvestMonster.Harvest（:24-92）：剥皮 2 次 → 生成掉落 → 发放/完成
+    async fn harvest_corpse(&mut self, session_id: u64, corpse_id: u32) {
+        let Some((x, y, map_index, direction)) = self.corpses.get(&corpse_id).map(|c| (c.x, c.y, c.map_index, c.direction)) else { return };
+        let remaining_skins = self.corpses.get(&corpse_id).map(|c| c.remaining_skins).unwrap_or(0);
+        if remaining_skins > 0 {
+            let new_remaining = remaining_skins - 1;
+            if new_remaining == 0 {
+                // 最后一次剥皮：生成采集掉落（C# RemainingSkinCount-- 至 0 → _drops）
+                let drops = self.roll_harvest_drops_for_corpse(corpse_id).await;
+                let empty = drops.is_empty();
+                if let Some(c) = self.corpses.get_mut(&corpse_id) {
+                    c.remaining_skins = 0;
+                    c.drops = drops;
+                }
+                if empty {
+                    // C#：无掉落 → NothingWasFound + ObjectHarvested + Harvested
+                    send_system_message(&self.gate_ref, session_id, "什么也没找到");
+                    self.broadcast_object_harvested(corpse_id, x, y, map_index, direction).await;
+                    self.corpses.remove(&corpse_id);
+                    let remove_packet = Self::build_object_remove_packet(corpse_id);
+                    broadcast_to_map(&self.gate_ref, &self.players, map_index, &remove_packet).await;
+                }
+            } else {
+                if let Some(c) = self.corpses.get_mut(&corpse_id) {
+                    c.remaining_skins = new_remaining;
+                }
+            }
+            return;
+        }
+        // 发放已生成掉落（C#：逐件 CanGainItem/GainItem；背包满停止）
+        let mut granted_all = true;
+        loop {
+            let next = self.corpses.get(&corpse_id).and_then(|c| c.drops.first().cloned());
+            let Some(item) = next else { break };
+            if self.grant_item_to_player(session_id, item.clone()).await {
+                if let Some(c) = self.corpses.get_mut(&corpse_id) {
+                    c.drops.remove(0);
+                }
+            } else {
+                granted_all = false;
+                break;
+            }
+        }
+        if granted_all {
+            self.corpses.remove(&corpse_id);
+            self.broadcast_object_harvested(corpse_id, x, y, map_index, direction).await;
+            let remove_packet = Self::build_object_remove_packet(corpse_id);
+            broadcast_to_map(&self.gate_ref, &self.players, map_index, &remove_packet).await;
+        } else {
+            send_system_message(&self.gate_ref, session_id, "背包已满，无法继续采集");
+        }
+    }
+
+    /// 发放采集物品（C# CanGainItem/GainItem；QuestRequired 已在 roll 阶段跳过）
+    async fn grant_item_to_player(&mut self, session_id: u64, item: mir2_shared::data::item::UserItem) -> bool {
+        let Some(record) = self.players.get(&session_id) else { return false };
+        let can = record.actor_ref.ask(crate::actors::player::CanGainItems).await.unwrap_or(false);
+        if !can {
+            return false;
+        }
+        record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false)
+    }
+
+    /// C# HarvestMonster.Harvest 掉落生成：按怪物掉落表 + EXPOwner 掉率加成
+    async fn roll_harvest_drops_for_corpse(&mut self, corpse_id: u32) -> Vec<mir2_shared::data::item::UserItem> {
+        let Some(corpse) = self.corpses.get(&corpse_id).cloned() else { return Vec::new() };
+        let Some(drops) = self.monster_drops.get(&corpse.monster_index).cloned() else { return Vec::new() };
+        let mut item_drop_pct = 0i32;
+        if let Some(owner) = corpse.exp_owner_session {
+            if let Some(record) = self.players.get(&owner) {
+                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                    item_drop_pct = st.item_drop_rate_percent;
+                }
+            }
+        }
+        let rolled = roll_harvest_drops(&drops, self.drop_rate, item_drop_pct);
+        let mut out = Vec::new();
+        for (item_index, count) in rolled {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index,
+                unique_id: generate_item_uid(),
+                count,
+                ..Default::default()
+            };
+            if let Some(info) = self.item_infos.get(&item_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            enrich_item_info(&mut item, &self.item_infos);
+            out.push(item);
+        }
+        out
+    }
+}
+
+/// C# HarvestMonster.Harvest AttemptDrop：逐条 roll（跳过 QuestRequired/组子条目/金币；Meat Quality 简化 0）
+pub(crate) fn roll_harvest_drops(
+    drops: &[crate::db::MonsterDropInfo],
+    drop_rate: f64,
+    item_drop_pct: i32,
+) -> Vec<(i32, u16)> {
+    let mut out = Vec::new();
+    let factor = 1.0 + item_drop_pct as f64 / 100.0;
+    for drop in drops {
+        if drop.quest_required || drop.group_parent_id != 0 || drop.gold > 0 {
+            continue;
+        }
+        let chance = (drop.chance * drop_rate * factor).min(1.0);
+        if fastrand::f64() > chance {
+            continue;
+        }
+        let count = if drop.max_count > drop.min_count {
+            fastrand::u16(drop.min_count..=drop.max_count)
+        } else {
+            drop.min_count
+        };
+        out.push((drop.item_index, count));
+    }
+    out
+}
+
 /// 采集请求（从 GateActor 转发）
 pub struct HarvestRequest {
     pub session_id: u64,
@@ -1185,6 +1365,10 @@ impl Message<HarvestRequest> for WorldActor {
         self.last_harvest_ms.insert(msg.session_id, now_ms);
 
         let dir = msg.direction as usize % 8;
+        // #2108：C# PlayerObject.Harvest——优先尸体采集（前方 3×3），无尸体回退采矿
+        if self.try_harvest_corpse(msg.session_id, &state, dir).await {
+            return;
+        }
         let target_x = state.x + MON_DIR_DX[dir];
         let target_y = state.y + MON_DIR_DY[dir];
 
@@ -5599,6 +5783,21 @@ fn best_dir(dx: i32, dy: i32) -> usize {
 #[cfg(test)]
 mod spell_geometry_tests {
     use super::*;
+
+    #[test]
+    fn roll_harvest_drops_forces_and_skips() {
+        // C# HarvestMonster.AttemptDrop：必中/必不中/QuestRequired 跳过
+        let drops = vec![
+            crate::db::MonsterDropInfo { id: 1, monster_index: 1, item_index: 100, min_count: 2, max_count: 2, chance: 1.0, gold: 0, quest_required: false, group_parent_id: 0, group_random: false, group_first: false },
+            crate::db::MonsterDropInfo { id: 2, monster_index: 1, item_index: 101, min_count: 1, max_count: 1, chance: 0.0, gold: 0, quest_required: false, group_parent_id: 0, group_random: false, group_first: false },
+            crate::db::MonsterDropInfo { id: 3, monster_index: 1, item_index: 102, min_count: 1, max_count: 1, chance: 1.0, gold: 0, quest_required: true, group_parent_id: 0, group_random: false, group_first: false },
+            crate::db::MonsterDropInfo { id: 4, monster_index: 1, item_index: 103, min_count: 1, max_count: 1, chance: 1.0, gold: 500, quest_required: false, group_parent_id: 0, group_random: false, group_first: false },
+            crate::db::MonsterDropInfo { id: 5, monster_index: 1, item_index: 104, min_count: 1, max_count: 1, chance: 1.0, gold: 0, quest_required: false, group_parent_id: 1, group_random: false, group_first: false },
+        ];
+        let rolled = roll_harvest_drops(&drops, 1.0, 0);
+        assert_eq!(rolled.len(), 1);
+        assert_eq!(rolled[0], (100, 2));
+    }
 
     #[test]
     fn flashdash_jump_distance_matches_csharp() {
