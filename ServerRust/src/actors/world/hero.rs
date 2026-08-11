@@ -1291,7 +1291,19 @@ impl WorldActor {
                                 }
                             }
                         }
-                        let skill = hero_warrior_melee_skill(&snap.hero_magics);
+                        let mut skill = hero_warrior_melee_skill(&snap.hero_magics);
+                        // C# HumanObject.cs:2929-2949：HalfMoon/CrossHalfMoon/TwinDrakeBlade 消耗 MP，蓝不足降级普攻；
+                        // Thrusting/FlamingSword/Slaying 无 cost 分支（不扣蓝，保持现状）
+                        if let Some((s, _)) = skill {
+                            if matches!(s, Spell::HalfMoon | Spell::CrossHalfMoon | Spell::TwinDrakeBlade) {
+                                let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, s as u8);
+                                if ai_local.mp >= cost {
+                                    ai_local.mp -= cost;
+                                } else {
+                                    skill = None;
+                                }
+                            }
+                        }
                         let spell_id = skill.map(|(s, _)| s as u8).unwrap_or(Spell::None as u8);
                         // C# 主击伤害 = magic.GetDamage(damageBase)（FlamingSword/TwinDrakeBlade）；
                         // Slaying/HalfMoon/CrossHalfMoon/None 主击 = base（C# damageFinal 保持 damageBase）
@@ -1363,13 +1375,21 @@ impl WorldActor {
                         let raw = hero_attack_power(&hero_combat);
                         let ds_lv = hero_magic_level(&snap.hero_magics, Spell::DoubleSlash as u8);
                         if ds_lv > 0 {
-                            let cs = (Spell::DoubleSlash as i32).saturating_sub(3);
-                            let dmg = self.magic_infos.get(&(cs as u32))
-                                .map(|info| crate::combat::magic::calc_magic_damage(info, ds_lv, raw))
-                                .unwrap_or(raw);
-                            attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::MacAgility, false));
-                            attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Agility, false));
-                            support_intents.push((snap.session_id, 0, Spell::DoubleSlash as u8, false));
+                            // C# HumanObject.cs:2909-2918：DoubleSlash 消耗 MP，蓝不足降级普攻
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::DoubleSlash as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                let cs = (Spell::DoubleSlash as i32).saturating_sub(3);
+                                let dmg = self.magic_infos.get(&(cs as u32))
+                                    .map(|info| crate::combat::magic::calc_magic_damage(info, ds_lv, raw))
+                                    .unwrap_or(raw);
+                                attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::MacAgility, false));
+                                attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Agility, false));
+                                support_intents.push((snap.session_id, 0, Spell::DoubleSlash as u8, false));
+                            } else {
+                                attack_intents.push((snap.session_id, target.oid, raw, DefenceType::AcAgility, false));
+                                support_intents.push((snap.session_id, 0, Spell::None as u8, false));
+                            }
                         } else {
                             attack_intents.push((snap.session_id, target.oid, raw, DefenceType::AcAgility, false));
                             support_intents.push((snap.session_id, 0, Spell::None as u8, false));
