@@ -616,8 +616,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             }
         }
         x if x == ServerPacketIds::MailSendRequest as i16 => {
-            if let Ok(p) = mail_system::MailSendRequest::read_body(&mut cur) {
-                tracing::debug!("📧 邮件发送请求 id={}", p.mail_id);
+            // C#：空包（打开写信框）
+            if mail_system::MailSendRequest::read_body(&mut cur).is_ok() {
+                tracing::debug!("📧 邮件发送请求（打开写信框）");
             }
         }
         x if x == ServerPacketIds::MailSent as i16 => {

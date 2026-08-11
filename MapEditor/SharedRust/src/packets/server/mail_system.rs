@@ -140,32 +140,24 @@ impl Packet for MailLockedItem {
 
 /// MailSendRequest - 邮件发送请求 (231)
 #[derive(Debug, Clone)]
-pub struct MailSendRequest {
-    pub mail_id: u64,              // 邮件ID
-}
+pub struct MailSendRequest; // C# ServerPackets.cs：空包（打开写信框）
 
 impl Packet for MailSendRequest {
     const OPCODE: i16 = ServerPacketIds::MailSendRequest as i16;
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        
-        writer.write_u64::<LittleEndian>(self.mail_id)?;
-        
+    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
         Ok(())
     }
 
-    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let mail_id = reader.read_u64::<LittleEndian>()?;
-        Ok(Self { mail_id })
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(Self)
     }
 }
 
 /// MailSent - 邮件已发送 (232)
 #[derive(Debug, Clone)]
-pub struct MailSent {
-    pub mail_id: u64,              // 邮件ID
-    pub result: u8,                 // 发送结果
+pub struct MailSent { // C# ServerPackets.cs：Result(sbyte)，无 mail_id
+    pub result: i8,
 }
 
 impl Packet for MailSent {
@@ -173,17 +165,15 @@ impl Packet for MailSent {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        writer.write_u64::<LittleEndian>(self.mail_id)?;
-        writer.write_u8(self.result)?;
-        
+
+        writer.write_i8(self.result)?;
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let mail_id = reader.read_u64::<LittleEndian>()?;
-        let result = reader.read_u8()?;
-        Ok(Self { mail_id, result })
+        let result = reader.read_i8()?;
+        Ok(Self { result })
     }
 }
 

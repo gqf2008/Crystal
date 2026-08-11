@@ -1,6 +1,15 @@
 use super::*;
 
 /// 发送邮件
+/// S.MailSent：Result(sbyte)（C# SendMail：1=成功，-1=失败）
+fn send_mail_sent_result(gate_ref: &ActorRef<GateActor>, session_id: u64, result: i8) {
+    let body = vec![result as u8];
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MailSent as i16, &body),
+    }).try_send();
+}
+
 pub struct SendMailRequest {
     pub session_id: u64,
     pub receiver_name: String,
@@ -95,22 +104,26 @@ impl Message<SendMailRequest> for WorldActor {
             .unwrap_or(0);
         if let Some(last) = self.last_mail_time.get(&msg.session_id).copied() {
             if now_ms - last < 10_000 {
+                send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
                 send_system_message(&self.gate_ref, msg.session_id, "发送邮件过于频繁，请稍后再试");
                 return;
             }
         }
 
         if msg.receiver_name == sender_state.name {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "不能给自己发送邮件");
             return;
         }
 
         // #2008：C# PlayerObject.SendMail（11737-11749）——消息>500 拒绝；收件人不存在拒绝
         if msg.body.len() > 500 {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "邮件内容过长（最多 500 字）");
             return;
         }
         if !db::character_exists_by_name(&self.db_pool, &msg.receiver_name).await.unwrap_or(false) {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "找不到该玩家");
             return;
         }
@@ -132,11 +145,13 @@ impl Message<SendMailRequest> for WorldActor {
                 .map(|m| m.inbox.len()).unwrap_or(0);
         }
         if recipient_mail_count > 50 {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "对方邮箱已满");
             return;
         }
         // #2044：C# CannotMailPlayerOnBlacklist——发送者拉黑收件人
         if sender_state.friend_list.is_blocked_name(&msg.receiver_name) {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "你已将该玩家加入黑名单，无法发送");
             return;
         }
@@ -145,6 +160,7 @@ impl Message<SendMailRequest> for WorldActor {
             .map(|fl| fl.is_blocked(sender_state.object_id))
             .unwrap_or(false);
         if receiver_blocked {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "对方不接受你的邮件");
             return;
         }
@@ -158,6 +174,7 @@ impl Message<SendMailRequest> for WorldActor {
                 .map(|it| super::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_TRADE.bits()))
                 .unwrap_or(false);
             if super::has_bind_flag(bind, 16) || super::has_bind_flag(bind, 16384) || rental_dont_trade {
+                send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法邮寄");
                 return;
             }
@@ -190,6 +207,7 @@ impl Message<SendMailRequest> for WorldActor {
         // 检查金币是否足够（附件金币 + 寄送费用）
         let total_gold = msg.gold as u64;
         if sender_state.inventory.gold < total_gold + mail_cost {
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "金币不足（含寄送费用）");
             return;
         }
@@ -251,6 +269,7 @@ impl Message<SendMailRequest> for WorldActor {
             // 收件人不在线，保存到数据库
             if let Err(e) = db::insert_mail(&self.db_pool, &msg.receiver_name, &mail).await {
                 warn!("Failed to save offline mail for {}: {}", msg.receiver_name, e);
+                send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
                 send_system_message(&self.gate_ref, msg.session_id, "邮件发送失败，请稍后重试");
                 return;
             }
@@ -258,6 +277,8 @@ impl Message<SendMailRequest> for WorldActor {
         }
 
         self.last_mail_time.insert(msg.session_id, now_ms);
+        // C# SendMail（:11844）：成功发 S.MailSent { Result = 1 }
+        send_mail_sent_result(&self.gate_ref, msg.session_id, 1);
         send_system_message(&self.gate_ref, msg.session_id, "邮件已发送");
     }
 }
