@@ -8613,6 +8613,89 @@ async fn spawn_conquest_flags(
     out
 }
 
+/// 领地上全部旗子实体（会话 → object_id）——易主广播目标（C# ConquestGuildFlagInfo.Broadcast）
+fn conquest_flag_update_targets(flags: &HashMap<u32, ConquestFlagNpc>, conquest_id: i32) -> Vec<(u64, u32)> {
+    flags.iter()
+        .filter(|(_, f)| f.conquest_id == conquest_id)
+        .map(|(oid, f)| (f.session_id, *oid))
+        .collect()
+}
+
+/// 同图 DataRange(16) 内（除自己）接收行会名更新的会话（C# Functions.InRange 切比雪夫）
+fn nearby_guild_name_targets(
+    member_sid: u64,
+    member_x: i32,
+    member_y: i32,
+    map_index: i32,
+    players: &[(u64, i32, i32, i32, Option<String>, u32)], // (sid, map, x, y, guild, object_id)
+) -> Vec<u64> {
+    players.iter()
+        .filter(|(sid, pmap, px, py, _, _)| {
+            *sid != member_sid
+                && *pmap == map_index
+                && (member_x - px).abs().max((member_y - py).abs()) <= 16
+        })
+        .map(|(sid, _, _, _, _, _)| *sid)
+        .collect()
+}
+
+impl WorldActor {
+    /// 领地易主：旗子外观更新广播（C# ConquestGuildFlagInfo.UpdateImage/UpdateColour
+    /// → NPCImageUpdate；per-session 定向下发并同步运行时外观）
+    async fn broadcast_conquest_flag_updates(&mut self, conquest_id: i32) {
+        use mir2_shared::packets::server::npc_interaction::NPCImageUpdate;
+        let Some(inst) = self.conquest_instances.iter().find(|c| c.id == conquest_id) else { return };
+        let (image, colour) = conquest::conquest_flag_appearance(inst);
+        let targets = conquest_flag_update_targets(&self.conquest_flags, conquest_id);
+        for (session_id, object_id) in targets {
+            if let Some(flag) = self.conquest_flags.get_mut(&object_id) {
+                flag.image = image;
+                flag.colour = colour;
+            }
+            let pkt = NPCImageUpdate { npc_id: object_id, image, colour };
+            let mut buf = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut buf), &pkt,
+            ).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient { session_id, data: buf }).await;
+            }
+        }
+    }
+
+    /// 领地易主：行会成员名字标签广播（C# ConquestObject.UpdatePlayers → BroadcastGuildName：
+    /// 同图 DataRange(16) 内除自己下发 ObjectGuildNameChanged）
+    async fn broadcast_conquest_guild_name_changed(&mut self, guild_name: &str, map_index: i32) {
+        use mir2_shared::packets::server::buff::ObjectGuildNameChanged;
+        // 收集同图玩家状态（避免多次 ask）；元组 = (sid, map, x, y, guild, object_id)
+        let mut players: Vec<(u64, i32, i32, i32, Option<String>, u32)> = Vec::new();
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                players.push((*sid, s.map_index as i32, s.x, s.y, s.guild_name.clone(), s.object_id));
+            }
+        }
+        for (sid, pmap, x, y, guild, object_id) in &players {
+            // C# BroadcastGuildName 以成员所在图 Players 为范围：异图成员不触发广播
+            if *pmap != map_index || guild.as_deref() != Some(guild_name) {
+                continue;
+            }
+            let targets = nearby_guild_name_targets(*sid, *x, *y, map_index, &players);
+            if targets.is_empty() {
+                continue;
+            }
+            let pkt = ObjectGuildNameChanged { object_id: *object_id, guild_name: guild_name.to_string() };
+            let mut buf = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut buf), &pkt,
+            ).is_err() {
+                continue;
+            }
+            for target_sid in targets {
+                let _ = self.gate_ref.tell(SendToClient { session_id: target_sid, data: buf.clone() }).await;
+            }
+        }
+    }
+}
+
 fn drop_count_multiplier(is_boss: bool, is_elite: bool) -> u16 {
     if is_boss { 3 } else if is_elite { 2 } else { 1 }
 }
@@ -9365,6 +9448,65 @@ mod tests {
         assert_eq!(pkt.location_y, 20);
         assert_eq!(pkt.direction, mir2_shared::enums::MirDirection::Up);
         assert!(pkt.quest_ids.is_empty());
+    }
+
+    /// 易主广播目标：仅命中指定领地旗子（C# ConquestGuildFlagInfo.Broadcast）
+    #[test]
+    fn test_conquest_flag_update_targets() {
+        let mut flags = HashMap::new();
+        flags.insert(1, ConquestFlagNpc {
+            object_id: 1, session_id: 100, map_index: 0, conquest_id: 1, flag_index: 1,
+            image: 1000, colour: 0, name: "旗子A".to_string(), x: 0, y: 0,
+        });
+        flags.insert(2, ConquestFlagNpc {
+            object_id: 2, session_id: 200, map_index: 0, conquest_id: 2, flag_index: 1,
+            image: 1000, colour: 0, name: "旗子B".to_string(), x: 0, y: 0,
+        });
+        let mut targets = conquest_flag_update_targets(&flags, 1);
+        targets.sort();
+        assert_eq!(targets, vec![(100, 1)]);
+        assert!(conquest_flag_update_targets(&flags, 3).is_empty());
+    }
+
+    /// 同图 DataRange(16) 内（除自己）行会名广播目标（C# BroadcastGuildName）
+    #[test]
+    fn test_nearby_guild_name_targets() {
+        // (sid, map, x, y, guild, object_id)
+        let players: Vec<(u64, i32, i32, i32, Option<String>, u32)> = vec![
+            (1, 0, 100, 100, Some("行会A".to_string()), 1001), // 成员自己
+            (2, 0, 110, 100, None, 1002),                        // 同图 10 格内 → 目标
+            (3, 0, 200, 100, None, 1003),                        // 同图 100 格外 → 不广播
+            (4, 1, 100, 100, None, 1004),                        // 异图 → 不广播
+        ];
+        let targets = nearby_guild_name_targets(1, 100, 100, 0, &players);
+        assert_eq!(targets, vec![2]);
+    }
+
+    /// 易主广播包线格式（C# ServerPackets.cs）回读校验
+    #[test]
+    fn test_conquest_broadcast_packets_wire() {
+        use mir2_shared::packets::base::serialize_packet;
+        use mir2_shared::packets::server::buff::ObjectGuildNameChanged;
+        use mir2_shared::packets::server::npc_interaction::NPCImageUpdate;
+        // NPCImageUpdate：ObjectID + Image + Colour
+        let mut buf = Vec::new();
+        serialize_packet(&mut std::io::Cursor::new(&mut buf), &NPCImageUpdate {
+            npc_id: 7, image: 1000, colour: 0x00FF0000,
+        }).unwrap();
+        let mut cur = std::io::Cursor::new(&buf[4..]);
+        let pkt = NPCImageUpdate::read_body(&mut cur).unwrap();
+        assert_eq!(pkt.npc_id, 7);
+        assert_eq!(pkt.image, 1000);
+        assert_eq!(pkt.colour, 0x00FF0000);
+        // ObjectGuildNameChanged：ObjectID + GuildName
+        let mut buf2 = Vec::new();
+        serialize_packet(&mut std::io::Cursor::new(&mut buf2), &ObjectGuildNameChanged {
+            object_id: 9, guild_name: "沙巴克".to_string(),
+        }).unwrap();
+        let mut cur2 = std::io::Cursor::new(&buf2[4..]);
+        let pkt2 = ObjectGuildNameChanged::read_body(&mut cur2).unwrap();
+        assert_eq!(pkt2.object_id, 9);
+        assert_eq!(pkt2.guild_name, "沙巴克");
     }
 
 }
