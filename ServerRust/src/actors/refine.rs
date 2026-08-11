@@ -3,6 +3,7 @@
 
 /// 精炼状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum RefineStatus {
     None = 0,
     Pending = 1,    // 等待精炼完成
@@ -12,6 +13,7 @@ pub enum RefineStatus {
 
 /// 正在精炼的物品
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct RefiningItem {
     /// 原始物品唯一 ID（背包中的 unique_id）
     pub original_uid: u64,
@@ -31,6 +33,7 @@ pub struct RefiningItem {
 
 /// 精炼日志（每个玩家一个）
 #[derive(Debug, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct RefineLog {
     /// 当前正在精炼的物品
     pub active_refine: Option<RefiningItem>,

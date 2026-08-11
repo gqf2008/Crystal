@@ -10,6 +10,7 @@ use mir2_shared::enums::PoisonType;
 
 /// 一条中毒/负面状态实例
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Poison {
     pub p_type: PoisonType,
     /// 持续时间（秒）

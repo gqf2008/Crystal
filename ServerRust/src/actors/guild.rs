@@ -3,6 +3,7 @@
 
 /// 行会成员 rank
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum GuildRank {
     Leader = 0,
     Officer = 1,

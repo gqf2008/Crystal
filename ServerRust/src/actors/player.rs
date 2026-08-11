@@ -45,6 +45,7 @@ const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
 /// 玩家状态
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct PlayerState {
     /// 唯一对象 ID
     pub object_id: u32,

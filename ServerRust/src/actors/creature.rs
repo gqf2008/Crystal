@@ -151,6 +151,7 @@ impl IntelligentCreature {
 
 /// 玩家宠物信息
 #[derive(Debug, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct CreatureLog {
     /// 当前激活的宠物
     pub active_creature: Option<IntelligentCreature>,

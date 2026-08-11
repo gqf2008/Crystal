@@ -912,6 +912,15 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         )"#
     ).execute(&pool).await?;
 
+    // GM 角色存档（C# Envir.SaveArchivedCharacter；PlayerState JSON 快照）
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS player_archives (
+            character_name TEXT PRIMARY KEY,
+            archived_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT 0
+        )"#
+    ).execute(&pool).await?;
+
     info!("SQLite database initialized: {}", db_url);
     Ok(pool)
 }
@@ -990,6 +999,25 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             .execute(&pool).await.unwrap();
         let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
         assert!(removed.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_player_archives_roundtrip() {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS player_archives (character_name TEXT PRIMARY KEY, archived_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0)")
+            .execute(&pool).await.unwrap();
+
+        archive_player_json(&pool, "Hero", r#"{"level":30}"#).await.unwrap();
+        let loaded = load_archived_player_json(&pool, "Hero").await.unwrap();
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap(), r#"{"level":30}"#);
+
+        // 同名覆盖
+        archive_player_json(&pool, "Hero", r#"{"level":31}"#).await.unwrap();
+        let loaded = load_archived_player_json(&pool, "Hero").await.unwrap();
+        assert_eq!(loaded.unwrap(), r#"{"level":31}"#);
+
+        assert!(load_archived_player_json(&pool, "None").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -2746,6 +2774,41 @@ pub(crate) async fn load_player_pets(
         });
     }
     Ok(pets)
+}
+
+/// GM @BACKUPPLAYER：角色状态 JSON 存档（C# Envir.SaveArchivedCharacter；同名覆盖）
+/// 由调用方（WorldActor GM 命令）序列化 PlayerState 为 JSON 后传入
+pub(crate) async fn archive_player_json(
+    pool: &DbPool,
+    character_name: &str,
+    json: &str,
+) -> anyhow::Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    sqlx::query(
+        "INSERT INTO player_archives (character_name, archived_json, created_at) VALUES (?, ?, ?) ON CONFLICT(character_name) DO UPDATE SET archived_json = excluded.archived_json, created_at = excluded.created_at"
+    )
+    .bind(character_name)
+    .bind(json)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 读取角色存档 JSON（C# Envir.GetArchivedCharacter）
+pub(crate) async fn load_archived_player_json(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Option<String>> {
+    let row = sqlx::query("SELECT archived_json FROM player_archives WHERE character_name = ?")
+        .bind(character_name)
+        .fetch_optional(pool)
+        .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(row.get("archived_json")))
 }
 
 async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {

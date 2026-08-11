@@ -56,6 +56,7 @@ pub const QUEST_INVENTORY_SIZE: usize = 40;
 
 /// 背包中的物品格子
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct InventorySlot {
     pub grid: u8,
     pub item: UserItem,
@@ -84,6 +85,7 @@ pub const STORAGE_SIZE: usize = 80;
 
 /// 玩家背包 + 装备 + 仓库
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct PlayerInventory {
     /// 金币
     pub gold: u64,
