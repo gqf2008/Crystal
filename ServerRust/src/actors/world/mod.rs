@@ -109,6 +109,8 @@ pub struct WorldActorArgs {
     pub item_timeout_ticks: u64,
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
     pub max_drop_gold: u32,
+    /// 金币是否落地（C# Settings.DropGold = true：落地；false：直接进击杀者背包并按组队平分）
+    pub drop_gold: bool,
     /// 精英怪配置（C# Settings.MonsterRarity*）
     pub rarity_cfg: crate::util::config::RarityConfig,
     /// 服务器公告文件路径（C# Settings.NoticePath）
@@ -1061,6 +1063,8 @@ pub struct WorldActor {
     pub(crate) item_timeout_ticks: u64,
     /// 金币掉落每堆上限
     pub(crate) max_drop_gold: u32,
+    /// 金币是否落地（C# Settings.DropGold；false 时直接进击杀者背包）
+    pub(crate) drop_gold: bool,
     /// 精英怪配置
     pub(crate) rarity_cfg: crate::util::config::RarityConfig,
     /// 服务器公告文件路径（C# Settings.NoticePath）
@@ -1450,6 +1454,7 @@ impl WorldActor {
             exp_rate: 1.0,
             item_timeout_ticks: 600,
             max_drop_gold: 2000,
+            drop_gold: true,
             rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
             death_exp_penalty_percent: 0,
@@ -2181,6 +2186,71 @@ impl WorldActor {
 
     /// 怪物死亡时生成掉落并广播给所有在线玩家
     /// 金币拆堆落地（C# DropGold：每堆 ≤ Settings.MaxDropGold，超出拆多堆）
+    /// C# WinGold 平分：count==0 或 count>gold → None（击杀者独得）；否则 Some(gold/count)
+    fn party_gold_share(gold: u64, count: usize) -> Option<u64> {
+        if count == 0 || (count as u64) > gold {
+            None
+        } else {
+            Some(gold / count as u64)
+        }
+    }
+
+    /// C# PlayerObject.WinGold：金币直接进击杀者（同组同图 DataRange(16) 未死成员平分）
+    /// 返回是否已直接发放（false 表示击杀者金币上限不足/无击杀者 → 走落地路径）
+    async fn win_gold(&mut self, killer_session: u64, gold: u64, map_index: u16, x: i32, y: i32) -> bool {
+        let Some(killer) = self.players.get(&killer_session).cloned() else { return false };
+        let Ok(Some(killer_state)) = killer.actor_ref.ask(GetPlayerState).await else { return false };
+        // C# MonsterObject.DropGold：EXPOwner.CanGainGold(gold) 不满足 → 落地
+        let can_gain = killer.actor_ref.ask(crate::actors::player::CanGainGold {
+            amount: gold.min(u32::MAX as u64) as u32,
+        }).await.unwrap_or(false);
+        if !can_gain { return false; }
+
+        let mut members: Vec<u64> = Vec::new();
+        if let Some(gid) = killer_state.group_id {
+            for (sid, r) in &self.players {
+                if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                    if st.group_id == Some(gid) && st.map_index == map_index
+                        && crate::actors::world::ai::max_distance(st.x, st.y, x, y) <= 16 && !st.is_dead
+                    {
+                        members.push(*sid);
+                    }
+                }
+            }
+        } else {
+            members.push(killer_session);
+        }
+        if members.is_empty() {
+            members.push(killer_session);
+        }
+        match Self::party_gold_share(gold, members.len()) {
+            Some(share) => {
+                for sid in &members {
+                    if let Some(r) = self.players.get(sid) {
+                        let _ = r.actor_ref.ask(crate::actors::player::AddGold { amount: share }).await;
+                    }
+                }
+            }
+            None => {
+                // C# WinGold：count==0 或 count>gold → 击杀者独得
+                let _ = killer.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
+            }
+        }
+        true
+    }
+
+    /// #2030：C# MonsterObject.DropGold——Settings.DropGold=false 且击杀者可收时直发（WinGold），否则落地
+    pub(crate) async fn give_monster_gold(&mut self, monster: &MonsterState, gold: u64) {
+        if !self.drop_gold {
+            if let Some(killer) = monster.last_hitter_session {
+                if self.win_gold(killer, gold, monster.map_index, monster.x, monster.y).await {
+                    return;
+                }
+            }
+        }
+        self.spawn_gold_drop(monster, gold).await;
+    }
+
     pub(crate) async fn spawn_gold_drop(&mut self, monster: &MonsterState, gold: u64) {
         let drop_oid = self.alloc_object_id();
         // 对齐 C# Settings.MaxDropGold：每堆金币 ≤ max_drop_gold，超过拆成多堆
@@ -2228,7 +2298,7 @@ impl WorldActor {
     pub(crate) async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
         if item_index == 0 {
             // 金币：按 Settings.MaxDropGold 拆堆落地（C# DropGold）
-            self.spawn_gold_drop(monster, count as u64).await;
+            self.give_monster_gold(monster, count as u64).await;
             return;
         }
         let drop_oid = self.alloc_object_id();
@@ -2464,7 +2534,7 @@ impl WorldActor {
                         // C# ApplyGoldModifier：精英 GoldMultiplier=2.5 最后应用
                         let rarity_gold_mul = if monster.is_elite { self.rarity_cfg.elite_gold_multiplier } else { 1.0 };
                         let gold = (gold_raw as f64 * global_gold_mul * rarity_gold_mul).round() as u64;
-                        self.spawn_gold_drop(monster, gold).await;
+                        self.give_monster_gold(monster, gold).await;
                     } else {
                         let ccount = if child.max_count > child.min_count {
                             fastrand::u16(child.min_count..=child.max_count)
@@ -2487,7 +2557,7 @@ impl WorldActor {
                 // C# ApplyGoldModifier：精英 GoldMultiplier=2.5 最后应用
                 let rarity_gold_mul = if monster.is_elite { self.rarity_cfg.elite_gold_multiplier } else { 1.0 };
                 let gold = (gold_raw as f64 * global_gold_mul * rarity_gold_mul).round() as u64;
-                self.spawn_gold_drop(monster, gold).await;
+                self.give_monster_gold(monster, gold).await;
                 continue;
             }
             let count = if drop.max_count > drop.min_count {
@@ -2511,7 +2581,7 @@ impl WorldActor {
             // #1000：装备 GoldDropRatePercent 对 Boss 金币同样生效
             let gold_factor = 1.0 + gold_drop_pct / 100.0;
             let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul * gold_factor).round() as u64;
-            self.spawn_gold_drop(monster, gold_drop).await;
+            self.give_monster_gold(monster, gold_drop).await;
             for drop in &drops {
                 // #1002：组合条目（父/子）不在额外循环处理
                 if drop.group_parent_id != 0 || drop.group_random || drop.group_first {
@@ -4599,6 +4669,7 @@ impl Actor for WorldActor {
             experience_list: args.experience_list,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
+            drop_gold: args.drop_gold,
             rarity_cfg: args.rarity_cfg,
             notice_path: args.notice_path.clone(),
             death_exp_penalty_percent: args.death_exp_penalty_percent,
@@ -7795,6 +7866,15 @@ mod tests {
         assert!(!guild_enemy_attackable(None, Some("B"), &wars));
         assert!(!guild_enemy_attackable(Some("A"), None, &wars));
         assert!(!guild_enemy_attackable(Some("A"), Some("A"), &wars));
+    }
+
+    #[test]
+    fn party_gold_share_matches_csharp() {
+        // #2030：C# WinGold——count==0 或 count>gold → 击杀者独得；否则平分向下取整
+        assert_eq!(WorldActor::party_gold_share(100, 0), None);
+        assert_eq!(WorldActor::party_gold_share(3, 5), None);
+        assert_eq!(WorldActor::party_gold_share(100, 4), Some(25));
+        assert_eq!(WorldActor::party_gold_share(101, 4), Some(25));
     }
 
     #[test]

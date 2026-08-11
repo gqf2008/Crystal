@@ -170,6 +170,7 @@ async fn async_main() -> anyhow::Result<()> {
         guild_buff_infos: guild_buff_infos.clone(),
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,
+        drop_gold: cfg.server.drop_gold,
         rarity_cfg: cfg.server.rarity.clone(),
         notice_path: cfg.server.notice_path.clone(),
         death_exp_penalty_percent: cfg.server.death_exp_penalty_percent,

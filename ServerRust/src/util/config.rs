@@ -337,6 +337,9 @@ pub struct ServerWorldConfig {
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
     #[serde(default = "default_max_drop_gold")]
     pub max_drop_gold: u32,
+    /// 金币是否落地（C# Settings.DropGold = true：落地；false：直接进击杀者背包并按组队平分）
+    #[serde(default = "default_drop_gold")]
+    pub drop_gold: bool,
     /// 服务器公告文件（C# Settings.NoticePath = EnvirPath/Notice.txt；首行 Title=，其余为消息）
     #[serde(default = "default_notice_path")]
     pub notice_path: String,
@@ -379,6 +382,10 @@ fn default_item_timeout() -> u32 {
 
 fn default_max_drop_gold() -> u32 {
     2000
+}
+
+fn default_drop_gold() -> bool {
+    true
 }
 
 fn default_notice_path() -> String {
@@ -563,6 +570,7 @@ impl Default for ServerConfig {
             experience_list: Vec::new(),
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
+                drop_gold: default_drop_gold(),
                 health_regen_weight: default_health_regen_weight(),
                 mana_regen_weight: default_mana_regen_weight(),
                 goods_hide_added_stats: default_goods_hide_added_stats(),
