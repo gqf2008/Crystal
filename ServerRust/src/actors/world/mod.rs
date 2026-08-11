@@ -2510,6 +2510,10 @@ impl WorldActor {
         let hp = pet.hp.max(1);
         let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
         let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+        // C# RefreshAll：按 PetLevel 加成（DC + PetLevel；AC/MAC + PetLevel*2；HP 已随存档）
+        let lv = pet.level.max(1) as i32;
+        let (min_dmg, max_dmg) = (min_dmg + lv, max_dmg + lv);
+        let (min_ac, max_ac, min_mac, max_mac) = (lv * 2, lv * 2, lv * 2, lv * 2);
         // C# Spawn(CurrentMap, Back)：玩家身后 1 格
         let dir = match self.players.get(&session_id) {
             Some(r) => match r.actor_ref.ask(GetPlayerState).await {
@@ -2554,7 +2558,7 @@ impl WorldActor {
             pending_brown_attacker: None,
             min_sc: 0, max_sc: 0, provoked: false,
             is_elite: false, is_boss: false,
-            min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+            min_ac, max_ac, min_mac, max_mac,
             agility: 0, accuracy: 0,
             armour_rate: 1.0, damage_rate: 1.0,
             magic_resist: 0, critical_rate: 0, critical_damage: 0,
@@ -2589,11 +2593,18 @@ impl WorldActor {
     /// 登出持久化驯服宠物（仅保留存活且 master 匹配的；C# Info.Pets 登出保存）
     pub(crate) async fn persist_tamed_pets(&mut self, session_id: u64, player_name: &str) {
         let alive: Vec<TamedPetInfo> = self.tamed_pets.remove(&session_id)
-            .map(|pets| pets.into_iter()
-                .filter(|p| self.monsters.get(&p.object_id)
-                    .map(|m| m.master_session == Some(session_id))
-                    .unwrap_or(false))
-                .collect())
+            .map(|pets| pets.into_iter().filter_map(|mut p| {
+                let m = self.monsters.get(&p.object_id)?;
+                if m.master_session != Some(session_id) {
+                    return None;
+                }
+                // 回写运行数据（C# PetInfo 保存时读 ob.HP/PetExperience/PetLevel/MaxPetLevel）
+                p.hp = m.hp;
+                p.experience = m.pet_experience;
+                p.level = self.pet_levels.get(&p.object_id).copied().unwrap_or(p.level as i32) as u8;
+                p.max_pet_level = m.max_pet_level;
+                Some(p)
+            }).collect())
             .unwrap_or_default();
         if let Err(e) = db::save_player_pets(&self.db_pool, player_name, &alive).await {
             warn!("Failed to save player pets for {}: {}", player_name, e);
