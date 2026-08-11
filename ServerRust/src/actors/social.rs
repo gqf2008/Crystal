@@ -1031,6 +1031,16 @@ impl SocialActor {
         String::new()
     }
 
+    /// #2012：查询玩家是否在安全区（C# InSafeZone；WorldActor IsInSafeZone）
+    async fn is_in_safe_zone(&self, map_index: u16, x: i32, y: i32) -> bool {
+        if let Some(world) = &self.world_ref {
+            if let Ok(safe) = world.ask(crate::actors::world::IsInSafeZone { map_index, x, y }).await {
+                return safe;
+            }
+        }
+        false
+    }
+
     /// #1329：结婚天数（unix 秒 → 整天；C# MarriedDays）
     fn married_days(&self, date_secs: i64) -> i16 {
         if date_secs <= 0 {
@@ -3588,6 +3598,12 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
             Ok(Some(s)) => s, _ => return,
         };
 
+        // #2012：C# GuildStorageItemChange（10134）——type != 3 需在安全区
+        if msg.change_type != 3 && !self.is_in_safe_zone(state.map_index, state.x, state.y).await {
+            send_system_message(&self.gate_ref, msg.session_id, "必须在安全区才能使用行会仓库");
+            return;
+        }
+
         let guild_name = match &state.guild_name {
             Some(n) => n.clone(), None => {
                 send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
@@ -3629,7 +3645,9 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                 let mut deposited = false;
                 if let Some(removed_item) = removed {
                     let item_index = removed_item.item_index;
-                    let slot = guild.deposit_item(removed_item.clone(), msg.count);
+                    // #2012：C# 整件移动——存储数量服务端权威为整叠，忽略客户端 count（防部分存入数量不一致）
+                    let stored_qty = removed_item.count as u32;
+                    let slot = guild.deposit_item(removed_item.clone(), stored_qty);
                     if let Some(slot_val) = slot {
                         send_system_message(&self.gate_ref, msg.session_id, "物品已存入行会仓库");
                         debug!("GuildStorageItem: {} deposited item={} slot={}", state.name, item_index, slot_val);
@@ -3668,6 +3686,13 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     return;
                 }
 
+                // #2012：历史脏数据自愈——存储 qty 与物品实际堆叠数对齐（C# 整件语义）
+                if let Some((item, qty)) = &guild.storage_items[msg.grid as usize] {
+                    if *qty != item.count as u32 {
+                        warn!("GuildStorageItem: 修正脏数据 slot={} qty={} -> {}", msg.grid, qty, item.count);
+                        guild.storage_items[msg.grid as usize] = Some((item.clone(), item.count as u32));
+                    }
+                }
                 let result = guild.withdraw_item(msg.grid);
                 let mut withdrew = false;
                 match result {
