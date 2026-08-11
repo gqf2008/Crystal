@@ -573,6 +573,10 @@ pub struct MonsterState {
     pub master_session: Option<u64>,
     /// 召唤物到期 tick（0=永不过期；>0 时到点自动消失，对齐 C# 召唤时限）
     pub recall_at_tick: u64,
+    /// 是否可召回（C# MonsterInfo.CanRecall：远离目标时传送回目标附近防风筝）
+    pub can_recall: bool,
+    /// 下次召回 tick（C# NextRecallTime；MonsterRecallCooldown=5000ms）
+    pub next_recall_tick: u64,
     /// 宠物经验积累（C# MonsterObject.PetExperience）
     pub pet_experience: u64,
     /// 宠物最大等级（C# MonsterObject.MaxPetLevel）
@@ -3814,6 +3818,8 @@ impl WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                     recall_at_tick: 0,
+                                    can_recall: false,
+                                    next_recall_tick: 0,
                                     behavior: ai::make_behavior(&monster_info.name),
                                 };
                                 self.monsters.insert(boss_oid, boss);
@@ -4096,6 +4102,7 @@ impl WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                         master_session: None, recall_at_tick: 0,
+                                        can_recall: info.can_recall, next_recall_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
                                 }
@@ -4986,6 +4993,8 @@ impl WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                 recall_at_tick: 0,
+                can_recall: info.can_recall,
+                next_recall_tick: 0,
                 behavior: ai::make_behavior(&info.name),
             });
             spawned += 1;
@@ -7424,6 +7433,8 @@ async fn spawn_npcs_and_monsters(
                                 pet_experience: 0,
                                 max_pet_level: 0,
             recall_at_tick: 0,
+            can_recall: monster_info_opt.map(|i| i.can_recall).unwrap_or(false),
+            next_recall_tick: 0,
             behavior: ai::make_behavior(&name),
         });
         // 从 MonsterInfo 填充战斗属性（AC/MAC/Agility/Crit 等）
@@ -7515,6 +7526,8 @@ async fn spawn_npcs_and_monsters(
                                 pet_experience: 0,
                                 max_pet_level: 0,
                         recall_at_tick: 0,
+                        can_recall: false,
+                        next_recall_tick: 0,
                         behavior: ai::make_behavior(&dragon.monster_name),
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
@@ -7670,6 +7683,8 @@ mod tests {
                                 pet_experience: 0,
                                 max_pet_level: 0,
             recall_at_tick: 0,
+            can_recall: false,
+            next_recall_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         };
         assert!(boss.is_boss);

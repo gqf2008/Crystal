@@ -3648,6 +3648,8 @@ impl Message<MagicRequest> for WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                 recall_at_tick: 0,
+                                can_recall: false,
+                                next_recall_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             self.pet_levels.insert(new_oid, spell_level as i32);
@@ -3828,6 +3830,8 @@ impl Message<MagicRequest> for WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                 recall_at_tick: 0,
+                                can_recall: false,
+                                next_recall_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             self.pet_levels.insert(new_oid, spell_level as i32);
@@ -4222,6 +4226,8 @@ impl Message<MagicRequest> for WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: max_pet_level as u8,
                                 recall_at_tick: if recall_at_tick > 0 { self.tick_count + recall_at_tick } else { 0 },
+                                can_recall: false,
+                                next_recall_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             // 补 DB 基础 AC/MAC（原实现遗漏）并叠加 PetLevel 加成（C# RefreshAll）
@@ -4350,6 +4356,8 @@ impl Message<MagicRequest> for WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                 recall_at_tick: self.tick_count + duration_ticks,
+                                can_recall: false,
+                                next_recall_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             debug!("Magic: {} casts Stonetrap '{}' as #{} at ({},{}) ({}s)",

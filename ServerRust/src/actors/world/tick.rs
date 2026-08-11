@@ -523,6 +523,24 @@ fn pet_speed_interval_ticks(base_ticks: u64, name: &str, max_pet_level: u32, is_
     (base_ticks * 100).saturating_sub(reduce as u64).max(400) / 100
 }
 
+/// #2042：C# Settings.MonsterRecallRange = 12 / MonsterRecallCooldown = 5000ms（50 ticks）
+const MONSTER_RECALL_RANGE: i32 = 12;
+const MONSTER_RECALL_COOLDOWN_TICKS: u64 = 50;
+
+/// #2042：C# FindRecallPoint（MonsterObject.cs:1898-1907）——目标格可走则用；否则 8 向 1 格兜底；再不行返回目标格
+fn find_recall_point<F: Fn(i32, i32) -> bool>(walkable: F, tx: i32, ty: i32) -> (i32, i32) {
+    if walkable(tx, ty) {
+        return (tx, ty);
+    }
+    for d in 0..8 {
+        let (cx, cy) = (tx + MON_DIR_DX[d], ty + MON_DIR_DY[d]);
+        if walkable(cx, cy) {
+            return (cx, cy);
+        }
+    }
+    (tx, ty)
+}
+
 /// #1759：Boss Range 伤害防御类型（C# 各怪 DelayedAction RangeDamage / CompleteRangeAttack 的 DefenceType）
 /// 精确名匹配（不区分大小写）；未收录默认 ACAgility（C# 默认敏捷物防，保持 #1721 既有行为，安全回退）。
 /// 已知限制：OmaMage（ACAgility+MACAgility）、RhinoPriest（MAC+MACAgility）、
@@ -1994,6 +2012,8 @@ impl WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                         recall_at_tick: 0,
+                        can_recall: info.can_recall,
+                        next_recall_tick: 0,
                         behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                     });
                     if let Some(m) = self.monsters.get_mut(&new_oid) {
@@ -2400,6 +2420,8 @@ impl WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                 recall_at_tick: 0,
+                can_recall: monster_info_opt.map(|i| i.can_recall).unwrap_or(false),
+                next_recall_tick: 0,
                 behavior: crate::actors::world::ai::make_behavior(&name),
             });
             if rarity > 0 {
@@ -3259,6 +3281,8 @@ impl WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
             recall_at_tick: 0,
+            can_recall: false,
+            next_recall_tick: 0,
             behavior: ai::make_behavior(&monster_info.name),
         };
         self.monsters.insert(spawn_oid, boss);
@@ -5184,6 +5208,24 @@ impl Message<Tick> for WorldActor {
                     self.monster_search_ticks.insert(*oid, self.tick_count + SEARCH_DELAY_TICKS);
                 }
 
+                // #2042：C# MonsterObject.TryRecallToTarget（1864-1900）——CanRecall 怪物远离目标时召回（防风筝）
+                if monster.can_recall && self.tick_count >= monster.next_recall_tick {
+                    if let Some((_, px, py, _)) = chase_target {
+                        let cheb = (monster.x - px).abs().max((monster.y - py).abs());
+                        if cheb > MONSTER_RECALL_RANGE {
+                            let map_ref = self.maps.get(&monster.map_index);
+                            let (tx, ty) = find_recall_point(
+                                |x, y| map_ref.map(|m| m.is_walkable(x, y)).unwrap_or(false),
+                                px, py,
+                            );
+                            if map_ref.map(|m| m.is_walkable(tx, ty)).unwrap_or(false) {
+                                monster.next_recall_tick = self.tick_count + MONSTER_RECALL_COOLDOWN_TICKS;
+                                boss_monster_teleports.push((*oid, tx, ty));
+                            }
+                        }
+                    }
+                }
+
                 // 被动环境物体（Deer/Doe/Football 等）：不主动攻击/追击玩家，
                 // 清空 nearest 使其跳过下方攻击+追击分支，仅保留返回出生点的漫游。
                 if is_passive_obj {
@@ -5950,6 +5992,8 @@ impl Message<Tick> for WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                     recall_at_tick: 0,
+                    can_recall: monster_info_opt.map(|i| i.can_recall).unwrap_or(false),
+                    next_recall_tick: 0,
                     behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                 });
                 debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
@@ -6444,6 +6488,8 @@ impl Message<Tick> for WorldActor {
                                 pet_experience: 0,
                                 max_pet_level: 0,
                             recall_at_tick: 0,
+                            can_recall: false,
+                            next_recall_tick: 0,
                             behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                         });
                         // 填充战斗属性
@@ -6528,6 +6574,8 @@ impl Message<Tick> for WorldActor {
                             last_hit_damage: 0, undead: false,
                             master_session: None, rarity: 0, pet_experience: 0, max_pet_level: 0,
                             recall_at_tick: 0,
+                            can_recall: false,
+                            next_recall_tick: 0,
                             behavior: Box::new(behavior),
                         });
                         // 登记 slave 归属（父岩死亡 → 子岩级联清理，C# SlaveList）
@@ -7062,11 +7110,21 @@ impl Message<Tick> for WorldActor {
 mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, pet_speed_interval_ticks,
-        reduce_exp, collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type,
+        find_recall_point, reduce_exp, collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type,
         monster_melee_defence_type, build_object_range_attack_body, resolve_monster_vs_monster,
         slow_adjusted_ticks, monster_control_blocked, combined_poison_flags,
         PARTY_EXP_RATE,
     };
+
+    #[test]
+    fn find_recall_point_matches_csharp() {
+        // #2042：C# FindRecallPoint——目标格可走用目标；否则 8 向 1 格兜底；再不行返回目标
+        assert_eq!(find_recall_point(|x, y| x == 5 && y == 5, 5, 5), (5, 5));
+        // 目标不可走 → 8 向兜底（dir0 = North (0,-1)）
+        assert_eq!(find_recall_point(|x, y| x == 5 && y == 4, 5, 5), (5, 4));
+        // 全部不可走 → 返回目标格
+        assert_eq!(find_recall_point(|_, _| false, 3, 7), (3, 7));
+    }
 
     #[test]
     fn pet_speed_interval_matches_csharp() {
