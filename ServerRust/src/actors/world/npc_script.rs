@@ -165,6 +165,32 @@ pub fn load_custom_commands(script_dir: &std::path::Path) -> Vec<String> {
     }
 }
 
+/// 从默认 NPC 脚本提取活动坐标（C# NPCScript.cs:227-244：`[@_MapCoord(map,x,y)]` 段头 → map.Info.ActiveCoords，去重）
+pub fn extract_map_coords(content: &str) -> Vec<(String, i32, i32)> {
+    let mut out: Vec<(String, i32, i32)> = Vec::new();
+    for line in content.lines() {
+        let up = line.to_uppercase();
+        if !up.starts_with("[@_") || !up.contains("MAPCOORD") { continue; }
+        // 段头格式：[@_MapCoord(map,x,y)]（map 可含字母数字下划线）
+        let inner = line.trim_start_matches('[').trim_end_matches(']');
+        if let Some(open) = inner.find('(') {
+            if let Some(close) = inner[open + 1..].find(')') {
+                let body = &inner[open + 1..open + 1 + close];
+                let parts: Vec<&str> = body.split(',').collect();
+                if parts.len() == 3 {
+                    if let (Ok(x), Ok(y)) = (parts[1].trim().parse::<i32>(), parts[2].trim().parse::<i32>()) {
+                        let map = parts[0].trim().to_string();
+                        if !map.is_empty() && !out.contains(&(map.clone(), x, y)) {
+                            out.push((map, x, y));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 impl ParsedScript {
     /// 把整份脚本文本解析为 ParsedScript。
     ///
@@ -3341,6 +3367,12 @@ mod tests {
         assert!(fin.find("_customcommand(vip)").is_some());
         // CUSTOMCOMMAND 指令提取（大小写不敏感、去重）
         let cc = extract_custom_commands("; CUSTOMCOMMAND(vip)\n#CUSTOMCOMMAND(HELP)\ncustomcommand ( Vip )\n");
+        // MapCoord：[@_MapCoord(map,x,y)] 注册活动坐标（去重）
+        let mc = extract_map_coords("[@_MapCoord(0,5,5)]\n#ACT\nBREAK\n\n[@_MapCoord(3,10,20)]\n#ACT\nBREAK\n\n[@_MapCoord(0,5,5)]\n");
+        assert_eq!(mc.len(), 2);
+        assert!(mc.contains(&("0".to_string(), 5, 5)));
+        assert!(mc.contains(&("3".to_string(), 10, 20)));
+        assert!(extract_map_coords("[@_Login]\n#SAY\nhi\n").is_empty());
         assert!(cc.contains(&"VIP".to_string()));
         assert!(cc.contains(&"HELP".to_string()));
         assert_eq!(cc.len(), 2);
