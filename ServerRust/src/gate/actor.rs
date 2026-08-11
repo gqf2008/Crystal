@@ -1447,11 +1447,12 @@ fn forward_equip_item(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 10 { return; }
+    if payload.len() < 13 { return; }
     let world_ref = match world_ref { Some(w) => w, None => return };
     let grid = payload[0];
     let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
-    let slot = payload[9] as i32;
+    // C# C.EquipItem.To = int（4 字节）；客户端双击装备恒发 0，服务端按物品类型自动判定
+    let slot = i32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
     let _ = world_ref.tell(crate::actors::world::EquipItemRequest {
         session_id, grid, unique_id: uid, slot,
     }).try_send();
@@ -3095,14 +3096,15 @@ fn forward_fishing_change_autocast(world_ref: &Option<ActorRef<crate::actors::wo
     let _ = world_ref.tell(crate::actors::world::FishingChangeAutocastRequest { session_id, enabled }).try_send();
 }
 
-/// CombineItem: [from: u32][to: u32]
+/// CombineItem: [grid: u8][id_from: u64][id_to: u64]（C# C.CombineItem 线格式）
 fn forward_combine_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 8 { return; }
-    let from_grid = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let to_grid = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    debug!("CombineItem: session={} from={} to={}", session_id, from_grid, to_grid);
+    if payload.len() < 17 { return; }
+    let grid = payload[0];
+    let id_from = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+    let id_to = u64::from_le_bytes(payload[9..17].try_into().unwrap_or([0; 8]));
+    debug!("CombineItem: session={} grid={} from={} to={}", session_id, grid, id_from, id_to);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::CombineItemRequest { session_id, from_grid, to_grid }).try_send();
+    let _ = world_ref.tell(crate::actors::world::CombineItemRequest { session_id, grid, id_from, id_to }).try_send();
 }
 
 /// AwakeningNeedMaterials: [unique_id: u64][awake_type: u8]
@@ -3346,11 +3348,11 @@ fn forward_npc_confirm_input(world_ref: &Option<ActorRef<crate::actors::world::W
     let _ = world_ref.tell(crate::actors::world::NPCConfirmInputRequest { session_id, npc_id, input_text }).try_send();
 }
 
-/// GameshopBuy: [item_id: u32][quantity: u32]
+/// GameshopBuy: [g_index: i32][quantity: u8][p_type: i32]（C# C.GameshopBuy 线格式；Rust 仅金币购买，PType 忽略）
 fn forward_gameshop_buy(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 8 { return; }
-    let item_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let count = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    if payload.len() < 9 { return; }
+    let item_id = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as u32;
+    let count = payload[4] as u32;
     debug!("GameshopBuy: session={} item={} count={}", session_id, item_id, count);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::GameshopBuyRequest { session_id, item_id, count }).try_send();

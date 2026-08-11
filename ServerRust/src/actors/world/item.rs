@@ -204,8 +204,12 @@ pub struct BuyItemBackRequest {
 
 pub struct CombineItemRequest {
     pub session_id: u64,
-    pub from_grid: u32,
-    pub to_grid: u32,
+    /// C# C.CombineItem.Grid（MirGridType）
+    pub grid: u8,
+    /// C# C.CombineItem.IDFrom（宝石 unique_id）
+    pub id_from: u64,
+    /// C# C.CombineItem.IDTo（装备 unique_id）
+    pub id_to: u64,
 }
 
 pub struct DisassembleItemRequest {
@@ -1609,6 +1613,26 @@ fn can_use_item(item_info: &db::ItemInfo, state: &crate::actors::player::PlayerS
     true
 }
 
+/// C# 物品类型 → 装备槽位（C# 客户端 MirItemCell.cs:421-605 双击装备的槽位判定；DB item_type 为 C# 原始值）
+fn equip_slot_for_item_type(item_type: i32) -> Option<crate::actors::inventory::EquipmentSlot> {
+    use crate::actors::inventory::EquipmentSlot::*;
+    match item_type {
+        1 => Some(Weapon),
+        2 => Some(Armour),
+        4 => Some(Helmet),
+        5 => Some(Necklace),
+        6 => Some(BraceletR), // C# 客户端先右后左；服务端默认右
+        7 => Some(RingR),
+        8 => Some(Pendant),   // C# Amulet → Pendant 槽
+        9 => Some(Belt),
+        10 => Some(Shoes),
+        11 => Some(Stone),
+        12 => Some(Torch),
+        19 => Some(Mount),
+        _ => None,
+    }
+}
+
 /// 装备校验（对齐 C# HumanObject.CanEquipItem：槽位类型/性别/职业/RequiredType）
 fn can_equip_item(item_info: &db::ItemInfo, slot: crate::actors::inventory::EquipmentSlot, state: &crate::actors::player::PlayerState) -> bool {
     use crate::actors::inventory::EquipmentSlot;
@@ -1800,7 +1824,7 @@ impl Message<EquipItemRequest> for WorldActor {
             return;
         }
 
-        let slot = match EquipmentSlot::from_i32(msg.slot) {
+        let mut slot = match EquipmentSlot::from_i32(msg.slot) {
             Some(s) => s,
             None => return,
         };
@@ -1875,9 +1899,18 @@ impl Message<EquipItemRequest> for WorldActor {
         };
 
         // C# CanEquipItem 校验（槽位类型/性别/职业/RequiredType）
-        let equippable = self.item_infos.get(&state.inventory.backpack[grid_idx].as_ref().unwrap().item.item_index)
-            .map(|info| can_equip_item(info, slot, &state))
-            .unwrap_or(false);
+        let item_info = self.item_infos.get(&state.inventory.backpack[grid_idx].as_ref().unwrap().item.item_index);
+        let mut equippable = item_info.map(|info| can_equip_item(info, slot, &state)).unwrap_or(false);
+        // #2188：客户端双击装备恒发 to=0（Weapon）；槽位不匹配时按物品类型自动判定（C# 客户端 MirItemCell 行为）
+        if !equippable {
+            if let Some(auto) = item_info.and_then(|info| equip_slot_for_item_type(info.item_type)) {
+                if auto != slot && item_info.map(|info| can_equip_item(info, auto, &state)).unwrap_or(false) {
+                    slot = auto;
+                    equippable = true;
+                    debug!("EquipItem: auto slot for uid={} -> {:?}", msg.unique_id, slot);
+                }
+            }
+        }
         if !equippable {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
             send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
@@ -3235,11 +3268,8 @@ impl Message<CombineItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        let from_grid = msg.from_grid as u8;
-        let to_grid = msg.to_grid as u8;
-
-        // 获取源物品和目标物品
-        let source = match record.actor_ref.ask(crate::actors::player::GetItemInfoByGrid { grid: from_grid }).await {
+        // C# CombineItem（PlayerObject.cs:6690-6755）：按 unique_id 在网格中查找源/目标（C# Grid=Inventory/HeroInventory）
+        let source = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.id_from }).await {
             Ok(Some(i)) => i,
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "找不到源物品");
@@ -3247,7 +3277,7 @@ impl Message<CombineItemRequest> for WorldActor {
                 return;
             }
         };
-        let target = match record.actor_ref.ask(crate::actors::player::GetItemInfoByGrid { grid: to_grid }).await {
+        let target = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.id_to }).await {
             Ok(Some(i)) => i,
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "找不到目标物品");
@@ -3274,18 +3304,15 @@ impl Message<CombineItemRequest> for WorldActor {
             }
         };
 
-        // 源物品必须是宝石 (ItemType::Gem = 18)
+        // 源物品必须是宝石（C# ItemType.Gem=18）
         if source_info.item_type != 18 {
             send_system_message(&self.gate_ref, msg.session_id, "源物品不是宝石");
             self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
             return;
         }
 
-        // 目标物品必须是可镶嵌的装备
-        let can_socket = matches!(target_info.item_type,
-            1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 19
-        );
-        if !can_socket {
+        // 目标物品必须是可镶嵌装备（C# CombineItem：Type 1..=11）
+        if !(1..=11).contains(&target_info.item_type) {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法镶嵌宝石");
             self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
             return;
@@ -3300,10 +3327,10 @@ impl Message<CombineItemRequest> for WorldActor {
             return;
         }
 
-        // 执行镶嵌
+        // 执行镶嵌（按 unique_id）
         let result = record.actor_ref.ask(crate::actors::player::SocketGem {
-            from_grid,
-            to_grid,
+            from_uid: msg.id_from,
+            to_uid: msg.id_to,
             target_slot_count: slot_count,
         }).await.ok().flatten();
 
@@ -3436,6 +3463,26 @@ impl Message<DisassembleItemRequest> for WorldActor {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// #2188：C# ItemType → 装备槽位映射（MirItemCell.cs 双击装备槽位判定）
+    #[test]
+    fn test_equip_slot_for_item_type() {
+        use crate::actors::inventory::EquipmentSlot::*;
+        assert_eq!(equip_slot_for_item_type(1), Some(Weapon));
+        assert_eq!(equip_slot_for_item_type(2), Some(Armour));
+        assert_eq!(equip_slot_for_item_type(4), Some(Helmet));
+        assert_eq!(equip_slot_for_item_type(5), Some(Necklace));
+        assert_eq!(equip_slot_for_item_type(6), Some(BraceletR));
+        assert_eq!(equip_slot_for_item_type(7), Some(RingR));
+        assert_eq!(equip_slot_for_item_type(8), Some(Pendant));
+        assert_eq!(equip_slot_for_item_type(9), Some(Belt));
+        assert_eq!(equip_slot_for_item_type(10), Some(Shoes));
+        assert_eq!(equip_slot_for_item_type(11), Some(Stone));
+        assert_eq!(equip_slot_for_item_type(12), Some(Torch));
+        assert_eq!(equip_slot_for_item_type(19), Some(Mount));
+        assert_eq!(equip_slot_for_item_type(13), None); // Potion
+    }
 
     use super::apply_conquest_tax;
 
