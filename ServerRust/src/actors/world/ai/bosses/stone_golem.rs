@@ -55,16 +55,10 @@ impl MonsterBehavior for StoneGolemBehavior {
                 });
             } else {
                 // Type1 前方 3 格处 5x5 Quake 法术场
-                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-                // 朝向方向移动 3 格的中心点
-                let (mut center_x, mut center_y, _) = step_toward(monster.x, monster.y, target.x, target.y);
-                // 再沿同方向推 2 格达到 offset=3（已走 1 格）
-                for _ in 0..(QUAKE_OFFSET - 1) {
-                    let (nx, ny, _) = step_toward(center_x, center_y, target.x, target.y);
-                    center_x = nx;
-                    center_y = ny;
-                }
-                let _ = dir; // 方向已隐含在 center 坐标里
+                // C# PointMove(CurrentLocation, Direction, 3) 精确 3 格（StoneGolem.cs:73）
+                let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as usize) % 8;
+                let center_x = monster.x + DIR_DX[dir] * QUAKE_OFFSET;
+                let center_y = monster.y + DIR_DY[dir] * QUAKE_OFFSET;
                 let value = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 // 5x5 法术场：C# 每格一个 SpellObject（全 25 格）
                 for oy in -QUAKE_RADIUS..=QUAKE_RADIUS {
