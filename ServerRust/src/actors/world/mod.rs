@@ -3544,28 +3544,8 @@ impl WorldActor {
                                     let gold = (completed_quest.gold_reward as f64 * self.drop_rate) as u64;
                                     let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
                                 }
-                                // C# FinishQuest：GainCredit(CreditReward)（账户积分，上限 uint.MaxValue）
-                                if completed_quest.credit_reward > 0 {
-                                    let username = record.account_username.clone();
-                                    let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
-                                    let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
-                                    let delta = (completed_quest.credit_reward as u64).min(remaining) as i64;
-                                    if delta > 0 {
-                                        if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
-                                            warn!("Quest CreditReward failed for {}: {}", username, e);
-                                        } else {
-                                            // C# GainCredit：S.GainedCredit（客户端积分浮字）
-                                            let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
-                                            let mut body = Vec::new();
-                                            if packet.write_body(&mut body).is_ok() {
-                                                let _ = self.gate_ref.tell(SendToClient {
-                                                    session_id,
-                                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
-                                                }).await;
-                                            }
-                                        }
-                                    }
-                                }
+                                // #2000/#2024：C# FinishQuest——GainCredit(CreditReward)（统一 helper）
+                                self.grant_quest_credit(session_id, completed_quest.credit_reward).await;
                                 if let Some(quest_db) = self.quest_infos.get(&quest_index) {
                                     for reward in &quest_db.fixed_rewards {
                                         let mut item = mir2_shared::data::item::UserItem {

@@ -1832,11 +1832,16 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                             let _ = record.actor_ref.ask(CompleteQuest { quest_index: quest_db.index }).await;
                             // #2022：C# FinishQuest——交任务扣除携带物品
                             self.take_quest_carry_items(msg.session_id, quest_db.index).await;
-                            // Grant rewards
+                            // Grant rewards（C# FinishQuest：Exp×ExpRate / Gold×DropRate / GainCredit）
                             let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(quest_db.exp_reward) , experience_list: self.experience_list.clone()}).await;
-                            let _ = record.actor_ref.ask(AddGold { amount: quest_db.gold_reward.max(0) as u64 }).await;
+                            let gold = (quest_db.gold_reward.max(0) as f64 * self.drop_rate) as u64;
+                            let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
+                            // #2024：C# FinishQuest——信用奖励（GainCredit + S.GainedCredit）
+                            self.grant_quest_credit(msg.session_id, quest_db.credit_reward as i64).await;
+                            // #2024：C# SendUpdateQuest Remove——S.CompleteQuest 完成包（与包/脚本路径一致）
+                            crate::actors::social_packets::send_quest_complete_packet(&self.gate_ref, msg.session_id, quest_db.index);
                             send_system_message(&self.gate_ref, msg.session_id,
-                                &format!("任务完成: +{}经验, +{}金币", quest_db.exp_reward, quest_db.gold_reward.max(0)));
+                                &format!("任务完成: +{}经验, +{}金币", quest_db.exp_reward, gold));
                             return;
                         }
                     }
