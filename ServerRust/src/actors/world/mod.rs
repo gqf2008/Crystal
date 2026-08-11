@@ -5976,84 +5976,91 @@ impl WorldActor {
         }
     }
 
-    /// #285：聊天物品链接 —— 解析 `%名字#uid%` 并在发送方背包/装备中查找，
-    /// 向所有在线玩家（含自己）推送 S.NewChatItem（按会话去重，C# SentChatItem）
-    pub(crate) async fn send_chat_item_links(&mut self, session_id: u64, message: &str) {
-        let mut uids: Vec<u64> = Vec::new();
-        let mut i = 0;
-        while i < message.len() {
-            let bytes = message.as_bytes();
-            if bytes[i] == b'%' {
-                if let Some(rel) = message[i + 1..].find('%') {
-                    let inner = &message[i + 1..i + 1 + rel];
-                    if let Some(hash) = inner.rfind('#') {
-                        if let Ok(uid) = inner[hash + 1..].trim().parse::<u64>() {
-                            uids.push(uid);
-                        }
-                    }
-                    i += rel + 2;
-                    continue;
-                }
-            }
-            i += 1;
-        }
-        if uids.is_empty() {
-            return;
+    /// #285：聊天物品链接 —— 处理 C.Chat.LinkedItems（背包/装备归属校验）与内嵌 `%物品名#uid%` 标记：
+    /// 文本替换（`<title>`→`<title/uid>`、`%name#uid%`→`[物品:name]`）并向在线玩家推送 S.NewChatItem（按会话去重，C# SentChatItem）
+    pub(crate) async fn process_chat_links(
+        &mut self,
+        session_id: u64,
+        message: &str,
+        linked_items: &[mir2_shared::data::item::ChatItem],
+    ) -> String {
+        use mir2_shared::enums::MirGridType;
+        // 1. <title> → <title/uid>（C# ProcessChatItems 文本替换）
+        let mut out = replace_linked_item_markers(message, linked_items);
+        // 2. %物品名#uid% → [物品:物品名] + uid 收集（客户端 chat_dialog 渲染 ItemLink）
+        let (out, uids) = replace_item_link_markers(&out);
+        if linked_items.is_empty() && uids.is_empty() {
+            return out;
         }
         let record = match self.players.get(&session_id) {
             Some(r) => r,
-            None => return,
+            None => return out,
         };
         let state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
-            _ => return,
+            _ => return out,
         };
-        // 在发送方背包/装备中按 unique_id 查找（C# PlayerObject 聊天链接查 Inventory）
+        // 3. 归属校验并收集 UserItem（背包/装备；Storage/HeroInventory 无内存容器跳过）
         let mut items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
         let mut push_item = |item: &mir2_shared::data::item::UserItem| {
-            if uids.contains(&item.unique_id)
-                && !items.iter().any(|it| it.unique_id == item.unique_id)
-            {
+            if !items.iter().any(|it| it.unique_id == item.unique_id) {
                 let mut it = item.clone();
                 enrich_item_info(&mut it, &self.item_infos);
                 items.push(it);
             }
         };
-        for slot in state.inventory.backpack.iter() {
-            if let Some(s) = slot {
-                push_item(&s.item);
-            }
-        }
-        for eq in state.inventory.equipment.iter() {
-            if let Some(it) = eq {
-                push_item(it);
-            }
-        }
-        if items.is_empty() {
-            return;
-        }
-        for item in &items {
-            let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(
-                &mut std::io::Cursor::new(&mut body),
-                &mir2_shared::packets::server::NewChatItem { item: item.clone() },
-            )
-            .is_err()
-            {
-                continue;
-            }
-            let data = body;
-            for sid in self.players.keys() {
-                let sent = self.chat_items_sent.entry(*sid).or_default();
-                if sent.insert(item.unique_id) {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: data.clone(),
-                    }).await;
+        for ci in linked_items {
+            if ci.grid == MirGridType::Inventory || ci.grid == MirGridType::Equipment {
+                for slot in state.inventory.backpack.iter() {
+                    if let Some(s) = slot {
+                        if s.item.unique_id == ci.unique_id { push_item(&s.item); }
+                    }
+                }
+                for eq in state.inventory.equipment.iter() {
+                    if let Some(it) = eq {
+                        if it.unique_id == ci.unique_id { push_item(it); }
+                    }
                 }
             }
         }
-        info!("Chat item links sent for session {}: {:?}", session_id, uids);
+        for uid in &uids {
+            for slot in state.inventory.backpack.iter() {
+                if let Some(s) = slot {
+                    if s.item.unique_id == *uid { push_item(&s.item); }
+                }
+            }
+            for eq in state.inventory.equipment.iter() {
+                if let Some(it) = eq {
+                    if it.unique_id == *uid { push_item(it); }
+                }
+            }
+        }
+        // 4. 推送（去重 chat_items_sent，C# SentChatItem）
+        if !items.is_empty() {
+            for item in &items {
+                let mut body = Vec::new();
+                if mir2_shared::packets::base::serialize_packet(
+                    &mut std::io::Cursor::new(&mut body),
+                    &mir2_shared::packets::server::NewChatItem { item: item.clone() },
+                )
+                .is_err()
+                {
+                    continue;
+                }
+                let data = body;
+                for sid in self.players.keys() {
+                    let sent = self.chat_items_sent.entry(*sid).or_default();
+                    if sent.insert(item.unique_id) {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: data.clone(),
+                        }).await;
+                    }
+                }
+            }
+            info!("Chat item links sent for session {}: {:?}", session_id, uids);
+        }
+        out
     }
 
 /// 通过 object_id 查找玩家
@@ -8105,9 +8112,101 @@ fn should_despawn_boss(tick_count: u64, despawn_tick: u64) -> bool {
     tick_count >= despawn_tick
 }
 
+/// C# ChatItem 标记：`<title>` → `<title/uid>`（C# ProcessChatItems 正则替换一次）
+fn replace_linked_item_markers(message: &str, items: &[mir2_shared::data::item::ChatItem]) -> String {
+    let mut out = message.to_string();
+    for item in items {
+        let regex_name = item.regex_internal_name();
+        let internal = item.internal_name();
+        if out.contains(&regex_name) {
+            out = out.replacen(&regex_name, &internal, 1);
+        }
+    }
+    out
+}
+
+/// 解析聊天文本内嵌 `%物品名#uid%` 标记：替换为客户端可点击 `[物品:物品名]`，返回 uid 列表
+/// （Client-Macroquad chat_dialog.rs 渲染 [物品:名] 为 ItemLink）
+fn replace_item_link_markers(message: &str) -> (String, Vec<u64>) {
+    let mut out = String::with_capacity(message.len());
+    let mut uids = Vec::new();
+    let bytes = message.as_bytes();
+    let mut i = 0;
+    while i < message.len() {
+        if bytes[i] == b'%' {
+            if let Some(rel) = message[i + 1..].find('%') {
+                let inner = &message[i + 1..i + 1 + rel];
+                if let Some(hash) = inner.rfind('#') {
+                    if let Ok(uid) = inner[hash + 1..].trim().parse::<u64>() {
+                        let name = inner[..hash].trim();
+                        if !name.is_empty() {
+                            uids.push(uid);
+                            out.push_str("[物品:");
+                            out.push_str(name);
+                            out.push(']');
+                            i += rel + 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        let ch = message[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    (out, uids)
+}
+
+/// C# $pos → 客户端可点击坐标链接 `[坐标:X, Y]`（Client-Macroquad CoordLink 约定）
+fn replace_pos_marker(message: &str, x: i32, y: i32) -> String {
+    message.replace("$pos", &format!("[坐标:{}, {}]", x, y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2186：C# ProcessChatItems 文本标记替换（<title> → <title/uid>）
+    #[test]
+    fn test_replace_linked_item_markers() {
+        use mir2_shared::data::item::ChatItem;
+        use mir2_shared::enums::MirGridType;
+        let items = vec![ChatItem {
+            unique_id: 98765,
+            title: "裁决之杖".to_string(),
+            grid: MirGridType::Inventory,
+        }];
+        assert_eq!(
+            replace_linked_item_markers("出售 <裁决之杖> 1000金币", &items),
+            "出售 <裁决之杖/98765> 1000金币"
+        );
+        assert_eq!(replace_linked_item_markers("hello", &items), "hello");
+    }
+
+    /// #2186：内嵌 %物品名#uid% 标记 → [物品:物品名] + uid 收集
+    #[test]
+    fn test_replace_item_link_markers() {
+        let (out, uids) = replace_item_link_markers("出售 %裁决之杖#98765% 1000金币");
+        assert_eq!(out, "出售 [物品:裁决之杖] 1000金币");
+        assert_eq!(uids, vec![98765]);
+        let (out, uids) = replace_item_link_markers("普通消息");
+        assert_eq!(out, "普通消息");
+        assert!(uids.is_empty());
+        let (out, uids) = replace_item_link_markers("%A#1% 和 %B#2%");
+        assert_eq!(out, "[物品:A] 和 [物品:B]");
+        assert_eq!(uids, vec![1, 2]);
+        let (out, uids) = replace_item_link_markers("%没有闭合");
+        assert_eq!(out, "%没有闭合");
+        assert!(uids.is_empty());
+    }
+
+    /// #2186：$pos → [坐标:X, Y]
+    #[test]
+    fn test_replace_pos_marker() {
+        assert_eq!(replace_pos_marker("来 $pos 集合", 340, 280), "来 [坐标:340, 280] 集合");
+        assert_eq!(replace_pos_marker("无标记", 1, 2), "无标记");
+    }
 
     #[test]
     fn test_parse_mine_sets_matches_mines_ini() {

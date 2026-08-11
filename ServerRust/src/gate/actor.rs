@@ -516,13 +516,14 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::Chat as i16 => {
                 // Chat - 解析并广播 (Phase 1.3: 输入验证)
                 if let Some(world_ref) = &self.world_ref {
-                    if let Some(message) = parse_chat_payload(payload) {
+                    if let Some((message, linked_items)) = parse_chat_packet(payload) {
                         if !crate::util::validation::validate_chat(&message) {
                             warn!("Session {} chat rejected: len={}", msg.session_id, message.len());
                         } else {
                             let _ = world_ref.ask(crate::actors::world::ChatRequest {
                                 session_id: msg.session_id,
                                 message,
+                                linked_items,
                             }).await;
                         }
                     }
@@ -1387,12 +1388,11 @@ fn parse_dotnet_string(data: &[u8]) -> String {
 }
 
 /// 解析聊天包：DotNetString message + i32 linked_items_count
-fn parse_chat_payload(payload: &[u8]) -> Option<String> {
-    use std::io::Cursor;
-    use mir2_shared::binary::read_dotnet_string;
-
-    let mut cursor = Cursor::new(payload);
-    read_dotnet_string(&mut cursor).ok()
+/// 解析聊天包：DotNetString message + i32 linked_items_count + ChatItem...（C# C.Chat）
+fn parse_chat_packet(payload: &[u8]) -> Option<(String, Vec<mir2_shared::data::item::ChatItem>)> {
+    let mut cursor = std::io::Cursor::new(payload);
+    let packet = mir2_shared::packets::client::Chat::read_body(&mut cursor).ok()?;
+    Some((packet.message, packet.linked_items))
 }
 
 /// 解析 CallNPC 包：[object_id: u32 LE][key: DotNetString]
