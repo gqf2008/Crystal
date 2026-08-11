@@ -168,13 +168,27 @@ pub fn compute_hero_stats(
     s.wear_weight += b.wear_weight;
     s.hand_weight += b.hand_weight;
     s.poison_attack += b.poison_attack;
-    // #1517：战士 Slaying 被动（C# HumanObject.cs:2297 slayingLvPlus）——MaxDC + [5,6,7,8][Lv]、Accuracy + Lv
+    // C# HumanObject.RefreshSkills（2294-2319）技能被动
+    // 战士 Slaying（2297 slayingLvPlus）：MaxDC + [5,6,7,8][Lv]、Accuracy + Lv
     if class == MirClass::Warrior {
         let slaying_cs = mir2_shared::enums::Spell::Slaying as i32 - 3;
         if let Some((_, lv)) = magics.iter().find(|(spell, _)| *spell == slaying_cs) {
             const LV_PLUS: [i32; 4] = [5, 6, 7, 8];
             s.max_dc += LV_PLUS[(*lv as usize).min(3)];
             s.accuracy += *lv as i32;
+        }
+        // 战士 Fencing（2303-2306）：Accuracy + 3×Lv
+        let fencing_cs = mir2_shared::enums::Spell::Fencing as i32 - 3;
+        if let Some((_, lv)) = magics.iter().find(|(spell, _)| *spell == fencing_cs) {
+            s.accuracy += *lv as i32 * 3;
+        }
+    }
+    // 道士 SpiritSword（2312-2316 spiritSwordLvPlus）：Accuracy + [0,3,5,8][Lv]
+    if class == MirClass::Taoist {
+        let spirit_cs = mir2_shared::enums::Spell::SpiritSword as i32 - 3;
+        if let Some((_, lv)) = magics.iter().find(|(spell, _)| *spell == spirit_cs) {
+            const LV_PLUS: [i32; 4] = [0, 3, 5, 8];
+            s.accuracy += LV_PLUS[(*lv as usize).min(3)];
         }
     }
     s
@@ -250,6 +264,29 @@ mod tests {
         let tao_magics = vec![(slaying_cs, 5u8)];
         let tao = compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &tao_magics);
         assert_eq!(tao.max_dc, compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[]).max_dc);
+    }
+
+    #[test]
+    fn fencing_and_spirit_sword_passives_add_accuracy() {
+        // C# HumanObject.cs:2303-2316：Fencing Accuracy + 3×Lv；SpiritSword Accuracy + [0,3,5,8][Lv]
+        use mir2_shared::enums::MirClass;
+        let empty: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 14];
+        let map = std::collections::HashMap::new();
+        // 战士 Fencing 2 级 → Accuracy +6
+        let fencing_cs = mir2_shared::enums::Spell::Fencing as i32 - 3;
+        let war_base = compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[]);
+        let war = compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[(fencing_cs, 2u8)]);
+        assert_eq!(war.accuracy, war_base.accuracy + 6);
+        // 道士 SpiritSword 3 级 → Accuracy +8（[0,3,5,8][3]）
+        let spirit_cs = mir2_shared::enums::Spell::SpiritSword as i32 - 3;
+        let tao_base = compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[]);
+        let tao = compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[(spirit_cs, 3u8)]);
+        assert_eq!(tao.accuracy, tao_base.accuracy + 8);
+        // 战士不受 SpiritSword 影响、道士不受 Fencing 影响
+        let war2 = compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[(spirit_cs, 3u8)]);
+        assert_eq!(war2.accuracy, war_base.accuracy);
+        let tao2 = compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[(fencing_cs, 2u8)]);
+        assert_eq!(tao2.accuracy, tao_base.accuracy);
     }
 
     #[test]
