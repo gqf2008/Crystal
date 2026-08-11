@@ -1414,8 +1414,8 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         .execute(&self.db_pool)
         .await;
 
-        // Record the rental for expiry tracking
-        self.player_rentals.entry(renter_record.name.clone())
+        // Record the rental for expiry tracking（C# Info.RentedItems 归属物主）
+        self.player_rentals.entry(owner_record.name.clone())
             .or_default()
             .push(RentedItem {
                 item: rented_item.clone(),
@@ -1449,6 +1449,7 @@ impl Message<GetRentedItemsRequest> for WorldActor {
                         rental_fee: r.rental_fee,
                         rental_period: 0,
                         expiry_date: r.expiry_timestamp,
+                        renting_player_name: r.renter_name.clone(),
                     }
                 }).collect())
                 .unwrap_or_default();
