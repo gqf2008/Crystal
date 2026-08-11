@@ -916,10 +916,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS player_archives (
             character_name TEXT PRIMARY KEY,
+            account_username TEXT NOT NULL DEFAULT '',
             archived_json TEXT NOT NULL,
             created_at INTEGER NOT NULL DEFAULT 0
         )"#
     ).execute(&pool).await?;
+    // 老库迁移：player_archives 补 account_username（恢复回原账号用）
+    let _ = sqlx::query("ALTER TABLE player_archives ADD COLUMN account_username TEXT NOT NULL DEFAULT ''").execute(&pool).await;
 
     info!("SQLite database initialized: {}", db_url);
     Ok(pool)
@@ -1004,20 +1007,33 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     #[tokio::test]
     async fn test_player_archives_roundtrip() {
         let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query("CREATE TABLE IF NOT EXISTS player_archives (character_name TEXT PRIMARY KEY, archived_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0)")
+        sqlx::query("CREATE TABLE IF NOT EXISTS player_archives (character_name TEXT PRIMARY KEY, account_username TEXT NOT NULL DEFAULT '', archived_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0)")
             .execute(&pool).await.unwrap();
 
-        archive_player_json(&pool, "Hero", r#"{"level":30}"#).await.unwrap();
-        let loaded = load_archived_player_json(&pool, "Hero").await.unwrap();
+        archive_player_json(&pool, "Hero", "acc1", r#"{"level":30}"#).await.unwrap();
+        let loaded = load_archived_player(&pool, "Hero").await.unwrap();
         assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap(), r#"{"level":30}"#);
+        let (acc, json) = loaded.unwrap();
+        assert_eq!(acc, "acc1");
+        assert_eq!(json, r#"{"level":30}"#);
 
-        // 同名覆盖
-        archive_player_json(&pool, "Hero", r#"{"level":31}"#).await.unwrap();
-        let loaded = load_archived_player_json(&pool, "Hero").await.unwrap();
-        assert_eq!(loaded.unwrap(), r#"{"level":31}"#);
+        // 同名覆盖（账号同步更新）
+        archive_player_json(&pool, "Hero", "acc2", r#"{"level":31}"#).await.unwrap();
+        let loaded = load_archived_player(&pool, "Hero").await.unwrap();
+        let (acc, json) = loaded.unwrap();
+        assert_eq!(acc, "acc2");
+        assert_eq!(json, r#"{"level":31}"#);
 
-        assert!(load_archived_player_json(&pool, "None").await.unwrap().is_none());
+        assert!(load_archived_player(&pool, "None").await.unwrap().is_none());
+
+        // get_character_account：无 characters 表时返回 None（不建表，避免依赖）
+        // get_character_account：需要 characters 表
+        sqlx::query("CREATE TABLE IF NOT EXISTS characters (name TEXT PRIMARY KEY, account_username TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO characters (name, account_username) VALUES ('Hero', 'acc_live')")
+            .execute(&pool).await.unwrap();
+        assert_eq!(get_character_account(&pool, "Hero").await.unwrap().as_deref(), Some("acc_live"));
+        assert!(get_character_account(&pool, "None").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -2781,6 +2797,7 @@ pub(crate) async fn load_player_pets(
 pub(crate) async fn archive_player_json(
     pool: &DbPool,
     character_name: &str,
+    account_username: &str,
     json: &str,
 ) -> anyhow::Result<()> {
     let now = std::time::SystemTime::now()
@@ -2788,9 +2805,10 @@ pub(crate) async fn archive_player_json(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     sqlx::query(
-        "INSERT INTO player_archives (character_name, archived_json, created_at) VALUES (?, ?, ?) ON CONFLICT(character_name) DO UPDATE SET archived_json = excluded.archived_json, created_at = excluded.created_at"
+        "INSERT INTO player_archives (character_name, account_username, archived_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(character_name) DO UPDATE SET account_username = excluded.account_username, archived_json = excluded.archived_json, created_at = excluded.created_at"
     )
     .bind(character_name)
+    .bind(account_username)
     .bind(json)
     .bind(now)
     .execute(pool)
@@ -2798,17 +2816,30 @@ pub(crate) async fn archive_player_json(
     Ok(())
 }
 
-/// 读取角色存档 JSON（C# Envir.GetArchivedCharacter）
-pub(crate) async fn load_archived_player_json(
+/// 读取角色存档（C# Envir.GetArchivedCharacter）；返回 (account_username, archived_json)
+pub(crate) async fn load_archived_player(
     pool: &DbPool,
     character_name: &str,
-) -> anyhow::Result<Option<String>> {
-    let row = sqlx::query("SELECT archived_json FROM player_archives WHERE character_name = ?")
+) -> anyhow::Result<Option<(String, String)>> {
+    let row = sqlx::query("SELECT account_username, archived_json FROM player_archives WHERE character_name = ?")
         .bind(character_name)
         .fetch_optional(pool)
         .await?;
     let Some(row) = row else { return Ok(None) };
-    Ok(Some(row.get("archived_json")))
+    Ok(Some((row.get("account_username"), row.get("archived_json"))))
+}
+
+/// 查询角色所属账号（RESTOREPLAYER 回原账号用）
+pub(crate) async fn get_character_account(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Option<String>> {
+    let row = sqlx::query("SELECT account_username FROM characters WHERE name = ?")
+        .bind(character_name)
+        .fetch_optional(pool)
+        .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(row.get("account_username")))
 }
 
 async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {

@@ -2118,7 +2118,7 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS" | "BACKUPPLAYER") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS" | "BACKUPPLAYER" | "ARCHIVEPLAYER" | "LOADPLAYER" | "RESTOREPLAYER") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2132,12 +2132,14 @@ impl Message<ChatRequest> for WorldActor {
                                 send_system_message(&self.gate_ref, msg.session_id, "用法: @BACKUPPLAYER <角色名>");
                                 return;
                             }
-                            // 在线 → 用实时状态；离线 → 从 DB 加载（C# GetCharacterInfo 等价）
+                            // 在线 → 用实时状态 + 记录账号；离线 → 从 DB 加载 + 查账号（C# GetCharacterInfo 等价）
                             let mut state = None;
+                            let mut account = None;
                             for (_sid, rec) in &self.players {
                                 if rec.name.eq_ignore_ascii_case(&name) {
                                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                                         state = Some(s);
+                                        account = Some(rec.account_username.clone());
                                     }
                                     break;
                                 }
@@ -2145,19 +2147,100 @@ impl Message<ChatRequest> for WorldActor {
                             if state.is_none() {
                                 if let Ok(Some(s)) = db::load_character(&self.db_pool, &name).await {
                                     state = Some(s);
+                                    account = db::get_character_account(&self.db_pool, &name).await.unwrap_or(None);
                                 }
                             }
-                            match state {
-                                Some(s) => {
+                            match (state, account) {
+                                (Some(s), Some(acc)) => {
                                     match serde_json::to_string(&s) {
-                                        Ok(json) => match db::archive_player_json(&self.db_pool, &s.name, &json).await {
+                                        Ok(json) => match db::archive_player_json(&self.db_pool, &s.name, &acc, &json).await {
                                             Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已存档", s.name)),
                                             Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档失败: {}", e)),
                                         },
                                         Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档序列化失败: {}", e)),
                                     }
                                 }
-                                None => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {}", name)),
+                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {}", name)),
+                            }
+                        }
+                        // @ARCHIVEPLAYER <name>（C# PlayerObject.cs:2709：存档 + 从账号移除）
+                        "ARCHIVEPLAYER" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            if name.is_empty() {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法: @ARCHIVEPLAYER <角色名>");
+                                return;
+                            }
+                            // 在线目标拒绝（C# 禁当前玩家；Rust 更严避免删在线角色数据）
+                            if self.players.values().any(|r| r.name.eq_ignore_ascii_case(&name)) {
+                                send_system_message(&self.gate_ref, msg.session_id, "不能存档在线玩家");
+                                return;
+                            }
+                            match db::load_character(&self.db_pool, &name).await {
+                                Ok(Some(s)) => {
+                                    let account = db::get_character_account(&self.db_pool, &name).await.unwrap_or(None);
+                                    if let Some(acc) = account {
+                                        if let Ok(json) = serde_json::to_string(&s) {
+                                            let _ = db::archive_player_json(&self.db_pool, &s.name, &acc, &json).await;
+                                        }
+                                    }
+                                    match db::delete_character(&self.db_pool, &name).await {
+                                        Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已存档并删除", name)),
+                                        Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档成功但删除失败: {}", e)),
+                                    }
+                                }
+                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {}", name)),
+                            }
+                        }
+                        // @LOADPLAYER <name>（C# PlayerObject.cs:2745：存档覆盖现役角色）
+                        "LOADPLAYER" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            if name.is_empty() {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法: @LOADPLAYER <角色名>");
+                                return;
+                            }
+                            if !db::character_exists_by_name(&self.db_pool, &name).await.unwrap_or(false) {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到现役角色 {}", name));
+                                return;
+                            }
+                            let Some(account) = db::get_character_account(&self.db_pool, &name).await.unwrap_or(None) else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("无法确定角色 {} 的账号", name));
+                                return;
+                            };
+                            match db::load_archived_player(&self.db_pool, &name).await {
+                                Ok(Some((_, json))) => match serde_json::from_str::<crate::actors::player::PlayerState>(&json) {
+                                    Ok(state) => match db::save_character(&self.db_pool, &state, &account).await {
+                                        Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已从存档加载", name)),
+                                        Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("加载失败: {}", e)),
+                                    },
+                                    Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档数据损坏: {}", e)),
+                                },
+                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {} 的存档", name)),
+                            }
+                        }
+                        // @RESTOREPLAYER <name> [account]（C# PlayerObject.cs:2780：恢复存档到指定/原账号）
+                        "RESTOREPLAYER" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            if name.is_empty() {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法: @RESTOREPLAYER <角色名> [账号]");
+                                return;
+                            }
+                            let target_account = parts.get(2).map(|s| s.to_string());
+                            match db::load_archived_player(&self.db_pool, &name).await {
+                                Ok(Some((orig_account, json))) => match serde_json::from_str::<crate::actors::player::PlayerState>(&json) {
+                                    Ok(state) => {
+                                        let account = target_account.clone().unwrap_or(orig_account);
+                                        if account.is_empty() {
+                                            send_system_message(&self.gate_ref, msg.session_id, "存档无原账号且未指定目标账号");
+                                            return;
+                                        }
+                                        match db::save_character(&self.db_pool, &state, &account).await {
+                                            Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已恢复到账号 {}", state.name, account)),
+                                            Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("恢复失败: {}", e)),
+                                        }
+                                    }
+                                    Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档数据损坏: {}", e)),
+                                },
+                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {} 的存档", name)),
                             }
                         }
                         // @level [玩家] <等级>（#1468：C# GM LEVEL parts>=3 改目标玩家）
