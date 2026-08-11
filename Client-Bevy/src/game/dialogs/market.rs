@@ -551,7 +551,8 @@ fn market_action_system(
         if btn.clicked {
             if let Some(idx) = market.selected {
                 let id = market.listings[idx].auction_id;
-                net.send_packet(&crate::network::MarketGetBackWire { listing_id: id as u32 });
+                // C# C.MarketGetBack：Mode=Any(0)（服务端按记录状态取回物品/领取金币）
+                net.send_packet(&crate::network::MarketGetBackWire { mode: 0, auction_id: id as u64 });
                 tracing::info!("🏪 取回商品 {}", id);
             } else {
                 market.message = "请先点击选中一个商品".to_string();
@@ -563,9 +564,9 @@ fn market_action_system(
         if btn.clicked {
             if let Some(idx) = market.selected {
                 let it = &market.listings[idx];
+                // C# C.MarketSellNow：仅 AuctionID
                 net.send_packet(&crate::network::MarketSellNowWire {
-                    unique_id: it.item_index as u32,
-                    price: it.price,
+                    auction_id: it.auction_id as u64,
                 });
                 tracing::info!("🏪 立即售出商品 {}", it.auction_id);
             } else {

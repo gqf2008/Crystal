@@ -67,7 +67,8 @@ impl Message<MarketSearchRequest> for WorldActor {
         let kw_index = kw.parse::<u32>().ok();
         let mut results: Vec<usize> = Vec::new();
         for (idx, auction) in self.auctions.iter().enumerate() {
-            if auction.sold {
+            // C#：卖家自己的已售记录保留（供 MarketGetBack 领取金币），他人已售排除
+            if auction.sold && auction.seller_name != state.name {
                 continue;
             }
             if !kw.is_empty() {
@@ -426,40 +427,10 @@ impl Message<MarketBuyRequest> for WorldActor {
             a.buyer_name = Some(buyer_state.name.clone());
         }
 
-        // Give gold to seller (online) or via mail (offline)
-        let mut seller_online = false;
-        for (_, seller_record) in &self.players {
-            if let Ok(Some(seller_state)) = seller_record.actor_ref.ask(GetPlayerState).await {
-                if seller_state.name == seller_name {
-                    let _ = seller_record.actor_ref.ask(AddGold { amount: price }).await;
-                    send_system_message(&self.gate_ref, seller_record.session_id, &format!("{} 购买了你的商品，获得 {} 金币", buyer_state.name, price));
-                    seller_online = true;
-                    break;
-                }
-            }
-        }
-        if !seller_online {
-            // Send gold to offline seller via mail
-            let mail = MailMessage {
-                mail_id: generate_mail_id(),
-                sender_name: "市场交易".to_string(),
-                receiver_name: seller_name.clone(),
-                subject: "商品售出".to_string(),
-                body: format!("你寄售的商品已售出，获得 {} 金币", price),
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0),
-                read: false,
-                collected: false,
-                locked: false,
-                gold: price,
-                items: Vec::new(),
-            };
-            if let Err(e) = db::insert_mail(&self.db_pool, &seller_name, &mail).await {
-                warn!("Failed to save market sale mail for {}: {}", seller_name, e);
-            }
-            debug!("Seller {} is offline, gold {} sent via mail", seller_name, price);
+        // C#：售出金币托管在寄售记录上，卖家经 MarketGetBack(Sold/Any) 领取（含 5% 佣金；不直接支付）
+        if let Some(r) = self.players.values().find(|r| r.name == seller_name) {
+            send_system_message(&self.gate_ref, r.session_id,
+                &format!("{} 购买了你的商品，可在市场领取金币", buyer_state.name));
         }
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功：获得物品"));
@@ -499,52 +470,108 @@ pub struct MarketGetBackRequest {
 impl Message<MarketGetBackRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketGetBackRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        // C# MarketCollectionMode：0=取回物品；mode=1 领取金币暂未实现
-        if msg.mode != 0 {
-            debug!("MarketGetBack: mode={} not supported (session={})", msg.mode, msg.session_id);
+        // C# PlayerObject.MarketGetBack：MarketCollectionMode Any=0 / Sold=1 / Expired=2
+        debug!("MarketGetBack: session={} mode={} auction={}", msg.session_id, msg.mode, msg.auction_id);
+
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.is_dead {
+            self.send_market_fail(msg.session_id, 0);
             return;
         }
-        debug!("MarketGetBack: session={} auction={}", msg.session_id, msg.auction_id);
-
-        let record = match self.players.get(&msg.session_id) {
-            Some(r) => r.clone(),
-            None => return,
-        };
-        let state = match record.actor_ref.ask(GetPlayerState).await {
-            Ok(Some(s)) => s,
-            _ => return,
-        };
 
         let auction_idx = match self.auctions.iter().position(|a| {
-            a.auction_id == msg.auction_id && a.seller_name == state.name && !a.sold
+            a.auction_id == msg.auction_id && a.seller_name == state.name
         }) {
             Some(idx) => idx,
             None => {
-                send_system_message(&self.gate_ref, msg.session_id, "找不到该寄售物品或已售出");
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该寄售记录");
                 return;
             }
         };
+        let auction = self.auctions[auction_idx].clone();
 
-        let item = self.auctions[auction_idx].item.clone();
-
-        // Try to add item to inventory first — if full, don't delete the auction
-        let added = record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await.unwrap_or(false);
-        if !added {
-            send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法取回物品");
-            return;
+        // Any(0)/Expired(2)：取回物品（未售出或已到期）
+        if msg.mode == 0 || msg.mode == 2 {
+            if !auction.sold || auction.expired {
+                // C# TakeAuction：过期拍卖若有当前出价 → 退款给出价人（:8680-8684）
+                if let Some(buyer) = &auction.current_buyer {
+                    let bid = auction.current_bid;
+                    if bid > 0 {
+                        let mail = MailMessage {
+                            mail_id: generate_mail_id(),
+                            sender_name: "市场交易".to_string(),
+                            receiver_name: buyer.clone(),
+                            subject: "拍卖过期退款".to_string(),
+                            body: format!("你出价的物品已过期，出价 {} 金币已退回", bid),
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0),
+                            read: false, collected: false, locked: false,
+                            gold: bid,
+                            items: Vec::new(),
+                        };
+                        let _ = db::insert_mail(&self.db_pool, buyer, &mail).await;
+                    }
+                }
+                // 取回物品（C# CanGainItem 失败 → Fail 5）
+                let added = record.actor_ref.ask(AddItemToInventory { item: auction.item.clone() }).await.unwrap_or(false);
+                if !added {
+                    self.send_market_fail(msg.session_id, 5);
+                    return;
+                }
+                let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+                self.auctions.remove(auction_idx);
+                self.send_market_success(msg.session_id, "取回寄售物品成功".to_string());
+                return;
+            }
         }
 
-        let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
-        self.auctions.remove(auction_idx);
-        send_system_message(&self.gate_ref, msg.session_id, "取回寄售物品成功");
+        // Any(0)/Sold(1)：领取售出金币（含佣金）
+        if msg.mode == 0 || msg.mode == 1 {
+            if auction.sold {
+                let cost = if auction.item_type == 1 { auction.current_bid } else { auction.price as u64 };
+                let gold = market_collect_gold(&auction);
+                if !record.actor_ref.ask(crate::actors::player::CanGainGold { amount: gold as u32 }).await.unwrap_or(false) {
+                    self.send_market_fail(msg.session_id, 8);
+                    return;
+                }
+                let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
+                let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+                self.auctions.remove(auction_idx);
+                let commission = cost - gold;
+                let text = format!("售出金币 {}（含佣金 {}）已领取", gold, commission);
+                send_system_message(&self.gate_ref, msg.session_id, &text);
+                self.send_market_success(msg.session_id, text);
+                return;
+            }
+        }
 
-        // 完整 UserInformation 刷新（背包 + 金币）
-        if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
-            let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+        send_system_message(&self.gate_ref, msg.session_id, "当前状态无法领取");
+    }
+}
+
+impl WorldActor {
+    fn send_market_success(&self, session_id: u64, message: String) {
+        let packet = mir2_shared::packets::server::market_system::MarketSuccess { message };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
             let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: packet,
-            }).await;
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MarketSuccess as i16, &body),
+            }).try_send();
+        }
+    }
+
+    fn send_market_fail(&self, session_id: u64, reason: u8) {
+        let packet = mir2_shared::packets::server::market_system::MarketFail { reason };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MarketFail as i16, &body),
+            }).try_send();
         }
     }
 }
@@ -562,6 +589,19 @@ pub fn auction_bid_validate(starting_price: u64, current_bid: u64, bid_price: u6
 
 /// 寄售/拍卖期限（C# Globals.ConsignmentLength 天；配置近似 7 天）
 const CONSIGNMENT_LENGTH_SECS: i64 = 7 * 24 * 3600;
+
+/// 市场佣金（C# Globals.Commission = 0.05F → 5%）
+pub(crate) const MARKET_COMMISSION_PERCENT: u64 = 5;
+
+/// C# MarketGetBack Sold 分支：cost=寄售价(Consign)/拍卖当前价(Auction)，gold = cost - cost×5%
+pub(crate) fn market_collect_gold(auction: &AuctionListing) -> u64 {
+    let cost = if auction.item_type == 1 {
+        auction.current_bid
+    } else {
+        auction.price as u64
+    };
+    cost - cost * MARKET_COMMISSION_PERCENT / 100
+}
 
 /// #1325：到期结算（C# Envir.ProcessAuction）
 /// - 拍卖且有人出价 → 成交：物品给买家（离线邮件）、金币给卖家（离线邮件）
@@ -615,31 +655,10 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                     let _ = db::insert_mail(&world.db_pool, &winner, &mail).await;
                 }
             }
-            // 金币给卖家（在线直接给，离线邮件）
-            let mut seller_online = false;
-            for (_, record) in &world.players {
-                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                    if st.name == seller {
-                        let _ = record.actor_ref.ask(AddGold { amount: bid }).await;
-                        send_system_message(&world.gate_ref, record.session_id, &format!("你的 {} 以 {} 金币成交", item_name, bid));
-                        seller_online = true;
-                        break;
-                    }
-                }
-            }
-            if !seller_online {
-                let mail = MailMessage {
-                    mail_id: generate_mail_id(),
-                    sender_name: "市场交易".to_string(),
-                    receiver_name: seller.clone(),
-                    subject: "拍卖成交".to_string(),
-                    body: format!("你的 {} 以 {} 金币成交", item_name, bid),
-                    timestamp: now,
-                    read: false, collected: false, locked: false,
-                    gold: bid,
-                    items: Vec::new(),
-                };
-                let _ = db::insert_mail(&world.db_pool, &seller, &mail).await;
+            // C#：拍卖成交金币托管在寄售记录上，卖家经 MarketGetBack(Sold/Any) 领取（含 5% 佣金；不直接支付）
+            if let Some(r) = world.players.values().find(|r| r.name == seller) {
+                send_system_message(&world.gate_ref, r.session_id,
+                    &format!("你的 {} 以 {} 金币成交，可在市场领取金币", item_name, bid));
             }
             let _ = db::mark_auction_sold(&world.db_pool, id as i64, &winner).await;
             if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
@@ -692,7 +711,7 @@ impl Message<MarketSellNowRequest> for WorldActor {
         let auction = &self.auctions[auction_idx];
         let price = auction.price as u64;
         // C# Globals.Commission = 0.05（5%）
-        let commission = price * 5 / 100;
+        let commission = price * MARKET_COMMISSION_PERCENT / 100;
         let seller_gold = price - commission;
 
         let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
@@ -1504,6 +1523,23 @@ mod tests {
         assert!(auction_bid_validate(1000, 1000, 1001).is_ok(), "高于当前价应通过");
         assert!(auction_bid_validate(1000, 2000, 1500).is_err(), "低于当前价应拒绝");
         assert!(auction_bid_validate(1000, 2000, 2001).is_ok());
+    }
+
+    /// #2216：C# MarketGetBack 售出金币 = cost - cost×5%（Consign=Price / Auction=CurrentBid）
+    #[test]
+    fn market_collect_gold_matches_csharp_commission() {
+        let consign = AuctionListing {
+            auction_id: 1, seller_name: "A".into(), item: mir2_shared::data::item::UserItem::new(1001),
+            price: 1000, consignment_date: 0, sold: true, buyer_name: None,
+            item_type: 0, current_bid: 0, current_buyer: None, expired: false,
+        };
+        assert_eq!(market_collect_gold(&consign), 950);
+        let auction = AuctionListing {
+            auction_id: 2, seller_name: "A".into(), item: mir2_shared::data::item::UserItem::new(1001),
+            price: 1000, consignment_date: 0, sold: true, buyer_name: Some("B".into()),
+            item_type: 1, current_bid: 2000, current_buyer: Some("B".into()), expired: false,
+        };
+        assert_eq!(market_collect_gold(&auction), 1900);
     }
 
     /// #2198：C# MarketSearch 过滤字段（类型/形状/市场面板/用户模式）

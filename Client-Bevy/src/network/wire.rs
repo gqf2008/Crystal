@@ -444,7 +444,10 @@ impl Packet for MarketBuyWire {
 
 #[derive(Debug, Clone, Copy)]
 pub struct MarketGetBackWire {
-    pub listing_id: u32,
+    /// C# C.MarketGetBack.Mode（MarketCollectionMode：0=Any 1=Sold 2=Expired）
+    pub mode: u8,
+    /// C# C.MarketGetBack.AuctionID
+    pub auction_id: u64,
 }
 
 impl Packet for MarketGetBackWire {
@@ -455,7 +458,8 @@ impl Packet for MarketGetBackWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            listing_id: reader.read_u32::<LittleEndian>()?,
+            mode: reader.read_u8()?,
+            auction_id: reader.read_u64::<LittleEndian>()?,
         })
     }
 
@@ -464,15 +468,16 @@ impl Packet for MarketGetBackWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.listing_id)?;
+        writer.write_u8(self.mode)?;
+        writer.write_u64::<LittleEndian>(self.auction_id)?;
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct MarketSellNowWire {
-    pub unique_id: u32,
-    pub price: u32,
+    /// C# C.MarketSellNow.AuctionID
+    pub auction_id: u64,
 }
 
 impl Packet for MarketSellNowWire {
@@ -483,8 +488,7 @@ impl Packet for MarketSellNowWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            unique_id: reader.read_u32::<LittleEndian>()?,
-            price: reader.read_u32::<LittleEndian>()?,
+            auction_id: reader.read_u64::<LittleEndian>()?,
         })
     }
 
@@ -493,8 +497,7 @@ impl Packet for MarketSellNowWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.unique_id)?;
-        writer.write_u32::<LittleEndian>(self.price)?;
+        writer.write_u64::<LittleEndian>(self.auction_id)?;
         Ok(())
     }
 }
