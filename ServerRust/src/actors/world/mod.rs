@@ -3470,6 +3470,11 @@ impl WorldActor {
                                 }
                                 // Check level
                                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    // #2016：C# AcceptQuest——并发任务上限（Globals.MaxConcurrentQuests=20）
+                                    if !state.quest_log.can_accept() {
+                                        send_system_message(&self.gate_ref, session_id, "任务数量已达上限（20）");
+                                        continue;
+                                    }
                                     if state.level < quest_db.required_min_level as u16 {
                                         send_system_message(&self.gate_ref, session_id, "等级不足");
                                         continue;

@@ -1794,6 +1794,18 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                     {
                         // Check not already accepted
                         if let Ok(None) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
+                            // #2016：C# AcceptQuest（11269-11274）——已完成任务不可再接
+                            if let Ok(true) = record.actor_ref.ask(HasCompletedQuest { quest_index: quest_db.index }).await {
+                                send_system_message(&self.gate_ref, msg.session_id, "该任务已完成");
+                                return;
+                            }
+                            // #2016：C# AcceptQuest（11276）——并发任务上限（Globals.MaxConcurrentQuests=20）
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !st.quest_log.can_accept() {
+                                    send_system_message(&self.gate_ref, msg.session_id, "任务数量已达上限（20）");
+                                    return;
+                                }
+                            }
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs())
