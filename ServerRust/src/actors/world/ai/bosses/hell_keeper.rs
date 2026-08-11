@@ -10,7 +10,7 @@
 //!
 //! Attack（C# HellKeeper.cs:163-171）：attacktype1 = Random(3)>0 ? 0 : 1。
 //! CompleteAttack（C# :173-201）：ViewRange 全体，Type 0=DC / Type 1=MC+Dazed。
-//! Attacked（C# :31-144）：自定义 armour 减伤（已实现）+ 移除 LRParalysis（未实现）。
+//! Attacked（C# :31-144）：自定义 armour 减伤（已实现）+ 移除 LRParalysis（已实现，见 on_attacked_with_monster）。
 
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;

@@ -461,7 +461,7 @@ impl Message<MarketBuyRequest> for WorldActor {
 
 pub struct MarketGetBackRequest {
     pub session_id: u64,
-    /// C# C.MarketGetBack.Mode（0=取回物品；金币领取暂未实现）
+    /// C# C.MarketGetBack.Mode（0=取回物品 / 1=领取售出金币 / 2=过期取回；均已实现）
     pub mode: u8,
     /// C# C.MarketGetBack.AuctionID
     pub auction_id: u64,
