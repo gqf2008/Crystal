@@ -3756,6 +3756,8 @@ impl Message<EditGuildNoticeRequest> for SocialActor {
         }
 
         send_system_message(&self.gate_ref, msg.session_id, "行会公告已更新");
+        // #2172：公告持久化（重启后保持）
+        self.save_guild_to_db(&guild_name).await;
     }
 }
 
