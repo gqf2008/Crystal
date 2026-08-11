@@ -376,12 +376,21 @@ fn test_startgame_full_flow() {
     let userinfo_op = mir2_shared::enums::ServerPacketIds::UserInformation as i16;
     let health_op = mir2_shared::enums::ServerPacketIds::HealthChanged as i16;
     let loc_op = mir2_shared::enums::ServerPacketIds::UserLocation as i16;
+    // #2210/#2222：登录新增包（ChangeAMode/ChangePMode/DefaultNPC/BaseStatsInfo）
+    let amode_op = mir2_shared::enums::ServerPacketIds::ChangeAMode as i16;
+    let pmode_op = mir2_shared::enums::ServerPacketIds::ChangePMode as i16;
+    let defaultnpc_op = mir2_shared::enums::ServerPacketIds::DefaultNPC as i16;
+    let basestats_op = mir2_shared::enums::ServerPacketIds::BaseStatsInfo as i16;
     let mut got_startgame = false;
     let mut got_map_changed = false;
     let mut got_userinfo = false;
     let mut got_health = false;
     let mut got_location = false;
-    for _ in 0..20 {
+    let mut got_amode = false;
+    let mut got_pmode = false;
+    let mut got_defaultnpc = false;
+    let mut got_basestats = false;
+    for _ in 0..30 {
         let result = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await;
         match result {
             Ok((op, body)) => {
@@ -390,7 +399,12 @@ fn test_startgame_full_flow() {
                 if op == userinfo_op { got_userinfo = true; }
                 if op == health_op { got_health = true; }
                 if op == loc_op { got_location = true; }
-                if got_startgame && got_map_changed && got_userinfo && got_health && got_location {
+                if op == amode_op { got_amode = true; }
+                if op == pmode_op { got_pmode = true; }
+                if op == defaultnpc_op { got_defaultnpc = true; }
+                if op == basestats_op { got_basestats = !body.is_empty(); }
+                if got_startgame && got_map_changed && got_userinfo && got_health && got_location
+                    && got_amode && got_pmode && got_defaultnpc && got_basestats {
                     break;
                 }
             }
@@ -398,7 +412,8 @@ fn test_startgame_full_flow() {
         }
     }
 
-    assert!(got_startgame, "Expected StartGame response from server (got map_changed={} userinfo={} health={} loc={})", got_map_changed, got_userinfo, got_health, got_location);
+    assert!(got_startgame, "Expected StartGame response from server (map_changed={} userinfo={} health={} loc={} amode={} pmode={} defaultnpc={} basestats={})",
+        got_map_changed, got_userinfo, got_health, got_location, got_amode, got_pmode, got_defaultnpc, got_basestats);
     });
 }
 
