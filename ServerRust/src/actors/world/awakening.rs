@@ -674,6 +674,92 @@ pub struct ResetAddedItemRequest {
     pub session_id: u64,
     pub unique_id: u64,
 }
+impl WorldActor {
+    /// C# @AWAKENING（PlayerObject.cs:3518-3559）：GM/TestServer 按 ItemType 直接升级装备觉醒（无金币/材料，失败不销毁）
+    pub(crate) async fn gm_awakening(
+        &mut self,
+        session_id: u64,
+        item_type: mir2_shared::enums::ItemType,
+        awake_type: mir2_shared::enums::AwakeType,
+    ) {
+        use mir2_shared::data::item::Awake;
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        // C#：遍历 Info.Equipment，真实类型匹配则 UpgradeAwake
+        for item in state.inventory.equipment.iter().flatten() {
+            let Some(info) = item.info.as_ref() else { continue };
+            if info.item_type != item_type { continue; }
+            let Some(item_info) = self.item_infos.get(&item.item_index) else { continue };
+
+            // C# CheckAwakening：可觉醒 / 未满级 / 类型兼容 / 品级
+            if !item_info.can_awakening || item.awake.is_max_level() {
+                send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
+                continue;
+            }
+            if item.awake.awake_type != mir2_shared::enums::AwakeType::None
+                && item.awake.awake_type != awake_type
+            {
+                send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
+                continue;
+            }
+            let compatible = match info.item_type {
+                mir2_shared::enums::ItemType::Weapon => matches!(awake_type,
+                    mir2_shared::enums::AwakeType::Dc | mir2_shared::enums::AwakeType::Mc | mir2_shared::enums::AwakeType::Sc),
+                mir2_shared::enums::ItemType::Helmet => matches!(awake_type,
+                    mir2_shared::enums::AwakeType::Ac | mir2_shared::enums::AwakeType::Mac),
+                mir2_shared::enums::ItemType::Armour => awake_type == mir2_shared::enums::AwakeType::HpMp,
+                _ => false,
+            };
+            let grade = item_info.grade;
+            if !compatible || !(1..=4).contains(&grade) {
+                send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
+                continue;
+            }
+
+            // C# UpgradeAwake：70% 成功；失败仅提示（GM 语义不销毁物品）
+            let roll = fastrand::u8(0..100);
+            if roll >= Awake::SUCCESS_RATE {
+                send_system_message(&self.gate_ref, session_id, &format!("觉醒失败：{}", item_info.name));
+                continue;
+            }
+
+            // 成功：计算觉醒值（与 NPC 觉醒一致：grade→chance_max，item_type→rate）
+            let chance_max = Awake::CHANCE_MAX.get(grade.saturating_sub(1) as usize).copied().unwrap_or(1);
+            let rate = match info.item_type {
+                mir2_shared::enums::ItemType::Weapon => Awake::WEAPON_RATE,
+                mir2_shared::enums::ItemType::Helmet => Awake::HELMET_RATE,
+                mir2_shared::enums::ItemType::Armour => Awake::ARMOUR_RATE,
+                _ => 1,
+            };
+            let value = (fastrand::u8(1..=chance_max) as i32 * rate as i32).max(1) as u8;
+
+            let mut new_awake = item.awake.clone();
+            new_awake.awake_type = awake_type;
+            new_awake.levels.push(value);
+            let mut snapshot = item.clone();
+            snapshot.awake = new_awake.clone();
+            let ok = record.actor_ref.ask(crate::actors::player::SetItemAwake {
+                unique_id: item.unique_id,
+                awake: new_awake,
+            }).await.unwrap_or(false);
+            if ok {
+                // C#：Enqueue(new S.RefreshItem { Item = temp })
+                let pkt = mir2_shared::packets::server::item::RefreshItem { item: snapshot };
+                let mut body = Vec::new();
+                if pkt.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RefreshItem as i16, &body),
+                    }).await;
+                }
+                send_system_message(&self.gate_ref, session_id,
+                    &format!("觉醒成功！{} +{}", awake_type_name(awake_type), value));
+            }
+        }
+    }
+}
+
 
 /// #2058：C# ResetPrice（ItemData.cs:605-611）——3000*Grade*(AddedStats.Count*0.2+1)
 fn reset_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {

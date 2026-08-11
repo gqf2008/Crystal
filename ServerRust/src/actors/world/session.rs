@@ -1615,6 +1615,19 @@ fn parse_item_type(name: &str) -> Option<mir2_shared::enums::ItemType> {
     })
 }
 
+/// C# AwakeType 枚举名 → shared AwakeType（Shared/Enums.cs:105-114；shared = C# + 3）
+fn parse_awake_type(name: &str) -> Option<mir2_shared::enums::AwakeType> {
+    Some(match name.to_uppercase().as_str() {
+        "DC" => mir2_shared::enums::AwakeType::Dc,
+        "MC" => mir2_shared::enums::AwakeType::Mc,
+        "SC" => mir2_shared::enums::AwakeType::Sc,
+        "AC" => mir2_shared::enums::AwakeType::Ac,
+        "MAC" => mir2_shared::enums::AwakeType::Mac,
+        "HPMP" => mir2_shared::enums::AwakeType::HpMp,
+        _ => return None,
+    })
+}
+
 impl Message<ChatRequest> for WorldActor {
     type Reply = ();
 
@@ -1756,7 +1769,7 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1799,6 +1812,19 @@ impl Message<ChatRequest> for WorldActor {
                                 return;
                             };
                             let _ = record.actor_ref.ask(crate::actors::player::RemoveAwakeningByItemType { item_type }).await;
+                        }
+                        // @awakening <ItemType> <AwakeType>（C# case "AWAKENING" ~3518：GM/TestServer 升级装备觉醒）
+                        "AWAKENING" => {
+                            let (Some(type_name), Some(awake_name)) = (parts.get(1).copied(), parts.get(2).copied()) else { return; };
+                            let Some(item_type) = parse_item_type(type_name) else {
+                                send_system_message(&self.gate_ref, msg.session_id, "无效的物品类型");
+                                return;
+                            };
+                            let Some(awake_type) = parse_awake_type(awake_name) else {
+                                send_system_message(&self.gate_ref, msg.session_id, "无效的觉醒类型");
+                                return;
+                            };
+                            self.gm_awakening(msg.session_id, item_type, awake_type).await;
                         }
                         // @gold <n>
                         "GOLD" => {
