@@ -516,6 +516,16 @@ impl Message<StartGameRequest> for WorldActor {
                     .unwrap_or(0)
                     / 86400;
                 if st.last_access / 86400 < today {
+                    // C# ProcessNewDay → ClearDailyQuests：每日任务从已完成移除（次日可重接）
+                    let daily: Vec<i32> = self.quest_infos.values()
+                        .filter(|q| q.quest_type == 1) // QuestType.Daily
+                        .map(|q| q.index)
+                        .collect();
+                    if !daily.is_empty() {
+                        let _ = r.actor_ref.ask(crate::actors::player::ClearDailyQuests {
+                            quest_indices: daily,
+                        }).await;
+                    }
                     self.queue_default_npc(msg.session_id, "_daily");
                 }
             }

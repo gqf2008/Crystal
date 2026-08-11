@@ -6744,6 +6744,7 @@ fn make_quest_instance(qi: &db::QuestInfo, start_time: u64) -> QuestInstance {
         title: qi.name.clone(),
         status: QuestStatus::InProgress,
         progress,
+        quest_type: qi.quest_type,
         exp_reward: qi.exp_reward as i64,
         gold_reward: qi.gold_reward.max(0) as u64,
         credit_reward: qi.credit_reward as i64,
