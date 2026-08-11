@@ -149,6 +149,8 @@ pub struct PlayerLogOut {
 pub struct ChatRequest {
     pub session_id: u64,
     pub message: String,
+    /// C# C.Chat.LinkedItems：聊天物品链接（服务端校验归属后回发 S.NewChatItem）
+    pub linked_items: Vec<mir2_shared::data::item::ChatItem>,
 }
 
 /// 切换攻击模式请求（从 GateActor 转发）
@@ -1740,17 +1742,20 @@ impl Message<ChatRequest> for WorldActor {
         }
         self.last_chat_ms.insert(msg.session_id, now_ms);
 
-        // C# Chat（PlayerObject.cs:1958）：$pos 替换为当前坐标 "X, Y"
+        // C# Chat（PlayerObject.cs:1958）：$pos → 客户端可点击坐标链接 [坐标:X, Y]
         let message = if message.contains("$pos") {
-            let pos = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                format!("{}, {}", st.x, st.y)
+            let (x, y) = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                (st.x, st.y)
             } else {
-                "0, 0".to_string()
+                (0, 0)
             };
-            message.replace("$pos", &pos)
+            replace_pos_marker(&message, x, y)
         } else {
             message
         };
+
+        // 聊天物品链接：%物品名#uid% → [物品:物品名]、<物品名> → <物品名/uid>、推送 S.NewChatItem
+        let message = self.process_chat_links(msg.session_id, &message, &msg.linked_items).await;
 
         // C# 聊天频道前缀（PlayerObject.Chat：1962-2150）：/ 私聊、!! 组队、!~ 行会、!# 师徒、:) 夫妻、@! GM公告
         // 喊话（!）保留下方原逻辑（卷轴/冷却/范围）；此处只处理其余频道
@@ -3879,9 +3884,6 @@ impl Message<ChatRequest> for WorldActor {
                 &format!("当前在线玩家: {} 人", count));
             return;
         }
-
-        // #285：聊天物品链接 → 向在线玩家推送 S.NewChatItem
-        self.send_chat_item_links(msg.session_id, &message).await;
 
         // #1344：普通聊天对齐 C#（PlayerObject.Chat → CurrentMap.Broadcast(S.ObjectChat)）：
         // 只广播同地图玩家（此前全服串线），并改用 S.ObjectChat（带 object_id）
