@@ -2975,6 +2975,10 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
     let mi = world.map_infos.get(&(state.map_index as i32));
     let Some(mi) = mi else { return };
 
+    // C# PlayerObject.cs:1507：进图触发默认 NPC [@_MapEnter(mapFileName)]
+    // 注：Rust 无 mapChanged 区分，同图传送也会触发（C# 仅地图变更触发）
+    world.queue_default_npc(session_id, &format!("_mapenter({})", mi.file_name));
+
     // NoIntelligentCreatures / NoPets：解散拾取/战斗宠物（Rust 统一 creature_log）
     if (mi.no_intelligent_creatures || mi.no_pets) && state.creature_log.active_creature.is_some() {
         let mut st = state.clone();
@@ -3297,6 +3301,13 @@ mod tests {
         assert!(script.find("_login").is_some());
         assert!(script.find("_useitem(3)").is_some());
         assert!(script.find("_die").is_none());
+        // 扩展段：Daily/MapEnter/OnAcceptQuest/OnFinishQuest/Trigger
+        let ext = ParsedScript::parse("[@_Daily]\n#ACT\nBREAK\n\n[@_MapEnter(0)]\n#ACT\nBREAK\n\n[@_OnAcceptQuest(5)]\n#ACT\nBREAK\n\n[@_OnFinishQuest(5)]\n#ACT\nBREAK\n\n[@_Trigger(3)]\n#ACT\nBREAK\n");
+        assert!(ext.find("_daily").is_some());
+        assert!(ext.find("_mapenter(0)").is_some());
+        assert!(ext.find("_onacceptquest(5)").is_some());
+        assert!(ext.find("_onfinishquest(5)").is_some());
+        assert!(ext.find("_trigger(3)").is_some());
         // 文件不存在 → None（默认关闭，无副作用）
         assert!(load_default_npc(std::path::Path::new("C:/definitely/not/exist")).is_none());
     }

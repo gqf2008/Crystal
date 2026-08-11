@@ -181,6 +181,8 @@ impl Message<AcceptQuestRequest> for WorldActor {
                 crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, msg.session_id, &q);
             }
             debug!("Quest accepted: {} ({}) by session {}", quest_db.name, msg.quest_index, msg.session_id);
+            // C# PlayerObject.cs:11347：接受任务成功触发默认 NPC [@_OnAcceptQuest(index)]
+            self.queue_default_npc(msg.session_id, &format!("_onacceptquest({})", msg.quest_index));
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "任务接受失败");
         }
@@ -289,6 +291,8 @@ impl Message<FinishQuestRequest> for WorldActor {
         ));
         send_quest_complete_packet(&self.gate_ref, msg.session_id, completed_quest.quest_index);
         debug!("Quest completed: {} by session {}", msg.quest_index, msg.session_id);
+        // C# PlayerObject.cs:11460：完成任务触发默认 NPC [@_OnFinishQuest(questIndex)]
+        self.queue_default_npc(msg.session_id, &format!("_onfinishquest({})", msg.quest_index));
     }
 }
 
