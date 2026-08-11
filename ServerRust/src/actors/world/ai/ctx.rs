@@ -227,6 +227,8 @@ pub struct AiCtx<'a> {
     pub out_heals: &'a mut Vec<(u32, i32)>,
     /// 输出：对玩家的 poison
     pub out_poisons: &'a mut Vec<PoisonPlayer>,
+    /// 输出：目标困敌状态（target_session, trapped；C# TrapRock Target.InTrapRock）
+    pub out_trap_state: &'a mut Vec<(u64, bool)>,
     /// 输出：推开玩家
     pub out_pushes: &'a mut Vec<PushPlayer>,
     /// 输出：传送玩家（C# Target.Teleport；session, x, y, dir）

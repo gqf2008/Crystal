@@ -857,6 +857,12 @@ impl Message<WorldMoveRequest> for WorldActor {
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             if state.is_dead { return; }
 
+            // C# CanWalk/CanRun（HumanObject.cs:128/4977）：InTrapRock 困敌中不可走/跑（TrapRock）
+            if self.in_trap_rock.contains(&msg.session_id) {
+                send_user_location_sync(&self.gate_ref, msg.session_id, state.direction, state.x, state.y).await;
+                return;
+            }
+
             // #1426：负重超限——C# CanWalk 不含负重（超重可走）；CanRun 含负重 → Run 退化为 Walk（HumanObject.Run :2516）
             let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
             let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos)
@@ -1476,6 +1482,7 @@ impl Message<PlayerDisconnected> for WorldActor {
         self.market_search_cache.remove(&msg.session_id);
         self.player_stacking.remove(&msg.session_id);
         self.slaying_armed.remove(&msg.session_id);
+        self.in_trap_rock.remove(&msg.session_id);
 
         info!("Player removed from world (session={})", msg.session_id);
 
@@ -1581,6 +1588,7 @@ impl Message<PlayerLogOut> for WorldActor {
         self.market_search_cache.remove(&msg.session_id);
         self.player_stacking.remove(&msg.session_id);
         self.slaying_armed.remove(&msg.session_id);
+        self.in_trap_rock.remove(&msg.session_id);
 
         // Clean up active rental sessions involving this player
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {

@@ -1969,6 +1969,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         let mut die_child_rocks: Vec<ai::ChildRockSpawn> = Vec::new();
         let mut die_heals: Vec<(u32, i32)> = Vec::new();
         let mut die_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+            let mut die_trap_states: Vec<(u64, bool)> = Vec::new();
         let mut die_backsteps: Vec<(u32, u8, i32)> = Vec::new();
         let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
         let mut die_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
@@ -2016,6 +2017,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 out_heals: &mut die_heals,
                 out_backsteps: &mut die_backsteps,
                 out_poisons: &mut die_poisons,
+                out_trap_state: &mut die_trap_states,
                 out_pushes: &mut die_pushes,
                 out_player_teleports: &mut die_teleports,
                 out_delayed_attacks: &mut die_delayed,
@@ -5365,6 +5367,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_child_rocks: Vec<ai::ChildRockSpawn> = Vec::new();
             let mut boss_heals: Vec<(u32, i32)> = Vec::new();
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+            let mut boss_trap_states: Vec<(u64, bool)> = Vec::new();
             let mut boss_backsteps: Vec<(u32, u8, i32)> = Vec::new();
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
@@ -5455,6 +5458,7 @@ impl Message<Tick> for WorldActor {
                         out_heals: &mut boss_heals,
                         out_backsteps: &mut boss_backsteps,
                         out_poisons: &mut boss_poisons,
+                out_trap_state: &mut boss_trap_states,
                         out_pushes: &mut boss_pushes,
                         out_player_teleports: &mut boss_player_teleports,
                         out_delayed_attacks: &mut boss_delayed_attacks,
@@ -7070,6 +7074,10 @@ impl Message<Tick> for WorldActor {
                         poisons: vec![pp.poison],
                     }).await;
                 }
+            }
+            // Boss 困敌状态（TrapRock：S.InTrapRock + 服务端禁走）
+            for (sid, trapped) in boss_trap_states.drain(..) {
+                self.set_in_trap_rock(sid, trapped).await;
             }
             // Boss 推开玩家（C# MapObject.Pushed：逐格校验 walkable，移动 + Pushed/ObjectPushed）
             for pp in &boss_pushes {
