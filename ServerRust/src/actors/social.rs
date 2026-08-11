@@ -2622,6 +2622,8 @@ impl Message<TradeAddItem> for SocialActor {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
+        // #2010：整堆/非堆叠放入时 count 取物品实际堆叠数（C# TradeItem 整件移动）
+        let eff_count = if msg.count > 0 && msg.count < full_count { msg.count } else { item_data.count };
 
         // 交易不存在/已锁定 → 回滚归还
         let other_session = {
@@ -2643,14 +2645,14 @@ impl Message<TradeAddItem> for SocialActor {
                 let _ = record.ask(AddItemToInventory { item: item_data }).await;
                 return;
             }
-            side.add_item(msg.unique_id, msg.grid, msg.count, Some(item_data));
+            side.add_item(msg.unique_id, msg.grid, eff_count, Some(item_data));
             side.unlock();
             trade.other_session(msg.session_id)
         };
 
         // 通知对方
         if let Some(other) = other_session {
-            send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, msg.grid, msg.count, true);
+            send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, msg.grid, eff_count, true);
         }
     }
 }
@@ -2659,17 +2661,36 @@ impl Message<TradeRemoveItem> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TradeRemoveItem, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(), None => return,
+        };
+
+        // #2010：C# RetrieveTradeItem 语义——移除即放回背包；锁定后不可改动（与 TradeAddItem 一致）
+        let removed = {
+            let trade = match self.find_trade_mut(msg.session_id) {
+                Some(t) => t, None => return,
+            };
+            let side = match trade.side_of_mut(msg.session_id) {
+                Some(s) => s, None => return,
+            };
+            if side.locked { return; }
+            let removed = side.remove_item(msg.unique_id);
+            side.unlock();
+            removed
+        };
+
+        // 归还背包（整叠/拆分部分均回 item_data，避免物品销毁）
+        if let Some(item_data) = removed.and_then(|ti| ti.item_data) {
+            let ok = record.ask(AddItemToInventory { item: item_data }).await.unwrap_or(false);
+            if !ok {
+                debug!("TradeRemoveItem: 归还背包失败 session={}", msg.session_id);
+            }
+        }
+
+        // 通知对方
         let trade = match self.find_trade_mut(msg.session_id) {
             Some(t) => t, None => return,
         };
-
-        let side = match trade.side_of_mut(msg.session_id) {
-            Some(s) => s, None => return,
-        };
-        side.remove_item(msg.unique_id);
-        side.unlock();
-
-        // 通知对方
         if let Some(other) = trade.other_session(msg.session_id) {
             send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, 0, 0, false);
         }
@@ -2698,6 +2719,19 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
             }
         };
 
+        // #2010：C# DepositTradeItem（10545-10553）——BindMode.DontTrade(0x10) 绑定物品不可放入交易
+        {
+            let infos = self.config.item_infos.read().await;
+            let bind = state.inventory.get_item(uid)
+                .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
+                .unwrap_or(0);
+            if (bind & 0x0010) != 0 {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
+                send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                return;
+            }
+        }
+
         // Check trade exists and not locked
         {
             let trade = match self.find_trade_mut(msg.session_id) {
@@ -2718,6 +2752,8 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
         // Remove item from player inventory
         let removed = record.ask(RemoveItemFromInventory { unique_id: uid }).await.ok().flatten();
         let item_data = removed.clone();
+        // #2010：C# 整格移动整叠（Info.Trade[to]=temp），count 取物品实际堆叠数
+        let item_count = item_data.as_ref().map(|it| it.count).unwrap_or(1);
 
         // Add to trade side
         let other_session = {
@@ -2739,13 +2775,13 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
                     return;
                 }
             };
-            side.add_item(uid, msg.to_slot as u8, 1, item_data);
+            side.add_item(uid, msg.to_slot as u8, item_count, item_data);
             side.unlock();
             trade.other_session(msg.session_id)
         };
 
         if let Some(other) = other_session {
-            send_trade_item_update_packet(&self.gate_ref, other, uid, msg.to_slot as u8, 1, true);
+            send_trade_item_update_packet(&self.gate_ref, other, uid, msg.to_slot as u8, item_count, true);
         }
         send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, true);
     }
