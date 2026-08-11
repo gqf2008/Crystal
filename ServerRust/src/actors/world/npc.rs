@@ -700,6 +700,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             spouse_name: None,
             married_date: 0,
             allow_mentor: false,
+            allow_marriage: false,
             mentor_name: None,
             creature_log: CreatureLog::new(),
             hero_index: 0,
