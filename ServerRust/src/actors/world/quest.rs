@@ -213,7 +213,35 @@ impl Message<FinishQuestRequest> for WorldActor {
                     && quest_db.select_rewards.get(msg.selected_item_index as usize).is_some());
             if has_item_reward {
                 let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
-                if !st.inventory.can_gain_items() {
+                // #2178：C# CanGainItems(奖励数组)——按发放逻辑构建奖励并做堆叠感知检查
+                let mut rewards: Vec<mir2_shared::data::item::UserItem> = Vec::new();
+                for r in &quest_db.fixed_rewards {
+                    let mut item = mir2_shared::data::item::UserItem {
+                        item_index: r.item_index,
+                        count: r.count,
+                        ..Default::default()
+                    };
+                    if let Some(info) = self.item_infos.get(&r.item_index) {
+                        item.max_dura = info.durability as u16;
+                        item.current_dura = info.durability as u16;
+                    }
+                    rewards.push(item);
+                }
+                if msg.selected_item_index >= 0 {
+                    if let Some(r) = quest_db.select_rewards.get(msg.selected_item_index as usize) {
+                        let mut item = mir2_shared::data::item::UserItem {
+                            item_index: r.item_index,
+                            count: r.count,
+                            ..Default::default()
+                        };
+                        if let Some(info) = self.item_infos.get(&r.item_index) {
+                            item.max_dura = info.durability as u16;
+                            item.current_dura = info.durability as u16;
+                        }
+                        rewards.push(item);
+                    }
+                }
+                if !st.inventory.can_gain_items_for(&rewards) {
                     send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法领取任务奖励");
                     return;
                 }
