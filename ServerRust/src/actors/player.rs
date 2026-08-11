@@ -4412,6 +4412,27 @@ impl Message<ReplaceWeddingRingItem> for PlayerActor {
     }
 }
 
+/// C# DivorceReply（PlayerObject.cs:13380-13392）：离婚清除左戒婚戒标记 + S.RefreshItem
+pub struct ClearWeddingRing;
+
+impl Message<ClearWeddingRing> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ClearWeddingRing, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let snapshot = {
+            let Some(ring) = self.state.inventory.equipment
+                .get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize)
+            else { return };
+            let Some(ring) = ring.as_mut() else { return };
+            if ring.wedding_ring == 0 { return; }
+            ring.wedding_ring = 0;
+            ring.clone()
+        };
+        self.send_refresh_item(&snapshot);
+        debug!("Player {} wedding ring cleared on divorce", self.state.name);
+    }
+}
+
 /// NPC 脚本 CHANGELEVEL：设置角色等级（对齐 C# ActionType.ChangeLevel：设等级 + 经验 0 + LevelUp）
 pub struct ChangeLevel {
     pub level: u16,
