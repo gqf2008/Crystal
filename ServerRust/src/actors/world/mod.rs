@@ -5922,6 +5922,7 @@ impl WorldActor {
             holy: b.holy,
             item_drop_rate_percent: b.item_drop_rate_percent,
             gold_drop_rate_percent: b.gold_drop_rate_percent,
+            mine_rate_percent: b.mine_rate_percent,
         }).await;
         Some(state)
     }
@@ -6410,6 +6411,8 @@ pub struct EquipmentBonuses {
     // #1000：装备掉落率加成（C# Stat.ItemDropRatePercent/GoldDropRatePercent）
     pub item_drop_rate_percent: i32,
     pub gold_drop_rate_percent: i32,
+    // #2118：装备采矿掉落率加成（C# Stat.MineRatePercent）
+    pub mine_rate_percent: i32,
     // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
     pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
     /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
@@ -6460,6 +6463,7 @@ pub(crate) fn calculate_equipment_bonuses(
             b.poison_resist += get(Stat::PoisonResist);
             b.item_drop_rate_percent += get(Stat::ItemDropRatePercent);
             b.gold_drop_rate_percent += get(Stat::GoldDropRatePercent);
+            b.mine_rate_percent += get(Stat::MineRatePercent);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
             b.hand_weight += get(Stat::HandWeight);

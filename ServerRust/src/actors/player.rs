@@ -326,6 +326,8 @@ pub struct PlayerState {
     pub item_drop_rate_percent: i32,
     /// 装备金币掉落率加成 %（C# Stat.GoldDropRatePercent）
     pub gold_drop_rate_percent: i32,
+    /// 装备采矿掉落率加成 %（C# Stat.MineRatePercent）
+    pub mine_rate_percent: i32,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -360,6 +362,8 @@ pub struct PlayerState {
     pub guild_buff_exp_percent: i32,
     /// 行会 Buff 钓鱼成功率加成百分比缓存（C# BuffFishRate）
     pub guild_buff_fish_rate_percent: i32,
+    /// 行会 Buff 采矿掉落率加成百分比缓存（C# GuildBuffInfo.BuffMineRate）
+    pub guild_buff_mine_rate_percent: i32,
     /// 当前地图是否无经验（C# MapInfo.NoExperience，#932；set_map_data 时从地图数据缓存，避免 AddExperience 反向 ask WorldActor 死锁）
     pub no_experience_map: bool,
     /// 灰名截止时间（毫秒；C# HumanObject.BrownTime，攻击低 PK 玩家后 1 分钟）
@@ -812,6 +816,8 @@ allow_group: false,
             exp_bonus_newbie_percent: 0,
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
+            mine_rate_percent: 0,
+            guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
@@ -2389,6 +2395,8 @@ pub struct SetStatBonuses {
     /// #1000：装备掉落率加成（C# Stat.ItemDropRatePercent/GoldDropRatePercent）
     pub item_drop_rate_percent: i32,
     pub gold_drop_rate_percent: i32,
+    /// 装备采矿掉落率加成（C# Stat.MineRatePercent）
+    pub mine_rate_percent: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -2429,7 +2437,8 @@ impl Message<SetStatBonuses> for PlayerActor {
             || msg.health_recovery != self.state.health_recovery
             || msg.spell_recovery != self.state.spell_recovery
             || msg.attack_speed != self.state.attack_speed
-            || msg.poison_resist != self.state.poison_resist;
+            || msg.poison_resist != self.state.poison_resist
+            || msg.mine_rate_percent != self.state.mine_rate_percent;
 
         if changed {
             self.state.min_attack += d_min;
@@ -2481,6 +2490,7 @@ impl Message<SetStatBonuses> for PlayerActor {
         // #1000：掉落率加成（非战斗属性，直接覆盖）
         self.state.item_drop_rate_percent = msg.item_drop_rate_percent;
         self.state.gold_drop_rate_percent = msg.gold_drop_rate_percent;
+        self.state.mine_rate_percent = msg.mine_rate_percent;
 
         if changed {
             self.send_user_information_refresh();
@@ -6341,6 +6351,8 @@ allow_group: false,
             exp_bonus_newbie_percent: 0,
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
+            mine_rate_percent: 0,
+            guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,

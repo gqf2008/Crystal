@@ -309,29 +309,35 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             }
         }
     }
-    let mut buff_updates: Vec<(u64, i32, i32)> = Vec::new();
+    let mut buff_updates: Vec<(u64, i32, i32, i32)> = Vec::new();
     for (sid, record) in &world.players {
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             let Some(guild_name) = &state.guild_name else { continue };
             let active = guild_active.get(guild_name).cloned().unwrap_or_default();
             let mut exp = 0i32;
             let mut fish = 0i32;
+            let mut mine = 0i32;
             for buff in world.guild_buff_infos.values() {
                 if active.contains(&buff.id) {
                     exp += buff.buff_exp_rate;
                     fish += buff.buff_fish_rate;
+                    mine += buff.buff_mine_rate;
                 }
             }
-            if exp != state.guild_buff_exp_percent || fish != state.guild_buff_fish_rate_percent {
-                buff_updates.push((*sid, exp, fish));
+            if exp != state.guild_buff_exp_percent
+                || fish != state.guild_buff_fish_rate_percent
+                || mine != state.guild_buff_mine_rate_percent
+            {
+                buff_updates.push((*sid, exp, fish, mine));
             }
         }
     }
-    for (sid, exp, fish) in buff_updates {
+    for (sid, exp, fish, mine) in buff_updates {
         if let Some(record) = world.players.get(&sid) {
             if let Ok(Some(mut st)) = record.actor_ref.ask(GetPlayerState).await {
                 st.guild_buff_exp_percent = exp;
                 st.guild_buff_fish_rate_percent = fish;
+                st.guild_buff_mine_rate_percent = mine;
                 let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
             }
         }
