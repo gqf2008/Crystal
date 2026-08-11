@@ -2682,6 +2682,11 @@ impl Message<TradeStartRequest> for SocialActor {
 
         if let Some((target, _dist)) = nearest_target {
             // 记录待处理交易请求
+            // C# TradeRequest（:10680-10684）：目标已有待处理交易邀请 → 拒绝
+            if self.pending_invites.contains_key(&target) {
+                send_system_message(&self.gate_ref, msg.session_id, "对方已有待处理的交易请求");
+                return;
+            }
             self.pending_invites.insert(target, msg.session_id);
             send_trade_invite_packet(&self.gate_ref, target, &state.name);
             debug!("Trade request: {} -> session {} (dist={})", state.name, target, _dist);
@@ -2714,6 +2719,16 @@ impl Message<TradeStartReply> for SocialActor {
         }
 
         // 创建交易会话
+        // C# TradeReply（:10723-10735）：接受者/邀请者任一已在交易 → 拒绝
+        if self.active_trades.contains_key(&msg.session_id) {
+            send_system_message(&self.gate_ref, msg.session_id, "你已经在交易中");
+            return;
+        }
+        if self.active_trades.contains_key(&initiator_id) {
+            send_system_message(&self.gate_ref, msg.session_id, "对方已在交易中");
+            return;
+        }
+
         let initiator_record = match self.players.get(&initiator_id) {
             Some(r) => r, None => return,
         };
