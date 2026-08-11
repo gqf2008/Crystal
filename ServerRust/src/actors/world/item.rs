@@ -356,6 +356,9 @@ impl Message<PickUpRequest> for WorldActor {
                 let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
                 if !updates.is_empty() {
                     send_system_message(&self.gate_ref, msg.session_id, "任务进度更新：获得物品");
+                    // C# CheckNeedQuestItem（:11551）：YouFound 任务输出消息
+                    let item_name = notify_item_name.clone();
+                    super::send_quest_output_message(&self.gate_ref, msg.session_id, format!("你获得了 {}", item_name));
                     // #2038：C# CheckNeedQuestItem → SendUpdateQuest——推 M43 ChangeQuest（与击杀路径一致）
                     for (quest_index, _, _) in &updates {
                         if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: *quest_index }).await {
@@ -2503,6 +2506,8 @@ impl Message<BuyItemRequest> for WorldActor {
         let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
         if !updates.is_empty() {
             send_system_message(&self.gate_ref, msg.session_id, "任务进度更新：获得物品");
+            // C# CheckNeedQuestItem（:11551）：YouFound 任务输出消息
+            super::send_quest_output_message(&self.gate_ref, msg.session_id, format!("你获得了 {}", item_db.name));
             // #2038：C# CheckNeedQuestItem → SendUpdateQuest——推 M43 ChangeQuest（与击杀路径一致）
             for (quest_index, _, _) in &updates {
                 if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: *quest_index }).await {

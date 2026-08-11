@@ -3912,6 +3912,9 @@ impl WorldActor {
                             let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
                             if !updates.is_empty() {
                                 send_system_message(&self.gate_ref, session_id, "任务进度更新：获得物品");
+                                // C# CheckNeedQuestItem（:11551）：YouFound 任务输出消息
+                                let item_name = self.item_infos.get(&item_index).map(|i| i.name.clone()).unwrap_or_default();
+                                send_quest_output_message(&self.gate_ref, session_id, format!("你获得了 {}", item_name));
                                 // #2038：C# CheckNeedQuestItem → SendUpdateQuest——推 M43 ChangeQuest（与击杀路径一致）
                                 for (quest_index, _, _) in &updates {
                                     if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: *quest_index }).await {
@@ -6485,6 +6488,21 @@ fn extract_quoted(s: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// 下发 S.SendOutputMessage（C# ReceiveOutputMessage；任务进度用 OutputMessageType.Quest=4）
+pub(crate) fn send_quest_output_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: String) {
+    let packet = mir2_shared::packets::server::ui_events::SendOutputMessage {
+        message,
+        message_type: mir2_shared::enums::OutputMessageType::Quest as u8,
+    };
+    let mut body = Vec::new();
+    if packet.write_body(&mut body).is_ok() {
+        let _ = gate_ref.tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SendOutputMessage as i16, &body),
+        }).try_send();
+    }
 }
 
 pub(crate) fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
