@@ -4111,6 +4111,38 @@ impl Message<MakeWeddingRing> for PlayerActor {
     }
 }
 
+/// #2036：C# ReplaceWeddingRing——更换结婚戒指（新戒标记 wedding_ring=1、旧戒解除、装备交换旧戒回背包）
+pub struct ReplaceWeddingRingItem {
+    pub new_unique_id: u64,
+}
+
+impl Message<ReplaceWeddingRingItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ReplaceWeddingRingItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        // 新戒指在背包
+        let Some(new_idx) = self.state.inventory.backpack.iter().position(|s| {
+            s.as_ref().map(|sl| sl.item.unique_id == msg.new_unique_id).unwrap_or(false)
+        }) else { return false };
+        // 当前左戒是婚戒
+        let Some(old) = self.state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL).cloned() else { return false };
+        if old.wedding_ring == 0 { return false; }
+        // 新戒标记婚戒；旧戒解除（equip_item 交换后旧戒回背包）
+        let grid = self.state.inventory.backpack[new_idx].as_ref().unwrap().grid;
+        self.state.inventory.backpack[new_idx].as_mut().unwrap().item.wedding_ring = 1;
+        if let Some(slot) = self.state.inventory.equipment.get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize) {
+            if let Some(s) = slot.as_mut() {
+                s.wedding_ring = 0;
+            }
+        }
+        let _ = self.state.inventory.equip_item(grid, crate::actors::inventory::EquipmentSlot::RingL);
+        self.send_inventory_changed();
+        self.send_equipment_changed();
+        debug!("Player {} wedding ring replaced (uid={})", self.state.name, msg.new_unique_id);
+        true
+    }
+}
+
 /// NPC 脚本 CHANGELEVEL：设置角色等级（对齐 C# ActionType.ChangeLevel：设等级 + 经验 0 + LevelUp）
 pub struct ChangeLevel {
     pub level: u16,
