@@ -3,8 +3,8 @@
 //! C# 参考：Server/MirObjects/Monsters/WhiteFoxman.cs
 //! 机制：
 //!   - AttackRange=6 远程风筝（<6 远离，>=6 接近）
-//!   - 目标贴身（dist<=1）且 10s 冷却：TeleportRandom(40, 14) 随机传送 ±14 格（C# Random.Next(1)==0 恒真）
-//!   - 攻击：ObjectRangeAttack + RangeDamage（MACAgility）；命中后 1/20+等级差 减速毒（5s，tick 1000）
+//!   - 攻击 7/8：ObjectRangeAttack + RangeDamage（MACAgility，DC）
+//!   - 攻击 1/8：Type=1 纯毒（CompleteAttack：levelgap=50-目标等级，Random(20)<4+levelgap → Slow 5s）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -14,16 +14,12 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
 const ATTACK_RANGE: i32 = 6;
-const TELEPORT_RANGE: i32 = 14;
-const TELEPORT_COOLDOWN: u64 = 100; // 10s
 
-pub struct WhiteFoxmanBehavior {
-    next_teleport_tick: u64,
-}
+pub struct WhiteFoxmanBehavior;
 
 impl WhiteFoxmanBehavior {
     pub fn new() -> Self {
-        Self { next_teleport_tick: 0 }
+        Self
     }
 }
 
@@ -36,33 +32,27 @@ impl MonsterBehavior for WhiteFoxmanBehavior {
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
-        // C# ProcessTarget：贴身且冷却到 → TeleportRandom(40, 14)
-        if dist <= 1 && ctx.tick_count >= self.next_teleport_tick {
-            self.next_teleport_tick = ctx.tick_count + TELEPORT_COOLDOWN;
-            let (w, h) = ctx.map_size;
-            let tx = (monster.x + fastrand::i32(-TELEPORT_RANGE..=TELEPORT_RANGE)).clamp(0, w - 1);
-            let ty = (monster.y + fastrand::i32(-TELEPORT_RANGE..=TELEPORT_RANGE)).clamp(0, h - 1);
-            ctx.out_monster_teleports.push((monster.object_id, tx, ty));
-            return;
-        }
-
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
-            // C# CompleteAttack：levelgap=50-target.Level；Random.Next(20) < 4+levelgap → Slow(1,5,Slow,1000)
-            let level_gap = (50 - target.level as i32).max(0);
-            if fastrand::i32(0..20) < 4 + level_gap {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+            // C# 7/8 弹道 DC；1/8 Type=1 纯毒（CompleteAttack 才上毒，无投射伤害）
+            if fastrand::i32(0..8) != 0 {
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
                 });
+            } else {
+                // C# CompleteAttack：levelgap=50-target.Level；Random.Next(20) < 4+levelgap → Slow(1,5,Slow,1000)
+                let level_gap = (50 - target.level as i32).max(0);
+                if fastrand::i32(0..20) < 4 + level_gap {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                    });
+                }
             }
             return;
         }
