@@ -3431,6 +3431,67 @@ impl Message<CombineItemRequest> for WorldActor {
             return;
         }
 
+        // C# CombineItem 修理分支（PlayerObject.cs:6765-6811 / 7125-7143）：
+        // 宝石 Shape 1/2/5/6 = 修理锤/缝纫（1/5 修武器/项链/戒指/手镯，2/6 修衣服/头盔/靴子/腰带）
+        if matches!(source_info.shape, 1 | 2 | 5 | 6) {
+            // BindMode.DontRepair(0x20) 不可修理
+            if super::has_bind_flag(target_info.bind_mode, 0x20) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法修理");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 类型匹配（C# ItemType：Weapon=1 Armour=2 Helmet=4 Necklace=5 Bracelet=6 Ring=7 Belt=9 Boots=10）
+            let can_repair = match target_info.item_type {
+                1 | 5 | 6 | 7 => matches!(source_info.shape, 1 | 5),
+                2 | 4 | 9 | 10 => matches!(source_info.shape, 2 | 6),
+                _ => false,
+            };
+            if !can_repair {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法用此宝石修理");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 耐久已满无需修理
+            if target.current_dura == target.max_dura {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品不需要修理");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+            // 执行修理：目标装备 Info.Shape 1/2 时 MaxDura 随机衰减后满修（C# 7127-7137）
+            let penalty = matches!(target_info.shape, 1 | 2);
+            let repaired = record.actor_ref.ask(crate::actors::player::HammerRepairItem {
+                unique_id: target.unique_id,
+                penalty,
+            }).await.ok().flatten();
+            if let Some((max_dura, current_dura)) = repaired {
+                // 消耗 1 颗宝石（C#：Count>1 则 Count--，否则移除整叠）
+                let _ = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: source.unique_id,
+                    count: 1,
+                }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "修理成功！");
+                // S.ItemRepaired { UniqueID, MaxDura, CurrentDura }（C# PlayerObject.cs:7142）
+                let packet = mir2_shared::packets::server::ItemRepaired {
+                    unique_id: target.unique_id,
+                    max_dura,
+                    current_dura,
+                };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemRepaired as i16, &body),
+                    }).await;
+                }
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, true, false);
+                debug!("CombineItem(repair): {} repaired item={} max_dura={} current_dura={}", state.name, target.unique_id, max_dura, current_dura);
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "修理失败");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+            }
+            return;
+        }
+
         // 检查目标物品是否有空槽位
         let slot_count = target_info.slots as usize;
         let filled_slots = target.slots.iter().filter(|s| s.is_some()).count();
