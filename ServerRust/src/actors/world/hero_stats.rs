@@ -139,12 +139,14 @@ pub fn hero_base_stats(class: MirClass, level: i32) -> HeroStats {
     }
 }
 
-/// 英雄完整属性 = 基础 + 装备加成（复用玩家 calculate_equipment_bonuses）
+/// 英雄完整属性 = 基础 + 装备加成（复用玩家 calculate_equipment_bonuses）+ 职业被动技能
+/// magics：英雄已学技能 (spell_cs, level)，spell_cs = SharedRust - 3（与 hero_magic_level 一致）
 pub fn compute_hero_stats(
     class: MirClass,
     level: i32,
     equipment: &[Option<mir2_shared::data::item::UserItem>],
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+    magics: &[(i32, u8)],
 ) -> HeroStats {
     let mut s = hero_base_stats(class, level);
     let b = super::calculate_equipment_bonuses(equipment, item_infos);
@@ -166,6 +168,15 @@ pub fn compute_hero_stats(
     s.wear_weight += b.wear_weight;
     s.hand_weight += b.hand_weight;
     s.poison_attack += b.poison_attack;
+    // #1517：战士 Slaying 被动（C# HumanObject.cs:2297 slayingLvPlus）——MaxDC + [5,6,7,8][Lv]、Accuracy + Lv
+    if class == MirClass::Warrior {
+        let slaying_cs = mir2_shared::enums::Spell::Slaying as i32 - 3;
+        if let Some((_, lv)) = magics.iter().find(|(spell, _)| *spell == slaying_cs) {
+            const LV_PLUS: [i32; 4] = [5, 6, 7, 8];
+            s.max_dc += LV_PLUS[(*lv as usize).min(3)];
+            s.accuracy += *lv as i32;
+        }
+    }
     s
 }
 
@@ -216,8 +227,29 @@ mod tests {
         // 无装备 = 基础；有装备（HP+100 的铠甲）→ max_hp 增加
         let empty: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 14];
         let map = std::collections::HashMap::new();
-        let base = compute_hero_stats(MirClass::Warrior, 30, &empty, &map);
+        let base = compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[]);
         assert_eq!(base.max_hp, 419);
+    }
+
+    #[test]
+    fn warrior_slaying_passive_adds_max_dc_and_accuracy() {
+        // C# HumanObject.cs:2297 slayingLvPlus：战士 Slaying 被动 MaxDC + [5,6,7,8][Lv]、Accuracy + Lv
+        use mir2_shared::enums::MirClass;
+        let empty: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 14];
+        let map = std::collections::HashMap::new();
+        let slaying_cs = mir2_shared::enums::Spell::Slaying as i32 - 3;
+        let base = compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[]);
+        // 已学 2 级 → MaxDC +7、Accuracy +2
+        let magics = vec![(slaying_cs, 2u8)];
+        let with = compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &magics);
+        assert_eq!(with.max_dc, base.max_dc + 7);
+        assert_eq!(with.accuracy, base.accuracy + 2);
+        // 未学 → 无加成
+        assert_eq!(base.max_dc, compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[]).max_dc);
+        // 非战士不生效
+        let tao_magics = vec![(slaying_cs, 5u8)];
+        let tao = compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &tao_magics);
+        assert_eq!(tao.max_dc, compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[]).max_dc);
     }
 
     #[test]
@@ -270,7 +302,7 @@ mod tests {
 
         let base = hero_base_stats(MirClass::Taoist, 30);
         assert_eq!(base.poison_attack, 0);
-        let with_eq = compute_hero_stats(MirClass::Taoist, 30, &eq, &infos);
+        let with_eq = compute_hero_stats(MirClass::Taoist, 30, &eq, &infos, &[]);
         assert_eq!(with_eq.poison_attack, 6);
     }
 }

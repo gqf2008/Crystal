@@ -1473,10 +1473,12 @@ impl Message<EquipItemRequest> for WorldActor {
                 hero_state.level = hero.level;
                 hero_state.class = hero.class;
                 hero_state.gender = hero.gender;
+                let magics: Vec<(i32, u8)> = state.hero_magics.iter().map(|m| (m.spell, m.level)).collect();
                 let hs = super::hero_stats::compute_hero_stats(
                     hero.class, hero.level as i32,
                     &state.hero_inventory.equipment,
                     &self.item_infos,
+                    &magics,
                 );
                 hero_state.min_ac = hs.min_ac;
                 hero_state.max_ac = hs.max_ac;
