@@ -231,6 +231,8 @@ impl Message<SendMailRequest> for WorldActor {
             if let Some(target_record) = self.players.get(&target) {
                 let _ = target_record.actor_ref.ask(crate::actors::player::AddMail { mail: mail.clone() }).await;
                 send_mail_received_packet(&self.gate_ref, target, &mail);
+                // C# PlayerObject.Process（:499-504）：收到新邮件 → 系统消息提示
+                send_system_message(&self.gate_ref, target, "你收到了一封新邮件");
                 debug!("Mail delivered online: {} -> {}", sender_state.name, msg.receiver_name);
             }
         } else {
