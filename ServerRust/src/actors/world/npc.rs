@@ -501,41 +501,46 @@ impl Message<SearchMapRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SearchMapRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let keyword_lower = msg.keyword.to_lowercase();
-
-        // 搜索匹配的地图
-        let matched_maps: Vec<_> = self.map_infos.values()
-            .filter(|m| m.title.to_lowercase().contains(&keyword_lower) || m.file_name.to_lowercase().contains(&keyword_lower))
-            .collect();
-
-        // 搜索匹配的 NPC
-        let matched_npcs: Vec<_> = self.npcs.values()
-            .filter(|n| n.name.to_lowercase().contains(&keyword_lower))
-            .collect();
-
-        if matched_maps.is_empty() && matched_npcs.is_empty() {
-            send_system_message(&self.gate_ref, msg.session_id, "未找到匹配结果");
+        // C# PlayerObject.SearchMap（~7595）：keyword < 3 字符 → 无响应
+        let keyword = msg.keyword.trim();
+        if keyword.len() < 3 {
             return;
         }
+        let keyword_lower = keyword.to_lowercase();
 
-        let mut result = String::new();
-        if !matched_maps.is_empty() {
-            result.push_str(&format!("地图({}): ", matched_maps.len()));
-            for (i, m) in matched_maps.iter().take(5).enumerate() {
-                if i > 0 { result.push_str(", "); }
-                result.push_str(&format!("{}(#{}))", m.title, m.index));
-            }
+        // C# GetWorldMap：Title.StartsWith(name) && BigMap > 0（首个匹配）
+        let matched_map = self.map_infos.values()
+            .find(|m| m.big_map > 0 && m.title.to_lowercase().starts_with(&keyword_lower));
+        // C# GetWorldMapNPC：GameName.StartsWith(name) && ShowOnBigMap（首个匹配；Rust 用 name 近似）
+        let matched_npc = if matched_map.is_none() {
+            self.npc_infos.values()
+                .find(|n| n.show_on_big_map && n.name.to_lowercase().starts_with(&keyword_lower))
+        } else {
+            None
+        };
+
+        // C# S.SearchMapResult：MapIndex(int，默认 -1) + NPCIndex(uint)
+        let (map_index, npc_index) = match (matched_map, matched_npc) {
+            (Some(m), _) => (m.index, 0u32),
+            (None, Some(n)) => (n.map_index, n.index.max(0) as u32),
+            (None, None) => (-1, 0u32),
+        };
+        let mut body = Vec::new();
+        body.extend_from_slice(&map_index.to_le_bytes());
+        body.extend_from_slice(&npc_index.to_le_bytes());
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SearchMapResult as i16, &body),
+        }).await;
+        // 客户端 SearchMapResult 渲染前保留系统消息兜底（Rust 附加）
+        if map_index == -1 {
+            send_system_message(&self.gate_ref, msg.session_id, "未找到匹配结果");
+        } else {
+            let kind = if npc_index != 0 { "NPC" } else { "地图" };
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("已找到{}：{}", kind, map_index));
         }
-        if !matched_npcs.is_empty() {
-            if !result.is_empty() { result.push_str(" | "); }
-            result.push_str(&format!("NPC({}): ", matched_npcs.len()));
-            for (i, n) in matched_npcs.iter().take(5).enumerate() {
-                if i > 0 { result.push_str(", "); }
-                result.push_str(&format!("{}({},{})", n.name, n.x, n.y));
-            }
-        }
-        send_system_message(&self.gate_ref, msg.session_id, &result);
-        debug!("SearchMap: {} maps, {} NPCs matching '{}'", matched_maps.len(), matched_npcs.len(), msg.keyword);
+        debug!("SearchMap: '{}' -> map={} npc={}", keyword, map_index, npc_index);
     }
 }
 

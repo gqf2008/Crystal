@@ -331,15 +331,13 @@ impl PacketHandler for MovementHandler {
             x if x == ServerPacketIds::SearchMapResult as u16 => {
                 if let Ok(packet) = server::SearchMapResult::read_body(&mut cursor) {
                     tracing::info!(
-                        "🔍 SearchMapResultReceived: map={} loc=({}, {})",
+                        "🔍 SearchMapResultReceived: map={} npc={}",
                         packet.map_index,
-                        packet.location_x,
-                        packet.location_y
+                        packet.npc_index
                     );
                     events.push(NetworkEvent::SearchMapResultReceived {
                         map_index: packet.map_index,
-                        location_x: packet.location_x,
-                        location_y: packet.location_y,
+                        npc_index: packet.npc_index,
                     });
                 }
             }

@@ -685,14 +685,12 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
             }
             NetworkEvent::SearchMapResultReceived {
                 map_index,
-                location_x,
-                location_y,
+                npc_index,
             } => {
                 tracing::trace!(
-                    "🗺️ Search map result: map={} loc=({}, {})",
+                    "🗺️ Search map result: map={} npc={}",
                     map_index,
-                    location_x,
-                    location_y
+                    npc_index
                 );
             }
             NetworkEvent::TimeOfDayChanged { time_of_day } => {

@@ -1089,13 +1089,13 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
             }
             NetworkEvent::SearchMapResultReceived {
                 map_index,
-                location_x,
-                location_y,
+                npc_index: _,
             } => {
+                // C# 结果仅含 MapIndex/NPCIndex（无坐标）；NPC 定位由客户端按对象查询
                 cmds.push(UiCommand::NavigateToMapLocation {
                     map_index: *map_index,
-                    x: *location_x,
-                    y: *location_y,
+                    x: 0,
+                    y: 0,
                 });
             }
             // 婚姻/师徒补充

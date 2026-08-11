@@ -102,9 +102,8 @@ pub struct WorldMapIcon {
 
 #[derive(Debug, Clone)]
 pub struct SearchMapResult {
-    pub map_index: i32,
-    pub location_x: u32,
-    pub location_y: u32,
+    pub map_index: i32, // C# MapIndex（默认 -1）
+    pub npc_index: u32, // C# NPCIndex（NPC 运行时 ObjectID）
 }
 
 // ==================== 解析函数 ====================
@@ -358,15 +357,13 @@ impl Packet for SearchMapResult {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         Ok(SearchMapResult {
             map_index: reader.read_i32::<LittleEndian>()?,
-            location_x: reader.read_u32::<LittleEndian>()?,
-            location_y: reader.read_u32::<LittleEndian>()?,
+            npc_index: reader.read_u32::<LittleEndian>()?,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.map_index)?;
-        writer.write_u32::<LittleEndian>(self.location_x)?;
-        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u32::<LittleEndian>(self.npc_index)?;
         Ok(())
     }
 }
