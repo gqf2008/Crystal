@@ -40,6 +40,58 @@ pub struct RefineLog {
     pub successful_refines: u32,
 }
 
+/// C# PlayerObject.RefineItem（:12811-12845）：精炼成功率公式
+/// 输入为材料聚合值（C# :12710-12751 计算）；无属性材料（refine_stat<=0）→ 0（C# :12753）
+#[allow(clippy::too_many_arguments)]
+pub fn refine_success_chance(
+    refine_stat: i32,
+    item_required_amount: i32,
+    required_level: i32,
+    item_amount: i32,
+    durability_count: i32,
+    current_dura_count: i32,
+    ore_amount: i32,
+    ore_purity: i32,
+    luck: i32,
+    added_dc: i32,
+    added_mc: i32,
+    added_sc: i32,
+    is_weapon: bool,
+) -> i32 {
+    // C# :12753 无属性材料 → 0（RefineAdded 仍设 RefineIncrease，但无 RefinedValue 不应用）
+    if refine_stat <= 0 {
+        return 0;
+    }
+    // itemSuccess（C# :12811-12821）：先钳 0..10，再按条件 +10/+10/+5
+    let mut item_success = (refine_stat * 5 - item_required_amount + 5).clamp(0, 10);
+    if item_amount > 0 && (required_level / item_amount) > (item_required_amount - 5) {
+        item_success += 10;
+    }
+    if item_amount > 0 && durability_count == item_amount {
+        item_success += 10;
+    }
+    if item_amount > 0 && current_dura_count == item_amount {
+        item_success += 5;
+    }
+    // oreSuccess（C# :12823-12827）
+    let mut ore_success = 0;
+    if item_amount > 0 && ore_amount >= item_amount {
+        ore_success += 15;
+    }
+    if item_amount > 0 && ore_amount > 0 && (ore_purity / ore_amount) >= (refine_stat / item_amount) {
+        ore_success += 15;
+    }
+    if ore_amount > 0 && ore_purity == refine_stat {
+        ore_success += 5;
+    }
+    // luckSuccess（C# :12829-12831，上限 10）
+    let luck_success = (luck + 5).clamp(0, 10);
+    // addedStats 惩罚（C# :12838-12843；武器 RefineWepStatReduce=6 / 其他 RefineItemStatReduce=15，上限 50）
+    let added = ((added_dc + added_mc + added_sc) * if is_weapon { 6 } else { 15 }).clamp(0, 50);
+    // RefineBaseChance=20（C# Settings.cs:251）
+    (item_success + ore_success + luck_success + 20 - added).max(0)
+}
+
 impl RefineLog {
     pub fn new() -> Self {
         Self::default()
@@ -129,6 +181,26 @@ impl RefineLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refine_success_chance_matches_csharp_formula() {
+        // 无材料 → 0（C# :12753）
+        assert_eq!(refine_success_chance(0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, true), 0);
+        // 全条件：itemSuccess=10+10+5=25, oreSuccess=15+15+5=35, luck=5, base=20 → 85
+        assert_eq!(refine_success_chance(10, 20, 0, 1, 1, 1, 1, 10, 0, 0, 0, 0, true), 85);
+        // luck 钳位：luck=20 → luckSuccess=10 → 90
+        assert_eq!(refine_success_chance(10, 20, 0, 1, 1, 1, 1, 10, 20, 0, 0, 0, true), 90);
+        // 武器 addedStats 惩罚（×6）：added_dc=5 → -30 → 55
+        assert_eq!(refine_success_chance(10, 20, 0, 1, 1, 1, 1, 10, 0, 5, 0, 0, true), 55);
+        // 非武器（×15）：-75 → 惩罚封顶 50 → 85-50=35
+        assert_eq!(refine_success_chance(10, 20, 0, 1, 1, 1, 1, 10, 0, 5, 0, 0, false), 35);
+        // 惩罚封顶 50：-50 → 35
+        assert_eq!(refine_success_chance(10, 20, 0, 1, 1, 1, 1, 10, 0, 20, 0, 0, true), 35);
+        // 无 ore：oreSuccess=0 → 25+5+20=50
+        assert_eq!(refine_success_chance(10, 20, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, true), 50);
+        // 低材料：itemSuccess=0, luck=5, base=20 → 25
+        assert_eq!(refine_success_chance(1, 100, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, true), 25);
+    }
 
     #[test]
     fn test_start_refine() {

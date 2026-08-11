@@ -202,7 +202,16 @@ impl Message<RefineItemRequest> for WorldActor {
 
         let mut log = state.refine_log;
         let duration = REFINE_TIME_MINUTES * 60; // C# Settings.RefineTime=20 分钟
-        let success_chance = 80u8; // 80%（材料槽公式后续批次）
+        // C# RefineItem 成功率公式（:12811-12845）；材料槽未实现时材料输入全 0 → 无材料恒失败（C# :12753）
+        let deposited = log.active_refine.as_ref().and_then(|ri| ri.item.as_ref());
+        let luck = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::Luck)).unwrap_or(0);
+        let added_dc = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::MaxDC)).unwrap_or(0);
+        let added_mc = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::MaxMC)).unwrap_or(0);
+        let added_sc = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::MaxSC)).unwrap_or(0);
+        let success_chance = crate::actors::refine::refine_success_chance(
+            0, item_db.required_amount, 0, 0, 0, 0, 0, 0,
+            luck, added_dc, added_mc, added_sc, true,
+        ).clamp(0, 255) as u8;
         if !log.begin_refine(current_time, duration, success_chance) {
             send_system_message(&self.gate_ref, msg.session_id, "没有待精炼的物品");
             return;
