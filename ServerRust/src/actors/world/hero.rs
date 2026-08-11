@@ -705,11 +705,13 @@ impl WorldActor {
                     .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
                     .cloned();
                 let hero_stats = hero.as_ref().map(|h| {
+                    let magics: Vec<(i32, u8)> = state.hero_magics.iter().map(|m| (m.spell, m.level)).collect();
                     super::hero_stats::compute_hero_stats(
                         h.class,
                         h.level as i32,
                         &state.hero_inventory.equipment,
                         &self.item_infos,
+                        &magics,
                     )
                 });
                 let hero_level = hero.as_ref().map(|h| h.level).unwrap_or(state.level);
