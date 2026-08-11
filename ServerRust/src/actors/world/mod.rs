@@ -3494,6 +3494,16 @@ impl WorldActor {
                         let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         if quest_index > 0 {
                             if let Some(record) = self.players.get(&session_id) {
+                                // #2002：C# FinishQuest——交任务前检查背包空间（CanGainItems → 拒绝）
+                                if let Some(quest_db) = self.quest_infos.get(&quest_index) {
+                                    if !quest_db.fixed_rewards.is_empty() {
+                                        let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+                                        if !st.inventory.can_gain_items() {
+                                            send_system_message(&self.gate_ref, session_id, "背包已满，无法领取任务奖励");
+                                            continue;
+                                        }
+                                    }
+                                }
                                 let completed_quest = match record.actor_ref.ask(CompleteQuest { quest_index }).await {
                                     Ok(Some(q)) => q,
                                     _ => {

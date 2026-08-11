@@ -90,6 +90,20 @@ impl Message<FinishQuestRequest> for WorldActor {
             Some(r) => r, None => return,
         };
 
+        // #2002：C# FinishQuest——交任务前检查背包空间（CanGainItems → CannotHandInQuestBagFull）
+        if let Some(quest_db) = self.quest_infos.get(&msg.quest_index) {
+            let has_item_reward = !quest_db.fixed_rewards.is_empty()
+                || (msg.selected_item_index >= 0
+                    && quest_db.select_rewards.get(msg.selected_item_index as usize).is_some());
+            if has_item_reward {
+                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
+                if !st.inventory.can_gain_items() {
+                    send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法领取任务奖励");
+                    return;
+                }
+            }
+        }
+
         let completed_quest = match record.actor_ref.ask(CompleteQuest { quest_index: msg.quest_index }).await {
             Ok(Some(q)) => q,
             _ => {
