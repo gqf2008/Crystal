@@ -1,9 +1,12 @@
 use super::*;
 
-/// 存入精炼物品
+/// 存入精炼物品（C# DepositRefineItem：From=背包格、To=精炼栏格）
 pub struct DepositRefineItemRequest {
     pub session_id: u64,
-    pub unique_id: u64,
+    /// C# C.DepositRefineItem.From：背包格索引
+    pub from: i32,
+    /// C# C.DepositRefineItem.To：精炼栏格索引（Rust 单槽，须为 0）
+    pub to: i32,
 }
 
 impl Message<DepositRefineItemRequest> for WorldActor {
@@ -19,8 +22,17 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 检查物品是否在背包中
-        let Some(item) = state.inventory.get_item(msg.unique_id) else {
+        // C# DepositRefineItem（:12529-12559）：From 为背包格、To 为精炼栏格（Rust 单槽 to=0）
+        let from = msg.from;
+        if from < 0 || from as usize >= state.inventory.backpack.len() {
+            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+            return;
+        }
+        if msg.to != 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "精炼栏已满");
+            return;
+        }
+        let Some(item) = state.inventory.backpack[from as usize].as_ref().map(|s| s.item.clone()) else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
@@ -35,7 +47,7 @@ impl Message<DepositRefineItemRequest> for WorldActor {
         }
 
         // C# RefineItem（:12705）：从背包移除物品并存入精炼日志（含完整物品数据）
-        let Some(item) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None) else {
+        let Some(item) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: item.unique_id }).await.unwrap_or(None) else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
@@ -48,14 +60,17 @@ impl Message<DepositRefineItemRequest> for WorldActor {
 
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
         send_system_message(&self.gate_ref, msg.session_id, "精炼物品已存入");
-        debug!("DepositRefineItem: {} uid={}", state.name, msg.unique_id);
+        debug!("DepositRefineItem: {} from={}", state.name, from);
     }
 }
 
-/// 取回精炼物品
+/// 取回精炼物品（C# RetrieveRefineItem：From=精炼栏格、To=背包格）
 pub struct RetrieveRefineItemRequest {
     pub session_id: u64,
-    pub unique_id: u64,
+    /// C# C.RetrieveRefineItem.From：精炼栏格索引（Rust 单槽，须为 0）
+    pub from: i32,
+    /// C# C.RetrieveRefineItem.To：背包格索引
+    pub to: i32,
 }
 
 impl Message<RetrieveRefineItemRequest> for WorldActor {
@@ -71,27 +86,35 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 检查精炼是否完成或可取回
-        if state.refine_log.active_refine.is_none() {
+        // C# RetrieveRefineItem（:12568-12600）：From=精炼栏格（Rust 单槽 0）、To=背包格
+        if msg.from != 0 || state.refine_log.active_refine.is_none() {
             send_system_message(&self.gate_ref, msg.session_id, "没有精炼物品可取回");
             return;
         }
-
-        // 检查背包是否有空位
-        if !state.inventory.has_space() {
-            send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+        let to = msg.to;
+        if to < 0 || to as usize >= state.inventory.backpack.len() || state.inventory.backpack[to as usize].is_some() {
+            send_system_message(&self.gate_ref, msg.session_id, "该背包格子已被占用");
             return;
         }
 
-        let mut log = state.refine_log;
+        let mut log = state.refine_log.clone();
         if let Some(ri) = log.retrieve() {
-            // C# CollectRefine（:12895）：返还完整物品到背包
+            // C# RetrieveRefineItem（:12590）：返还到指定背包格
             if let Some(item) = ri.item {
-                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                let ok = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
+                if !ok {
+                    // 放置失败回放精炼栏（避免物品丢失）
+                    let mut log2 = state.refine_log.clone();
+                    if log2.deposit_item(item) {
+                        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log2 }).await;
+                    }
+                    send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+                    return;
+                }
             }
             let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
             send_system_message(&self.gate_ref, msg.session_id, "精炼物品已取回");
-            debug!("RetrieveRefineItem: {} uid={}", state.name, msg.unique_id);
+            debug!("RetrieveRefineItem: {} to={}", state.name, to);
         }
     }
 }
@@ -142,11 +165,11 @@ fn refine_cost(required_amount: i32) -> u64 {
     ((required_amount.max(0) * 10) * REFINE_COST) as u64
 }
 
-/// 开始精炼
+/// 开始精炼（C# RefineItem：UniqueID 为精炼栏内物品 uid）
 pub struct RefineItemRequest {
     pub session_id: u64,
-    pub item_id: u32,
-    pub materials: u32,
+    /// C# C.RefineItem.UniqueID：精炼栏内待精炼物品 uid
+    pub unique_id: u64,
 }
 
 impl Message<RefineItemRequest> for WorldActor {
@@ -162,14 +185,19 @@ impl Message<RefineItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 检查是否有待精炼物品
-        if state.refine_log.active_refine.is_none() {
+        // C# RefineItem（:12649-12658）：按 unique_id 校验精炼栏物品
+        let deposited = state.refine_log.active_refine.as_ref().and_then(|ri| ri.item.clone());
+        let Some(deposited) = deposited else {
             send_system_message(&self.gate_ref, msg.session_id, "没有待精炼的物品");
+            return;
+        };
+        if msg.unique_id != 0 && deposited.unique_id != msg.unique_id {
+            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         }
 
         // #2034：C# RefineItem（12676-12683）——费用 (RequiredAmount*10)*RefineCost
-        let item_db = match self.item_infos.get(&(msg.item_id as i32)) {
+        let item_db = match self.item_infos.get(&deposited.item_index) {
             Some(i) => i.clone(),
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
@@ -203,11 +231,10 @@ impl Message<RefineItemRequest> for WorldActor {
         let mut log = state.refine_log;
         let duration = REFINE_TIME_MINUTES * 60; // C# Settings.RefineTime=20 分钟
         // C# RefineItem 成功率公式（:12811-12845）；材料槽未实现时材料输入全 0 → 无材料恒失败（C# :12753）
-        let deposited = log.active_refine.as_ref().and_then(|ri| ri.item.as_ref());
-        let luck = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::Luck)).unwrap_or(0);
-        let added_dc = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::MaxDC)).unwrap_or(0);
-        let added_mc = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::MaxMC)).unwrap_or(0);
-        let added_sc = deposited.map(|u| u.added_stats.get(mir2_shared::enums::Stat::MaxSC)).unwrap_or(0);
+        let luck = deposited.added_stats.get(mir2_shared::enums::Stat::Luck);
+        let added_dc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxDC);
+        let added_mc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxMC);
+        let added_sc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxSC);
         let success_chance = crate::actors::refine::refine_success_chance(
             0, item_db.required_amount, 0, 0, 0, 0, 0, 0,
             luck, added_dc, added_mc, added_sc, true,
@@ -219,7 +246,7 @@ impl Message<RefineItemRequest> for WorldActor {
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
 
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
-        debug!("RefineItem: {} item={} materials={}", state.name, msg.item_id, msg.materials);
+        debug!("RefineItem: {} uid={}", state.name, msg.unique_id);
     }
 }
 

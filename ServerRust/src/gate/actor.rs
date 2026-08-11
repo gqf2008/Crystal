@@ -1492,11 +1492,13 @@ fn forward_drop_item(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 11 { return; }
+    // C# C.DropItem：uid u64 + count u16 + hero bool = 11 字节；SharedRust/客户端：count u32 + hero u8 = 13 字节
+    // 兼容两者：count 取低 2 字节（实际堆叠 < 65536），hero 标志取 count 高字节或第 12 字节
+    if payload.len() < 13 { return; }
     let world_ref = match world_ref { Some(w) => w, None => return };
     let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
     let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
-    let _hero_inv = payload[10] != 0;
+    let _hero_inv = payload[10] != 0 || payload[12] != 0;
     let _ = world_ref.tell(crate::actors::world::DropItemRequest {
         session_id, unique_id: uid, count,
     }).try_send();
@@ -2798,24 +2800,27 @@ fn handle_abandon_quest(world_ref: &Option<ActorRef<crate::actors::world::WorldA
 // ============================================================================
 
 /// DepositRefineItem: [unique_id: u64]
+/// DepositRefineItem: [from: i32][to: i32]（C# C.DepositRefineItem 槽位线格式）
 fn handle_deposit_refine_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 8 { return; }
-    let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
-    debug!("DepositRefineItem: session={} uid={}", session_id, uid);
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("DepositRefineItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::DepositRefineItemRequest {
-        session_id, unique_id: uid,
+        session_id, from, to,
     }).try_send();
 }
 
-/// RetrieveRefineItem: [unique_id: u64]
+/// RetrieveRefineItem: [from: i32][to: i32]（C# C.RetrieveRefineItem 槽位线格式）
 fn handle_retrieve_refine_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 8 { return; }
-    let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
-    debug!("RetrieveRefineItem: session={} uid={}", session_id, uid);
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("RetrieveRefineItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::RetrieveRefineItemRequest {
-        session_id, unique_id: uid,
+        session_id, from, to,
     }).try_send();
 }
 
@@ -2826,15 +2831,14 @@ fn handle_refine_cancel(world_ref: &Option<ActorRef<crate::actors::world::WorldA
     let _ = world_ref.tell(crate::actors::world::RefineCancelRequest { session_id }).try_send();
 }
 
-/// RefineItem: [item_id: u32][materials: u32]
+/// RefineItem: [unique_id: u64]（C# C.RefineItem 精炼栏物品 uid）
 fn handle_refine_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 8 { return; }
-    let item_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let materials = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    debug!("RefineItem: session={} item={} materials={}", session_id, item_id, materials);
+    let unique_id = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+    debug!("RefineItem: session={} uid={}", session_id, unique_id);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::RefineItemRequest {
-        session_id, item_id, materials,
+        session_id, unique_id,
     }).try_send();
 }
 
@@ -2930,14 +2934,14 @@ fn forward_search_map(
     let _ = world_ref.tell(crate::actors::world::SearchMapRequest { session_id, keyword }).try_send();
 }
 
-/// Observe: [target_id: u32]
+/// Observe: [name: DotNetString]（C# C.Observe 目标玩家名）
 fn forward_observe(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("Observe: session={} target={}", session_id, target_id);
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
+    debug!("Observe: session={} target={}", session_id, name);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::ObservePlayerRequest {
-        session_id, target_id,
+        session_id, name,
     }).try_send();
 }
 

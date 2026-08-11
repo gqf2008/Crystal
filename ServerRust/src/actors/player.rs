@@ -2837,6 +2837,24 @@ impl Message<ResizeHeroInventory> for PlayerActor {
 }
 
 /// 添加物品到背包
+/// 将物品放到指定背包格（C# RetrieveRefineItem 的 To 目标格语义；格空才成功）
+pub struct PlaceItemAtSlot {
+    pub slot: i32,
+    pub item: mir2_shared::data::item::UserItem,
+}
+
+impl Message<PlaceItemAtSlot> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: PlaceItemAtSlot, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let ok = self.state.inventory.place_item_at(msg.slot, msg.item);
+        if ok {
+            self.send_inventory_changed();
+        }
+        ok
+    }
+}
+
 pub struct AddItemToInventory {
     pub item: mir2_shared::data::item::UserItem,
 }

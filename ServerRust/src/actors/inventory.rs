@@ -355,6 +355,16 @@ impl PlayerInventory {
     }
 
     /// 查询物品（按 unique_id）
+    /// 将物品放到指定背包格（C# RetrieveRefineItem 的 To 目标格语义；格空才成功）
+    pub fn place_item_at(&mut self, slot: i32, item: UserItem) -> bool {
+        let idx = slot as usize;
+        if slot < 0 || idx >= self.backpack.len() || self.backpack[idx].is_some() {
+            return false;
+        }
+        self.backpack[idx] = Some(InventorySlot { grid: slot as u8, item });
+        true
+    }
+
     pub fn get_item(&self, uid: u64) -> Option<&UserItem> {
         for s in self.backpack.iter().flatten() {
             if s.item.unique_id == uid {
@@ -1275,6 +1285,21 @@ mod tests {
 
         // 修理不存在的物品
         assert!(!inv.repair_item(99999, false));
+    }
+
+    /// #2190：C# RetrieveRefineItem 目标格放置（空格成功/占用失败/越界失败）
+    #[test]
+    fn test_place_item_at() {
+        let mut inv = PlayerInventory::new();
+        let item = make_item(100, 1);
+        // 空格成功
+        assert!(inv.place_item_at(0, item.clone()));
+        assert!(inv.backpack[0].is_some());
+        // 占用失败
+        assert!(!inv.place_item_at(0, item.clone()));
+        // 越界失败
+        assert!(!inv.place_item_at(BACKPACK_SIZE as i32, item.clone()));
+        assert!(!inv.place_item_at(-1, item.clone()));
     }
 
     #[test]
