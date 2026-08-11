@@ -557,6 +557,8 @@ impl Message<StartGameRequest> for WorldActor {
             &map_title,
             is_big_map,
             &self.item_infos,
+            &self.quest_infos,
+            &self.recipe_infos,
         ).await;
 
         // C# PlayerObject 构造（~1219）：登录下发 S.SwitchGroup 同步客户端“允许组队”开关
