@@ -474,8 +474,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                     );
                     let damage = attack_result.damage;
                     monster.take_damage(damage);
-                    monster.set_last_hitter(msg.session_id);
-                    self.pending_gather.push(msg.session_id);
+                    // #1988：C# MonsterObject.Attacked（2578-2637）——Miss/护甲全挡返回 0，
+                    // EXPOwner（LastHitter）/GatherElement 仅在实际造成伤害后设置
+                    if damage > 0 {
+                        monster.set_last_hitter(msg.session_id);
+                        self.pending_gather.push(msg.session_id);
+                    }
                     monster.provoked = true;
                     // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（Target == null 才设置）
                     if monster.target_session.is_none() {
