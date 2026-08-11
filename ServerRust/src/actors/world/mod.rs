@@ -946,6 +946,8 @@ pub struct WorldActor {
     pub(crate) script_dir: PathBuf,
     /// 默认 NPC 脚本（C# Envir.DefaultNPC；<script_dir>/00Default.txt，Login/LevelUp/Die/UseItem 事件段）
     pub(crate) default_npc: Option<npc_script::ParsedScript>,
+    /// 默认 NPC 自定义命令（C# Envir.CustomCommands；00Default.txt 中 CUSTOMCOMMAND(x) 指令，玩家 @x 触发）
+    pub(crate) custom_commands: Vec<String>,
     /// 下一个对象 ID
     pub(crate) next_object_id: u32,
     /// 活跃怪物（按 object_id 索引）
@@ -1413,6 +1415,7 @@ impl WorldActor {
             spawn_dir,
             script_dir: PathBuf::from("."),
             default_npc: None,
+            custom_commands: Vec::new(),
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
@@ -4794,6 +4797,7 @@ impl Actor for WorldActor {
             hero_ai_states: HashMap::new(),
             player_heroes: HashMap::new(),
             default_npc: npc_script::load_default_npc(&args.quest_dir),
+            custom_commands: npc_script::load_custom_commands(&args.quest_dir),
         })
     }
 }

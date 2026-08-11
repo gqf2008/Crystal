@@ -138,6 +138,33 @@ pub fn load_default_npc(script_dir: &std::path::Path) -> Option<ParsedScript> {
     Some(ParsedScript::parse(&content))
 }
 
+/// 从默认 NPC 脚本提取自定义命令（C# NPCScript.cs:246-254：`CUSTOMCOMMAND(name)` 指令 → Envir.CustomCommands）
+pub fn extract_custom_commands(content: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let up = line.to_uppercase();
+        if !up.contains("CUSTOMCOMMAND") { continue; }
+        // 提取第一个括号内容：CUSTOMCOMMAND(name) / #CUSTOMCOMMAND (name)
+        if let Some(open) = line.find('(') {
+            if let Some(close) = line[open + 1..].find(')') {
+                let name = line[open + 1..open + 1 + close].trim().to_uppercase();
+                if !name.is_empty() && !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 加载默认 NPC 脚本中的自定义命令列表（文件不存在 → 空）
+pub fn load_custom_commands(script_dir: &std::path::Path) -> Vec<String> {
+    match std::fs::read_to_string(script_dir.join("00Default.txt")) {
+        Ok(content) => extract_custom_commands(&content),
+        Err(_) => Vec::new(),
+    }
+}
+
 impl ParsedScript {
     /// 把整份脚本文本解析为 ParsedScript。
     ///
@@ -3308,6 +3335,15 @@ mod tests {
         assert!(ext.find("_onacceptquest(5)").is_some());
         assert!(ext.find("_onfinishquest(5)").is_some());
         assert!(ext.find("_trigger(3)").is_some());
+        // 收尾段：Client / CustomCommand
+        let fin = ParsedScript::parse("[@_Client]\n#ACT\nBREAK\n\n[@_CustomCommand(vip)]\n#ACT\nBREAK\n");
+        assert!(fin.find("_client").is_some());
+        assert!(fin.find("_customcommand(vip)").is_some());
+        // CUSTOMCOMMAND 指令提取（大小写不敏感、去重）
+        let cc = extract_custom_commands("; CUSTOMCOMMAND(vip)\n#CUSTOMCOMMAND(HELP)\ncustomcommand ( Vip )\n");
+        assert!(cc.contains(&"VIP".to_string()));
+        assert!(cc.contains(&"HELP".to_string()));
+        assert_eq!(cc.len(), 2);
         // 文件不存在 → None（默认关闭，无副作用）
         assert!(load_default_npc(std::path::Path::new("C:/definitely/not/exist")).is_none());
     }
