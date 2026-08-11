@@ -3059,8 +3059,17 @@ impl Message<CraftItemRequest> for WorldActor {
             let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: recipe.gold_cost as u64 }).await;
         }
 
-        // 检查背包空间
-        if !state.inventory.has_space() {
+        // 检查背包空间（C# GainItem：结果可叠入已有堆叠）
+        let mut result_item = mir2_shared::data::item::UserItem {
+            item_index: recipe.product_item_index,
+            count: recipe.product_count,
+            ..Default::default()
+        };
+        if let Some(info) = self.item_infos.get(&recipe.product_item_index) {
+            result_item.max_dura = info.durability as u16;
+            result_item.current_dura = info.durability as u16;
+        }
+        if !state.inventory.can_gain_item(&result_item) {
             send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "背包已满").await;
             return;
         }
@@ -3097,16 +3106,7 @@ impl Message<CraftItemRequest> for WorldActor {
         let success = fastrand::u8(0..100) < recipe.chance;
 
         if success {
-            let mut item = mir2_shared::data::item::UserItem {
-                item_index: recipe.product_item_index,
-                count: recipe.product_count,
-                ..Default::default()
-            };
-            if let Some(info) = self.item_infos.get(&recipe.product_item_index) {
-                item.max_dura = info.durability as u16;
-                item.current_dura = info.durability as u16;
-            }
-            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item: result_item }).await;
             send_system_message(&self.gate_ref, msg.session_id, "合成成功！");
             debug!("CraftItem: {} recipe={} success", state.name, msg.recipe_id);
         } else {
@@ -3198,8 +3198,8 @@ impl Message<BuyItemBackRequest> for WorldActor {
             .unwrap_or(0);
         let cost = (per_unit.saturating_mul(count as u64) * price_rate / 100).max(1);
 
-        // 检查背包空间
-        if !state.inventory.has_space() {
+        // 检查背包空间（C# GainItem：回购物品可叠入已有堆叠）
+        if !state.inventory.can_gain_item(&buyback.item) {
             send_system_message(&self.gate_ref, msg.session_id, "背包已满");
             list.insert(idx, buyback);
             return;

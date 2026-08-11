@@ -2791,11 +2791,7 @@ impl WorldActor {
         let rolls: Vec<i32> = drops.iter().map(|d| fastrand::i32(0..d.chance.max(1) as i32)).collect();
         let Some(item_index) = pick_lowest_rate_drop(&drops, self.drop_rate, &rolls) else { return };
         let Some(record) = self.players.get(&session_id) else { return };
-        let can = record.actor_ref.ask(crate::actors::player::CanGainItems).await.unwrap_or(false);
-        if !can {
-            send_system_message(&self.gate_ref, session_id, "背包已满");
-            return;
-        }
+        // #2178：C# CanGainItem——先构建奖励物品，满包时结果可叠入已有堆叠
         let mut item = mir2_shared::data::item::UserItem {
             item_index,
             unique_id: generate_item_uid(),
@@ -2807,6 +2803,11 @@ impl WorldActor {
             item.current_dura = info.durability as u16;
         }
         enrich_item_info(&mut item, &self.item_infos);
+        let can = record.actor_ref.ask(crate::actors::player::CanGainItemsFor { items: vec![item.clone()] }).await.unwrap_or(false);
+        if !can {
+            send_system_message(&self.gate_ref, session_id, "背包已满");
+            return;
+        }
         let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
     }
 
@@ -2836,7 +2837,8 @@ impl WorldActor {
         }
         enrich_item_info(&mut item, &self.item_infos);
         let Some(record) = self.players.get(&session_id) else { return };
-        let can = record.actor_ref.ask(crate::actors::player::CanGainItems).await.unwrap_or(false);
+        // #2178：C# CanGainItem——结果可叠入已有堆叠
+        let can = record.actor_ref.ask(crate::actors::player::CanGainItemsFor { items: vec![item.clone()] }).await.unwrap_or(false);
         if !can {
             send_system_message(&self.gate_ref, session_id, "背包已满");
             return;
