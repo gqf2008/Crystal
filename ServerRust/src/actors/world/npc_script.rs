@@ -1246,7 +1246,7 @@ async fn eval_one_check(
             compare_i64(empty, op, want)
         },
         _ => {
-            debug!("NPC check '{}' not implemented, treating as PASS", c.check_type);
+            warn!("NPC check '{}' not implemented, treating as PASS", c.check_type);
             true
         }
     }
@@ -2073,6 +2073,12 @@ async fn exec_action(
             let _kind = arg1().parse::<u8>().unwrap_or(0);
             send_system_message(&world.gate_ref, session_id, &msg);
         }
+        // LINEMESSAGE "msg" <type> —— 给玩家发提示消息（脚本扩展；真实脚本 npc 275 使用）
+        "LINEMESSAGE" => {
+            let msg = unquote(arg0()).to_string();
+            let _kind = arg1().to_string();
+            send_system_message(&world.gate_ref, session_id, &msg);
+        }
         // MAP <map_name> —— 设置 MONGEN 等指令的目标地图（对齐 C# Param1）
         "MAP" => {
             flow.map_name = Some(unquote(arg0()).to_string());
@@ -2534,7 +2540,7 @@ async fn exec_action(
             flow.break_loop = true;
         }
         _ => {
-            debug!("NPC action '{}' not implemented, ignored", act.action_type);
+            warn!("NPC action '{}' not implemented, ignored", act.action_type);
         }
     }
     let _ = npc; // 保留参数供未来动作使用
@@ -3204,7 +3210,59 @@ pub fn parse_buttons(text: &str) -> Vec<(String, String)> {
     buttons
 }
 
-/// 判断给定脚本文本是否为 C# 格式（首条非空非注释行以 `[` 段头或 `#` 指令开头）。
+/// #2018：C# ParseInclude（NPCScript.cs:330）——展开 `#INCLUDE [相对路径.txt] @page`
+/// 把被包含文件 `[@page]` 的 `{...}` 块内容拼入当前脚本行（替换 #INCLUDE 行）。
+/// 路径相对于 Envir 根目录（quest_dir 的父目录）。
+pub fn expand_includes(lines: &[String], envir_dir: &std::path::Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let t = line.trim();
+        if !t.starts_with("#INCLUDE") {
+            out.push(line.clone());
+            continue;
+        }
+        let open = match t.find('[') { Some(i) => i, None => { warn!("NPC script #INCLUDE missing '[': {}", t); out.push(line.clone()); continue; } };
+        let close = match t.find(']') { Some(i) => i, None => { warn!("NPC script #INCLUDE missing ']': {}", t); out.push(line.clone()); continue; } };
+        if close <= open { out.push(line.clone()); continue; }
+        let rel_path = &t[open + 1..close];
+        let page = t[close + 1..].trim().to_string();
+        let full = envir_dir.join(rel_path.replace('\\', "/"));
+        match std::fs::read_to_string(&full) {
+            Ok(content) => {
+                let want = format!("[{}]", page.to_uppercase());
+                let mut started = false;
+                let mut in_block = false;
+                let mut finished = false;
+                for ext in content.lines() {
+                    let et = ext.trim();
+                    if !started && et.eq_ignore_ascii_case(&want) {
+                        started = true;
+                        continue;
+                    }
+                    if started && !in_block && et == "{" {
+                        in_block = true;
+                        continue;
+                    }
+                    if in_block && et == "}" {
+                        finished = true;
+                        break;
+                    }
+                    if in_block {
+                        out.push(ext.to_string());
+                    }
+                }
+                if !finished {
+                    warn!("NPC script #INCLUDE page {} not found in {}", want, full.display());
+                }
+            }
+            Err(_) => {
+                warn!("NPC script #INCLUDE file not found: {}", full.display());
+            }
+        }
+    }
+    out
+}
+
 /// 用于 npc.rs 选择走新引擎还是旧的 `<CMD>` 解析。
 pub fn is_csharp_format(script_text: &str) -> bool {
     for line in script_text.lines() {
@@ -3416,6 +3474,28 @@ You don't have enough Gold!
         assert!(main.segments[0].say.iter().any(|l| l.contains("hi")));
         // INSERT 不应产生任何 section
         assert!(script.find("INSERT").is_none());
+    }
+
+    #[test]
+    fn expand_includes_splices_page_block() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("npcscript_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let inc = dir.join("Tavern.txt");
+        let mut f = std::fs::File::create(&inc).unwrap();
+        writeln!(f, "[@MAIN]").unwrap();
+        writeln!(f, "{{").unwrap();
+        writeln!(f, "#SAY").unwrap();
+        writeln!(f, "wine list").unwrap();
+        writeln!(f, "<Close/@exit>").unwrap();
+        writeln!(f, "}}").unwrap();
+        drop(f);
+        let lines = vec![String::from("#INCLUDE [Tavern.txt] @Main"), String::new()];
+        let out = expand_includes(&lines, &dir);
+        assert!(out.iter().any(|l| l.contains("wine list")));
+        assert!(out.iter().any(|l| l.contains("<Close/@exit>")));
+        assert!(!out.iter().any(|l| l.starts_with("#INCLUDE")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

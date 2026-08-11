@@ -4939,6 +4939,8 @@ impl WorldActor {
             let section_upper = act.section.to_uppercase();
             let script_key = (db_index, section_upper.clone());
             let Some(lines) = self.npc_scripts.get(&script_key).cloned() else { continue };
+            // #2018：C# ParseInclude——运行时展开 #INCLUDE（Envir 根 = quest_dir 父目录）
+            let lines = npc_script::expand_includes(&lines, self.script_dir.parent().unwrap_or(std::path::Path::new("")));
             let joined = lines.join("\n");
             if !npc_script::is_csharp_format(&joined) {
                 // 旧 <CMD> 格式：延迟到期后用旧引擎执行该页（对齐 C# DelayedAction 到点执行脚本页）
