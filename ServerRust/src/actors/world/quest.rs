@@ -45,6 +45,27 @@ impl Message<AcceptQuestRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "等级过高");
                 return;
             }
+            // #2004：C# QuestInfo.CanAccept——RequiredClass 位掩码（Warrior=1/Wizard=2/Taoist=4/Assassin=8/Archer=16；0=不限制）
+            if quest_db.required_class != 0 {
+                let class_bit: i32 = match state.class {
+                    mir2_shared::enums::MirClass::Warrior => 1,
+                    mir2_shared::enums::MirClass::Wizard => 2,
+                    mir2_shared::enums::MirClass::Taoist => 4,
+                    mir2_shared::enums::MirClass::Assassin => 8,
+                    mir2_shared::enums::MirClass::Archer => 16,
+                };
+                if quest_db.required_class & class_bit == 0 {
+                    send_system_message(&self.gate_ref, msg.session_id, "职业不符合");
+                    return;
+                }
+            }
+        }
+        // #2004：C# QuestInfo.CanAccept——RequiredQuest 前置任务（需已完成）
+        if quest_db.required_quest > 0 {
+            if let Ok(false) = record.actor_ref.ask(HasCompletedQuest { quest_index: quest_db.required_quest }).await {
+                send_system_message(&self.gate_ref, msg.session_id, "需要先完成前置任务");
+                return;
+            }
         }
 
         // 检查是否已接受该任务
