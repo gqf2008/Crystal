@@ -721,6 +721,21 @@ impl Message<UseItemRequest> for WorldActor {
                             apply(BuffType::MpRegen { amount_per_tick: get(Stat::MP) }).await;
                             applied = true;
                         }
+                        // C# Defence（MaxAC+MinAC，PlayerObject.cs:5871-5872）
+                        if get(Stat::MaxAC) > 0 || get(Stat::MinAC) > 0 {
+                            apply(BuffType::AcDefenseBoost { bonus: get(Stat::MaxAC).max(get(Stat::MinAC)) }).await;
+                            applied = true;
+                        }
+                        // C# MagicDefence（MaxMAC+MinMAC，:5874-5875）
+                        if get(Stat::MaxMAC) > 0 || get(Stat::MinMAC) > 0 {
+                            apply(BuffType::MacDefenseBoost { bonus: get(Stat::MaxMAC).max(get(Stat::MinMAC)) }).await;
+                            applied = true;
+                        }
+                        // C# BagWeight（:5877-5878，负重上限）
+                        if get(Stat::BagWeight) > 0 {
+                            apply(BuffType::BagWeightBoost { bonus: get(Stat::BagWeight) }).await;
+                            applied = true;
+                        }
                         if applied {
                             debug!("Potion: {} shape=3 buff potion {} ticks", player_state.name, ticks);
                         }

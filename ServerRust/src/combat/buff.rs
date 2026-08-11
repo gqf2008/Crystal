@@ -16,6 +16,8 @@ pub enum BuffType {
     AcDefenseBoost { bonus: i32 },
     /// 魔法防御提升（SoulShield，C# Stat.MAC）
     MacDefenseBoost { bonus: i32 },
+    /// 负重上限提升（C# BuffType.BagWeight：Buff 药水 Stat.BagWeight）
+    BagWeightBoost { bonus: i32 },
     /// 伤害百分比减免（MagicShield/ElementalBarrier，C# Stat.DamageReductionPercent）
     DamageReduction { percent: i32 },
     /// 中毒（持续掉血）
@@ -180,6 +182,7 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
             (BuffType::Reflect { percent }, BuffType::Reflect { .. }) => *percent,
             (BuffType::AcDefenseBoost { bonus }, BuffType::AcDefenseBoost { .. }) => *bonus,
             (BuffType::MacDefenseBoost { bonus }, BuffType::MacDefenseBoost { .. }) => *bonus,
+            (BuffType::BagWeightBoost { bonus }, BuffType::BagWeightBoost { .. }) => *bonus,
             _ => 0,
         })
         .sum()
@@ -247,6 +250,14 @@ mod tests {
         ];
         assert_eq!(get_stat_bonus(&buffs, &BuffType::AcDefenseBoost { bonus: 0 }), 7);
         assert_eq!(get_stat_bonus(&buffs, &BuffType::MacDefenseBoost { bonus: 0 }), 6);
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }), 0);
+    }
+
+    #[test]
+    fn get_stat_bonus_includes_bag_weight_boost() {
+        // C# BuffType.BagWeight：负重上限加成应计入
+        let buffs = vec![BuffInstance::new(BuffType::BagWeightBoost { bonus: 500 }, 600, 1)];
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::BagWeightBoost { bonus: 0 }), 500);
         assert_eq!(get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }), 0);
     }
 
