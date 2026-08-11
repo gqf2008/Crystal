@@ -915,17 +915,36 @@ allow_group: false,
 
     /// #1319：死亡清理（对齐 C# Die()）——清 Buff 并逐 buff 下发 S.RemoveBuff、毒清空、灰名重置
     fn clear_death_state(&mut self) {
-        let tags: Vec<u8> = self.state.buffs.iter().map(|b| buff_tag(&b.buff_type)).collect();
-        self.state.buffs.clear();
+        // C# Die（:646-662）：只移除 RemoveOnDeath（Curse/Blindness）+ 显式 MagicShield/ElementalBarrier
+        // + 毒镜像 debuff（对应 C# PoisonList.Clear）；其余 buff 保留自然到期
+        let removed: Vec<(u8, Option<mir2_shared::enums::SpellEffect>)> = self.state.buffs.iter()
+            .filter(|b| buff_removed_on_death(&b.buff_type))
+            .map(|b| {
+                let down = match b.buff_type {
+                    crate::combat::buff::BuffType::DamageReduction { kind, .. } => shield_down_effect(kind),
+                    _ => None,
+                };
+                (buff_tag(&b.buff_type), down)
+            })
+            .collect();
+        self.state.buffs.retain(|b| !buff_removed_on_death(&b.buff_type));
         self.state.poison_list.clear();
         self.state.brown_until_ms = 0;
-        for tag in tags {
+        for (tag, down) in removed {
             let mut body = Vec::new();
             body.push(tag);
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
             }).try_send();
+            // C# Die → ProcessBuffs 移除路径：盾移除广播 Down 特效
+            if let Some(effect) = down {
+                let _ = self.world_ref.tell(crate::actors::world::BroadcastObjectEffect {
+                    object_id: self.state.object_id,
+                    effect,
+                    map_index: self.state.map_index,
+                }).try_send();
+            }
         }
     }
 
@@ -2115,6 +2134,22 @@ pub(crate) fn shield_down_effect(kind: crate::combat::buff::ShieldKind) -> Optio
         crate::combat::buff::ShieldKind::MagicShield => Some(mir2_shared::enums::SpellEffect::MagicShieldDown),
         crate::combat::buff::ShieldKind::ElementalBarrier => Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown),
         crate::combat::buff::ShieldKind::Other => None,
+    }
+}
+
+/// C# Die/RemoveOnDeath + 显式盾移除 + PoisonList.Clear 对应的毒镜像 debuff
+pub(crate) fn buff_removed_on_death(buff_type: &crate::combat::buff::BuffType) -> bool {
+    match buff_type {
+        crate::combat::buff::BuffType::Curse { .. } => true,
+        crate::combat::buff::BuffType::DamageReduction { kind, .. } => matches!(
+            kind,
+            crate::combat::buff::ShieldKind::MagicShield | crate::combat::buff::ShieldKind::ElementalBarrier
+        ),
+        crate::combat::buff::BuffType::Stun
+        | crate::combat::buff::BuffType::Frozen
+        | crate::combat::buff::BuffType::Slow { .. }
+        | crate::combat::buff::BuffType::Silence => true,
+        _ => false,
     }
 }
 
@@ -6000,6 +6035,23 @@ fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn buff_removed_on_death_matches_csharp_die() {
+        use crate::combat::buff::{BuffType, ShieldKind};
+        // C# Die：RemoveOnDeath（Curse）+ 显式盾 + PoisonList.Clear 毒镜像 → true
+        assert!(super::buff_removed_on_death(&BuffType::Curse { percent: 10 }));
+        assert!(super::buff_removed_on_death(&BuffType::DamageReduction { percent: 30, kind: ShieldKind::MagicShield }));
+        assert!(super::buff_removed_on_death(&BuffType::DamageReduction { percent: 30, kind: ShieldKind::ElementalBarrier }));
+        assert!(super::buff_removed_on_death(&BuffType::Stun));
+        assert!(super::buff_removed_on_death(&BuffType::Frozen));
+        assert!(super::buff_removed_on_death(&BuffType::Slow { percent: 10 }));
+        assert!(super::buff_removed_on_death(&BuffType::Silence));
+        // C# BuffInfo Properties=None → 保留
+        assert!(!super::buff_removed_on_death(&BuffType::AttackBoost { bonus: 10 }));
+        assert!(!super::buff_removed_on_death(&BuffType::Invisibility));
+        assert!(!super::buff_removed_on_death(&BuffType::DamageReduction { percent: 30, kind: ShieldKind::Other })); // EnergyShield
+    }
+
     #[test]
     fn shield_down_effect_matches_csharp_processbuffs() {
         // C# ProcessBuffs：MagicShield → MagicShieldDown / ElementalBarrier → ElementalBarrierDown / 其他无
