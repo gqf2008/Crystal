@@ -6547,8 +6547,8 @@ fn build_new_map_info_packet(
     build_packet_bytes(ServerPacketIds::NewMapInfo as i16, &body)
 }
 
-/// 传送 NPC 费用（C# Settings.TeleportToNPCCost）
-pub(crate) const TELEPORT_TO_NPC_COST: i32 = 1000;
+/// 传送 NPC 费用（C# Settings.TeleportToNPCCost = 3000）
+pub(crate) const TELEPORT_TO_NPC_COST: i32 = 3000;
 
 /// 构建 S.WorldMapSetupInfo（C# 线格式：enabled/count/icons/teleport_cost）
 /// icons 取 DB 中 big_map=true 的地图（前 64 个，image_index 用 MapLinkIcon 帧序号）
