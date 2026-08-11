@@ -199,6 +199,37 @@ pub struct DelayedNpcAction {
     pub teleport: Option<(u16, i32, i32)>,
 }
 
+/// 采矿命中 400ms 后的视觉结算（C# CompleteMine：MapEffect(Mine) + Rubble 方向步进）
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PendingMineEffect {
+    /// 到期 tick（C# now+400ms → 4 tick）
+    pub fire_tick: u64,
+    /// 废墟 SpellObject id
+    pub rubble_oid: u32,
+    /// 地图索引
+    pub map_index: u16,
+    /// 废墟位置（玩家当前格）
+    pub x: i32,
+    pub y: i32,
+    /// 玩家朝向（C# MapEffect.Value = Direction）
+    pub direction: u8,
+}
+
+/// 广播 ObjectEffect 给同图玩家（C# CurrentMap.Broadcast；Buff 过期 MagicShieldDown/ElementalBarrierDown 用）
+pub struct BroadcastObjectEffect {
+    pub object_id: u32,
+    pub effect: mir2_shared::enums::SpellEffect,
+    pub map_index: u16,
+}
+
+impl Message<BroadcastObjectEffect> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: BroadcastObjectEffect, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.broadcast_object_effect(msg.object_id, msg.effect, 0, 0, msg.map_index).await;
+    }
+}
+
 /// C# CompleteNPC：page.Length > 0 才调用脚本段；否则（TIMERECALL 无 section）仅传送
 pub(crate) fn delayed_npc_page_present(section: &str) -> bool {
     !section.is_empty()
@@ -1151,6 +1182,8 @@ pub struct WorldActor {
     pub(crate) last_turn_ms: std::collections::HashMap<u64, i64>,
     /// #1657：每个玩家上次采集时间（ms，C# Mining ActionTime=550ms）
     pub(crate) last_harvest_ms: std::collections::HashMap<u64, i64>,
+    /// 采矿命中 400ms 后的视觉结算队列（C# DelayedAction DelayedType.Mine）
+    pub(crate) pending_mine_effects: Vec<PendingMineEffect>,
     /// #1659：每个玩家上次聊天时间（ms，防刷屏广播）
     pub(crate) last_chat_ms: std::collections::HashMap<u64, i64>,
     /// #1269：每个玩家上次攻击时间（ms；C# AttackTime = Envir.Time + AttackSpeed）
@@ -1527,6 +1560,7 @@ impl WorldActor {
             last_move_time: std::collections::HashMap::new(),
         last_turn_ms: std::collections::HashMap::new(),
         last_harvest_ms: std::collections::HashMap::new(),
+        pending_mine_effects: Vec::new(),
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
@@ -4881,6 +4915,7 @@ Ok(Self {
             last_move_time: std::collections::HashMap::new(),
         last_turn_ms: std::collections::HashMap::new(),
         last_harvest_ms: std::collections::HashMap::new(),
+        pending_mine_effects: Vec::new(),
         last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),

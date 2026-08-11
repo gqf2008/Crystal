@@ -1,6 +1,14 @@
 // Buff/Debuff 系统
 // 纯函数 + 数据结构，由 WorldActor 调用
 
+/// 减伤 buff 来源（C# ProcessBuffs 过期 Down 特效：MagicShield/ElementalBarrier；Other 无特效）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShieldKind {
+    MagicShield,
+    ElementalBarrier,
+    Other,
+}
+
 /// Buff 类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuffType {
@@ -19,7 +27,7 @@ pub enum BuffType {
     /// 负重上限提升（C# BuffType.BagWeight：Buff 药水 Stat.BagWeight）
     BagWeightBoost { bonus: i32 },
     /// 伤害百分比减免（MagicShield/ElementalBarrier，C# Stat.DamageReductionPercent）
-    DamageReduction { percent: i32 },
+    DamageReduction { percent: i32, kind: ShieldKind },
     /// 中毒（持续掉血）
     Poison { damage_per_tick: i32 },
     /// 沉默（无法使用技能）

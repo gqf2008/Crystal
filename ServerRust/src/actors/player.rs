@@ -2087,6 +2087,8 @@ impl Message<ApplyCombatPoisons> for PlayerActor {
 pub struct ApplyDamageReduction {
     pub percent: i32,
     pub duration_ticks: u32,
+    /// 减伤 buff 来源（C# 过期 Down 特效区分 MagicShield/ElementalBarrier）
+    pub kind: crate::combat::buff::ShieldKind,
 }
 
 impl Message<ApplyDamageReduction> for PlayerActor {
@@ -2099,11 +2101,20 @@ impl Message<ApplyDamageReduction> for PlayerActor {
     ) -> Self::Reply {
         self.state.damage_reduction_percent = msg.percent;
         let buff = crate::combat::buff::BuffInstance::new(
-            crate::combat::buff::BuffType::DamageReduction { percent: msg.percent },
+            crate::combat::buff::BuffType::DamageReduction { percent: msg.percent, kind: msg.kind },
             msg.duration_ticks,
             1,
         );
         crate::combat::buff::apply_buff(&mut self.state.buffs, buff);
+    }
+}
+
+/// C# ProcessBuffs：减伤 buff 过期对应的 Down 特效（Other/EnergyShield 无）
+pub(crate) fn shield_down_effect(kind: crate::combat::buff::ShieldKind) -> Option<mir2_shared::enums::SpellEffect> {
+    match kind {
+        crate::combat::buff::ShieldKind::MagicShield => Some(mir2_shared::enums::SpellEffect::MagicShieldDown),
+        crate::combat::buff::ShieldKind::ElementalBarrier => Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown),
+        crate::combat::buff::ShieldKind::Other => None,
     }
 }
 
@@ -2244,6 +2255,14 @@ impl Message<TickBuff> for PlayerActor {
             .filter(|b| b.remaining_ticks == 0)
             .map(|b| buff_tag(&b.buff_type))
             .collect();
+        // #2106：C# ProcessBuffs——MagicShield/ElementalBarrier 过期广播 Down 特效
+        let shield_downs: Vec<mir2_shared::enums::SpellEffect> = self.state.buffs.iter()
+            .filter(|b| b.remaining_ticks == 0)
+            .filter_map(|b| match b.buff_type {
+                crate::combat::buff::BuffType::DamageReduction { kind, .. } => shield_down_effect(kind),
+                _ => None,
+            })
+            .collect();
         // 移除过期 buff
         crate::combat::buff::expire_buffs(&mut self.state.buffs,
         );
@@ -2253,6 +2272,14 @@ impl Message<TickBuff> for PlayerActor {
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
+            }).try_send();
+        }
+        // #2106：C# ProcessBuffs CurrentMap.Broadcast——Down 特效给同图玩家
+        for effect in shield_downs {
+            let _ = self.world_ref.tell(crate::actors::world::BroadcastObjectEffect {
+                object_id: self.state.object_id,
+                effect,
+                map_index: self.state.map_index,
             }).try_send();
         }
 
@@ -5973,6 +6000,17 @@ fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shield_down_effect_matches_csharp_processbuffs() {
+        // C# ProcessBuffs：MagicShield → MagicShieldDown / ElementalBarrier → ElementalBarrierDown / 其他无
+        use crate::combat::buff::ShieldKind;
+        assert_eq!(super::shield_down_effect(ShieldKind::MagicShield),
+                   Some(mir2_shared::enums::SpellEffect::MagicShieldDown));
+        assert_eq!(super::shield_down_effect(ShieldKind::ElementalBarrier),
+                   Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown));
+        assert_eq!(super::shield_down_effect(ShieldKind::Other), None);
+    }
+
     #[test]
     fn movement_blocked_by_poison_matches_csharp_canwalk() {
         // #1614：C# HumanObject.CanWalk——Paralysis/LRParalysis/Frozen 禁止移动

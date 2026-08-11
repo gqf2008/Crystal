@@ -1317,6 +1317,15 @@ impl Message<HarvestRequest> for WorldActor {
                         }
                     }
                 }
+                // C# CompleteMine：命中 400ms 后 MapEffect(Mine) + Rubble 方向步进
+                self.pending_mine_effects.push(PendingMineEffect {
+                    fire_tick: self.tick_count + 4,
+                    rubble_oid,
+                    map_index: state.map_index,
+                    x: state.x,
+                    y: state.y,
+                    direction: msg.direction,
+                });
             }
 
             // 掉落判定（保留现有按矿种的掉落表）
@@ -2625,6 +2634,7 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
                     percent: reduction_pct,
                     duration_ticks,
+                    kind: crate::combat::buff::ShieldKind::MagicShield,
                 }).await;
                 debug!("Magic: {} casts MagicShield (damage -{}%)", state.name, reduction_pct);
             }
@@ -3621,6 +3631,7 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
                     percent: reduction_pct,
                     duration_ticks,
+                    kind: crate::combat::buff::ShieldKind::ElementalBarrier,
                 }).await;
                 // C# CurrentMap.Broadcast(ObjectEffect ElementalBarrierUp)
                 self.broadcast_object_effect(
@@ -5177,6 +5188,7 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
                     percent,
                     duration_ticks,
+                    kind: crate::combat::buff::ShieldKind::Other,
                 }).await;
                 debug!("Magic: {} casts EnergyShield (damage -{}%, {}s)",
                        state.name, percent, 30 + 50 * spell_level as i32);
