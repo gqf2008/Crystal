@@ -1206,11 +1206,9 @@ impl WorldActor {
 
             // ===== 按职业决定攻击方式（C# 各职业子类 ProcessAttack） =====
             // 先确定攻击范围（近战 vs 远程）+ 防御类型
-            let (attack_range, defence) = match snap.class {
-                MirClass::Warrior | MirClass::Assassin => (HERO_MELEE_RANGE, DefenceType::Ac),
-                MirClass::Wizard => (HERO_RANGED_RANGE, DefenceType::Mac),
-                MirClass::Taoist => (HERO_RANGED_RANGE, DefenceType::Mac),
-                MirClass::Archer => (HERO_RANGED_RANGE, DefenceType::Ac),
+            let attack_range = match snap.class {
+                MirClass::Warrior | MirClass::Assassin => HERO_MELEE_RANGE,
+                MirClass::Wizard | MirClass::Taoist | MirClass::Archer => HERO_RANGED_RANGE,
             };
 
             // #1188：战士 Thrusting / 刺客 HeavenlySword 可在距离 2 施放（C# 子类 InAttackRange 扩展）
@@ -1224,7 +1222,18 @@ impl WorldActor {
                     if hero_magic_level(&snap.hero_magics, spell as u8) > 0 {
                         ai_local.direction = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
                         let raw = hero_attack_power(&hero_combat);
-                        attack_intents.push((snap.session_id, target.oid, raw, DefenceType::Ac, true));
+                        // C# Thrusting 命中防御 Agility（HumanObject.cs:3225）+ 倍率 0.25+0.25Lv（Envir.cs）
+                        let (dmg, def) = if spell == Spell::Thrusting {
+                            let lv = hero_magic_level(&snap.hero_magics, Spell::Thrusting as u8);
+                            let cs = (Spell::Thrusting as i32).saturating_sub(3);
+                            let d = self.magic_infos.get(&(cs as u32))
+                                .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
+                                .unwrap_or(raw);
+                            (d, DefenceType::Agility)
+                        } else {
+                            (raw, DefenceType::Ac) // HeavenlySword 保持既有
+                        };
+                        attack_intents.push((snap.session_id, target.oid, dmg, def, true));
                         support_intents.push((snap.session_id, 0, spell as u8, false));
                         ai_local.next_attack_tick = self.tick_count + 6;
                         // #1190：Haste 缩短攻击冷却
@@ -1246,34 +1255,125 @@ impl WorldActor {
 
                 match snap.class {
                     MirClass::Warrior => {
-                        // #1188：C# WarriorHero.Attack 优先级取已学技能（Thrusting 已在距离 2 分支处理）
+                        // C# WarriorHero.Attack（HumanObject.cs:2848-3203）：
+                        //   dist1+目标身后有怪 → Thrusting（命中 2 格，Agility，0.25+0.25Lv）
+                        //   否则 Slaying > FlamingSword > TwinDrakeBlade > CrossHalfMoon > HalfMoon
+                        //   （C# if 链 HalfMoon→CrossHalfMoon→TwinDrakeBlade→FlamingSword 后者覆盖前者）
                         let raw = hero_attack_power(&hero_combat);
-                        let learned = first_learned_spell(
-                            &snap.hero_magics,
-                            &[
-                                Spell::Slaying,
-                                Spell::HalfMoon,
-                                Spell::CrossHalfMoon,
-                                Spell::TwinDrakeBlade,
-                                Spell::FlamingSword,
-                            ],
-                        );
-                        let spell_id = learned.map(|(s, _)| s as u8).unwrap_or(Spell::None as u8);
-                        attack_intents.push((snap.session_id, target.oid, raw, defence, false));
+                        let dir = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
+                        let dir_u = dir as usize % 8;
+                        let thrust_lv = hero_magic_level(&snap.hero_magics, Spell::Thrusting as u8);
+                        if thrust_lv > 0 && target_dist == 1 {
+                            let behind_x = target.x + crate::actors::world::ai::helpers::DIR_DX[dir_u];
+                            let behind_y = target.y + crate::actors::world::ai::helpers::DIR_DY[dir_u];
+                            let has_behind = monster_snaps.iter().any(|m| {
+                                m.map_index == snap.owner_map && m.x == behind_x && m.y == behind_y
+                            });
+                            if has_behind {
+                                let cs = (Spell::Thrusting as i32).saturating_sub(3);
+                                let dmg = self.magic_infos.get(&(cs as u32))
+                                    .map(|info| crate::combat::magic::calc_magic_damage(info, thrust_lv, raw))
+                                    .unwrap_or(raw);
+                                let tx = ai_local.x + crate::actors::world::ai::helpers::DIR_DX[dir_u] * 2;
+                                let ty = ai_local.y + crate::actors::world::ai::helpers::DIR_DY[dir_u] * 2;
+                                let mut thrusted = false;
+                                for m in monster_snaps.iter()
+                                    .filter(|m| m.map_index == snap.owner_map && m.x == tx && m.y == ty)
+                                {
+                                    attack_intents.push((snap.session_id, m.oid, dmg, DefenceType::Agility, false));
+                                    thrusted = true;
+                                }
+                                if thrusted {
+                                    support_intents.push((snap.session_id, 0, Spell::Thrusting as u8, false));
+                                    ai_local.next_attack_tick = self.tick_count + 6;
+                                    *ai = ai_local;
+                                    continue;
+                                }
+                            }
+                        }
+                        let skill = hero_warrior_melee_skill(&snap.hero_magics);
+                        let spell_id = skill.map(|(s, _)| s as u8).unwrap_or(Spell::None as u8);
+                        // C# 主击伤害 = magic.GetDamage(damageBase)（FlamingSword/TwinDrakeBlade）；
+                        // Slaying/HalfMoon/CrossHalfMoon/None 主击 = base（C# damageFinal 保持 damageBase）
+                        let skill_dmg = |s: Spell, lv: u8| -> i32 {
+                            let cs = (s as i32).saturating_sub(3);
+                            self.magic_infos.get(&(cs as u32))
+                                .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
+                                .unwrap_or(raw)
+                        };
+                        let (main_dmg, main_def) = match skill {
+                            Some((Spell::FlamingSword, lv)) => {
+                                // C# :3189-3197：FlamingSword 主击 damageFinal=GetDamage(base)，防御 AC
+                                (skill_dmg(Spell::FlamingSword, lv), DefenceType::Ac)
+                            }
+                            Some((Spell::TwinDrakeBlade, lv)) => {
+                                // C# :3175-3188：主击 damageFinal=GetDamage(base)，防御 ACAgility
+                                (skill_dmg(Spell::TwinDrakeBlade, lv), DefenceType::AcAgility)
+                            }
+                            _ => (raw, DefenceType::AcAgility),
+                        };
+                        attack_intents.push((snap.session_id, target.oid, main_dmg, main_def, false));
                         // 广播带 spell_id 的 ObjectAttack（循环外广播）
                         support_intents.push((snap.session_id, 0, spell_id, false));
+                        // 技能附加效果
+                        match skill {
+                            Some((Spell::TwinDrakeBlade, lv)) => {
+                                // C# :3179-3186：第二段同倍率、Agility 防御、最终击概率眩晕（Random(20)<=Lv+1）
+                                let second = skill_dmg(Spell::TwinDrakeBlade, lv);
+                                attack_intents.push((snap.session_id, target.oid, second, DefenceType::Agility, false));
+                                if fastrand::i32(0..20) <= lv as i32 + 1 {
+                                    poison_intents.push((
+                                        snap.session_id,
+                                        target.oid,
+                                        mir2_shared::enums::PoisonType::STUN,
+                                        2 + lv as u32,
+                                        0,
+                                        1000,
+                                    ));
+                                }
+                            }
+                            Some((Spell::HalfMoon, lv)) | Some((Spell::CrossHalfMoon, lv)) => {
+                                // C# HalfMoon :3233-3262：PreviousDir 起 4 向（排除 Front）=3 格弧；
+                                // CrossHalfMoon :3264-3291：8 向排除 Front=7 格弧；防御 Agility
+                                let is_half = matches!(skill, Some((Spell::HalfMoon, _)));
+                                let arc_spell = if is_half { Spell::HalfMoon } else { Spell::CrossHalfMoon };
+                                let arc_dmg = skill_dmg(arc_spell, lv);
+                                let dirs: Vec<usize> = if is_half {
+                                    vec![(dir_u + 7) % 8, (dir_u + 1) % 8, (dir_u + 2) % 8]
+                                } else {
+                                    (0..8).filter(|d| *d != dir_u).collect()
+                                };
+                                for d in dirs {
+                                    let cx = ai_local.x + crate::actors::world::ai::helpers::DIR_DX[d];
+                                    let cy = ai_local.y + crate::actors::world::ai::helpers::DIR_DY[d];
+                                    for m in monster_snaps.iter()
+                                        .filter(|m| m.map_index == snap.owner_map && m.x == cx && m.y == cy)
+                                    {
+                                        attack_intents.push((snap.session_id, m.oid, arc_dmg, DefenceType::Agility, false));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
                         ai_local.next_attack_tick = self.tick_count + 6; // ~600ms
                     }
                     MirClass::Assassin => {
-                        // #1188：C# AssassinHero.Attack：DoubleSlash（已学）；HeavenlySword 已在距离 2 分支处理
+                        // C# AssassinHero.Attack：DoubleSlash（已学）→ 主击 MACAgility + 第二段 Agility
+                        // （HumanObject.cs:3153-3161：damageFinal=GetDamage(base)，倍率 0.8+0.1Lv）
                         let raw = hero_attack_power(&hero_combat);
-                        let spell_id = if hero_magic_level(&snap.hero_magics, Spell::DoubleSlash as u8) > 0 {
-                            Spell::DoubleSlash as u8
+                        let ds_lv = hero_magic_level(&snap.hero_magics, Spell::DoubleSlash as u8);
+                        if ds_lv > 0 {
+                            let cs = (Spell::DoubleSlash as i32).saturating_sub(3);
+                            let dmg = self.magic_infos.get(&(cs as u32))
+                                .map(|info| crate::combat::magic::calc_magic_damage(info, ds_lv, raw))
+                                .unwrap_or(raw);
+                            attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::MacAgility, false));
+                            attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Agility, false));
+                            support_intents.push((snap.session_id, 0, Spell::DoubleSlash as u8, false));
                         } else {
-                            Spell::None as u8
-                        };
-                        attack_intents.push((snap.session_id, target.oid, raw, defence, false));
-                        support_intents.push((snap.session_id, 0, spell_id, false));
+                            attack_intents.push((snap.session_id, target.oid, raw, DefenceType::AcAgility, false));
+                            support_intents.push((snap.session_id, 0, Spell::None as u8, false));
+                        }
                         ai_local.next_attack_tick = self.tick_count + 5;
                     }
                     MirClass::Wizard => {
@@ -3046,6 +3146,29 @@ fn first_learned_spell(
         .find(|(_, lvl)| *lvl > 0)
 }
 
+/// C# WarriorHero.Attack 技能选择（HumanObject.cs:3146-3198）：
+/// Slaying 优先；否则 HalfMoon→CrossHalfMoon→TwinDrakeBlade→FlamingSword 后者覆盖前者（高阶优先）
+fn hero_warrior_melee_skill(hero_magics: &[(i32, u8)]) -> Option<(mir2_shared::enums::Spell, u8)> {
+    use mir2_shared::enums::Spell;
+    let lv = |s: Spell| hero_magic_level(hero_magics, s as u8);
+    if lv(Spell::Slaying) > 0 {
+        return Some((Spell::Slaying, lv(Spell::Slaying)));
+    }
+    if lv(Spell::FlamingSword) > 0 {
+        return Some((Spell::FlamingSword, lv(Spell::FlamingSword)));
+    }
+    if lv(Spell::TwinDrakeBlade) > 0 {
+        return Some((Spell::TwinDrakeBlade, lv(Spell::TwinDrakeBlade)));
+    }
+    if lv(Spell::CrossHalfMoon) > 0 {
+        return Some((Spell::CrossHalfMoon, lv(Spell::CrossHalfMoon)));
+    }
+    if lv(Spell::HalfMoon) > 0 {
+        return Some((Spell::HalfMoon, lv(Spell::HalfMoon)));
+    }
+    None
+}
+
 /// 英雄法术伤害（#1188：C# GetDamage = (DamageBase + GetPower()) * GetMultiplier()）
 /// DamageBase = 英雄自身 MC/SC 中值；Power/Multiplier 来自魔法表 + 实际等级。
 fn hero_spell_damage(
@@ -3400,6 +3523,31 @@ mod tests {
         // 未学 → 0
         assert_eq!(hero_magic_level(&[(cs + 100, 3)], shared), 0);
         assert_eq!(hero_magic_level(&[], shared), 0);
+    }
+
+    #[test]
+    fn hero_warrior_melee_skill_priority_matches_cs() {
+        use mir2_shared::enums::Spell;
+        let mk = |s: Spell, lv: u8| ((s as u8).saturating_sub(3) as i32, lv);
+        // 多技能：C# if 链后者覆盖前者 → FlamingSword 优先于 HalfMoon/CrossHalfMoon/TwinDrakeBlade
+        let magics = vec![
+            mk(Spell::HalfMoon, 1),
+            mk(Spell::CrossHalfMoon, 2),
+            mk(Spell::TwinDrakeBlade, 3),
+            mk(Spell::FlamingSword, 4),
+        ];
+        assert_eq!(hero_warrior_melee_skill(&magics), Some((Spell::FlamingSword, 4)));
+        // 无 FlamingSword → TwinDrakeBlade
+        let magics2 = vec![mk(Spell::HalfMoon, 1), mk(Spell::CrossHalfMoon, 2), mk(Spell::TwinDrakeBlade, 3)];
+        assert_eq!(hero_warrior_melee_skill(&magics2), Some((Spell::TwinDrakeBlade, 3)));
+        // Slaying 优先于一切（C# spell==None 时才进入高阶链）
+        let magics3 = vec![mk(Spell::HalfMoon, 1), mk(Spell::FlamingSword, 2), mk(Spell::Slaying, 5)];
+        assert_eq!(hero_warrior_melee_skill(&magics3), Some((Spell::Slaying, 5)));
+        // 仅 HalfMoon
+        let magics4 = vec![mk(Spell::HalfMoon, 2)];
+        assert_eq!(hero_warrior_melee_skill(&magics4), Some((Spell::HalfMoon, 2)));
+        // 未学 → None
+        assert_eq!(hero_warrior_melee_skill(&[]), None);
     }
 
     #[test]
