@@ -794,6 +794,34 @@ fn pet_find_hostile_target(
         .map(|s| (s.0, s.1, s.2))
 }
 
+/// C# HumanObject.Teleport / NPCObject.Show：玩家落点与阻挡物同格 → Stacking=true, StackingTime=now+1000
+pub struct CheckPlayerStacking {
+    pub session_id: u64,
+}
+
+impl Message<CheckPlayerStacking> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: CheckPlayerStacking,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let Some(record) = self.players.get(&msg.session_id).cloned() else { return };
+        let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        if st.is_dead { return; }
+        if self.player_cell_stacked(msg.session_id, &st).await {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            self.player_stacking.insert(msg.session_id, now_ms + 1000);
+            debug!("Player {} stacked at ({},{}) map={} — push in 1000ms",
+                   st.name, st.x, st.y, st.map_index);
+        }
+    }
+}
+
 impl WorldActor {
 
     /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。
@@ -844,6 +872,55 @@ impl WorldActor {
                 let remove_packet = Self::build_object_remove_packet(oid);
                 broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
                 debug!("Pet '{}' despawned on master death", monster.name);
+            }
+        }
+    }
+
+    /// C# MapObject.CheckStacked（:765-778）：玩家所在格是否存在 Blocking 对象
+    /// （NPC Blocking=Visible :418 / 怪物 Blocking=!Dead :623 / 玩家 Blocking=!Dead&&!Observer HumanObject.cs:221）
+    async fn player_cell_stacked(&self, session_id: u64, st: &crate::actors::player::PlayerState) -> bool {
+        let npc_tiles: Vec<(i32, i32)> = self.npcs.values()
+            .filter(|n| n.map_index == st.map_index)
+            .map(|n| (n.x, n.y))
+            .collect();
+        let monster_tiles: Vec<(i32, i32)> = self.monsters.values()
+            .filter(|m| m.map_index == st.map_index && m.hp > 0)
+            .map(|m| (m.x, m.y))
+            .collect();
+        // 其他存活玩家（Rust 无 Observer 模型；仅传送/推挤等低频事件调用，逐 player ask O(n) 可接受）
+        let mut player_tiles: Vec<(i32, i32)> = Vec::new();
+        for (sid, record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(ps)) = record.actor_ref.ask(GetPlayerState).await {
+                if !ps.is_dead && ps.map_index == st.map_index {
+                    player_tiles.push((ps.x, ps.y));
+                }
+            }
+        }
+        cell_has_blocking_object(st.x, st.y, &npc_tiles, &monster_tiles, &player_tiles)
+    }
+
+    /// C# HumanObject.Process（:294-302）：Stacking 到点（StackingTime+1000ms）后
+    /// 8 方向依次 Pushed(1)，首个成功即停（复用 push_player = C# HumanObject.Pushed）
+    pub(crate) async fn tick_stacking(&mut self) {
+        if self.player_stacking.is_empty() { return; }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let due: Vec<u64> = self.player_stacking.iter()
+            .filter(|(_, t)| now_ms >= **t)
+            .map(|(s, _)| *s)
+            .collect();
+        for sid in due {
+            self.player_stacking.remove(&sid);
+            let Some(record) = self.players.get(&sid).cloned() else { continue };
+            let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+            if st.is_dead { continue; }
+            // 1s 内玩家已自行走开则不再推（避免 C# 盲推边角问题）
+            if !self.player_cell_stacked(sid, &st).await { continue; }
+            for dir in 0..8u8 {
+                if self.push_player(sid, dir, 1).await > 0 { break; }
             }
         }
     }
@@ -7034,6 +7111,8 @@ impl Message<Tick> for WorldActor {
 
         self.tick_potion_pools().await;
 
+        self.tick_stacking().await;
+
         self.tick_environment_damage().await;
 
         self.tick_exp_events_and_invisibility().await;
@@ -7101,6 +7180,17 @@ impl Message<Tick> for WorldActor {
     }
 }
 
+/// C# MapObject.CheckStacked：目标格是否存在 Blocking 对象（NPC/怪物/其他玩家）（纯逻辑，供单测）
+fn cell_has_blocking_object(
+    x: i32,
+    y: i32,
+    npc_tiles: &[(i32, i32)],
+    monster_tiles: &[(i32, i32)],
+    player_tiles: &[(i32, i32)],
+) -> bool {
+    npc_tiles.contains(&(x, y)) || monster_tiles.contains(&(x, y)) || player_tiles.contains(&(x, y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -7109,7 +7199,21 @@ mod tests {
         monster_melee_defence_type, build_object_range_attack_body, resolve_monster_vs_monster,
         slow_adjusted_ticks, monster_control_blocked, combined_poison_flags,
         PARTY_EXP_RATE,
+        cell_has_blocking_object,
     };
+
+    #[test]
+    fn cell_has_blocking_object_matches_csharp_checkstacked() {
+        // C# MapObject.CheckStacked：同格存在 NPC/怪物/玩家任一即重叠
+        let npcs = [(5, 5), (10, 10)];
+        let monsters = [(7, 7)];
+        let players = [(3, 3)];
+        assert!(cell_has_blocking_object(5, 5, &npcs, &monsters, &players));
+        assert!(cell_has_blocking_object(7, 7, &npcs, &monsters, &players));
+        assert!(cell_has_blocking_object(3, 3, &npcs, &monsters, &players));
+        assert!(!cell_has_blocking_object(1, 1, &npcs, &monsters, &players));
+        assert!(!cell_has_blocking_object(5, 6, &npcs, &monsters, &players));
+    }
 
     #[test]
     fn find_recall_point_matches_csharp() {

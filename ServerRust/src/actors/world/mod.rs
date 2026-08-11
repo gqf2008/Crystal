@@ -35,6 +35,7 @@ pub use tick::ProcessDelayedActions;
 pub use tick::ProcessElementalTick;
 pub use tick::ProcessDeathCallbacks;
 pub use tick::ProcessRevives;
+pub use tick::CheckPlayerStacking;
 pub use session::*;
 pub use item::*;
 pub use combat::*;
@@ -1079,6 +1080,8 @@ pub struct WorldActor {
     pub(crate) death_exp_penalty_percent: u32,
     /// 服务端移动节流间隔毫秒（0=关闭；>0 按 C# MoveDelay=600ms/动作 节流，Slow 毒 ×2）
     pub(crate) movement_pacing_ms: u64,
+    /// C# HumanObject.Stacking：玩家与阻挡物同格延迟推开表（session → 推开时刻 ms；CheckStacked/Stacking）
+    pub(crate) player_stacking: HashMap<u64, i64>,
     /// 回血权重（C# Settings.HealthRegenWeight）
     pub(crate) health_regen_weight: u32,
     /// 回蓝权重（C# Settings.ManaRegenWeight）
@@ -1466,6 +1469,7 @@ impl WorldActor {
             notice_path: "Notice.txt".to_string(),
             death_exp_penalty_percent: 0,
             movement_pacing_ms: 0,
+            player_stacking: HashMap::new(),
             health_regen_weight: 10,
             mana_regen_weight: 10,
             goods_hide_added_stats: true,
@@ -4691,6 +4695,7 @@ impl Actor for WorldActor {
             notice_path: args.notice_path.clone(),
             death_exp_penalty_percent: args.death_exp_penalty_percent,
             movement_pacing_ms: args.movement_pacing_ms,
+            player_stacking: HashMap::new(),
             health_regen_weight: args.health_regen_weight,
             mana_regen_weight: args.mana_regen_weight,
             goods_hide_added_stats: args.goods_hide_added_stats,

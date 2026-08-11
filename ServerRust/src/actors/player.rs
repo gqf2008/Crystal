@@ -4945,6 +4945,12 @@ impl Message<SetPlayerPosition> for PlayerActor {
         if let Some(mounted) = msg.is_mounted {
             self.state.is_mounted = mounted;
         }
+        // C# HumanObject.Teleport：落点与阻挡物（NPC/怪物/存活玩家）同格 → 1s 后推开（CheckStacked/Stacking）
+        let _ = self.world_ref
+            .tell(crate::actors::world::CheckPlayerStacking {
+                session_id: self.state.session_id,
+            })
+            .try_send();
     }
 }
 
