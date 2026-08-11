@@ -4023,6 +4023,8 @@ impl Message<MagicRequest> for WorldActor {
             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                 self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
             }
+                // C# AddBuff(BuffType.MoonLight) → Sneaking=true（MapObject.cs:659-661）+ ObjectSneaking 广播
+                self.set_sneaking(msg.session_id, true).await;
                 debug!("Magic: {} casts MoonLight (invisible {}s)", state.name, duration_ticks / 10);
             }
             // DarkBody：刺客分身（C# HumanObject.cs:5323）——召唤 AssassinClone 宠物；已有存活分身则移除

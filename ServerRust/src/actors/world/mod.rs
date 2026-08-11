@@ -1343,6 +1343,8 @@ pub struct WorldActor {
     pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,
     /// 驯服宠物（session -> list；C# Info.Pets；登出持久化，登录重生）
     pub(crate) tamed_pets: HashMap<u64, Vec<TamedPetInfo>>,
+    /// 潜行状态（session -> 是否生效；C# MapObject.Sneaking/SneakingActive；MoonLight buff 触发）
+    pub(crate) sneaking_sessions: HashMap<u64, bool>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
@@ -1734,6 +1736,7 @@ impl WorldActor {
             rental_sessions: HashMap::new(),
             player_rentals: HashMap::new(),
             tamed_pets: HashMap::new(),
+            sneaking_sessions: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
@@ -2608,6 +2611,71 @@ impl WorldActor {
             .unwrap_or_default();
         if let Err(e) = db::save_player_pets(&self.db_pool, player_name, &alive).await {
             warn!("Failed to save player pets for {}: {}", player_name, e);
+        }
+    }
+
+    /// 同图 3 格方形内是否有其他玩家（C# CheckSneakRadius：±3 遍历）
+    async fn sneaking_nearby_player(&mut self, session_id: u64, map_index: u16, x: i32, y: i32) -> bool {
+        for (sid, record) in &self.players {
+            if *sid == session_id {
+                continue;
+            }
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                if st.map_index == map_index && (st.x - x).abs() <= 3 && (st.y - y).abs() <= 3 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// 广播 S.ObjectSneaking（C# S.ObjectSneaking { ObjectID, SneakingActive }）
+    async fn broadcast_object_sneaking(&self, object_id: u32, sneaking: bool, map_index: u16) {
+        let packet = mir2_shared::packets::server::movement::ObjectSneaking { object_id, sneaking };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectSneaking as i16, &body);
+            broadcast_to_map(&self.gate_ref, &self.players, map_index, &data).await;
+        }
+    }
+
+    /// 设置/解除潜行（C# MapObject.Sneaking 属性：MoonLight/DarkBody buff 触发；开启时先 active 再半径校正）
+    pub(crate) async fn set_sneaking(&mut self, session_id: u64, on: bool) {
+        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        let prev = self.sneaking_sessions.get(&session_id).copied().unwrap_or(false);
+        let active = if on {
+            let nearby = self.sneaking_nearby_player(session_id, st.map_index, st.x, st.y).await;
+            !nearby
+        } else {
+            false
+        };
+        if on {
+            self.sneaking_sessions.insert(session_id, active);
+        } else {
+            self.sneaking_sessions.remove(&session_id);
+        }
+        if prev != active {
+            self.broadcast_object_sneaking(st.object_id, active, st.map_index).await;
+        }
+    }
+
+    /// 潜行半径检测（C# CheckSneakRadius 每 tick）：有玩家靠近 3 格 → 潜行失效并广播
+    pub(crate) async fn tick_sneak_radius(&mut self) {
+        if self.tick_count % 10 != 0 {
+            return;
+        }
+        let sessions: Vec<u64> = self.sneaking_sessions.keys().copied().collect();
+        for session_id in sessions {
+            let Some(record) = self.players.get(&session_id).cloned() else { continue };
+            let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+            let nearby = self.sneaking_nearby_player(session_id, st.map_index, st.x, st.y).await;
+            let active = !nearby;
+            let prev = self.sneaking_sessions.get(&session_id).copied().unwrap_or(false);
+            if prev != active {
+                self.sneaking_sessions.insert(session_id, active);
+                self.broadcast_object_sneaking(st.object_id, active, st.map_index).await;
+            }
         }
     }
 
@@ -5375,6 +5443,7 @@ Ok(Self {
             rental_sessions: HashMap::new(),
             player_rentals,
             tamed_pets: HashMap::new(),
+            sneaking_sessions: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
