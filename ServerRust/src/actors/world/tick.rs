@@ -66,6 +66,16 @@ pub(crate) struct BossRangedPendingHit {
     pub damage: i32,
     pub map_index: u16,
 }
+/// #1986：Boss 单体延迟伤害（C# DelayedAction DelayedType.Damage 多段近战：Armadillo/GlacierSnail）
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BossDelayedSingleHit {
+    pub attacker_oid: u32,
+    pub target_session: u64,
+    pub damage: i32,
+    pub defence: mir2_shared::enums::DefenceType,
+    pub map_index: u16,
+}
+
 /// #1703/#1721：怪物命中玩家结算（C# Attacked / DelayedAction RangeDamage 落地）：
 /// 完整结算（命中/护甲/反伤/减伤）+ ObjectStruck/DamageIndicator 广播 + 下坐骑 + 装备耐久 + 死亡掉落/经验惩罚。
 /// 近战即时调用与远程延迟结算共用；返回反伤量（调用方施加给怪物）。
@@ -957,6 +967,78 @@ impl WorldActor {
         }
     }
 
+    /// #1986：Boss 单体延迟伤害结算（C# DelayedAction DelayedType.Damage 多段近战）
+    pub(crate) async fn tick_boss_delayed_single_pending(&mut self) {
+        if self.boss_delayed_single_pending.is_empty() {
+            return;
+        }
+        let now = self.tick_count;
+        let mut due: Vec<BossDelayedSingleHit> = Vec::new();
+        self.boss_delayed_single_pending.retain(|(fire, h)| {
+            if *fire <= now {
+                due.push(*h);
+                false
+            } else {
+                true
+            }
+        });
+        for hit in due {
+            // 攻击者已消失（Boss 死亡/移除）→ 延迟段不再结算（C# 施法者不在则 ActionList 清空）
+            if !self.monsters.contains_key(&hit.attacker_oid) {
+                continue;
+            }
+            if let Some(record) = self.players.get(&hit.target_session) {
+                // 目标存活且同图才结算（C# CompleteAttack 校验）
+                let target_alive_same_map = record.actor_ref.ask(GetPlayerState).await
+                    .map(|s| s.map(|st| !st.is_dead && st.map_index == hit.map_index).unwrap_or(false))
+                    .unwrap_or(false);
+                if !target_alive_same_map {
+                    continue;
+                }
+                let attacker_stats = self.monsters.get(&hit.attacker_oid)
+                    .map(|m| m.to_combat_stats())
+                    .unwrap_or_default();
+                let attacker_level = self.monsters.get(&hit.attacker_oid)
+                    .map(|m| m.level)
+                    .unwrap_or(0);
+                let mut is_critical = false;
+                let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
+                    let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
+                        &attacker_stats, attacker_level, &defender, hit.damage,
+                        hit.defence,
+                    );
+                    is_critical = crit;
+                    if reflected > 0 {
+                        if let Some(m) = self.monsters.get_mut(&hit.attacker_oid) {
+                            m.take_damage(reflected);
+                            m.provoked = true;
+                        }
+                    }
+                    if is_miss {
+                        broadcast_miss_feedback(
+                            &self.players, &self.gate_ref, hit.map_index, hit.target_session, defender.object_id,
+                        ).await;
+                        0
+                    } else {
+                        actual
+                    }
+                } else { hit.damage };
+                let _ = record.actor_ref.ask(TakeDamage {
+                    attacker_id: hit.attacker_oid,
+                    attacker_session: hit.target_session,
+                    damage: actual,
+                }).await;
+                if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                    broadcast_hit_feedback(
+                        &self.players, &self.gate_ref, hit.map_index, hit.target_session,
+                        victim.object_id, victim.x, victim.y, victim.direction,
+                        hit.attacker_oid, actual, if is_critical { 5 } else { 0 },
+                    ).await;
+                }
+            }
+        }
+    }
+
     pub(crate) async fn tick_potion_pools(&mut self) {
         if self.tick_count % 2 != 0 {
             return;
@@ -1596,6 +1678,7 @@ impl WorldActor {
         let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
         let mut die_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
         let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
+        let mut die_delayed_single: Vec<ai::DelayedSingleDamage> = Vec::new();
         let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
@@ -1641,6 +1724,7 @@ impl WorldActor {
                 out_pushes: &mut die_pushes,
                 out_player_teleports: &mut die_teleports,
                 out_delayed_attacks: &mut die_delayed,
+                out_delayed_single_damage: &mut die_delayed_single,
                 out_monster_taunts: &mut die_taunts,
                 out_monster_teleports: &mut die_monster_teleports,
                 out_player_buffs: &mut die_player_buffs,
@@ -4720,6 +4804,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
             let mut boss_delayed_attacks: Vec<ai::DelayedAttack> = Vec::new();
+            let mut boss_delayed_single: Vec<ai::DelayedSingleDamage> = Vec::new();
             let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
@@ -4808,6 +4893,7 @@ impl Message<Tick> for WorldActor {
                         out_pushes: &mut boss_pushes,
                         out_player_teleports: &mut boss_player_teleports,
                         out_delayed_attacks: &mut boss_delayed_attacks,
+                        out_delayed_single_damage: &mut boss_delayed_single,
                         out_monster_taunts: &mut boss_taunts,
                         out_monster_teleports: &mut boss_monster_teleports,
                         out_player_buffs: &mut boss_player_buffs,
@@ -6384,6 +6470,19 @@ impl Message<Tick> for WorldActor {
             for atk in &boss_delayed_attacks {
                 self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, atk.clone()));
             }
+            // Boss 单体延迟伤害：入队（#1986 C# DelayedAction DelayedType.Damage 多段近战）
+            for dh in &boss_delayed_single {
+                self.boss_delayed_single_pending.push((
+                    self.tick_count + dh.delay_ticks,
+                    BossDelayedSingleHit {
+                        attacker_oid: dh.attacker_oid,
+                        target_session: dh.target_session,
+                        damage: dh.damage,
+                        defence: dh.defence,
+                        map_index: self.monsters.get(&dh.attacker_oid).map(|m| m.map_index).unwrap_or(0),
+                    },
+                ));
+            }
             // Boss 传送玩家（C# Target.Teleport：TurtleKing 拉拽等）
             for (sid, tx, ty, dir) in &boss_player_teleports {
                 if let Some(record) = self.players.get(sid) {
@@ -6853,6 +6952,7 @@ impl Message<Tick> for WorldActor {
         self.tick_spells().await;
 
         self.tick_boss_ranged_pending().await;
+        self.tick_boss_delayed_single_pending().await;
         self.tick_ranged_pending().await;
         self.tick_spell_completions().await;
 

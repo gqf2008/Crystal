@@ -161,6 +161,17 @@ pub struct PushPlayer {
     pub distance: i32,
 }
 
+/// Boss 单体延迟伤害（#1986 C# DelayedAction DelayedType.Damage 多段近战：Armadillo/GlacierSnail 等）
+#[derive(Debug, Clone, Copy)]
+pub struct DelayedSingleDamage {
+    /// 相对当前 tick 的延迟（100ms/tick）
+    pub delay_ticks: u64,
+    pub attacker_oid: u32,
+    pub target_session: u64,
+    pub damage: i32,
+    pub defence: mir2_shared::enums::DefenceType,
+}
+
 /// Boss 延迟攻击（C# DelayedAction DelayedType.Damage：到点对指定格集合内玩家造成伤害）
 #[derive(Debug, Clone)]
 pub struct DelayedAttack {
@@ -222,6 +233,8 @@ pub struct AiCtx<'a> {
     pub out_player_teleports: &'a mut Vec<(u64, i32, i32, u8)>,
     /// 输出：延迟攻击（C# DelayedAction DelayedType.Damage）
     pub out_delayed_attacks: &'a mut Vec<DelayedAttack>,
+    /// 输出：Boss 单体延迟伤害（#1986 C# DelayedAction DelayedType.Damage 多段命中）
+    pub out_delayed_single_damage: &'a mut Vec<DelayedSingleDamage>,
     /// 输出：怪物嘲讽（C# StoneTrap：target_oid 攻击 taunter_oid）→ monster_targets
     pub out_monster_taunts: &'a mut Vec<(u32, u32)>,
     /// 输出：怪物自传送 (oid, x, y)（C# TeleportRandom/Teleport：RedFoxman/WhiteFoxman 等）
