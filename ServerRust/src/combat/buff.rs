@@ -41,6 +41,8 @@ pub enum BuffType {
     MpRegenBoost { bonus: i32 },
     /// 魔力上限提升（MagicBooster）
     MaxMpBoost { bonus: i32 },
+    /// 生命上限提升（C# BuffType.HealthAid：Buff 药水 Stat.HP / NPC 脚本 MAXHPBOOST）
+    MaxHpBoost { bonus: i32 },
     /// 魔法攻击提升（UltimateEnhancer 法师/弓手，C# Stat.MaxMC）
     McBoost { bonus: i32 },
     /// 道术提升（UltimateEnhancer 道士，C# Stat.MaxSC）
@@ -174,6 +176,7 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
             (BuffType::CriticalRateBoost { bonus }, BuffType::CriticalRateBoost { .. }) => *bonus,
             (BuffType::MpRegenBoost { bonus }, BuffType::MpRegenBoost { .. }) => *bonus,
             (BuffType::MaxMpBoost { bonus }, BuffType::MaxMpBoost { .. }) => *bonus,
+            (BuffType::MaxHpBoost { bonus }, BuffType::MaxHpBoost { .. }) => *bonus,
             (BuffType::McBoost { bonus }, BuffType::McBoost { .. }) => *bonus,
             (BuffType::ScBoost { bonus }, BuffType::ScBoost { .. }) => *bonus,
             (BuffType::AttackSpeedBoost { percent }, BuffType::AttackSpeedBoost { .. }) => *percent,
@@ -251,6 +254,14 @@ mod tests {
         assert_eq!(get_stat_bonus(&buffs, &BuffType::AcDefenseBoost { bonus: 0 }), 7);
         assert_eq!(get_stat_bonus(&buffs, &BuffType::MacDefenseBoost { bonus: 0 }), 6);
         assert_eq!(get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }), 0);
+    }
+
+    #[test]
+    fn get_stat_bonus_includes_max_hp_boost() {
+        // C# BuffType.HealthAid：生命上限加成应计入
+        let buffs = vec![BuffInstance::new(BuffType::MaxHpBoost { bonus: 30 }, 600, 1)];
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::MaxHpBoost { bonus: 0 }), 30);
+        assert_eq!(get_stat_bonus(&buffs, &BuffType::MaxMpBoost { bonus: 0 }), 0);
     }
 
     #[test]

@@ -713,12 +713,13 @@ impl Message<UseItemRequest> for WorldActor {
                             apply(BuffType::AttackSpeedBoost { percent: get(Stat::AttackSpeed) }).await;
                             applied = true;
                         }
+                        // C# HealthAid/ManaAid（:5866-5869）：+MaxHP/+MaxMP（非回血回蓝）
                         if get(Stat::HP) > 0 {
-                            apply(BuffType::HpRegen { amount_per_tick: get(Stat::HP) }).await;
+                            apply(BuffType::MaxHpBoost { bonus: get(Stat::HP) }).await;
                             applied = true;
                         }
                         if get(Stat::MP) > 0 {
-                            apply(BuffType::MpRegen { amount_per_tick: get(Stat::MP) }).await;
+                            apply(BuffType::MaxMpBoost { bonus: get(Stat::MP) }).await;
                             applied = true;
                         }
                         // C# Defence（MaxAC+MinAC，PlayerObject.cs:5871-5872）
@@ -1416,7 +1417,11 @@ impl Message<UseItemRequest> for WorldActor {
                                 let _ = record.actor_ref.ask(SetDropMultiplier { multiplier: 1.0 + drop_rate as f64 / 100.0, end_tick }).await;
                                 applied = true;
                             }
-                            // C# HP/MP AddedStats 为 +MaxHP/+MaxMP（MaxHp/MaxMpBoost 未实现，跳过）
+                            // C# HP/MP AddedStats 为 +MaxHP/+MaxMP（:6214 Stats(AddedStats)）
+                            let added_hp = get_added(Stat::HP);
+                            if added_hp > 0 { apply(BuffType::MaxHpBoost { bonus: added_hp }).await; applied = true; }
+                            let added_mp = get_added(Stat::MP);
+                            if added_mp > 0 { apply(BuffType::MaxMpBoost { bonus: added_mp }).await; applied = true; }
                             debug!("Pets: {} used Wonderdrug added_stats applied={}", player_state.name, applied);
                         }
                         // 27 FortuneCookies（C# :6217-6218）：无效果但消耗
