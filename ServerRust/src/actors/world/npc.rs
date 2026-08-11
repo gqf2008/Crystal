@@ -1830,6 +1830,8 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                     if let Ok(Some(quest)) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
                         if quest.status == QuestStatus::InProgress {
                             let _ = record.actor_ref.ask(CompleteQuest { quest_index: quest_db.index }).await;
+                            // #2022：C# FinishQuest——交任务扣除携带物品
+                            self.take_quest_carry_items(msg.session_id, quest_db.index).await;
                             // Grant rewards
                             let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(quest_db.exp_reward) , experience_list: self.experience_list.clone()}).await;
                             let _ = record.actor_ref.ask(AddGold { amount: quest_db.gold_reward.max(0) as u64 }).await;

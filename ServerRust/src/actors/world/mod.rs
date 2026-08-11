@@ -3534,6 +3534,8 @@ impl WorldActor {
                                         continue;
                                     }
                                 };
+                                // #2022：C# FinishQuest——交任务扣除携带物品
+                                self.take_quest_carry_items(session_id, quest_index).await;
                                 if completed_quest.exp_reward > 0 {
                                     let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) , experience_list: self.experience_list.clone()}).await;
                                 }
