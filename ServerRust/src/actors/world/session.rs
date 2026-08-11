@@ -1484,6 +1484,7 @@ impl Message<PlayerDisconnected> for WorldActor {
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
+        self.gm_login_pending.remove(&msg.session_id);
 
         info!("Player removed from world (session={})", msg.session_id);
 
@@ -1591,6 +1592,7 @@ impl Message<PlayerLogOut> for WorldActor {
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
+        self.gm_login_pending.remove(&msg.session_id);
 
         // Clean up active rental sessions involving this player
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
@@ -1827,6 +1829,23 @@ impl Message<ChatRequest> for WorldActor {
         };
 
         if message.trim().is_empty() {
+            return;
+        }
+
+        // C# @LOGIN（PlayerObject.cs:1898-1915）：GMLogin 待验证 → 下一条消息作为 GM 密码
+        const GM_PASSWORD: &str = "C#Mir 4.0";
+        if self.gm_login_pending.remove(&msg.session_id) {
+            if message.trim() == GM_PASSWORD {
+                if let Ok(Some(mut st)) = record.actor_ref.ask(GetPlayerState).await {
+                    st.is_gm = true;
+                    let _ = record.actor_ref.ask(SetPlayerState { state: st }).await;
+                }
+                send_system_message(&self.gate_ref, msg.session_id, "你已成为 GM");
+                debug!("GM login ok: {}", record.name);
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "GM 密码错误");
+                debug!("GM login failed: {}", record.name);
+            }
             return;
         }
 
@@ -3328,6 +3347,16 @@ impl Message<ChatRequest> for WorldActor {
                     }
                     return;
                 }
+            }
+        }
+
+        // @LOGIN —— 输入 GM 密码升级为 GM（C# PlayerObject case "LOGIN"：GMLogin=true + EnterGmPassword；无 GM 门槛）
+        if let Some(cmd_rest) = message.strip_prefix('@') {
+            let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
+            if parts.first().is_some_and(|c| c.eq_ignore_ascii_case("LOGIN")) {
+                self.gm_login_pending.insert(msg.session_id);
+                send_system_message(&self.gate_ref, msg.session_id, "请输入 GM 密码");
+                return;
             }
         }
 
