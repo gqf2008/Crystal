@@ -591,7 +591,9 @@ pub async fn replace_vars(
         .unwrap_or_else(|| "无".to_string());
     out = out.replace("<$GUILDEXTENDFEE>", &extend_fee);
     out = out.replace("<$guildextendfee>", &extend_fee);
-    let days_left = owns_gt.map(|c| c.rent_days.to_string()).unwrap_or_else(|| "0".to_string());
+    let days_left = owns_gt
+        .map(|c| c.gt_days_left(world.tick_count).to_string())
+        .unwrap_or_else(|| "0".to_string());
     out = out.replace("<$GUILDGTRENTALDAYSLEFT>", &days_left);
     out = out.replace("<$guildgtrentaldaysleft>", &days_left);
     // AGITGUILDNAME：行会名（无行会 → 无行会）
