@@ -993,6 +993,15 @@ pub async fn get_character_last_access(pool: &DbPool, character_name: &str) -> a
     Ok(row.map(|r| r.0).unwrap_or(0))
 }
 
+/// 判断角色名是否存在（C# Envir.GetCharacterInfo(name) != null；邮件收件人校验用）
+pub async fn character_exists_by_name(pool: &DbPool, character_name: &str) -> anyhow::Result<bool> {
+    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM characters WHERE name = ?")
+        .bind(character_name)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.is_some())
+}
+
 /// 更新角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
 pub async fn update_last_access(pool: &DbPool, character_name: &str, now_unix: i64) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET last_access = ? WHERE name = ?")
