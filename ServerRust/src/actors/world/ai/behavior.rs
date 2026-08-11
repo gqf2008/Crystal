@@ -20,6 +20,12 @@ pub trait MonsterBehavior: Send + Sync + 'static {
         true
     }
 
+    /// 是否可被怪物/宠物攻击（C# IsAttackTarget(MonsterObject)）——默认同玩家版；
+    /// TownArcher/Siege 等对怪物恒 false（玩家可打）。#1984
+    fn is_attackable_by_monster(&self) -> bool {
+        self.is_attackable()
+    }
+
     /// 能否自然回血（HellLord/TreeQueen 返回 false，对齐 C# CanRegen）
     fn can_regen(&self) -> bool {
         true
@@ -91,5 +97,17 @@ mod tests {
     fn default_behavior_is_attackable() {
         let d = crate::actors::world::ai::DefaultBehavior::new();
         assert!(d.is_attackable());
+        assert!(d.is_attackable_by_monster());
+    }
+
+    /// #1984：TownArcher/Siege 对怪物不可攻击、对玩家可攻击（C# IsAttackTarget 双版本）
+    #[test]
+    fn town_archer_and_siege_immune_to_monsters() {
+        let archer = crate::actors::world::ai::bosses::town_archer::TownArcherBehavior::new();
+        assert!(archer.is_attackable(), "城镇弓箭手对玩家可攻击");
+        assert!(!archer.is_attackable_by_monster(), "城镇弓箭手对怪物不可攻击");
+        let siege = crate::actors::world::ai::bosses::siege::SiegeBehavior::new();
+        assert!(siege.is_attackable(), "攻城建筑对玩家可攻击");
+        assert!(!siege.is_attackable_by_monster(), "攻城建筑对怪物不可攻击");
     }
 }
