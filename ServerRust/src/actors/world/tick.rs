@@ -822,6 +822,20 @@ impl Message<CheckPlayerStacking> for WorldActor {
     }
 }
 
+/// 默认 NPC 事件（Login/LevelUp/Die/UseItem 等；C# CallDefaultNPC 排队执行）
+pub struct DefaultNpcEvent {
+    pub session_id: u64,
+    pub section: String,
+}
+
+impl Message<DefaultNpcEvent> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: DefaultNpcEvent, _ctx: &mut Context<Self, Self::Reply>) {
+        self.call_default_npc(msg.session_id, &msg.section).await;
+    }
+}
+
 impl WorldActor {
 
     /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。

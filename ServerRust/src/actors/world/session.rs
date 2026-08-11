@@ -411,6 +411,8 @@ impl Message<StartGameRequest> for WorldActor {
 
         // C# PlayerObject.cs:1172：公告非空且文件修改时间 > 上次下线时间 → S.UpdateNotice
         self.send_login_notice(msg.session_id, &player_name).await;
+        // C# PlayerObject.cs:1121：登录触发默认 NPC [@_Login]（独立消息）
+        self.queue_default_npc(msg.session_id, "_login");
 
         // 行会在线状态由 SocialActor 管理
 

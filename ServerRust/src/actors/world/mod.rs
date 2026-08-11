@@ -36,6 +36,7 @@ pub use tick::ProcessElementalTick;
 pub use tick::ProcessDeathCallbacks;
 pub use tick::ProcessRevives;
 pub use tick::CheckPlayerStacking;
+pub use tick::DefaultNpcEvent;
 pub use session::*;
 pub use item::*;
 pub use combat::*;
@@ -943,6 +944,8 @@ pub struct WorldActor {
     pub(crate) spawn_dir: Option<PathBuf>,
     /// NPC 脚本/INI 根目录（C# NPCPath 等价，SAVEVALUE/LOADVALUE 用）
     pub(crate) script_dir: PathBuf,
+    /// 默认 NPC 脚本（C# Envir.DefaultNPC；<script_dir>/00Default.txt，Login/LevelUp/Die/UseItem 事件段）
+    pub(crate) default_npc: Option<npc_script::ParsedScript>,
     /// 下一个对象 ID
     pub(crate) next_object_id: u32,
     /// 活跃怪物（按 object_id 索引）
@@ -1409,6 +1412,7 @@ impl WorldActor {
             map_dir,
             spawn_dir,
             script_dir: PathBuf::from("."),
+            default_npc: None,
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
@@ -2617,6 +2621,33 @@ impl WorldActor {
         }
     }
 
+    /// 排队默认 NPC 事件（C# CallDefaultNPC；独立消息分发，避免内联进巨型 Tick handler 导致 debug 栈溢出 #881）
+    fn queue_default_npc(&self, session_id: u64, section: &str) {
+        if let Some(world_ref) = self.self_ref.clone() {
+            let _ = world_ref.tell(DefaultNpcEvent { session_id, section: section.to_string() }).try_send();
+        }
+    }
+
+    /// 调用默认 NPC 事件段（C# CallDefaultNPC：Envir.DefaultNPC 的 [@_xxx] 段；无脚本/无段返回 false）
+    pub(crate) async fn call_default_npc(&mut self, session_id: u64, section_name: &str) -> bool {
+        let Some(script) = self.default_npc.clone() else { return false };
+        let Some(section) = script.find(section_name) else { return false };
+        let Some(record) = self.players.get(&session_id).cloned() else { return false };
+        let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return false };
+        let npc = NpcState {
+            object_id: 0,
+            name: "DefaultNPC".to_string(),
+            x: st.x,
+            y: st.y,
+            direction: 0,
+            db_index: 0,
+            map_index: st.map_index,
+        };
+        let mut custom_vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let _ = script.execute_section(section, self, session_id, &npc, &mut custom_vars).await;
+        true
+    }
+
     /// 玩家死亡时随机掉落背包物品和金币（安全区不掉落）
     pub(crate) async fn handle_player_death_drop(
         &mut self,
@@ -2626,6 +2657,8 @@ impl WorldActor {
         map_index: u16,
         killed_by_player: bool,
     ) {
+        // C# PlayerObject.cs:664：玩家死亡触发默认 NPC [@_Die]（独立消息，避免内联进巨型 Tick handler 栈溢出）
+        self.queue_default_npc(session_id, "_die");
         // #1755：C# Die（:624）UnSummonIntelligentCreature——玩家死亡解散其召唤物（同图广播 ObjectRemove）
         let pet_ids: Vec<u32> = self.monsters.iter()
             .filter(|(_, m)| m.master_session == Some(session_id))
@@ -4760,6 +4793,7 @@ impl Actor for WorldActor {
             guild_war_ends: HashMap::new(),
             hero_ai_states: HashMap::new(),
             player_heroes: HashMap::new(),
+            default_npc: npc_script::load_default_npc(&args.quest_dir),
         })
     }
 }
@@ -5660,6 +5694,8 @@ impl Message<PlayerLeveled> for WorldActor {
             }).await;
         }
         info!("Player {} leveled to {} broadcast", msg.object_id, msg.level);
+        // C# PlayerObject.cs:934：升级触发默认 NPC [@_LevelUp]（独立消息）
+        self.queue_default_npc(msg.session_id, "_levelup");
     }
 }
 
