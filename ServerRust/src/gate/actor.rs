@@ -3201,12 +3201,14 @@ fn forward_guild_war_return(world_ref: &Option<ActorRef<crate::actors::world::Wo
 }
 
 /// GuildBuffUpdate: [buff_id: u32]
+/// GuildBuffUpdate: [action: u8][buff_id: i32]（C# C.GuildBuffUpdate：0=请求列表 1=启用 2=激活）
 fn forward_guild_buff_update(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let buff_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("GuildBuffUpdate: session={} buff_id={}", session_id, buff_id);
+    if payload.len() < 5 { return; }
+    let action = payload[0];
+    let buff_id = i32::from_le_bytes(payload[1..5].try_into().unwrap_or([0; 4])) as u32;
+    debug!("GuildBuffUpdate: session={} action={} buff_id={}", session_id, action, buff_id);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::GuildBuffUpdateRequest { session_id, buff_id }).try_send();
+    let _ = world_ref.tell(crate::actors::world::GuildBuffUpdateRequest { session_id, action, buff_id }).try_send();
 }
 
 /// LockMail: [mail_id: u64][lock: bool]
@@ -3220,13 +3222,14 @@ fn forward_lock_mail(world_ref: &Option<ActorRef<crate::actors::world::WorldActo
 }
 
 /// MailLockedItem: [mail_id: u64][item_index: u32]
+/// MailLockedItem: [unique_id: u64][locked: bool]（C# C.MailLockedItem；服务端回显）
 fn forward_mail_locked_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 12 { return; }
-    let mail_id = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
-    let item_index = u32::from_le_bytes(payload[8..12].try_into().unwrap_or([0; 4]));
-    debug!("MailLockedItem: session={} mail_id={} item_index={}", session_id, mail_id, item_index);
+    if payload.len() < 9 { return; }
+    let unique_id = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+    let locked = payload[8] != 0;
+    debug!("MailLockedItem: session={} uid={} locked={}", session_id, unique_id, locked);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::MailLockedItemRequest { session_id, mail_id, item_index }).try_send();
+    let _ = world_ref.tell(crate::actors::world::MailLockedItemRequest { session_id, unique_id, locked }).try_send();
 }
 
 /// MailCost: [items_count: u32][gold: u32]
