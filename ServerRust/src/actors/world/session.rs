@@ -381,6 +381,14 @@ impl Message<StartGameRequest> for WorldActor {
         // Phase A fix: 如果 map_index 在 DB 里找不到(idx 从 1 开始),fallback 到第一张可用地图
         let (map_file, map_title, map_info_idx) = if let Some(m) = self.map_infos.get(&(map_index as i32)) {
             (m.file_name.clone(), m.title.clone(), m.index)
+        } else if let Some(by_name) = self.map_infos.values().find(|m| {
+            // #2434：DB 地图 idx 从 1 开始（如新手村 file "0" → idx 1），存量角色 map_index=0 需按文件名解析
+            m.file_name == map_index.to_string()
+                || m.file_name.starts_with(&format!("{}.", map_index))
+                || m.file_name == format!("{}.map", map_index)
+        }) {
+            info!("map_index {} not in DB by idx, resolved by file name: {} ({})", map_index, by_name.file_name, by_name.title);
+            (by_name.file_name.clone(), by_name.title.clone(), by_name.index)
         } else if let Some(first) = self.map_infos.values().next() {
             info!("map_index {} not in DB, using first available: {} ({})", map_index, first.file_name, first.title);
             (first.file_name.clone(), first.title.clone(), first.index)
