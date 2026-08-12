@@ -252,8 +252,10 @@ fn npc_goods_ui_system(
             });
             tracing::info!("🔄 回购 uid={} x{}", pending.unique_id, n);
         } else {
+            // #2376：发 UniqueID（C# 客户端 BuyItem.ItemIndex = SelectedItem.UniqueID）；
+            // 常规商店商品服务端 unique_id=item_index，二手货为实例 id，服务端据此区分
             net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
-                item_index: pending.item_index as u64,
+                item_index: pending.unique_id as u64,
                 count: n as u16,
                 panel_type: mir2_shared::enums::PanelType::Buy,
             });
@@ -390,8 +392,9 @@ fn npc_goods_ui_system(
                         amount.ask(format!("购买 {} 数量", g.name), buy_max_quantity(g.stack_size, g.count));
                         tracing::info!("🏪 购买 {}: 弹数量框 max={}", g.name, buy_max_quantity(g.stack_size, g.count));
                     } else {
+                        // #2376：发 UniqueID（见上）
                         net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
-                            item_index: g.item_index as u64,
+                            item_index: g.unique_id as u64,
                             count: 1,
                             panel_type: mir2_shared::enums::PanelType::Buy,
                         });

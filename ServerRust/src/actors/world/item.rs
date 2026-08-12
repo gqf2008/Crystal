@@ -2460,7 +2460,101 @@ impl Message<BuyItemRequest> for WorldActor {
         let good_idx = match goods_list.iter().position(|g| g.item_index == msg.item_index as i32) {
             Some(idx) => idx,
             None => {
-                send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不出售此物品");
+                // #2376：普通商店无此物品 → 尝试二手货购买（C# NPCScript.Buy isUsed 分支，按 UniqueID）
+                drop(goods_list);
+                let used_list = match self.used_goods.get_mut(&npc_oid) {
+                    Some(l) => l,
+                    None => {
+                        send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不出售此物品");
+                        return;
+                    }
+                };
+                let uid = msg.item_index; // C# 客户端 BuyItem.ItemIndex 字段实际携带 UniqueID
+                let used_idx = match used_list.iter().position(|i| i.unique_id == uid) {
+                    Some(i) => i,
+                    None => {
+                        send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不出售此物品");
+                        return;
+                    }
+                };
+                let goods = used_list[used_idx].clone();
+                // C#：count==0 或 > StackSize 直接忽略
+                let stack_size = self.item_infos
+                    .get(&goods.item_index)
+                    .map(|i| i.stack_size.max(1) as u32)
+                    .unwrap_or(1);
+                if msg.count == 0 || msg.count > stack_size {
+                    return;
+                }
+                // C#：二手货整件移除（"destroy whole stack"），数量销到当前堆叠
+                let count = msg.count.min(goods.count.max(1) as u32) as u16;
+                // C#：全价×PriceRate（与 BuyItemBack 一致，#1866）
+                let per_unit = self.item_infos
+                    .get(&goods.item_index)
+                    .map(|info| compute_item_price_per_unit(&goods, info))
+                    .unwrap_or(0);
+                let cost = (per_unit.saturating_mul(count as u64) * npc_rate / 100).max(1);
+                if state.inventory.gold < cost {
+                    send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+                    return;
+                }
+                let mut item = goods.clone();
+                item.count = count;
+                // C#：CanGainItem(item)（购买数量，非原始整件）
+                if !state.inventory.can_gain_item(&item) {
+                    send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+                    return;
+                }
+                let ok = record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await.unwrap_or(false);
+                if !ok {
+                    send_system_message(&self.gate_ref, msg.session_id, "背包空间不足");
+                    return;
+                }
+                let _ = record.actor_ref.ask(DeductGold { amount: cost }).await;
+                used_list.remove(used_idx);
+                let _ = used_list;
+                // 完整 UserInformation 刷新（背包 + 金币）
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: packet,
+                    }).await;
+                }
+                // C#：刷新 Goods + UsedGoods（BuySub 面板）
+                let mut refresh: Vec<mir2_shared::data::item::UserItem> = Vec::new();
+                if let Some(list) = self.npc_goods.get(&npc_db_index) {
+                    for good in list {
+                        let mut it = mir2_shared::data::item::UserItem {
+                            item_index: good.item_index,
+                            count: good.count as u16,
+                            unique_id: good.item_index as u64,
+                            ..Default::default()
+                        };
+                        super::enrich_item_info(&mut it, &self.item_infos);
+                        if let Some(info) = self.item_infos.get(&good.item_index) {
+                            it.max_dura = info.durability as u16;
+                            it.current_dura = info.durability as u16;
+                        }
+                        refresh.push(it);
+                    }
+                }
+                if let Some(list) = self.used_goods.get(&npc_oid) {
+                    for mut it in list.clone() {
+                        super::enrich_item_info(&mut it, &self.item_infos);
+                        refresh.push(it);
+                    }
+                }
+                if let Some(npc) = self.npcs.get(&npc_oid) {
+                    self.send_npc_goods_items_panel(
+                        msg.session_id,
+                        npc,
+                        refresh,
+                        mir2_shared::enums::PanelType::BuySub,
+                    );
+                }
+                send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", cost));
+                debug!("BuyItem(used): {} uid={} x{} for {} gold from NPC #{}", state.name, uid, count, cost, npc_oid);
                 return;
             }
         };
@@ -2644,19 +2738,21 @@ impl Message<SellItemRequest> for WorldActor {
 
         let success = record.actor_ref.ask(AddGold { amount: total_gold }).await.unwrap_or(false);
         if success {
-            // 记录到回购列表（C# Settings.GoodsBuyBackMaxStored = 20，GoodsBuyBackTime = 60 分钟）
-            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-            let buyback = BuybackItem {
-                item: removed.as_ref().cloned().unwrap_or_else(|| item_data.clone()),
-                sell_price: total_gold,
-                expires_at: now_ms + 60 * 60 * 1000,
-                // #1542：记录卖出 NPC（C# NPCObject.BuyBack[Name] 按 NPC 隔离）
-                npc_object_id: npc_oid,
-            };
-            let list = self.buyback_items.entry(msg.session_id).or_default();
-            list.insert(0, buyback);
-            while list.len() > 20 {
-                list.pop();
+            // 记录到回购列表（C# Settings.GoodsBuyBackMaxStored/GoodsBuyBackTime；GoodsOn 门控，#2376）
+            if self.goods_on {
+                let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+                let buyback = BuybackItem {
+                    item: removed.as_ref().cloned().unwrap_or_else(|| item_data.clone()),
+                    sell_price: total_gold,
+                    expires_at: now_ms + self.goods_buy_back_time_minutes as i64 * 60 * 1000,
+                    // #1542：记录卖出 NPC（C# NPCObject.BuyBack[Name] 按 NPC 隔离）
+                    npc_object_id: npc_oid,
+                };
+                let list = self.buyback_items.entry(msg.session_id).or_default();
+                list.insert(0, buyback);
+                while list.len() > self.goods_buy_back_max_stored as usize {
+                    list.pop();
+                }
             }
             send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, true);
             // 完整 UserInformation 刷新（背包 + 金币）

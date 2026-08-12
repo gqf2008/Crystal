@@ -5690,6 +5690,11 @@ impl Message<Tick> for WorldActor {
             crate::actors::world::market::resolve_expired_auctions(self).await;
         }
 
+        // #2376：过期回购转入各 NPC 二手货（C# NPCObject.ProcessGoods，每 60 秒）
+        if self.tick_count % 600 == 0 {
+            self.flush_expired_buyback_to_used_goods();
+        }
+
 
 
 

@@ -198,9 +198,9 @@ impl Message<NPCCallRequest> for WorldActor {
                 self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::SpecialRepair);
                 return;
             }
-            // C# BuyUsedKey：SendNPCGoods(UsedGoods, BuySub)；Rust 未实现 UsedGoods，先发空 BuySub 面板
+            // C# BuyUsedKey：SendNPCGoods(UsedGoods, BuySub)（#2376 实现二手货列表）
             Some(EngineNpcAction::BuySub) => {
-                self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::BuySub);
+                self.send_used_goods(msg.session_id, &npc);
                 return;
             }
             // C# StorageKey：ResetStorageUnlock + SendStorage + NPCStorage（含密码解锁）
@@ -1234,6 +1234,8 @@ impl WorldActor {
             let mut item = mir2_shared::data::item::UserItem {
                 item_index: good.item_index,
                 count: good.count as u16,
+                // #2376：常规商店商品 unique_id = item_index（C# 客户端 BuyItem 发 UniqueID 语义）
+                unique_id: good.item_index as u64,
                 ..Default::default()
             };
             enrich_item_info(&mut item, &self.item_infos);

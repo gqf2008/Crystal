@@ -128,6 +128,14 @@ pub struct WorldActorArgs {
     pub mana_regen_weight: u32,
     /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats）
     pub goods_hide_added_stats: bool,
+    /// NPC 二手货/回购系统开关（C# Settings.GoodsOn = true）
+    pub goods_on: bool,
+    /// 每 NPC 每物品索引二手货上限（C# Settings.GoodsMaxStored = 15）
+    pub goods_max_stored: u32,
+    /// 回购过期分钟数（C# Settings.GoodsBuyBackTime = 60）
+    pub goods_buy_back_time_minutes: u32,
+    /// 每玩家每 NPC 回购上限（C# Settings.GoodsBuyBackMaxStored = 20）
+    pub goods_buy_back_max_stored: u32,
     /// 安全区回血（C# Settings.SafeZoneHealing，默认 false；开启后安全区内每 2 秒 +25 HP）
     pub safe_zone_healing: bool,
 }
@@ -1137,6 +1145,45 @@ pub struct BuybackItem {
     pub npc_object_id: u32,
 }
 
+/// #2376：将过期未回购的卖出物品转入对应 NPC 二手货（C# NPCObject.ProcessGoods）。
+/// - goods_on=false 时不转入（C# ProcessGoods 顶部 return）；过期条目仍会在打开回购面板时被过滤
+/// - 每 NPC 每物品索引上限 max_per_index（C# Settings.GoodsMaxStored=15）：超限时移除最旧（C# RemoveAt(0)，Rust 无 IsAdded 语义）
+fn move_expired_buyback_to_used_goods(
+    buyback: &mut std::collections::HashMap<u64, Vec<BuybackItem>>,
+    used: &mut std::collections::HashMap<u32, Vec<mir2_shared::data::item::UserItem>>,
+    now_ms: i64,
+    goods_on: bool,
+    max_per_index: usize,
+) -> usize {
+    if !goods_on {
+        return 0;
+    }
+    let mut moved = 0usize;
+    for list in buyback.values_mut() {
+        let mut keep = Vec::with_capacity(list.len());
+        for b in list.drain(..) {
+            if b.expires_at > now_ms {
+                keep.push(b);
+                continue;
+            }
+            let npc_list = used.entry(b.npc_object_id).or_default();
+            let same_index = npc_list
+                .iter()
+                .filter(|i| i.item_index == b.item.item_index)
+                .count();
+            if same_index >= max_per_index {
+                // C# ProcessGoods：满员时先移除（无 IsAdded 则 RemoveAt(0)）
+                npc_list.remove(0);
+            }
+            npc_list.push(b.item);
+            moved += 1;
+        }
+        *list = keep;
+    }
+    buyback.retain(|_, v| !v.is_empty());
+    moved
+}
+
 /// 矿脉掉落条目（C# MineDrop：ItemName/MinSlot/MaxSlot/MinDura/MaxDura/BonusChance/MaxBonusDura）
 #[derive(Debug, Clone)]
 pub(crate) struct MineDropConfig {
@@ -1270,6 +1317,8 @@ pub struct WorldActor {
     pub(crate) players: HashMap<u64, PlayerRecord>,
     /// 商店回购列表（session_id -> 最近卖出的物品，最多保留 10 个）
     pub(crate) buyback_items: HashMap<u64, Vec<BuybackItem>>,
+    /// NPC 二手货列表（C# NPCObject.UsedGoods：npc object_id -> 过期未回购的卖出物品）
+    pub(crate) used_goods: HashMap<u32, Vec<mir2_shared::data::item::UserItem>>,
     /// 已加载的地图缓存
     pub(crate) maps: HashMap<u16, MapData>,
     /// GateActor 引用，用于发数据包给客户端
@@ -1460,6 +1509,14 @@ pub struct WorldActor {
     pub(crate) mana_regen_weight: u32,
     /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats）
     pub(crate) goods_hide_added_stats: bool,
+    /// NPC 二手货/回购系统开关（C# Settings.GoodsOn）
+    pub(crate) goods_on: bool,
+    /// 每 NPC 每物品索引二手货上限（C# Settings.GoodsMaxStored = 15）
+    pub(crate) goods_max_stored: u32,
+    /// 回购过期分钟数（C# Settings.GoodsBuyBackTime = 60）
+    pub(crate) goods_buy_back_time_minutes: u32,
+    /// 每玩家每 NPC 回购上限（C# Settings.GoodsBuyBackMaxStored = 20）
+    pub(crate) goods_buy_back_max_stored: u32,
     /// 安全区回血（C# Settings.SafeZoneHealing，默认 false）
     pub(crate) safe_zone_healing: bool,
     /// 全局经验倍率事件
@@ -1806,6 +1863,7 @@ impl WorldActor {
             npc_delayed_actions: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
+            used_goods: HashMap::new(),
             maps: HashMap::new(),
             gate_ref,
             self_ref: None,
@@ -1898,6 +1956,10 @@ impl WorldActor {
             health_regen_weight: 10,
             mana_regen_weight: 10,
             goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
             safe_zone_healing: false,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
@@ -2516,6 +2578,8 @@ impl WorldActor {
             let mut item = mir2_shared::data::item::UserItem {
                 item_index: good.item_index,
                 count: good.count as u16,
+                // #2376：常规商店商品 unique_id = item_index（C# 客户端 BuyItem 发 UniqueID 语义）
+                unique_id: good.item_index as u64,
                 ..Default::default()
             };
             // 填充物品信息（客户端商店列表需要名称/价格/图标/类型；枚举需 C#→SharedRust +3）
@@ -2532,6 +2596,8 @@ impl WorldActor {
 
     /// 发送回购列表（C# 语义：原物品 + 原始 unique_id，客户端据此发 BuyItemBack）
     pub(crate) fn send_buyback_goods(&mut self, session_id: u64, npc: &NpcState) {
+        // #2376：先将全局过期回购转入各 NPC 二手货（C# NPCObject.ProcessGoods）
+        self.flush_expired_buyback_to_used_goods();
         // C#：过期回购物品清理（GoodsBuyBackTime = 60 分钟）
         let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         if let Some(list) = self.buyback_items.get_mut(&session_id) {
@@ -2552,6 +2618,47 @@ impl WorldActor {
             })
             .unwrap_or_default();
         self.send_npc_goods_items(session_id, npc, items);
+    }
+
+    /// #2376：将全局过期回购转入各 NPC 二手货（C# NPCObject.ProcessGoods）
+    pub(crate) fn flush_expired_buyback_to_used_goods(&mut self) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        move_expired_buyback_to_used_goods(
+            &mut self.buyback_items,
+            &mut self.used_goods,
+            now_ms,
+            self.goods_on,
+            self.goods_max_stored as usize,
+        );
+    }
+
+    /// #2376：发送 NPC 二手货商品列表（C# NPCScript.BuyUsedKey：SendNPCGoods(UsedGoods, BuySub)）
+    pub(crate) fn send_used_goods(&mut self, session_id: u64, npc: &NpcState) {
+        if !self.goods_on {
+            // C# BuyUsedKey：Settings.GoodsOn=false 时不响应
+            return;
+        }
+        self.flush_expired_buyback_to_used_goods();
+        let items: Vec<mir2_shared::data::item::UserItem> = self
+            .used_goods
+            .get(&npc.object_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|mut item| {
+                enrich_item_info(&mut item, &self.item_infos);
+                item
+            })
+            .collect();
+        self.send_npc_goods_items_panel(
+            session_id,
+            npc,
+            items,
+            mir2_shared::enums::PanelType::BuySub,
+        );
     }
 
     /// 发送 NPCGoods 通用实现（rate 由 NPC 配置决定）
@@ -5690,6 +5797,7 @@ Ok(Self {
             npc_delayed_actions: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
+            used_goods: HashMap::new(),
             maps: HashMap::new(),
             gate_ref: args.gate_ref,
             self_ref: Some(actor_ref),
@@ -5779,6 +5887,10 @@ Ok(Self {
             health_regen_weight: args.health_regen_weight,
             mana_regen_weight: args.mana_regen_weight,
             goods_hide_added_stats: args.goods_hide_added_stats,
+            goods_on: args.goods_on,
+            goods_max_stored: args.goods_max_stored,
+            goods_buy_back_time_minutes: args.goods_buy_back_time_minutes,
+            goods_buy_back_max_stored: args.goods_buy_back_max_stored,
             safe_zone_healing: args.safe_zone_healing,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
@@ -10981,9 +11093,94 @@ impl Message<GmGotoRequest> for WorldActor {
     }
 }
 
+#[cfg(test)]
+mod goods_tests {
+    use super::*;
 
+    /// #2376：过期回购转入二手货（按 NPC 隔离 + 每索引上限）
+    #[test]
+    fn expired_buyback_moves_to_used_goods() {
+        let mut buyback: std::collections::HashMap<u64, Vec<BuybackItem>> =
+            std::collections::HashMap::new();
+        let mut used: std::collections::HashMap<u32, Vec<mir2_shared::data::item::UserItem>> =
+            std::collections::HashMap::new();
+        let mk = |uid: u64, index: i32| BuybackItem {
+            item: mir2_shared::data::item::UserItem {
+                unique_id: uid,
+                item_index: index,
+                count: 1,
+                ..Default::default()
+            },
+            sell_price: 10,
+            expires_at: 1000,
+            npc_object_id: 7,
+        };
+        buyback.insert(1, vec![mk(101, 5), mk(102, 6)]);
+        buyback.insert(2, vec![mk(103, 5)]);
 
+        // now=2000 过期：全部转入 NPC 7（HashMap 迭代顺序不确定，按集合断言）
+        let moved = move_expired_buyback_to_used_goods(&mut buyback, &mut used, 2000, true, 15);
+        assert_eq!(moved, 3);
+        assert!(buyback.is_empty());
+        let mut ids: Vec<u64> = used[&7].iter().map(|i| i.unique_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![101, 102, 103]);
+    }
 
+    /// #2376：未过期回购保留；goods_on=false 不转入
+    #[test]
+    fn unexpired_kept_and_goods_off_no_move() {
+        let mut buyback: std::collections::HashMap<u64, Vec<BuybackItem>> =
+            std::collections::HashMap::new();
+        let mut used: std::collections::HashMap<u32, Vec<mir2_shared::data::item::UserItem>> =
+            std::collections::HashMap::new();
+        let mk = |expires: i64| BuybackItem {
+            item: mir2_shared::data::item::UserItem::default(),
+            sell_price: 1,
+            expires_at: expires,
+            npc_object_id: 1,
+        };
+        buyback.insert(1, vec![mk(5000), mk(1000)]);
 
+        let moved = move_expired_buyback_to_used_goods(&mut buyback, &mut used, 2000, true, 15);
+        assert_eq!(moved, 1); // 只转 1000
+        assert_eq!(buyback[&1].len(), 1);
+        assert_eq!(buyback[&1][0].expires_at, 5000);
 
+        // goods_on=false：不转入，过期条目仍留在 BuyBack
+        let moved_off = move_expired_buyback_to_used_goods(&mut buyback, &mut used, 9999, false, 15);
+        assert_eq!(moved_off, 0);
+        assert_eq!(buyback[&1].len(), 1);
+    }
 
+    /// #2376：每物品索引上限（GoodsMaxStored=15）超限移除最旧
+    #[test]
+    fn used_goods_per_index_cap_removes_oldest() {
+        let mut buyback: std::collections::HashMap<u64, Vec<BuybackItem>> =
+            std::collections::HashMap::new();
+        let mut used: std::collections::HashMap<u32, Vec<mir2_shared::data::item::UserItem>> =
+            std::collections::HashMap::new();
+        used.insert(3, vec![mir2_shared::data::item::UserItem {
+            unique_id: 1,
+            item_index: 9,
+            count: 1,
+            ..Default::default()
+        }]);
+        buyback.insert(1, vec![BuybackItem {
+            item: mir2_shared::data::item::UserItem {
+                unique_id: 2,
+                item_index: 9,
+                count: 1,
+                ..Default::default()
+            },
+            sell_price: 1,
+            expires_at: 0,
+            npc_object_id: 3,
+        }]);
+        // max_per_index=1：超限移除最旧 uid=1，新 uid=2 入列
+        let moved = move_expired_buyback_to_used_goods(&mut buyback, &mut used, 100, true, 1);
+        assert_eq!(moved, 1);
+        assert_eq!(used[&3].len(), 1);
+        assert_eq!(used[&3][0].unique_id, 2);
+    }
+}
