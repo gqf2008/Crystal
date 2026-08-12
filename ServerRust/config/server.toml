@@ -65,6 +65,8 @@ marriage_cooldown_days = 7    # C# Settings.MarriageCooldown（#2394）
 marriage_level_required = 10  # C# Settings.MarriageLevelRequired（#2394）
 replace_wedring_cost = 125    # C# Settings.ReplaceWedRingCost（#2394）
 lover_exp_bonus = 5           # C# Settings.LoverEXPBonus（#2394）
+mentor_level_gap = 10          # C# Settings.MentorLevelGap（#2396）
+mentor_exp_boost = 10          # C# Settings.MentorExpBoost（#2396）
 
 # 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold / ExtendGT / GTSale 最低价）
 [conquest]
