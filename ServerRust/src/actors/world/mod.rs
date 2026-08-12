@@ -164,8 +164,17 @@ pub struct NpcSpawn {
     pub db_index: i32,
 }
 
+/// 巡逻路线点（C# RouteInfo：Location + Delay ms；Envir/Routes/<route_path>.txt 每行 x,y[,delay_ms]）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoutePoint {
+    pub x: i32,
+    pub y: i32,
+    /// 到达该点后的停留时长（毫秒；C# RouteInfo.Delay）
+    pub delay_ms: i32,
+}
+
 /// 怪物定义（从 DB 配置或 TOML 加载）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MonsterSpawn {
     pub name: String,
     pub image: u16,
@@ -183,6 +192,8 @@ pub struct MonsterSpawn {
     pub count: u32,
     /// 出生点随机散布范围（C# RespawnInfo.Spread）
     pub spread: i32,
+    /// 巡逻路线（C# MonsterObject.Route；空=不巡逻）
+    pub route: Vec<RoutePoint>,
 }
 
 /// NPC 延迟执行动作（TIMERECALL/DELAYGOTO，对齐 C# DelayedAction DelayedType.NPC）
@@ -304,6 +315,7 @@ fn load_spawn_config(map_name: &str, map_index: u16, spawn_dir: &Path) -> SpawnC
                         map_index,
                         count: 1,
                         spread: 0,
+                            route: Vec::new(),
                     }).collect(),
                 }
             }
@@ -321,11 +333,54 @@ fn load_spawn_config(map_name: &str, map_index: u16, spawn_dir: &Path) -> SpawnC
 
 use mir2_shared::enums::Stat;
 
+/// 解析单条路线文件（C# RouteInfo.FromText：每行 x,y[,delay_ms]，忽略空行/非法行）
+fn parse_route_line(line: &str) -> Option<RoutePoint> {
+    let line = line.trim();
+    if line.is_empty() { return None; }
+    let mut parts = line.split(',');
+    let x = parts.next()?.trim().parse::<i32>().ok()?;
+    let y = parts.next()?.trim().parse::<i32>().ok()?;
+    let delay_ms = parts.next().map(|s| s.trim().parse::<i32>().unwrap_or(0)).unwrap_or(0);
+    Some(RoutePoint { x, y, delay_ms })
+}
+
+/// 加载单个路线文件（C# MapRespawn.LoadRoutes）
+fn load_route_file(path: &std::path::Path) -> Vec<RoutePoint> {
+    let Ok(content) = std::fs::read_to_string(path) else { return Vec::new() };
+    content.lines().filter_map(parse_route_line).collect()
+}
+
+/// 扫描 Envir/Routes 目录，键 = 相对路径小写（去 .txt；C# Settings.RoutePath）
+fn load_route_files(map_dir: &std::path::Path) -> HashMap<String, Vec<RoutePoint>> {
+    let mut out = HashMap::new();
+    let routes_dir = map_dir.join("Envir").join("Routes");
+    let Ok(entries) = std::fs::read_dir(&routes_dir) else { return out };
+    let mut stack: Vec<std::path::PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            if let Ok(sub) = std::fs::read_dir(&path) {
+                stack.extend(sub.filter_map(|e| e.ok().map(|e| e.path())));
+            }
+            continue;
+        }
+        if path.extension().map(|e| e == "txt").unwrap_or(false) {
+            let rel = path.strip_prefix(&routes_dir).unwrap_or(&path);
+            let key = rel.with_extension("").to_string_lossy().replace('\\', "/").to_lowercase();
+            let points = load_route_file(&path);
+            if !points.is_empty() {
+                out.insert(key, points);
+            }
+        }
+    }
+    out
+}
+
 /// Build SpawnConfig from DB-loaded MapInfo + MonsterInfo
 fn spawn_config_from_db(
     map_info: &db::MapInfo,
     monster_infos: &HashMap<i32, db::MonsterInfo>,
     npc_infos: &HashMap<i32, db::NPCInfo>,
+    routes: &HashMap<String, Vec<RoutePoint>>,
 ) -> SpawnConfig {
     let npcs: Vec<NpcSpawn> = npc_infos.values()
         .filter(|n| n.map_index == map_info.index)
@@ -349,6 +404,11 @@ fn spawn_config_from_db(
         // C# RespawnInfo.Count：每个出生点生成 Count 只怪物（坐标在 spawn 时于
         // ±Spread 内随机可走格落点，这里先生成 count 条定义）
         let count = r.count.max(1) as usize;
+        // #2342：C# Respawn.Route——按 route_path 查巡逻路线（键小写，兼容大小写差异）
+        let route = r.route_path.as_deref()
+            .and_then(|rp| routes.get(&rp.to_lowercase()))
+            .cloned()
+            .unwrap_or_default();
         (0..count).map(move |_| MonsterSpawn {
             name: mi.name.clone(),
             image: mi.image as u16,
@@ -363,6 +423,7 @@ fn spawn_config_from_db(
             map_index: map_info.index as u16,
             count: 1,
             spread: r.spread.max(0) as i32,
+            route: route.clone(),
         }).collect::<Vec<_>>().into_iter()
     }).collect();
 
@@ -380,6 +441,7 @@ struct SpawnContext<'a> {
     npc_infos: &'a HashMap<i32, db::NPCInfo>,
     dragon_info: Option<&'a db::DragonInfo>,
     rarity: crate::util::config::RarityConfig,
+    routes: &'a HashMap<String, Vec<RoutePoint>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -650,6 +712,14 @@ pub struct MonsterState {
     pub can_recall: bool,
     /// 下次召回 tick（C# NextRecallTime；MonsterRecallCooldown=5000ms）
     pub next_recall_tick: u64,
+    /// 巡逻路线（C# MonsterObject.Route；空=不巡逻）
+    pub route: Vec<RoutePoint>,
+    /// 当前目标路线点下标（C# RoutePoint）
+    pub route_point: usize,
+    /// 是否在路线点停留中（C# Waiting）
+    pub route_waiting: bool,
+    /// 路线停留到期 tick（C# RoamTime + Delay）
+    pub route_wait_until_tick: u64,
     /// 宠物经验积累（C# MonsterObject.PetExperience）
     pub pet_experience: u64,
     /// 宠物最大等级（C# MonsterObject.MaxPetLevel）
@@ -1159,6 +1229,8 @@ pub struct WorldActor {
     pub(crate) chat_items_sent: HashMap<u64, std::collections::HashSet<u64>>,
     /// 地图目录
     pub(crate) map_dir: PathBuf,
+    /// 巡逻路线表（route_path 小写 → 路线点；C# MapRespawn.LoadRoutes）
+    pub(crate) routes: HashMap<String, Vec<RoutePoint>>,
     /// 刷怪配置目录
     pub(crate) spawn_dir: Option<PathBuf>,
     /// NPC 脚本/INI 根目录（C# NPCPath 等价，SAVEVALUE/LOADVALUE 用）
@@ -1677,6 +1749,7 @@ impl WorldActor {
             gate_ref,
             self_ref: None,
             chat_items_sent: HashMap::new(),
+            routes: load_route_files(&map_dir),
             map_dir,
             spawn_dir,
             script_dir: PathBuf::from("."),
@@ -2592,6 +2665,7 @@ impl WorldActor {
             map_index,
             count: 1,
             spread: 0,
+                route: Vec::new(),
         };
         let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
         broadcast_to_map(&self.gate_ref, &self.players, map_index, &packet).await;
@@ -2631,6 +2705,10 @@ impl WorldActor {
             recall_at_tick: 0,
             can_recall: false,
             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
             behavior: crate::actors::world::ai::make_behavior(&spawn.name),
         });
         self.pet_levels.insert(new_oid, pet.level.max(1) as i32);
@@ -4654,6 +4732,10 @@ impl WorldActor {
                                     recall_at_tick: 0,
                                     can_recall: false,
                                     next_recall_tick: 0,
+                                        route: Vec::new(),
+                                        route_point: 0,
+                                        route_waiting: false,
+                                        route_wait_until_tick: 0,
                                     behavior: ai::make_behavior(&monster_info.name),
                                 };
                                 self.monsters.insert(boss_oid, boss);
@@ -4674,6 +4756,7 @@ impl WorldActor {
                                         map_index: target_map_index,
                                         count: 1,
                                         spread: 0,
+                                            route: Vec::new(),
                                     }, boss_oid, &format!("[世界Boss] {}", monster_info.name));
                                 // #1686：世界Boss 生成广播只发目标图（C# CurrentMap）
                                 broadcast_to_map(&self.gate_ref, &self.players, target_map_index, &packet).await;
@@ -4939,6 +5022,10 @@ impl WorldActor {
                                 max_pet_level: 0,
                                         master_session: None, recall_at_tick: 0,
                                         can_recall: info.can_recall, next_recall_tick: 0,
+                                        route: Vec::new(),
+                                        route_point: 0,
+                                        route_waiting: false,
+                                        route_wait_until_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
                                 }
@@ -5530,6 +5617,7 @@ Ok(Self {
             gate_ref: args.gate_ref,
             self_ref: Some(actor_ref),
             chat_items_sent: HashMap::new(),
+            routes: load_route_files(&args.map_dir),
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             script_dir: args.quest_dir.clone(),
@@ -5884,6 +5972,7 @@ impl WorldActor {
                     map_index,
                     count: 1,
                     spread: 0,
+                        route: Vec::new(),
                 },
                 oid,
                 &info.name,
@@ -5960,6 +6049,10 @@ impl WorldActor {
                 recall_at_tick: 0,
                 can_recall: info.can_recall,
                 next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                 behavior: ai::make_behavior(&info.name),
             });
             spawned += 1;
@@ -8687,7 +8780,7 @@ async fn spawn_npcs_and_monsters(
 ) -> (Vec<NpcState>, Vec<MonsterState>) {
     // Try DB-loaded configs first, fall back to TOML
     let config = if let Some(mi) = ctx.map_info {
-        spawn_config_from_db(mi, ctx.monster_infos, ctx.npc_infos)
+        spawn_config_from_db(mi, ctx.monster_infos, ctx.npc_infos, ctx.routes)
     } else if let Some(d) = spawn_dir {
         load_spawn_config(map_file, map_index, d)
     } else {
@@ -8843,6 +8936,10 @@ async fn spawn_npcs_and_monsters(
             recall_at_tick: 0,
             can_recall: monster_info_opt.map(|i| i.can_recall).unwrap_or(false),
             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
             behavior: ai::make_behavior(&name),
         });
         // 从 MonsterInfo 填充战斗属性（AC/MAC/Agility/Crit 等）
@@ -8871,7 +8968,7 @@ async fn spawn_npcs_and_monsters(
                     let max_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(100);
                     let xp = monster_db.experience;
                     let packet = build_object_monster_packet(
-                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp, map_index, count: 1, spread: 0 },
+                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp, map_index, count: 1, spread: 0, route: Vec::new() },
                         object_id,
                         &dragon.monster_name,
                     );
@@ -8938,6 +9035,10 @@ async fn spawn_npcs_and_monsters(
                         recall_at_tick: 0,
                         can_recall: false,
                         next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                         behavior: ai::make_behavior(&dragon.monster_name),
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
@@ -9207,6 +9308,20 @@ fn replace_pos_marker(message: &str, x: i32, y: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #2342：C# RouteInfo.FromText 路线行解析
+    #[test]
+    fn test_parse_route_line() {
+        assert_eq!(parse_route_line("417,164"), Some(RoutePoint { x: 417, y: 164, delay_ms: 0 }));
+        assert_eq!(parse_route_line("417,164,300000"), Some(RoutePoint { x: 417, y: 164, delay_ms: 300000 }));
+        assert_eq!(parse_route_line("  1 , 2 , 3 "), Some(RoutePoint { x: 1, y: 2, delay_ms: 3 }));
+        // 空行/非法行 → None
+        assert_eq!(parse_route_line(""), None);
+        assert_eq!(parse_route_line("   "), None);
+        assert_eq!(parse_route_line("abc,def"), None);
+        assert_eq!(parse_route_line("1"), None);
+        // 多余列忽略
+        assert_eq!(parse_route_line("1,2,3,4"), Some(RoutePoint { x: 1, y: 2, delay_ms: 3 }));
+    }
     use super::*;
 
     /// #2186：C# ProcessChatItems 文本标记替换（<title> → <title/uid>）
@@ -9512,6 +9627,10 @@ mod tests {
             recall_at_tick: 0,
             can_recall: false,
             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         };
         assert!(boss.is_boss);
@@ -9588,6 +9707,10 @@ mod tests {
             recall_at_tick: 0,
             can_recall: false,
             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         }
     }

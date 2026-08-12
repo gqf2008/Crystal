@@ -9,6 +9,8 @@ const SEARCH_DELAY_TICKS: u64 = 30;
 /// 寻路缓存目标哨兵（monster_path_targets 首字段）：追击=玩家 session；回出生点=0；
 /// 宠物跟随=u64::MAX；宠物协战=u64::MAX-1；怪物互伤=u64::MAX-2（#1697）
 const PATH_TARGET_PET_FOLLOW: u64 = u64::MAX;
+/// 巡逻路线目标哨兵（#2342：C# MonsterObject.ProcessRoute → MoveTo(Route[RoutePoint])）
+const PATH_TARGET_ROUTE: u64 = u64::MAX - 2;
 const PATH_TARGET_PET_ATTACK: u64 = u64::MAX - 1;
 const PATH_TARGET_MONSTER_ATTACK: u64 = u64::MAX - 2;
 
@@ -807,6 +809,79 @@ fn pet_find_hostile_target(
         }))
         .min_by_key(|s| ((s.1 - monster.x).abs() + (s.2 - monster.y).abs(), s.0))
         .map(|s| (s.0, s.1, s.2))
+}
+
+/// #2342：C# MonsterObject.ProcessRoute（:1999-2025）——无目标时沿巡逻路线逐点移动
+/// 到达当前点：delay>0 先停留（C# Waiting + RoamTime+Delay），否则推进下一站（循环）；
+/// 移动用 A* 寻路到路线点。返回 true 表示本 tick 已由巡逻接管（调用方跳过普通漫游）。
+/// 自由函数：参数均为不相交字段借用（调用点在 self.monsters.iter_mut() 内，不能整借 &mut self）。
+#[allow(clippy::too_many_arguments)]
+fn monster_route_patrol(
+    paths: &mut std::collections::HashMap<u32, Vec<(i32, i32)>>,
+    path_targets: &mut std::collections::HashMap<u32, (u64, i32, i32)>,
+    maps: &std::collections::HashMap<u16, crate::maps::loader::MapData>,
+    tick_count: u64,
+    monster: &mut MonsterState,
+    moved_monsters: &mut Vec<(u32, i32, i32, u8)>,
+    moved_targets: &mut std::collections::HashSet<(i32, i32)>,
+    monster_positions: &std::collections::HashSet<(i32, i32)>,
+    slowed: bool,
+) -> bool {
+    if monster.route.is_empty() {
+        return false;
+    }
+    let idx = monster.route_point.min(monster.route.len() - 1);
+    let pt = monster.route[idx];
+    // 到达当前点：先停留（C# Route[RoutePoint].Delay > 0 && !Waiting）
+    if monster.x == pt.x && monster.y == pt.y {
+        if pt.delay_ms > 0 && !monster.route_waiting {
+            monster.route_waiting = true;
+            // C# RoamTime = Time + RoamDelay(1000ms) + Delay
+            monster.route_wait_until_tick = tick_count + ROAM_DELAY_TICKS + (pt.delay_ms as u64 / 100).max(1);
+            return true;
+        }
+        monster.route_waiting = false;
+        monster.route_point = (monster.route_point + 1) % monster.route.len();
+    }
+    if monster.route_waiting {
+        if tick_count < monster.route_wait_until_tick {
+            return true;
+        }
+        monster.route_waiting = false;
+    }
+    let idx2 = monster.route_point.min(monster.route.len() - 1);
+    let (tx, ty) = (monster.route[idx2].x, monster.route[idx2].y);
+    // C# MoveTo(Route[RoutePoint].Location)：A* 寻路
+    let mut path = paths.entry(monster.object_id).or_default();
+    let recalc = path.is_empty()
+        || path_targets.get(&monster.object_id)
+            .map(|(s, px, py)| *s != PATH_TARGET_ROUTE || *px != tx || *py != ty)
+            .unwrap_or(true)
+        || !maps.get(&monster.map_index)
+            .map(|m| m.is_walkable(path[0].0, path[0].1))
+            .unwrap_or(false);
+    if recalc {
+        *path = maps.get(&monster.map_index)
+            .and_then(|m| crate::maps::pathfind::find_path(m, (monster.x, monster.y), (tx, ty)))
+            .unwrap_or_default();
+        path_targets.insert(monster.object_id, (PATH_TARGET_ROUTE, tx, ty));
+    }
+    if !path.is_empty() {
+        let candidate = path[0];
+        let walkable = maps.get(&monster.map_index)
+            .map(|m| m.is_walkable(candidate.0, candidate.1))
+            .unwrap_or(true);
+        if walkable && !monster_positions.contains(&candidate) && moved_targets.insert(candidate) {
+            let dir = (0..8)
+                .find(|d| MON_DIR_DX[*d] == candidate.0 - monster.x && MON_DIR_DY[*d] == candidate.1 - monster.y)
+                .unwrap_or(monster.direction as usize) as u8;
+            moved_monsters.push((monster.object_id, candidate.0, candidate.1, dir));
+            path.remove(0);
+        }
+    }
+    monster.next_move_tick = tick_count + slow_adjusted_ticks(monster.ai_profile.move_interval, slowed);
+    monster.ai_state = MonsterAiState::Return;
+    true
 }
 
 /// C# HumanObject.Teleport / NPCObject.Show：玩家落点与阻挡物同格 → Stacking=true, StackingTime=now+1000
@@ -2252,6 +2327,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         map_index,
                         count: 1,
                         spread: 0,
+                            route: Vec::new(),
                     };
                     let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                     // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
@@ -2294,6 +2370,10 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         recall_at_tick: 0,
                         can_recall: info.can_recall,
                         next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                         behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                     });
                     if let Some(m) = self.monsters.get_mut(&new_oid) {
@@ -2858,6 +2938,10 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 recall_at_tick: 0,
                 can_recall: monster_info_opt.map(|i| i.can_recall).unwrap_or(false),
                 next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                 behavior: crate::actors::world::ai::make_behavior(&name),
             });
             if rarity > 0 {
@@ -3793,6 +3877,10 @@ pub(crate) async fn tick_player_conditions(&mut self) {
             recall_at_tick: 0,
             can_recall: false,
             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
             behavior: ai::make_behavior(&monster_info.name),
         };
         self.monsters.insert(spawn_oid, boss);
@@ -3816,6 +3904,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                 map_index: dragon_map_u16,
                 count: 1,
                 spread: 0,
+                    route: Vec::new(),
             }, spawn_oid, &format!("[龙] {}", monster_info.name),
         );
         for session_id in self.players.keys() {
@@ -5664,6 +5753,20 @@ impl Message<Tick> for WorldActor {
                             }
                         }
                     }
+                    // #2342：无目标时沿巡逻路线走动（C# ProcessRoute；守卫/弓手等带 Route 的怪）
+                    if monster.target_session.is_none() && !monster.route.is_empty() {
+                        monster_route_patrol(
+                            &mut self.monster_paths,
+                            &mut self.monster_path_targets,
+                            &self.maps,
+                            self.tick_count,
+                            monster,
+                            &mut moved_monsters,
+                            &mut moved_targets,
+                            &monster_positions,
+                            crate::combat::poison::is_slowed(&monster.poison_list),
+                        );
+                    }
                     debug!("Boss '{}' AI tick processed", monster_name);
                     continue;
                 }
@@ -6014,6 +6117,7 @@ impl Message<Tick> for WorldActor {
                                             map_index: monster.map_index,
                                             count: 1,
                                             spread: 0,
+                                                route: Vec::new(),
                                         });
                                         spawn_count += 1;
                                     }
@@ -6249,6 +6353,23 @@ impl Message<Tick> for WorldActor {
                     }
                     monster.next_move_tick = self.tick_count + slow_adjusted_ticks(profile.move_interval, slowed);
                     monster.ai_state = MonsterAiState::Return;
+                } else if !monster.route.is_empty() {
+                    // #2342：有巡逻路线 → 沿路线走动（C# ProcessRoute），替代随机漫游
+                    if can_move {
+                        monster_route_patrol(
+                            &mut self.monster_paths,
+                            &mut self.monster_path_targets,
+                            &self.maps,
+                            self.tick_count,
+                            monster,
+                            &mut moved_monsters,
+                            &mut moved_targets,
+                            &monster_positions,
+                            slowed,
+                        );
+                    } else {
+                        monster.ai_state = MonsterAiState::Idle;
+                    }
                 } else {
                     // C# ProcessRoam：无目标时按 RoamDelay(1s) 1/10 概率随机转身/走动
                     let roam_next = self.monster_roam_ticks.get(oid).copied().unwrap_or(0);
@@ -6544,6 +6665,10 @@ impl Message<Tick> for WorldActor {
                     recall_at_tick: 0,
                     can_recall: monster_info_opt.map(|i| i.can_recall).unwrap_or(false),
                     next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                     behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                 });
                 debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
@@ -7000,6 +7125,7 @@ impl Message<Tick> for WorldActor {
                             map_index,
                             count: 1,
                             spread: 0,
+                                route: Vec::new(),
                         };
                         let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                         // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
@@ -7042,6 +7168,10 @@ impl Message<Tick> for WorldActor {
                             recall_at_tick: 0,
                             can_recall: false,
                             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                             behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                         });
                         // 填充战斗属性
@@ -7088,6 +7218,7 @@ impl Message<Tick> for WorldActor {
                             map_index,
                             count: 1,
                             spread: 0,
+                                route: Vec::new(),
                         };
                         let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                         // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
@@ -7130,6 +7261,10 @@ impl Message<Tick> for WorldActor {
                             recall_at_tick: 0,
                             can_recall: false,
                             next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                             behavior: Box::new(behavior),
                         });
                         // 登记 slave 归属（父岩死亡 → 子岩级联清理，C# SlaveList）
@@ -7244,6 +7379,7 @@ impl Message<Tick> for WorldActor {
                             map_index: *mm,
                             count: 1,
                             spread: 0,
+                                route: Vec::new(),
                         };
                         let packet = build_object_monster_packet_extra(&spawn, pet_oid, &spawn.name, true, 0);
                         let mut rm = Vec::new();
@@ -7597,6 +7733,7 @@ impl Message<Tick> for WorldActor {
                         map_index: monster.map_index,
                         count: 1,
                         spread: monster.spawn_spread,
+                            route: monster.route.clone(), // #2342：重生保留巡逻路线
                     };
                     self.respawn_queue.insert(*oid, (spawn, respawn_tick));
                     // 死亡回调（C# Die 覆盖：HumanAssassin 爆炸 / KingHydrax 召唤等）——

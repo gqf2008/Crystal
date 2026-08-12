@@ -700,6 +700,7 @@ impl Message<StartGameRequest> for WorldActor {
             npc_infos: &self.npc_infos,
             dragon_info: self.dragon_info.as_ref(),
             rarity: self.rarity_cfg.clone(),
+            routes: &self.routes,
         };
         let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
             self.gate_ref.clone(),
@@ -1268,6 +1269,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             npc_infos: &self.npc_infos,
                             dragon_info: self.dragon_info.as_ref(),
                             rarity: self.rarity_cfg.clone(),
+                            routes: &self.routes,
                         };
                         let dest_file_clone = dest_file.clone();
                         let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
