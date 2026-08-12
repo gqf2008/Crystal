@@ -385,6 +385,8 @@ pub struct PlayerState {
     pub mentee_exp: i64,
     /// 导师经验银行（C# CharacterInfo.MentorExp：徒弟下线/解除时转入，导师 GainExp 结算）
     pub mentor_exp: i64,
+    /// 拜师/解除时间（C# CharacterInfo.MentorDate，unix 秒；#2374 到期/冷却判定）
+    pub mentor_date: i64,
     /// 导师伤害加成是否激活（C# HasBuff(Mentor)：徒弟近身同组时 true）
     pub mentor_damage_bonus: bool,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
@@ -869,6 +871,7 @@ allow_group: false,
             is_mentor: false,
             mentee_exp: 0,
             mentor_exp: 0,
+            mentor_date: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
@@ -4850,6 +4853,20 @@ pub struct SetMentor {
     pub is_mentor: bool,
 }
 
+/// #2374：设置师徒日期（C# CharacterInfo.MentorDate，unix 秒；拜师/解除/到期判定）
+pub struct SetMentorDate {
+    pub date: i64,
+}
+
+impl Message<SetMentorDate> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMentorDate, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.mentor_date = msg.date;
+        debug!("Player {} mentor_date set to {}", self.state.name, msg.date);
+    }
+}
+
 impl Message<SetMentor> for PlayerActor {
     type Reply = ();
 
@@ -6809,6 +6826,7 @@ allow_group: false,
             is_mentor: false,
             mentee_exp: 0,
             mentor_exp: 0,
+            mentor_date: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,

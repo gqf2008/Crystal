@@ -200,6 +200,14 @@ impl Message<GetNewbieGuildConfig> for WorldActor {
 
 /// 每 50 ticks 刷新导师伤害加成（C# ProcessBuffs 维护 BuffType.Mentor +
 /// MonsterObject.Attacked 的 MentorDamageRatePercent 判定：导师 + 徒弟近身同组存活）
+/// #2374：当前 Unix 秒
+pub(crate) fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     use super::*;
     if world.tick_count % 50 != 0 {

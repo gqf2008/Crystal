@@ -236,6 +236,8 @@ pub struct SocialAllowMentor {
 
 pub struct SocialCancelMentor {
     pub session_id: u64,
+    /// C# MentorBreak(force)：true=手动解除（7 天冷却）；false=到期自动解除（无冷却，#2374）
+    pub force: bool,
 }
 
 // --- Trade helper struct ---
@@ -2175,6 +2177,18 @@ impl Message<SocialPlayerJoined> for SocialActor {
                 );
             }
         }
+
+        // #2374：C# PlayerObject.cs:1194-1196——师徒到期（MentorDate.AddDays(7) < Now）登录时自动解除（force=false 无冷却）
+        let now_secs = crate::actors::world::partners::now_unix_secs();
+        if state.mentor_name.is_some() && mentor_relationship_expired(state.mentor_date, now_secs) {
+            self.do_mentor_break(msg.session_id, false).await;
+        }
+        // 重新取状态（到期解除可能已清空师徒关系）
+        let state = match msg.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
 
         // 师徒状态同步（C# GetMentor 语义：上线时通知双方，双方各发 MentorUpdate）
         if let Some(partner_name) = &state.mentor_name {
@@ -4683,6 +4697,17 @@ impl Message<SocialAddMentor> for SocialActor {
             return;
         }
 
+        // #2374：C# AddMentor 冷却门（PlayerObject.cs:13536/13542：MentorDate > Now 拒绝）
+        let now_secs = crate::actors::world::partners::now_unix_secs();
+        if requester_state.mentor_date > now_secs {
+            send_system_message(&self.gate_ref, msg.session_id, "你正处于解除师徒的冷却期，暂时不能拜师");
+            return;
+        }
+        if target_state.mentor_date > now_secs {
+            send_system_message(&self.gate_ref, msg.session_id, "对方正处于解除师徒的冷却期");
+            return;
+        }
+
         // 发送拜师请求给目标（C# S.MentorRequest：Name + Level）
         self.pending_mentor_invites.insert(target_session, msg.session_id);
         send_mentor_invite_packet(&self.gate_ref, target_session, &requester_state.name, requester_state.level);
@@ -4763,6 +4788,10 @@ impl Message<SocialMentorReply> for SocialActor {
         // C#：student.Info.Mentor = 导师；导师 Info.IsMentor = true（PlayerObject.cs:13637-13640）
         let _ = replier_record.ask(SetMentor { mentor_name: Some(requester_state.name.clone()), is_mentor: true }).await;
         let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()), is_mentor: false }).await;
+        // #2374：C# 双方 MentorDate = Envir.Now（:13641-13642）——拜师成功即开始 7 天期限
+        let now_secs = crate::actors::world::partners::now_unix_secs();
+        let _ = replier_record.ask(crate::actors::player::SetMentorDate { date: now_secs }).await;
+        let _ = requester_record.ask(crate::actors::player::SetMentorDate { date: now_secs }).await;
 
         send_system_message(&self.gate_ref, replier_session, &format!("收徒成功，你的徒弟是: {}", requester_state.name));
         send_system_message(&self.gate_ref, requester_session, &format!("拜师成功，你的导师是: {}", replier_state.name));
@@ -4810,7 +4839,14 @@ impl Message<SocialCancelMentor> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SocialCancelMentor, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) {
+        self.do_mentor_break(msg.session_id, msg.force).await;
+    }
+}
+
+impl SocialActor {
+    /// C# PlayerObject.MentorBreak（:13450-13475）：解除师徒关系（force=true 设 7 天冷却；#2374）
+    async fn do_mentor_break(&mut self, session_id: u64, force: bool) {
+        let record = match self.players.get(&session_id) {
             Some(r) => r,
             None => return,
         };
@@ -4820,7 +4856,7 @@ impl Message<SocialCancelMentor> for SocialActor {
         };
 
         if state.mentor_name.is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "你没有师徒关系");
+            send_system_message(&self.gate_ref, session_id, "你没有师徒关系");
             return;
         }
 
@@ -4829,7 +4865,7 @@ impl Message<SocialCancelMentor> for SocialActor {
 
         // C# MentorBreak：取对方在线状态（partnerP）
         let partner_online: Option<(u64, crate::actors::player::PlayerState)> =
-            match self.find_player_by_name(&partner_name, msg.session_id).await {
+            match self.find_player_by_name(&partner_name, session_id).await {
                 Some(sid) => match self.players.get(&sid) {
                     Some(prec) => match prec.ask(GetPlayerState).await {
                         Ok(Some(ps)) => Some((sid, ps)),
@@ -4857,15 +4893,19 @@ impl Message<SocialCancelMentor> for SocialActor {
         new_self_state.is_mentor = false;
         new_self_state.mentor_exp = new_self_mentor_exp;
         new_self_state.mentee_exp = new_self_mentee_exp;
+        // #2374：手动解除（force=true）→ 7 天冷却（C# :13463 MentorDate = Now.AddDays(7)）
+        if force {
+            new_self_state.mentor_date = mentor_cooldown_until(crate::actors::world::partners::now_unix_secs());
+        }
         let _ = record.ask(SetPlayerState { state: new_self_state }).await;
         // C#：自身结算 IsMentor && MentorExp > 0 → GainExp + 清零
         if mentor_settle_amount(self_is_mentor, new_self_mentor_exp) > 0 {
             if let Some(world) = &self.world_ref {
-                let _ = world.ask(crate::actors::world::partners::SettleMentorExp { session_id: msg.session_id }).await;
+                let _ = world.ask(crate::actors::world::partners::SettleMentorExp { session_id: session_id }).await;
             }
         }
-        send_mentor_cancel_packet(&self.gate_ref, msg.session_id);
-        send_system_message(&self.gate_ref, msg.session_id, "已解除师徒关系");
+        send_mentor_cancel_packet(&self.gate_ref, session_id);
+        send_system_message(&self.gate_ref, session_id, "已解除师徒关系");
 
         // 对方同步（C# 双方 Info.Mentor 同时清空 + partner 结算）
         if let Some((partner_sid, partner_state)) = partner_online {
@@ -4895,6 +4935,16 @@ impl Message<SocialCancelMentor> for SocialActor {
         }
         debug!("CancelMentor: {} removed mentor", state.name);
     }
+}
+
+/// #2374：师徒到期判定（C# PlayerObject.cs:1194：MentorDate.AddDays(MentorLength) < Now；MentorLength=7 天）
+pub(crate) fn mentor_relationship_expired(mentor_date: i64, now: i64) -> bool {
+    mentor_date > 0 && mentor_date + 7 * 86400 < now
+}
+
+/// #2374：解除冷却截止（C# MentorBreak force：MentorDate = Now.AddDays(MentorLength)）
+pub(crate) fn mentor_cooldown_until(now: i64) -> i64 {
+    now + 7 * 86400
 }
 
 /// C# MentorBreak 经验转移计算（纯函数）：仅对方在线时转移——
@@ -5121,6 +5171,21 @@ mod tests {
         // 停战不存在的对：无副作用
         apply_guild_war_mirror(&mut wars, "X", "Y", false);
         assert!(wars.is_empty());
+    }
+
+    /// #2374：师徒到期/冷却（C# MentorDate + MentorLength(7 天)）
+    #[test]
+    fn mentor_term_and_cooldown_match_csharp() {
+        let now = 1_700_000_000i64;
+        // 未到期：MentorDate + 7d >= Now
+        assert!(!super::mentor_relationship_expired(now - 6 * 86400, now));
+        assert!(!super::mentor_relationship_expired(now - 7 * 86400, now));
+        // 到期：MentorDate + 7d < Now
+        assert!(super::mentor_relationship_expired(now - 8 * 86400, now));
+        // 无日期（0）不判到期
+        assert!(!super::mentor_relationship_expired(0, now));
+        // 解除冷却截止 = Now + 7d（C# MentorDate = Now.AddDays(7)）
+        assert_eq!(super::mentor_cooldown_until(now), now + 7 * 86400);
     }
 
     /// #2142：C# MentorBreak 转移（仅对方在线）+ 结算金额
