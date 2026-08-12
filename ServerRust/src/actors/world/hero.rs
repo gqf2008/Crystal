@@ -110,7 +110,8 @@ pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
         hp: ai_hp,
         mp: ai_mp,
         experience: 0,
-        max_experience: 100,
+        // #2418：英雄信息下发用当前 max_experience（替代硬编码 100）
+        max_experience: hero.max_experience as i64,
         inventory: Some(inventory),
         equipment: Some(equipment),
         // #218：英雄魔法（DB C# 编号 → 客户端 +3）
@@ -2691,8 +2692,11 @@ impl WorldActor {
         while hero.experience >= hero.max_experience && hero.level < u16::MAX {
             hero.experience -= hero.max_experience;
             hero.level += 1;
-            // #1180：C# HeroExpList 默认每级 100（Settings.HeroExpList[Level-1]）
-            hero.max_experience = super::hero_stats::HERO_MAX_EXPERIENCE;
+            // #2418：C# HeroExperienceList[Level-1]（默认 100/级，缺省回退）
+            hero.max_experience = self.hero_exp_list
+                .get(hero.level.saturating_sub(1) as usize)
+                .copied()
+                .unwrap_or(super::hero_stats::HERO_MAX_EXPERIENCE);
             leveled = true;
         }
         let hero_name = hero.name.clone();

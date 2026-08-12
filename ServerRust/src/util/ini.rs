@@ -600,6 +600,23 @@ pub fn load_gem_settings(configs_dir: &Path) -> GemIniSettings {
     out
 }
 
+/// 英雄升级经验曲线（C# Settings.LoadHeroEXP：Configs/HeroExpList.ini [Exp] Level1..500；
+/// 默认 100/级，缺失项沿用上一级；文件缺失返回空，调用方回退 100/级）
+pub fn load_hero_exp_list(configs_dir: &Path) -> Vec<u32> {
+    let path = configs_dir.join("HeroExpList.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let parsed = parse_ini(&content);
+    let mut out = Vec::with_capacity(500);
+    let mut exp: i64 = 100;
+    for i in 1..=500 {
+        exp = ini_get_i64(&parsed, "Exp", &format!("Level{}", i), exp);
+        out.push(exp.max(1) as u32);
+    }
+    out
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -816,6 +833,25 @@ BuffExpRate=0
             assert_eq!(a2.chance_max, [1, 2, 3, 4, 5]);
             assert!(load_gem_settings(real).stat_independent);
         }
+    }
+
+    /// #2418：load_hero_exp_list 解析（[Exp] Level1..N，缺失沿用上一级）；文件缺失返回空
+    #[test]
+    fn test_load_hero_exp_list() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_heroexp");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Level1=100, Level2=200, Level3 缺失沿用 200, Level4=400
+        std::fs::write(dir.join("HeroExpList.ini"), "[Exp]\nLevel1=100\nLevel2=200\nLevel4=400\n").unwrap();
+        let list = load_hero_exp_list(&dir);
+        assert_eq!(list.len(), 500);
+        assert_eq!(list[0], 100);
+        assert_eq!(list[1], 200);
+        assert_eq!(list[2], 200); // Level3 缺失 → 沿用 Level2
+        assert_eq!(list[3], 400);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → 空（调用方回退 100/级）
+        assert!(load_hero_exp_list(Path::new("C:/definitely/not/exists")).is_empty());
     }
 
     /// #2406：load_guild_settings 解析（[Guilds]/经验与上限列表）；文件缺失返回 C# 默认
