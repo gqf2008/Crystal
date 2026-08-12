@@ -2957,9 +2957,60 @@ impl Message<ChatRequest> for WorldActor {
                             }
                         }
 
-                        // @kill [玩家]（C# case "KILL"：GM 击杀目标玩家）
+                        // @kill [玩家]（C# case "KILL"，PlayerObject.cs:2175-2215；#2372 对齐）
                         "KILL" => {
                             let name = parts.get(1).copied().unwrap_or("");
+                            // C# 无参数：击杀前方 1 格 Cell 内所有玩家/怪物（ob.EXPOwner=GM + Die）
+                            if name.is_empty() {
+                                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return; };
+                                let (fx, fy) = point_move(st.x, st.y, st.direction, 1);
+                                // 前方玩家（C#：GMNeverDie 豁免）
+                                let mut front_players: Vec<u64> = Vec::new();
+                                for (sid, other) in &self.players {
+                                    if *sid == msg.session_id { continue; }
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if !os.is_dead && os.map_index == st.map_index && os.x == fx && os.y == fy {
+                                            front_players.push(*sid);
+                                        }
+                                    }
+                                }
+                                for sid in front_players {
+                                    if let Some(target) = self.players.get(&sid).cloned() {
+                                        if let Ok(Some(ts)) = target.actor_ref.ask(GetPlayerState).await {
+                                            if ts.gm_never_die { continue; }
+                                            let died = target.actor_ref.ask(crate::actors::player::TakeDamage {
+                                                attacker_id: 0, attacker_session: 0, damage: i32::MAX,
+                                            }).await.unwrap_or(false);
+                                            if died {
+                                                let died_packet = Self::build_object_died_packet(ts.object_id, ts.x, ts.y, ts.direction, 0u8);
+                                                for (psid, _) in &self.players {
+                                                    let _ = self.gate_ref.tell(SendToClient {
+                                                        session_id: *psid,
+                                                        data: died_packet.clone(),
+                                                    }).await;
+                                                }
+                                                self.handle_player_death_drop(sid, ts.x, ts.y, ts.map_index, false).await;
+                                            }
+                                        }
+                                    }
+                                }
+                                // 前方怪物（C#：EXPOwner=GM；hp=0 交由 tick 统一结算死亡/掉落）
+                                let mut front_mobs: Vec<u32> = Vec::new();
+                                for (oid, m) in &self.monsters {
+                                    if m.hp > 0 && m.map_index == st.map_index && m.x == fx && m.y == fy {
+                                        front_mobs.push(*oid);
+                                    }
+                                }
+                                for oid in front_mobs {
+                                    if let Some(m) = self.monsters.get_mut(&oid) {
+                                        m.exp_owner_session = Some(msg.session_id);
+                                        m.hp = 0;
+                                    }
+                                }
+                                send_system_message(&self.gate_ref, msg.session_id, "已击杀前方目标");
+                                return;
+                            }
+                            // C# 带玩家名：GMNeverDie（@SUPERMAN 无敌）目标不可被击杀
                             let mut found = None;
                             for (_sid, other) in &self.players {
                                 if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
@@ -2975,6 +3026,10 @@ impl Message<ChatRequest> for WorldActor {
                             };
                             let Some(target) = self.players.get(&target_sid).cloned() else { return; };
                             if let Ok(Some(st)) = target.actor_ref.ask(GetPlayerState).await {
+                                if st.gm_never_die {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 处于 GM 无敌状态，无法击杀", st.name));
+                                    return;
+                                }
                                 let died = target.actor_ref.ask(crate::actors::player::TakeDamage {
                                     attacker_id: 0, attacker_session: 0, damage: i32::MAX,
                                 }).await.unwrap_or(false);
