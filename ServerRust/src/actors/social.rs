@@ -585,14 +585,18 @@ impl Message<NpcGetMailSettings> for SocialActor {
     }
 }
 
-/// WorldActor -> SocialActor: 查询英雄创建选项（C# Settings.AllowNewHero / Hero_CanCreateClass）
+/// WorldActor -> SocialActor: 查询英雄创建选项（C# Settings.AllowNewHero / Hero_CanCreateClass / Hero_RequiredLevel）
 pub struct NpcGetHeroCreateOptions;
 
 impl Message<NpcGetHeroCreateOptions> for SocialActor {
-    type Reply = (bool, Vec<bool>);
+    type Reply = (bool, Vec<bool>, u8);
 
     async fn handle(&mut self, _msg: NpcGetHeroCreateOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        (self.config.allow_new_hero, self.config.hero_can_create_class.clone())
+        (
+            self.config.allow_new_hero,
+            self.config.hero_can_create_class.clone(),
+            self.config.hero_required_level,
+        )
     }
 }
 
@@ -993,6 +997,8 @@ pub struct SocialActorConfig {
     pub allow_new_hero: bool,
     /// 英雄可创建职业（C# Settings.Hero_CanCreateClass[5]）
     pub hero_can_create_class: Vec<bool>,
+    /// 创建英雄所需等级（C# Settings.Hero_RequiredLevel = 22）
+    pub hero_required_level: u8,
     /// 邮件寄金币费用（每 1000 金币，C# Settings.MailCostPer1KGold）
     pub mail_cost_per_1k_gold: u32,
     /// 邮件寄物品保险百分比（C# Settings.MailItemInsurancePercentage）
@@ -1036,6 +1042,7 @@ impl Default for SocialActorConfig {
             allow_create_archer: true,
             allow_new_hero: true,
             hero_can_create_class: vec![true; 5],
+            hero_required_level: 22,
             mail_cost_per_1k_gold: 100,
             mail_item_insurance_percentage: 5,
             mail_free_with_stamp: true,
