@@ -3939,6 +3939,7 @@ impl Message<MagicRequest> for WorldActor {
                                 map_index: state.map_index,
                                 count: 1,
                                 spread: 0,
+                                    route: Vec::new(),
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
@@ -3980,6 +3981,10 @@ impl Message<MagicRequest> for WorldActor {
                                 recall_at_tick: 0,
                                 can_recall: false,
                                 next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             self.pet_levels.insert(new_oid, spell_level as i32);
@@ -4125,6 +4130,7 @@ impl Message<MagicRequest> for WorldActor {
                                 map_index: state.map_index,
                                 count: 1,
                                 spread: 0,
+                                    route: Vec::new(),
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
@@ -4166,6 +4172,10 @@ impl Message<MagicRequest> for WorldActor {
                                 recall_at_tick: 0,
                                 can_recall: false,
                                 next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             self.pet_levels.insert(new_oid, spell_level as i32);
@@ -4622,6 +4632,7 @@ impl Message<MagicRequest> for WorldActor {
                                 map_index: state.map_index,
                                 count: 1,
                                 spread: 0,
+                                    route: Vec::new(),
                             };
                             // C# MonsterObject.Name：宠物名字 = 怪物名(主人名)
                             let display_name = format!("{}({})", spawn.name, state.name);
@@ -4687,6 +4698,10 @@ impl Message<MagicRequest> for WorldActor {
                                 recall_at_tick: if recall_at_tick > 0 { self.tick_count + recall_at_tick } else { 0 },
                                 can_recall: false,
                                 next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             // 补 DB 基础 AC/MAC（原实现遗漏）并叠加 PetLevel 加成（C# RefreshAll）
@@ -4774,6 +4789,7 @@ impl Message<MagicRequest> for WorldActor {
                                 map_index: state.map_index,
                                 count: 1,
                                 spread: 0,
+                                    route: Vec::new(),
                             };
                             // C# StoneTrap.Name：宠物名 = 怪物名(主人名)
                             let display_name = format!("{}({})", spawn.name, state.name);
@@ -4819,6 +4835,10 @@ impl Message<MagicRequest> for WorldActor {
                                 recall_at_tick: self.tick_count + duration_ticks,
                                 can_recall: false,
                                 next_recall_tick: 0,
+    route: Vec::new(),
+    route_point: 0,
+    route_waiting: false,
+    route_wait_until_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             debug!("Magic: {} casts Stonetrap '{}' as #{} at ({},{}) ({}s)",
