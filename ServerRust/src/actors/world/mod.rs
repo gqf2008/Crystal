@@ -10181,6 +10181,27 @@ mod set_bonus_tests {
     }
 
     #[test]
+    fn test_new_item_info_roundtrip() {
+        use mir2_shared::packets::server::item::NewItemInfo;
+        let mut infos = std::collections::HashMap::new();
+        let mut info = test_item_info(1, 10);
+        info.name = "木剑".to_string();
+        info.item_type = 1;
+        infos.insert(1, info);
+        let mut tmp = mir2_shared::data::item::UserItem { item_index: 1, ..Default::default() };
+        enrich_item_info(&mut tmp, &infos);
+        let shared = tmp.info.unwrap();
+        let pkt = NewItemInfo { info: shared.clone() };
+        let mut body = Vec::new();
+        pkt.write_body(&mut body).unwrap();
+        let mut cur = std::io::Cursor::new(&body);
+        let back = NewItemInfo::read_body(&mut cur).unwrap();
+        assert_eq!(back.info.index, 1);
+        assert_eq!(back.info.name, "木剑");
+        assert_eq!(back.info, shared);
+    }
+
+    #[test]
     fn test_map_information_packet_roundtrip() {
         use mir2_shared::packets::server::map::MapInformation;
         let mi = db::MapInfo {
