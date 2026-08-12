@@ -2473,8 +2473,26 @@ impl Message<RequestItemInfoRequest> for WorldActor {
         msg: RequestItemInfoRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        debug!("RequestItemInfo: session={} idx={} (no-op until ItemInfo schema is extended)",
-            msg.session_id, msg.item_index);
+        // C# PlayerObject.RequestItemInfo（:7538-7544）：CheckItemInfo → S.NewItemInfo { Info }；物品不存在不响应
+        if !self.item_infos.contains_key(&msg.item_index) {
+            debug!("RequestItemInfo: session={} idx={} unknown item", msg.session_id, msg.item_index);
+            return;
+        }
+        let mut tmp = mir2_shared::data::item::UserItem {
+            item_index: msg.item_index,
+            ..Default::default()
+        };
+        enrich_item_info(&mut tmp, &self.item_infos);
+        let Some(shared_info) = tmp.info else { return };
+        let packet = mir2_shared::packets::server::item::NewItemInfo { info: shared_info };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewItemInfo as i16, &body),
+            }).await;
+        }
+        debug!("RequestItemInfo: session={} idx={} sent NewItemInfo", msg.session_id, msg.item_index);
     }
 }
 
