@@ -45,7 +45,7 @@ impl MonsterBehavior for TrollKingBehavior {
                 // 近战：2/3 概率范围攻击，1/3 WalkAway（C# Random(2)==0 || !InRange(,2)）
                 if fastrand::i32(0..2) == 0 || dist > 2 {
                     // MC 范围 3 格 AOE（C# FindAllTargets(3) MACAgility）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
@@ -73,7 +73,7 @@ impl MonsterBehavior for TrollKingBehavior {
                 });
                 // C# CompleteRangeAttack：命中后 Dazed 1s
                 // C# PoisonTarget(1, random(MaxMC), Dazed, 1000)：时长=random(MaxMC)、值=SC
-                let mc_power = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let mc_power = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,

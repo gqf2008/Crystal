@@ -50,9 +50,9 @@ impl MonsterBehavior for HornedArcherBehavior {
             if !friends.is_empty() {
                 let f = friends[fastrand::usize(0..friends.len())];
                 // C# CompleteAttack：命中友军 → 4 格内友军 AddBuff（时长 10s）
-                // C# 取施法者 MinMC/MaxMC；Rust 怪物魔法攻击等价字段为 min_mac/max_mac
-                let min = monster.min_mac.max(1);
-                let max = monster.max_mac.max(min);
+                // C# 取施法者 MinMC/MaxMC（#2328：Rust 用 min_mc/max_mc，勿用 min_mac）
+                let min = monster.min_mc.max(1);
+                let max = monster.max_mc.max(min);
                 // C# Info.Effect==0 → HornedArcherBuff（DC/MC）；==1 → ColdArcherBuff（AC/MAC）
                 let buff = if monster.effect == 0 {
                     crate::actors::world::MonsterBuff {

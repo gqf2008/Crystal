@@ -89,7 +89,7 @@ impl MonsterBehavior for KirinBehavior {
 impl KirinBehavior {
     /// 冰锥：MC 前方 3x3（3 列 × 3 深）区域，每命中 1/5 Slow 4s（C# Kirin.IceThrust :126）
     fn ice_thrust(&self, monster: &mut MonsterState, target: crate::actors::world::ai::PlayerSnap, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+        let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
         let dir = direction_towards(monster.x, monster.y, target.x, target.y);
         monster.direction = dir;
         // C# IceThrust：3 列（prevdir/dir/nextdir 起点）× 3 深 = 9 格

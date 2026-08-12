@@ -54,7 +54,7 @@ impl MonsterBehavior for RhinoPriestBehavior {
             } else {
                 // 远程 MC：2/3 普通(MACAgility,Debuff) / 1/3 蓝圈(MAC,Slow/Frozen)
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let blue_circle = fastrand::i32(0..3) == 0;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,

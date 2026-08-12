@@ -97,13 +97,19 @@ impl MonsterBehavior for DemonGuardBehavior {
                 monster.luck,
             )
             .max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             // C# Random.Next(3) > 0：2/3 物理 / 1/3 魔法
             let magic = fastrand::i32(0..3) == 0;
             ctx.out_attacks
                 .push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
-                    damage,
+                    damage: if magic { mc_damage } else { damage },
                     spell_id: 0,
                     attack_type: if magic { 1 } else { 0 },
                 });

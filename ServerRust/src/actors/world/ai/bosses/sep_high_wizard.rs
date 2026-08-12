@@ -37,7 +37,7 @@ impl MonsterBehavior for SepHighWizardBehavior {
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# SepHighWizard：魔法伤害 MinMC/MaxMC
-            let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
 
             // 排斥：1 格内低等级目标推 4，10-30s 冷却
             if ctx.tick_count >= self.next_repulsion_tick {

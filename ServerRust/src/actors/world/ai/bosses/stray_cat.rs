@@ -49,7 +49,7 @@ impl MonsterBehavior for StrayCatBehavior {
             let ranged = max_distance(monster.x, monster.y, target.x, target.y) > 1;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# Type=1/Type=2 直线用 MinMC/MaxMC（StrayCat.cs）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
 
             if !ranged && fastrand::i32(0..10) > 0 {
                 if fastrand::i32(0..10) > 0 {

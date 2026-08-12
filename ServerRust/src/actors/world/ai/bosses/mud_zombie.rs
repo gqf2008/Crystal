@@ -38,6 +38,8 @@ impl MonsterBehavior for MudZombieBehavior {
 
         if ctx.tick_count >= monster.next_attack_tick {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             // C# ranged = 同位 || !InRange(..., 2)（切比雪夫距离 > 2）
             let ranged = dist == 0 || dist > 2;
             if !ranged {
@@ -85,7 +87,7 @@ impl MonsterBehavior for MudZombieBehavior {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 if fastrand::i32(0..5) == 0 {

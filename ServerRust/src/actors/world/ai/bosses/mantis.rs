@@ -36,7 +36,7 @@ impl MonsterBehavior for MantisBehavior {
             // C# Envir.Random.Next(5) > 0：80% 物理 / 20% 魔法（Type=1，Mantis.cs:39-41 用 MC）
             let magic = fastrand::i32(0..5) == 0;
             let dmg = if magic {
-                crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
             } else {
                 damage
             };

@@ -80,7 +80,7 @@ impl MonsterBehavior for HornedSorcerorBehavior {
             // Dust Tornado：HP<90 且冷却到 且 1/4 概率
             if hp_pct < 90 && ctx.tick_count >= self.tornado_tick && fastrand::i32(0..4) == 0 {
                 self.tornado_tick = ctx.tick_count + TORNADO_COOLDOWN_TICKS;
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 // 自身 5x5 法术场（C# location ±2 网格）
                 ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
                     spell: Spell::HornedSorcererDustTornado,
@@ -101,7 +101,7 @@ impl MonsterBehavior for HornedSorcerorBehavior {
                 let (damage, distance) = if is_thrust {
                     (crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1), 2)
                 } else {
-                    (crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1), 3)
+                    (crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1), 3)
                 };
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
                 // 沿朝向直线每格命中第一个存活玩家

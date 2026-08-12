@@ -45,7 +45,7 @@ impl MonsterBehavior for FrozenKnightBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# 远程伤害用 MinMC/MaxMC（FrozenKnight.cs）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             // C# !range && Random.Next(3) > 0：近战 2/3 Halfmoon / 1/3 远程
             let melee = dist <= 1 && fastrand::i32(0..3) > 0;
             if melee {

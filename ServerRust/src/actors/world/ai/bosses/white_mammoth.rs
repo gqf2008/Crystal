@@ -64,7 +64,7 @@ impl MonsterBehavior for WhiteMammothBehavior {
                 }
             } else {
                 // 1/8 Type2 MC 践踏：AOE 1 格 + Dazed
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =
                     ctx.find_targets_in_range(monster.x, monster.y, MELEE_RANGE, monster.map_index)
                         .into_iter().copied().collect();

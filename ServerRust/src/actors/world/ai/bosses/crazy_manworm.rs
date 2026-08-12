@@ -39,7 +39,7 @@ impl MonsterBehavior for CrazyManwormBehavior {
                 // C# Random(3)>0 → DC（Type0）；else MC（Type1）
                 let use_mc = fastrand::i32(0..3) == 0;
                 let damage = if use_mc {
-                    crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1)
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1)
                 } else {
                     crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
                 };

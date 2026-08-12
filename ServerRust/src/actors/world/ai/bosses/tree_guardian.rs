@@ -33,6 +33,8 @@ impl MonsterBehavior for TreeGuardianBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             if dist <= 1 {
                 // 近战：2/3 普通 / 1/3 Fullmoon
                 if fastrand::i32(0..3) > 0 {
@@ -65,7 +67,7 @@ impl MonsterBehavior for TreeGuardianBehavior {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
                         target_object_id: target.object_id,
-                        damage,
+                        damage: mc_damage,
                         spell_id: 0,
                     });
                 } else {
@@ -73,7 +75,7 @@ impl MonsterBehavior for TreeGuardianBehavior {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
                         target_object_id: target.object_id,
-                        damage: damage.saturating_mul(2),
+                        damage: mc_damage.saturating_mul(2),
                         spell_id: 0,
                     });
                 }

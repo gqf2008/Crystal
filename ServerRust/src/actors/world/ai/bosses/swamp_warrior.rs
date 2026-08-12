@@ -34,6 +34,8 @@ impl MonsterBehavior for SwampWarriorBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             if dist <= 1 {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
@@ -49,7 +51,7 @@ impl MonsterBehavior for SwampWarriorBehavior {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 // C# 恒 Red：PoisonTarget(8, 5, Red, 2000)：1/8、5s

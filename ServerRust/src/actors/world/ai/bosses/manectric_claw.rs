@@ -50,7 +50,7 @@ impl MonsterBehavior for ManectricClawBehavior {
                 let near: Vec<(i32, i32)> = cells3.iter().filter(|&&(_, _, j)| j <= 1).map(|&(x, y, _)| (x, y)).collect();
                 let far: Vec<(i32, i32)> = cells3.iter().filter(|&&(_, _, j)| j == 2).map(|&(x, y, _)| (x, y)).collect();
                 let near_dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                let far_dmg = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let far_dmg = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,

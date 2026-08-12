@@ -36,6 +36,8 @@ impl MonsterBehavior for ManectricBlestBehavior {
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             // C# _attackCount >= 5：AOE3 + 1/5 冰冻
             if self.attack_count >= 5 {
                 self.attack_count = 0;
@@ -44,7 +46,7 @@ impl MonsterBehavior for ManectricBlestBehavior {
                     center_x: monster.x,
                     center_y: monster.y,
                     radius: AOE_RADIUS,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)

@@ -111,7 +111,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             self.next_thunder_tick = ctx.tick_count + MASS_THUNDER_BASE_TICKS + jitter;
 
             // MAC 伤害 AOE（C# GetAttackPower(MinMC, MaxMC)）
-            let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                 attacker_oid: monster.object_id,
                 center_x: monster.x,
@@ -196,7 +196,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if fastrand::i32(0..3) == 0 {
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,

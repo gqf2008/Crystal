@@ -106,7 +106,7 @@ impl MonsterBehavior for EvilCentipedeBehavior {
                 .into_iter().copied().collect();
 
         for t in targets {
-            let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
             // C# DefenceType.MAC
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,

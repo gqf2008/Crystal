@@ -62,7 +62,7 @@ impl MonsterBehavior for FlameQueenBehavior {
                     ctx.find_targets_in_range(monster.x, monster.y, FIELD_RADIUS, monster.map_index)
                         .into_iter().copied().collect();
                 for t in targets {
-                    let value = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let value = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
                         spell: Spell::FireWall,
                         x: t.x,

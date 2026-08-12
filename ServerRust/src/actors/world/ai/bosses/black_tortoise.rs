@@ -33,6 +33,8 @@ impl MonsterBehavior for BlackTortoiseBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             if dist <= 1 {
                 // C# Random.Next(5) > 0：4/5 普攻 / 1/5 Halfmoon
                 if fastrand::i32(0..5) > 0 {
@@ -62,7 +64,7 @@ impl MonsterBehavior for BlackTortoiseBehavior {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 // C# CompleteRangeAttack：PoisonTarget(7, 5, Green, 1000)：1/7、5s
