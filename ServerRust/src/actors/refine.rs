@@ -1,6 +1,17 @@
 // 精炼系统（Refining）
 // 纯数据结构，由 WorldActor 调用
 
+/// C# Info.Refine 材料槽数量（PlayerInfo.Refine；PlayerObject.cs:12535）
+pub const REFINE_MATERIAL_SLOTS: usize = 10;
+/// C# Settings.RefineIncrease（Settings.cs:253）
+pub const REFINE_INCREASE: u8 = 1;
+/// C# Settings.RefineCritChance（Settings.cs:254）
+pub const REFINE_CRIT_CHANCE: u8 = 10;
+/// C# Settings.RefineCritIncrease（Settings.cs:255）
+pub const REFINE_CRIT_INCREASE: u8 = 2;
+/// C# Settings.RefineOreName（Settings.cs:260）
+pub const REFINE_ORE_NAME: &str = "BlackIronOre";
+
 /// 精炼状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -32,7 +43,7 @@ pub struct RefiningItem {
 }
 
 /// 精炼日志（每个玩家一个）
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct RefineLog {
     /// 当前正在精炼的物品
@@ -41,6 +52,19 @@ pub struct RefineLog {
     pub total_refines: u32,
     /// 成功计数
     pub successful_refines: u32,
+    /// C# Info.Refine：精炼材料槽（10 格，PlayerObject.cs:12722-12751）
+    pub materials: Vec<Option<mir2_shared::data::item::UserItem>>,
+}
+
+impl Default for RefineLog {
+    fn default() -> Self {
+        Self {
+            active_refine: None,
+            total_refines: 0,
+            successful_refines: 0,
+            materials: vec![None; REFINE_MATERIAL_SLOTS],
+        }
+    }
 }
 
 /// C# PlayerObject.RefineItem（:12811-12845）：精炼成功率公式
@@ -93,6 +117,72 @@ pub fn refine_success_chance(
     let added = ((added_dc + added_mc + added_sc) * if is_weapon { 6 } else { 15 }).clamp(0, 50);
     // RefineBaseChance=20（C# Settings.cs:251）
     (item_success + ore_success + luck_success + 20 - added).max(0)
+}
+
+/// C# RefineItem 材料聚合（PlayerObject.cs:12710-12751）
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RefineMaterials {
+    pub total_dc: i32,
+    pub total_mc: i32,
+    pub total_sc: i32,
+    pub required_level: i32,
+    pub item_amount: i32,
+    pub durability_count: i32,
+    pub current_dura_count: i32,
+    pub ore_amount: i32,
+    pub ore_purity: i32,
+}
+
+/// 聚合精炼材料（C# PlayerObject.cs:12722-12751）：武器材料跳过；DC/MC/SC 材料累计属性；
+/// FriendlyName == RefineOreName 累计矿纯度。
+pub fn refine_material_aggregates(
+    materials: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+    refine_ore_name: &str,
+) -> RefineMaterials {
+    use mir2_shared::enums::Stat;
+    let mut agg = RefineMaterials::default();
+    for m in materials.iter().flatten() {
+        let Some(info) = item_infos.get(&m.item_index) else { continue };
+        // C# :12727-12731 武器材料跳过（ItemType.Weapon=1）
+        if info.item_type == 1 {
+            continue;
+        }
+        let dc = info.stats.get(&(Stat::MaxDC as u8)).copied().unwrap_or(0);
+        let mc = info.stats.get(&(Stat::MaxMC as u8)).copied().unwrap_or(0);
+        let sc = info.stats.get(&(Stat::MaxSC as u8)).copied().unwrap_or(0);
+        if dc > 0 || mc > 0 || sc > 0 {
+            // C# :12735-12741：Min+Max+AddedStats（DC/MC/SC 同理）
+            agg.total_dc += info.stats.get(&(Stat::MinDC as u8)).copied().unwrap_or(0) + dc + m.added_stats.get(Stat::MaxDC);
+            agg.total_mc += info.stats.get(&(Stat::MinMC as u8)).copied().unwrap_or(0) + mc + m.added_stats.get(Stat::MaxMC);
+            agg.total_sc += info.stats.get(&(Stat::MinSC as u8)).copied().unwrap_or(0) + sc + m.added_stats.get(Stat::MaxSC);
+            agg.required_level += info.required_amount;
+            // C# :12739 floor(MaxDura/1000) == floor(Info.Durability/1000)
+            if m.max_dura as i32 / 1000 == info.durability / 1000 {
+                agg.durability_count += 1;
+            }
+            // C# :12740 floor(CurrentDura/1000) == floor(MaxDura/1000)
+            if m.current_dura as i32 / 1000 == m.max_dura as i32 / 1000 {
+                agg.current_dura_count += 1;
+            }
+            agg.item_amount += 1;
+        }
+        // C# :12744-12748 矿（FriendlyName == RefineOreName）
+        if info.name == refine_ore_name {
+            agg.ore_purity += m.current_dura as i32 / 1000;
+            agg.ore_amount += 1;
+        }
+    }
+    agg
+}
+
+/// CheckRefine 结算结果（C# PlayerObject.cs:12925-12971）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefineCheckResult {
+    /// 成功：已应用 RefineAdded 属性（可取回）
+    Applied,
+    /// 失败/无 RefinedValue：物品被粉碎（C# :12961-12967）
+    Destroyed,
 }
 
 impl RefineLog {
@@ -150,25 +240,84 @@ impl RefineLog {
         self.active_refine.take()
     }
 
-    /// 完成精炼（返回是否成功）
-    pub fn finish(&mut self) -> bool {
-        if let Some(ref mut item) = self.active_refine {
-            item.status = RefineStatus::Ready;
-            self.total_refines += 1;
-            // 随机判定：success_chance% 概率成功
-            let success = fastrand::u16(0..100) < item.success_chance as u16;
-            if success {
-                self.successful_refines += 1;
-            }
-            success
-        } else {
-            false
+    /// 存入材料（C# DepositRefineItem：背包 → 精炼材料格）
+    pub fn deposit_material(&mut self, slot: usize, item: mir2_shared::data::item::UserItem) -> bool {
+        if slot >= self.materials.len() || self.materials[slot].is_some() {
+            return false;
         }
+        self.materials[slot] = Some(item);
+        true
+    }
+
+    /// 取回材料（C# RetrieveRefineItem：精炼材料格 → 背包）
+    pub fn retrieve_material(&mut self, slot: usize) -> Option<mir2_shared::data::item::UserItem> {
+        if slot >= self.materials.len() {
+            return None;
+        }
+        self.materials[slot].take()
+    }
+
+    /// 取回全部材料并重置 10 格（C# RefineCancel / RefineItem 消耗：PlayerObject.cs:12603-12639 / 12750）
+    pub fn take_all_materials(&mut self) -> Vec<Option<mir2_shared::data::item::UserItem>> {
+        let taken = std::mem::take(&mut self.materials);
+        self.materials = vec![None; REFINE_MATERIAL_SLOTS];
+        taken
     }
 
     /// 取回精炼物品
     pub fn retrieve(&mut self) -> Option<RefiningItem> {
         self.active_refine.take()
+    }
+
+    /// C# CheckRefine 结算（PlayerObject.cs:12925-12971）：失败 → RefinedValue=None → 物品粉碎；
+    /// 成功 → 按 RefinedValue 加 MaxDC/MC/SC + RefineAdded（暴击 ×2）；清空精炼字段。
+    /// 返回 None 表示未到结算时机/无精炼。
+    pub fn settle_check(&mut self) -> Option<RefineCheckResult> {
+        use mir2_shared::enums::{RefinedValue, Stat};
+        let item = self.active_refine.as_mut()?;
+        if item.status != RefineStatus::Pending {
+            return None;
+        }
+        item.status = RefineStatus::Ready;
+        self.total_refines += 1;
+        let Some(ui) = item.item.as_mut() else {
+            return Some(RefineCheckResult::Destroyed);
+        };
+        // C# :12925 失败（Random(1,100) > RefineSuccessChance）→ RefinedValue = None
+        if fastrand::u16(1..100) > ui.refine_success_chance.min(99) as u16 {
+            ui.refined_value = RefinedValue::None;
+        }
+        // C# :12930-12933 暴击：Random(1,100) < RefineCritChance → RefineAdded *= RefineCritIncrease
+        if fastrand::u16(1..100) < REFINE_CRIT_CHANCE as u16 {
+            ui.refine_added = ui.refine_added.saturating_mul(REFINE_CRIT_INCREASE);
+        }
+        // C# :12935-12960 应用属性
+        let applied = match ui.refined_value {
+            RefinedValue::Dc if ui.refine_added > 0 => {
+                let cur = ui.added_stats.get(Stat::MaxDC);
+                ui.added_stats.set(Stat::MaxDC, cur + i32::from(ui.refine_added));
+                true
+            }
+            RefinedValue::Mc if ui.refine_added > 0 => {
+                let cur = ui.added_stats.get(Stat::MaxMC);
+                ui.added_stats.set(Stat::MaxMC, cur + i32::from(ui.refine_added));
+                true
+            }
+            RefinedValue::Sc if ui.refine_added > 0 => {
+                let cur = ui.added_stats.get(Stat::MaxSC);
+                ui.added_stats.set(Stat::MaxSC, cur + i32::from(ui.refine_added));
+                true
+            }
+            _ => false,
+        };
+        // C# :12939-12940 / 12958-12959 / 12965：清空精炼字段
+        ui.refined_value = RefinedValue::None;
+        ui.refine_added = 0;
+        ui.refine_success_chance = 0;
+        if applied {
+            self.successful_refines += 1;
+        }
+        Some(if applied { RefineCheckResult::Applied } else { RefineCheckResult::Destroyed })
     }
 
     /// 检查精炼是否完成
@@ -240,15 +389,121 @@ mod tests {
     }
 
     #[test]
-    fn test_finish_success_or_fail() {
-        // Just test that it doesn't panic and updates status
+    fn test_materials_default_slots() {
+        let log = RefineLog::new();
+        assert_eq!(log.materials.len(), REFINE_MATERIAL_SLOTS);
+        assert!(log.materials.iter().all(|s| s.is_none()));
+    }
+
+    #[test]
+    fn test_deposit_retrieve_material() {
         let mut log = RefineLog::new();
-        log.start_refine(100, 0, 3600, 80);
-        let _ = log.finish();
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 42;
+        assert!(log.deposit_material(0, it.clone()));
+        assert!(!log.deposit_material(0, mir2_shared::data::item::UserItem::default())); // 占用
+        assert!(!log.deposit_material(99, mir2_shared::data::item::UserItem::default())); // 越界
+        let got = log.retrieve_material(0).unwrap();
+        assert_eq!(got.unique_id, 42);
+        assert!(log.retrieve_material(0).is_none());
+        assert!(log.retrieve_material(99).is_none());
+    }
+
+    #[test]
+    fn test_take_all_materials_resets_slots() {
+        let mut log = RefineLog::new();
+        log.deposit_material(0, mir2_shared::data::item::UserItem::default());
+        log.deposit_material(1, mir2_shared::data::item::UserItem::default());
+        let all = log.take_all_materials();
+        assert_eq!(all.iter().flatten().count(), 2);
+        assert_eq!(log.materials.len(), REFINE_MATERIAL_SLOTS);
+        assert!(log.materials.iter().all(|s| s.is_none()));
+    }
+
+    #[test]
+    fn test_refine_material_aggregates() {
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::Stat;
+        use std::collections::HashMap;
+        // DC 材料：Info MinDC=1 MaxDC=3（DB 键已 +3 转 SharedRust Stat），added MaxDC=2 → total_dc=6
+        let mut item = mir2_shared::data::item::UserItem::default();
+        item.item_index = 10;
+        item.added_stats.set(Stat::MaxDC, 2);
+        item.max_dura = 2000;
+        item.current_dura = 2000;
+        // 矿：name=BlackIronOre，CurrentDura=5000 → ore_purity=5
+        let mut ore = mir2_shared::data::item::UserItem::default();
+        ore.item_index = 20;
+        ore.current_dura = 5000;
+        let mut infos = HashMap::new();
+        infos.insert(10, crate::db::ItemInfo {
+            item_type: 2, // Armour
+            required_amount: 5,
+            durability: 2000,
+            stats: HashMap::from([(Stat::MinDC as u8, 1), (Stat::MaxDC as u8, 3)]),
+            ..Default::default()
+        });
+        infos.insert(20, crate::db::ItemInfo {
+            item_type: 2,
+            name: "BlackIronOre".to_string(),
+            ..Default::default()
+        });
+        let agg = refine_material_aggregates(&[Some(item), Some(ore)], &infos, REFINE_ORE_NAME);
+        assert_eq!(agg.total_dc, 6);
+        assert_eq!(agg.total_mc, 0);
+        assert_eq!(agg.item_amount, 1);
+        assert_eq!(agg.required_level, 5);
+        assert_eq!(agg.durability_count, 1);
+        assert_eq!(agg.current_dura_count, 1);
+        assert_eq!(agg.ore_amount, 1);
+        assert_eq!(agg.ore_purity, 5);
+
+        // 武器材料跳过（ItemType.Weapon=1）
+        infos.insert(30, crate::db::ItemInfo { item_type: 1, ..Default::default() });
+        let mut weapon = mir2_shared::data::item::UserItem::default();
+        weapon.item_index = 30;
+        let agg2 = refine_material_aggregates(&[Some(weapon)], &infos, REFINE_ORE_NAME);
+        assert_eq!(agg2.item_amount, 0);
+    }
+
+    #[test]
+    fn test_settle_check_applies_on_success() {
+        use mir2_shared::enums::{RefinedValue, Stat};
+        let mut log = RefineLog::new();
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 1;
+        it.refined_value = RefinedValue::Dc;
+        it.refine_added = 1;
+        it.refine_success_chance = 100; // 必成功（C# Random(1,100) > 100 恒 false）
+        assert!(log.deposit_item(it));
+        assert!(log.begin_refine(0, 3600, 100));
+        assert_eq!(log.settle_check(), Some(RefineCheckResult::Applied));
+        let it = log.active_refine.as_ref().unwrap().item.as_ref().unwrap();
+        let added = it.added_stats.get(Stat::MaxDC);
+        assert!((1..=2).contains(&added), "added={}", added); // 暴击可能 ×2
+        assert_eq!(it.refined_value, RefinedValue::None);
+        assert_eq!(it.refine_added, 0);
+        assert_eq!(log.successful_refines, 1);
         assert_eq!(log.total_refines, 1);
-        if let Some(item) = &log.active_refine {
-            assert_eq!(item.status, RefineStatus::Ready);
-        }
+    }
+
+    #[test]
+    fn test_settle_check_destroys_on_fail() {
+        use mir2_shared::enums::{RefinedValue, Stat};
+        let mut log = RefineLog::new();
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 2;
+        it.refined_value = RefinedValue::Dc;
+        it.refine_added = 1;
+        it.refine_success_chance = 0; // 必失败（Random(1,100) > 0 恒 true → RefinedValue=None）
+        assert!(log.deposit_item(it));
+        assert!(log.begin_refine(0, 3600, 0));
+        assert_eq!(log.settle_check(), Some(RefineCheckResult::Destroyed));
+        assert_eq!(log.successful_refines, 0);
+        assert_eq!(log.total_refines, 1);
+        let it = log.active_refine.as_ref().unwrap().item.as_ref().unwrap();
+        assert_eq!(it.added_stats.get(Stat::MaxDC), 0);
+        assert_eq!(it.refined_value, RefinedValue::None);
     }
 
     #[test]
