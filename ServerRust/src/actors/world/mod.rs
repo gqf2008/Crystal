@@ -152,6 +152,10 @@ pub struct WorldActorArgs {
     pub lover_exp_bonus: u32,
     /// 徒弟经验加成 %（C# Settings.MentorExpBoost = 10）
     pub mentor_exp_boost: u8,
+    /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10）
+    pub mentor_damage_boost: u8,
+    /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
+    pub mentee_exp_bank: u8,
 }
 
 /// 世界中的玩家记录
@@ -1555,6 +1559,10 @@ pub struct WorldActor {
     pub(crate) lover_exp_bonus: u32,
     /// 徒弟经验加成 %（C# Settings.MentorExpBoost = 10）
     pub(crate) mentor_exp_boost: u8,
+    /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10）
+    pub(crate) mentor_damage_boost: u8,
+    /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
+    pub(crate) mentee_exp_bank: u8,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -2007,6 +2015,8 @@ impl WorldActor {
             replace_wedring_cost: 125,
             lover_exp_bonus: 5,
             mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentee_exp_bank: 1,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5957,6 +5967,8 @@ Ok(Self {
             replace_wedring_cost: args.replace_wedring_cost,
             lover_exp_bonus: args.lover_exp_bonus,
             mentor_exp_boost: args.mentor_exp_boost,
+            mentor_damage_boost: args.mentor_damage_boost,
+            mentee_exp_bank: args.mentee_exp_bank,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

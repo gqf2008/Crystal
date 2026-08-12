@@ -67,6 +67,8 @@ replace_wedring_cost = 125    # C# Settings.ReplaceWedRingCost（#2394）
 lover_exp_bonus = 5           # C# Settings.LoverEXPBonus（#2394）
 mentor_level_gap = 10          # C# Settings.MentorLevelGap（#2396）
 mentor_exp_boost = 10          # C# Settings.MentorExpBoost（#2396）
+mentor_damage_boost = 10       # C# Settings.MentorDamageBoost（#2400）
+mentee_exp_bank = 1            # C# Settings.MenteeExpBank（#2400）
 
 # 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold / ExtendGT / GTSale 最低价）
 [conquest]

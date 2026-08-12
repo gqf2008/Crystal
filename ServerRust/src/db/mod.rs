@@ -1853,6 +1853,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             mentor_exp: row.try_get("mentor_exp").unwrap_or(0),
             mentee_exp: 0,
             mentor_damage_bonus: false,
+        mentor_damage_rate_percent: 0,
+        mentee_exp_bank: 1,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
