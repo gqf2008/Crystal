@@ -3068,6 +3068,11 @@ async fn send_craft_fail(gate_ref: &kameo::actor::ActorRef<crate::gate::actor::G
     }).await;
 }
 
+/// C# NPCScript.Craft（NPCScript.cs:1437）：Random.Next(100) >= Chance + Stats[CraftRatePercent] → 失败
+fn craft_succeeds(chance: u8, craft_rate_percent: i32, roll: u32) -> bool {
+    (roll as i64) < (chance as i64) + (craft_rate_percent as i64)
+}
+
 impl Message<CraftItemRequest> for WorldActor {
     type Reply = ();
 
@@ -3197,8 +3202,8 @@ impl Message<CraftItemRequest> for WorldActor {
             }).await;
         }
 
-        // 成功率判定
-        let success = fastrand::u8(0..100) < recipe.chance;
+        // 成功率判定（C# NPCScript.Craft:1437：Random.Next(100) >= Chance + Stats[CraftRatePercent] → 失败）
+        let success = craft_succeeds(recipe.chance, state.craft_rate_percent, fastrand::u8(0..100) as u32);
 
         if success {
             let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item: result_item }).await;
@@ -4356,6 +4361,16 @@ mod tests {
         // 无属性/耐久 → 0
         let empty = crate::db::ItemInfo::default();
         assert_eq!(super::current_stat_count(&mir2_shared::data::item::UserItem::default(), &empty, &target, &target_info), 0);
+    }
+
+    #[test]
+    fn test_craft_succeeds() {
+        // C# NPCScript.Craft:1437：roll >= Chance + CraftRatePercent → 失败
+        assert!(super::craft_succeeds(50, 0, 49));
+        assert!(!super::craft_succeeds(50, 0, 50));
+        // CraftRatePercent 提升成功率（如行会 BuffCraftRate / 装备附加）
+        assert!(super::craft_succeeds(50, 10, 59));
+        assert!(!super::craft_succeeds(50, 10, 60));
     }
 
     #[test]
