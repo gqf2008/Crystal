@@ -1392,6 +1392,20 @@ async fn exec_action(
                 debug!("NPC REDUCEPKPOINT: -{}", amount);
             }
         }
+        // REQUESTGUILDNAME —— 建会名称输入提示（对齐 C# NPCScript GuildCreateKey：NPCScript.cs:1050-1062；无行会才提示）
+        "REQUESTGUILDNAME" => {
+            if let Some(st) = current_player_state(world, session_id).await {
+                if st.guild_name.is_some() {
+                    send_system_message(&world.gate_ref, session_id, "你已经有行会了");
+                } else {
+                    let mut body = Vec::new();
+                    let _ = world.gate_ref.tell(SendToClient {
+                        session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildNameRequest as i16, &body),
+                    }).await;
+                }
+            }
+        }
         // GIVEGUILDGOLD <amount> —— 行会仓库增加金币（对齐 C# ActionType.GiveGuildGold）
         "GIVEGUILDGOLD" => {
             let amount = arg0().parse::<u32>().unwrap_or(0);
