@@ -3521,7 +3521,12 @@ impl Message<CreateGuildRequest> for SocialActor {
         }
         let _ = record.ask(DeductGold { amount: self.config.guild_creation_cost_gold }).await;
 
-        let guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
+        let mut guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
+        // #2406：C# GuildInfo 构造——MaxExperience = Guild_ExperienceList[Level]（Level=1 → index1）；
+        // 上限从 MembercapList 读取（数据占位值 <5 时回退 50 保护）
+        guild.max_experience = self.config.guild_experience_list.get(1).copied().unwrap_or(0);
+        let cap = self.config.guild_membercap_list.get(1).copied().unwrap_or(50);
+        guild.member_cap = if cap >= 5 { cap } else { 50 };
         self.guilds.insert(msg.guild_name.clone(), guild);
 
         // 保存行会到数据库
@@ -3575,7 +3580,12 @@ impl Message<GmCreateGuildRequest> for SocialActor {
         }
 
         // GM 直接建会：跳过等级/金币/新手行会限制（C# CREATEGUILD：仅 GM/TestServer 可用）
-        let guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
+        let mut guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
+        // #2406：C# GuildInfo 构造——MaxExperience = Guild_ExperienceList[Level]（Level=1 → index1）；
+        // 上限从 MembercapList 读取（数据占位值 <5 时回退 50 保护）
+        guild.max_experience = self.config.guild_experience_list.get(1).copied().unwrap_or(0);
+        let cap = self.config.guild_membercap_list.get(1).copied().unwrap_or(50);
+        guild.member_cap = if cap >= 5 { cap } else { 50 };
         self.guilds.insert(msg.guild_name.clone(), guild);
         if let Some(guild) = self.guilds.get(&msg.guild_name) {
             if let Err(e) = db::save_guild(&self.db_pool, guild).await {
