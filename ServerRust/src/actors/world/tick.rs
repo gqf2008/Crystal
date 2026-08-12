@@ -10,7 +10,8 @@ const SEARCH_DELAY_TICKS: u64 = 30;
 /// 宠物跟随=u64::MAX；宠物协战=u64::MAX-1；怪物互伤=u64::MAX-2（#1697）
 const PATH_TARGET_PET_FOLLOW: u64 = u64::MAX;
 /// 巡逻路线目标哨兵（#2342：C# MonsterObject.ProcessRoute → MoveTo(Route[RoutePoint])）
-const PATH_TARGET_ROUTE: u64 = u64::MAX - 2;
+/// 注意避开 PATH_TARGET_MONSTER_ATTACK(MAX-2) 与 PATH_TARGET_PET_ATTACK(MAX-1)
+const PATH_TARGET_ROUTE: u64 = u64::MAX - 3;
 const PATH_TARGET_PET_ATTACK: u64 = u64::MAX - 1;
 const PATH_TARGET_MONSTER_ATTACK: u64 = u64::MAX - 2;
 
@@ -3722,6 +3723,213 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
     }
 
+    /// #2344：C# Dragon.Load——在龙头周围生成 24 个身体部件（BodyName=EvilMirBody，静态）
+    async fn spawn_dragon_body_parts(&mut self, dragon_info: &crate::db::DragonInfo, map_index: u16) {
+        use crate::actors::world::dragon::DragonState;
+        if dragon_info.body_name.is_empty() { return; }
+        let body_info = match self.monster_infos.values()
+            .find(|m| m.name.eq_ignore_ascii_case(&dragon_info.body_name))
+            .cloned()
+        {
+            Some(mi) => mi,
+            None => return,
+        };
+        let body_index = body_info.index;
+        let body_hp = body_info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(100);
+        let base_min_dmg = body_info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(0);
+        let base_max_dmg = body_info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(0);
+        for (ox, oy) in DragonState::body_part_offsets() {
+            let bx = dragon_info.location_x + ox;
+            let by = dragon_info.location_y + oy;
+            if !self.maps.get(&map_index).map(|m| m.is_valid(bx, by)).unwrap_or(false) { continue; }
+            let body_oid = self.alloc_object_id();
+            let body = MonsterState {
+                object_id: body_oid,
+                name: body_info.name.clone(),
+                image: body_info.image as u16,
+                monster_index: body_index,
+                x: bx,
+                y: by,
+                direction: 0,
+                hp: body_hp,
+                max_hp: body_hp,
+                min_dmg: base_min_dmg,
+                max_dmg: base_max_dmg,
+                xp: 0,
+                spawn_x: bx,
+                spawn_y: by,
+                spawn_spread: 0,
+                map_index,
+                next_attack_tick: 0,
+                next_move_tick: 0,
+                next_summon_tick: 0,
+                ai_profile: MonsterAiProfile::from_info(&body_info),
+                ai_state: MonsterAiState::Idle,
+                sitting: false,
+                hidden: false,
+                sit_down_tick: 0,
+                target_session: None,
+                last_hitter_session: None,
+                exp_owner_session: None,
+                exp_owner_tick: 0,
+                pending_brown_attacker: None,
+                min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
+                provoked: false,
+                is_elite: false,
+                is_boss: false,
+                min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                agility: 0, accuracy: 0,
+                armour_rate: 1.0, damage_rate: 1.0,
+                magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                luck: 0, reflect: 0, level: body_info.level, effect: body_info.effect,
+                damage_reduction_percent: 0,
+                monster_buffs: Vec::new(),
+                poison_list: Vec::new(),
+                last_hit_damage: 0,
+                undead: body_info.undead,
+                master_session: None,
+                rarity: 0,
+                pet_experience: 0,
+                max_pet_level: 0,
+                recall_at_tick: 0,
+                can_recall: false,
+                next_recall_tick: 0,
+                route: Vec::new(),
+                route_point: 0,
+                route_waiting: false,
+                route_wait_until_tick: 0,
+                behavior: ai::make_behavior(&body_info.name),
+            };
+            self.monsters.insert(body_oid, body);
+            // 广播生成（同图玩家）
+            let spawn = MonsterSpawn {
+                name: body_info.name.clone(),
+                image: body_info.image as u16,
+                monster_index: body_index,
+                x: bx,
+                y: by,
+                direction: 0,
+                hp: body_hp,
+                min_dmg: base_min_dmg,
+                max_dmg: base_max_dmg,
+                xp: 0,
+                map_index,
+                count: 1,
+                spread: 0,
+                route: Vec::new(),
+            };
+            let packet = build_object_monster_packet(&spawn, body_oid, &spawn.name);
+            for (sid, rec) in &self.players {
+                if let Ok(Some(st)) = rec.actor_ref.ask(GetPlayerState).await {
+                    if st.map_index == map_index {
+                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// #2344：C# Dragon.LevelUp → Drop(level)——按 DragonItem.txt 每级掉落表在 DropArea 散布
+    /// first_level..new_level 为升级经过的旧等级（C# Drop(Info.Level) 在 +1 前执行）
+    async fn spawn_dragon_level_drops(
+        &mut self,
+        dragon_info: &crate::db::DragonInfo,
+        first_level: u8,
+        new_level: u8,
+        owner: Option<u64>,
+    ) {
+        if self.dragon_drops.is_empty() { return; }
+        let map_index: u16 = self.map_infos.values()
+            .find(|m| m.file_name.eq_ignore_ascii_case(&dragon_info.map_file_name))
+            .map(|m| m.index as u16)
+            .unwrap_or(0);
+        // C# DropArea：中心 = (Top.X + (Bottom.X-Top.X)/2, Top.Y)；散布 = Width/2
+        let center_x = dragon_info.drop_area_top_x + (dragon_info.drop_area_bottom_x - dragon_info.drop_area_top_x) / 2;
+        let center_y = dragon_info.drop_area_top_y;
+        let spread = ((dragon_info.drop_area_bottom_x - dragon_info.drop_area_top_x) / 2).max(1);
+        // 先克隆所需条目，避免 self.dragon_drops 借用与 &mut self 冲突
+        let entries: Vec<crate::actors::world::dragon::DragonDropEntry> = self.dragon_drops.iter()
+            .filter(|d| d.level >= first_level && d.level < new_level)
+            .cloned()
+            .collect();
+        for entry in entries {
+            {
+                // C# rate = max(1, Chance / DropRate)；Random(rate) == 0 命中
+                let rate = ((entry.chance as f64) / self.drop_rate).max(1.0) as i32;
+                if fastrand::i32(0..rate) != 0 { continue; }
+                let dx = center_x + fastrand::i32(-spread..=spread);
+                let dy = center_y + fastrand::i32(-spread..=spread);
+                if !self.maps.get(&map_index).map(|m| m.is_walkable(dx, dy)).unwrap_or(true) { continue; }
+                if entry.gold > 0 {
+                    // C# Random(gold/2, gold + gold/2)
+                    let half = entry.gold / 2;
+                    let gold = half.saturating_add(fastrand::u64(0..=entry.gold));
+                    if gold == 0 { continue; }
+                    let oid = self.alloc_object_id();
+                    let object_gold = mir2_shared::packets::server::ObjectGold {
+                        object_id: oid,
+                        gold: gold as u32,
+                        location_x: dx,
+                        location_y: dy,
+                    };
+                    let mut buf = Vec::new();
+                    if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
+                        broadcast_to_map(&self.gate_ref, &self.players, map_index, &buf).await;
+                    }
+                    self.ground_items.push(GroundItem {
+                        object_id: oid,
+                        item: mir2_shared::data::item::UserItem { item_index: 0, count: gold.min(u16::MAX as u64) as u16, ..Default::default() },
+                        x: dx,
+                        y: dy,
+                        map_index,
+                        dropper_session: owner,
+                        drop_tick: self.tick_count,
+                        death_drop: false,
+                        gold_amount: gold as u32,
+                    });
+                } else if let Some(item_name) = &entry.item_name {
+                    let Some(item_index) = self.item_infos.values()
+                        .find(|i| i.name.eq_ignore_ascii_case(item_name))
+                        .map(|i| i.index)
+                    else { continue };
+                    let mut item = mir2_shared::data::item::UserItem {
+                        item_index,
+                        unique_id: crate::actors::inventory::generate_item_uid(),
+                        count: 1,
+                        ..Default::default()
+                    };
+                    if let Some(info) = self.item_infos.get(&item_index) {
+                        item.max_dura = info.durability as u16;
+                        item.current_dura = info.durability as u16;
+                    }
+                    enrich_item_info(&mut item, &self.item_infos);
+                    let oid = self.alloc_object_id();
+                    let object_item = mir2_shared::packets::server::ObjectItem {
+                        object_id: oid,
+                        item: item.clone(),
+                        location_x: dx,
+                        location_y: dy,
+                    };
+                    let mut buf = Vec::new();
+                    if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
+                        broadcast_to_map(&self.gate_ref, &self.players, map_index, &buf).await;
+                    }
+                    self.ground_items.push(GroundItem {
+                        object_id: oid,
+                        item,
+                        x: dx,
+                        y: dy,
+                        map_index,
+                        dropper_session: owner,
+                        drop_tick: self.tick_count,
+                        death_drop: false,
+                        gold_amount: 0,
+                    });
+                }
+            }
+        }
+    }
+
     pub(crate) async fn tick_dragon(&mut self) {
         use crate::actors::world::dragon::DragonState;
 
@@ -3733,6 +3941,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
 
         // C# EvilMir.ChangeHP：DragonLink 且受击（amount<0）→ DragonSystem.GainExp(Random(1,40))
+        let mut dragon_level_up: Option<(u8, u8, Option<u64>)> = None;
         if let Some(dragon) = self.dragon_state.as_mut() {
             if let Some(oid) = dragon.evil_mir_oid {
                 if let Some(m) = self.monsters.get(&oid) {
@@ -3741,12 +3950,15 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                         let exp = fastrand::i32(1..40) as u64;
                         let levels = dragon.gain_exp(exp);
                         debug!("Dragon exp +{} from EvilMir hit (levels gained: {})", exp, levels);
+                        // #2344：C# LevelUp → Drop(level)——升级经过的旧等级触发掉落（在 +1 前执行）
+                        if levels > 0 && dragon.level >= levels as u8 {
+                            dragon_level_up = Some((dragon.level - levels as u8, dragon.level, m.exp_owner_session));
+                        }
                     }
                     dragon.last_evil_mir_hp = m.hp;
                 }
             }
         }
-
         // Dragon 系统：根据 dragon_info 配置在龙地图上有玩家时生成/维持 EvilMir 作为世界Boss。
         // 简化：当 dragon_info 存在、玩家在龙地图上、且当前无活跃 EvilMir → 生成。
         let dragon_info = match self.dragon_info.clone() {
@@ -3756,6 +3968,11 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         // 确保 dragon_state 存在（懒初始化，body_object_id 占位）
         if self.dragon_state.is_none() {
             self.dragon_state = Some(DragonState::new(0));
+        }
+
+        // #2344：升级掉落（C# Dragon.LevelUp → Drop(level)）——延迟到 dragon_info 可用后执行
+        if let Some((first_level, new_level, owner)) = dragon_level_up {
+            self.spawn_dragon_level_drops(&dragon_info, first_level, new_level, owner).await;
         }
 
         // 解析龙地图索引（按 map_file_name 查 map_infos）
@@ -3887,6 +4104,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         // 标记为世界Boss超时（1小时 = 36000 ticks 无挑战则消失）
         self.world_boss_queue.insert(spawn_oid, self.tick_count + 36000);
         self.dragon_state.as_mut().unwrap().evil_mir_oid = Some(spawn_oid);
+        // #2344：C# Dragon.Load——生成 24 个身体部件（BodyName=EvilMirBody）
+        self.spawn_dragon_body_parts(&dragon_info, dragon_map_u16).await;
 
         // 广播生成
         let packet = build_object_monster_packet(
