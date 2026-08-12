@@ -612,6 +612,8 @@ impl MonsterAiType {
             252 => Self::Boss,
             // C# 4=SpittingSpider（主动近战+毒线）、5=CannibalPlant（埋伏主动），均非逃跑
             6 => Self::Guard,
+            // C# 57=TownArcher（红名守卫，FindTarget 只打 PKPoints>=200；#2436）
+            57 => Self::Guard,
             // C# 8=AxeSkeleton（远程掷斧 Range Projectile）
             8 => Self::Ranged,
             // C# 10=FlamingWooma（近战，MAC 判定）
@@ -9888,6 +9890,8 @@ mod tests {
         }
         // 6=Guard、8=AxeSkeleton 远程
         assert_eq!(T::from_db_ai(6), T::Guard);
+        // #2436：57=TownArcher 红名守卫（C# FindTarget 只打 PKPoints>=200）
+        assert_eq!(T::from_db_ai(57), T::Guard);
         assert_eq!(T::from_db_ai(8), T::Ranged);
         // 20=DarkDevil 远程魔法
         assert_eq!(T::from_db_ai(20), T::Mage);
@@ -9908,7 +9912,7 @@ mod tests {
             assert_eq!(T::from_db_ai(ai), T::Passive, "ai={} should be Passive", ai);
         }
         // 其余特殊 AI 由 name 注册专属行为，generic 默认主动
-        for ai in [4, 5, 7, 9, 10, 11, 12, 24, 25, 26, 33, 34, 35, 49, 57, 58] {
+        for ai in [4, 5, 7, 9, 10, 11, 12, 24, 25, 26, 33, 34, 35, 49, 58] {
             assert_eq!(T::from_db_ai(ai), T::Aggressive, "ai={} should be Aggressive", ai);
         }
     }
