@@ -194,7 +194,7 @@ mod tests {
         PlayerSnap { session_id: sid, x, y, hp: 100, map_index: 1, object_id: sid as u32, level: 30, pk_points: 0, min_dc: 10, poison_flags: mir2_shared::enums::PoisonType::NONE }
     }
     fn monster(oid: u32, x: i32, y: i32) -> MonsterSnap {
-        MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: 1 }
+        MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: 1, level: 0 }
     }
 
     #[test]

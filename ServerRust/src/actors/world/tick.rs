@@ -791,7 +791,7 @@ impl Message<ProcessRevives> for WorldActor {
 /// 找最近正在攻击主人（target_session == master）的怪物（C# IsAttackTarget：ob.Target == attacker.Master）。
 fn pet_find_hostile_target(
     monster: &MonsterState,
-    monster_snapshot: &[(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)],
+    monster_snapshot: &[(u32, i32, i32, i32, i32, u16, i32, String, u16, u8, i32)],
     monster_hostility: &std::collections::HashMap<u32, (Option<u64>, Option<u64>)>,
 ) -> Option<(u32, i32, i32)> {
     let master = monster.master_session?;
@@ -5403,8 +5403,8 @@ impl Message<Tick> for WorldActor {
             // 预收集怪物当前位置（用于碰撞检测）
             let monster_positions: HashSet<(i32, i32)> = self.monsters.values().map(|m| (m.x, m.y)).collect();
             // 预收集怪物快照（用于 Healer AI 寻找受伤盟友）
-            let monster_snapshot: Vec<(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)> = self.monsters.values()
-                .map(|m| (m.object_id, m.x, m.y, m.hp, m.max_hp, m.map_index, m.monster_index, m.name.clone(), m.image, m.direction))
+            let monster_snapshot: Vec<(u32, i32, i32, i32, i32, u16, i32, String, u16, u8, i32)> = self.monsters.values()
+                .map(|m| (m.object_id, m.x, m.y, m.hp, m.max_hp, m.map_index, m.monster_index, m.name.clone(), m.image, m.direction, m.level))
                 .collect();
             // #1932：Jar 系死亡召唤候选（非已注册 Boss、排除攻城 AI 72/73/80/81/82，对齐 C# Jar1.SpawnSlave）
             let monster_spawn_candidates: Vec<(String, i32)> = self.monster_infos.values()
@@ -5495,9 +5495,9 @@ impl Message<Tick> for WorldActor {
                         self.monster_infos.iter().map(|(k, v)| (*k, v.name.clone())).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
-                        .map(|(oid, x, y, hp, max_hp, map, idx, _, _, _)| ai::MonsterSnap {
+                        .map(|(oid, x, y, hp, max_hp, map, idx, _, _, _, lvl)| ai::MonsterSnap {
                             object_id: *oid, x: *x, y: *y, hp: *hp, max_hp: *max_hp,
-                            map_index: *map, monster_index: *idx,
+                            map_index: *map, monster_index: *idx, level: *lvl,
                         }).collect();
                     let map_ref = self.maps.get(&monster.map_index);
                     let is_walkable = move |x: i32, y: i32| map_ref.map(|m| m.is_walkable(x, y)).unwrap_or(false);
@@ -5586,7 +5586,7 @@ impl Message<Tick> for WorldActor {
                                 .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
                             if !target_alive {
                                 self.pet_targets.remove(&monster.object_id);
-                            } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
+                            } else if let Some((_, tx, ty, _, _, _, _, _, _, _, _)) =
                                 monster_snapshot.iter().find(|s| s.0 == tmid)
                             {
                                 pet_target = Some((tmid, *tx, *ty));
@@ -5808,7 +5808,7 @@ impl Message<Tick> for WorldActor {
                         let target_alive = monster_snapshot.iter().any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
                         if !target_alive {
                             self.pet_targets.remove(&monster.object_id);
-                        } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) = monster_snapshot.iter().find(|s| s.0 == tmid) {
+                        } else if let Some((_, tx, ty, _, _, _, _, _, _, _, _)) = monster_snapshot.iter().find(|s| s.0 == tmid) {
                             pet_target = Some((tmid, *tx, *ty));
                         }
                     }
@@ -5869,7 +5869,7 @@ impl Message<Tick> for WorldActor {
                         .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
                     if !target_alive {
                         self.monster_targets.remove(oid);
-                    } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
+                    } else if let Some((_, tx, ty, _, _, _, _, _, _, _, _)) =
                         monster_snapshot.iter().find(|s| s.0 == tmid)
                     {
                         monster_target_active = true;
@@ -5942,7 +5942,7 @@ impl Message<Tick> for WorldActor {
                         let mut did_heal = false;
                         if profile.ai_type == MonsterAiType::Healer {
                             let mut best_target: Option<(u32, i32)> = None; // (oid, deficit)
-                            for (snap_oid, sx, sy, shp, smax, smap, _, _, _, _) in &monster_snapshot {
+                            for (snap_oid, sx, sy, shp, smax, smap, _, _, _, _, _) in &monster_snapshot {
                                 if *snap_oid == *oid { continue; }
                                 if *smap != monster.map_index { continue; }
                                 let dist_ally = (monster.x - sx).abs() + (monster.y - sy).abs();

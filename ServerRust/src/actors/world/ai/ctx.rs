@@ -34,6 +34,7 @@ pub struct MonsterSnap {
     pub max_hp: i32,
     pub map_index: u16,
     pub monster_index: i32,
+    pub level: i32,
 }
 
 /// AI 产生的攻击动作（广播 + 延迟伤害）

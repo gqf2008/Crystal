@@ -132,7 +132,7 @@ mod tests {
     use crate::actors::world::ai::ctx::MonsterSnap;
 
     fn snap(oid: u32, idx: i32, x: i32, y: i32) -> MonsterSnap {
-        MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: idx }
+        MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: idx, level: 0 }
     }
 
     #[test]
