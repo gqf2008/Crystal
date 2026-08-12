@@ -20,7 +20,18 @@ pub const CRITICAL_RATE_WEIGHT: i32 = 5;
 pub const CRITICAL_DAMAGE_WEIGHT: i32 = 50;
 pub const FREEZING_ATTACK_WEIGHT: i32 = 10;
 pub const POISON_ATTACK_WEIGHT: i32 = 10;
-pub const MAX_LUCK: i32 = 10;
+/// C# Settings.MaxLuck（[Items] MaxLuck = 10；启动时由 main.rs 从 Setup.ini 注入）
+static MAX_LUCK: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(10);
+
+/// 设置全局幸运上限（C# Settings.MaxLuck，最小 1）
+pub fn set_max_luck(v: i32) {
+    MAX_LUCK.store(v.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 当前幸运上限（默认 10）
+pub fn max_luck() -> i32 {
+    MAX_LUCK.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 // ============================================================
 // CombatStats：从 PlayerState / MonsterState 提取的战斗属性快照
@@ -94,11 +105,11 @@ pub fn get_attack_power(min: i32, max: i32, luck: i32) -> i32 {
     let max = if min > max { min } else { max };
 
     if luck > 0 {
-        if luck > rand_below(MAX_LUCK) {
+        if luck > rand_below(max_luck()) {
             return max;
         }
     } else if luck < 0 {
-        if luck < -rand_below(MAX_LUCK) {
+        if luck < -rand_below(max_luck()) {
             return min;
         }
     }
@@ -629,5 +640,16 @@ mod tests {
         assert_eq!(level_offset(30, 20), 10);  // 差 10 封顶
         assert_eq!(level_offset(30, 28), 2);   // 差 2
         assert_eq!(level_offset(30, 18), 10);  // 差 12 → 10
+    }
+
+    #[test]
+    fn test_max_luck_global_default_and_set() {
+        // #2424：默认 10；set_max_luck 最小钳 1（C# Settings.MaxLuck）
+        assert_eq!(max_luck(), 10);
+        set_max_luck(5);
+        assert_eq!(max_luck(), 5);
+        set_max_luck(0);
+        assert_eq!(max_luck(), 1);
+        set_max_luck(10); // 还原默认，避免影响并行用例
     }
 }

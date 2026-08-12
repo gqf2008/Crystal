@@ -82,6 +82,8 @@ async fn async_main() -> anyhow::Result<()> {
     let hero_exp_list = crystal_server::util::ini::load_hero_exp_list(&configs_dir);
     // #2420：Setup.ini 常用参数（C# Settings.Load）
     let setup_ini = crystal_server::util::ini::load_setup_settings(&configs_dir);
+    // #2424：注入全局幸运上限（C# Settings.MaxLuck，供 combat::attack 纯函数使用）
+    crystal_server::combat::attack::set_max_luck(setup_ini.max_luck);
     // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
     // server.toml 显式配置优先，否则用 ini 曲线
     let exp_list = {

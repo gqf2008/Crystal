@@ -644,6 +644,8 @@ pub struct SetupIniSettings {
     pub pk_town_x: i32,
     /// C# Settings.PKTownPositionY（[PKTown] PKTownPositionY = 677）
     pub pk_town_y: i32,
+    /// C# Settings.MaxLuck（[Items] MaxLuck = 10）
+    pub max_luck: i32,
 }
 
 impl Default for SetupIniSettings {
@@ -661,6 +663,7 @@ impl Default for SetupIniSettings {
             pk_town_map_name: "3".to_string(),
             pk_town_x: 848,
             pk_town_y: 677,
+            max_luck: 10,
         }
     }
 }
@@ -690,6 +693,8 @@ pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
     }
     out.pk_town_x = ini_get_i64(&parsed, "PKTown", "PKTownPositionX", out.pk_town_x as i64) as i32;
     out.pk_town_y = ini_get_i64(&parsed, "PKTown", "PKTownPositionY", out.pk_town_y as i64) as i32;
+    // #2424：幸运上限（C# Settings.MaxLuck，最小 1）
+    out.max_luck = ini_get_i64(&parsed, "Items", "MaxLuck", out.max_luck as i64).max(1) as i32;
     out
 }
 
@@ -937,7 +942,7 @@ BuffExpRate=0
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("Setup.ini"),
-            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n",
+            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\nMaxLuck=10\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n",
         ).unwrap();
         let s = load_setup_settings(&dir);
         assert!(s.gather_orbs_per_level);
@@ -953,6 +958,8 @@ BuffExpRate=0
         assert_eq!(s.pk_town_map_name, "3");
         assert_eq!(s.pk_town_x, 848);
         assert_eq!(s.pk_town_y, 677);
+        // #2424：幸运上限
+        assert_eq!(s.max_luck, 10);
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → C# 默认
@@ -963,6 +970,7 @@ BuffExpRate=0
         assert_eq!(d.pk_town_map_name, "3");
         assert_eq!(d.pk_town_x, 848);
         assert_eq!(d.pk_town_y, 677);
+        assert_eq!(d.max_luck, 10);
 
         // 真实文件集成（Daneo1989/Configs/Setup.ini）
         let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));
@@ -978,6 +986,8 @@ BuffExpRate=0
             assert_eq!(r.pk_town_map_name, "3");
             assert_eq!(r.pk_town_x, 848);
             assert_eq!(r.pk_town_y, 677);
+            // #2424：幸运上限
+            assert_eq!(r.max_luck, 10);
         }
     }
 
