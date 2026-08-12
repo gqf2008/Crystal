@@ -75,6 +75,9 @@ async fn async_main() -> anyhow::Result<()> {
     let guild_buff_infos = crystal_server::util::ini::load_guild_buff_infos(&configs_dir);
     // #2414：元素三表（C# Settings.LoadOrbsExp：Configs/OrbsExpList.ini）
     let orbs_ini = crystal_server::util::ini::load_orbs_settings(&configs_dir);
+    // #2416：觉醒/宝石配置（C# Settings.LoadAwakeAttribute / LoadGem）
+    let awakening_ini = crystal_server::util::ini::load_awakening_settings(&configs_dir);
+    let gem_ini = crystal_server::util::ini::load_gem_settings(&configs_dir);
     // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
     // server.toml 显式配置优先，否则用 ini 曲线
     let exp_list = {
@@ -248,6 +251,8 @@ async fn async_main() -> anyhow::Result<()> {
         orbs_exp_list: orbs_ini.exp_list,
         orbs_dmg_list: orbs_ini.dmg_list,
         orbs_def_list: orbs_ini.def_list,
+        awakening_cfg: awakening_ini,
+        gem_cfg: gem_ini,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 
