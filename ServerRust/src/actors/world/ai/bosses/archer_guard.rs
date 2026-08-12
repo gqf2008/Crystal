@@ -24,9 +24,10 @@ impl MonsterBehavior for ArcherGuardBehavior {
     }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
+        // #2436：C# ArcherGuard（AI 57 = TownArcher）只攻击红名玩家（PKPoints>=200，FindTarget 跳过清白）
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
-            Some(t) => *t,
-            None => return,
+            Some(t) if is_red_name(t.pk_points) => *t,
+            _ => return,
         };
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
