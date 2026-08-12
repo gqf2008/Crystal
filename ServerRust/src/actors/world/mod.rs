@@ -1309,6 +1309,16 @@ pub(crate) struct FishingSession {
     pub chance: i32,
     /// 灵活度（C# flexibilityStat：CriticalRate，进度>50 时半值加入）
     pub flexibility: i32,
+    /// 咬钩概率（C# FishingNibbleChance = 5 + Random(nibbleMin,nibbleMax)，Float 槽加成）
+    pub nibble_chance: i32,
+    /// 自动收竿概率（C# FishingAutoReelChance：Reel 槽 MaxMAC）
+    pub auto_reel_chance: i32,
+    /// 是否已咬钩（C# FishFound）
+    pub fish_found: bool,
+    /// 咬钩时刻（tick；C# FishingFoundTime，3 秒窗口 = 30 ticks）
+    pub found_tick: u64,
+    /// 本轮进度（tick；C# _fishCounter，FishingProgress = counter/attempts*100）
+    pub progress: u32,
 }
 
 /// WorldActor 状态
@@ -1416,9 +1426,7 @@ pub struct WorldActor {
     pub(crate) world_boss_queue: HashMap<u32, u64>,
     /// 死亡玩家复活队列 (session_id → 死亡 tick)
     pub(crate) player_death_queue: HashMap<u64, u64>,
-    /// 钓鱼进度计数器 (session_id → 已钓鱼 tick 数)
-    pub(crate) fishing_tick_counters: HashMap<u64, u32>,
-    /// 钓鱼会话（session → 当前钓点/成功率；C# PlayerObject.FishingChance 等）
+    /// 钓鱼会话（session → 当前钓点/成功率/咬钩状态；C# PlayerObject.FishingChance 等）
     pub(crate) fishing_sessions: HashMap<u64, FishingSession>,
     /// 连续成功次数（C# FishingChanceCounter：每次满进度 +1，成功收获清零；跨抛竿保留）
     pub(crate) fishing_success_counters: HashMap<u64, u32>,
@@ -1911,7 +1919,6 @@ impl WorldActor {
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
-            fishing_tick_counters: HashMap::new(),
             fishing_sessions: HashMap::new(),
             fishing_success_counters: HashMap::new(),
             fishing_cfg: crate::util::ini::FishingConfig::default(),
@@ -5850,7 +5857,6 @@ Ok(Self {
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
-            fishing_tick_counters: HashMap::new(),
             fishing_sessions: HashMap::new(),
             fishing_success_counters: HashMap::new(),
             fishing_cfg: args.fishing_cfg,
