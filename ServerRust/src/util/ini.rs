@@ -254,6 +254,200 @@ pub fn load_guild_settings(configs_dir: &Path) -> GuildIniSettings {
     s
 }
 
+/// 商店/回购配置（C# Settings.LoadGoods：Configs/GoodsSystem.ini [Goods]）
+#[derive(Debug, Clone)]
+pub struct GoodsIniSettings {
+    /// C# Settings.GoodsOn
+    pub on: bool,
+    /// C# Settings.GoodsMaxStored
+    pub max_stored: u32,
+    /// C# Settings.GoodsBuyBackTime（分钟）
+    pub buy_back_time_minutes: u32,
+    /// C# Settings.GoodsBuyBackMaxStored
+    pub buy_back_max_stored: u32,
+    /// C# Settings.GoodsHideAddedStats
+    pub hide_added_stats: bool,
+}
+
+impl Default for GoodsIniSettings {
+    fn default() -> Self {
+        Self {
+            on: true,
+            max_stored: 15,
+            buy_back_time_minutes: 60,
+            buy_back_max_stored: 20,
+            hide_added_stats: true,
+        }
+    }
+}
+
+/// 从 `Configs/GoodsSystem.ini` 加载商店配置（文件缺失返回 C# 默认）
+pub fn load_goods_settings(configs_dir: &Path) -> GoodsIniSettings {
+    let path = configs_dir.join("GoodsSystem.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return GoodsIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut s = GoodsIniSettings::default();
+    if let Some(v) = ini_get(&parsed, "Goods", "On") {
+        s.on = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    s.max_stored = ini_get_i64(&parsed, "Goods", "MaxStored", s.max_stored as i64).max(0) as u32;
+    s.buy_back_time_minutes = ini_get_i64(&parsed, "Goods", "BuyBackTime", s.buy_back_time_minutes as i64).max(0) as u32;
+    s.buy_back_max_stored = ini_get_i64(&parsed, "Goods", "BuyBackMaxStored", s.buy_back_max_stored as i64).max(0) as u32;
+    if let Some(v) = ini_get(&parsed, "Goods", "HideAddedStats") {
+        s.hide_added_stats = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    s
+}
+
+/// 邮件配置（C# Settings.LoadMail：Configs/MailSystem.ini）
+#[derive(Debug, Clone)]
+pub struct MailIniSettings {
+    /// C# Settings.MailAutoSendGold（Rust 未接入，仅记录）
+    pub auto_send_gold: bool,
+    /// C# Settings.MailAutoSendItems（仅记录）
+    pub auto_send_items: bool,
+    /// C# Settings.MailFreeWithStamp
+    pub free_with_stamp: bool,
+    /// C# Settings.MailCostPer1KGold
+    pub cost_per_1k: u32,
+    /// C# Settings.MailItemInsurancePercentage
+    pub insurance_percent: u32,
+    /// C# Settings.MailCapacity
+    pub capacity: u32,
+}
+
+impl Default for MailIniSettings {
+    fn default() -> Self {
+        Self {
+            auto_send_gold: false,
+            auto_send_items: false,
+            free_with_stamp: true,
+            cost_per_1k: 100,
+            insurance_percent: 5,
+            capacity: 100,
+        }
+    }
+}
+
+/// 从 `Configs/MailSystem.ini` 加载邮件配置
+pub fn load_mail_settings(configs_dir: &Path) -> MailIniSettings {
+    let path = configs_dir.join("MailSystem.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return MailIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut s = MailIniSettings::default();
+    if let Some(v) = ini_get(&parsed, "AutoSend", "Gold") {
+        s.auto_send_gold = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    if let Some(v) = ini_get(&parsed, "AutoSend", "Items") {
+        s.auto_send_items = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    if let Some(v) = ini_get(&parsed, "Rates", "FreeWithStamp") {
+        s.free_with_stamp = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    s.cost_per_1k = ini_get_i64(&parsed, "Rates", "CostPer1k", s.cost_per_1k as i64).max(0) as u32;
+    s.insurance_percent = ini_get_i64(&parsed, "Rates", "InsurancePerItem", s.insurance_percent as i64).max(0) as u32;
+    s.capacity = ini_get_i64(&parsed, "General", "MailCapacity", s.capacity as i64).max(0) as u32;
+    s
+}
+
+/// 婚姻配置（C# Settings.LoadMarriage：Configs/MarriageSystem.ini [Config]）
+#[derive(Debug, Clone)]
+pub struct MarriageIniSettings {
+    /// C# Settings.LoverEXPBonus
+    pub lover_exp_bonus: u32,
+    /// C# Settings.MarriageCooldown（天）
+    pub cooldown_days: i64,
+    /// C# Settings.WeddingRingRecall
+    pub wedding_ring_recall: bool,
+    /// C# Settings.MarriageLevelRequired
+    pub level_required: u16,
+    /// C# Settings.ReplaceWedRingCost
+    pub replace_wedring_cost: u32,
+}
+
+impl Default for MarriageIniSettings {
+    fn default() -> Self {
+        Self {
+            lover_exp_bonus: 5,
+            cooldown_days: 7,
+            wedding_ring_recall: true,
+            level_required: 10,
+            replace_wedring_cost: 125,
+        }
+    }
+}
+
+/// 从 `Configs/MarriageSystem.ini` 加载婚姻配置
+pub fn load_marriage_settings(configs_dir: &Path) -> MarriageIniSettings {
+    let path = configs_dir.join("MarriageSystem.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return MarriageIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut s = MarriageIniSettings::default();
+    s.lover_exp_bonus = ini_get_i64(&parsed, "Config", "EXPBonus", s.lover_exp_bonus as i64).max(0) as u32;
+    s.cooldown_days = ini_get_i64(&parsed, "Config", "MarriageCooldown", s.cooldown_days).max(0);
+    if let Some(v) = ini_get(&parsed, "Config", "AllowLoverRecall") {
+        s.wedding_ring_recall = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    s.level_required = ini_get_i64(&parsed, "Config", "MinimumLevel", s.level_required as i64).clamp(0, 255) as u16;
+    s.replace_wedring_cost = ini_get_i64(&parsed, "Config", "ReplaceRingCost", s.replace_wedring_cost as i64).max(0) as u32;
+    s
+}
+
+/// 师徒配置（C# Settings.LoadMentor：Configs/MentorSystem.ini [Config]）
+#[derive(Debug, Clone)]
+pub struct MentorIniSettings {
+    /// C# Settings.MentorLevelGap
+    pub level_gap: u8,
+    /// C# Settings.MentorSkillBoost（Rust 已实现硬编码 true，仅记录）
+    pub skill_boost: bool,
+    /// C# Settings.MentorLength（天）
+    pub length_days: u8,
+    /// C# Settings.MentorDamageBoost
+    pub damage_boost: u8,
+    /// C# Settings.MentorExpBoost
+    pub exp_boost: u8,
+    /// C# Settings.MenteeExpBank
+    pub exp_bank: u8,
+}
+
+impl Default for MentorIniSettings {
+    fn default() -> Self {
+        Self {
+            level_gap: 10,
+            skill_boost: true,
+            length_days: 7,
+            damage_boost: 10,
+            exp_boost: 10,
+            exp_bank: 1,
+        }
+    }
+}
+
+/// 从 `Configs/MentorSystem.ini` 加载师徒配置
+pub fn load_mentor_settings(configs_dir: &Path) -> MentorIniSettings {
+    let path = configs_dir.join("MentorSystem.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return MentorIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut s = MentorIniSettings::default();
+    s.level_gap = ini_get_i64(&parsed, "Config", "LevelGap", s.level_gap as i64).clamp(0, 255) as u8;
+    if let Some(v) = ini_get(&parsed, "Config", "MenteeSkillBoost") {
+        s.skill_boost = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    s.length_days = ini_get_i64(&parsed, "Config", "MentorshipLength", s.length_days as i64).clamp(0, 255) as u8;
+    s.damage_boost = ini_get_i64(&parsed, "Config", "MentorDamageBoost", s.damage_boost as i64).clamp(0, 255) as u8;
+    s.exp_boost = ini_get_i64(&parsed, "Config", "MenteeExpBoost", s.exp_boost as i64).clamp(0, 255) as u8;
+    s.exp_bank = ini_get_i64(&parsed, "Config", "PercentXPtoMentor", s.exp_bank as i64).clamp(0, 255) as u8;
+    s
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -440,6 +634,46 @@ BuffExpRate=0
         assert_eq!(s.war_cost, 30000);
         assert_eq!(s.experience_list.len(), 21);
         assert_eq!(s.membercap_list.len(), 21);
+    }
+
+    /// #2408：Goods/Mail/Marriage/Mentor 四组 ini 解析 + 真实文件集成
+    #[test]
+    fn test_load_system_settings() {
+        // 解析单测（临时文件）
+        let dir = std::env::temp_dir().join("crystal_ini_test_sys");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("GoodsSystem.ini"), "[Goods]\nOn=True\nMaxStored=50\nBuyBackTime=60\nBuyBackMaxStored=20\nHideAddedStats=True\n").unwrap();
+        std::fs::write(dir.join("MailSystem.ini"), "[AutoSend]\nGold=False\nItems=False\n\n[Rates]\nFreeWithStamp=True\nCostPer1k=100\nInsurancePerItem=5\n\n[General]\nMailCapacity=100\n").unwrap();
+        std::fs::write(dir.join("MarriageSystem.ini"), "[Config]\nEXPBonus=5\nMarriageCooldown=7\nAllowLoverRecall=True\nMinimumLevel=10\nReplaceRingCost=125\n").unwrap();
+        std::fs::write(dir.join("MentorSystem.ini"), "[Config]\nLevelGap=10\nMenteeSkillBoost=True\nMentorshipLength=7\nMentorDamageBoost=10\nMenteeExpBoost=10\nPercentXPtoMentor=1\n").unwrap();
+        let g = load_goods_settings(&dir);
+        assert_eq!(g.max_stored, 50);
+        assert!(g.on);
+        let m = load_mail_settings(&dir);
+        assert_eq!(m.capacity, 100);
+        assert_eq!(m.cost_per_1k, 100);
+        let mg = load_marriage_settings(&dir);
+        assert_eq!(mg.cooldown_days, 7);
+        assert_eq!(mg.replace_wedring_cost, 125);
+        let mt = load_mentor_settings(&dir);
+        assert_eq!(mt.length_days, 7);
+        assert_eq!(mt.exp_bank, 1);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → C# 默认
+        assert_eq!(load_goods_settings(Path::new("C:/definitely/not/exists")).max_stored, 15);
+        assert_eq!(load_mail_settings(Path::new("C:/definitely/not/exists")).capacity, 100);
+        assert_eq!(load_marriage_settings(Path::new("C:/definitely/not/exists")).cooldown_days, 7);
+        assert_eq!(load_mentor_settings(Path::new("C:/definitely/not/exists")).length_days, 7);
+
+        // 真实文件集成
+        let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));
+        if real.join("GoodsSystem.ini").exists() {
+            assert_eq!(load_goods_settings(real).max_stored, 50);
+            assert_eq!(load_marriage_settings(real).cooldown_days, 7);
+            assert_eq!(load_mentor_settings(real).length_days, 7);
+            assert_eq!(load_mail_settings(real).capacity, 100);
+        }
     }
 }
 

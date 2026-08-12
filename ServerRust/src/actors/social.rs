@@ -1028,6 +1028,8 @@ pub struct SocialActorConfig {
     pub marriage_level_required: u16,
     /// 师徒等级差下限（C# Settings.MentorLevelGap = 10）
     pub mentor_level_gap: u8,
+    /// 师徒期限（天，C# Settings.MentorLength = 7）
+    pub mentor_length_days: u8,
 }
 
 impl Default for SocialActorConfig {
@@ -1067,6 +1069,7 @@ impl Default for SocialActorConfig {
             marriage_cooldown_days: 7,
             marriage_level_required: 10,
             mentor_level_gap: 10,
+            mentor_length_days: 7,
         }
     }
 }
@@ -2195,7 +2198,7 @@ impl Message<SocialPlayerJoined> for SocialActor {
 
         // #2374：C# PlayerObject.cs:1194-1196——师徒到期（MentorDate.AddDays(7) < Now）登录时自动解除（force=false 无冷却）
         let now_secs = crate::actors::world::partners::now_unix_secs();
-        if state.mentor_name.is_some() && mentor_relationship_expired(state.mentor_date, now_secs) {
+        if state.mentor_name.is_some() && mentor_relationship_expired(state.mentor_date, now_secs, self.config.mentor_length_days as i64) {
             self.do_mentor_break(msg.session_id, false).await;
         }
         // 重新取状态（到期解除可能已清空师徒关系）
@@ -4920,7 +4923,7 @@ impl SocialActor {
         new_self_state.mentee_exp = new_self_mentee_exp;
         // #2374：手动解除（force=true）→ 7 天冷却（C# :13463 MentorDate = Now.AddDays(7)）
         if force {
-            new_self_state.mentor_date = mentor_cooldown_until(crate::actors::world::partners::now_unix_secs());
+            new_self_state.mentor_date = mentor_cooldown_until(crate::actors::world::partners::now_unix_secs(), self.config.mentor_length_days as i64);
         }
         let _ = record.ask(SetPlayerState { state: new_self_state }).await;
         // C#：自身结算 IsMentor && MentorExp > 0 → GainExp + 清零
@@ -4963,13 +4966,13 @@ impl SocialActor {
 }
 
 /// #2374：师徒到期判定（C# PlayerObject.cs:1194：MentorDate.AddDays(MentorLength) < Now；MentorLength=7 天）
-pub(crate) fn mentor_relationship_expired(mentor_date: i64, now: i64) -> bool {
-    mentor_date > 0 && mentor_date + 7 * 86400 < now
+pub(crate) fn mentor_relationship_expired(mentor_date: i64, now: i64, length_days: i64) -> bool {
+    mentor_date > 0 && mentor_date + length_days * 86400 < now
 }
 
 /// #2374：解除冷却截止（C# MentorBreak force：MentorDate = Now.AddDays(MentorLength)）
-pub(crate) fn mentor_cooldown_until(now: i64) -> i64 {
-    now + 7 * 86400
+pub(crate) fn mentor_cooldown_until(now: i64, length_days: i64) -> i64 {
+    now + length_days * 86400
 }
 
 /// C# MentorBreak 经验转移计算（纯函数）：仅对方在线时转移——
@@ -5203,14 +5206,14 @@ mod tests {
     fn mentor_term_and_cooldown_match_csharp() {
         let now = 1_700_000_000i64;
         // 未到期：MentorDate + 7d >= Now
-        assert!(!super::mentor_relationship_expired(now - 6 * 86400, now));
-        assert!(!super::mentor_relationship_expired(now - 7 * 86400, now));
+        assert!(!super::mentor_relationship_expired(now - 6 * 86400, now, 7));
+        assert!(!super::mentor_relationship_expired(now - 7 * 86400, now, 7));
         // 到期：MentorDate + 7d < Now
-        assert!(super::mentor_relationship_expired(now - 8 * 86400, now));
+        assert!(super::mentor_relationship_expired(now - 8 * 86400, now, 7));
         // 无日期（0）不判到期
-        assert!(!super::mentor_relationship_expired(0, now));
+        assert!(!super::mentor_relationship_expired(0, now, 7));
         // 解除冷却截止 = Now + 7d（C# MentorDate = Now.AddDays(7)）
-        assert_eq!(super::mentor_cooldown_until(now), now + 7 * 86400);
+        assert_eq!(super::mentor_cooldown_until(now, 7), now + 7 * 86400);
     }
 
     /// #2142：C# MentorBreak 转移（仅对方在线）+ 结算金额
