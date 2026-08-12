@@ -3798,9 +3798,9 @@ impl Message<CombineItemRequest> for WorldActor {
             } else {
                 successchance *= gem_count as i64;
             }
-            // C# 6999：>= 宝石 CriticalRate 则 0，否则 CriticalRate - successchance + 玩家 GemRatePercent（Rust 暂未聚合，按 0）
+            // C# 6999：>= 宝石 CriticalRate 则 0，否则 CriticalRate - successchance + 玩家 GemRatePercent（装备宝石率，C# Stats[Stat.GemRatePercent]）
             let critical_rate = gem_stat(mir2_shared::enums::Stat::CriticalRate) as i64;
-            successchance = if successchance >= critical_rate { 0 } else { critical_rate - successchance };
+            successchance = if successchance >= critical_rate { 0 } else { critical_rate - successchance + state.gem_rate_percent as i64 };
             let succeeded = (fastrand::i32(0..100) as i64) < successchance;
             // ValidGemForItem（C# 7007-7012；C# 先判定成败再校验）
             if !valid_gem_for_item(source_info, target_info.item_type) {

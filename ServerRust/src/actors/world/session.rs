@@ -4792,6 +4792,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
             mine_rate_percent: 0,
+            gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,

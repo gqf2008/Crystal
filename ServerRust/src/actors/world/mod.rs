@@ -6315,6 +6315,7 @@ impl WorldActor {
             item_drop_rate_percent: b.item_drop_rate_percent,
             gold_drop_rate_percent: b.gold_drop_rate_percent,
             mine_rate_percent: b.mine_rate_percent,
+            gem_rate_percent: b.gem_rate_percent,
         }).await;
         Some(state)
     }
@@ -6828,10 +6829,55 @@ pub struct EquipmentBonuses {
     pub gold_drop_rate_percent: i32,
     // #2118：装备采矿掉落率加成（C# Stat.MineRatePercent）
     pub mine_rate_percent: i32,
+    // #2306：装备宝石率加成（C# Stats[Stat.GemRatePercent]；装备基础/附加/觉醒/槽位宝石合计）
+    pub gem_rate_percent: i32,
     // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
     pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
     /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
     pub muscle: bool,
+}
+
+/// 把单条物品属性（基础/附加/槽位宝石）累加进 EquipmentBonuses（对齐 C# Stats.Add）
+fn apply_equipment_stat(b: &mut EquipmentBonuses, stat: mir2_shared::enums::Stat, value: i32) {
+    use mir2_shared::enums::Stat;
+    match stat {
+        Stat::MinDC => b.min_atk += value,
+        Stat::MaxDC => b.max_atk += value,
+        Stat::MinMC => b.min_mc += value,
+        Stat::MaxMC => b.max_mc += value,
+        Stat::MinSC => b.min_sc += value,
+        Stat::MaxSC => b.max_sc += value,
+        Stat::MinAC => b.min_ac += value,
+        Stat::MaxAC => b.max_ac += value,
+        Stat::MinMAC => b.min_mac += value,
+        Stat::MaxMAC => b.max_mac += value,
+        Stat::HP => b.hp += value,
+        Stat::MP => b.mp += value,
+        Stat::Luck => b.luck += value,
+        Stat::CriticalRate => b.critical_rate += value,
+        Stat::CriticalDamage => b.critical_damage += value,
+        Stat::MagicResist => b.magic_resist += value,
+        Stat::Reflect => b.reflect += value,
+        Stat::AttackBonus => b.attack_bonus += value,
+        Stat::HPDrainRatePercent => b.hp_drain_rate_percent += value,
+        Stat::Agility => b.agility += value,
+        Stat::Accuracy => b.accuracy += value,
+        Stat::Freezing => b.freezing += value,
+        Stat::PoisonAttack => b.poison_attack += value,
+        Stat::HealthRecovery => b.health_recovery += value,
+        Stat::SpellRecovery => b.spell_recovery += value,
+        Stat::AttackSpeed => b.attack_speed += value,
+        Stat::PoisonResist => b.poison_resist += value,
+        Stat::Holy => b.holy += value,
+        Stat::ItemDropRatePercent => b.item_drop_rate_percent += value,
+        Stat::GoldDropRatePercent => b.gold_drop_rate_percent += value,
+        Stat::MineRatePercent => b.mine_rate_percent += value,
+        Stat::GemRatePercent => b.gem_rate_percent += value,
+        Stat::BagWeight => b.bag_weight += value,
+        Stat::WearWeight => b.wear_weight += value,
+        Stat::HandWeight => b.hand_weight += value,
+        _ => {}
+    }
 }
 
 pub(crate) fn calculate_equipment_bonuses(
@@ -6879,10 +6925,60 @@ pub(crate) fn calculate_equipment_bonuses(
             b.item_drop_rate_percent += get(Stat::ItemDropRatePercent);
             b.gold_drop_rate_percent += get(Stat::GoldDropRatePercent);
             b.mine_rate_percent += get(Stat::MineRatePercent);
+            b.gem_rate_percent += get(Stat::GemRatePercent);
             b.holy += get(Stat::Holy);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
             b.hand_weight += get(Stat::HandWeight);
+            // C# RefreshEquipmentStats（:1859）：Stats.Add(temp.AddedStats)——装备附加属性（宝石/精炼/觉醒附加）
+            for (stat, v) in eq.added_stats.iter() {
+                apply_equipment_stat(&mut b, stat, v);
+            }
+            // C# RefreshEquipmentStats（:1861-1874）：temp.Awake.GetAC/MAC/DC/MC/SC/HPMP（levels 求和）
+            let awake_value: i32 = eq.awake.levels.iter().map(|&l| i32::from(l)).sum();
+            match eq.awake.awake_type {
+                mir2_shared::enums::AwakeType::Dc => {
+                    b.min_atk += awake_value;
+                    b.max_atk += awake_value;
+                }
+                mir2_shared::enums::AwakeType::Mc => {
+                    b.min_mc += awake_value;
+                    b.max_mc += awake_value;
+                }
+                mir2_shared::enums::AwakeType::Sc => {
+                    b.min_sc += awake_value;
+                    b.max_sc += awake_value;
+                }
+                mir2_shared::enums::AwakeType::Ac => {
+                    b.min_ac += awake_value;
+                    b.max_ac += awake_value;
+                }
+                mir2_shared::enums::AwakeType::Mac => {
+                    b.min_mac += awake_value;
+                    b.max_mac += awake_value;
+                }
+                mir2_shared::enums::AwakeType::HpMp => {
+                    b.hp += awake_value;
+                    b.mp += awake_value;
+                }
+                _ => {}
+            }
+            // C# RefreshSocketStats（:1951-1979）：槽位宝石——基础 + 附加属性计入（破损宝石跳过，:1963）
+            for gem in eq.slots.iter().flatten() {
+                if let Some(gem_info) = item_infos.get(&gem.item_index) {
+                    if gem.current_dura == 0 && gem_info.durability > 0 {
+                        continue;
+                    }
+                    for (k, v) in &gem_info.stats {
+                        if let Ok(stat) = mir2_shared::enums::Stat::try_from(*k) {
+                            apply_equipment_stat(&mut b, stat, *v);
+                        }
+                    }
+                    for (stat, v) in gem.added_stats.iter() {
+                        apply_equipment_stat(&mut b, stat, v);
+                    }
+                }
+            }
             // C# SpecialItemMode.Muscle = 0x0020：负重上限翻倍
             if info.special_mode as u16 & mir2_shared::enums::SpecialItemMode::MUSCLE.bits() != 0 {
                 b.muscle = true;
@@ -9851,6 +9947,48 @@ mod set_bonus_tests {
         });
         let b3 = calculate_equipment_bonuses(&eq, &infos);
         assert_eq!(b3.max_atk, 7);
+    }
+
+    #[test]
+    fn test_equipment_bonuses_includes_added_awake_sockets() {
+        // C# RefreshEquipmentStats/RefreshSocketStats：装备附加 + 觉醒 + 槽位宝石计入玩家属性
+        use mir2_shared::data::item::UserItem;
+        use mir2_shared::enums::{AwakeType, Stat};
+        let mut info = test_item_info(1, 10);
+        info.item_type = 1; // Weapon
+        info.stats.insert(Stat::MaxDC as u8, 5);
+        let mut gem_info = test_item_info(2, 1);
+        gem_info.item_type = 18; // Gem
+        gem_info.stats.insert(Stat::MaxMC as u8, 3);
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, info);
+        infos.insert(2, gem_info);
+
+        let mut gem = UserItem { item_index: 2, ..Default::default() };
+        gem.added_stats.set(Stat::Luck, 2);
+        let mut eq_item = UserItem {
+            item_index: 1,
+            current_dura: 10,
+            max_dura: 10,
+            ..Default::default()
+        };
+        // 附加属性（C# Stats.Add(temp.AddedStats)）
+        eq_item.added_stats.set(Stat::MaxDC, 4);
+        eq_item.added_stats.set(Stat::GemRatePercent, 3);
+        // 觉醒（C# temp.Awake.GetDC：levels 求和）
+        eq_item.awake = mir2_shared::data::item::Awake { awake_type: AwakeType::Dc, levels: vec![2, 3] };
+        // 槽位宝石（C# RefreshSocketStats：基础 + 附加）
+        eq_item.slots = vec![Some(gem)];
+
+        let mut eq: Vec<Option<UserItem>> =
+            vec![None; crate::actors::inventory::EquipmentSlot::COUNT as usize];
+        eq[crate::actors::inventory::EquipmentSlot::Weapon as usize] = Some(eq_item);
+        let b = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b.max_atk, 5 + 4 + 5); // 基础 5 + 附加 4 + 觉醒 5
+        assert_eq!(b.min_atk, 5); // 觉醒 DC 同时加 MinDC
+        assert_eq!(b.max_mc, 3); // 槽位宝石基础 MaxMC
+        assert_eq!(b.luck, 2); // 槽位宝石附加 Luck
+        assert_eq!(b.gem_rate_percent, 3); // 装备附加 GemRatePercent
     }
 
     #[test]
