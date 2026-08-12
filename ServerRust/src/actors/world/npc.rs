@@ -339,6 +339,119 @@ impl Message<NPCCallRequest> for WorldActor {
                 }
                 return;
             }
+            // C# HeroManageKey：player.ManageHeroes()（S.ManageHeroes；NPCScript.cs:1090-1092）
+            Some(EngineNpcAction::ManageHero) => {
+                let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+                super::send_manage_heroes_packet(&self.gate_ref, msg.session_id, &player_state, &heroes);
+                return;
+            }
+            // C# ReplaceWedRingKey：S.NPCReplaceWedRing { Rate = Settings.ReplaceWedRingCost=125 }（:1043-1044）
+            Some(EngineNpcAction::ReplaceWedRing) => {
+                let packet = mir2_shared::packets::server::npc::NPCReplaceWedRing { rate: 125.0 };
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCReplaceWedRing as i16, &body),
+                    }).await;
+                }
+                return;
+            }
+            // C# GuildTerritoryKey：player.GetGuildTerritories(0)（S.GuildTerritoryPage 第 0 页）
+            Some(EngineNpcAction::GuildTerritory) => {
+                self.send_guild_territory_page_packet(msg.session_id, 0);
+                return;
+            }
+            // C# GuildCreateKey（NPCScript.cs:1050-1062）：已在行会拒绝；否则 S.GuildNameRequest（等级在创建时校验）
+            Some(EngineNpcAction::CreateGuild) => {
+                if player_state.guild_name.is_some() {
+                    send_system_message(&self.gate_ref, msg.session_id, "你已经有行会了");
+                    return;
+                }
+                let mut body = Vec::new();
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildNameRequest as i16, &body),
+                }).await;
+                return;
+            }
+            // C# RequestWarKey（NPCScript.cs:1064-1078）：无行会/非会长拒绝；否则 S.GuildRequestWar（客户端输入目标行会名）
+            Some(EngineNpcAction::RequestWar) => {
+                if player_state.guild_name.is_none() {
+                    send_system_message(&self.gate_ref, msg.session_id, "你没有行会");
+                    return;
+                }
+                if player_state.guild_rank != crate::actors::guild::GuildRank::Leader {
+                    send_system_message(&self.gate_ref, msg.session_id, "只有行会会长才能宣战");
+                    return;
+                }
+                let packet = mir2_shared::packets::server::miscellaneous::GuildRequestWar { guild_name: String::new() };
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16, &body),
+                    }).await;
+                }
+                return;
+            }
+            // C# SendParcelKey：S.MailSendRequest（打开写信框；:1074）
+            Some(EngineNpcAction::SendParcel) => {
+                let packet = mir2_shared::packets::server::mail_system::MailSendRequest;
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MailSendRequest as i16, &body),
+                    }).await;
+                }
+                return;
+            }
+            // C# CollectParcelKey（NPCScript.cs:1076-1093）：收取全部包裹附件 + S.ParcelCollected + GetMail 刷新
+            Some(EngineNpcAction::CollectParcel) => {
+                let mail_ids: Vec<u64> = player_state.mailbox.inbox.iter()
+                    .filter(|m| !m.collected && (!m.items.is_empty() || m.gold > 0))
+                    .map(|m| m.mail_id)
+                    .collect();
+                if mail_ids.is_empty() {
+                    let pkt = mir2_shared::packets::server::mail_system::ParcelCollected { result: -1 };
+                    let mut body = Vec::new();
+                    if mir2_shared::packets::Packet::write_body(&pkt, &mut body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ParcelCollected as i16, &body),
+                        }).await;
+                    }
+                    return;
+                }
+                let mut any = false;
+                for mid in mail_ids {
+                    if let Ok(Some((gold, items))) = record.actor_ref.ask(crate::actors::player::CollectMailAttachment { mail_id: mid }).await {
+                        if gold > 0 {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
+                        }
+                        for item in items {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                        }
+                        any = true;
+                    }
+                }
+                let pkt = mir2_shared::packets::server::mail_system::ParcelCollected { result: if any { 1 } else { -1 } };
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&pkt, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ParcelCollected as i16, &body),
+                    }).await;
+                }
+                // C# GetMail：刷新邮件列表
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    for mail in &new_state.mailbox.inbox {
+                        send_mail_received_packet(&self.gate_ref, msg.session_id, mail);
+                    }
+                }
+                return;
+            }
             // C# ConsignKey：S.NPCConsign（空包；:1041-1043）
             Some(EngineNpcAction::Consign) => {
                 let packet = mir2_shared::packets::server::market_system::NPCConsign {};
@@ -2039,6 +2152,20 @@ pub(crate) enum EngineNpcAction {
     CheckRefine,
     /// C# RefineCollectKey：CollectRefine（NPCCollectRefine + 取回精炼物品）
     RefineCollect,
+    /// C# HeroManageKey：S.ManageHeroes
+    ManageHero,
+    /// C# ReplaceWedRingKey：S.NPCReplaceWedRing
+    ReplaceWedRing,
+    /// C# GuildTerritoryKey：S.GuildTerritoryPage（第 0 页）
+    GuildTerritory,
+    /// C# GuildCreateKey：S.GuildNameRequest
+    CreateGuild,
+    /// C# RequestWarKey：S.GuildRequestWar
+    RequestWar,
+    /// C# SendParcelKey：S.MailSendRequest
+    SendParcel,
+    /// C# CollectParcelKey：收取全部包裹 + S.ParcelCollected
+    CollectParcel,
     /// C# ConsignKey：S.NPCConsign
     Consign,
 }
@@ -2056,6 +2183,13 @@ pub(crate) fn engine_npc_action(key: &str) -> Option<EngineNpcAction> {
         "[@REFINE]" => Some(EngineNpcAction::Refine),
         "[@REFINECHECK]" => Some(EngineNpcAction::CheckRefine),
         "[@REFINECOLLECT]" => Some(EngineNpcAction::RefineCollect),
+        "[@MANAGEHERO]" => Some(EngineNpcAction::ManageHero),
+        "[@REPLACEWEDDINGRING]" => Some(EngineNpcAction::ReplaceWedRing),
+        "[@GUILDTERRITORY]" => Some(EngineNpcAction::GuildTerritory),
+        "[@CREATEGUILD]" => Some(EngineNpcAction::CreateGuild),
+        "[@REQUESTWAR]" => Some(EngineNpcAction::RequestWar),
+        "[@SENDPARCEL]" => Some(EngineNpcAction::SendParcel),
+        "[@COLLECTPARCEL]" => Some(EngineNpcAction::CollectParcel),
         "[@CONSIGN]" => Some(EngineNpcAction::Consign),
         _ => None,
     }
@@ -3098,6 +3232,13 @@ mod tests {
         assert_eq!(engine_npc_action("[@REFINE]"), Some(A::Refine));
         assert_eq!(engine_npc_action("[@REFINECHECK]"), Some(A::CheckRefine));
         assert_eq!(engine_npc_action("[@REFINECOLLECT]"), Some(A::RefineCollect));
+        assert_eq!(engine_npc_action("[@MANAGEHERO]"), Some(A::ManageHero));
+        assert_eq!(engine_npc_action("[@REPLACEWEDDINGRING]"), Some(A::ReplaceWedRing));
+        assert_eq!(engine_npc_action("[@GUILDTERRITORY]"), Some(A::GuildTerritory));
+        assert_eq!(engine_npc_action("[@CREATEGUILD]"), Some(A::CreateGuild));
+        assert_eq!(engine_npc_action("[@REQUESTWAR]"), Some(A::RequestWar));
+        assert_eq!(engine_npc_action("[@SENDPARCEL]"), Some(A::SendParcel));
+        assert_eq!(engine_npc_action("[@COLLECTPARCEL]"), Some(A::CollectParcel));
         assert_eq!(engine_npc_action("[@CONSIGN]"), Some(A::Consign));
         // 大小写不敏感
         assert_eq!(engine_npc_action("[@buysell]"), Some(A::GoodsAndSell));

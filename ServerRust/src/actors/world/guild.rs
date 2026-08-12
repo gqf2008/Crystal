@@ -549,6 +549,13 @@ pub struct GuildTerritoryPageRequest {
 impl Message<GuildTerritoryPageRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildTerritoryPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        self.send_guild_territory_page_packet(msg.session_id, msg.page);
+    }
+}
+
+impl WorldActor {
+    /// #2380：下发行会领地列表页（C# GetGuildTerritories；客户端 GuildTerritoryPage 与 NPC [@GUILDTERRITORY] 共用）
+    pub(crate) fn send_guild_territory_page_packet(&self, session_id: u64, _page: u32) {
         let count = self.conquest_instances.len() as i32;
         let mut body = Vec::new();
         body.extend_from_slice(&count.to_le_bytes());
@@ -560,9 +567,9 @@ impl Message<GuildTerritoryPageRequest> for WorldActor {
             body.push(instance.state.clone() as u8);
         }
         let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
+            session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16, &body),
-        }).await;
+        }).try_send();
     }
 }
 
