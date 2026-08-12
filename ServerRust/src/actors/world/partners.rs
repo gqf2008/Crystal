@@ -340,7 +340,7 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             }
         }
     }
-    let mut buff_updates: Vec<(u64, i32, i32, i32)> = Vec::new();
+    let mut buff_updates: Vec<(u64, i32, i32, i32, mir2_shared::data::stats::Stats)> = Vec::new();
     for (sid, record) in &world.players {
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             let Some(guild_name) = &state.guild_name else { continue };
@@ -355,21 +355,27 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                     mine += buff.buff_mine_rate;
                 }
             }
+            // #2310：行会激活 Buff 全属性（C# RefreshGuildBuffs）
+            let stats = super::sum_active_guild_buff_stats(&world.guild_buff_infos, &active);
             if exp != state.guild_buff_exp_percent
                 || fish != state.guild_buff_fish_rate_percent
                 || mine != state.guild_buff_mine_rate_percent
+                || stats != state.guild_buff_stats
             {
-                buff_updates.push((*sid, exp, fish, mine));
+                buff_updates.push((*sid, exp, fish, mine, stats));
             }
         }
     }
-    for (sid, exp, fish, mine) in buff_updates {
+    for (sid, exp, fish, mine, stats) in buff_updates {
         if let Some(record) = world.players.get(&sid) {
             if let Ok(Some(mut st)) = record.actor_ref.ask(GetPlayerState).await {
                 st.guild_buff_exp_percent = exp;
                 st.guild_buff_fish_rate_percent = fish;
                 st.guild_buff_mine_rate_percent = mine;
+                st.guild_buff_stats = stats;
                 let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+                // C# RefreshStats：Buff 变化后立即重算玩家属性
+                world.recalculate_and_set_stat_bonuses(sid).await;
             }
         }
     }
