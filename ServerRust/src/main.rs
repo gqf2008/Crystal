@@ -164,6 +164,7 @@ async fn async_main() -> anyhow::Result<()> {
         marriage_level_required: cfg.social.marriage_level_required,
         mentor_level_gap: cfg.social.mentor_level_gap,
         mentor_length_days: cfg.social.mentor_length_days,
+        guild_creation_costs: Vec::new(), // #2412：下方用 GuildSettings.ini Required-* 覆盖
     };
     // #2406：用 ini 值覆盖 server.toml 的 C# 默认（对齐 C# LoadGuildSettings）
     social_config.guild_required_level = guild_ini.required_level;
@@ -175,6 +176,8 @@ async fn async_main() -> anyhow::Result<()> {
     social_config.newbie_guild_exp_buff = guild_ini.newbie_guild_exp_buff;
     social_config.guild_experience_list = guild_ini.experience_list;
     social_config.guild_membercap_list = guild_ini.membercap_list;
+    // #2412：建会混合消耗（Guild_CreationCostList）；空 = 回退金币仅（guild_creation_cost_gold）
+    social_config.guild_creation_costs = guild_ini.creation_costs;
     // #2408：邮件/婚姻/师徒用 ini 值覆盖（对齐 C# LoadMail/LoadMarriage/LoadMentor；
     // 配偶加成/婚戒费用/导师加成等 WorldActor 侧字段在 WorldActorArgs 处覆盖）
     social_config.mail_free_with_stamp = mail_ini.free_with_stamp;

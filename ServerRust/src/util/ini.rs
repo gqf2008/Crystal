@@ -198,6 +198,8 @@ pub struct GuildIniSettings {
     pub experience_list: Vec<i64>,
     /// C# Settings.Guild_MembercapList（[Cap] Level-i）
     pub membercap_list: Vec<i32>,
+    /// C# Settings.Guild_CreationCostList（[Required-i]：金币/物品混合消耗）
+    pub creation_costs: Vec<GuildCreationCost>,
 }
 
 impl Default for GuildIniSettings {
@@ -212,8 +214,18 @@ impl Default for GuildIniSettings {
             newbie_guild_exp_buff: 5,
             experience_list: Vec::new(),
             membercap_list: Vec::new(),
+            creation_costs: Vec::new(),
         }
     }
+}
+
+/// 行会创建消耗条目（C# GuildItemVolume：GuildSettings.ini [Required-i]）
+#[derive(Debug, Clone)]
+pub struct GuildCreationCost {
+    /// 物品名（空 = 金币消耗）
+    pub item_name: Option<String>,
+    /// 金币金额 / 物品数量
+    pub amount: u32,
 }
 
 /// 从 `Configs/GuildSettings.ini` 加载行会配置（C# Settings.LoadGuildSettings；文件缺失返回 C# 默认）
@@ -250,6 +262,19 @@ pub fn load_guild_settings(configs_dir: &Path) -> GuildIniSettings {
             break;
         }
         s.membercap_list.push(v as i32);
+    }
+    // C# LoadGuildSettings：while (Required-i Amount != 0) 读取消耗列表（ItemName 空 = 金币）
+    for i in 0..100 {
+        let sec = format!("Required-{}", i);
+        let amount = ini_get_i64(&parsed, &sec, "Amount", 0);
+        if amount <= 0 {
+            break;
+        }
+        let item_name = ini_get(&parsed, &sec, "ItemName").map(|v| v.to_string());
+        s.creation_costs.push(GuildCreationCost {
+            item_name: if item_name.as_deref().map(|v| v.trim().is_empty()).unwrap_or(true) { None } else { item_name },
+            amount: amount as u32,
+        });
     }
     s
 }
@@ -598,7 +623,7 @@ BuffExpRate=0
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("GuildSettings.ini"),
-            "[Guilds]\nMinimumLevel=22\nExpRate=0.01\nPointPerLevel=1\nWarTime=180\nWarCost=30000\nNewbieGuildBuffEnabled=true\nNewbieGuildExpBuff=5\n\n[Exp]\nLevel-0=1\nLevel-1=1\nLevel-2=2\n\n[Cap]\nLevel-0=10\nLevel-1=20\n",
+            "[Guilds]\nMinimumLevel=22\nExpRate=0.01\nPointPerLevel=1\nWarTime=180\nWarCost=30000\nNewbieGuildBuffEnabled=true\nNewbieGuildExpBuff=5\n\n[Exp]\nLevel-0=1\nLevel-1=1\nLevel-2=2\n\n[Cap]\nLevel-0=10\nLevel-1=20\n\n[Required-0]\nItemName=\nAmount=1000000\n\n[Required-1]\nItemName=WoomaHorn\nAmount=1\n",
         )
         .unwrap();
         let s = load_guild_settings(&dir);
@@ -609,6 +634,12 @@ BuffExpRate=0
         assert_eq!(s.war_time, 180);
         assert_eq!(s.experience_list, vec![1, 1, 2]);
         assert_eq!(s.membercap_list, vec![10, 20]);
+        // #2412：建会混合消耗（金币 + 物品）
+        assert_eq!(s.creation_costs.len(), 2);
+        assert!(s.creation_costs[0].item_name.is_none());
+        assert_eq!(s.creation_costs[0].amount, 1_000_000);
+        assert_eq!(s.creation_costs[1].item_name.as_deref(), Some("WoomaHorn"));
+        assert_eq!(s.creation_costs[1].amount, 1);
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → C# 默认
@@ -634,6 +665,12 @@ BuffExpRate=0
         assert_eq!(s.war_cost, 30000);
         assert_eq!(s.experience_list.len(), 21);
         assert_eq!(s.membercap_list.len(), 21);
+        // #2412：建会消耗（金币 1M + WoomaHorn×1）
+        assert_eq!(s.creation_costs.len(), 2);
+        assert!(s.creation_costs[0].item_name.is_none());
+        assert_eq!(s.creation_costs[0].amount, 1_000_000);
+        assert_eq!(s.creation_costs[1].item_name.as_deref(), Some("WoomaHorn"));
+        assert_eq!(s.creation_costs[1].amount, 1);
     }
 
     /// #2408：Goods/Mail/Marriage/Mentor 四组 ini 解析 + 真实文件集成

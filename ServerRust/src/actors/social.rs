@@ -1030,6 +1030,8 @@ pub struct SocialActorConfig {
     pub mentor_level_gap: u8,
     /// 师徒期限（天，C# Settings.MentorLength = 7）
     pub mentor_length_days: u8,
+    /// 建会消耗列表（C# Guild_CreationCostList：[Required-i]；空 = 回退金币 guild_creation_cost_gold）
+    pub guild_creation_costs: Vec<crate::util::ini::GuildCreationCost>,
 }
 
 impl Default for SocialActorConfig {
@@ -1070,6 +1072,7 @@ impl Default for SocialActorConfig {
             marriage_level_required: 10,
             mentor_level_gap: 10,
             mentor_length_days: 7,
+            guild_creation_costs: Vec::new(),
         }
     }
 }
@@ -3512,17 +3515,61 @@ impl Message<CreateGuildRequest> for SocialActor {
             return;
         }
 
-        // 创建行会（扣除费用，对应 C# Settings.Guild_CreationCost / GuildCreationCost）
-        // 调查发现:master C# 端 **没有** Guild_CreationCostList 字段(2026-06
-        // 搜索 Server/Settings.cs 和 Server/MirEnvir/ 0 匹配);旧代码的
-        // "支持物品+金币混合消耗" 注释原本基于对 master 的误解。本分支只
-        // 支持金币扣除,这是 master 端实际的等价行为。如果未来 master 加
-        // 混合消耗,可在此扩展。
-        if state.inventory.gold < self.config.guild_creation_cost_gold as u64 {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", self.config.guild_creation_cost_gold));
-            return;
+        // #2412：建会混合消耗（C# Guild_CreationCostList：[Required-i] 金币/物品；非 GM 才校验/消耗）
+        if !state.is_gm {
+            if !self.config.guild_creation_costs.is_empty() {
+                // 逐项校验
+                for cost in &self.config.guild_creation_costs {
+                    match &cost.item_name {
+                        None => {
+                            if state.inventory.gold < cost.amount as u64 {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", cost.amount));
+                                return;
+                            }
+                        }
+                        Some(name) => {
+                            let idx = {
+                                let infos = self.config.item_infos.read().await;
+                                infos.values().find(|i| i.name.eq_ignore_ascii_case(name)).map(|i| i.index)
+                            };
+                            let Some(idx) = idx else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("缺少建会材料：{}", name));
+                                return;
+                            };
+                            let count = record.ask(crate::actors::player::CountItemsByIndex { item_index: idx }).await.unwrap_or(0);
+                            if (count as u32) < cost.amount {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("缺少建会材料：{} ×{}", name, cost.amount));
+                                return;
+                            }
+                        }
+                    }
+                }
+                // 消耗
+                for cost in &self.config.guild_creation_costs {
+                    match &cost.item_name {
+                        None => {
+                            let _ = record.ask(crate::actors::player::DeductGold { amount: cost.amount as u64 }).await;
+                        }
+                        Some(name) => {
+                            let infos = self.config.item_infos.read().await;
+                            if let Some(i) = infos.values().find(|i| i.name.eq_ignore_ascii_case(name)) {
+                                let _ = record.ask(crate::actors::player::ConsumeItemsByIndex {
+                                    item_index: i.index,
+                                    count: cost.amount.min(u16::MAX as u32) as u16,
+                                }).await;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // 兼容：无 Required 列表时回退金币仅（guild_creation_cost_gold）
+                if state.inventory.gold < self.config.guild_creation_cost_gold as u64 {
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", self.config.guild_creation_cost_gold));
+                    return;
+                }
+                let _ = record.ask(DeductGold { amount: self.config.guild_creation_cost_gold }).await;
+            }
         }
-        let _ = record.ask(DeductGold { amount: self.config.guild_creation_cost_gold }).await;
 
         let mut guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
         // #2406：C# GuildInfo 构造——MaxExperience = Guild_ExperienceList[Level]（Level=1 → index1）；
