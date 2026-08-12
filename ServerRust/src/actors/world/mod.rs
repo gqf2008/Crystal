@@ -6148,17 +6148,16 @@ impl WorldActor {
             _ => return,
         };
         use mir2_shared::enums::{SpecialItemMode, Spell};
+        // #2308：C# RefreshSocketStats——槽位宝石特殊模式也计入（Flame/Healing/Blink 临时技能）
+        let unique = equipment_special_mode(&state.inventory.equipment);
         let mut desired: Vec<i32> = Vec::new();
-        for eq in state.inventory.equipment.iter().flatten() {
-            let Some(unique) = eq.info.as_ref().map(|i| i.unique) else { continue };
-            for (flag, spell) in [
-                (SpecialItemMode::FLAME, Spell::FireBall as i32),
-                (SpecialItemMode::HEALING, Spell::Healing as i32),
-                (SpecialItemMode::BLINK, Spell::Blink as i32),
-            ] {
-                if unique.contains(flag) && !desired.contains(&spell) {
-                    desired.push(spell);
-                }
+        for (flag, spell) in [
+            (SpecialItemMode::FLAME, Spell::FireBall as i32),
+            (SpecialItemMode::HEALING, Spell::Healing as i32),
+            (SpecialItemMode::BLINK, Spell::Blink as i32),
+        ] {
+            if unique.contains(flag) && !desired.contains(&spell) {
+                desired.push(spell);
             }
         }
         let mut new_state = state;
@@ -7024,6 +7023,10 @@ pub(crate) fn calculate_equipment_bonuses(
             let slots: Vec<usize> = entries.iter().map(|(s, _)| *s).collect();
             apply_mir_set_bonus(&mut b, &slots);
         }
+    }
+    // #2308：槽位宝石 Muscle 也触发负重翻倍（C# RefreshSocketStats 聚合 SpecialMode）
+    if equipment_special_mode(equipment).contains(mir2_shared::enums::SpecialItemMode::MUSCLE) {
+        b.muscle = true;
     }
     b
 }
@@ -7896,9 +7899,34 @@ pub(crate) fn rental_has_flag(item: &mir2_shared::data::item::UserItem, flag: u1
 }
 
 /// #940：是否装备了含指定特殊模式的物品（C# SpecialMode.HasFlag）
-fn has_special_equipped(state: &PlayerState, flag: mir2_shared::enums::SpecialItemMode) -> bool {
-    state.inventory.equipment.iter().flatten()
-        .any(|it| it.info.as_ref().map(|i| i.unique.contains(flag)).unwrap_or(false))
+/// 聚合装备 + 槽位宝石的特殊模式（C# RefreshEquipmentStats :1877 / RefreshSocketStats :1969-1970；破损跳过 :1836/:1963）
+pub(crate) fn equipment_special_mode(
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+) -> mir2_shared::enums::SpecialItemMode {
+    use mir2_shared::enums::SpecialItemMode;
+    let mut mode = SpecialItemMode::NONE;
+    for eq in equipment.iter().flatten() {
+        let Some(info) = eq.info.as_ref() else { continue };
+        // 破损装备不提供特殊模式（C# RefreshStats continue）
+        if eq.current_dura == 0 && info.durability > 0 {
+            continue;
+        }
+        mode |= info.unique;
+        // 槽位宝石（C# RefreshSocketStats）
+        for gem in eq.slots.iter().flatten() {
+            let Some(gem_info) = gem.info.as_ref() else { continue };
+            if gem.current_dura == 0 && gem_info.durability > 0 {
+                continue;
+            }
+            mode |= gem_info.unique;
+        }
+    }
+    mode
+}
+
+/// 是否装备（含槽位宝石）了指定特殊模式（C# SpecialMode.HasFlag）
+pub(crate) fn has_special_equipped(state: &PlayerState, flag: mir2_shared::enums::SpecialItemMode) -> bool {
+    equipment_special_mode(&state.inventory.equipment).contains(flag)
 }
 
 /// #1458：C# GuildObject.IsEnemy——宣战敌对行会才可攻击（IsAtWar && WarringGuilds 包含）
@@ -9989,6 +10017,43 @@ mod set_bonus_tests {
         assert_eq!(b.max_mc, 3); // 槽位宝石基础 MaxMC
         assert_eq!(b.luck, 2); // 槽位宝石附加 Luck
         assert_eq!(b.gem_rate_percent, 3); // 装备附加 GemRatePercent
+    }
+
+    #[test]
+    fn test_equipment_special_mode_includes_socket_gems() {
+        // #2308：C# RefreshSocketStats——槽位宝石特殊模式聚合；破损宝石跳过
+        use mir2_shared::data::item::UserItem;
+        use mir2_shared::enums::SpecialItemMode;
+        let mut weapon = UserItem::default();
+        weapon.item_index = 1;
+        weapon.current_dura = 10;
+        weapon.info = Some(mir2_shared::data::item::ItemInfo {
+            index: 1,
+            unique: SpecialItemMode::MUSCLE,
+            durability: 10,
+            ..Default::default()
+        });
+        let mut gem = UserItem::default();
+        gem.item_index = 2;
+        gem.info = Some(mir2_shared::data::item::ItemInfo {
+            index: 2,
+            unique: SpecialItemMode::PARALIZE,
+            ..Default::default()
+        });
+        weapon.slots = vec![Some(gem)];
+
+        let mut eq = vec![Some(weapon)];
+        let mode = equipment_special_mode(&eq);
+        assert!(mode.contains(SpecialItemMode::MUSCLE));
+        assert!(mode.contains(SpecialItemMode::PARALIZE));
+
+        // 破损宝石不提供特殊模式（C# :1963 continue）
+        let gem = eq[0].as_mut().unwrap().slots[0].as_mut().unwrap();
+        gem.current_dura = 0;
+        gem.info.as_mut().unwrap().durability = 10;
+        let mode2 = equipment_special_mode(&eq);
+        assert!(mode2.contains(SpecialItemMode::MUSCLE));
+        assert!(!mode2.contains(SpecialItemMode::PARALIZE));
     }
 
     #[test]

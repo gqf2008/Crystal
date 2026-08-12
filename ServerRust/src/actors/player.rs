@@ -560,10 +560,8 @@ impl PlayerState {
             attacker_damage_rate: if self.mentor_damage_bonus { 1.1 } else { 1.0 },
             freezing: self.freezing,
             poison_attack: self.poison_attack,
-            // C# SpecialItemMode.Paralize：任意装备带 Paralize 特殊模式（1/14 概率麻痹，Random.Next(1,15)==1）
-            paralize: self.inventory.equipment.iter().flatten().any(|e| {
-                e.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::PARALIZE)).unwrap_or(false)
-            }),
+            // C# SpecialItemMode.Paralize：任意装备/槽位宝石带 Paralize（1/14 概率麻痹，Random.Next(1,15)==1；#2308 含宝石）
+            paralize: crate::actors::world::has_special_equipped(self, mir2_shared::enums::SpecialItemMode::PARALIZE),
         }
     }
 }
@@ -5622,6 +5620,9 @@ impl PlayerState {
         amount: u16,
         info: Option<&crate::db::MagicInfo>,
     ) -> Option<(mir2_shared::enums::Spell, u8, u16)> {
+        // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
+        // #1246：破损装备特殊模式失效（C# RefreshStats continue）；#2308 槽位宝石 Skill 也计入（C# RefreshSocketStats :1973）
+        let skill_multiplier = crate::actors::world::has_special_equipped(self, mir2_shared::enums::SpecialItemMode::SKILL);
         let spell_cs = spell_shared.saturating_sub(3) as i32;
         let magic = self.magics.iter_mut().find(|m| m.spell == spell_cs)?;
         if magic.level >= 3 {
@@ -5638,22 +5639,7 @@ impl PlayerState {
                 return None;
             }
         }
-        // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
-        // #1246：破损装备特殊模式失效（C# RefreshStats continue）
         let mut amount = amount;
-        let skill_multiplier = self.inventory.equipment.iter().flatten().any(|it| {
-            let broken =
-                it.current_dura == 0 && it.info.as_ref().map(|i| i.durability > 0).unwrap_or(false);
-            !broken
-                && it
-                    .info
-                    .as_ref()
-                    .map(|i| {
-                        i.unique
-                            .contains(mir2_shared::enums::SpecialItemMode::SKILL)
-                    })
-                    .unwrap_or(false)
-        });
         if skill_multiplier {
             amount = amount.saturating_mul(3);
         } else if self.is_mentor && self.mentor_damage_bonus {
