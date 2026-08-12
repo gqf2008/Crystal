@@ -150,6 +150,8 @@ pub struct WorldActorArgs {
     pub replace_wedring_cost: u32,
     /// 配偶经验加成 %（C# Settings.LoverEXPBonus = 5）
     pub lover_exp_bonus: u32,
+    /// 徒弟经验加成 %（C# Settings.MentorExpBoost = 10）
+    pub mentor_exp_boost: u8,
 }
 
 /// 世界中的玩家记录
@@ -1549,6 +1551,8 @@ pub struct WorldActor {
     pub(crate) replace_wedring_cost: u32,
     /// 配偶经验加成 %（C# Settings.LoverEXPBonus = 5）
     pub(crate) lover_exp_bonus: u32,
+    /// 徒弟经验加成 %（C# Settings.MentorExpBoost = 10）
+    pub(crate) mentor_exp_boost: u8,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1996,6 +2000,7 @@ impl WorldActor {
             refine_cfg: crate::util::config::RefineConfig::default(),
             replace_wedring_cost: 125,
             lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5941,6 +5946,7 @@ Ok(Self {
             refine_cfg: args.refine_cfg,
             replace_wedring_cost: args.replace_wedring_cost,
             lover_exp_bonus: args.lover_exp_bonus,
+            mentor_exp_boost: args.mentor_exp_boost,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

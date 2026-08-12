@@ -310,6 +310,12 @@ pub struct SocialConfig {
     /// 配偶同图 16 格内经验加成 %（C# Settings.LoverEXPBonus = 5）
     #[serde(default = "default_lover_exp_bonus")]
     pub lover_exp_bonus: u32,
+    /// 师徒等级差下限（C# Settings.MentorLevelGap = 10）
+    #[serde(default = "default_mentor_level_gap")]
+    pub mentor_level_gap: u8,
+    /// 徒弟同图同组经验加成 %（C# Settings.MentorExpBoost = 10）
+    #[serde(default = "default_mentor_exp_boost")]
+    pub mentor_exp_boost: u8,
 }
 
 fn default_allow_new_character() -> bool {
@@ -366,6 +372,14 @@ fn default_replace_wedring_cost() -> u32 {
 
 fn default_lover_exp_bonus() -> u32 {
     5
+}
+
+fn default_mentor_level_gap() -> u8 {
+    10
+}
+
+fn default_mentor_exp_boost() -> u8 {
+    10
 }
 
 fn default_wedding_ring_recall() -> bool {
@@ -434,6 +448,8 @@ impl Default for SocialConfig {
             marriage_level_required: default_marriage_level_required(),
             replace_wedring_cost: default_replace_wedring_cost(),
             lover_exp_bonus: default_lover_exp_bonus(),
+            mentor_level_gap: default_mentor_level_gap(),
+            mentor_exp_boost: default_mentor_exp_boost(),
         }
     }
 }
@@ -882,5 +898,13 @@ mod tests {
         assert_eq!(c.marriage_level_required, 10);
         assert_eq!(c.replace_wedring_cost, 125);
         assert_eq!(c.lover_exp_bonus, 5);
+    }
+
+    /// #2396：师徒配置默认值（C# Settings.MentorLevelGap/MentorExpBoost）
+    #[test]
+    fn mentor_defaults_match_csharp() {
+        let c = ServerConfig::default().social;
+        assert_eq!(c.mentor_level_gap, 10);
+        assert_eq!(c.mentor_exp_boost, 10);
     }
 }

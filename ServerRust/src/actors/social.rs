@@ -1026,6 +1026,8 @@ pub struct SocialActorConfig {
     pub marriage_cooldown_days: i64,
     /// 结婚最低等级（C# Settings.MarriageLevelRequired = 10）
     pub marriage_level_required: u16,
+    /// 师徒等级差下限（C# Settings.MentorLevelGap = 10）
+    pub mentor_level_gap: u8,
 }
 
 impl Default for SocialActorConfig {
@@ -1064,6 +1066,7 @@ impl Default for SocialActorConfig {
             guild_war_time: 180,
             marriage_cooldown_days: 7,
             marriage_level_required: 10,
+            mentor_level_gap: 10,
         }
     }
 }
@@ -4704,8 +4707,8 @@ impl Message<SocialAddMentor> for SocialActor {
             send_system_message(&self.gate_ref, msg.session_id, "只能拜同职业的师父");
             return;
         }
-        if (requester_state.level as u32 + 10) > target_state.level as u32 {
-            send_system_message(&self.gate_ref, msg.session_id, "师父等级需高于徒弟至少 10 级");
+        if (requester_state.level as u32 + self.config.mentor_level_gap as u32) > target_state.level as u32 {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("师父等级需高于徒弟至少 {} 级", self.config.mentor_level_gap));
             return;
         }
 
@@ -4792,8 +4795,8 @@ impl Message<SocialMentorReply> for SocialActor {
             return;
         }
         // C# :13631-13635：徒弟等级需低于师父至少 10 级（Settings.MentorLevelGap=10，与 AddMentor 一致）
-        if (requester_state.level as u32 + 10) > replier_state.level as u32 {
-            send_system_message(&self.gate_ref, replier_session, "徒弟等级需低于师父至少 10 级");
+        if (requester_state.level as u32 + self.config.mentor_level_gap as u32) > replier_state.level as u32 {
+            send_system_message(&self.gate_ref, replier_session, &format!("徒弟等级需低于师父至少 {} 级", self.config.mentor_level_gap));
             return;
         }
 

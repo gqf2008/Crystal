@@ -157,6 +157,7 @@ async fn start_server_with_world() -> u16 {
         refine_cfg: crystal_server::util::config::RefineConfig::default(),
         replace_wedring_cost: 125,
         lover_exp_bonus: 5,
+        mentor_exp_boost: 10,
         experience_list: Vec::new(),
         fishing_cfg: Default::default(),
         random_item_stats: Vec::new(),

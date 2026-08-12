@@ -145,6 +145,7 @@ async fn async_main() -> anyhow::Result<()> {
         guild_war_time: cfg.social.guild_war_time,
         marriage_cooldown_days: cfg.social.marriage_cooldown_days,
         marriage_level_required: cfg.social.marriage_level_required,
+        mentor_level_gap: cfg.social.mentor_level_gap,
     };
     info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
     let social_ref = SocialActor::spawn(SocialActorArgs {
@@ -194,6 +195,7 @@ async fn async_main() -> anyhow::Result<()> {
         refine_cfg: cfg.refine.clone(),
         replace_wedring_cost: cfg.social.replace_wedring_cost,
         lover_exp_bonus: cfg.social.lover_exp_bonus,
+        mentor_exp_boost: cfg.social.mentor_exp_boost,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 
