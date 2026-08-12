@@ -264,8 +264,8 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     // GetNewbieGuildConfig），当击杀经验在 WorldActor tick 内发放时形成互相等待死锁。
     // 这里在独立消息（ProcessElementalTick）中把加成缓存进 PlayerState，
     // AddExperience 只读缓存，不再反向 ask。
-    const LOVER_EXP_BONUS: i32 = 5;   // C# Settings.LoverEXPBonus
     const MENTEE_EXP_BONUS: i32 = 10; // C# Settings.MentorExpBoost
+    let lover_exp_bonus = world.lover_exp_bonus as i32; // C# Settings.LoverEXPBonus（#2394 配置化）
     let newbie_cfg = world.social_ref
         .ask(crate::actors::social::NpcGetNewbieGuildConfig)
         .await
@@ -283,7 +283,7 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                         }
                         // C# Functions.InRange = 切比雪夫
                         if (os.x - state.x).abs().max((os.y - state.y).abs()) <= DATA_RANGE {
-                            lover = LOVER_EXP_BONUS;
+                            lover = lover_exp_bonus;
                             break;
                         }
                     }

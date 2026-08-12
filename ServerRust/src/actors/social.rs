@@ -1022,6 +1022,10 @@ pub struct SocialActorConfig {
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
     pub guild_war_time: i64,
+    /// 离婚后再次结婚等待天数（C# Settings.MarriageCooldown = 7）
+    pub marriage_cooldown_days: i64,
+    /// 结婚最低等级（C# Settings.MarriageLevelRequired = 10）
+    pub marriage_level_required: u16,
 }
 
 impl Default for SocialActorConfig {
@@ -1058,6 +1062,8 @@ impl Default for SocialActorConfig {
             allow_login: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
+            marriage_cooldown_days: 7,
+            marriage_level_required: 10,
         }
     }
 }
@@ -1158,10 +1164,7 @@ fn front_tile(x: i32, y: i32, dir: u8) -> (i32, i32) {
     (x + DIR_DX[d], y + DIR_DY[d])
 }
 
-/// C# Settings.MarriageCooldown（离婚后再次结婚等待天数）
-const MARRIAGE_COOLDOWN_DAYS: i64 = 7;
-/// C# Settings.MarriageLevelRequired（结婚最低等级）
-const MARRIAGE_LEVEL_REQUIRED: u16 = 10;
+// #2394：婚姻配置改用 SocialConfig（C# Settings.MarriageCooldown/MarriageLevelRequired）
 
 /// C# MarriageRequest 目标侧校验输入（PlayerObject.cs:13174-13226 所需字段）
 struct MarriageTargetCtx<'a> {
@@ -1185,7 +1188,12 @@ struct MarriageTargetCtx<'a> {
 
 /// C# MarriageRequest 目标侧校验（PlayerObject.cs:13174-13226）
 /// 返回 None = 全部通过；Some(拒绝原因) = 校验失败（消息发给发起方）
-fn marriage_target_check(ctx: &MarriageTargetCtx<'_>, now_unix: i64) -> Option<String> {
+fn marriage_target_check(
+    ctx: &MarriageTargetCtx<'_>,
+    now_unix: i64,
+    marriage_level_required: u16,
+    marriage_cooldown_days: i64,
+) -> Option<String> {
     // C# :13174 双方面对面（FacingEachOther）
     if !facing_each_other(
         ctx.requester_dir,
@@ -1198,12 +1206,12 @@ fn marriage_target_check(ctx: &MarriageTargetCtx<'_>, now_unix: i64) -> Option<S
         return Some("结婚需要双方面对面".to_string());
     }
     // C# :13180 目标等级（MarriageLevelRequired=10）
-    if ctx.target_level < MARRIAGE_LEVEL_REQUIRED {
-        return Some(format!("{} 需要达到 {} 级才能结婚", ctx.target_name, MARRIAGE_LEVEL_REQUIRED));
+    if ctx.target_level < marriage_level_required {
+        return Some(format!("{} 需要达到 {} 级才能结婚", ctx.target_name, marriage_level_required));
     }
     // C# :13186 目标离婚冷却（MarriageCooldown=7 天）
-    if ctx.target_married_date > 0 && now_unix < ctx.target_married_date + MARRIAGE_COOLDOWN_DAYS * 86_400 {
-        return Some(format!("{} 离婚后 {} 天内无法再次结婚", ctx.target_name, MARRIAGE_COOLDOWN_DAYS));
+    if ctx.target_married_date > 0 && now_unix < ctx.target_married_date + marriage_cooldown_days * 86_400 {
+        return Some(format!("{} 离婚后 {} 天内无法再次结婚", ctx.target_name, marriage_cooldown_days));
     }
     // C# :13192 目标是否允许求婚（AllowMarriage 开关）
     if !ctx.target_allow_marriage {
@@ -4318,16 +4326,16 @@ impl Message<MarriageRequest> for SocialActor {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         if requester_state.married_date > 0 {
-            if now_unix < requester_state.married_date + MARRIAGE_COOLDOWN_DAYS * 86_400 {
+            if now_unix < requester_state.married_date + self.config.marriage_cooldown_days * 86_400 {
                 send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("离婚后 {} 天内无法再次结婚", MARRIAGE_COOLDOWN_DAYS));
+                    &format!("离婚后 {} 天内无法再次结婚", self.config.marriage_cooldown_days));
                 return;
             }
         }
         // C# MarriageRequest（:13146-13150）：等级要求（Settings.MarriageLevelRequired=10）
-        if requester_state.level < MARRIAGE_LEVEL_REQUIRED {
+        if requester_state.level < self.config.marriage_level_required {
             send_system_message(&self.gate_ref, msg.session_id,
-                &format!("需要达到 {} 级才能结婚", MARRIAGE_LEVEL_REQUIRED));
+                &format!("需要达到 {} 级才能结婚", self.config.marriage_level_required));
             return;
         }
 
@@ -4377,7 +4385,7 @@ impl Message<MarriageRequest> for SocialActor {
             target_spouse: target_state.spouse_name.is_some(),
             target_has_pending: self.pending_marriage_invites.contains_key(&target_session),
         };
-        if let Some(reason) = marriage_target_check(&marriage_ctx, now_unix) {
+        if let Some(reason) = marriage_target_check(&marriage_ctx, now_unix, self.config.marriage_level_required, self.config.marriage_cooldown_days) {
             send_system_message(&self.gate_ref, msg.session_id, &reason);
             return;
         }
@@ -5109,46 +5117,46 @@ mod tests {
             target_has_pending: false,
         };
         // 全部通过
-        assert_eq!(marriage_target_check(&base, now), None);
+        assert_eq!(marriage_target_check(&base, now, 10, 7), None);
 
         // 1. 双方面对面
         let c = MarriageTargetCtx { requester_dir: 6, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "结婚需要双方面对面");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "结婚需要双方面对面");
 
         // 2. 目标等级不足
         let c = MarriageTargetCtx { target_level: 9, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "Target 需要达到 10 级才能结婚");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 需要达到 10 级才能结婚");
 
         // 3. 目标离婚冷却
         let c = MarriageTargetCtx { target_married_date: now - 1, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "Target 离婚后 7 天内无法再次结婚");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 离婚后 7 天内无法再次结婚");
         // 冷却已过
         let c = MarriageTargetCtx { target_married_date: now - 8 * 86_400, ..base };
-        assert_eq!(marriage_target_check(&c, now), None);
+        assert_eq!(marriage_target_check(&c, now, 10, 7), None);
 
         // 4. 目标未允许求婚
         let c = MarriageTargetCtx { target_allow_marriage: false, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "目标玩家当前不允许接收求婚");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "目标玩家当前不允许接收求婚");
 
         // 5. 双方死亡
         let c = MarriageTargetCtx { requester_dead: true, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "死亡状态下无法求婚");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "死亡状态下无法求婚");
         let c = MarriageTargetCtx { target_dead: true, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "死亡状态下无法求婚");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "死亡状态下无法求婚");
 
         // 6. 目标已有待处理求婚
         let c = MarriageTargetCtx { target_has_pending: true, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "Target 已有待处理的求婚");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 已有待处理的求婚");
 
         // 7. 距离 > DataRange(16) 或不同地图
         let c = MarriageTargetCtx { target_x: 120, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "Target 不在可求婚范围内");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 不在可求婚范围内");
         let c = MarriageTargetCtx { target_map: 2, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "Target 不在可求婚范围内");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 不在可求婚范围内");
 
         // 8. 目标已婚
         let c = MarriageTargetCtx { target_spouse: true, ..base };
-        assert_eq!(marriage_target_check(&c, now).unwrap(), "目标玩家已经结婚了");
+        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "目标玩家已经结婚了");
     }
 
     /// #2138：行会战争镜像双向增删（宣战/停战），与 C# WarringGuilds 语义一致

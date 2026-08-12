@@ -155,6 +155,8 @@ async fn start_server_with_world() -> u16 {
         monster_recall_range: 12,
         monster_recall_cooldown_ms: 5000,
         refine_cfg: crystal_server::util::config::RefineConfig::default(),
+        replace_wedring_cost: 125,
+        lover_exp_bonus: 5,
         experience_list: Vec::new(),
         fishing_cfg: Default::default(),
         random_item_stats: Vec::new(),

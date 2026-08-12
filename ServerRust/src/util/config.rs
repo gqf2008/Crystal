@@ -298,6 +298,18 @@ pub struct SocialConfig {
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180；<$GUILDWARTIME>）
     #[serde(default = "default_guild_war_time")]
     pub guild_war_time: i64,
+    /// 离婚后再次结婚等待天数（C# Settings.MarriageCooldown = 7）
+    #[serde(default = "default_marriage_cooldown_days")]
+    pub marriage_cooldown_days: i64,
+    /// 结婚最低等级（C# Settings.MarriageLevelRequired = 10）
+    #[serde(default = "default_marriage_level_required")]
+    pub marriage_level_required: u16,
+    /// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125；cost = RequiredAmount*10*Cost）
+    #[serde(default = "default_replace_wedring_cost")]
+    pub replace_wedring_cost: u32,
+    /// 配偶同图 16 格内经验加成 %（C# Settings.LoverEXPBonus = 5）
+    #[serde(default = "default_lover_exp_bonus")]
+    pub lover_exp_bonus: u32,
 }
 
 fn default_allow_new_character() -> bool {
@@ -338,6 +350,22 @@ fn default_guild_war_cost() -> u32 {
 
 fn default_guild_war_time() -> i64 {
     180
+}
+
+fn default_marriage_cooldown_days() -> i64 {
+    7
+}
+
+fn default_marriage_level_required() -> u16 {
+    10
+}
+
+fn default_replace_wedring_cost() -> u32 {
+    125
+}
+
+fn default_lover_exp_bonus() -> u32 {
+    5
 }
 
 fn default_wedding_ring_recall() -> bool {
@@ -402,6 +430,10 @@ impl Default for SocialConfig {
             allow_login: default_true(),
             guild_war_cost: default_guild_war_cost(),
             guild_war_time: default_guild_war_time(),
+            marriage_cooldown_days: default_marriage_cooldown_days(),
+            marriage_level_required: default_marriage_level_required(),
+            replace_wedring_cost: default_replace_wedring_cost(),
+            lover_exp_bonus: default_lover_exp_bonus(),
         }
     }
 }
@@ -840,5 +872,15 @@ mod tests {
         assert_eq!(c.item_stat_reduce, 15);
         assert_eq!(c.cost, 125);
         assert_eq!(c.ore_name, "BlackIronOre");
+    }
+
+    /// #2394：婚姻/配偶配置默认值（C# Settings.Marriage*/ReplaceWedRingCost/LoverEXPBonus）
+    #[test]
+    fn marriage_defaults_match_csharp() {
+        let c = ServerConfig::default().social;
+        assert_eq!(c.marriage_cooldown_days, 7);
+        assert_eq!(c.marriage_level_required, 10);
+        assert_eq!(c.replace_wedring_cost, 125);
+        assert_eq!(c.lover_exp_bonus, 5);
     }
 }

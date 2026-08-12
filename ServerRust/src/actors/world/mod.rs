@@ -146,6 +146,10 @@ pub struct WorldActorArgs {
     pub monster_recall_cooldown_ms: u64,
     /// 精炼配置（C# Settings.Refine*）
     pub refine_cfg: crate::util::config::RefineConfig,
+    /// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125）
+    pub replace_wedring_cost: u32,
+    /// 配偶经验加成 %（C# Settings.LoverEXPBonus = 5）
+    pub lover_exp_bonus: u32,
 }
 
 /// 世界中的玩家记录
@@ -1541,6 +1545,10 @@ pub struct WorldActor {
     pub(crate) monster_recall_cooldown_ms: u64,
     /// 精炼配置（C# Settings.Refine*）
     pub(crate) refine_cfg: crate::util::config::RefineConfig,
+    /// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125）
+    pub(crate) replace_wedring_cost: u32,
+    /// 配偶经验加成 %（C# Settings.LoverEXPBonus = 5）
+    pub(crate) lover_exp_bonus: u32,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1986,6 +1994,8 @@ impl WorldActor {
             monster_recall_range: 12,
             monster_recall_cooldown_ms: 5000,
             refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5929,6 +5939,8 @@ Ok(Self {
             monster_recall_range: args.monster_recall_range,
             monster_recall_cooldown_ms: args.monster_recall_cooldown_ms,
             refine_cfg: args.refine_cfg,
+            replace_wedring_cost: args.replace_wedring_cost,
+            lover_exp_bonus: args.lover_exp_bonus,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

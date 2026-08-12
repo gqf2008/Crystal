@@ -2953,12 +2953,9 @@ impl Message<EquipSlotItemRequest> for WorldActor {
     }
 }
 
-/// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125）
-const REPLACE_WEDRING_COST: i32 = 125;
-
-/// #2036：C# ReplaceWeddingRing（13100）——费用 (RequiredAmount*10)*ReplaceWedRingCost
-fn replace_wedring_cost(required_amount: i32) -> u64 {
-    ((required_amount.max(0) * 10) * REPLACE_WEDRING_COST) as u64
+/// #2036：C# ReplaceWeddingRing（13100）——费用 (RequiredAmount*10)*ReplaceWedRingCost（#2394 配置化）
+fn replace_wedring_cost(required_amount: i32, cost: u32) -> u64 {
+    (required_amount.max(0) as i64 * 10 * cost as i64) as u64
 }
 
 impl Message<ReplaceWedRingRequest> for WorldActor {
@@ -3016,7 +3013,7 @@ impl Message<ReplaceWedRingRequest> for WorldActor {
         }
 
         // #2036：C# 费用 (RequiredAmount*10)*ReplaceWedRingCost(125)
-        let cost = replace_wedring_cost(item_db.required_amount);
+        let cost = replace_wedring_cost(item_db.required_amount, self.replace_wedring_cost);
         if state.inventory.gold < cost {
             send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法更换结婚戒指");
             return;
@@ -4359,10 +4356,10 @@ mod tests {
     #[test]
     fn replace_wedring_cost_matches_csharp() {
         // #2036：C# ReplaceWeddingRing——cost = (RequiredAmount*10)*ReplaceWedRingCost(125)
-        assert_eq!(super::replace_wedring_cost(0), 0);
-        assert_eq!(super::replace_wedring_cost(1), 1250);
-        assert_eq!(super::replace_wedring_cost(10), 12500);
-        assert_eq!(super::replace_wedring_cost(-5), 0);
+        assert_eq!(super::replace_wedring_cost(0, 125), 0);
+        assert_eq!(super::replace_wedring_cost(1, 125), 1250);
+        assert_eq!(super::replace_wedring_cost(10, 125), 12500);
+        assert_eq!(super::replace_wedring_cost(-5, 125), 0);
     }
 
     #[test]
