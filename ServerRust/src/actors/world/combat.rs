@@ -5552,8 +5552,17 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts Repulsion", state.name);
             }
-            // ElectricShock：驯服怪物（对齐 C# HumanObject.cs ElectricShock）
+            // ElectricShock：驯服怪物（对齐 C# HumanObject.cs:4009-4072 ElectricShock，#2362）
             SPELL_ELECTRIC_SHOCK => {
+                // C# :4011 CurrentMap.Info.NoPets → 禁止驯服
+                if self.map_infos.get(&(state.map_index as i32))
+                    .map(|m| m.no_pets)
+                    .unwrap_or(false)
+                {
+                    electric_shock_exp_handled = true;
+                    send_system_message(&self.gate_ref, msg.session_id, "该地图禁止召唤宠物");
+                    return;
+                }
                 let target_mid: Option<u32> = self.monsters.iter()
                     .find(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
@@ -5561,7 +5570,20 @@ impl Message<MagicRequest> for WorldActor {
                     })
                     .map(|(id, _)| *id);
                 if let Some(mid) = target_mid {
-                    // 已驯服宠物：眩晕（ShockTime = (Lv*5+10)s）并清除目标（C# target.Master == this）
+                    // C# HumanObject.cs:4009-4072 ElectricShock——驯服流程全量对齐（#2362）
+                    // 1) 4-Lv 前置门槛（C# :4017 Random(4-magic.Level) > 0 → 失败；1/2 概率 LevelMagic）
+                    let n = (4 - spell_level as i32).max(1);
+                    if fastrand::i32(0..n) != 0 {
+                        if fastrand::i32(0..2) == 0 {
+                            self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
+                        }
+                        electric_shock_exp_handled = true;
+                        return;
+                    }
+                    // 2) 门槛通过 → LevelMagic（C# :4023；后续无论成败不再额外给经验）
+                    self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
+                    electric_shock_exp_handled = true;
+                    // 3) 已驯服宠物：眩晕（C# :4025 target.Master == this → ShockTime + Target=null）
                     if self.monsters.get(&mid).map(|m| m.master_session == Some(msg.session_id)).unwrap_or(false) {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
                             crate::combat::poison::apply_poison(&mut monster.poison_list,
@@ -5571,69 +5593,108 @@ impl Message<MagicRequest> for WorldActor {
                             monster.target_session = None;
                             debug!("Magic: {} ElectricShock stunned own pet {}", state.name, mid);
                         }
-                        // #1256：C# ElectricShock——能走到这里说明驯服判定已成功，必给经验
-                        self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
-                        electric_shock_exp_handled = true;
                         return;
                     }
                     let can_tame = self.monsters.get(&mid)
                         .and_then(|m| self.monster_infos.get(&m.monster_index))
                         .map(|i| i.can_tame).unwrap_or(false);
-                    if can_tame {
-                        // C# 成功率：Random(4-Lv) == 0（Lv0=25% → Lv3=100%）
-                        let n = (4 - spell_level as i32).max(1);
-                        if fastrand::i32(0..n) == 0 {
-                            // #1410：捕获驯服后的怪物名（随后广播 ObjectName；避免借用冲突）
-                            let tamed_name = {
-                                if let Some(monster) = self.monsters.get_mut(&mid) {
-                                    monster.master_session = Some(msg.session_id);
-                                    monster.target_session = None;
-                                    monster.provoked = false;
-                                    monster.recall_at_tick = 0; // C# 驯服宠物不消失
-                                    Some(monster.name.clone())
-                                } else {
-                                    None
-                                }
-                            };
-                            if let Some(name) = tamed_name {
-                                // C# HumanObject.cs:4101：驯服成功 Broadcast(S.ObjectName) 刷新名字显示
-                                self.broadcast_object_name(mid, &name).await;
-                                debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
-                                send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
-                                // #2218：驯服宠物持久化（C# Info.Pets）；宠物等级从 1 开始
-                                if let Some(monster) = self.monsters.get(&mid) {
-                                    self.pet_levels.insert(mid, 1);
-                                    self.tamed_pets.entry(msg.session_id).or_default().push(TamedPetInfo {
-                                        object_id: mid,
-                                        monster_index: monster.monster_index,
-                                        name: name.clone(),
-                                        hp: monster.hp,
-                                        experience: monster.pet_experience,
-                                        level: 1,
-                                        max_pet_level: monster.max_pet_level,
-                                    });
-                                }
-                            }
-                            // #1256：C# 驯服成功必给经验
-                            self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
-                            electric_shock_exp_handled = true;
-                        } else {
-                            // #1256：C# 失败 50% 概率给经验（Random(2)==0）
-                            if fastrand::i32(0..2) == 0 {
-                                self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
-                            }
-                            electric_shock_exp_handled = true;
-                            // 失败时激怒怪物
-                            if let Some(monster) = self.monsters.get_mut(&mid) {
-                                monster.provoked = true;
-                                monster.target_session = Some(msg.session_id);
-                            }
-                            debug!("Magic: {} ElectricShock failed on monster {}", state.name, mid);
-                        }
-                    } else {
-                        // #1256：C# 不可驯服不给经验
-                        electric_shock_exp_handled = true;
+                    if !can_tame {
+                        // C#：不可驯服（CanTame=false）直接失败
                         debug!("Magic: {} ElectricShock: monster {} not tamable", state.name, mid);
+                        return;
+                    }
+                    // 4) 50% 眩晕（C# :4029 Random(2) > 0 → ShockTime + Target=null）
+                    if fastrand::i32(0..2) > 0 {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::STUN, spell_level as u32 * 5 + 10, 0, 1000,
+                                ));
+                            monster.target_session = None;
+                        }
+                        debug!("Magic: {} ElectricShock stunned monster {}", state.name, mid);
+                        return;
+                    }
+                    // 5) 等级差（C# :4037 target.Level > Level + 2 → 无法驯服）
+                    let (target_level, target_hp, target_is_boss) = {
+                        let m = self.monsters.get(&mid);
+                        (
+                            m.map(|m| m.level).unwrap_or(0),
+                            m.map(|m| m.hp).unwrap_or(0),
+                            m.map(|m| m.is_boss).unwrap_or(false),
+                        )
+                    };
+                    if target_level > state.level as i32 + 2 {
+                        debug!("Magic: {} ElectricShock: target level {} > player {} + 2", state.name, target_level, state.level);
+                        return;
+                    }
+                    // 6) Boss 驯服上限（C# :4040 Settings.MaxBossTames=1；已有 Boss 宠物 >= 1 拒绝）
+                    if target_is_boss {
+                        let boss_pets = self.monsters.values()
+                            .filter(|m| m.master_session == Some(msg.session_id) && m.is_boss)
+                            .count();
+                        if boss_pets >= 1 {
+                            debug!("Magic: {} ElectricShock: boss tame cap reached", state.name);
+                            return;
+                        }
+                    }
+                    // 7) 等级对抗（C# :4047 Random(Level+20+Lv*5) <= target.Level+10 → 失败；4/5 概率 Rage + 清目标）
+                    if fastrand::i32(0..(state.level as i32 + 20 + spell_level as i32 * 5)) <= target_level + 10 {
+                        if fastrand::i32(0..5) > 0 {
+                            if let Some(monster) = self.monsters.get_mut(&mid) {
+                                // 近似 C# RageTime（10~30s 狂暴）：激怒 + 清目标
+                                monster.provoked = true;
+                                monster.target_session = None;
+                            }
+                        }
+                        debug!("Magic: {} ElectricShock: monster {} resisted tame", state.name, mid);
+                        return;
+                    }
+                    // 8) 宠物数上限（C# :4062 Globals.MaxPets=5 → petBonus=2；Pets.Count >= magic.Level + petBonus）
+                    let pet_bonus = 5 - 3; // Globals.MaxPets = 5
+                    let pet_count = self.monsters.values()
+                        .filter(|m| m.master_session == Some(msg.session_id))
+                        .count();
+                    if pet_count >= spell_level as usize + pet_bonus {
+                        debug!("Magic: {} ElectricShock: pet cap reached ({} >= {} + {})", state.name, pet_count, spell_level, pet_bonus);
+                        return;
+                    }
+                    // 9) 最终捕获判定（C# :4067 rate = HP/100（<=2 → 2，否则 ×2）；Random(rate) != 0 → 失败）
+                    let rate = tame_capture_rate(target_hp);
+                    if fastrand::i32(0..rate) != 0 {
+                        debug!("Magic: {} ElectricShock: final tame roll failed (1/{})", state.name, rate);
+                        return;
+                    }
+                    // 10) 驯服成功（#1410：捕获驯服后的怪物名，随后广播 ObjectName）
+                    let tamed_name = {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            monster.master_session = Some(msg.session_id);
+                            monster.target_session = None;
+                            monster.provoked = false;
+                            monster.recall_at_tick = 0; // C# 驯服宠物不消失
+                            Some(monster.name.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(name) = tamed_name {
+                        // C# HumanObject.cs:4101：驯服成功 Broadcast(S.ObjectName) 刷新名字显示
+                        self.broadcast_object_name(mid, &name).await;
+                        debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
+                        send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
+                        // #2218：驯服宠物持久化（C# Info.Pets）；宠物等级从 1 开始
+                        if let Some(monster) = self.monsters.get(&mid) {
+                            self.pet_levels.insert(mid, 1);
+                            self.tamed_pets.entry(msg.session_id).or_default().push(TamedPetInfo {
+                                object_id: mid,
+                                monster_index: monster.monster_index,
+                                name: name.clone(),
+                                hp: monster.hp,
+                                experience: monster.pet_experience,
+                                level: 1,
+                                max_pet_level: monster.max_pet_level,
+                            });
+                        }
                     }
                 } else {
                     // #1256：C# 无目标（target == null）不给经验
@@ -5891,9 +5952,30 @@ fn best_dir(dx: i32, dy: i32) -> usize {
     best
 }
 
+/// C# HumanObject.cs:4067：最终驯服捕获率 rate = HP/100（<=2 → 2，否则 ×2）；Random(rate) != 0 失败
+fn tame_capture_rate(target_hp: i32) -> i32 {
+    let hp_div = (target_hp / 100).max(0);
+    if hp_div <= 2 {
+        2
+    } else {
+        hp_div * 2
+    }
+}
+
 #[cfg(test)]
 mod spell_geometry_tests {
     use super::*;
+
+    /// #2362：C# HumanObject.cs:4067 最终驯服捕获率 rate = HP/100（<=2 → 2，否则 ×2）
+    #[test]
+    fn tame_capture_rate_matches_csharp() {
+        assert_eq!(tame_capture_rate(50), 2);   // HP/100=0 → 2
+        assert_eq!(tame_capture_rate(100), 2);  // 1 → 2
+        assert_eq!(tame_capture_rate(200), 2);  // 2 → 2
+        assert_eq!(tame_capture_rate(300), 6);  // 3 → 6
+        assert_eq!(tame_capture_rate(500), 10); // 5 → 10
+        assert_eq!(tame_capture_rate(0), 2);    // 0 → 2
+    }
 
     #[test]
     fn mine_drop_succeeds_matches_csharp_gate() {
