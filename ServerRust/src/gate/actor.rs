@@ -1601,7 +1601,7 @@ fn forward_magic(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 12 { return; }
+    if payload.len() < 14 { return; }
     let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let spell = payload[0];
     let dir = payload[1];
@@ -2585,7 +2585,7 @@ fn handle_guild_storage_gold(social_ref: &Option<ActorRef<crate::actors::social:
 
 /// GuildStorageItemChange: [change_type: u8][grid: u8][unique_id: u64][count: u32]
 fn handle_guild_storage_item(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 12 { return; }
+    if payload.len() < 14 { return; }
     let change_type = payload[0];
     let grid = payload[1];
     let uid = u64::from_le_bytes(payload[2..10].try_into().unwrap_or([0; 8]));
