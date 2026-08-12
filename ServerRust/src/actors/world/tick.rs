@@ -1103,6 +1103,12 @@ pub(crate) async fn tick_player_conditions(&mut self) {
     if self.tick_count % 5 != 0 { return; }
     self.tick_storage_expiry().await;
     self.tick_required_group().await;
+    // #2348：C# Envir.Process（:2167）——LineMessageTimer(10 分钟 = 6000 ticks) 随机提示广播全服
+    if !self.line_messages.is_empty() && self.tick_count >= self.line_message_next_tick {
+        self.line_message_next_tick = self.tick_count + 6000;
+        let line = self.line_messages[fastrand::usize(0..self.line_messages.len())].clone();
+        broadcast_chat(&self.gate_ref, &self.players, &line, mir2_shared::enums::ChatType::LineMessage);
+    }
 }
 
 /// S.SpellToggle 下发（body：[object_id u32][spell u8][can_use u8]，spell 用 C# 号；

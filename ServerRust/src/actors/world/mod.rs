@@ -350,6 +350,24 @@ fn load_route_file(path: &std::path::Path) -> Vec<RoutePoint> {
     content.lines().filter_map(parse_route_line).collect()
 }
 
+/// C# Envir.LoadLineMessages：解析 LineMessage.txt 内容（跳过 `;` 注释与空行）
+fn parse_line_messages(content: &str) -> Vec<String> {
+    content.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with(';'))
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// C# Envir.LoadLineMessages：加载 LineMessage.txt
+fn load_line_messages(map_dir: &std::path::Path) -> Vec<String> {
+    let path = map_dir.join("Envir").join("LineMessage.txt");
+    match std::fs::read_to_string(&path) {
+        Ok(content) => parse_line_messages(&content),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// C# Envir.LoadDisabledChars：解析 DisabledChars.txt 内容（每行一个禁用名，转大写；空行/注释忽略）
 fn parse_disabled_chars(content: &str) -> HashSet<String> {
     content.lines()
@@ -1258,6 +1276,10 @@ pub struct WorldActor {
     pub(crate) routes: HashMap<String, Vec<RoutePoint>>,
     /// 角色/英雄名禁用名单（C# Envir.DisabledCharNames；DisabledChars.txt 每行，转大写）
     pub(crate) disabled_char_names: HashSet<String>,
+    /// 周期提示行（C# Envir.LineMessages；LineMessage.txt，跳过 ;/空行）
+    pub(crate) line_messages: Vec<String>,
+    /// 下一条周期提示的 tick（C# lineMessageTime，LineMessageTimer=10 分钟）
+    pub(crate) line_message_next_tick: u64,
     /// 刷怪配置目录
     pub(crate) spawn_dir: Option<PathBuf>,
     /// NPC 脚本/INI 根目录（C# NPCPath 等价，SAVEVALUE/LOADVALUE 用）
@@ -1781,6 +1803,8 @@ impl WorldActor {
             routes: load_route_files(&map_dir),
             dragon_drops: load_dragon_drops(&map_dir),
             disabled_char_names: load_disabled_chars(&map_dir),
+            line_messages: load_line_messages(&map_dir),
+            line_message_next_tick: 0,
             map_dir,
             spawn_dir,
             script_dir: PathBuf::from("."),
@@ -5651,6 +5675,8 @@ Ok(Self {
             routes: load_route_files(&args.map_dir),
             dragon_drops: load_dragon_drops(&args.map_dir),
             disabled_char_names: load_disabled_chars(&args.map_dir),
+            line_messages: load_line_messages(&args.map_dir),
+            line_message_next_tick: 0,
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             script_dir: args.quest_dir.clone(),
@@ -9341,6 +9367,13 @@ fn replace_pos_marker(message: &str, x: i32, y: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #2348：C# Envir.LoadLineMessages 解析（跳过 ;/空行）
+    #[test]
+    fn test_parse_line_messages() {
+        let v = parse_line_messages("Pro tip: hi\n;comment\n\n  Reduce hp  \n");
+        assert_eq!(v, vec!["Pro tip: hi".to_string(), "Reduce hp".to_string()]);
+    }
+
     /// #2346：C# Envir.LoadDisabledChars 解析（大写归一/空行/注释）
     #[test]
     fn test_parse_disabled_chars() {
