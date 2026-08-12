@@ -8200,16 +8200,22 @@ fn guild_war_flags(
 
 /// C# MonsterRarityData.Roll：basis points（percent×100），random.Next(10000)
 /// 返回 0=普通 1=Uncommon 2=Rare 3=Elite
-fn roll_rarity(cfg: &crate::util::config::RarityConfig) -> u8 {
-    let elite_bp = (cfg.elite_chance_percent as f64 * 100.0).round() as i32;
+/// 稀有度 bp 阈值（C# MonsterRarityData.Roll：percent×100，累计上界；返回 (elite, elite+rare, elite+rare+uncommon)）
+fn rarity_bp(cfg: &crate::util::config::RarityConfig) -> (i32, i32, i32) {
+    let elite_bp = (cfg.elite_chance_percent * 100.0).round() as i32;
     let rare_bp = (cfg.rare_chance_percent * 100.0).round() as i32;
     let uncommon_bp = (cfg.uncommon_chance_percent * 100.0).round() as i32;
+    (elite_bp, elite_bp + rare_bp, elite_bp + rare_bp + uncommon_bp)
+}
+
+fn roll_rarity(cfg: &crate::util::config::RarityConfig) -> u8 {
+    let (elite_bp, elite_rare_bp, all_bp) = rarity_bp(cfg);
     let roll = fastrand::i32(0..10000);
     if roll < elite_bp {
         3
-    } else if roll < elite_bp + rare_bp {
+    } else if roll < elite_rare_bp {
         2
-    } else if roll < elite_bp + rare_bp + uncommon_bp {
+    } else if roll < all_bp {
         1
     } else {
         0
@@ -9994,6 +10000,16 @@ mod tests {
         assert_eq!(rarity_prefix(2), "[稀有] ");
         assert_eq!(rarity_prefix(1), "[罕见] ");
         assert_eq!(rarity_prefix(0), "");
+    }
+
+    /// #2360：rarity bp 阈值与 C# MonsterRarityData.Roll 概率一致（elite 0.1% / rare 0.75% / uncommon 3.0%）
+    #[test]
+    fn rarity_bp_matches_csharp_chances() {
+        let cfg = crate::util::config::RarityConfig::default();
+        let (e, er, eru) = rarity_bp(&cfg);
+        assert_eq!(e, 10);    // 0.1% → 10bp
+        assert_eq!(er, 85);   // 0.1% + 0.75% → 85bp
+        assert_eq!(eru, 385); // 0.1% + 0.75% + 3.0% → 385bp
     }
 
     /// #1140：roll_rarity 返回值域 0..=3

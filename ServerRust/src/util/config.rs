@@ -36,11 +36,11 @@ pub struct ConquestConfig {
 }
 
 fn default_conquest_buy_gold() -> u64 {
-    1_000_000
+    10_000_000 // C# Settings.BuyGTGold
 }
 
 fn default_conquest_extend_gold() -> u64 {
-    500_000
+    1_000_000 // C# Settings.ExtendGT
 }
 
 fn default_conquest_gt_sale_min() -> u64 {
@@ -402,9 +402,9 @@ fn default_death_exp_penalty_percent() -> u32 {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RarityConfig {
-    /// 精英概率百分比（1..=100）
+    /// 精英概率百分比（C# Settings.MonsterRarityEliteChancePercent = 0.1；#2360）
     #[serde(default = "default_elite_chance")]
-    pub elite_chance_percent: u8,
+    pub elite_chance_percent: f64,
     /// Uncommon 概率百分比（C# Settings.MonsterRarityUncommonChancePercent = 3.0）
     #[serde(default = "default_uncommon_chance")]
     pub uncommon_chance_percent: f64,
@@ -464,8 +464,8 @@ pub struct RarityConfig {
     pub elite_gold_multiplier: f64,
 }
 
-fn default_elite_chance() -> u8 {
-    3
+fn default_elite_chance() -> f64 {
+    0.1 // C# MonsterRarityEliteChancePercent
 }
 
 fn default_elite_defense_multiplier() -> f64 {
@@ -591,4 +591,35 @@ pub fn load_config(path: &str) -> anyhow::Result<ServerConfig> {
     let content = std::fs::read_to_string(path)?;
     let config: ServerConfig = toml::from_str(&content)?;
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2360：RarityConfig 默认值与 C# Settings/MonsterRarityData 对齐
+    #[test]
+    fn rarity_defaults_match_csharp_settings() {
+        let c = RarityConfig::default();
+        assert_eq!(c.elite_chance_percent, 0.1);   // C# MonsterRarityEliteChancePercent
+        assert_eq!(c.rare_chance_percent, 0.75);   // C# MonsterRarityRareChancePercent
+        assert_eq!(c.uncommon_chance_percent, 3.0); // C# MonsterRarityUncommonChancePercent
+        assert_eq!(c.elite_hp_multiplier, 2.25);
+        assert_eq!(c.elite_defense_multiplier, 1.55);
+        assert_eq!(c.elite_dmg_multiplier, 1.65);
+        assert_eq!(c.elite_xp_multiplier, 2.20);
+        assert_eq!(c.elite_gold_multiplier, 2.50);
+        assert_eq!(c.elite_item_drop_bonus_percent, 75);
+        assert_eq!(c.elite_gold_drop_bonus_percent, 75);
+    }
+
+    /// #2360：ConquestConfig 默认值与 C# Settings 对齐（BuyGTGold/ExtendGT/GTSale 最低 200 万/GTDays）
+    #[test]
+    fn conquest_defaults_match_csharp_settings() {
+        let c = ConquestConfig::default();
+        assert_eq!(c.buy_gold, 10_000_000);   // C# BuyGTGold
+        assert_eq!(c.extend_gold, 1_000_000); // C# ExtendGT
+        assert_eq!(c.gt_sale_min_price, 2_000_000); // C# NPCSegment GTSale 最低 200 万
+        assert_eq!(c.gt_days, 30);            // C# GTDays
+    }
 }
