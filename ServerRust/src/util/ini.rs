@@ -473,6 +473,37 @@ pub fn load_mentor_settings(configs_dir: &Path) -> MentorIniSettings {
     s
 }
 
+/// 元素三表（C# Settings.LoadOrbsExp：Configs/OrbsExpList.ini）
+#[derive(Debug, Clone, Default)]
+pub struct OrbsIniSettings {
+    /// C# Settings.OrbsExpList（[Exp] Orb1..4）
+    pub exp_list: Vec<i32>,
+    /// C# Settings.OrbsDefList（[Def] Orb1..4）
+    pub def_list: Vec<i32>,
+    /// C# Settings.OrbsDmgList（[Att] Orb1..4）
+    pub dmg_list: Vec<i32>,
+}
+
+/// 从 `Configs/OrbsExpList.ini` 加载元素三表（文件缺失返回空；调用方回退默认常量）
+pub fn load_orbs_settings(configs_dir: &Path) -> OrbsIniSettings {
+    let path = configs_dir.join("OrbsExpList.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return OrbsIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut out = OrbsIniSettings::default();
+    for (sec, list) in [("Exp", &mut out.exp_list), ("Def", &mut out.def_list), ("Att", &mut out.dmg_list)] {
+        for i in 1..=100 {
+            let v = ini_get_i64(&parsed, sec, &format!("Orb{}", i), -1);
+            if v < 0 {
+                break;
+            }
+            list.push(v as i32);
+        }
+    }
+    out
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -614,6 +645,36 @@ BuffExpRate=0
         assert_eq!(list.len(), 500);
         assert_eq!(list[0], 100);
         assert_eq!(list[499], 100);
+    }
+
+    /// #2414：load_orbs_settings 解析 [Exp]/[Def]/[Att] Orb1..N；文件缺失返回空
+    #[test]
+    fn test_load_orbs_settings_parsing() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_orbs");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("OrbsExpList.ini"), "[Exp]\nOrb1=50\nOrb2=100\nOrb3=150\nOrb4=200\n\n[Def]\nOrb1=2\nOrb2=4\nOrb3=6\nOrb4=8\n\n[Att]\nOrb1=4\nOrb2=8\nOrb3=12\nOrb4=16\n").unwrap();
+        let s = load_orbs_settings(&dir);
+        assert_eq!(s.exp_list, vec![50, 100, 150, 200]);
+        assert_eq!(s.def_list, vec![2, 4, 6, 8]);
+        assert_eq!(s.dmg_list, vec![4, 8, 12, 16]);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → 空
+        assert!(load_orbs_settings(Path::new("C:/definitely/not/exists")).exp_list.is_empty());
+    }
+
+    /// #2414：真实 Daneo1989/Configs/OrbsExpList.ini 加载（4 档；数据目录缺失时跳过）
+    #[test]
+    fn test_load_real_orbs_settings() {
+        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs/OrbsExpList.ini"));
+        if !path.exists() {
+            return; // 数据目录缺失时跳过（CI 无数据版本）
+        }
+        let dir = path.parent().unwrap();
+        let s = load_orbs_settings(dir);
+        assert_eq!(s.exp_list, vec![50, 100, 150, 200]);
+        assert_eq!(s.def_list, vec![2, 4, 6, 8]);
+        assert_eq!(s.dmg_list, vec![4, 8, 12, 16]);
     }
 
     /// #2406：load_guild_settings 解析（[Guilds]/经验与上限列表）；文件缺失返回 C# 默认

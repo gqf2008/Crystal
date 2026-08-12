@@ -158,6 +158,12 @@ pub struct WorldActorArgs {
     pub mentor_damage_boost: u8,
     /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
     pub mentee_exp_bank: u8,
+    /// 元素经验档位（C# Settings.OrbsExpList：Configs/OrbsExpList.ini [Exp] Orb1..N；空 = 回退默认 [50,100,150,200]）
+    pub orbs_exp_list: Vec<i32>,
+    /// 元素攻击加成（C# Settings.OrbsDmgList：[Att] Orb1..N；空 = 回退默认 [4,8,12,16]）
+    pub orbs_dmg_list: Vec<i32>,
+    /// 元素防御加成（C# Settings.OrbsDefList：[Def] Orb1..N；空 = 回退默认 [2,4,6,8]）
+    pub orbs_def_list: Vec<i32>,
 }
 
 /// 世界中的玩家记录
@@ -1567,6 +1573,10 @@ pub struct WorldActor {
     pub(crate) mentor_damage_boost: u8,
     /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
     pub(crate) mentee_exp_bank: u8,
+    /// 元素三表（#2414：Configs/OrbsExpList.ini；空 = 回退默认常量）
+    pub(crate) orbs_exp_list: Vec<i32>,
+    pub(crate) orbs_dmg_list: Vec<i32>,
+    pub(crate) orbs_def_list: Vec<i32>,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -2022,6 +2032,9 @@ impl WorldActor {
             mentor_exp_boost: 10,
             mentor_damage_boost: 10,
             mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5975,6 +5988,9 @@ Ok(Self {
             mentor_exp_boost: args.mentor_exp_boost,
             mentor_damage_boost: args.mentor_damage_boost,
             mentee_exp_bank: args.mentee_exp_bank,
+            orbs_exp_list: args.orbs_exp_list,
+            orbs_dmg_list: args.orbs_dmg_list,
+            orbs_def_list: args.orbs_def_list,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

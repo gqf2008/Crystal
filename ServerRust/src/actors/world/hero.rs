@@ -880,6 +880,8 @@ impl WorldActor {
         // 超度意图：(hero_session_id, target_oid) —— 阶段 3h 击杀亡灵（#1212 TurnUndead）
         let mut turn_undead_intents: Vec<(u64, u32)> = Vec::new();
 
+        // #2414：元素经验档位快照（hero_ai_states 可变借用期间不可再借 self）
+        let orbs_exp = self.orbs_exp().to_vec();
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
             let mut is_new_ai = false;
@@ -1831,7 +1833,7 @@ impl WorldActor {
                         // #1537：C# ArcherHero ElementalShot 聚球条件（GetElementalOrbCount<1；需 Meditation）
                         let elemental_lv = hero_magic_level(&snap.hero_magics, Spell::ElementalShot as u8);
                         let meditation_lv = hero_magic_level(&snap.hero_magics, Spell::Meditation as u8);
-                        let orb_count = crate::actors::world::elements::elemental_orb_count(ai_local.elements_level);
+                        let orb_count = crate::actors::world::elements::elemental_orb_count(ai_local.elements_level, &orbs_exp);
                         let can_elemental = elemental_lv > 0 && meditation_lv > 0 && orb_count < 1;
                         if poison_lv > 0 && !target.has_green && !has_poison_buff {
                             // #1194：C# SpecialArrowShot：PoisonShot 魔法箭（MC 伤害/MAC 防御）
@@ -1880,10 +1882,10 @@ impl WorldActor {
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 // C# ObtainElement(true)：ElementsLevel = OrbsExpList[0]；Meditation Lv3 → [1]（GatherOrbsPerLevel）
-                                ai_local.elements_level = if meditation_lv >= 3 {
-                                    crate::actors::world::elements::ORBS_EXP_LIST[1]
+                                ai_local.elements_level = if meditation_lv >= 3 && orbs_exp.len() > 1 {
+                                    orbs_exp[1]
                                 } else {
-                                    crate::actors::world::elements::ORBS_EXP_LIST[0]
+                                    orbs_exp[0]
                                 };
                                 magic_anim_intents.push((snap.session_id, Spell::ElementalShot as u8, target.oid));
                                 ai_local.next_attack_tick = self.tick_count + 10;
