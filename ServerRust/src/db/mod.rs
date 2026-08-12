@@ -656,6 +656,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN active_item_json TEXT").execute(&pool).await;
     // #2304：精炼材料槽持久化（safe to re-run；新库 CREATE 已含）
     let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN materials_json TEXT").execute(&pool).await;
+    // #2432：怪物可召回标记（C# MonsterInfo.CanRecall；safe to re-run——旧库缺列导致 load_monster_infos r.get panic）
+    let _ = sqlx::query("ALTER TABLE monster_infos ADD COLUMN can_recall INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
 
     // Migration: add quest timer columns (safe to re-run)
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN start_time INTEGER NOT NULL DEFAULT 0")
