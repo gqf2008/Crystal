@@ -1086,7 +1086,22 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         assert!(get_character_account(&pool, "None").await.unwrap().is_none());
     }
 
+    
+    /// #2384：list_all_characters 返回 (name, account, last_access)
     #[tokio::test]
+    async fn test_list_all_characters() {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query("CREATE TABLE characters (name TEXT PRIMARY KEY, account_username TEXT NOT NULL, last_access INTEGER NOT NULL DEFAULT 0)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO characters (name, account_username, last_access) VALUES ('A','acc1',100),('B','acc2',200)")
+            .execute(&pool).await.unwrap();
+        let rows = list_all_characters(&pool).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.contains(&("A".to_string(), "acc1".to_string(), 100)));
+        assert!(rows.contains(&("B".to_string(), "acc2".to_string(), 200)));
+    }
+
+#[tokio::test]
     async fn test_player_pets_roundtrip() {
         let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
         sqlx::query("CREATE TABLE IF NOT EXISTS player_pets (character_name TEXT NOT NULL, monster_index INTEGER NOT NULL, name TEXT NOT NULL, hp INTEGER NOT NULL DEFAULT 1, experience INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1, max_pet_level INTEGER NOT NULL DEFAULT 0)")
@@ -2234,6 +2249,17 @@ pub async fn load_mail(pool: &DbPool, character_name: &str) -> anyhow::Result<Ma
     }
 
     Ok(mailbox)
+}
+
+/// #2384：列出全部角色（name, account_username, last_access 秒）；自动归档扫描用
+pub async fn list_all_characters(pool: &DbPool) -> anyhow::Result<Vec<(String, String, i64)>> {
+    let rows = sqlx::query("SELECT name, account_username, last_access FROM characters")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get("name"), r.get("account_username"), r.get::<i64, _>("last_access")))
+        .collect())
 }
 
 

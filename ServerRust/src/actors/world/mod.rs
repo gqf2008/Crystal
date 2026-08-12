@@ -138,6 +138,8 @@ pub struct WorldActorArgs {
     pub goods_buy_back_max_stored: u32,
     /// 安全区回血（C# Settings.SafeZoneHealing，默认 false；开启后安全区内每 2 秒 +25 HP）
     pub safe_zone_healing: bool,
+    /// 长期未登录角色自动归档月数（C# Settings.ArchiveInactiveCharacterAfterMonths = 12）
+    pub archive_inactive_after_months: u32,
 }
 
 /// 世界中的玩家记录
@@ -5507,6 +5509,15 @@ impl Actor for WorldActor {
                 let _ = tick_ref.ask(ProcessElementalTick).await;
                 let _ = tick_ref.ask(ProcessDeathCallbacks).await;
             }
+        });
+
+        // #2384：启动时归档长期未登录角色（C# AccountInfo.Load 归档超期角色）
+        let archive_ref = actor_ref.clone();
+        let archive_months = args.archive_inactive_after_months;
+        tokio::spawn(async move {
+            let _ = archive_ref
+                .ask(crate::actors::world::ArchiveInactiveCharacters { months: archive_months })
+                .await;
         });
 
         // Load guilds from DB (SocialActor handles guild data now)

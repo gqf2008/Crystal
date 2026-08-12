@@ -365,6 +365,9 @@ pub struct ServerWorldConfig {
     /// 服务端移动节流间隔毫秒（0=关闭，默认关以兼容 Bevy 客户端节奏；>0 时按 C# HumanObject MoveDelay=600ms/动作 节流，Slow 毒 ×2）
     #[serde(default = "default_movement_pacing_ms")]
     pub movement_pacing_ms: u64,
+    /// 长期未登录角色自动归档月数（C# Settings.ArchiveInactiveCharacterAfterMonths = 12；启动时执行）
+    #[serde(default = "default_archive_inactive_after_months")]
+    pub archive_inactive_after_months: u32,
     /// 回血权重（C# Settings.HealthRegenWeight = 10：healthRegen += regen * HealthRecovery / weight）
     #[serde(default = "default_health_regen_weight")]
     pub health_regen_weight: u32,
@@ -438,6 +441,10 @@ fn default_notice_path() -> String {
 
 fn default_movement_pacing_ms() -> u64 {
     0
+}
+
+fn default_archive_inactive_after_months() -> u32 {
+    12
 }
 
 fn default_death_exp_penalty_percent() -> u32 {
@@ -626,6 +633,7 @@ impl Default for ServerConfig {
                 notice_path: default_notice_path(),
                 death_exp_penalty_percent: default_death_exp_penalty_percent(),
                 movement_pacing_ms: default_movement_pacing_ms(),
+                archive_inactive_after_months: default_archive_inactive_after_months(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
@@ -693,5 +701,12 @@ mod tests {
     fn mail_capacity_defaults_to_100() {
         let c = ServerConfig::default().social;
         assert_eq!(c.mail_capacity, 100);
+    }
+
+    /// #2384：归档月数默认 12（C# Settings.ArchiveInactiveCharacterAfterMonths）
+    #[test]
+    fn archive_inactive_after_months_defaults_to_12() {
+        let c = ServerConfig::default().server;
+        assert_eq!(c.archive_inactive_after_months, 12);
     }
 }
