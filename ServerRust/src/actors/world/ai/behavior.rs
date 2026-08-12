@@ -66,6 +66,11 @@ pub trait MonsterBehavior: Send + Sync + 'static {
         false
     }
 
+    /// #2358：可采集尸体皮肤次数（C# HarvestMonster.RemainingSkinCount：默认 2；Deer AI 2 = 5）
+    fn harvest_skin_count(&self, _monster: &MonsterState) -> u8 {
+        crate::actors::world::HARVEST_SKIN_COUNT
+    }
+
     /// #1399：标记死亡已广播；返回是否首次（tick.rs 死亡处理首次发 ObjectDied，避免每 tick 重复）
     fn mark_death_announced(&mut self) -> bool {
         false

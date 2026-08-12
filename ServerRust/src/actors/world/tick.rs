@@ -7750,7 +7750,7 @@ impl Message<Tick> for WorldActor {
                             exp_owner_session: monster.exp_owner_session,
                             target_session: monster.target_session,
                             dead_until_tick: self.tick_count + CORPSE_DEFAULT_TICKS,
-                            remaining_skins: HARVEST_SKIN_COUNT,
+                            remaining_skins: monster.behavior.harvest_skin_count(&monster),
                             drops: Vec::new(),
                         };
                         self.corpses.insert(monster.object_id, corpse);

@@ -19,6 +19,11 @@ impl CaveMaggotBehavior {
 }
 
 impl MonsterBehavior for CaveMaggotBehavior {
+    /// #2358：C# CaveMaggot : HarvestMonster（AI 7 家族 Dung/WedgeMoth/SpiderBat 同）——可采集
+    fn is_harvestable(&self) -> bool {
+        true
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
             Some(t) => *t,

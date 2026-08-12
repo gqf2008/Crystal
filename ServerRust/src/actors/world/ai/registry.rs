@@ -19,6 +19,12 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if is_static_object(&name) || is_passive_object(&name) {
         return Box::new(DefaultBehavior::new());
     }
+    // #2358：C# Deer.cs（AI 1/2）：Hen/Pig/Bull/Deer/Deer1/Sheep 均可采集（HarvestMonster 子类），AI2 有逃跑分支
+    if name == "hen" || name == "pig" || name == "bull" || name.contains("sheep") || name.contains("羊")
+        || name.contains("deer") || name.contains("doe") || name.contains("鹿")
+    {
+        return Box::new(bosses::deer::DeerBehavior::new());
+    }
     // 召唤物分身（名称带后缀）不匹配 Boss behavior，避免无限召唤
     if name.contains("分身") || name.contains(" clone") || name.contains("summoned ") {
         return Box::new(DefaultBehavior::new());
@@ -659,6 +665,9 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
     }
     ((name.contains("evilmir") || name.contains("evil mir") || name.contains("邪恶巨龙"))
         && !name.contains("evilmirbody"))
+        // #2358：C# Deer.cs（AI 1/2）可采集被动（Hen/Pig/Bull/Deer/Deer1/Sheep/Doe）
+        || name == "hen" || name == "pig" || name == "bull" || name.contains("sheep") || name.contains("羊")
+        || name.contains("deer") || name.contains("doe") || name.contains("鹿")
         || name.contains("hornedcommander") || name.contains("horned commander") || name.contains("角魔统帅")
         || name.contains("helllord") || name.contains("hell lord") || name.contains("地狱领主")
         || name.contains("treequeen") || name.contains("tree queen") || name.contains("树后")
@@ -899,14 +908,23 @@ pub fn is_static_object(monster_name: &str) -> bool {
 pub fn is_passive_object(monster_name: &str) -> bool {
     let name = monster_name.to_lowercase();
     // 可移动但不主动攻击的动物/物体
-    name == "deer" || name.contains("鹿")
-        || name == "doe" || name.contains("母鹿")
-        || name == "football" || name.contains("足球")
+    // #2358：Deer/Doe 移出（改为 DeerBehavior 可采集注册）；保留 Football
+    name == "football" || name.contains("足球")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2358：C# Deer.cs（AI 1/2）——Deer 系全部注册且可采集
+    #[test]
+    fn deer_family_registered() {
+        for name in ["Hen", "Pig", "Bull", "Deer", "Deer1", "Sheep", "Doe"] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+            let b = make_behavior(name);
+            assert!(b.is_harvestable(), "{} should be harvestable", name);
+        }
+    }
 
     /// #2356：C# MonsterObject.GetMonster 12 家族 DB 变体全部注册；DigOut 系初始钻地不可攻击
     #[test]
@@ -984,9 +1002,9 @@ mod tests {
         // GuardianRock/Trainer：静态怪专属行为（C# CanMove=false）
         assert!(is_registered_boss("GuardianRock"));
         assert!(is_registered_boss("Trainer"));
-        // 静态/被动环境物体仍走默认行为
+        // 静态环境物体仍走默认行为；Deer 现注册 DeerBehavior（可采集被动，#2358）
         assert!(!is_registered_boss("Tree"));
-        assert!(!is_registered_boss("Deer"));
+        assert!(is_registered_boss("Deer"));
     }
 
     #[test]
@@ -1023,7 +1041,7 @@ mod tests {
     fn static_and_passive_stay_default() {
         for name in ["Tree", "Wall", "CaveStatue",
                       "CargoBox", "BlockingObject", "EvilMirBody",
-                      "Deer", "Doe", "Football"] {
+                      "Football"] {
             assert!(!is_registered_boss(name), "{} should not be registered", name);
         }
         // WoodBox/IcePillar/BoulderSpirit 现注册专属行为（#1130-#1132 死亡/受击机制），不再走静态拦截
@@ -1039,7 +1057,8 @@ mod tests {
         assert!(is_static_object("Tree"));
         assert!(is_static_object("Wall"));
         assert!(is_static_object("CaveStatue"));
-        assert!(is_passive_object("Deer"));
+        // #2358：Deer/Doe 移出被动名单（由 DeerBehavior 处理可采集）；Football 仍被动
+        assert!(!is_passive_object("Deer"));
         assert!(is_passive_object("Football"));
     }
 }

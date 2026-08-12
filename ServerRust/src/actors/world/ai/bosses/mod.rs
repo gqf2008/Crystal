@@ -15,6 +15,7 @@ pub mod zuma_taurus;
 pub mod evil_centipede;
 pub mod cannibal_plant;
 pub mod cave_maggot;
+pub mod deer;
 pub mod oma_king;
 pub mod wooma_taurus;
 pub mod flame_queen;
