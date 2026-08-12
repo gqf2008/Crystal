@@ -606,6 +606,8 @@ impl Message<AccountChangePassword> for AccountActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let gate_ref = self.gate_ref.clone();
+        // 封禁提示用独立克隆（send_result 闭包 move 了 gate_ref）
+        let ban_gate_ref = gate_ref.clone();
         let send_result = |result: u8| async move {
             let packet = mir2_shared::packets::server::login::ChangePassword { result };
             let mut body = Vec::new();
@@ -626,6 +628,30 @@ impl Message<AccountChangePassword> for AccountActor {
             send_result(4).await;
             return;
         };
+        // #2340：C# Envir.cs:3816-3824——封禁中 → ChangePasswordBanned（原因 + expiry ticks）；到期自动解封
+        let now_secs = Self::unix_now_secs();
+        if account.banned_until > now_secs {
+            let packet = mir2_shared::packets::server::login::ChangePasswordBanned {
+                reason: "登录尝试失败次数过多，账号暂时封禁".to_string(),
+                expiry_date: crate::actors::world::unix_secs_to_dotnet_ticks(account.banned_until),
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = ban_gate_ref.tell(crate::gate::actor::SendToClient {
+                    session_id: msg.session_id,
+                    data: crate::util::wire::build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ChangePasswordBanned as i16,
+                        &body,
+                    ),
+                }).await;
+            }
+            warn!("ChangePassword rejected: account '{}' banned until {}", msg.username, account.banned_until);
+            return;
+        }
+        if account.banned_until > 0 {
+            // C# 到期自动解封（Envir.cs:3823）
+            account.banned_until = 0;
+        }
         // Verify old password before changing（C#：不匹配 → Result=5）
         let (ok, _needs_migration) = verify_password(&msg.old_password, &account.password_hash);
         if !ok {

@@ -409,6 +409,11 @@ impl Message<ProcessDelayedActions> for WorldActor {
 const DOTNET_BINARY_TICKS_MASK: i64 = 0x3FFF_FFFF_FFFF_FFFF;
 
 /// 当前时间对应的 .NET Ticks（本地墙钟，C# Envir.Now.Ticks 语义）
+/// #2340：unix 秒 → .NET DateTime ticks（C# DateTime.FromBinary/ExpiryDate 用 ticks）
+pub(crate) fn unix_secs_to_dotnet_ticks(unix_secs: i64) -> i64 {
+    unix_secs * 10_000_000 + 621_355_968_000_000_000
+}
+
 pub(crate) fn dotnet_now_ticks() -> i64 {
     let now = chrono::Local::now().naive_local();
     let as_utc = now.and_utc();
@@ -7706,7 +7711,7 @@ fn cell_has_blocking_object(
 #[cfg(test)]
 mod tests {
     use super::{
-        dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, pet_speed_interval_ticks,
+        dotnet_now_ticks, unix_secs_to_dotnet_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, pet_speed_interval_ticks,
         find_recall_point, reduce_exp, collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type,
         monster_melee_defence_type, build_object_range_attack_body, resolve_monster_vs_monster,
         slow_adjusted_ticks, monster_control_blocked, combined_poison_flags,
@@ -7795,6 +7800,15 @@ mod tests {
         assert_eq!(reduce_exp(100, 100, 1), 1);
         // amount 很小时 penalty 至少 1*diff
         assert_eq!(reduce_exp(5, 40, 25), 1); // 5 - 5 = 0 → 最低 1
+    }
+
+    /// #2340：unix 秒 → .NET DateTime ticks
+    #[test]
+    fn test_unix_secs_to_dotnet_ticks() {
+        // .NET epoch 1970-01-01T00:00:00Z = 621355968000000000 ticks
+        assert_eq!(unix_secs_to_dotnet_ticks(0), 621_355_968_000_000_000);
+        assert_eq!(unix_secs_to_dotnet_ticks(1), 621_355_968_000_000_000 + 10_000_000);
+        assert_eq!(unix_secs_to_dotnet_ticks(-1), 621_355_968_000_000_000 - 10_000_000);
     }
 
     #[test]
