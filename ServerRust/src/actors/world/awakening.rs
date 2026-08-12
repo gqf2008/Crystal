@@ -195,14 +195,11 @@ impl Message<RefineCancelRequest> for WorldActor {
     }
 }
 
-/// 精炼费用系数（C# Settings.RefineCost = 125）
-const REFINE_COST: i32 = 125;
-/// 精炼时长（分钟，C# Settings.RefineTime = 20）
-const REFINE_TIME_MINUTES: u64 = 20;
+// #2392：精炼费用/时长改用 util::config::RefineConfig（C# Settings.RefineCost/RefineTime）
 
 /// #2034：C# RefineItem（12676）——费用 (RequiredAmount*10)*RefineCost
-fn refine_cost(required_amount: i32) -> u64 {
-    ((required_amount.max(0) * 10) * REFINE_COST) as u64
+fn refine_cost(required_amount: i32, cost: u32) -> u64 {
+    (required_amount.max(0) as i64 * 10 * cost as i64) as u64
 }
 
 /// 开始精炼（C# RefineItem：UniqueID 为精炼栏内物品 uid）
@@ -256,7 +253,7 @@ impl Message<RefineItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法精炼");
             return;
         }
-        let cost = refine_cost(item_db.required_amount);
+        let cost = refine_cost(item_db.required_amount, self.refine_cfg.cost);
         if state.inventory.gold < cost {
             send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法精炼");
             return;
@@ -270,12 +267,12 @@ impl Message<RefineItemRequest> for WorldActor {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let duration = REFINE_TIME_MINUTES * 60; // C# Settings.RefineTime=20 分钟
+        let duration = self.refine_cfg.time_minutes as u64 * 60; // C# Settings.RefineTime=20 分钟
         // C# RefineItem 材料聚合（:12710-12751）→ RefinedValue/refineStat（:12790-12806）→ 成功率（:12811-12845）
         let aggregates = crate::actors::refine::refine_material_aggregates(
             &state.refine_log.materials,
             &self.item_infos,
-            crate::actors::refine::REFINE_ORE_NAME,
+            &self.refine_cfg.ore_name,
         );
         let (refined_value, refine_stat) = if aggregates.total_dc > aggregates.total_mc && aggregates.total_dc > aggregates.total_sc {
             (mir2_shared::enums::RefinedValue::Dc, aggregates.total_dc)
@@ -295,6 +292,9 @@ impl Message<RefineItemRequest> for WorldActor {
             aggregates.item_amount, aggregates.durability_count, aggregates.current_dura_count,
             aggregates.ore_amount, aggregates.ore_purity,
             luck, added_dc, added_mc, added_sc, true,
+            self.refine_cfg.base_chance as i32,
+            self.refine_cfg.wep_stat_reduce as i32,
+            self.refine_cfg.item_stat_reduce as i32,
         ).clamp(0, 255) as u8;
         let mut log = state.refine_log;
         if !log.begin_refine(current_time, duration, success_chance) {
@@ -305,7 +305,7 @@ impl Message<RefineItemRequest> for WorldActor {
         if let Some(ri) = log.active_refine.as_mut() {
             if let Some(item) = ri.item.as_mut() {
                 item.refined_value = refined_value;
-                item.refine_added = crate::actors::refine::REFINE_INCREASE;
+                item.refine_added = self.refine_cfg.increase;
                 item.refine_success_chance = success_chance as i32;
             }
         }
@@ -353,7 +353,7 @@ impl Message<CheckRefineRequest> for WorldActor {
         if let Some(ref item) = state.refine_log.active_refine {
             if item.status == RefineStatus::Pending && current_time >= item.finish_time {
                 let mut log = state.refine_log;
-                match log.settle_check() {
+                match log.settle_check(self.refine_cfg.crit_chance, self.refine_cfg.crit_increase) {
                     Some(crate::actors::refine::RefineCheckResult::Applied) => {
                         let refined_item = log.active_refine.as_ref().and_then(|ri| ri.item.clone());
                         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
@@ -983,9 +983,9 @@ mod tests {
     #[test]
     fn refine_cost_matches_csharp() {
         // #2034：C# RefineItem——cost = (RequiredAmount*10)*RefineCost(125)
-        assert_eq!(refine_cost(0), 0);
-        assert_eq!(refine_cost(1), 1250);
-        assert_eq!(refine_cost(10), 12500);
-        assert_eq!(refine_cost(-5), 0); // RequiredAmount 负数按 0
+        assert_eq!(refine_cost(0, 125), 0);
+        assert_eq!(refine_cost(1, 125), 1250);
+        assert_eq!(refine_cost(10, 125), 12500);
+        assert_eq!(refine_cost(-5, 125), 0); // RequiredAmount 负数按 0
     }
 }

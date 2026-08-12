@@ -17,6 +17,9 @@ pub struct ServerConfig {
     /// PvP 开关配置（C# Settings.PvpCan*）
     #[serde(default)]
     pub pvp: PvpConfig,
+    /// 精炼配置（C# Settings.Refine*）
+    #[serde(default)]
+    pub refine: RefineConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -78,6 +81,90 @@ impl Default for PvpConfig {
         Self {
             can_freeze: false,
             can_resist_poison: false,
+        }
+    }
+}
+
+/// 精炼配置（C# Settings.Refine*：Settings.cs:250-260）
+#[derive(Debug, Deserialize, Clone)]
+pub struct RefineConfig {
+    /// 精炼基础成功率（C# RefineBaseChance = 20）
+    #[serde(default = "default_refine_base_chance")]
+    pub base_chance: u8,
+    /// 精炼完成时间（分钟，C# RefineTime = 20）
+    #[serde(default = "default_refine_time_minutes")]
+    pub time_minutes: u32,
+    /// 精炼加成值（C# RefineIncrease = 1）
+    #[serde(default = "default_refine_increase")]
+    pub increase: u8,
+    /// 抱击概率（C# RefineCritChance = 10）
+    #[serde(default = "default_refine_crit_chance")]
+    pub crit_chance: u8,
+    /// 抱击加成倍率（C# RefineCritIncrease = 2）
+    #[serde(default = "default_refine_crit_increase")]
+    pub crit_increase: u8,
+    /// 武器已加属性折扣（C# RefineWepStatReduce = 6）
+    #[serde(default = "default_refine_wep_stat_reduce")]
+    pub wep_stat_reduce: u8,
+    /// 非武器已加属性折扣（C# RefineItemStatReduce = 15）
+    #[serde(default = "default_refine_item_stat_reduce")]
+    pub item_stat_reduce: u8,
+    /// 精炼费用系数（C# RefineCost = 125；cost = RequiredAmount*10*RefineCost）
+    #[serde(default = "default_refine_cost")]
+    pub cost: u32,
+    /// 精炼矿石名（C# RefineOreName = "BlackIronOre"）
+    #[serde(default = "default_refine_ore_name")]
+    pub ore_name: String,
+}
+
+fn default_refine_base_chance() -> u8 {
+    20
+}
+
+fn default_refine_time_minutes() -> u32 {
+    20
+}
+
+fn default_refine_increase() -> u8 {
+    1
+}
+
+fn default_refine_crit_chance() -> u8 {
+    10
+}
+
+fn default_refine_crit_increase() -> u8 {
+    2
+}
+
+fn default_refine_wep_stat_reduce() -> u8 {
+    6
+}
+
+fn default_refine_item_stat_reduce() -> u8 {
+    15
+}
+
+fn default_refine_cost() -> u32 {
+    125
+}
+
+fn default_refine_ore_name() -> String {
+    "BlackIronOre".to_string()
+}
+
+impl Default for RefineConfig {
+    fn default() -> Self {
+        Self {
+            base_chance: default_refine_base_chance(),
+            time_minutes: default_refine_time_minutes(),
+            increase: default_refine_increase(),
+            crit_chance: default_refine_crit_chance(),
+            crit_increase: default_refine_crit_increase(),
+            wep_stat_reduce: default_refine_wep_stat_reduce(),
+            item_stat_reduce: default_refine_item_stat_reduce(),
+            cost: default_refine_cost(),
+            ore_name: default_refine_ore_name(),
         }
     }
 }
@@ -659,6 +746,7 @@ impl Default for ServerConfig {
             conquest: ConquestConfig::default(),
             rested: RestedConfig::default(),
             pvp: PvpConfig::default(),
+            refine: RefineConfig::default(),
         }
     }
 }
@@ -737,5 +825,20 @@ mod tests {
         assert!(c.monster_recall_enabled);
         assert_eq!(c.monster_recall_range, 12);
         assert_eq!(c.monster_recall_cooldown_ms, 5000);
+    }
+
+    /// #2392：精炼配置默认值（C# Settings.Refine*）
+    #[test]
+    fn refine_defaults_match_csharp() {
+        let c = RefineConfig::default();
+        assert_eq!(c.base_chance, 20);
+        assert_eq!(c.time_minutes, 20);
+        assert_eq!(c.increase, 1);
+        assert_eq!(c.crit_chance, 10);
+        assert_eq!(c.crit_increase, 2);
+        assert_eq!(c.wep_stat_reduce, 6);
+        assert_eq!(c.item_stat_reduce, 15);
+        assert_eq!(c.cost, 125);
+        assert_eq!(c.ore_name, "BlackIronOre");
     }
 }

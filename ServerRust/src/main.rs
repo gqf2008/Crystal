@@ -189,6 +189,7 @@ async fn async_main() -> anyhow::Result<()> {
         monster_recall_enabled: cfg.server.monster_recall_enabled,
         monster_recall_range: cfg.server.monster_recall_range,
         monster_recall_cooldown_ms: cfg.server.monster_recall_cooldown_ms,
+        refine_cfg: cfg.refine.clone(),
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

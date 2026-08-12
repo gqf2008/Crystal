@@ -76,3 +76,15 @@ period_secs = 60
 buff_length_minutes = 10
 exp_bonus_percent = 5
 max_bonus = 24
+
+# 精炼配置（C# Settings.Refine*，#2392）
+[refine]
+base_chance = 20
+time_minutes = 20
+increase = 1
+crit_chance = 10
+crit_increase = 2
+wep_stat_reduce = 6
+item_stat_reduce = 15
+cost = 125
+ore_name = "BlackIronOre"
