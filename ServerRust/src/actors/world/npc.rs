@@ -240,6 +240,47 @@ impl Message<NPCCallRequest> for WorldActor {
                 }).await;
                 return;
             }
+            // C# CraftKey：SendNPCGoods(可制作配方产物, PanelType.Craft；NPCScript.cs:952-956)
+            Some(EngineNpcAction::Craft) => {
+                self.send_craft_goods(msg.session_id, &npc, &player_state).await;
+                return;
+            }
+            // C# RefineKey：S.NPCRefine{Rate=Settings.RefineCost, Refining=CurrentRefine!=null}（:958-966）
+            Some(EngineNpcAction::Refine) => {
+                let packet = mir2_shared::packets::server::npc::NPCRefine { rate: 125.0, refining: false };
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCRefine as i16, &body),
+                    }).await;
+                }
+                return;
+            }
+            // C# RefineCheckKey：S.NPCCheckRefine（空包；:967-969）
+            Some(EngineNpcAction::CheckRefine) => {
+                let packet = mir2_shared::packets::server::npc::NPCCheckRefine;
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCCheckRefine as i16, &body),
+                    }).await;
+                }
+                return;
+            }
+            // C# ConsignKey：S.NPCConsign（空包；:1041-1043）
+            Some(EngineNpcAction::Consign) => {
+                let packet = mir2_shared::packets::server::market_system::NPCConsign {};
+                let mut body = Vec::new();
+                if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCConsign as i16, &body),
+                    }).await;
+                }
+                return;
+            }
             None => {}
         }
 
@@ -1836,6 +1877,56 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// C# CraftKey：SendNPCGoods(可制作配方产物, PanelType.Craft)——按 recipe_infos 过滤 CanCraft
+    /// （NPCScript.cs:952-956；等级/性别/职业/任务/flags 校验与 CraftItemRequest 一致）
+    pub(crate) async fn send_craft_goods(
+        &mut self,
+        session_id: u64,
+        npc: &NpcState,
+        player_state: &crate::actors::player::PlayerState,
+    ) {
+        let mut items = Vec::new();
+        for recipe in &self.recipe_infos {
+            if recipe.product_item_index <= 0 {
+                continue;
+            }
+            // C# RecipeInfo.CanCraft
+            if let Some(lv) = recipe.required_level {
+                if (player_state.level as u16) < lv {
+                    continue;
+                }
+            }
+            if let Some(g) = recipe.required_gender {
+                if player_state.gender as u8 != g {
+                    continue;
+                }
+            }
+            if !recipe.required_classes.is_empty() && !recipe.required_classes.contains(&(player_state.class as u8)) {
+                continue;
+            }
+            if recipe.required_quests.iter().any(|q| !player_state.quest_log.completed_indices.contains(q)) {
+                continue;
+            }
+            if recipe.required_flags.iter().any(|f| player_state.flags.get(&format!("NPC_FLAG_{}", f)).copied().unwrap_or(0) < 1) {
+                continue;
+            }
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index: recipe.product_item_index,
+                count: recipe.product_count,
+                ..Default::default()
+            };
+            if let Some(info) = self.item_infos.get(&recipe.product_item_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            crate::actors::world::enrich_item_info(&mut item, &self.item_infos);
+            items.push(item);
+        }
+        self.send_npc_goods_items_panel(session_id, npc, items, mir2_shared::enums::PanelType::Craft);
+    }
+}
+
 /// #2368：引擎级特殊页 → 面板动作（C# NPCScript.ProcessSpecial 商店类 key）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EngineNpcAction {
@@ -1853,6 +1944,14 @@ pub(crate) enum EngineNpcAction {
     BuySub,
     /// C# StorageKey：ResetStorageUnlock + SendStorage + NPCStorage
     Storage,
+    /// C# CraftKey：SendNPCGoods(可制作配方产物, PanelType.Craft)
+    Craft,
+    /// C# RefineKey：S.NPCRefine
+    Refine,
+    /// C# RefineCheckKey：S.NPCCheckRefine
+    CheckRefine,
+    /// C# ConsignKey：S.NPCConsign
+    Consign,
 }
 
 pub(crate) fn engine_npc_action(key: &str) -> Option<EngineNpcAction> {
@@ -1864,6 +1963,10 @@ pub(crate) fn engine_npc_action(key: &str) -> Option<EngineNpcAction> {
         "[@SREPAIR]" => Some(EngineNpcAction::SpecialRepair),
         "[@BUYUSED]" => Some(EngineNpcAction::BuySub),
         "[@STORAGE]" => Some(EngineNpcAction::Storage),
+        "[@CRAFT]" => Some(EngineNpcAction::Craft),
+        "[@REFINE]" => Some(EngineNpcAction::Refine),
+        "[@REFINECHECK]" => Some(EngineNpcAction::CheckRefine),
+        "[@CONSIGN]" => Some(EngineNpcAction::Consign),
         _ => None,
     }
 }
@@ -2901,11 +3004,16 @@ mod tests {
         assert_eq!(engine_npc_action("[@SREPAIR]"), Some(A::SpecialRepair));
         assert_eq!(engine_npc_action("[@BUYUSED]"), Some(A::BuySub));
         assert_eq!(engine_npc_action("[@STORAGE]"), Some(A::Storage));
+        assert_eq!(engine_npc_action("[@CRAFT]"), Some(A::Craft));
+        assert_eq!(engine_npc_action("[@REFINE]"), Some(A::Refine));
+        assert_eq!(engine_npc_action("[@REFINECHECK]"), Some(A::CheckRefine));
+        assert_eq!(engine_npc_action("[@CONSIGN]"), Some(A::Consign));
         // 大小写不敏感
         assert_eq!(engine_npc_action("[@buysell]"), Some(A::GoodsAndSell));
+        assert_eq!(engine_npc_action("[@craft]"), Some(A::Craft));
         // 普通页不拦截
         assert_eq!(engine_npc_action("[@MAIN]"), None);
-        assert_eq!(engine_npc_action("[@CRAFT]"), None); // 后续批次
+        assert_eq!(engine_npc_action("[@MARKET]"), None); // 客户端按钮直接开市场
     }
 
     #[test]
