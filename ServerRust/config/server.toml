@@ -21,10 +21,11 @@ mana_regen_weight = 10
 goods_hide_added_stats = true
 
 [rarity]
-elite_chance_percent = 3
-elite_hp_multiplier = 2.0
-elite_dmg_multiplier = 1.5
-elite_xp_multiplier = 2.0
+# 对齐 C# Settings.MonsterRarity*（#2360）：Elite 0.1% / HP 2.25 / 伤害 1.65 / 经验 2.20
+elite_chance_percent = 0.1
+elite_hp_multiplier = 2.25
+elite_dmg_multiplier = 1.65
+elite_xp_multiplier = 2.2
 
 # Social / 行会 / 任务系统配置
 # guild_creation_cost_gold = 创建行会所需金币 (master C# Guild_CreationCost)
@@ -52,8 +53,9 @@ guild_war_time = 180
 
 # 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold / ExtendGT / GTSale 最低价）
 [conquest]
-buy_gold = 1000000
-extend_gold = 500000
+# 对齐 C# Settings.BuyGTGold / ExtendGT（#2360）
+buy_gold = 10000000
+extend_gold = 1000000
 gt_sale_min_price = 2000000
 gt_days = 30
 
