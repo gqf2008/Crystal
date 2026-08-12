@@ -3008,7 +3008,7 @@ pub struct MapMovementInfo {
 }
 
 /// Map info with nested data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MapInfo {
     pub index: i32,
     pub file_name: String,
