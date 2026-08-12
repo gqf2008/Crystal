@@ -158,6 +158,25 @@ fn get_i32(parsed: &HashMap<String, HashMap<String, String>>, section: &str, key
     ini_get_i64(parsed, section, key, default as i64) as i32
 }
 
+/// 从 `Configs/ExpList.ini` 加载玩家升级经验曲线（C# Settings.ExperienceList：`[Exp] Level1..LevelN`）
+/// 文件缺失/无数据时返回空 Vec（调用方回退 ×1.5）
+pub fn load_exp_list(configs_dir: &Path) -> Vec<i64> {
+    let path = configs_dir.join("ExpList.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let parsed = parse_ini(&content);
+    let mut out = Vec::new();
+    for i in 1..=1000 {
+        let v = ini_get_i64(&parsed, "Exp", &format!("Level{}", i), -1);
+        if v < 0 {
+            break;
+        }
+        out.push(v);
+    }
+    out
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -273,6 +292,33 @@ BuffExpRate=0
         assert_eq!(infos[1].buff_craft_rate, 1);
         std::fs::remove_dir_all(&dir).ok();
     }
+    /// #2404：load_exp_list 解析 `[Exp] LevelN`；文件缺失返回空
+    #[test]
+    fn test_load_exp_list_parsing() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_exp");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ExpList.ini"), "[Exp]\nLevel1=100\nLevel2=200\nLevel3=300\n").unwrap();
+        let list = load_exp_list(&dir);
+        assert_eq!(list, vec![100, 200, 300]);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → 空
+        assert!(load_exp_list(Path::new("C:/definitely/not/exists")).is_empty());
+    }
+
+    /// #2404：真实 Daneo1989/Configs/ExpList.ini 加载（500 级）
+    #[test]
+    fn test_load_real_exp_list() {
+        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs/ExpList.ini"));
+        if !path.exists() {
+            return; // 数据目录缺失时跳过（CI 无数据版本）
+        }
+        let dir = path.parent().unwrap();
+        let list = load_exp_list(dir);
+        assert_eq!(list.len(), 500);
+        assert_eq!(list[0], 100);
+        assert_eq!(list[499], 100);
+    }
 }
 
 /// #1749：C# Settings.RandomItemStatsList（Configs/RandomItemStats.ini）——掉落随机附加属性配置
@@ -370,4 +416,3 @@ pub fn load_random_item_stats(configs_dir: &Path) -> Vec<mir2_shared::data::item
     }
     out
 }
-

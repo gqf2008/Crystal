@@ -73,10 +73,21 @@ async fn async_main() -> anyhow::Result<()> {
     let configs_dir = map_dir.join("Configs");
     let fishing_cfg = crystal_server::util::ini::load_fishing_config(&configs_dir);
     let guild_buff_infos = crystal_server::util::ini::load_guild_buff_infos(&configs_dir);
+    // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
+    // server.toml 显式配置优先，否则用 ini 曲线
+    let exp_list = {
+        let ini_exp = crystal_server::util::ini::load_exp_list(&configs_dir);
+        if cfg.server.experience_list.is_empty() {
+            ini_exp
+        } else {
+            cfg.server.experience_list.clone()
+        }
+    };
     info!(
-        "Loaded data configs: fishing attempts={} buffs={}",
+        "Loaded data configs: fishing attempts={} buffs={} exp_levels={}",
         fishing_cfg.attempts,
-        guild_buff_infos.len()
+        guild_buff_infos.len(),
+        exp_list.len()
     );
 
     // 初始化 SQLite 数据库（使用配置 database.path，支持绝对路径；#77 worktree 联调发现原硬编码忽略配置）
@@ -169,7 +180,7 @@ async fn async_main() -> anyhow::Result<()> {
         pvp_cfg: cfg.pvp.clone(),
         drop_rate: cfg.server.drop_rate,
         exp_rate: 1.0, // C# Settings.ExpRate 默认 1
-        experience_list: cfg.server.experience_list.clone(),
+        experience_list: exp_list,
         fishing_cfg: fishing_cfg,
         random_item_stats: crystal_server::util::ini::load_random_item_stats(&configs_dir),
         guild_buff_infos: guild_buff_infos.clone(),
