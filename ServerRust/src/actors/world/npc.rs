@@ -247,7 +247,8 @@ impl Message<NPCCallRequest> for WorldActor {
             }
             // C# RefineKey：S.NPCRefine{Rate=Settings.RefineCost, Refining=CurrentRefine!=null}（:958-966）
             Some(EngineNpcAction::Refine) => {
-                let packet = mir2_shared::packets::server::npc::NPCRefine { rate: 125.0, refining: false };
+                // C# RefineKey（NPCScript.cs:982-990）：Refining = CurrentRefine != null
+                let packet = mir2_shared::packets::server::npc::NPCRefine { rate: 125.0, refining: player_state.refine_log.active_refine.is_some() };
                 let mut body = Vec::new();
                 if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
                     let _ = self.gate_ref.tell(SendToClient {
@@ -265,6 +266,75 @@ impl Message<NPCCallRequest> for WorldActor {
                     let _ = self.gate_ref.tell(SendToClient {
                         session_id: msg.session_id,
                         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCCheckRefine as i16, &body),
+                    }).await;
+                }
+                return;
+            }
+
+            // C# RefineCollectKey：player.CollectRefine()（PlayerObject.cs:12858-12891）
+            Some(EngineNpcAction::RefineCollect) => {
+                let current_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let Some(active) = player_state.refine_log.active_refine.as_ref() else {
+                    send_system_message(&self.gate_ref, msg.session_id, "没有精炼进行中");
+                    self.send_npc_collect_refine(msg.session_id, false);
+                    return;
+                };
+                let status = active.status;
+                let finish_time = active.finish_time;
+                // C# CollectRefine：CollectTime > Envir.Time → 未完成
+                if status == crate::actors::refine::RefineStatus::Pending && current_time < finish_time {
+                    let remaining = finish_time - current_time;
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("精炼进行中，剩余 {} 秒", remaining));
+                    self.send_npc_collect_refine(msg.session_id, false);
+                    return;
+                }
+                // 就绪且未结算：先按 CheckRefine 语义结算（成功应用属性/失败粉碎）
+                let mut log = player_state.refine_log;
+                if status == crate::actors::refine::RefineStatus::Pending {
+                    match log.settle_check() {
+                        Some(crate::actors::refine::RefineCheckResult::Applied) => {}
+                        Some(crate::actors::refine::RefineCheckResult::Destroyed) => {
+                            let _ = log.cancel();
+                            let _ = record.actor_ref.ask(crate::actors::player::SetRefineLog { refine_log: log }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "精炼失败，物品已粉碎");
+                            self.send_npc_collect_refine(msg.session_id, false);
+                            return;
+                        }
+                        None => {}
+                    }
+                }
+                let Some(ri) = log.retrieve() else {
+                    send_system_message(&self.gate_ref, msg.session_id, "没有精炼进行中");
+                    self.send_npc_collect_refine(msg.session_id, false);
+                    return;
+                };
+                let Some(item) = ri.item else {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetRefineLog { refine_log: log }).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "精炼物品缺失");
+                    self.send_npc_collect_refine(msg.session_id, false);
+                    return;
+                };
+                // C# CollectRefine：背包无空格→失败（回放精炼日志避免物品丢失）
+                let ok = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item: item.clone() }).await.unwrap_or(false);
+                if !ok {
+                    let _ = log.deposit_item(item);
+                    let _ = record.actor_ref.ask(crate::actors::player::SetRefineLog { refine_log: log }).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+                    self.send_npc_collect_refine(msg.session_id, false);
+                    return;
+                }
+                let _ = record.actor_ref.ask(crate::actors::player::SetRefineLog { refine_log: log }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "精炼物品已取回");
+                self.send_npc_collect_refine(msg.session_id, true);
+                // 完整 UserInformation 刷新（背包 + 金币）
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: packet,
                     }).await;
                 }
                 return;
@@ -1930,6 +2000,20 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// #2378：发送 S.NPCCollectRefine（C# CollectRefine 结果包；try_send 尽力送达）
+    fn send_npc_collect_refine(&self, session_id: u64, success: bool) {
+        let packet = mir2_shared::packets::server::npc::NPCCollectRefine { success };
+        let mut body = Vec::new();
+        if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCCollectRefine as i16, &body),
+            }).try_send();
+        }
+    }
+}
+
 /// #2368：引擎级特殊页 → 面板动作（C# NPCScript.ProcessSpecial 商店类 key）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EngineNpcAction {
@@ -1953,6 +2037,8 @@ pub(crate) enum EngineNpcAction {
     Refine,
     /// C# RefineCheckKey：S.NPCCheckRefine
     CheckRefine,
+    /// C# RefineCollectKey：CollectRefine（NPCCollectRefine + 取回精炼物品）
+    RefineCollect,
     /// C# ConsignKey：S.NPCConsign
     Consign,
 }
@@ -1969,6 +2055,7 @@ pub(crate) fn engine_npc_action(key: &str) -> Option<EngineNpcAction> {
         "[@CRAFT]" => Some(EngineNpcAction::Craft),
         "[@REFINE]" => Some(EngineNpcAction::Refine),
         "[@REFINECHECK]" => Some(EngineNpcAction::CheckRefine),
+        "[@REFINECOLLECT]" => Some(EngineNpcAction::RefineCollect),
         "[@CONSIGN]" => Some(EngineNpcAction::Consign),
         _ => None,
     }
@@ -3010,6 +3097,7 @@ mod tests {
         assert_eq!(engine_npc_action("[@CRAFT]"), Some(A::Craft));
         assert_eq!(engine_npc_action("[@REFINE]"), Some(A::Refine));
         assert_eq!(engine_npc_action("[@REFINECHECK]"), Some(A::CheckRefine));
+        assert_eq!(engine_npc_action("[@REFINECOLLECT]"), Some(A::RefineCollect));
         assert_eq!(engine_npc_action("[@CONSIGN]"), Some(A::Consign));
         // 大小写不敏感
         assert_eq!(engine_npc_action("[@buysell]"), Some(A::GoodsAndSell));
