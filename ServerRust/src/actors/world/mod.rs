@@ -168,6 +168,8 @@ pub struct WorldActorArgs {
     pub awakening_cfg: crate::util::ini::AwakeningIniSettings,
     /// 宝石配置（C# Settings.LoadGem：Configs/GemSystem.ini）
     pub gem_cfg: crate::util::ini::GemIniSettings,
+    /// 英雄升级经验曲线（C# Settings.HeroExpList：Configs/HeroExpList.ini；空 = 回退 100/级）
+    pub hero_exp_list: Vec<u32>,
 }
 
 /// 世界中的玩家记录
@@ -1585,6 +1587,8 @@ pub struct WorldActor {
     pub(crate) awakening_cfg: crate::util::ini::AwakeningIniSettings,
     /// 宝石配置（#2416：Configs/GemSystem.ini）
     pub(crate) gem_cfg: crate::util::ini::GemIniSettings,
+    /// 英雄升级经验曲线（#2418：Configs/HeroExpList.ini；空 = 回退 100/级）
+    pub(crate) hero_exp_list: Vec<u32>,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -2045,6 +2049,7 @@ impl WorldActor {
             orbs_def_list: Vec::new(),
             awakening_cfg: crate::util::ini::AwakeningIniSettings::default(),
             gem_cfg: crate::util::ini::GemIniSettings::default(),
+            hero_exp_list: Vec::new(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -6003,6 +6008,7 @@ Ok(Self {
             orbs_def_list: args.orbs_def_list,
             awakening_cfg: args.awakening_cfg,
             gem_cfg: args.gem_cfg,
+            hero_exp_list: args.hero_exp_list,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

@@ -1342,7 +1342,8 @@ impl Message<NewHeroRequest> for WorldActor {
                 sealed: false,
                 autopot: false,
                 experience: 0,
-                max_experience: 100,
+                // #2418：英雄经验曲线第 1 档（C# HeroExperienceList[Level-1]，Level=1 → [0]）
+                max_experience: self.hero_exp_list.first().copied().unwrap_or(super::hero_stats::HERO_MAX_EXPERIENCE),
             });
             // C# CreateHero（PlayerObject.cs:9610）：有封印符配置（HeroSealItemName）且背包有空位时，
             // 英雄以"英雄封印符"形式发放（不出战，使用后恢复）；否则直接创建为出战英雄。

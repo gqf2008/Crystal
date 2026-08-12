@@ -166,6 +166,7 @@ async fn start_server_with_world() -> u16 {
         orbs_def_list: Vec::new(),
         awakening_cfg: Default::default(),
         gem_cfg: Default::default(),
+        hero_exp_list: Vec::new(),
         experience_list: Vec::new(),
         fishing_cfg: Default::default(),
         random_item_stats: Vec::new(),
