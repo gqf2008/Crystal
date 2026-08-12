@@ -177,6 +177,83 @@ pub fn load_exp_list(configs_dir: &Path) -> Vec<i64> {
     out
 }
 
+/// 行会配置（C# Settings.LoadGuildSettings：Configs/GuildSettings.ini 覆盖默认值）
+#[derive(Debug, Clone)]
+pub struct GuildIniSettings {
+    /// C# Settings.Guild_RequiredLevel（[Guilds] MinimumLevel）
+    pub required_level: u16,
+    /// C# Settings.Guild_ExpRate（[Guilds] ExpRate）
+    pub exp_rate: f64,
+    /// C# Settings.Guild_PointPerLevel（[Guilds] PointPerLevel）
+    pub point_per_level: u8,
+    /// C# Settings.Guild_WarTime（[Guilds] WarTime）
+    pub war_time: i64,
+    /// C# Settings.Guild_WarCost（[Guilds] WarCost）
+    pub war_cost: u32,
+    /// C# Settings.NewbieGuildBuffEnabled（[Guilds] NewbieGuildBuffEnabled）
+    pub newbie_guild_buff_enabled: bool,
+    /// C# Settings.NewbieGuildExpBuff（[Guilds] NewbieGuildExpBuff）
+    pub newbie_guild_exp_buff: i32,
+    /// C# Settings.Guild_ExperienceList（[Exp] Level-i）
+    pub experience_list: Vec<i64>,
+    /// C# Settings.Guild_MembercapList（[Cap] Level-i）
+    pub membercap_list: Vec<i32>,
+}
+
+impl Default for GuildIniSettings {
+    fn default() -> Self {
+        Self {
+            required_level: 22,
+            exp_rate: 0.01,
+            point_per_level: 0,
+            war_time: 180,
+            war_cost: 3000,
+            newbie_guild_buff_enabled: true,
+            newbie_guild_exp_buff: 5,
+            experience_list: Vec::new(),
+            membercap_list: Vec::new(),
+        }
+    }
+}
+
+/// 从 `Configs/GuildSettings.ini` 加载行会配置（C# Settings.LoadGuildSettings；文件缺失返回 C# 默认）
+pub fn load_guild_settings(configs_dir: &Path) -> GuildIniSettings {
+    let path = configs_dir.join("GuildSettings.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return GuildIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut s = GuildIniSettings::default();
+    s.required_level = ini_get_i64(&parsed, "Guilds", "MinimumLevel", s.required_level as i64).clamp(1, 255) as u16;
+    if let Some(v) = ini_get(&parsed, "Guilds", "ExpRate") {
+        if let Ok(f) = v.parse::<f64>() {
+            s.exp_rate = f;
+        }
+    }
+    s.point_per_level = ini_get_i64(&parsed, "Guilds", "PointPerLevel", s.point_per_level as i64).clamp(0, 255) as u8;
+    s.war_time = ini_get_i64(&parsed, "Guilds", "WarTime", s.war_time);
+    s.war_cost = ini_get_i64(&parsed, "Guilds", "WarCost", s.war_cost as i64).max(0) as u32;
+    if let Some(v) = ini_get(&parsed, "Guilds", "NewbieGuildBuffEnabled") {
+        s.newbie_guild_buff_enabled = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    s.newbie_guild_exp_buff = ini_get_i64(&parsed, "Guilds", "NewbieGuildExpBuff", s.newbie_guild_exp_buff as i64) as i32;
+    for i in 0..1000 {
+        let v = ini_get_i64(&parsed, "Exp", &format!("Level-{}", i), -1);
+        if v < 0 {
+            break;
+        }
+        s.experience_list.push(v);
+    }
+    for i in 0..1000 {
+        let v = ini_get_i64(&parsed, "Cap", &format!("Level-{}", i), -1);
+        if v < 0 {
+            break;
+        }
+        s.membercap_list.push(v as i32);
+    }
+    s
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -318,6 +395,51 @@ BuffExpRate=0
         assert_eq!(list.len(), 500);
         assert_eq!(list[0], 100);
         assert_eq!(list[499], 100);
+    }
+
+    /// #2406：load_guild_settings 解析（[Guilds]/经验与上限列表）；文件缺失返回 C# 默认
+    #[test]
+    fn test_load_guild_settings_parsing() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_guild");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("GuildSettings.ini"),
+            "[Guilds]\nMinimumLevel=22\nExpRate=0.01\nPointPerLevel=1\nWarTime=180\nWarCost=30000\nNewbieGuildBuffEnabled=true\nNewbieGuildExpBuff=5\n\n[Exp]\nLevel-0=1\nLevel-1=1\nLevel-2=2\n\n[Cap]\nLevel-0=10\nLevel-1=20\n",
+        )
+        .unwrap();
+        let s = load_guild_settings(&dir);
+        assert_eq!(s.required_level, 22);
+        assert_eq!(s.exp_rate, 0.01);
+        assert_eq!(s.point_per_level, 1);
+        assert_eq!(s.war_cost, 30000);
+        assert_eq!(s.war_time, 180);
+        assert_eq!(s.experience_list, vec![1, 1, 2]);
+        assert_eq!(s.membercap_list, vec![10, 20]);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → C# 默认
+        let d = load_guild_settings(Path::new("C:/definitely/not/exists"));
+        assert_eq!(d.required_level, 22);
+        assert_eq!(d.war_cost, 3000);
+        assert!(d.experience_list.is_empty());
+    }
+
+    /// #2406：真实 Daneo1989/Configs/GuildSettings.ini 加载（WarCost=30000/PointPerLevel=1/Exp 21 项/Cap 21 项）
+    #[test]
+    fn test_load_real_guild_settings() {
+        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs/GuildSettings.ini"));
+        if !path.exists() {
+            return; // 数据目录缺失时跳过
+        }
+        let dir = path.parent().unwrap();
+        let s = load_guild_settings(dir);
+        assert_eq!(s.required_level, 22);
+        assert_eq!(s.exp_rate, 0.01);
+        assert_eq!(s.point_per_level, 1);
+        assert_eq!(s.war_time, 180);
+        assert_eq!(s.war_cost, 30000);
+        assert_eq!(s.experience_list.len(), 21);
+        assert_eq!(s.membercap_list.len(), 21);
     }
 }
 

@@ -123,7 +123,9 @@ async fn async_main() -> anyhow::Result<()> {
     // SocialActor 先启动，WorldActor 依赖它。
     // 共享 cfg:social 字段(guild_creation_cost_gold)透传到 SocialActorConfig
     // 的 GUILD_CREATION_COST_GOLD 常量(之前是 hardcoded 1_000_000,现从 cfg 读)。
-    let social_config = SocialActorConfig {
+    // #2406：行会配置以 Configs/GuildSettings.ini 为准（C# Settings.LoadGuildSettings 覆盖）
+    let guild_ini = crystal_server::util::ini::load_guild_settings(&configs_dir);
+    let mut social_config = SocialActorConfig {
         map_infos: Arc::new(RwLock::new(HashMap::<i32, db::MapInfo>::new())),
         item_infos: Arc::new(RwLock::new(HashMap::<i32, db::ItemInfo>::new())),
         guild_creation_cost_gold: cfg.social.guild_creation_cost_gold,
@@ -158,6 +160,16 @@ async fn async_main() -> anyhow::Result<()> {
         marriage_level_required: cfg.social.marriage_level_required,
         mentor_level_gap: cfg.social.mentor_level_gap,
     };
+    // #2406：用 ini 值覆盖 server.toml 的 C# 默认（对齐 C# LoadGuildSettings）
+    social_config.guild_required_level = guild_ini.required_level;
+    social_config.guild_exp_rate = guild_ini.exp_rate;
+    social_config.guild_point_per_level = guild_ini.point_per_level;
+    social_config.guild_war_time = guild_ini.war_time;
+    social_config.guild_war_cost = guild_ini.war_cost;
+    social_config.newbie_guild_buff_enabled = guild_ini.newbie_guild_buff_enabled;
+    social_config.newbie_guild_exp_buff = guild_ini.newbie_guild_exp_buff;
+    social_config.guild_experience_list = guild_ini.experience_list;
+    social_config.guild_membercap_list = guild_ini.membercap_list;
     info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
     let social_ref = SocialActor::spawn(SocialActorArgs {
         gate_ref: gate_ref.clone(),
