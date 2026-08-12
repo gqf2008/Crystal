@@ -556,12 +556,18 @@ pub enum MonsterAiType {
 }
 
 impl MonsterAiType {
-    /// 从 DB 的 ai 字段解析
+    /// 从 DB 的 ai 字段解析（对齐 C# MonsterObject.GetMonster：MonsterObject.cs:18-；#2354）
     fn from_db_ai(ai: i32) -> Self {
         match ai {
+            // C# GetMonster default（AI 0）= 基础 MonsterObject：CanMove/CanAttack 默认 true，主动索敌攻击
+            0 => Self::Aggressive,
             // C# GetMonster：1/2=Deer、3=Tree（被动/静态）
-            0 | 1 | 2 | 3 => Self::Passive,
-            64 | 81 | 82 | 252 => Self::Boss,
+            1 | 2 | 3 => Self::Passive,
+            // C# GetMonster：64=IntelligentCreatureObject（智能宠物/幼宠，被动）、68=Football（CanAttack=false）
+            64 | 68 => Self::Passive,
+            // C# GetMonster：81=Gate、82=Wall（攻城静态结构）→ Passive；252=未知强化版保留 Boss
+            81 | 82 => Self::Passive,
+            252 => Self::Boss,
             // C# 4=SpittingSpider（主动近战+毒线）、5=CannibalPlant（埋伏主动），均非逃跑
             6 => Self::Guard,
             // C# 8=AxeSkeleton（远程掷斧 Range Projectile）
@@ -569,8 +575,10 @@ impl MonsterAiType {
             // C# 10=FlamingWooma（近战，MAC 判定）
             // C# 20=DarkDevil（远程 RangeAttack）→ Mage；21/22=IncarnatedGhoul/ZT 为近战 → 默认 Aggressive
             20 => Self::Mage,
-            30 | 31 => Self::Healer,
-            40 | 41 => Self::Summoner,
+            // C# 30=BoneLord（AttackRange=7 远程魔法/召唤）、31=RightGuard/32=LeftGuard（AttackRange=8 远程魔法）→ Mage
+            30 | 31 | 32 => Self::Mage,
+            // C# 40=BombSpider、41/42=YinDevilNode/YangDevilNode（召唤/增益）→ Summoner
+            40 | 41 | 42 => Self::Summoner,
             _ => Self::Aggressive,
         }
     }
@@ -9598,6 +9606,43 @@ mod tests {
         upgrade_item(&mut item, &stat);
         assert!(item.added_stats.get(mir2_shared::enums::Stat::MaxDC) > 0);
         assert!(!item.slots.is_empty(), "slot should be created");
+    }
+
+    /// #2354：from_db_ai 映射对齐 C# MonsterObject.GetMonster（MonsterObject.cs:18-）
+    #[test]
+    fn monster_ai_from_db_mapping_matches_csharp_getmonster() {
+        use crate::actors::world::MonsterAiType as T;
+        // default（AI 0）= 基础 MonsterObject，主动攻击
+        assert_eq!(T::from_db_ai(0), T::Aggressive);
+        // 1/2=Deer、3=Tree 被动
+        for ai in [1, 2, 3] {
+            assert_eq!(T::from_db_ai(ai), T::Passive, "ai={} should be Passive", ai);
+        }
+        // 6=Guard、8=AxeSkeleton 远程
+        assert_eq!(T::from_db_ai(6), T::Guard);
+        assert_eq!(T::from_db_ai(8), T::Ranged);
+        // 20=DarkDevil 远程魔法
+        assert_eq!(T::from_db_ai(20), T::Mage);
+        // 30=BoneLord / 31=RightGuard / 32=LeftGuard 远程魔法（原误映射 Healer）
+        for ai in [30, 31, 32] {
+            assert_eq!(T::from_db_ai(ai), T::Mage, "ai={} should be Mage", ai);
+        }
+        // 40=BombSpider / 41/42=YinDevilNode 召唤
+        for ai in [40, 41, 42] {
+            assert_eq!(T::from_db_ai(ai), T::Summoner, "ai={} should be Summoner", ai);
+        }
+        // 64=IntelligentCreatureObject / 68=Football 被动（原误映射 Boss/Aggressive）
+        for ai in [64, 68] {
+            assert_eq!(T::from_db_ai(ai), T::Passive, "ai={} should be Passive", ai);
+        }
+        // 81=Gate / 82=Wall 攻城静态结构
+        for ai in [81, 82] {
+            assert_eq!(T::from_db_ai(ai), T::Passive, "ai={} should be Passive", ai);
+        }
+        // 其余特殊 AI 由 name 注册专属行为，generic 默认主动
+        for ai in [4, 5, 7, 9, 10, 11, 12, 24, 25, 26, 33, 34, 35, 49, 57, 58] {
+            assert_eq!(T::from_db_ai(ai), T::Aggressive, "ai={} should be Aggressive", ai);
+        }
     }
 
     #[test]
