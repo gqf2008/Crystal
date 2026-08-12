@@ -80,6 +80,8 @@ async fn async_main() -> anyhow::Result<()> {
     let gem_ini = crystal_server::util::ini::load_gem_settings(&configs_dir);
     // #2418：英雄升级经验曲线（C# Settings.LoadHeroEXP：Configs/HeroExpList.ini）
     let hero_exp_list = crystal_server::util::ini::load_hero_exp_list(&configs_dir);
+    // #2420：Setup.ini 常用参数（C# Settings.Load）
+    let setup_ini = crystal_server::util::ini::load_setup_settings(&configs_dir);
     // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
     // server.toml 显式配置优先，否则用 ini 曲线
     let exp_list = {
@@ -173,6 +175,9 @@ async fn async_main() -> anyhow::Result<()> {
         mentor_level_gap: cfg.social.mentor_level_gap,
         mentor_length_days: cfg.social.mentor_length_days,
         guild_creation_costs: Vec::new(), // #2412：下方用 GuildSettings.ini Required-* 覆盖
+        // #2420：Setup.ini [Game] 邀请/交易冷却（C# GroupInviteDelay/TradeDelay）
+        group_invite_delay_ms: setup_ini.group_invite_delay_ms,
+        trade_delay_ms: setup_ini.trade_delay_ms,
     };
     // #2406：用 ini 值覆盖 server.toml 的 C# 默认（对齐 C# LoadGuildSettings）
     social_config.guild_required_level = guild_ini.required_level;
@@ -256,6 +261,7 @@ async fn async_main() -> anyhow::Result<()> {
         awakening_cfg: awakening_ini,
         gem_cfg: gem_ini,
         hero_exp_list,
+        setup_cfg: setup_ini,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

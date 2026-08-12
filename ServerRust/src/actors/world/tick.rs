@@ -1143,7 +1143,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
     self.tick_required_group().await;
     // #2348：C# Envir.Process（:2167）——LineMessageTimer(10 分钟 = 6000 ticks) 随机提示广播全服
     if !self.line_messages.is_empty() && self.tick_count >= self.line_message_next_tick {
-        self.line_message_next_tick = self.tick_count + 6000;
+        // #2420：C# Settings.LineMessageTimer（分钟 × 600 ticks；默认 10 分钟 = 6000）
+        self.line_message_next_tick = self.tick_count + self.setup_cfg.line_message_timer_minutes as u64 * 600;
         let line = self.line_messages[fastrand::usize(0..self.line_messages.len())].clone();
         broadcast_chat(&self.gate_ref, &self.players, &line, mir2_shared::enums::ChatType::LineMessage);
     }
@@ -2684,7 +2685,8 @@ pub(crate) async fn tick_player_conditions(&mut self) {
     }
 
     pub(crate) async fn tick_pk_decay(&mut self) {
-        if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
+        // #2420：C# Settings.PKDelay（秒 × 10 ticks/s；默认 12s = 120 ticks）
+        if self.tick_count % (self.setup_cfg.pk_delay_seconds as u64 * 10) == 0 {
             let mut colour_changes = Vec::new();
             for (session_id, record) in &self.players {
                 let _ = record.actor_ref.ask(crate::actors::player::DecayPkPoints).await;

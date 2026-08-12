@@ -14,9 +14,6 @@ pub(crate) const ORBS_EXP_LIST: [i32; 4] = [50, 100, 150, 200];
 pub(crate) const ORBS_DMG_LIST: [i32; 4] = [4, 8, 12, 16];
 /// 元素防御加成（C# Settings.OrbsDefList 默认：Orb i = i*2）
 pub(crate) const ORBS_DEF_LIST: [i32; 4] = [2, 4, 6, 8];
-/// 冥想每级上限（C# Settings.GatherOrbsPerLevel 默认 true）
-pub(crate) const GATHER_ORBS_PER_LEVEL: bool = true;
-
 /// 元素球数量（C# HumanObject.GetElementalOrbCount：满足 ElementsLevel >= OrbsExpList[i]
 /// 的档位数；OrbsExpList 升序 [50,100,150,200]，故为升序计数）
 pub(crate) fn elemental_orb_count(elements_level: i32, exp_list: &[i32]) -> usize {
@@ -233,7 +230,7 @@ impl WorldActor {
             // C# ObtainElement(true)：直接获得第一档元素
             level = exp_list[0];
             orb_type = 1;
-            if GATHER_ORBS_PER_LEVEL && meditation_lv == 3 && exp_list.len() > 1 {
+            if self.setup_cfg.gather_orbs_per_level && meditation_lv == 3 && exp_list.len() > 1 {
                 // C# 特殊：冥想 Lv3 时先广播第一档，再升到第二档
                 self.broadcast_set_elemental(
                     state.object_id, true, exp_list[0] as u32, 1,
@@ -247,7 +244,7 @@ impl WorldActor {
             // C# ObtainElement(false)：命中攒元素，先清 HasElemental 再 +1
             has_elemental = false;
             level = state.elements_level.saturating_add(1);
-            if GATHER_ORBS_PER_LEVEL {
+            if self.setup_cfg.gather_orbs_per_level {
                 let cap = exp_list[orb_idx];
                 if level > cap {
                     has_elemental = true;

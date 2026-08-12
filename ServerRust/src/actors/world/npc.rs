@@ -697,7 +697,7 @@ impl Message<TeleportToNPCRequest> for WorldActor {
             return;
         }
         // #2032：C# cost = Settings.TeleportToNPCCost（3000），金币不足拒绝
-        let cost = super::TELEPORT_TO_NPC_COST as u64;
+        let cost = self.setup_cfg.teleport_to_npc_cost.max(0) as u64;
         if state.inventory.gold < cost {
             send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法传送");
             return;
@@ -763,7 +763,7 @@ impl Message<RequestMapInfoRequest> for WorldActor {
         if let Some(rec) = self.players.get_mut(&msg.session_id) {
             if !rec.world_map_setup_sent {
                 rec.world_map_setup_sent = true;
-                let wm = super::build_world_map_setup_packet(&self.map_infos, super::TELEPORT_TO_NPC_COST);
+                let wm = super::build_world_map_setup_packet(&self.map_infos, self.setup_cfg.teleport_to_npc_cost);
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
                     data: wm,
