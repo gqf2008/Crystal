@@ -113,6 +113,12 @@ pub struct IntelligentCreature {
     /// 物品过滤（serde 兼容旧存档）
     #[serde(default)]
     pub filter: CreatureFilter,
+    /// 珍珠产出计数（C# IntelligentCreatureObject.PearlTicker；瞬态，不持久化，serde 兼容旧存档）
+    #[serde(default)]
+    pub pearl_ticker: u32,
+    /// 黑曜石产出计时（秒；C# CreatureInfo.BlackstoneTime，持久化，serde 兼容旧存档）
+    #[serde(default)]
+    pub blackstone_time: u32,
 }
 
 fn default_creature_level() -> u8 {
@@ -129,6 +135,8 @@ impl IntelligentCreature {
             enabled: false,
             level: 1,
             filter: CreatureFilter::default(),
+            pearl_ticker: 0,
+            blackstone_time: 0,
         }
     }
 
@@ -146,6 +154,33 @@ impl IntelligentCreature {
     /// 是否因饥饿无法工作
     pub fn is_starving(&self) -> bool {
         self.hunger < 20
+    }
+
+    /// C# IntelligentCreatureObject.PearlProduceCount = 1000：拾取 1000 次 → 1 珍珠
+    pub const PEARL_PRODUCE_COUNT: u32 = 1000;
+    /// C# IntelligentCreatureObject.BlackstoneProduceTime = 10800 秒（3 小时）
+    pub const BLACKSTONE_PRODUCE_TIME: u32 = 10800;
+
+    /// C# IncreasePearlProduction（:720-733）：每次拾取操作 +1；满 1000 产出珍珠（返回 true）
+    pub fn increase_pearl_production(&mut self) -> bool {
+        self.pearl_ticker += 1;
+        if self.pearl_ticker >= Self::PEARL_PRODUCE_COUNT {
+            self.pearl_ticker = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// C# ProcessBlackStoneProduction（:735-750）：每 dt 秒 +dt；满 10800 产出黑曜石（返回 true，计时归零）
+    pub fn process_blackstone_production(&mut self, dt_seconds: u32) -> bool {
+        self.blackstone_time = self.blackstone_time.saturating_add(dt_seconds);
+        if self.blackstone_time >= Self::BLACKSTONE_PRODUCE_TIME {
+            self.blackstone_time = 0;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -270,6 +305,28 @@ mod tests {
         assert_eq!(log.active_creature.as_ref().unwrap().hunger, 100);
     }
 
+    #[test]
+    fn test_pearl_production() {
+        // C# PearlProduceCount = 1000：拾取 1000 次 → 1 珍珠
+        let mut c = IntelligentCreature::new(CreatureType::None);
+        for _ in 0..999 {
+            assert!(!c.increase_pearl_production());
+        }
+        assert!(c.increase_pearl_production()); // 第 1000 次产出
+        assert_eq!(c.pearl_ticker, 0); // 计数归零
+        assert!(!c.increase_pearl_production());
+    }
+
+    #[test]
+    fn test_blackstone_production() {
+        // C# BlackstoneProduceTime = 10800 秒（3 小时）
+        let mut c = IntelligentCreature::new(CreatureType::None);
+        c.blackstone_time = 10790;
+        assert!(!c.process_blackstone_production(9)); // 10799 未满
+        assert!(c.process_blackstone_production(10)); // 10800 → 产出
+        assert_eq!(c.blackstone_time, 0); // 归零
+        assert!(!c.process_blackstone_production(1));
+    }
     #[test]
     fn test_log_tick() {
         let mut log = CreatureLog::new();

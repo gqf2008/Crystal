@@ -5003,16 +5003,27 @@ impl Message<FeedCreature> for PlayerActor {
     }
 }
 
-/// 宠物饥饿计时
+/// 宠物饥饿计时 + 黑曜石产出（C# IntelligentCreatureObject.Process：每秒 BlackstoneTime++）
+/// Reply = 本周期是否产出黑曜石（C# ProcessBlackStoneProduction 满 10800 秒）
 pub struct TickCreatureHunger {
     pub dt_seconds: u32,
 }
 
 impl Message<TickCreatureHunger> for PlayerActor {
-    type Reply = ();
+    type Reply = bool;
 
-    async fn handle(&mut self, msg: TickCreatureHunger, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(&mut self, msg: TickCreatureHunger, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.state.creature_log.tick(msg.dt_seconds);
+        // #2330：C# ProcessBlackStoneProduction（IntelligentCreatureObject.cs:735-750）
+        if let Some(c) = &mut self.state.creature_log.active_creature {
+            if c.enabled {
+                c.process_blackstone_production(msg.dt_seconds)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 }
 

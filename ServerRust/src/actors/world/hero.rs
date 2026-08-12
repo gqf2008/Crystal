@@ -437,6 +437,19 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
                 }
             }
             if picked_up {
+                // #2330：C# IntelligentCreatureObject.IncreasePearlProduction（:720-733）——
+                // 每次拾取操作 PearlTicker++，满 1000 → 玩家 PearlCount+1（PearlTicker 瞬态）
+                let mut st = state.clone();
+                let produced_pearl = st.creature_log
+                    .active_creature
+                    .as_mut()
+                    .map(|c| c.increase_pearl_production())
+                    .unwrap_or(false);
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+                if produced_pearl {
+                    let _ = record.actor_ref.ask(crate::actors::player::GainPearls { amount: 1 }).await;
+                    debug!("Creature produced pearl for session {} (1000 pickups)", msg.session_id);
+                }
                 // 广播 ObjectRemove
                 let remove_packet = Self::build_object_remove_packet(picked_oid);
                 for (sid, rec) in &self.players {
