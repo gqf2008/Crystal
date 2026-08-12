@@ -112,6 +112,7 @@ pub mod axe_plant;
 pub mod hedge_kek_tal;
 pub mod flame_assassin;
 pub mod yin_devil_node;
+pub mod purple_fae_flower;
 pub mod power_bead;
 pub mod demon_guard;
 pub mod trap_rock;
