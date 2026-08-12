@@ -251,6 +251,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             active_hunger INTEGER NOT NULL DEFAULT 100,
             active_enabled INTEGER NOT NULL DEFAULT 0,
             active_level INTEGER NOT NULL DEFAULT 1,
+            active_blackstone_time INTEGER NOT NULL DEFAULT 0,
             owned_json TEXT NOT NULL DEFAULT '[]',
             request_updates INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (character_name) REFERENCES characters(name)
@@ -804,6 +805,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE creatures ADD COLUMN active_level INTEGER NOT NULL DEFAULT 1")
+        .execute(&pool).await;
+    // #2330：智能宠物黑曜石产出计时（C# CreatureInfo.BlackstoneTime）
+    let _ = sqlx::query("ALTER TABLE creatures ADD COLUMN active_blackstone_time INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -2514,18 +2518,18 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
 async fn save_creatures(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &CreatureLog) -> anyhow::Result<()> {
     let owned_json = serde_json::to_string(&log.owned_creatures)?;
 
-    let (active_type, active_custom_name, active_pickup_mode, active_hunger, active_enabled, active_level) =
+    let (active_type, active_custom_name, active_pickup_mode, active_hunger, active_enabled, active_level, active_blackstone_time) =
         if let Some(c) = &log.active_creature {
-            (c.creature_type as i32, c.custom_name.clone(), c.pickup_mode as i32, c.hunger as i32, if c.enabled { 1 } else { 0 }, c.level as i32)
+            (c.creature_type as i32, c.custom_name.clone(), c.pickup_mode as i32, c.hunger as i32, if c.enabled { 1 } else { 0 }, c.level as i32, c.blackstone_time as i32)
         } else {
-            (0, None, 0, 100, 0, 1)
+            (0, None, 0, 100, 0, 1, 0)
         };
 
     sqlx::query(
         r#"INSERT OR REPLACE INTO creatures (
             character_name, active_type, active_custom_name, active_pickup_mode,
-            active_hunger, active_enabled, active_level, owned_json, request_updates
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            active_hunger, active_enabled, active_level, active_blackstone_time, owned_json, request_updates
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(character_name)
     .bind(active_type)
@@ -2534,6 +2538,7 @@ async fn save_creatures(conn: &mut sqlx::sqlite::SqliteConnection, character_nam
     .bind(active_hunger)
     .bind(active_enabled)
     .bind(active_level)
+    .bind(active_blackstone_time)
     .bind(&owned_json)
     .bind(if log.request_updates { 1 } else { 0 })
     .execute(&mut *conn).await?;
@@ -2544,7 +2549,7 @@ async fn save_creatures(conn: &mut sqlx::sqlite::SqliteConnection, character_nam
 async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<CreatureLog> {
     let row = sqlx::query(
         "SELECT active_type, active_custom_name, active_pickup_mode, active_hunger,
-                active_enabled, active_level, owned_json, request_updates
+                active_enabled, active_level, active_blackstone_time, owned_json, request_updates
          FROM creatures WHERE character_name = ?"
     )
     .bind(character_name)
@@ -2564,6 +2569,8 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
                     hunger: r.get::<i32, _>("active_hunger") as u8,
                     enabled: active_enabled != 0,
                     level: r.try_get::<i32, _>("active_level").unwrap_or(1).max(1) as u8,
+                    blackstone_time: r.try_get::<i32, _>("active_blackstone_time").unwrap_or(0).max(0) as u32,
+                    pearl_ticker: 0, // C# PearlTicker 瞬态（登录重置）
                     filter: crate::actors::creature::CreatureFilter::default(),
                 })
             } else {

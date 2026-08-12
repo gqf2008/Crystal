@@ -3128,6 +3128,59 @@ impl WorldActor {
         let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
     }
 
+    /// #2330：C# IntelligentCreatureProduceBlackStone（PlayerObject.cs:12241-12265）——
+    /// 宠物黑曜石产出：按 Settings.CreatureBlackStoneName（默认 BlackCreatureStone）发 1 个物品；
+    /// 背包满则发邮件（Sender=BlackStone，对齐 C# MailInfo 行为）。
+    pub(crate) async fn grant_creature_blackstone(&self, session_id: u64) {
+        // C# Settings.CreatureBlackStoneName = "BlackCreatureStone"
+        let item_name_index: std::collections::HashMap<String, i32> = self.item_infos.iter()
+            .map(|(k, v)| (v.name.to_lowercase(), *k))
+            .collect();
+        let Some(&item_index) = item_name_index.get("blackcreaturestone") else { return };
+        let Some(record) = self.players.get(&session_id) else { return };
+        let mut item = mir2_shared::data::item::UserItem {
+            item_index,
+            unique_id: generate_item_uid(),
+            count: 1,
+            ..Default::default()
+        };
+        if let Some(info) = self.item_infos.get(&item_index) {
+            item.max_dura = info.durability as u16;
+            item.current_dura = info.durability as u16;
+        }
+        enrich_item_info(&mut item, &self.item_infos);
+        // C# CanGainItem：背包空间（含可叠入已有堆叠）→ GainItem
+        let can = record.actor_ref.ask(crate::actors::player::CanGainItemsFor { items: vec![item.clone()] }).await.unwrap_or(false);
+        if can {
+            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+            debug!("Creature blackstone produced for session {} (item {})", session_id, item_index);
+            return;
+        }
+        // 背包满 → 邮件（C# MailInfo Sender="BlackStone"）
+        let state = match record.actor_ref.ask(crate::actors::player::GetPlayerState).await {
+            Ok(Some(s)) => s, _ => return,
+        };
+        let mail = MailMessage {
+            mail_id: crate::actors::mail::generate_mail_id(),
+            sender_name: "BlackStone".to_string(),
+            receiver_name: state.name.clone(),
+            subject: "黑曜石产出".to_string(),
+            body: "宠物产出的黑曜石因背包已满，已通过邮件送达。".to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            read: false,
+            collected: false,
+            locked: false,
+            gold: 0,
+            items: vec![item],
+        };
+        let _ = record.actor_ref.ask(crate::actors::player::AddMail { mail: mail.clone() }).await;
+        send_mail_received_packet(&self.gate_ref, session_id, &mail);
+        debug!("Creature blackstone mailed to session {} (inventory full)", session_id);
+    }
+
     /// C# StrongboxRewardItem（:12284-12342）：同上 + 动态 WonderDrug（Pets shape 26）按 boxtype 加成
     pub(crate) async fn strongbox_reward(&mut self, session_id: u64, boxtype: u8, drops: Vec<RewardDrop>) {
         let rolls: Vec<i32> = drops.iter().map(|d| fastrand::i32(0..d.chance.max(1) as i32)).collect();

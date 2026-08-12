@@ -3088,8 +3088,13 @@ pub(crate) async fn tick_player_conditions(&mut self) {
 
             // 每 10 秒（100 ticks @ 100ms）回复 HP/MP
             for record in self.players.values() {
-                // 宠物饥饿值
-                let _ = record.actor_ref.ask(TickCreatureHunger { dt_seconds: 10 }).await;
+                // 宠物饥饿值 + 黑曜石产出（C# IntelligentCreatureObject.Process：每秒 BlackstoneTime++）
+                if let Ok(true) = record.actor_ref.ask(TickCreatureHunger { dt_seconds: 10 }).await {
+                    // #2330：满 10800 秒 → 发 1 个黑曜石（背包满发邮件）
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        self.grant_creature_blackstone(state.session_id).await;
+                    }
+                }
 
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                     // #1283：C# ProcessRegen——每 RegenDelay=10s 回 (max*3%+1) + Recovery 加成
