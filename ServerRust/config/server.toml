@@ -28,6 +28,7 @@ archive_inactive_after_months = 12  # C# Settings.ArchiveInactiveCharacterAfterM
 monster_recall_enabled = true     # C# Settings.MonsterRecallEnabled（#2390）
 monster_recall_range = 12         # C# Settings.MonsterRecallRange（#2390）
 monster_recall_cooldown_ms = 5000 # C# Settings.MonsterRecallCooldown（#2390）
+exp_mob_level_difference = true  # C# Settings.ExpMobLevelDifference（#2410）
 
 [rarity]
 # 对齐 C# Settings.MonsterRarity*（#2360）：Elite 0.1% / HP 2.25 / 伤害 1.65 / 经验 2.20

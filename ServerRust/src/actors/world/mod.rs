@@ -144,6 +144,8 @@ pub struct WorldActorArgs {
     pub monster_recall_enabled: bool,
     pub monster_recall_range: i32,
     pub monster_recall_cooldown_ms: u64,
+    /// 怪物等级差经验衰减开关（C# Settings.ExpMobLevelDifference）
+    pub exp_mob_level_difference: bool,
     /// 精炼配置（C# Settings.Refine*）
     pub refine_cfg: crate::util::config::RefineConfig,
     /// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125）
@@ -1551,6 +1553,8 @@ pub struct WorldActor {
     pub(crate) monster_recall_enabled: bool,
     pub(crate) monster_recall_range: i32,
     pub(crate) monster_recall_cooldown_ms: u64,
+    /// 怪物等级差经验衰减开关（C# Settings.ExpMobLevelDifference）
+    pub(crate) exp_mob_level_difference: bool,
     /// 精炼配置（C# Settings.Refine*）
     pub(crate) refine_cfg: crate::util::config::RefineConfig,
     /// 更换婚戒费用系数（C# Settings.ReplaceWedRingCost = 125）
@@ -2011,6 +2015,7 @@ impl WorldActor {
             monster_recall_enabled: true,
             monster_recall_range: 12,
             monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
             refine_cfg: crate::util::config::RefineConfig::default(),
             replace_wedring_cost: 125,
             lover_exp_bonus: 5,
@@ -5963,6 +5968,7 @@ Ok(Self {
             monster_recall_enabled: args.monster_recall_enabled,
             monster_recall_range: args.monster_recall_range,
             monster_recall_cooldown_ms: args.monster_recall_cooldown_ms,
+            exp_mob_level_difference: args.exp_mob_level_difference,
             refine_cfg: args.refine_cfg,
             replace_wedring_cost: args.replace_wedring_cost,
             lover_exp_bonus: args.lover_exp_bonus,

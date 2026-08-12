@@ -536,6 +536,9 @@ pub struct ServerWorldConfig {
     /// 怪物召回冷却毫秒（C# Settings.MonsterRecallCooldown = 5000；Math.Max(0,...)）
     #[serde(default = "default_monster_recall_cooldown_ms")]
     pub monster_recall_cooldown_ms: u64,
+    /// 怪物等级差经验衰减开关（C# Settings.ExpMobLevelDifference = true；关闭时不减）
+    #[serde(default = "default_true")]
+    pub exp_mob_level_difference: bool,
     /// 回血权重（C# Settings.HealthRegenWeight = 10：healthRegen += regen * HealthRecovery / weight）
     #[serde(default = "default_health_regen_weight")]
     pub health_regen_weight: u32,
@@ -813,6 +816,7 @@ impl Default for ServerConfig {
                 monster_recall_enabled: default_true(),
                 monster_recall_range: default_monster_recall_range(),
                 monster_recall_cooldown_ms: default_monster_recall_cooldown_ms(),
+                exp_mob_level_difference: default_true(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
@@ -897,6 +901,7 @@ mod tests {
         assert!(c.monster_recall_enabled);
         assert_eq!(c.monster_recall_range, 12);
         assert_eq!(c.monster_recall_cooldown_ms, 5000);
+        assert!(c.exp_mob_level_difference);
     }
 
     /// #2392：精炼配置默认值（C# Settings.Refine*）
