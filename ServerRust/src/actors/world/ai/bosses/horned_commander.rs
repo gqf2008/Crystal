@@ -24,6 +24,18 @@ pub struct HornedCommanderBehavior {
     rock_spike_index: usize,
 }
 
+/// C# HornedCommander.TeleportRandom(10, 10)：最多 10 次尝试返回 ±10 内可走点（None=失败留在原地）
+fn teleport_random_point(x: i32, y: i32, is_walkable: impl Fn(i32, i32) -> bool) -> Option<(i32, i32)> {
+    for _ in 0..10 {
+        let tx = x + fastrand::i32(-10..=10);
+        let ty = y + fastrand::i32(-10..=10);
+        if is_walkable(tx, ty) {
+            return Some((tx, ty));
+        }
+    }
+    None
+}
+
 impl HornedCommanderBehavior {
     pub fn new() -> Self {
         Self {
@@ -66,16 +78,37 @@ impl MonsterBehavior for HornedCommanderBehavior {
         if !self.start_advanced && hp_pct < 100.0 {
             self.start_advanced = true;
         }
+        // C# ProcessAI（:114-121）+ Reset（:126-137）：HP 回满 → 重置全部阶段标志
+        //（C# 还会 KillRockSpikes/KillSlaves——法术场由调用方按召唤物归属清理）
+        if self.start_advanced && hp_pct >= 100.0 {
+            self.start_advanced = false;
+            self.called_boulders = false;
+            self.called_rock_spikes = false;
+            self.called_shield = false;
+            self.immune = false;
+            self.rock_spike_index = 0;
+            self.rock_spike_anchors.clear();
+        }
 
         // Phase 0: HP<80% 召唤 8 个 Boulder（C# SpawnBoulder）
         if hp_pct < 80.0 && !self.called_boulders {
+            // C# SpawnBoulder（:525-530）：距地图中心(26,32)≤20 → 先传送到中心再召唤
+            //（C# _MapCentre 硬编码 HY01_morae_chon 中心）
+            const MAP_CENTRE_X: i32 = 26;
+            const MAP_CENTRE_Y: i32 = 32;
+            let (bx, by) = if max_distance(monster.x, monster.y, MAP_CENTRE_X, MAP_CENTRE_Y) <= 20 {
+                ctx.out_monster_teleports.push((monster.object_id, MAP_CENTRE_X, MAP_CENTRE_Y));
+                (MAP_CENTRE_X, MAP_CENTRE_Y)
+            } else {
+                (monster.x, monster.y)
+            };
             for i in 0..8 {
                 let dist = if i % 2 != 0 { 7 } else { 9 };
                 let dir = i as usize % 8;
                 ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                     monster_name: "BoulderSpirit".to_string(),
-                    x: monster.x + DIR_DX[dir] * dist,
-                    y: monster.y + DIR_DY[dir] * dist,
+                    x: bx + DIR_DX[dir] * dist,
+                    y: by + DIR_DY[dir] * dist,
                     is_slave: true,
                     summoner_oid: Some(monster.object_id),
                 });
@@ -144,7 +177,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
             }
         }
 
-        // 攻击逻辑（C# Attack：6 种形态随机）
+        // 攻击逻辑（C# Attack：6 种形态；顺序概率 1/20 RockFall → 1/15 SpinHit → 1/10 HammerSmash → 1/10 Teleport → 50/50 普攻）
         let target = match ctx.nearest_target(monster.x, monster.y, 20, monster.map_index) {
             Some(t) => *t,
             None => return,
@@ -157,31 +190,62 @@ impl MonsterBehavior for HornedCommanderBehavior {
         if dist <= attack_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+            monster.direction = dir;
+            // 前方 2 格（C# Attack：front = PointMove(CurrentLocation, Direction, 2)）
+            let (fx, fy) = (monster.x + DIR_DX[dir as usize] * 2, monster.y + DIR_DY[dir as usize] * 2);
 
             if self.start_advanced {
-                let roll = fastrand::i32(0..20);
-                if roll == 0 {
-                    // RockFall（1/20）：前方大范围 AOE
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                        center_x: target.x, center_y: target.y, radius: 5,
-                        damage: damage * 5, spell_id: 0,
-                    });
+                // 1/20 RockFall（C# :188-209）：蓄力期免疫，DC×loops(5-10)，前方 AOE5
+                if fastrand::i32(0..20) == 0 {
+                    let loops = fastrand::i32(5..10).max(1);
                     self.immune = true;
-                    self.shield_end_tick = ctx.tick_count + 30; // 蓄力期短暂免疫
-                } else {
-                    // 普攻
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                        target_session: target.session_id, damage, spell_id: 0, attack_type: 0,
+                    // C# ActionTime = Time + loops*500 + 500（10ms/tick）
+                    self.shield_end_tick = ctx.tick_count + (loops as u64 * 5) + 5;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: fx, center_y: fy, radius: 5,
+                        damage: damage.saturating_mul(loops), spell_id: 0,
                     });
+                    return;
                 }
-            } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id, damage, spell_id: 0, attack_type: 0,
-                });
+                // 1/15 SpinHit（C# :211-232）：蓄力期免疫，DC×loops(5-10)，自身 AOE3
+                if fastrand::i32(0..15) == 0 {
+                    let loops = fastrand::i32(5..10).max(1);
+                    self.immune = true;
+                    // C# spinDuration = loops*700 + 1500（10ms/tick）
+                    self.shield_end_tick = ctx.tick_count + (loops as u64 * 7) + 15;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x, center_y: monster.y, radius: 3,
+                        damage: damage.saturating_mul(loops), spell_id: 0,
+                    });
+                    return;
+                }
+                // 1/10 HammerSmash（C# :234-245）：DC，前方 AOE3（CompleteRangeAttack aoeSize=3 at front）
+                if fastrand::i32(0..10) == 0 {
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: fx, center_y: fy, radius: 3,
+                        damage, spell_id: 0,
+                    });
+                    return;
+                }
+                // 1/10 Teleport（C# :247-256）：空 RangeDamage → CompleteRangeAttack → TeleportRandom(10,10) + Target=null
+                if fastrand::i32(0..10) == 0 {
+                    if let Some((tx, ty)) = teleport_random_point(monster.x, monster.y, |x, y| (ctx.is_walkable)(x, y)) {
+                        ctx.out_monster_teleports.push((monster.object_id, tx, ty));
+                    }
+                    monster.target_session = None;
+                    return;
+                }
             }
+            // 普攻（C# :258-278）：50/50 Type0/1（同为 ACAgility，仅表现类型不同）
+            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                attacker_oid: monster.object_id,
+                target_session: target.session_id, damage, spell_id: 0,
+                attack_type: if fastrand::i32(0..2) == 0 { 0 } else { 1 },
+            });
         } else if dist > attack_range && ctx.tick_count >= monster.next_move_tick {
             // 追击（C# 标准 MoveTo）
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
@@ -193,5 +257,39 @@ impl MonsterBehavior for HornedCommanderBehavior {
 
     fn on_die(&mut self, _monster: &mut MonsterState, _ctx: &mut AiCtx) {
         // C# Die：KillRockSpikes + KillSlaves（由调用方通过 is_slave 清理召唤物）
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn teleport_random_point_within_range_and_walkable() {
+        // C# TeleportRandom(10,10)：返回点必须在 ±10 内
+        for _ in 0..500 {
+            let pt = teleport_random_point(100, 100, |_, _| true).expect("always walkable");
+            assert!((pt.0 - 100).abs() <= 10 && (pt.1 - 100).abs() <= 10, "out of range: {:?}", pt);
+        }
+    }
+
+    #[test]
+    fn teleport_random_point_fails_when_no_walkable() {
+        // 全部不可走 → None（留在原地）
+        assert_eq!(teleport_random_point(0, 0, |_, _| false), None);
+    }
+
+    #[test]
+    fn teleport_random_point_uses_walkable() {
+        // 可走域 = 第一象限：返回点必须落在域内且 ±10 内；10 次尝试全失败（~2^-10）→ None 也合法
+        let mut got = 0;
+        for _ in 0..500 {
+            if let Some(pt) = teleport_random_point(0, 0, |x, y| x >= 0 && y >= 0) {
+                got += 1;
+                assert!((pt.0).abs() <= 10 && (pt.1).abs() <= 10);
+                assert!(pt.0 >= 0 && pt.1 >= 0, "walkable check ignored: {:?}", pt);
+            }
+        }
+        assert!(got > 0, "500 次均未命中可走点");
     }
 }
