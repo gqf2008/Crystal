@@ -1109,6 +1109,12 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         let line = self.line_messages[fastrand::usize(0..self.line_messages.len())].clone();
         broadcast_chat(&self.gate_ref, &self.players, &line, mir2_shared::enums::ChatType::LineMessage);
     }
+    // #2350：C# Envir.Process（:2157-2165）——每 5 分钟（30000 ticks）广播在线人数提示（ChatType.Hint）
+    if self.tick_count >= self.online_hint_next_tick {
+        self.online_hint_next_tick = self.tick_count + 30000;
+        let msg = format!("当前在线玩家: {} 人", self.players.len());
+        broadcast_chat(&self.gate_ref, &self.players, &msg, mir2_shared::enums::ChatType::Hint);
+    }
 }
 
 /// S.SpellToggle 下发（body：[object_id u32][spell u8][can_use u8]，spell 用 C# 号；

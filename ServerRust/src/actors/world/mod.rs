@@ -1280,6 +1280,8 @@ pub struct WorldActor {
     pub(crate) line_messages: Vec<String>,
     /// 下一条周期提示的 tick（C# lineMessageTime，LineMessageTimer=10 分钟）
     pub(crate) line_message_next_tick: u64,
+    /// 下一条在线人数提示的 tick（C# userTime，每 5 分钟）
+    pub(crate) online_hint_next_tick: u64,
     /// 刷怪配置目录
     pub(crate) spawn_dir: Option<PathBuf>,
     /// NPC 脚本/INI 根目录（C# NPCPath 等价，SAVEVALUE/LOADVALUE 用）
@@ -1805,6 +1807,7 @@ impl WorldActor {
             disabled_char_names: load_disabled_chars(&map_dir),
             line_messages: load_line_messages(&map_dir),
             line_message_next_tick: 0,
+            online_hint_next_tick: 0,
             map_dir,
             spawn_dir,
             script_dir: PathBuf::from("."),
@@ -5677,6 +5680,7 @@ Ok(Self {
             disabled_char_names: load_disabled_chars(&args.map_dir),
             line_messages: load_line_messages(&args.map_dir),
             line_message_next_tick: 0,
+            online_hint_next_tick: 0,
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             script_dir: args.quest_dir.clone(),
