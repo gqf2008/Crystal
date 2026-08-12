@@ -147,10 +147,11 @@ impl Packet for FishingChangeAutocastWire {
     }
 }
 
-/// 精炼客户端包（M40：gate 实际 wire 与 SharedRust 结构不一致，手动构造）
+/// 精炼存入（对齐 SharedRust DepositRefineItem / C# C.DepositRefineItem：[from i32][to i32]）
 #[derive(Debug, Clone, Copy)]
 pub struct RefineDepositWire {
-    pub unique_id: u64,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Packet for RefineDepositWire {
@@ -161,7 +162,8 @@ impl Packet for RefineDepositWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            unique_id: reader.read_u64::<LittleEndian>()?,
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
         })
     }
 
@@ -170,7 +172,8 @@ impl Packet for RefineDepositWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
         Ok(())
     }
 }
@@ -286,9 +289,11 @@ impl Packet for RentalRetrieveWire {
     }
 }
 
+/// 精炼取回（对齐 SharedRust RetrieveRefineItem / C# C.RetrieveRefineItem：[from i32][to i32]）
 #[derive(Debug, Clone, Copy)]
 pub struct RefineRetrieveWire {
-    pub unique_id: u64,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Packet for RefineRetrieveWire {
@@ -299,7 +304,8 @@ impl Packet for RefineRetrieveWire {
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            unique_id: reader.read_u64::<LittleEndian>()?,
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
         })
     }
 
@@ -308,7 +314,8 @@ impl Packet for RefineRetrieveWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
         Ok(())
     }
 }
@@ -405,6 +412,31 @@ mod tests {
         let mut cur = std::io::Cursor::new(buf);
         let r = ObserveWire::read_body(&mut cur).unwrap();
         assert_eq!(r.name, "测试玩家");
+    }
+
+    #[test]
+    fn refine_deposit_wire_roundtrip() {
+        let w = RefineDepositWire { from: 3, to: 0 };
+        let mut buf = Vec::new();
+        w.write_body(&mut buf).unwrap();
+        // gate 解析 [from i32][to i32]（对齐 SharedRust DepositRefineItem / C#）
+        assert_eq!(&buf[..4], 3i32.to_le_bytes());
+        assert_eq!(&buf[4..], 0i32.to_le_bytes());
+        let mut cur = std::io::Cursor::new(buf);
+        let r = RefineDepositWire::read_body(&mut cur).unwrap();
+        assert_eq!(r.from, 3);
+        assert_eq!(r.to, 0);
+    }
+
+    #[test]
+    fn refine_retrieve_wire_roundtrip() {
+        let w = RefineRetrieveWire { from: 0, to: 5 };
+        let mut buf = Vec::new();
+        w.write_body(&mut buf).unwrap();
+        let mut cur = std::io::Cursor::new(buf);
+        let r = RefineRetrieveWire::read_body(&mut cur).unwrap();
+        assert_eq!(r.from, 0);
+        assert_eq!(r.to, 5);
     }
 }
 /// 大地图 NPC 搜索（gate 解析 [keyword: u16 len + bytes]，对齐 C# BigMapDialog SearchButton → C.SearchMap）
