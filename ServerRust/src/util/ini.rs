@@ -617,6 +617,67 @@ pub fn load_hero_exp_list(configs_dir: &Path) -> Vec<u32> {
     out
 }
 
+/// 服务端基础参数（C# Settings.Load：Configs/Setup.ini 部分字段；缺失返回 C# 默认）
+#[derive(Debug, Clone)]
+pub struct SetupIniSettings {
+    /// C# Settings.GatherOrbsPerLevel（[Optional] GatherOrbsPerLevel = true）
+    pub gather_orbs_per_level: bool,
+    /// C# Settings.LineMessageTimer（[Optional] LineMessageTimer = 10 分钟）
+    pub line_message_timer_minutes: u32,
+    /// C# Settings.ItemSealDelay（[Items] SealDelay = 60 分钟）
+    pub item_seal_delay_minutes: u64,
+    /// C# Settings.PKDelay（[Game] PKDelay = 12 秒）
+    pub pk_delay_seconds: u32,
+    /// C# Settings.TeleportToNPCCost（[Game] TeleportToNPCCost = 3000）
+    pub teleport_to_npc_cost: i32,
+    /// C# Settings.GroupInviteDelay（[Game] GroupInviteDelay = 2000ms）
+    pub group_invite_delay_ms: i64,
+    /// C# Settings.TradeDelay（[Game] TradeDelay = 2000ms）
+    pub trade_delay_ms: i64,
+    /// C# Settings.MaxBossTames（[Game] MaxBossTames = 1）
+    pub max_boss_tames: u32,
+    /// C# Settings.RangeAccuracyBonus（[Bonus] RangeAccuracyBonus = 0）
+    pub range_accuracy_bonus: i32,
+}
+
+impl Default for SetupIniSettings {
+    fn default() -> Self {
+        Self {
+            gather_orbs_per_level: true,
+            line_message_timer_minutes: 10,
+            item_seal_delay_minutes: 60,
+            pk_delay_seconds: 12,
+            teleport_to_npc_cost: 3000,
+            group_invite_delay_ms: 2000,
+            trade_delay_ms: 2000,
+            max_boss_tames: 1,
+            range_accuracy_bonus: 0,
+        }
+    }
+}
+
+/// 从 `Configs/Setup.ini` 加载服务端基础参数（文件缺失返回 C# 默认）
+pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
+    let path = configs_dir.join("Setup.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return SetupIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut out = SetupIniSettings::default();
+    if let Some(v) = ini_get(&parsed, "Optional", "GatherOrbsPerLevel") {
+        out.gather_orbs_per_level = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    out.line_message_timer_minutes = ini_get_i64(&parsed, "Optional", "LineMessageTimer", out.line_message_timer_minutes as i64).max(1) as u32;
+    out.item_seal_delay_minutes = ini_get_i64(&parsed, "Items", "SealDelay", out.item_seal_delay_minutes as i64).max(0) as u64;
+    out.pk_delay_seconds = ini_get_i64(&parsed, "Game", "PKDelay", out.pk_delay_seconds as i64).max(1) as u32;
+    out.teleport_to_npc_cost = ini_get_i64(&parsed, "Game", "TeleportToNPCCost", out.teleport_to_npc_cost as i64) as i32;
+    out.group_invite_delay_ms = ini_get_i64(&parsed, "Game", "GroupInviteDelay", out.group_invite_delay_ms);
+    out.trade_delay_ms = ini_get_i64(&parsed, "Game", "TradeDelay", out.trade_delay_ms);
+    out.max_boss_tames = ini_get_i64(&parsed, "Game", "MaxBossTames", out.max_boss_tames as i64).max(0) as u32;
+    out.range_accuracy_bonus = ini_get_i64(&parsed, "Bonus", "RangeAccuracyBonus", out.range_accuracy_bonus as i64) as i32;
+    out
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -852,6 +913,46 @@ BuffExpRate=0
 
         // 文件缺失 → 空（调用方回退 100/级）
         assert!(load_hero_exp_list(Path::new("C:/definitely/not/exists")).is_empty());
+    }
+
+    /// #2420：load_setup_settings 解析 + 真实 Setup.ini 集成
+    #[test]
+    fn test_load_setup_settings() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_setup");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Setup.ini"),
+            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n",
+        ).unwrap();
+        let s = load_setup_settings(&dir);
+        assert!(s.gather_orbs_per_level);
+        assert_eq!(s.line_message_timer_minutes, 10);
+        assert_eq!(s.item_seal_delay_minutes, 60);
+        assert_eq!(s.pk_delay_seconds, 12);
+        assert_eq!(s.teleport_to_npc_cost, 3000);
+        assert_eq!(s.group_invite_delay_ms, 2000);
+        assert_eq!(s.trade_delay_ms, 2000);
+        assert_eq!(s.max_boss_tames, 1);
+        assert_eq!(s.range_accuracy_bonus, 0);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → C# 默认
+        let d = load_setup_settings(Path::new("C:/definitely/not/exists"));
+        assert!(d.gather_orbs_per_level);
+        assert_eq!(d.line_message_timer_minutes, 10);
+        assert_eq!(d.teleport_to_npc_cost, 3000);
+
+        // 真实文件集成（Daneo1989/Configs/Setup.ini）
+        let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));
+        if real.join("Setup.ini").exists() {
+            let r = load_setup_settings(real);
+            assert!(r.gather_orbs_per_level);
+            assert_eq!(r.line_message_timer_minutes, 10);
+            assert_eq!(r.pk_delay_seconds, 12);
+            assert_eq!(r.group_invite_delay_ms, 2000);
+            assert_eq!(r.trade_delay_ms, 2000);
+            assert_eq!(r.range_accuracy_bonus, 0);
+        }
     }
 
     /// #2406：load_guild_settings 解析（[Guilds]/经验与上限列表）；文件缺失返回 C# 默认

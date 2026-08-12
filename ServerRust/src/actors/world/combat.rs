@@ -264,8 +264,9 @@ fn archer_state_penalty(mental_state: u8, mental_lvl: u8) -> i32 {
 }
 
 /// #1519：C# chanceToHit = (100 + RangeAccuracyBonus(0) - (100/MaxAttackRange)*distance) * (focus?2:1)，<0 clamp 0
-fn ranged_chance_to_hit(distance: i32, focus: bool) -> i32 {
-    let base = 100 - (100 / 9) * distance; // RangeAccuracyBonus=0（Settings 默认）
+fn ranged_chance_to_hit(distance: i32, focus: bool, range_accuracy_bonus: i32) -> i32 {
+    // #2420：C# Settings.RangeAccuracyBonus（[Bonus]，默认 0）
+    let base = 100 + range_accuracy_bonus - (100 / 9) * distance;
     (base * if focus { 2 } else { 1 }).max(0)
 }
 
@@ -1876,7 +1877,7 @@ impl Message<RangeAttackRequest> for WorldActor {
             self.mental_state.get(&msg.session_id).copied().unwrap_or(0),
             mental_lvl,
         );
-        let ranged_chance = ranged_chance_to_hit(attack_dist, focus);
+        let ranged_chance = ranged_chance_to_hit(attack_dist, focus, self.setup_cfg.range_accuracy_bonus);
 
         // C# HumanObject.RangeAttack（HumanObject.cs:2745）：
         //   - Broadcast(S.ObjectRangeAttack{...}) 给其他玩家（拉弓动作，Broadcast 排除攻击者）
@@ -5630,12 +5631,12 @@ impl Message<MagicRequest> for WorldActor {
                         debug!("Magic: {} ElectricShock: target level {} > player {} + 2", state.name, target_level, state.level);
                         return;
                     }
-                    // 6) Boss 驯服上限（C# :4040 Settings.MaxBossTames=1；已有 Boss 宠物 >= 1 拒绝）
+                    // 6) Boss 驯服上限（C# :4040 Settings.MaxBossTames=1；#2420 配置化）
                     if target_is_boss {
                         let boss_pets = self.monsters.values()
                             .filter(|m| m.master_session == Some(msg.session_id) && m.is_boss)
                             .count();
-                        if boss_pets >= 1 {
+                        if boss_pets >= self.setup_cfg.max_boss_tames as usize {
                             debug!("Magic: {} ElectricShock: boss tame cap reached", state.name);
                             return;
                         }
@@ -6353,10 +6354,10 @@ mod tests {
         assert_eq!(archer_state_penalty(1, 2), 65);
         assert_eq!(archer_state_penalty(2, 0), 80);
         // chanceToHit：近距恒命中（>=100），远距按 100 - 11*dist，Focus ×2，<0 clamp 0
-        assert_eq!(ranged_chance_to_hit(0, false), 100);
-        assert_eq!(ranged_chance_to_hit(9, false), 1);
-        assert_eq!(ranged_chance_to_hit(9, true), 2);
-        assert_eq!(ranged_chance_to_hit(10, false), 0);
+        assert_eq!(ranged_chance_to_hit(0, false, 0), 100);
+        assert_eq!(ranged_chance_to_hit(9, false, 0), 1);
+        assert_eq!(ranged_chance_to_hit(9, true, 0), 2);
+        assert_eq!(ranged_chance_to_hit(10, false, 0), 0);
     }
 
     #[test]

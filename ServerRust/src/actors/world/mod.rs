@@ -170,6 +170,8 @@ pub struct WorldActorArgs {
     pub gem_cfg: crate::util::ini::GemIniSettings,
     /// 英雄升级经验曲线（C# Settings.HeroExpList：Configs/HeroExpList.ini；空 = 回退 100/级）
     pub hero_exp_list: Vec<u32>,
+    /// 服务端基础参数（#2420：Configs/Setup.ini 部分字段）
+    pub setup_cfg: crate::util::ini::SetupIniSettings,
 }
 
 /// 世界中的玩家记录
@@ -1589,6 +1591,8 @@ pub struct WorldActor {
     pub(crate) gem_cfg: crate::util::ini::GemIniSettings,
     /// 英雄升级经验曲线（#2418：Configs/HeroExpList.ini；空 = 回退 100/级）
     pub(crate) hero_exp_list: Vec<u32>,
+    /// 服务端基础参数（#2420：Configs/Setup.ini 部分字段）
+    pub(crate) setup_cfg: crate::util::ini::SetupIniSettings,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -2050,6 +2054,7 @@ impl WorldActor {
             awakening_cfg: crate::util::ini::AwakeningIniSettings::default(),
             gem_cfg: crate::util::ini::GemIniSettings::default(),
             hero_exp_list: Vec::new(),
+            setup_cfg: crate::util::ini::SetupIniSettings::default(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -6009,6 +6014,7 @@ Ok(Self {
             awakening_cfg: args.awakening_cfg,
             gem_cfg: args.gem_cfg,
             hero_exp_list: args.hero_exp_list,
+            setup_cfg: args.setup_cfg,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -8295,9 +8301,6 @@ fn build_new_map_info_packet(
 
     build_packet_bytes(ServerPacketIds::NewMapInfo as i16, &body)
 }
-
-/// 传送 NPC 费用（C# Settings.TeleportToNPCCost = 3000）
-pub(crate) const TELEPORT_TO_NPC_COST: i32 = 3000;
 
 /// 构建 S.WorldMapSetupInfo（C# 线格式：enabled/count/icons/teleport_cost）
 /// icons 取 DB 中 big_map=true 的地图（前 64 个，image_index 用 MapLinkIcon 帧序号）

@@ -3442,9 +3442,10 @@ fn valid_gem_for_item(source_info: &crate::db::ItemInfo, target_type: i32) -> bo
 }
 
 /// C# CombineItem 封印（PlayerObject.cs:7161-7166）：分钟数=封印石 CurrentDura；Expiry=now+minutes；NextSeal=Expiry+ItemSealDelay(60min)
-fn compute_sealed_info(minutes: i64, now_ticks: i64) -> mir2_shared::data::item::SealedInfo {
+fn compute_sealed_info(minutes: i64, now_ticks: i64, seal_delay_minutes: i64) -> mir2_shared::data::item::SealedInfo {
     let expiry = now_ticks + minutes * 60 * 10_000_000;
-    let next_seal = expiry + 60 * 60 * 10_000_000;
+    // #2420：C# Settings.ItemSealDelay（[Items] SealDelay，默认 60 分钟）
+    let next_seal = expiry + seal_delay_minutes * 60 * 10_000_000;
     mir2_shared::data::item::SealedInfo {
         expiry_date_binary: expiry,
         next_seal_date_binary: next_seal,
@@ -3813,7 +3814,7 @@ impl Message<CombineItemRequest> for WorldActor {
             }
             // 分钟数 = 封印石 CurrentDura（C# 7161）
             let minutes = source.current_dura as i64;
-            let sealed_info = compute_sealed_info(minutes, now_ticks);
+            let sealed_info = compute_sealed_info(minutes, now_ticks, self.setup_cfg.item_seal_delay_minutes as i64);
             let expiry = sealed_info.expiry_date_binary;
             let _ = record.actor_ref.ask(crate::actors::player::SetItemSealedInfo {
                 unique_id: target.unique_id,
@@ -4386,13 +4387,13 @@ mod tests {
     #[test]
     fn test_compute_sealed_info() {
         let now_ticks = 638_714_592_000_000_000i64;
-        let info = super::compute_sealed_info(5, now_ticks);
+        let info = super::compute_sealed_info(5, now_ticks, 60);
         // 5 分钟 = 5 * 60s * 10_000_000 ticks
         assert_eq!(info.expiry_date_binary, now_ticks + 5 * 60 * 10_000_000);
         // NextSeal = Expiry + ItemSealDelay(60min)
         assert_eq!(info.next_seal_date_binary, info.expiry_date_binary + 60 * 60 * 10_000_000);
         // 0 分钟：Expiry = now（C# 语义：CurrentDura=0 时分钟数为 0）
-        let info0 = super::compute_sealed_info(0, now_ticks);
+        let info0 = super::compute_sealed_info(0, now_ticks, 60);
         assert_eq!(info0.expiry_date_binary, now_ticks);
     }
 

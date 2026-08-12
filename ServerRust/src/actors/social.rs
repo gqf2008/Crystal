@@ -1032,6 +1032,10 @@ pub struct SocialActorConfig {
     pub mentor_length_days: u8,
     /// 建会消耗列表（C# Guild_CreationCostList：[Required-i]；空 = 回退金币 guild_creation_cost_gold）
     pub guild_creation_costs: Vec<crate::util::ini::GuildCreationCost>,
+    /// 组队邀请冷却（C# Settings.GroupInviteDelay = 2000ms，#2420 Setup.ini）
+    pub group_invite_delay_ms: i64,
+    /// 交易邀请冷却（C# Settings.TradeDelay = 2000ms，#2420 Setup.ini）
+    pub trade_delay_ms: i64,
 }
 
 impl Default for SocialActorConfig {
@@ -1073,6 +1077,8 @@ impl Default for SocialActorConfig {
             mentor_level_gap: 10,
             mentor_length_days: 7,
             guild_creation_costs: Vec::new(),
+            group_invite_delay_ms: 2000,
+            trade_delay_ms: 2000,
         }
     }
 }
@@ -2495,14 +2501,13 @@ impl Message<GroupInviteRequest> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: GroupInviteRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        // #919：C# AddMember——NextGroupInviteTime 防刷（GroupInviteDelay=2000ms）
-        const GROUP_INVITE_DELAY_MS: i64 = 2000;
+        // #919：C# AddMember——NextGroupInviteTime 防刷（#2420：GroupInviteDelay 配置化）
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         if let Some(last) = self.last_group_invite.get(&msg.session_id).copied() {
-            if now_ms - last < GROUP_INVITE_DELAY_MS {
+            if now_ms - last < self.config.group_invite_delay_ms {
                 send_system_message(&self.gate_ref, msg.session_id, "操作过于频繁，请稍后再试");
                 return;
             }
@@ -2798,14 +2803,13 @@ impl Message<TradeStartRequest> for SocialActor {
             _ => return,
         };
 
-        // #919：C# StartTrade——NextTradeTime 防刷（TradeDelay=2000ms）
-        const TRADE_DELAY_MS: i64 = 2000;
+        // #919：C# StartTrade——NextTradeTime 防刷（#2420：TradeDelay 配置化）
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         if let Some(last) = self.last_trade_request.get(&msg.session_id).copied() {
-            if now_ms - last < TRADE_DELAY_MS {
+            if now_ms - last < self.config.trade_delay_ms {
                 send_system_message(&self.gate_ref, msg.session_id, "操作过于频繁，请稍后再试");
                 return;
             }
