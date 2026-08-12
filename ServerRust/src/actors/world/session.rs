@@ -71,6 +71,51 @@ fn parse_chat_channel(message: &str) -> Option<ChatChannel> {
     None
 }
 
+/// #2334：C# PlayerObject.Chat（:1917-1954）聊天防刷屏状态机
+/// - 每个 2s 窗口内计数 ChatTick；达到 5 后下一次聊天（第 7 条）自动禁言 5 分钟
+/// - 禁言期间返回剩余时间；到期自动解封；GM 豁免（C# !IsGM）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChatThrottle {
+    /// 2s 窗口起始（Unix ms；C# ChatTime）
+    window_start_ms: i64,
+    /// 窗口内计数（C# ChatTick）
+    tick: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatDecision {
+    /// 正常放行
+    Allow,
+    /// 禁言中（剩余 ms）
+    Banned { remaining_ms: i64 },
+    /// 触发自动禁言（5 分钟）
+    BanNow,
+}
+
+fn chat_throttle_decision(
+    throttle: &mut ChatThrottle,
+    now_ms: i64,
+    banned_until_ms: i64,
+    is_gm: bool,
+) -> ChatDecision {
+    // C#：禁言中 → 提示剩余时间；到期自动解封（ChatBanned=false）
+    if banned_until_ms > now_ms {
+        return ChatDecision::Banned { remaining_ms: banned_until_ms - now_ms };
+    }
+    // 2s 窗口重置/建立：窗口内第一条消息不计数（C# 首个聊天 ChatTick=0，仅设 ChatTime）
+    if now_ms - throttle.window_start_ms >= 2000 {
+        throttle.window_start_ms = now_ms;
+        throttle.tick = 0;
+        return ChatDecision::Allow;
+    }
+    // C# ChatTick >= 5 && !IsGM → 禁言（C# 第 7 条触发：前 6 条放行，tick 累计到 5）
+    if throttle.tick >= 5 && !is_gm {
+        return ChatDecision::BanNow;
+    }
+    throttle.tick += 1;
+    ChatDecision::Allow
+}
+
 impl WorldActor {
     /// 登录公告（C# Settings.Notice + S.UpdateNotice）
     async fn send_login_notice(&mut self, session_id: u64, character_name: &str) {
@@ -1911,6 +1956,47 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
         self.last_chat_ms.insert(msg.session_id, now_ms);
+
+        // #2334：C# PlayerObject.Chat（:1917-1954）——2s 窗口计数防刷屏，超限自动禁言 5 分钟（GM 豁免）
+        let mut chat_state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let mut throttle = ChatThrottle {
+            window_start_ms: chat_state.chat_window_start_ms,
+            tick: chat_state.chat_tick,
+        };
+        match chat_throttle_decision(&mut throttle, now_ms, chat_state.chat_banned_until_ms, chat_state.is_gm) {
+            ChatDecision::Banned { remaining_ms } => {
+                // C# ChatBanRemainingTimeBySecond（:1923-1930 剩余时间提示）
+                send_system_message(&self.gate_ref, msg.session_id,
+                    &format!("你已被禁言，剩余 {} 秒", (remaining_ms / 1000).max(1)));
+                return;
+            }
+            ChatDecision::BanNow => {
+                // C# :1942-1944：ChatBanned=true + ChatBanExpiryDate = Now + 5 分钟
+                chat_state.chat_banned_until_ms = now_ms + 300_000;
+                chat_state.chat_window_start_ms = throttle.window_start_ms;
+                chat_state.chat_tick = throttle.tick;
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: chat_state }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "检测到频繁发言，禁言 5 分钟");
+                return;
+            }
+            ChatDecision::Allow => {
+                // 窗口/计数变化写回（禁言到期解封时 banned_until 归零也在此处理）
+                if throttle.window_start_ms != chat_state.chat_window_start_ms
+                    || throttle.tick != chat_state.chat_tick
+                    || chat_state.chat_banned_until_ms > 0
+                {
+                    chat_state.chat_window_start_ms = throttle.window_start_ms;
+                    chat_state.chat_tick = throttle.tick;
+                    if chat_state.chat_banned_until_ms > 0 && chat_state.chat_banned_until_ms <= now_ms {
+                        chat_state.chat_banned_until_ms = 0; // C# 到期解封
+                    }
+                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: chat_state }).await;
+                }
+            }
+        }
 
         // C# Chat（PlayerObject.cs:1958）：$pos → 客户端可点击坐标链接 [坐标:X, Y]
         let message = if message.contains("$pos") {
@@ -4808,6 +4894,9 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            chat_banned_until_ms: 0,
+            chat_window_start_ms: 0,
+            chat_tick: 0,
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
@@ -4897,13 +4986,55 @@ mod tests {
     use mir2_shared::packets::Packet;
     use super::{
         effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by,
-        user_location_body, parse_chat_channel, ChatChannel,
+        user_location_body, parse_chat_channel, chat_throttle_decision, ChatChannel, ChatDecision, ChatThrottle,
     };
 
     #[test]
     fn test_roll_message_format() {
         assert_eq!(format_roll_message("张三", 4), "张三 掷出了 4 点");
         assert_eq!(format_roll_message("Legacy", 1), "Legacy 掷出了 1 点");
+    }
+
+    /// #2334：C# PlayerObject.Chat（:1917-1954）防刷屏禁言
+    #[test]
+    fn test_chat_throttle_ban_on_seventh() {
+        let mut t = ChatThrottle { window_start_ms: 0, tick: 0 };
+        // 窗口内第 1 条建立窗口（不计数），第 2-6 条放行（tick 1..5），第 7 条触发禁言（C# ChatTick>=5 → BanNow）
+        assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::Allow);
+        assert_eq!(t.tick, 0); // 首条不计数
+        for i in 0..5 {
+            assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::Allow, "msg {}", i + 2);
+        }
+        assert_eq!(t.tick, 5);
+        assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::BanNow);
+    }
+
+    #[test]
+    fn test_chat_throttle_gm_exempt() {
+        let mut t = ChatThrottle { window_start_ms: 1000, tick: 0 };
+        for _ in 0..20 {
+            assert_eq!(chat_throttle_decision(&mut t, 1500, 0, true), ChatDecision::Allow);
+        }
+    }
+
+    #[test]
+    fn test_chat_throttle_window_resets_after_2s() {
+        let mut t = ChatThrottle { window_start_ms: 1000, tick: 5 };
+        // 2s 后窗口重置：首条建立新窗口（不计数），不再触发禁言
+        assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::Allow);
+        assert_eq!(t.tick, 0);
+        assert_eq!(t.window_start_ms, 3000);
+    }
+
+    #[test]
+    fn test_chat_throttle_banned_returns_remaining() {
+        let mut t = ChatThrottle { window_start_ms: 1000, tick: 0 };
+        assert_eq!(
+            chat_throttle_decision(&mut t, 2000, 5000, false),
+            ChatDecision::Banned { remaining_ms: 3000 }
+        );
+        // 到期后（banned_until <= now）→ 正常放行路径
+        assert_eq!(chat_throttle_decision(&mut t, 6000, 5000, false), ChatDecision::Allow);
     }
 
     /// #2184：C# PlayerObject.Chat 频道前缀解析（/、!!、!~、!#、:)、@!、!）

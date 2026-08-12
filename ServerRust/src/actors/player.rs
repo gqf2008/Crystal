@@ -353,6 +353,12 @@ pub struct PlayerState {
     pub attack_speed_rate_percent: i32,
     /// C# Stats[Stat.SkillGainMultiplier]（LevelMagic 技能经验倍率；装备/行会 Buff 合计）
     pub skill_gain_multiplier: i32,
+    /// 禁言截止（Unix ms；0=未禁言；C# ChatBanned+ChatBanExpiryDate，瞬态不持久化）
+    pub chat_banned_until_ms: i64,
+    /// 聊天 2s 窗口起始（Unix ms；C# ChatTime）
+    pub chat_window_start_ms: i64,
+    /// 聊天窗口内计数（C# ChatTick）
+    pub chat_tick: u32,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -877,6 +883,9 @@ allow_group: false,
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            chat_banned_until_ms: 0,
+            chat_window_start_ms: 0,
+            chat_tick: 0,
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
@@ -6812,6 +6821,9 @@ allow_group: false,
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            chat_banned_until_ms: 0,
+            chat_window_start_ms: 0,
+            chat_tick: 0,
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
