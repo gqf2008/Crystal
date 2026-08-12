@@ -1132,6 +1132,12 @@ impl Message<WorldMoveRequest> for WorldActor {
                             session_id: msg.session_id,
                             data: build_map_changed_packet(dest_map_index as u16, &dest_file, &dest_title, dest_x, dest_y, state.direction, Some(&dest_mi)),
                         }).await;
+                        // C# GetMapInfo：换图补发 MapInformation
+                        let map_info = super::build_map_information_packet(dest_map_index as u16, &dest_file, &dest_title, Some(&dest_mi));
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: map_info,
+                        }).await;
 
                         // Send UserLocation to confirm new position
                         if let Ok(Some(new_state)) = player_ref.ask(GetPlayerState).await {

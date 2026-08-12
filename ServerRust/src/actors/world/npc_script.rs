@@ -3139,6 +3139,9 @@ pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map
             .await;
         let map_pkt = build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, 4, Some(&dest_mi));
         let _ = world.gate_ref.tell(SendToClient { session_id, data: map_pkt }).await;
+        // C# GetMapInfo：换图补发 MapInformation
+        let map_info = super::build_map_information_packet(map_index, &dest_file, &dest_title, Some(&dest_mi));
+        let _ = world.gate_ref.tell(SendToClient { session_id, data: map_info }).await;
         let mut body = Vec::new();
         body.extend_from_slice(&x.to_le_bytes());
         body.extend_from_slice(&y.to_le_bytes());

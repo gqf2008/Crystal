@@ -7658,6 +7658,13 @@ async fn send_game_entry_sequence(
         data: map_changed,
     }).await;
 
+    // 2.5 MapInformation（C# GetMapInfo：地图标题/灯光/天气元数据）
+    let map_info = build_map_information_packet(state.map_index, map_file, map_title, mi);
+    let _ = gate_ref.tell(SendToClient {
+        session_id: sid,
+        data: map_info,
+    }).await;
+
     // 3. UserInformation（含背包/装备 ItemInfo）
     let user_info = build_user_information_packet(state, item_infos);
     let _ = gate_ref.tell(SendToClient {
@@ -7756,6 +7763,35 @@ fn build_map_changed_packet(
     body.extend_from_slice(&mi.map(|m| if m.weather_particles { 1u16 } else { 0u16 }).unwrap_or(0).to_le_bytes());
 
     build_packet_bytes(ServerPacketIds::MapChanged as i16, &body)
+}
+
+/// 构建 MapInformation 包（C# PlayerObject.GetMapInfo：:1710-1726；线格式对齐 SharedRust map::MapInformation）
+fn build_map_information_packet(
+    map_index: u16,
+    file_name: &str,
+    title: &str,
+    mi: Option<&db::MapInfo>,
+) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let packet = mir2_shared::packets::server::map::MapInformation {
+        map_index: map_index as i32,
+        file_name: file_name.to_string(),
+        title: title.to_string(),
+        minimap: mi.map(|m| m.mini_map as u16).unwrap_or(0),
+        big_map: mi.map(|m| m.big_map).unwrap_or(0),
+        lights: mi.map(|m| m.light as u8).unwrap_or(0),
+        lightning: mi.map(|m| m.lightning).unwrap_or(false),
+        fire: mi.map(|m| m.fire).unwrap_or(false),
+        map_dark_light: mi.map(|m| m.map_dark_light as u8).unwrap_or(0),
+        music: mi.map(|m| if m.music { 1u16 } else { 0u16 }).unwrap_or(0),
+        weather_particles: mi.map(|m| if m.weather_particles { 1u16 } else { 0u16 }).unwrap_or(0),
+    };
+    let mut body = Vec::new();
+    if packet.write_body(&mut body).is_ok() {
+        build_packet_bytes(ServerPacketIds::MapInformation as i16, &body)
+    } else {
+        Vec::new()
+    }
 }
 /// 构建 NewMapInfo 包（M53：大地图地图信息，含 NPC 列表）
 /// wire 对齐 SharedRust NewMapInfo：map_index/title/width/height/big_map/movements/npcs
@@ -10145,6 +10181,36 @@ mod set_bonus_tests {
     }
 
     #[test]
+    fn test_map_information_packet_roundtrip() {
+        use mir2_shared::packets::server::map::MapInformation;
+        let mi = db::MapInfo {
+            index: 1,
+            file_name: "0".into(),
+            title: "比奇".into(),
+            mini_map: 100,
+            big_map: 0,
+            light: 1,
+            lightning: true,
+            fire: false,
+            map_dark_light: 0,
+            music: true,
+            weather_particles: false,
+            ..Default::default()
+        };
+        let bytes = build_map_information_packet(1, &mi.file_name, &mi.title, Some(&mi));
+        // 完整包 = 4 字节头（len u16 + opcode i16）+ body
+        let mut cur = std::io::Cursor::new(&bytes[4..]);
+        let pkt = MapInformation::read_body(&mut cur).unwrap();
+        assert_eq!(pkt.map_index, 1);
+        assert_eq!(pkt.title, "比奇");
+        assert_eq!(pkt.minimap, 100);
+        assert!(pkt.lightning);
+        assert!(!pkt.fire);
+        assert_eq!(pkt.music, 1);
+        assert_eq!(pkt.weather_particles, 0);
+    }
+
+    #[test]
     fn test_guild_buff_stats_mapping() {
         // #2310：C# GuildBuffInfo.Stats（GuildData.cs:133-150）映射 + 聚合
         use mir2_shared::enums::Stat;
@@ -10480,6 +10546,12 @@ impl Message<GmGotoRequest> for WorldActor {
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: map_pkt,
+            }).await;
+            // C# GetMapInfo：换图补发 MapInformation
+            let map_info = build_map_information_packet(dest_map, &mi.file_name, &mi.title, Some(&mi));
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: map_info,
             }).await;
         }
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
