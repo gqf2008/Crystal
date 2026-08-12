@@ -322,6 +322,9 @@ pub struct SocialConfig {
     /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
     #[serde(default = "default_mentee_exp_bank")]
     pub mentee_exp_bank: u8,
+    /// 师徒期限（天，C# Settings.MentorLength = 7）
+    #[serde(default = "default_mentor_length_days")]
+    pub mentor_length_days: u8,
 }
 
 fn default_allow_new_character() -> bool {
@@ -396,6 +399,10 @@ fn default_mentee_exp_bank() -> u8 {
     1
 }
 
+fn default_mentor_length_days() -> u8 {
+    7
+}
+
 fn default_wedding_ring_recall() -> bool {
     true
 }
@@ -466,6 +473,7 @@ impl Default for SocialConfig {
             mentor_exp_boost: default_mentor_exp_boost(),
             mentor_damage_boost: default_mentor_damage_boost(),
             mentee_exp_bank: default_mentee_exp_bank(),
+            mentor_length_days: default_mentor_length_days(),
         }
     }
 }
@@ -924,6 +932,7 @@ mod tests {
         assert_eq!(c.mentor_exp_boost, 10);
         assert_eq!(c.mentor_damage_boost, 10);
         assert_eq!(c.mentee_exp_bank, 1);
+        assert_eq!(c.mentor_length_days, 7);
     }
 
     /// #2402：真实 config/server.toml 能被解析（新配置段不破坏服务器启动）
@@ -933,7 +942,7 @@ mod tests {
         let cfg = load_config(path).expect("server.toml 必须能解析");
         // 抽查近期新增段/字段的真实文件值
         assert!(cfg.server.goods_on);
-        assert_eq!(cfg.server.goods_max_stored, 15);
+        assert_eq!(cfg.server.goods_max_stored, 50); // 对齐 GoodsSystem.ini MaxStored（#2408）
         assert_eq!(cfg.server.monster_recall_range, 12);
         assert_eq!(cfg.server.archive_inactive_after_months, 12);
         assert_eq!(cfg.social.marriage_cooldown_days, 7);

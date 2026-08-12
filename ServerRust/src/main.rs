@@ -123,8 +123,12 @@ async fn async_main() -> anyhow::Result<()> {
     // SocialActor 先启动，WorldActor 依赖它。
     // 共享 cfg:social 字段(guild_creation_cost_gold)透传到 SocialActorConfig
     // 的 GUILD_CREATION_COST_GOLD 常量(之前是 hardcoded 1_000_000,现从 cfg 读)。
-    // #2406：行会配置以 Configs/GuildSettings.ini 为准（C# Settings.LoadGuildSettings 覆盖）
+    // #2406/#2408：行会/商店/邮件/婚姻/师徒配置以 Configs/*.ini 为准（C# Load* 覆盖）
     let guild_ini = crystal_server::util::ini::load_guild_settings(&configs_dir);
+    let goods_ini = crystal_server::util::ini::load_goods_settings(&configs_dir);
+    let mail_ini = crystal_server::util::ini::load_mail_settings(&configs_dir);
+    let marriage_ini = crystal_server::util::ini::load_marriage_settings(&configs_dir);
+    let mentor_ini = crystal_server::util::ini::load_mentor_settings(&configs_dir);
     let mut social_config = SocialActorConfig {
         map_infos: Arc::new(RwLock::new(HashMap::<i32, db::MapInfo>::new())),
         item_infos: Arc::new(RwLock::new(HashMap::<i32, db::ItemInfo>::new())),
@@ -159,6 +163,7 @@ async fn async_main() -> anyhow::Result<()> {
         marriage_cooldown_days: cfg.social.marriage_cooldown_days,
         marriage_level_required: cfg.social.marriage_level_required,
         mentor_level_gap: cfg.social.mentor_level_gap,
+        mentor_length_days: cfg.social.mentor_length_days,
     };
     // #2406：用 ini 值覆盖 server.toml 的 C# 默认（对齐 C# LoadGuildSettings）
     social_config.guild_required_level = guild_ini.required_level;
@@ -170,6 +175,17 @@ async fn async_main() -> anyhow::Result<()> {
     social_config.newbie_guild_exp_buff = guild_ini.newbie_guild_exp_buff;
     social_config.guild_experience_list = guild_ini.experience_list;
     social_config.guild_membercap_list = guild_ini.membercap_list;
+    // #2408：邮件/婚姻/师徒用 ini 值覆盖（对齐 C# LoadMail/LoadMarriage/LoadMentor；
+    // 配偶加成/婚戒费用/导师加成等 WorldActor 侧字段在 WorldActorArgs 处覆盖）
+    social_config.mail_free_with_stamp = mail_ini.free_with_stamp;
+    social_config.mail_cost_per_1k_gold = mail_ini.cost_per_1k;
+    social_config.mail_item_insurance_percentage = mail_ini.insurance_percent;
+    social_config.mail_capacity = mail_ini.capacity;
+    social_config.marriage_cooldown_days = marriage_ini.cooldown_days;
+    social_config.wedding_ring_recall_enabled = marriage_ini.wedding_ring_recall;
+    social_config.marriage_level_required = marriage_ini.level_required;
+    social_config.mentor_level_gap = mentor_ini.level_gap;
+    social_config.mentor_length_days = mentor_ini.length_days;
     info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
     let social_ref = SocialActor::spawn(SocialActorArgs {
         gate_ref: gate_ref.clone(),
@@ -205,22 +221,23 @@ async fn async_main() -> anyhow::Result<()> {
         movement_pacing_ms: cfg.server.movement_pacing_ms,
         health_regen_weight: cfg.server.health_regen_weight,
         mana_regen_weight: cfg.server.mana_regen_weight,
-        goods_hide_added_stats: cfg.server.goods_hide_added_stats,
-        goods_on: cfg.server.goods_on,
-        goods_max_stored: cfg.server.goods_max_stored,
-        goods_buy_back_time_minutes: cfg.server.goods_buy_back_time_minutes,
-        goods_buy_back_max_stored: cfg.server.goods_buy_back_max_stored,
+        // #2408：商店配置以 GoodsSystem.ini 为准（GoodsMaxStored 数据=50）
+        goods_hide_added_stats: goods_ini.hide_added_stats,
+        goods_on: goods_ini.on,
+        goods_max_stored: goods_ini.max_stored,
+        goods_buy_back_time_minutes: goods_ini.buy_back_time_minutes,
+        goods_buy_back_max_stored: goods_ini.buy_back_max_stored,
         safe_zone_healing: false, // C# Settings.SafeZoneHealing 默认 false
         archive_inactive_after_months: cfg.server.archive_inactive_after_months,
         monster_recall_enabled: cfg.server.monster_recall_enabled,
         monster_recall_range: cfg.server.monster_recall_range,
         monster_recall_cooldown_ms: cfg.server.monster_recall_cooldown_ms,
         refine_cfg: cfg.refine.clone(),
-        replace_wedring_cost: cfg.social.replace_wedring_cost,
-        lover_exp_bonus: cfg.social.lover_exp_bonus,
-        mentor_exp_boost: cfg.social.mentor_exp_boost,
-        mentor_damage_boost: cfg.social.mentor_damage_boost,
-        mentee_exp_bank: cfg.social.mentee_exp_bank,
+        replace_wedring_cost: marriage_ini.replace_wedring_cost,
+        lover_exp_bonus: marriage_ini.lover_exp_bonus,
+        mentor_exp_boost: mentor_ini.exp_boost,
+        mentor_damage_boost: mentor_ini.damage_boost,
+        mentee_exp_bank: mentor_ini.exp_bank,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 
