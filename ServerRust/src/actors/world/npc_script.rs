@@ -1547,6 +1547,18 @@ async fn exec_action(
                 debug!("NPC GIVEMP: +{}", amount);
             }
         }
+        // GIVEEXP <amount> —— 给玩家经验（对齐 C# ActionType.GiveExp：NPCSegment.cs:3413 player.GainExp）
+        "GIVEEXP" => {
+            let amount = arg0().parse::<i32>().unwrap_or(0);
+            if amount > 0 {
+                // 与击杀/任务奖励同一入口：自动处理 CanGainExp / 无经验地图 / 倍率
+                send_player_msg(world, session_id, crate::actors::player::AddExperience {
+                    amount: world.apply_global_exp_multiplier(amount),
+                    experience_list: world.experience_list.clone(),
+                }).await;
+                debug!("NPC GIVEEXP: +{}", amount);
+            }
+        }
         // CLEARPETS —— 清除所有宠物（对齐 C# ActionType.ClearPets）
         "CLEARPETS" => {
             if let Some(mut st) = current_player_state(world, session_id).await {
