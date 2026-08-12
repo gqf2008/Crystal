@@ -84,6 +84,14 @@ async fn async_main() -> anyhow::Result<()> {
     let setup_ini = crystal_server::util::ini::load_setup_settings(&configs_dir);
     // #2424：注入全局幸运上限（C# Settings.MaxLuck，供 combat::attack 纯函数使用）
     crystal_server::combat::attack::set_max_luck(setup_ini.max_luck);
+    // #2426：注入战斗权重（C# Settings.[Items] *Weight，供 combat::attack 纯函数使用）
+    use crystal_server::combat::attack::{set_combat_weight, CombatWeight};
+    set_combat_weight(CombatWeight::MagicResist, setup_ini.magic_resist_weight as i32);
+    set_combat_weight(CombatWeight::PoisonResist, setup_ini.poison_resist_weight as i32);
+    set_combat_weight(CombatWeight::CriticalRate, setup_ini.critical_rate_weight as i32);
+    set_combat_weight(CombatWeight::CriticalDamage, setup_ini.critical_damage_weight as i32);
+    set_combat_weight(CombatWeight::FreezingAttack, setup_ini.freezing_attack_weight as i32);
+    set_combat_weight(CombatWeight::PoisonAttack, setup_ini.poison_attack_weight as i32);
     // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
     // server.toml 显式配置优先，否则用 ini 曲线
     let exp_list = {
