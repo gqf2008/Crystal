@@ -61,6 +61,10 @@ allow_new_account = true
 allow_login = true
 guild_war_cost = 3000
 guild_war_time = 180
+marriage_cooldown_days = 7    # C# Settings.MarriageCooldown（#2394）
+marriage_level_required = 10  # C# Settings.MarriageLevelRequired（#2394）
+replace_wedring_cost = 125    # C# Settings.ReplaceWedRingCost（#2394）
+lover_exp_bonus = 5           # C# Settings.LoverEXPBonus（#2394）
 
 # 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold / ExtendGT / GTSale 最低价）
 [conquest]
