@@ -168,6 +168,81 @@ impl Message<NPCCallRequest> for WorldActor {
             return;
         }
 
+        // #2368：引擎级特殊页（C# NPCScript.ProcessSpecial）——必须在 DB 脚本查找之前拦截。
+        // 这些 key 在 DB 里大多有脚本页（[@BUYSELL] 80+ NPC / [@BUY] 39 / [@SELL] 42 / [@REPAIR] 56 / [@STORAGE] 15），
+        // 若走脚本只会显示 #SAY 文字，面板（NPCGoods/NPCSell/...）永远不下发 → 商店/出售/修理/仓库打不开。
+        let engine_key = msg.key.to_uppercase();
+        match engine_npc_action(&engine_key) {
+            // C# BuyKey/BuyNewKey：SendNPCGoods(PanelType.Buy)
+            Some(EngineNpcAction::Goods) => {
+                self.send_npc_goods(msg.session_id, &npc);
+                return;
+            }
+            // C# BuySellKey/BuySellNewKey：SendNPCGoods(Buy) + NPCSell
+            Some(EngineNpcAction::GoodsAndSell) => {
+                self.send_npc_goods(msg.session_id, &npc);
+                self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::Sell);
+                return;
+            }
+            // C# SellKey：NPCSell
+            Some(EngineNpcAction::Sell) => {
+                self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::Sell);
+                return;
+            }
+            // C# RepairKey：NPCRepair；SRepairKey：NPCSRepair
+            Some(EngineNpcAction::Repair) => {
+                self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::Repair);
+                return;
+            }
+            Some(EngineNpcAction::SpecialRepair) => {
+                self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::SpecialRepair);
+                return;
+            }
+            // C# BuyUsedKey：SendNPCGoods(UsedGoods, BuySub)；Rust 未实现 UsedGoods，先发空 BuySub 面板
+            Some(EngineNpcAction::BuySub) => {
+                self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::BuySub);
+                return;
+            }
+            // C# StorageKey：ResetStorageUnlock + SendStorage + NPCStorage（含密码解锁）
+            Some(EngineNpcAction::Storage) => {
+                let has_pwd = match self.players.get(&msg.session_id) {
+                    Some(r) => db::account_has_storage_password(&self.db_pool, &r.account_username)
+                        .await
+                        .unwrap_or(false),
+                    None => false,
+                };
+                let mut lines = if has_pwd {
+                    let mut body = Vec::new();
+                    if mir2_shared::packets::base::serialize_packet(
+                        &mut body,
+                        &mir2_shared::packets::server::npc::NPCStorage,
+                    ).is_err() {
+                        warn!("Failed to serialize NPCStorage");
+                    } else {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: body,
+                        }).await;
+                    }
+                    vec![format!("{}: 请输入仓库密码。", npc.name)]
+                } else {
+                    self.send_user_storage(msg.session_id, &player_state.inventory.storage);
+                    vec![format!("{}: 请妥善保管你的物品。", npc.name)]
+                };
+                let mut body2 = Vec::new();
+                body2.extend_from_slice(&(lines.len() as i32).to_le_bytes());
+                for line in &mut lines {
+                    write_dotnet_string(&mut body2, line);
+                }
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCResponse as i16, &body2),
+                }).await;
+                return;
+            }
+            None => {}
+        }
+
         // 优先使用 DB 脚本（支持 GOTO 跳转）
         let mut dialog_lines = Vec::new();
         let mut current_key = msg.key.clone();
@@ -1761,6 +1836,38 @@ impl WorldActor {
     }
 }
 
+/// #2368：引擎级特殊页 → 面板动作（C# NPCScript.ProcessSpecial 商店类 key）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EngineNpcAction {
+    /// C# BuyKey/BuyNewKey：SendNPCGoods(PanelType.Buy)
+    Goods,
+    /// C# BuySellKey/BuySellNewKey：SendNPCGoods(Buy) + NPCSell
+    GoodsAndSell,
+    /// C# SellKey：NPCSell
+    Sell,
+    /// C# RepairKey：NPCRepair
+    Repair,
+    /// C# SRepairKey：NPCSRepair
+    SpecialRepair,
+    /// C# BuyUsedKey：SendNPCGoods(UsedGoods, BuySub)
+    BuySub,
+    /// C# StorageKey：ResetStorageUnlock + SendStorage + NPCStorage
+    Storage,
+}
+
+pub(crate) fn engine_npc_action(key: &str) -> Option<EngineNpcAction> {
+    match key.to_uppercase().as_str() {
+        "[@BUY]" | "[@BUYNEW]" => Some(EngineNpcAction::Goods),
+        "[@BUYSELL]" | "[@BUYSELLNEW]" => Some(EngineNpcAction::GoodsAndSell),
+        "[@SELL]" => Some(EngineNpcAction::Sell),
+        "[@REPAIR]" => Some(EngineNpcAction::Repair),
+        "[@SREPAIR]" => Some(EngineNpcAction::SpecialRepair),
+        "[@BUYUSED]" => Some(EngineNpcAction::BuySub),
+        "[@STORAGE]" => Some(EngineNpcAction::Storage),
+        _ => None,
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================
@@ -2779,6 +2886,26 @@ mod tests {
         assert_eq!(b.flexibility, 255); // byte
         assert_eq!(b.success_stat, 127); // sbyte
         assert_eq!(b.auto_reel_chance, 127); // sbyte
+    }
+
+    /// #2368：引擎级特殊页 key → 面板动作（C# ProcessSpecial 商店类）
+    #[test]
+    fn engine_npc_action_matches_csharp_process_special() {
+        use super::EngineNpcAction as A;
+        assert_eq!(engine_npc_action("[@BUY]"), Some(A::Goods));
+        assert_eq!(engine_npc_action("[@BUYNEW]"), Some(A::Goods));
+        assert_eq!(engine_npc_action("[@BUYSELL]"), Some(A::GoodsAndSell));
+        assert_eq!(engine_npc_action("[@BUYSELLNEW]"), Some(A::GoodsAndSell));
+        assert_eq!(engine_npc_action("[@SELL]"), Some(A::Sell));
+        assert_eq!(engine_npc_action("[@REPAIR]"), Some(A::Repair));
+        assert_eq!(engine_npc_action("[@SREPAIR]"), Some(A::SpecialRepair));
+        assert_eq!(engine_npc_action("[@BUYUSED]"), Some(A::BuySub));
+        assert_eq!(engine_npc_action("[@STORAGE]"), Some(A::Storage));
+        // 大小写不敏感
+        assert_eq!(engine_npc_action("[@buysell]"), Some(A::GoodsAndSell));
+        // 普通页不拦截
+        assert_eq!(engine_npc_action("[@MAIN]"), None);
+        assert_eq!(engine_npc_action("[@CRAFT]"), None); // 后续批次
     }
 
     #[test]
