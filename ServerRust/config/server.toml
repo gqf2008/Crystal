@@ -50,6 +50,7 @@ hero_required_level = 22  # C# Settings.Hero_RequiredLevel（#2366）
 mail_cost_per_1k_gold = 100
 mail_item_insurance_percentage = 5
 mail_free_with_stamp = true
+mail_capacity = 100  # C# Settings.MailCapacity（#2382）
 allow_start_game = true
 allow_change_password = true
 allow_new_account = true
