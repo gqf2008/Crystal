@@ -123,20 +123,28 @@ impl PlayerInventory {
     /// 添加物品到背包（自动找空位或合并堆叠）
     /// 返回 (grid, unique_id) 或 None（背包已满）
     pub fn add_item(&mut self, mut item: UserItem) -> Option<(u8, u64)> {
-        // 尝试合并到已有堆叠（相同 item_index 且可堆叠）
+        // 尝试合并到已有堆叠（相同 item_index 且可堆叠；C# HumanObject.AddItem：StackSize>1 时按 StackSize 合并）
+        // #2364：堆叠上限用 ItemInfo.StackSize（可堆叠物品 DB durability=0，原 max_dura 误用导致永不合并）
         if item.count > 1 {
             for s in self.backpack.iter_mut().flatten() {
-                if s.item.item_index == item.item_index && s.item.count < s.item.max_dura.max(1) {
-                    let can_merge = s.item.count + item.count;
-                    let max_stack = s.item.max_dura.max(1);
-                    if can_merge <= max_stack {
-                        s.item.count = can_merge;
-                        return Some((s.grid, s.item.unique_id));
-                    } else {
-                        s.item.count = max_stack;
-                        item.count = can_merge - max_stack;
-                        // 继续处理剩余
-                    }
+                if s.item.item_index != item.item_index {
+                    continue;
+                }
+                let stack_cap = item.info.as_ref().or(s.item.info.as_ref())
+                    .map(|i| i.stack_size as u16)
+                    .filter(|c| *c > 1)
+                    .unwrap_or(1);
+                if s.item.count >= stack_cap {
+                    continue;
+                }
+                let can_merge = s.item.count + item.count;
+                if can_merge <= stack_cap {
+                    s.item.count = can_merge;
+                    return Some((s.grid, s.item.unique_id));
+                } else {
+                    s.item.count = stack_cap;
+                    item.count = can_merge - stack_cap;
+                    // 继续处理剩余
                 }
             }
         }
@@ -1130,6 +1138,36 @@ mod tests {
         assert_eq!(grid, 0);
         assert!(uid > 0);
         assert_eq!(inv.item_count(), 1);
+    }
+
+    /// #2364：可堆叠物品按 ItemInfo.StackSize 合并（C# HumanObject.AddItem；原 max_dura 误用）
+    #[test]
+    fn test_add_item_merges_stackables_by_stack_size() {
+        let mut inv = PlayerInventory::new();
+        let mut potion = make_item(666, 15);
+        potion.max_dura = 0;
+        potion.current_dura = 0;
+        potion.info = Some(mir2_shared::data::item::ItemInfo {
+            index: 666,
+            stack_size: 20,
+            ..Default::default()
+        });
+        let (g0, _) = inv.add_item(potion.clone()).unwrap(); // 15 → 槽A
+        potion.count = 10;
+        let (g1, _) = inv.add_item(potion.clone()).unwrap(); // 槽A 满 20，剩 5 → 槽B
+        assert_ne!(g1, g0);
+        assert_eq!(inv.backpack[g0 as usize].as_ref().unwrap().item.count, 20);
+        assert_eq!(inv.backpack[g1 as usize].as_ref().unwrap().item.count, 5);
+        potion.count = 10;
+        let (g2, _) = inv.add_item(potion.clone()).unwrap(); // 并入槽B → 15
+        assert_eq!(g2, g1);
+        assert_eq!(inv.backpack[g1 as usize].as_ref().unwrap().item.count, 15);
+        assert_eq!(inv.item_count(), 2);
+        // 非可堆叠（info 缺失）不合并：各占一格
+        let mut inv2 = PlayerInventory::new();
+        inv2.add_item(make_item(1, 1));
+        inv2.add_item(make_item(1, 1));
+        assert_eq!(inv2.item_count(), 2);
     }
 
     #[test]
