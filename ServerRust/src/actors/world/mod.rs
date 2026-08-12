@@ -6319,6 +6319,7 @@ impl WorldActor {
             gold_drop_rate_percent: b.gold_drop_rate_percent,
             mine_rate_percent: b.mine_rate_percent,
             gem_rate_percent: b.gem_rate_percent,
+            craft_rate_percent: b.craft_rate_percent,
         }).await;
         Some(state)
     }
@@ -6834,6 +6835,8 @@ pub struct EquipmentBonuses {
     pub mine_rate_percent: i32,
     // #2306：装备宝石率加成（C# Stats[Stat.GemRatePercent]；装备基础/附加/觉醒/槽位宝石合计）
     pub gem_rate_percent: i32,
+    // #2312：装备合成成功率加成（C# Stats[Stat.CraftRatePercent]；装备/行会 Buff 合计）
+    pub craft_rate_percent: i32,
     // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
     pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
     /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
@@ -6876,6 +6879,7 @@ fn apply_equipment_stat(b: &mut EquipmentBonuses, stat: mir2_shared::enums::Stat
         Stat::GoldDropRatePercent => b.gold_drop_rate_percent += value,
         Stat::MineRatePercent => b.mine_rate_percent += value,
         Stat::GemRatePercent => b.gem_rate_percent += value,
+        Stat::CraftRatePercent => b.craft_rate_percent += value,
         Stat::BagWeight => b.bag_weight += value,
         Stat::WearWeight => b.wear_weight += value,
         Stat::HandWeight => b.hand_weight += value,
@@ -6968,6 +6972,7 @@ pub(crate) fn calculate_equipment_bonuses(
             b.gold_drop_rate_percent += get(Stat::GoldDropRatePercent);
             b.mine_rate_percent += get(Stat::MineRatePercent);
             b.gem_rate_percent += get(Stat::GemRatePercent);
+            b.craft_rate_percent += get(Stat::CraftRatePercent);
             b.holy += get(Stat::Holy);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
