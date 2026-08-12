@@ -31,6 +31,12 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name == "trainingmob" {
         return Box::new(bosses::trainer::TrainerBehavior::new());
     }
+    // #2430：C# GetMonster AI 8——AxeSkeleton 家族（远程掷斧 + Fear 风筝）
+    if name.contains("bonearcher") || name.contains("crossbowoma") || name.contains("elitearcher")
+        || name.contains("zumaarcher") || name == "dark" || name == "dark0"
+    {
+        return Box::new(bosses::axe_skeleton::AxeSkeletonBehavior::new());
+    }
     // #2358：C# Deer.cs（AI 1/2）：Hen/Pig/Bull/Deer/Deer1/Sheep 均可采集（HarvestMonster 子类），AI2 有逃跑分支
     if name == "hen" || name == "pig" || name == "bull" || name.contains("sheep") || name.contains("羊")
         || name.contains("deer") || name.contains("doe") || name.contains("鹿")
@@ -675,7 +681,9 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
     if is_static_object(&name) || is_passive_object(&name) {
         return false;
     }
-    (name == "clone" || name == "assassinclone" || name == "trainingmob")
+    (name == "clone" || name == "assassinclone" || name == "trainingmob"
+        || name.contains("bonearcher") || name.contains("crossbowoma") || name.contains("elitearcher")
+        || name.contains("zumaarcher") || name == "dark" || name == "dark0")
         || ((name.contains("evilmir") || name.contains("evil mir") || name.contains("邪恶巨龙"))
         && !name.contains("evilmirbody"))
         // #2358：C# Deer.cs（AI 1/2）可采集被动（Hen/Pig/Bull/Deer/Deer1/Sheep/Doe）
@@ -910,6 +918,9 @@ pub fn is_static_object(monster_name: &str) -> bool {
         || name == "cargobox" || name.contains("cargo box") || name.contains("货箱")
         // 注意：RestlessJar 曾在此列表（CanMove=false），但它 CanAttack=true，已改由专属 RestlessJarBehavior 处理（#1089）
         || name == "blockingobject" || name.contains("blocking object") || name.contains("阻挡物")
+        // #2430：C# AI 3 = Tree 静态物（CherryTree/ChestnutTree/EbonyTree/LargeMushroom/TreasureBox）
+        || name.contains("cherrytree") || name.contains("chestnuttree") || name.contains("ebonytree")
+        || name.contains("largemushroom") || name.contains("treasurebox")
 }
 
 /// 判断是否为「被动环境物体」（可移动但不主动攻击，对齐 C# 的 Deer/Doe/Football 等）
@@ -943,6 +954,15 @@ mod tests {
     #[test]
     fn clone_family_registered() {
         for name in ["Clone", "AssassinClone", "TrainingMob"] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+            let _b = make_behavior(name);
+        }
+    }
+
+    /// #2430：C# GetMonster AI 8——AxeSkeleton 家族弓手
+    #[test]
+    fn axe_skeleton_family_registered() {
+        for name in ["BoneArcher", "CrossbowOma", "EliteArcher", "ZumaArcher", "Dark"] {
             assert!(is_registered_boss(name), "{} should be registered", name);
             let _b = make_behavior(name);
         }
@@ -990,9 +1010,10 @@ mod tests {
             let b = make_behavior(name);
             assert!(!b.is_attackable(), "{} 初始应石化不可攻击", name);
         }
-        // 非祖玛雕像系不受影响（EliteArcher/ZumaArcher 是 AI 8 远程，走各自注册/默认）
-        assert!(!is_registered_boss("EliteArcher"));
-        assert!(!is_registered_boss("ZumaArcher20"));
+        // 非祖玛雕像系不受影响（EliteArcher/ZumaArcher 是 AI 8 远程，走 AxeSkeleton 注册，#2430；不应石化）
+        assert!(is_registered_boss("EliteArcher"));
+        assert!(is_registered_boss("ZumaArcher20"));
+        assert!(make_behavior("EliteArcher").is_attackable(), "EliteArcher 不应石化");
     }
 
     /// #2354：C# AI 41/42 均创建 YinDevilNode——DB YangDevilNode 也须命中注册
@@ -1079,6 +1100,13 @@ mod tests {
         assert!(is_static_object("Tree"));
         assert!(is_static_object("Wall"));
         assert!(is_static_object("CaveStatue"));
+        // #2430：C# AI 3 树木/蘑菇/宝箱静态物
+        assert!(is_static_object("CherryTree"));
+        assert!(is_static_object("ChestnutTree1"));
+        assert!(is_static_object("EbonyTree"));
+        assert!(is_static_object("LargeMushroom"));
+        assert!(is_static_object("TreasureBox"));
+        assert!(!is_registered_boss("CherryTree"));
         // #2358：Deer/Doe 移出被动名单（由 DeerBehavior 处理可采集）；Football 仍被动
         assert!(!is_passive_object("Deer"));
         assert!(is_passive_object("Football"));
