@@ -331,6 +331,8 @@ pub struct PlayerState {
     pub gold_drop_rate_percent: i32,
     /// 装备采矿掉落率加成 %（C# Stat.MineRatePercent）
     pub mine_rate_percent: i32,
+    /// 装备宝石率加成（C# Stats[Stat.GemRatePercent]；装备基础/附加/觉醒/槽位宝石合计）
+    pub gem_rate_percent: i32,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -824,6 +826,7 @@ allow_group: false,
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
             mine_rate_percent: 0,
+            gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
@@ -2490,6 +2493,8 @@ pub struct SetStatBonuses {
     pub gold_drop_rate_percent: i32,
     /// 装备采矿掉落率加成（C# Stat.MineRatePercent）
     pub mine_rate_percent: i32,
+    /// 装备宝石率加成（C# Stats[Stat.GemRatePercent]；装备基础/附加/觉醒/槽位宝石合计）
+    pub gem_rate_percent: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -2584,6 +2589,7 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.item_drop_rate_percent = msg.item_drop_rate_percent;
         self.state.gold_drop_rate_percent = msg.gold_drop_rate_percent;
         self.state.mine_rate_percent = msg.mine_rate_percent;
+        self.state.gem_rate_percent = msg.gem_rate_percent;
 
         if changed {
             self.send_user_information_refresh();
@@ -6639,6 +6645,7 @@ allow_group: false,
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
             mine_rate_percent: 0,
+            gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,

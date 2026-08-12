@@ -798,6 +798,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             guild_buff_exp_percent: 0,
             guild_buff_fish_rate_percent: 0,
             mine_rate_percent: 0,
+            gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
