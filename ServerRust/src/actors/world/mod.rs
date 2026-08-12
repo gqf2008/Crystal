@@ -30,6 +30,7 @@ pub mod spell;
 mod tick;
 
 // Re-export submodule structs for external access
+pub(crate) use tick::unix_secs_to_dotnet_ticks;
 pub use tick::Tick;
 pub use tick::ProcessDelayedActions;
 pub use tick::ProcessElementalTick;
