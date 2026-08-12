@@ -646,6 +646,18 @@ pub struct SetupIniSettings {
     pub pk_town_y: i32,
     /// C# Settings.MaxLuck（[Items] MaxLuck = 10）
     pub max_luck: i32,
+    /// C# Settings.MagicResistWeight（[Items] MagicResistWeight = 10）
+    pub magic_resist_weight: u8,
+    /// C# Settings.PoisonResistWeight（[Items] PoisonResistWeight = 10）
+    pub poison_resist_weight: u8,
+    /// C# Settings.CriticalRateWeight（[Items] CriticalRateWeight = 5）
+    pub critical_rate_weight: u8,
+    /// C# Settings.CriticalDamageWeight（[Items] CriticalDamageWeight = 50）
+    pub critical_damage_weight: u8,
+    /// C# Settings.FreezingAttackWeight（[Items] FreezingAttackWeight = 10）
+    pub freezing_attack_weight: u8,
+    /// C# Settings.PoisonAttackWeight（[Items] PoisonAttackWeight = 10）
+    pub poison_attack_weight: u8,
 }
 
 impl Default for SetupIniSettings {
@@ -664,6 +676,12 @@ impl Default for SetupIniSettings {
             pk_town_x: 848,
             pk_town_y: 677,
             max_luck: 10,
+            magic_resist_weight: 10,
+            poison_resist_weight: 10,
+            critical_rate_weight: 5,
+            critical_damage_weight: 50,
+            freezing_attack_weight: 10,
+            poison_attack_weight: 10,
         }
     }
 }
@@ -695,6 +713,13 @@ pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
     out.pk_town_y = ini_get_i64(&parsed, "PKTown", "PKTownPositionY", out.pk_town_y as i64) as i32;
     // #2424：幸运上限（C# Settings.MaxLuck，最小 1）
     out.max_luck = ini_get_i64(&parsed, "Items", "MaxLuck", out.max_luck as i64).max(1) as i32;
+    // #2426：战斗权重（C# Settings.[Items] *Weight，最小 1）
+    out.magic_resist_weight = ini_get_i64(&parsed, "Items", "MagicResistWeight", out.magic_resist_weight as i64).max(1) as u8;
+    out.poison_resist_weight = ini_get_i64(&parsed, "Items", "PoisonResistWeight", out.poison_resist_weight as i64).max(1) as u8;
+    out.critical_rate_weight = ini_get_i64(&parsed, "Items", "CriticalRateWeight", out.critical_rate_weight as i64).max(1) as u8;
+    out.critical_damage_weight = ini_get_i64(&parsed, "Items", "CriticalDamageWeight", out.critical_damage_weight as i64).max(1) as u8;
+    out.freezing_attack_weight = ini_get_i64(&parsed, "Items", "FreezingAttackWeight", out.freezing_attack_weight as i64).max(1) as u8;
+    out.poison_attack_weight = ini_get_i64(&parsed, "Items", "PoisonAttackWeight", out.poison_attack_weight as i64).max(1) as u8;
     out
 }
 
@@ -942,7 +967,7 @@ BuffExpRate=0
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("Setup.ini"),
-            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\nMaxLuck=10\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n",
+            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\nMaxLuck=10\nMagicResistWeight=10\nPoisonResistWeight=10\nCriticalRateWeight=5\nCriticalDamageWeight=50\nFreezingAttackWeight=10\nPoisonAttackWeight=10\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n",
         ).unwrap();
         let s = load_setup_settings(&dir);
         assert!(s.gather_orbs_per_level);
@@ -960,6 +985,13 @@ BuffExpRate=0
         assert_eq!(s.pk_town_y, 677);
         // #2424：幸运上限
         assert_eq!(s.max_luck, 10);
+        // #2426：战斗权重
+        assert_eq!(s.magic_resist_weight, 10);
+        assert_eq!(s.poison_resist_weight, 10);
+        assert_eq!(s.critical_rate_weight, 5);
+        assert_eq!(s.critical_damage_weight, 50);
+        assert_eq!(s.freezing_attack_weight, 10);
+        assert_eq!(s.poison_attack_weight, 10);
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → C# 默认
@@ -971,6 +1003,8 @@ BuffExpRate=0
         assert_eq!(d.pk_town_x, 848);
         assert_eq!(d.pk_town_y, 677);
         assert_eq!(d.max_luck, 10);
+        assert_eq!(d.critical_rate_weight, 5);
+        assert_eq!(d.critical_damage_weight, 50);
 
         // 真实文件集成（Daneo1989/Configs/Setup.ini）
         let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));
@@ -988,6 +1022,13 @@ BuffExpRate=0
             assert_eq!(r.pk_town_y, 677);
             // #2424：幸运上限
             assert_eq!(r.max_luck, 10);
+            // #2426：战斗权重
+            assert_eq!(r.magic_resist_weight, 10);
+            assert_eq!(r.poison_resist_weight, 10);
+            assert_eq!(r.critical_rate_weight, 5);
+            assert_eq!(r.critical_damage_weight, 50);
+            assert_eq!(r.freezing_attack_weight, 10);
+            assert_eq!(r.poison_attack_weight, 10);
         }
     }
 

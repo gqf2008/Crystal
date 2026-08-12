@@ -14,12 +14,49 @@ use crate::combat::poison::Poison;
 // ============================================================
 // Settings 权重常量（对齐 C# Server/Settings.cs:296-304）
 // ============================================================
-pub const MAGIC_RESIST_WEIGHT: i32 = 10;
-pub const POISON_RESIST_WEIGHT: i32 = 10;
-pub const CRITICAL_RATE_WEIGHT: i32 = 5;
-pub const CRITICAL_DAMAGE_WEIGHT: i32 = 50;
-pub const FREEZING_ATTACK_WEIGHT: i32 = 10;
-pub const POISON_ATTACK_WEIGHT: i32 = 10;
+/// 战斗权重类型（C# Settings：[Items] MagicResistWeight 等 6 项）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombatWeight {
+    MagicResist,
+    PoisonResist,
+    CriticalRate,
+    CriticalDamage,
+    FreezingAttack,
+    PoisonAttack,
+}
+
+impl CombatWeight {
+    fn index(self) -> usize {
+        match self {
+            CombatWeight::MagicResist => 0,
+            CombatWeight::PoisonResist => 1,
+            CombatWeight::CriticalRate => 2,
+            CombatWeight::CriticalDamage => 3,
+            CombatWeight::FreezingAttack => 4,
+            CombatWeight::PoisonAttack => 5,
+        }
+    }
+}
+
+/// 战斗权重（C# Settings：默认 10/10/5/50/10/10；启动时由 main.rs 从 Setup.ini 注入）
+static COMBAT_WEIGHTS: [std::sync::atomic::AtomicI32; 6] = [
+    std::sync::atomic::AtomicI32::new(10), // MagicResist
+    std::sync::atomic::AtomicI32::new(10), // PoisonResist
+    std::sync::atomic::AtomicI32::new(5),  // CriticalRate
+    std::sync::atomic::AtomicI32::new(50), // CriticalDamage
+    std::sync::atomic::AtomicI32::new(10), // FreezingAttack
+    std::sync::atomic::AtomicI32::new(10), // PoisonAttack
+];
+
+/// 设置战斗权重（最小 1）
+pub fn set_combat_weight(kind: CombatWeight, v: i32) {
+    COMBAT_WEIGHTS[kind.index()].store(v.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 读取战斗权重（默认见 COMBAT_WEIGHTS）
+pub fn combat_weight(kind: CombatWeight) -> i32 {
+    COMBAT_WEIGHTS[kind.index()].load(std::sync::atomic::Ordering::Relaxed)
+}
 /// C# Settings.MaxLuck（[Items] MaxLuck = 10；启动时由 main.rs 从 Setup.ini 注入）
 static MAX_LUCK: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(10);
 
@@ -149,7 +186,7 @@ pub fn get_armour(defender: &CombatStats, defence_type: DefenceType, attacker_ac
         }
         DefenceType::MacAgility => {
             // MagicResist 抵抗 + Agility 闪避
-            if rand_below(MAGIC_RESIST_WEIGHT) < defender.magic_resist {
+            if rand_below(combat_weight(CombatWeight::MagicResist)) < defender.magic_resist {
                 hit = false;
             }
             if rand_below(defender.agility + 1) > attacker_accuracy {
@@ -158,7 +195,7 @@ pub fn get_armour(defender: &CombatStats, defence_type: DefenceType, attacker_ac
             armour = get_defence_power(defender.min_mac, defender.max_mac);
         }
         DefenceType::Mac => {
-            if rand_below(MAGIC_RESIST_WEIGHT) < defender.magic_resist {
+            if rand_below(combat_weight(CombatWeight::MagicResist)) < defender.magic_resist {
                 hit = false;
             }
             armour = get_defence_power(defender.min_mac, defender.max_mac);
@@ -182,13 +219,13 @@ pub fn get_armour(defender: &CombatStats, defence_type: DefenceType, attacker_ac
 
 /// 暴击判定：Random(100) < CriticalRate * CriticalRateWeight
 pub fn check_critical(critical_rate: i32) -> bool {
-    rand_below(100) < critical_rate.saturating_mul(CRITICAL_RATE_WEIGHT)
+    rand_below(100) < critical_rate.saturating_mul(combat_weight(CombatWeight::CriticalRate))
 }
 
 /// 暴击伤害加成：damage += floor(damage * (CriticalDamage / CriticalDamageWeight) * 10)
 /// 完全按 C# 浮点顺序实现（HumanObject.cs:7159）
 pub fn apply_critical(damage: i32, critical_damage: i32) -> i32 {
-    let bonus = (damage as f64 * (critical_damage as f64 / CRITICAL_DAMAGE_WEIGHT as f64) * 10.0).floor() as i64;
+    let bonus = (damage as f64 * (critical_damage as f64 / combat_weight(CombatWeight::CriticalDamage) as f64) * 10.0).floor() as i64;
     let total = damage as i64 + bonus;
     total.min(i32::MAX as i64) as i32
 }
@@ -220,7 +257,7 @@ pub fn apply_negative_effects(
 
     // Freezing → Slow（level_offset==0 时 C# Random(0) 抛异常被吞，等效不触发）
     if attacker.freezing > 0 && level_offset > 0 {
-        if rand_below(FREEZING_ATTACK_WEIGHT) < attacker.freezing && rand_below(level_offset as i32) == 0 {
+        if rand_below(combat_weight(CombatWeight::FreezingAttack)) < attacker.freezing && rand_below(level_offset as i32) == 0 {
             let duration = (3 + rand_below(attacker.freezing)).min(10) as u32;
             poisons.push(Poison::new(PoisonType::SLOW, duration, 0, 1000));
         }
@@ -228,7 +265,7 @@ pub fn apply_negative_effects(
 
     // PoisonAttack → Green
     if attacker.poison_attack > 0 && level_offset > 0 {
-        if rand_below(POISON_ATTACK_WEIGHT) < attacker.poison_attack && rand_below(level_offset as i32) == 0 {
+        if rand_below(combat_weight(CombatWeight::PoisonAttack)) < attacker.poison_attack && rand_below(level_offset as i32) == 0 {
             let value = (3 + rand_below(attacker.poison_attack)).min(10);
             poisons.push(Poison::new(PoisonType::GREEN, 5, value, 1000));
         }
@@ -651,5 +688,21 @@ mod tests {
         set_max_luck(0);
         assert_eq!(max_luck(), 1);
         set_max_luck(10); // 还原默认，避免影响并行用例
+    }
+
+    #[test]
+    fn test_combat_weight_global_default_and_set() {
+        // #2426：默认 10/10/5/50/10/10；set_combat_weight 最小钳 1
+        assert_eq!(combat_weight(CombatWeight::MagicResist), 10);
+        assert_eq!(combat_weight(CombatWeight::PoisonResist), 10);
+        assert_eq!(combat_weight(CombatWeight::CriticalRate), 5);
+        assert_eq!(combat_weight(CombatWeight::CriticalDamage), 50);
+        assert_eq!(combat_weight(CombatWeight::FreezingAttack), 10);
+        assert_eq!(combat_weight(CombatWeight::PoisonAttack), 10);
+        set_combat_weight(CombatWeight::CriticalDamage, 60);
+        assert_eq!(combat_weight(CombatWeight::CriticalDamage), 60);
+        set_combat_weight(CombatWeight::CriticalDamage, 0);
+        assert_eq!(combat_weight(CombatWeight::CriticalDamage), 1);
+        set_combat_weight(CombatWeight::CriticalDamage, 50); // 还原默认，避免影响并行用例
     }
 }
