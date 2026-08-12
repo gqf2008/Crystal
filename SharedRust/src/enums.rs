@@ -223,14 +223,14 @@ pub enum ClientPacketIds {
     ItemRentalLockFee = 144,
     ItemRentalLockItem = 145,
     ConfirmItemRental = 146,
-    /// #1216：英雄一键复活（C# HeroPanel 复活按钮）
-    ReviveHero = 147,
     GuildTerritoryPage,
     PurchaseGuildTerritory,
     DeleteItem,
     UnlockStorage,
     SetStoragePassword,
     RemoveStoragePassword,
+    /// #1216：英雄一键复活（C# HeroPanel 复活按钮，Rust-only 新增，放末尾避免挤占 C# 编号）
+    ReviveHero,
 }
 
 #[derive(
@@ -2766,6 +2766,19 @@ mod tests {
         let action = MirAction::try_from(raw).expect("mir action");
         assert_eq!(action, MirAction::MountAttack);
         assert_eq!(MirAction::FishingReel as u8, 47); // Rust ground truth
+    }
+
+    /// 客户端包编号 0..152 对齐 C# ClientPacketIds；ReviveHero 为 Rust-only 追加（153），
+    /// 放在末尾，避免挤占 C# 的 GuildTerritoryPage=147 .. RemoveStoragePassword=152。
+    #[test]
+    fn client_packet_ids_tail_align_csharp() {
+        assert_eq!(ClientPacketIds::GuildTerritoryPage as i16, 147);
+        assert_eq!(ClientPacketIds::PurchaseGuildTerritory as i16, 148);
+        assert_eq!(ClientPacketIds::DeleteItem as i16, 149);
+        assert_eq!(ClientPacketIds::UnlockStorage as i16, 150);
+        assert_eq!(ClientPacketIds::SetStoragePassword as i16, 151);
+        assert_eq!(ClientPacketIds::RemoveStoragePassword as i16, 152);
+        assert_eq!(ClientPacketIds::ReviveHero as i16, 153); // Rust-only
     }
 }
 
