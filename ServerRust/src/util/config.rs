@@ -366,6 +366,18 @@ pub struct ServerWorldConfig {
     /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats = true）
     #[serde(default = "default_goods_hide_added_stats")]
     pub goods_hide_added_stats: bool,
+    /// NPC 二手货/回购系统开关（C# Settings.GoodsOn = true；关闭后卖出不入 BuyBack/UsedGoods，[@BUYUSED]/[@BUYBACK] 不响应）
+    #[serde(default = "default_goods_on")]
+    pub goods_on: bool,
+    /// 每 NPC 每种物品索引的二手货（UsedGoods）上限（C# Settings.GoodsMaxStored = 15）
+    #[serde(default = "default_goods_max_stored")]
+    pub goods_max_stored: u32,
+    /// 回购（BuyBack）过期分钟数（C# Settings.GoodsBuyBackTime = 60；过期未回购转入二手货）
+    #[serde(default = "default_goods_buy_back_time_minutes")]
+    pub goods_buy_back_time_minutes: u32,
+    /// 每玩家每 NPC 回购（BuyBack）上限（C# Settings.GoodsBuyBackMaxStored = 20）
+    #[serde(default = "default_goods_buy_back_max_stored")]
+    pub goods_buy_back_max_stored: u32,
     /// 精英怪配置（C# Settings.MonsterRarity* 第一阶段：单级精英，默认保留 Rust 当前值；
     /// C# Elite 参考：2.25x HP / 75% 掉落加成）
     #[serde(default)]
@@ -382,6 +394,22 @@ fn default_mana_regen_weight() -> u32 {
 
 fn default_goods_hide_added_stats() -> bool {
     true
+}
+
+fn default_goods_on() -> bool {
+    true
+}
+
+fn default_goods_max_stored() -> u32 {
+    15
+}
+
+fn default_goods_buy_back_time_minutes() -> u32 {
+    60
+}
+
+fn default_goods_buy_back_max_stored() -> u32 {
+    20
 }
 
 fn default_item_timeout() -> u32 {
@@ -582,6 +610,10 @@ impl Default for ServerConfig {
                 health_regen_weight: default_health_regen_weight(),
                 mana_regen_weight: default_mana_regen_weight(),
                 goods_hide_added_stats: default_goods_hide_added_stats(),
+                goods_on: default_goods_on(),
+                goods_max_stored: default_goods_max_stored(),
+                goods_buy_back_time_minutes: default_goods_buy_back_time_minutes(),
+                goods_buy_back_max_stored: default_goods_buy_back_max_stored(),
                 rarity: RarityConfig::default(),
                 notice_path: default_notice_path(),
                 death_exp_penalty_percent: default_death_exp_penalty_percent(),
@@ -636,5 +668,15 @@ mod tests {
     fn hero_required_level_defaults_to_22() {
         let c = SocialConfig::default();
         assert_eq!(c.hero_required_level, 22);
+    }
+
+    /// #2376：Goods 配置默认值与 C# Settings 对齐（GoodsOn/GoodsMaxStored/GoodsBuyBackTime/GoodsBuyBackMaxStored）
+    #[test]
+    fn goods_defaults_match_csharp_settings() {
+        let c = ServerConfig::default().server;
+        assert!(c.goods_on);
+        assert_eq!(c.goods_max_stored, 15);
+        assert_eq!(c.goods_buy_back_time_minutes, 60);
+        assert_eq!(c.goods_buy_back_max_stored, 20);
     }
 }

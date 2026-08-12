@@ -19,6 +19,11 @@ death_exp_penalty_percent = 0
 health_regen_weight = 10
 mana_regen_weight = 10
 goods_hide_added_stats = true
+# NPC 二手货/回购系统（C# Settings.Goods*，#2376）
+goods_on = true
+goods_max_stored = 15
+goods_buy_back_time_minutes = 60
+goods_buy_back_max_stored = 20
 
 [rarity]
 # 对齐 C# Settings.MonsterRarity*（#2360）：Elite 0.1% / HP 2.25 / 伤害 1.65 / 经验 2.20

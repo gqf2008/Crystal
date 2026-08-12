@@ -179,6 +179,10 @@ async fn async_main() -> anyhow::Result<()> {
         health_regen_weight: cfg.server.health_regen_weight,
         mana_regen_weight: cfg.server.mana_regen_weight,
         goods_hide_added_stats: cfg.server.goods_hide_added_stats,
+        goods_on: cfg.server.goods_on,
+        goods_max_stored: cfg.server.goods_max_stored,
+        goods_buy_back_time_minutes: cfg.server.goods_buy_back_time_minutes,
+        goods_buy_back_max_stored: cfg.server.goods_buy_back_max_stored,
         safe_zone_healing: false, // C# Settings.SafeZoneHealing 默认 false
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
