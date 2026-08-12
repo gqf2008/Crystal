@@ -19,6 +19,18 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if is_static_object(&name) || is_passive_object(&name) {
         return Box::new(DefaultBehavior::new());
     }
+    // #2428：C# GetMonster AI 55/59/56——技能召唤物/训练木桩专属行为
+    // Clone（分身术）→ HumanWizard（远程 ThunderBolt，跟随主人）；AssassinClone（DarkBody）→ HumanAssassin（自爆）；
+    // TrainingMob（训练木桩）→ Trainer（不移动不反击）
+    if name == "clone" {
+        return Box::new(bosses::human_wizard::HumanWizardBehavior::new());
+    }
+    if name == "assassinclone" {
+        return Box::new(bosses::human_assassin::HumanAssassinBehavior::new());
+    }
+    if name == "trainingmob" {
+        return Box::new(bosses::trainer::TrainerBehavior::new());
+    }
     // #2358：C# Deer.cs（AI 1/2）：Hen/Pig/Bull/Deer/Deer1/Sheep 均可采集（HarvestMonster 子类），AI2 有逃跑分支
     if name == "hen" || name == "pig" || name == "bull" || name.contains("sheep") || name.contains("羊")
         || name.contains("deer") || name.contains("doe") || name.contains("鹿")
@@ -663,7 +675,8 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
     if is_static_object(&name) || is_passive_object(&name) {
         return false;
     }
-    ((name.contains("evilmir") || name.contains("evil mir") || name.contains("邪恶巨龙"))
+    (name == "clone" || name == "assassinclone" || name == "trainingmob")
+        || ((name.contains("evilmir") || name.contains("evil mir") || name.contains("邪恶巨龙"))
         && !name.contains("evilmirbody"))
         // #2358：C# Deer.cs（AI 1/2）可采集被动（Hen/Pig/Bull/Deer/Deer1/Sheep/Doe）
         || name == "hen" || name == "pig" || name == "bull" || name.contains("sheep") || name.contains("羊")
@@ -923,6 +936,15 @@ mod tests {
             assert!(is_registered_boss(name), "{} should be registered", name);
             let b = make_behavior(name);
             assert!(b.is_harvestable(), "{} should be harvestable", name);
+        }
+    }
+
+    /// #2428：C# GetMonster AI 55/59/56——Clone/AssassinClone/TrainingMob 专属行为
+    #[test]
+    fn clone_family_registered() {
+        for name in ["Clone", "AssassinClone", "TrainingMob"] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+            let _b = make_behavior(name);
         }
     }
 
