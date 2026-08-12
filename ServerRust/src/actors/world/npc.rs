@@ -584,6 +584,11 @@ impl Message<NewCharacterRequest> for WorldActor {
             send_new_character_result(&self.gate_ref, msg.session_id, 1);
             return;
         }
+        // #2346：C# Envir.cs:4015——DisabledCharNames（DisabledChars.txt，大写）→ Result=1（C# 有 !IsGm 豁免）
+        if self.disabled_char_names.contains(&msg.name.to_uppercase()) {
+            send_new_character_result(&self.gate_ref, msg.session_id, 1);
+            return;
+        }
         // C# Globals.MaxCharacterCount = 4：账号角色数上限
         let existing_count = db::list_character_summaries(&self.db_pool, &msg.account_username)
             .await
@@ -983,6 +988,15 @@ impl Message<NewHeroRequest> for WorldActor {
         let valid_name = (3..=15).contains(&name_len)
             && msg.name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c));
         if !valid_name {
+            let body = vec![1u8];
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
+            }).await;
+            return;
+        }
+        // #2346：C# Envir.cs:4085——DisabledCharNames（DisabledChars.txt，大写）→ Result=1（C# 有 !IsGm 豁免）
+        if self.disabled_char_names.contains(&msg.name.to_uppercase()) {
             let body = vec![1u8];
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
