@@ -305,7 +305,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客") {
         return Box::new(bosses::flame_assassin::FlameAssassinBehavior::new());
     }
-    if name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔") {
+    // #2354：C# AI 41/42 均创建 YinDevilNode（YinDevilNode.cs）——DB YangDevilNode 同样注册
+    if name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔")
+        || name.contains("yangdevil") || name.contains("yang devil") || name.contains("阳魔")
+    {
         return Box::new(bosses::yin_devil_node::YinDevilNodeBehavior::new());
     }
     if name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠") {
@@ -413,7 +416,13 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     }
 
     // ===== 普通怪物专属 behavior（25 个，独特机制）=====
-    if name.contains("zumamonster") || name.contains("zuma monster") || name.contains("祖玛怪") {
+    // #2354：C# AI 15 ZumaMonster——DB 名 ZumaStatue/ZumaGuardian/EliteStatue/EliteGuardian（含 0/3/20/21/00 变体）
+    if name.contains("zumamonster") || name.contains("zuma monster") || name.contains("祖玛怪")
+        || name.contains("zumastatue") || name.contains("zuma statue")
+        || name.contains("zumaguardian") || name.contains("zuma guardian")
+        || name.contains("elitestatue") || name.contains("elite statue")
+        || name.contains("eliteguardian") || name.contains("elite guardian")
+    {
         return Box::new(bosses::zuma_monster::ZumaMonsterBehavior::new());
     }
     if name.contains("axeskeleton") || name.contains("axe skeleton") || name.contains("掷斧骷髅") || name.contains("斧骷髅") {
@@ -742,7 +751,9 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物")
         || name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔")
         || name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客")
+        // #2354：C# AI 41/42 均创建 YinDevilNode（DB YangDevilNode 一并注册）
         || name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔")
+        || name.contains("yangdevil") || name.contains("yang devil") || name.contains("阳魔")
         || name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠")
         || name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫")
         || name.contains("traprock") || name.contains("trap rock") || name.contains("陷阱岩")
@@ -779,6 +790,11 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("hellkeeper") || name.contains("hell keeper") || name.contains("地狱守门人")
         // 普通怪物专属 behavior
         || name.contains("zumamonster") || name.contains("zuma monster") || name.contains("祖玛怪")
+        // #2354：C# AI 15 ZumaMonster（ZumaStatue/ZumaGuardian/EliteStatue/EliteGuardian 含变体）
+        || name.contains("zumastatue") || name.contains("zuma statue")
+        || name.contains("zumaguardian") || name.contains("zuma guardian")
+        || name.contains("elitestatue") || name.contains("elite statue")
+        || name.contains("eliteguardian") || name.contains("elite guardian")
         || name.contains("axeskeleton") || name.contains("axe skeleton") || name.contains("掷斧骷髅") || name.contains("斧骷髅")
         || name.contains("spittingspider") || name.contains("spitting spider") || name.contains("吐丝蜘蛛")
         || name.contains("stonetrap") || name.contains("stone trap") || name.contains("石阵")
@@ -891,6 +907,35 @@ pub fn is_passive_object(monster_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2354：C# AI 15 ZumaMonster（石化/唤醒）——DB 名与变体全部命中，初始石化不可攻击
+    #[test]
+    fn zuma_statue_family_registered() {
+        for name in [
+            "ZumaStatue", "ZumaStatue0", "ZumaStatue3", "ZumaStatue21",
+            "ZumaGuardian", "ZumaGuardian0", "ZumaGuardian00", "ZumaGuardian3",
+            "ZumaGuardian20", "ZumaGuardian21", "EliteStatue", "EliteGuardian",
+            "ZumaMonster",
+        ] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+            // 初始石化：不可被攻击（ZumaMonsterBehavior stoned=true）
+            let b = make_behavior(name);
+            assert!(!b.is_attackable(), "{} 初始应石化不可攻击", name);
+        }
+        // 非祖玛雕像系不受影响（EliteArcher/ZumaArcher 是 AI 8 远程，走各自注册/默认）
+        assert!(!is_registered_boss("EliteArcher"));
+        assert!(!is_registered_boss("ZumaArcher20"));
+    }
+
+    /// #2354：C# AI 41/42 均创建 YinDevilNode——DB YangDevilNode 也须命中注册
+    #[test]
+    fn yin_yang_devil_node_registered() {
+        for name in ["YinDevilNode", "YangDevilNode", "yindevilnode", "yangdevilnode"] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+        }
+        // 被动环境物体（Football）不受阴/阳魔条件影响
+        assert!(!is_registered_boss("Football"));
+    }
 
     #[test]
     fn archer_guard_registered() {
