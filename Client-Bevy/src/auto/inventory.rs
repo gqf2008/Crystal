@@ -450,10 +450,11 @@ pub(crate) fn auto_refine_test(
                 .enumerate()
                 .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
             match first {
-                Some((_i, item)) => {
+                Some((i, item)) => {
                     *uid = Some(item.unique_id);
                     net.send_packet(&client_bevy::network::RefineDepositWire {
-                        unique_id: item.unique_id,
+                        from: i as i32,
+                        to: 0,
                     });
                     tracing::info!(
                         "[REFINETEST] 存入精炼物品 uid={} #{}",
@@ -516,12 +517,21 @@ pub(crate) fn auto_refine_test(
             }
             if chat_has(&chat, "精炼成功") || chat_has(&chat, "精炼失败") || chat_has(&chat, "已完成") {
                 tracing::info!("[REFINETEST] ✅ 精炼结果已返回");
-                net.send_packet(&client_bevy::network::RefineRetrieveWire {
-                    unique_id: uid.unwrap_or(0),
-                });
-                tracing::info!("[REFINETEST] 取回精炼物品");
-                *stage = 5;
-                *t = 0.0;
+                match hud.inventory.items.iter().position(|s| s.is_none()) {
+                    Some(grid) => {
+                        net.send_packet(&client_bevy::network::RefineRetrieveWire {
+                            from: 0,
+                            to: grid as i32,
+                        });
+                        tracing::info!("[REFINETEST] 取回精炼物品到背包格 {}", grid);
+                        *stage = 5;
+                        *t = 0.0;
+                    }
+                    None => {
+                        tracing::warn!("[REFINETEST] ❌ 背包已满，无法取回");
+                        *stage = 9;
+                    }
+                }
             }
         }
         5 => {

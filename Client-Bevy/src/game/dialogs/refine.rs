@@ -1,10 +1,10 @@
 // ============================================================================
 // 精炼对话框（M40）
 // 参考：C# RefineDialog + ServerRust awakening.rs 精炼流程
-// 网络（ServerRust gate 实际 wire，与 SharedRust 客户端结构不一致，手动构造）：
-//   C: DepositRefineItem[uid u64] / RetrieveRefineItem[uid u64] / RefineCancel(空)
-//      RefineItem[item_id u32][materials u32] / CheckRefine[uid u64]
-// 结果通过系统聊天消息返回（精炼 60 秒 / 80% 成功率）
+// 网络（对齐 SharedRust / ServerRust gate wire）：
+//   C: DepositRefineItem[from i32][to i32] / RetrieveRefineItem[from i32][to i32] / RefineCancel(空)
+//      RefineItem[unique_id u64] / CheckRefine[unique_id u64]
+// 结果通过系统聊天消息返回（精炼 60 秒 / 材料槽未实现 → 成功率 0）
 // ============================================================================
 
 use bevy::prelude::*;
@@ -212,7 +212,8 @@ fn refine_ui_system(
             if let Some(i) = idx {
                 if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
                     net.send_packet(&crate::network::RefineDepositWire {
-                        unique_id: item.unique_id,
+                        from: i as i32,
+                        to: 0,
                     });
                     state.deposited_uid = Some(item.unique_id);
                     state.deposited_index = Some(item.item_index);
@@ -228,10 +229,19 @@ fn refine_ui_system(
     for btn in &retrieve_btn {
         if btn.clicked {
             if let Some(uid) = state.deposited_uid {
-                net.send_packet(&crate::network::RefineRetrieveWire { unique_id: uid });
-                state.deposited_uid = None;
-                state.message = "已请求取回".to_string();
-                tracing::info!("🔨 取回精炼物品 uid={}", uid);
+                // C# RetrieveRefineItem：[from 精炼栏格][to 背包格]；Rust 单槽 from=0，to 需为空格
+                match hud.inventory.items.iter().position(|s| s.is_none()) {
+                    Some(grid) => {
+                        net.send_packet(&crate::network::RefineRetrieveWire {
+                            from: 0,
+                            to: grid as i32,
+                        });
+                        state.deposited_uid = None;
+                        state.message = "已请求取回".to_string();
+                        tracing::info!("🔨 取回精炼物品 uid={} 到背包格 {}", uid, grid);
+                    }
+                    None => state.message = "背包已满，无法取回".to_string(),
+                }
             }
         }
     }
