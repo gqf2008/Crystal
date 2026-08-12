@@ -941,10 +941,15 @@ impl Message<NewCharacterRequest> for WorldActor {
             send_new_character_result(&self.gate_ref, msg.session_id, 3);
             return;
         }
+        // #2434：新角色出生地图——DB 地图 idx 从 1 开始（新手村 file "0" 通常为 idx 1），按文件名解析
+        let starting_map_index = self.map_infos.values()
+            .find(|m| m.file_name == "0" || m.file_name.starts_with("0."))
+            .map(|m| m.index)
+            .unwrap_or(0);
         let mut default_state = PlayerState {
             object_id: 0,
             name: msg.name.clone(),
-            map_index: 0,
+            map_index: starting_map_index as u16,
             x: 330,
             y: 330,
             direction: 4,
@@ -1089,9 +1094,9 @@ impl Message<NewCharacterRequest> for WorldActor {
             has_elemental: false,
             concentration_interrupted: false,
             concentration_interrupt_time: 0,
-            bind_map_index: 0,
-            bind_x: 0,
-            bind_y: 0,
+            bind_map_index: starting_map_index,
+            bind_x: 330,
+            bind_y: 330,
             level_effects: 0,
             is_mentor: false,
             mentee_exp: 0,
