@@ -158,6 +158,8 @@ async fn start_server_with_world() -> u16 {
         replace_wedring_cost: 125,
         lover_exp_bonus: 5,
         mentor_exp_boost: 10,
+        mentor_damage_boost: 10,
+        mentee_exp_bank: 1,
         experience_list: Vec::new(),
         fishing_cfg: Default::default(),
         random_item_stats: Vec::new(),

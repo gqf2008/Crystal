@@ -196,6 +196,8 @@ async fn async_main() -> anyhow::Result<()> {
         replace_wedring_cost: cfg.social.replace_wedring_cost,
         lover_exp_bonus: cfg.social.lover_exp_bonus,
         mentor_exp_boost: cfg.social.mentor_exp_boost,
+        mentor_damage_boost: cfg.social.mentor_damage_boost,
+        mentee_exp_bank: cfg.social.mentee_exp_bank,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

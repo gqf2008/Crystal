@@ -316,6 +316,12 @@ pub struct SocialConfig {
     /// 徒弟同图同组经验加成 %（C# Settings.MentorExpBoost = 10）
     #[serde(default = "default_mentor_exp_boost")]
     pub mentor_exp_boost: u8,
+    /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10）
+    #[serde(default = "default_mentor_damage_boost")]
+    pub mentor_damage_boost: u8,
+    /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
+    #[serde(default = "default_mentee_exp_bank")]
+    pub mentee_exp_bank: u8,
 }
 
 fn default_allow_new_character() -> bool {
@@ -380,6 +386,14 @@ fn default_mentor_level_gap() -> u8 {
 
 fn default_mentor_exp_boost() -> u8 {
     10
+}
+
+fn default_mentor_damage_boost() -> u8 {
+    10
+}
+
+fn default_mentee_exp_bank() -> u8 {
+    1
 }
 
 fn default_wedding_ring_recall() -> bool {
@@ -450,6 +464,8 @@ impl Default for SocialConfig {
             lover_exp_bonus: default_lover_exp_bonus(),
             mentor_level_gap: default_mentor_level_gap(),
             mentor_exp_boost: default_mentor_exp_boost(),
+            mentor_damage_boost: default_mentor_damage_boost(),
+            mentee_exp_bank: default_mentee_exp_bank(),
         }
     }
 }
@@ -906,5 +922,7 @@ mod tests {
         let c = ServerConfig::default().social;
         assert_eq!(c.mentor_level_gap, 10);
         assert_eq!(c.mentor_exp_boost, 10);
+        assert_eq!(c.mentor_damage_boost, 10);
+        assert_eq!(c.mentee_exp_bank, 1);
     }
 }

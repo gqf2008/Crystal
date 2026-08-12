@@ -389,6 +389,10 @@ pub struct PlayerState {
     pub mentor_date: i64,
     /// 导师伤害加成是否激活（C# HasBuff(Mentor)：徒弟近身同组时 true）
     pub mentor_damage_bonus: bool,
+    /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10；spawn 时由 WorldActor 配置注入）
+    pub mentor_damage_rate_percent: i32,
+    /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1；spawn 时注入）
+    pub mentee_exp_bank: u32,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
     pub newbie_exp_bonus: bool,
     /// 配偶经验加成百分比缓存（C# Settings.LoverEXPBonus；tick_partner_bonuses 刷新，避免 AddExperience 反向 ask WorldActor 死锁）
@@ -612,7 +616,11 @@ impl PlayerState {
             armour_rate,
             damage_rate,
             // C# MentorDamageRatePercent：导师伤害加成（徒弟近身同组时 +10%）
-            attacker_damage_rate: if self.mentor_damage_bonus { 1.1 } else { 1.0 },
+            attacker_damage_rate: if self.mentor_damage_bonus {
+                1.0f32 + self.mentor_damage_rate_percent as f32 / 100.0
+            } else {
+                1.0f32
+            },
             freezing: self.freezing,
             poison_attack: self.poison_attack,
             // C# SpecialItemMode.Paralize：任意装备/槽位宝石带 Paralize（1/14 概率麻痹，Random.Next(1,15)==1；#2308 含宝石）
@@ -715,6 +723,8 @@ impl PlayerActor {
         map_index: u16,
         gate_ref: ActorRef<GateActor>,
         world_ref: ActorRef<crate::actors::world::WorldActor>,
+        mentor_damage_boost: u8,
+        mentee_exp_bank: u8,
     ) -> Self {
         Self {
             state: PlayerState {
@@ -873,6 +883,8 @@ allow_group: false,
             mentor_exp: 0,
             mentor_date: 0,
             mentor_damage_bonus: false,
+            mentor_damage_rate_percent: mentor_damage_boost as i32,
+            mentee_exp_bank: mentee_exp_bank as u32,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
@@ -1048,16 +1060,16 @@ allow_group: false,
 }
 
 impl Actor for PlayerActor {
-    type Args = (u32, String, u64, u16, ActorRef<GateActor>, ActorRef<crate::actors::world::WorldActor>);
+    type Args = (u32, String, u64, u16, ActorRef<GateActor>, ActorRef<crate::actors::world::WorldActor>, u8, u8);
     type Error = anyhow::Error;
 
     async fn on_start(
         args: Self::Args,
         _actor_ref: ActorRef<Self>,
     ) -> Result<Self, Self::Error> {
-        let (object_id, name, session_id, map_index, gate_ref, world_ref) = args;
+        let (object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank) = args;
         debug!("PlayerActor spawned: {} (object_id={}, session={})", name, object_id, session_id);
-        Ok(Self::new(object_id, name, session_id, map_index, gate_ref, world_ref))
+        Ok(Self::new(object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank))
     }
 }
 
@@ -1769,7 +1781,10 @@ impl Message<AddExperience> for PlayerActor {
 
         // C# GainExp：徒弟经验积累 MenteeEXP += amount * Settings.MenteeExpBank(1) / 100
         if self.state.mentor_name.is_some() && !self.state.is_mentor {
-            self.state.mentee_exp += (amount * 1) / 100;
+            let bank = self.state.mentee_exp_bank as i64;
+            if bank > 0 {
+                self.state.mentee_exp += (amount * bank) / 100;
+            }
         }
 
         // C# GainExp：行会获得经验（MyGuild.GainExp；新手行会由 WorldActor 侧过滤）
@@ -6828,6 +6843,8 @@ allow_group: false,
             mentor_exp: 0,
             mentor_date: 0,
             mentor_damage_bonus: false,
+            mentor_damage_rate_percent: 10,
+            mentee_exp_bank: 1,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
