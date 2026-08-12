@@ -73,6 +73,8 @@ async fn async_main() -> anyhow::Result<()> {
     let configs_dir = map_dir.join("Configs");
     let fishing_cfg = crystal_server::util::ini::load_fishing_config(&configs_dir);
     let guild_buff_infos = crystal_server::util::ini::load_guild_buff_infos(&configs_dir);
+    // #2414：元素三表（C# Settings.LoadOrbsExp：Configs/OrbsExpList.ini）
+    let orbs_ini = crystal_server::util::ini::load_orbs_settings(&configs_dir);
     // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
     // server.toml 显式配置优先，否则用 ini 曲线
     let exp_list = {
@@ -84,10 +86,11 @@ async fn async_main() -> anyhow::Result<()> {
         }
     };
     info!(
-        "Loaded data configs: fishing attempts={} buffs={} exp_levels={}",
+        "Loaded data configs: fishing attempts={} buffs={} exp_levels={} orbs_exp={}",
         fishing_cfg.attempts,
         guild_buff_infos.len(),
-        exp_list.len()
+        exp_list.len(),
+        orbs_ini.exp_list.len()
     );
 
     // 初始化 SQLite 数据库（使用配置 database.path，支持绝对路径；#77 worktree 联调发现原硬编码忽略配置）
@@ -242,6 +245,9 @@ async fn async_main() -> anyhow::Result<()> {
         mentor_exp_boost: mentor_ini.exp_boost,
         mentor_damage_boost: mentor_ini.damage_boost,
         mentee_exp_bank: mentor_ini.exp_bank,
+        orbs_exp_list: orbs_ini.exp_list,
+        orbs_dmg_list: orbs_ini.dmg_list,
+        orbs_def_list: orbs_ini.def_list,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

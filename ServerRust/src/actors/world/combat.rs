@@ -3783,7 +3783,8 @@ impl Message<MagicRequest> for WorldActor {
                         0,
                     );
                     let orb_power = crate::actors::world::elements::elemental_orb_power(
-                        state.elements_level, false);
+                        state.elements_level, false,
+                        self.orbs_exp(), self.orbs_dmg(), self.orbs_def());
                     raw_damage = (mc_power + (power as i32) / 2 + orb_power).max(1);
                     debug!("Magic: {} ElementalShot orb_power +{} (elements_level={})",
                            state.name, orb_power, state.elements_level);
@@ -3884,7 +3885,8 @@ impl Message<MagicRequest> for WorldActor {
                     0,
                 ).max(1);
                 let barrier_power = crate::actors::world::elements::elemental_orb_power(
-                    state.elements_level, true);
+                    state.elements_level, true,
+                    self.orbs_exp(), self.orbs_dmg(), self.orbs_def());
                 let duration_ticks = ((mc_power + barrier_power) as u32) * 10;
                 // 消耗元素（C# ElementsLevel=0; ObtainElement(false)）
                 self.consume_elemental(msg.session_id).await;

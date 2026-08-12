@@ -19,22 +19,43 @@ pub(crate) const GATHER_ORBS_PER_LEVEL: bool = true;
 
 /// 元素球数量（C# HumanObject.GetElementalOrbCount：满足 ElementsLevel >= OrbsExpList[i]
 /// 的档位数；OrbsExpList 升序 [50,100,150,200]，故为升序计数）
-pub(crate) fn elemental_orb_count(elements_level: i32) -> usize {
-    ORBS_EXP_LIST.iter().filter(|exp| elements_level >= **exp).count()
+pub(crate) fn elemental_orb_count(elements_level: i32, exp_list: &[i32]) -> usize {
+    exp_list.iter().filter(|exp| elements_level >= **exp).count()
 }
 
 /// 元素球加成（C# HumanObject.GetElementalOrbPower：无元素返回 0；
-/// defensive 用 OrbsDefList，否则 OrbsDmgList，取当前球数档位）
-pub(crate) fn elemental_orb_power(elements_level: i32, defensive: bool) -> i32 {
-    let count = elemental_orb_count(elements_level);
+/// defensive 用 OrbsDefList，否则 OrbsDmgList，取当前球数档位；空表返回 0）
+pub(crate) fn elemental_orb_power(
+    elements_level: i32, defensive: bool,
+    exp_list: &[i32], dmg_list: &[i32], def_list: &[i32],
+) -> i32 {
+    let count = elemental_orb_count(elements_level, exp_list);
     if count == 0 {
         return 0;
     }
-    let list = if defensive { ORBS_DEF_LIST } else { ORBS_DMG_LIST };
-    list[count - 1]
+    let list = if defensive { def_list } else { dmg_list };
+    if list.is_empty() {
+        return 0;
+    }
+    list[(count - 1).min(list.len() - 1)]
 }
 
 impl WorldActor {
+    /// 元素经验档位（#2414：Configs/OrbsExpList.ini 为空时回退 C# 默认 [50,100,150,200]）
+    pub(crate) fn orbs_exp(&self) -> &[i32] {
+        if self.orbs_exp_list.is_empty() { &ORBS_EXP_LIST } else { &self.orbs_exp_list }
+    }
+
+    /// 元素攻击加成档位（空回退默认 [4,8,12,16]）
+    pub(crate) fn orbs_dmg(&self) -> &[i32] {
+        if self.orbs_dmg_list.is_empty() { &ORBS_DMG_LIST } else { &self.orbs_dmg_list }
+    }
+
+    /// 元素防御加成档位（空回退默认 [2,4,6,8]）
+    pub(crate) fn orbs_def(&self) -> &[i32] {
+        if self.orbs_def_list.is_empty() { &ORBS_DEF_LIST } else { &self.orbs_def_list }
+    }
+
     /// 当前世界时间（毫秒，近似 C# Envir.Time）
     fn now_ms(&self) -> i64 {
         self.tick_count as i64 * 100
@@ -201,23 +222,24 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "需要先学习冥想");
             return;
         }
-        let max_orbs = ORBS_EXP_LIST[ORBS_EXP_LIST.len() - 1];
-        let orb_idx = (meditation_lv as usize).min(ORBS_EXP_LIST.len() - 1);
+        let exp_list = self.orbs_exp();
+        let max_orbs = exp_list[exp_list.len() - 1];
+        let orb_idx = (meditation_lv as usize).min(exp_list.len() - 1);
 
         let mut orb_type = 0u8;
         let mut level: i32;
         let mut has_elemental: bool;
         if cast {
             // C# ObtainElement(true)：直接获得第一档元素
-            level = ORBS_EXP_LIST[0];
+            level = exp_list[0];
             orb_type = 1;
-            if GATHER_ORBS_PER_LEVEL && meditation_lv == 3 {
+            if GATHER_ORBS_PER_LEVEL && meditation_lv == 3 && exp_list.len() > 1 {
                 // C# 特殊：冥想 Lv3 时先广播第一档，再升到第二档
                 self.broadcast_set_elemental(
-                    state.object_id, true, ORBS_EXP_LIST[0] as u32, 1,
+                    state.object_id, true, exp_list[0] as u32, 1,
                     max_orbs as i64, state.map_index,
                 ).await;
-                level = ORBS_EXP_LIST[1];
+                level = exp_list[1];
                 orb_type = 2;
             }
             has_elemental = true;
@@ -226,14 +248,14 @@ impl WorldActor {
             has_elemental = false;
             level = state.elements_level.saturating_add(1);
             if GATHER_ORBS_PER_LEVEL {
-                let cap = ORBS_EXP_LIST[orb_idx];
+                let cap = exp_list[orb_idx];
                 if level > cap {
                     has_elemental = true;
                     level = cap;
                 }
             }
-            if level >= ORBS_EXP_LIST[0] { has_elemental = true; }
-            for (i, exp) in ORBS_EXP_LIST.iter().enumerate() {
+            if level >= exp_list[0] { has_elemental = true; }
+            for (i, exp) in exp_list.iter().enumerate() {
                 if *exp == level {
                     orb_type = (i + 1) as u8;
                     break;
@@ -260,21 +282,33 @@ mod tests {
     #[test]
     fn test_orb_count_and_power() {
         // C# GetElementalOrbCount：OrbsExpList=[50,100,150,200]
-        assert_eq!(elemental_orb_count(0), 0);
-        assert_eq!(elemental_orb_count(49), 0);
-        assert_eq!(elemental_orb_count(50), 1);
-        assert_eq!(elemental_orb_count(100), 2);
-        assert_eq!(elemental_orb_count(150), 3);
-        assert_eq!(elemental_orb_count(200), 4);
-        assert_eq!(elemental_orb_count(999), 4);
+        assert_eq!(elemental_orb_count(0, &ORBS_EXP_LIST), 0);
+        assert_eq!(elemental_orb_count(49, &ORBS_EXP_LIST), 0);
+        assert_eq!(elemental_orb_count(50, &ORBS_EXP_LIST), 1);
+        assert_eq!(elemental_orb_count(100, &ORBS_EXP_LIST), 2);
+        assert_eq!(elemental_orb_count(150, &ORBS_EXP_LIST), 3);
+        assert_eq!(elemental_orb_count(200, &ORBS_EXP_LIST), 4);
+        assert_eq!(elemental_orb_count(999, &ORBS_EXP_LIST), 4);
         // C# GetElementalOrbPower：攻击 OrbsDmgList=[4,8,12,16]，防御 OrbsDefList=[2,4,6,8]
-        assert_eq!(elemental_orb_power(0, false), 0);
-        assert_eq!(elemental_orb_power(50, false), 4);
-        assert_eq!(elemental_orb_power(100, false), 8);
-        assert_eq!(elemental_orb_power(150, false), 12);
-        assert_eq!(elemental_orb_power(200, false), 16);
-        assert_eq!(elemental_orb_power(50, true), 2);
-        assert_eq!(elemental_orb_power(100, true), 4);
-        assert_eq!(elemental_orb_power(200, true), 8);
+        assert_eq!(elemental_orb_power(0, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 0);
+        assert_eq!(elemental_orb_power(50, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 4);
+        assert_eq!(elemental_orb_power(100, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 8);
+        assert_eq!(elemental_orb_power(150, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 12);
+        assert_eq!(elemental_orb_power(200, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 16);
+        assert_eq!(elemental_orb_power(50, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 2);
+        assert_eq!(elemental_orb_power(100, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 4);
+        assert_eq!(elemental_orb_power(200, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 8);
+
+        // #2414：自定义三表（OrbsExpList.ini 数据驱动）
+        let exp = [10, 20];
+        let dmg = [3, 5];
+        let def = [1, 2];
+        assert_eq!(elemental_orb_count(15, &exp), 1);
+        assert_eq!(elemental_orb_power(15, false, &exp, &dmg, &def), 3);
+        assert_eq!(elemental_orb_power(15, true, &exp, &dmg, &def), 1);
+        assert_eq!(elemental_orb_power(25, false, &exp, &dmg, &def), 5);
+        // 空表 → 0（WorldActor 侧统一回退默认常量，纯函数防御）
+        assert_eq!(elemental_orb_count(50, &[]), 0);
+        assert_eq!(elemental_orb_power(50, false, &[], &[], &[]), 0);
     }
 }
