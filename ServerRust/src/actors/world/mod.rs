@@ -6320,6 +6320,14 @@ impl WorldActor {
             mine_rate_percent: b.mine_rate_percent,
             gem_rate_percent: b.gem_rate_percent,
             craft_rate_percent: b.craft_rate_percent,
+            hp_rate_percent: b.hp_rate_percent,
+            mp_rate_percent: b.mp_rate_percent,
+            max_ac_rate_percent: b.max_ac_rate_percent,
+            max_mac_rate_percent: b.max_mac_rate_percent,
+            max_dc_rate_percent: b.max_dc_rate_percent,
+            max_mc_rate_percent: b.max_mc_rate_percent,
+            max_sc_rate_percent: b.max_sc_rate_percent,
+            attack_speed_rate_percent: b.attack_speed_rate_percent,
         }).await;
         Some(state)
     }
@@ -6837,6 +6845,22 @@ pub struct EquipmentBonuses {
     pub gem_rate_percent: i32,
     // #2312：装备合成成功率加成（C# Stats[Stat.CraftRatePercent]；装备/行会 Buff 合计）
     pub craft_rate_percent: i32,
+    // #2314：hp_rate_percent（C# Stats[Stat.HPRatePercent]；RefreshStats :1751-1759）
+    // #2314：mp_rate_percent（C# Stats[Stat.MPRatePercent]；RefreshStats :1751-1759）
+    // #2314：max_ac_rate_percent（C# Stats[Stat.MaxACRatePercent]；RefreshStats :1751-1759）
+    // #2314：max_mac_rate_percent（C# Stats[Stat.MaxMACRatePercent]；RefreshStats :1751-1759）
+    // #2314：max_dc_rate_percent（C# Stats[Stat.MaxDCRatePercent]；RefreshStats :1751-1759）
+    // #2314：max_mc_rate_percent（C# Stats[Stat.MaxMCRatePercent]；RefreshStats :1751-1759）
+    // #2314：max_sc_rate_percent（C# Stats[Stat.MaxSCRatePercent]；RefreshStats :1751-1759）
+    // #2314：attack_speed_rate_percent（C# Stats[Stat.AttackSpeedRatePercent]；RefreshStats :1751-1759）
+    pub hp_rate_percent: i32,
+    pub mp_rate_percent: i32,
+    pub max_ac_rate_percent: i32,
+    pub max_mac_rate_percent: i32,
+    pub max_dc_rate_percent: i32,
+    pub max_mc_rate_percent: i32,
+    pub max_sc_rate_percent: i32,
+    pub attack_speed_rate_percent: i32,
     // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
     pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
     /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
@@ -6880,6 +6904,14 @@ fn apply_equipment_stat(b: &mut EquipmentBonuses, stat: mir2_shared::enums::Stat
         Stat::MineRatePercent => b.mine_rate_percent += value,
         Stat::GemRatePercent => b.gem_rate_percent += value,
         Stat::CraftRatePercent => b.craft_rate_percent += value,
+        Stat::HPRatePercent => b.hp_rate_percent += value,
+        Stat::MPRatePercent => b.mp_rate_percent += value,
+        Stat::MaxACRatePercent => b.max_ac_rate_percent += value,
+        Stat::MaxMACRatePercent => b.max_mac_rate_percent += value,
+        Stat::MaxDCRatePercent => b.max_dc_rate_percent += value,
+        Stat::MaxMCRatePercent => b.max_mc_rate_percent += value,
+        Stat::MaxSCRatePercent => b.max_sc_rate_percent += value,
+        Stat::AttackSpeedRatePercent => b.attack_speed_rate_percent += value,
         Stat::BagWeight => b.bag_weight += value,
         Stat::WearWeight => b.wear_weight += value,
         Stat::HandWeight => b.hand_weight += value,
@@ -6973,6 +7005,14 @@ pub(crate) fn calculate_equipment_bonuses(
             b.mine_rate_percent += get(Stat::MineRatePercent);
             b.gem_rate_percent += get(Stat::GemRatePercent);
             b.craft_rate_percent += get(Stat::CraftRatePercent);
+            b.hp_rate_percent += get(Stat::HPRatePercent);
+            b.mp_rate_percent += get(Stat::MPRatePercent);
+            b.max_ac_rate_percent += get(Stat::MaxACRatePercent);
+            b.max_mac_rate_percent += get(Stat::MaxMACRatePercent);
+            b.max_dc_rate_percent += get(Stat::MaxDCRatePercent);
+            b.max_mc_rate_percent += get(Stat::MaxMCRatePercent);
+            b.max_sc_rate_percent += get(Stat::MaxSCRatePercent);
+            b.attack_speed_rate_percent += get(Stat::AttackSpeedRatePercent);
             b.holy += get(Stat::Holy);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
