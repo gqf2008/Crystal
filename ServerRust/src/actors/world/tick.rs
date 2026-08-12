@@ -5776,6 +5776,15 @@ impl Message<Tick> for WorldActor {
         // [DEBUG] 每 5 秒打一次 tick 确认 WorldActor 活着
         self.tick_count += 1;
 
+        // #2398：C# Envir.Process ProcessNewDay——跨零点清每日任务 + 在线触发 [@_Daily]
+        let today = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64 / 86_400)
+            .unwrap_or(0);
+        if today != self.current_day {
+            self.process_new_day(today).await;
+        }
+
         // NPC 脚本计时器到期清理（SETTIMER/EXPIRETIMER/CHECKTIMER，对齐 C# Envir.Timers）
         self.tick_npc_timers();
 
