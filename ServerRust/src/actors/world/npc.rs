@@ -1757,6 +1757,121 @@ impl WorldActor {
 // 钓鱼系统
 // ============================================================
 
+/// C# PlayerObject.FishingCast 钓具加成（PlayerObject.cs:10964-11066）
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct FishingGearBonuses {
+    /// C# flexibilityStat（byte）：鱼竿 CriticalRate + Hook 槽（收获时进度>50 半值加入）
+    pub flexibility: i32,
+    /// C# successStat（sbyte）：鱼竿 MaxAC + Bait/Reel 槽 MaxAC
+    pub success_stat: i32,
+    /// C# failedAddSuccessMin（byte）：Finder 槽 MinAC（FishingChanceCounter!=0 时随机补偿下限）
+    pub failed_add_min: i32,
+    /// C# failedAddSuccessMax（byte）：Finder 槽 MaxAC（补偿上限，C# Random.Next 上界开区间）
+    pub failed_add_max: i32,
+    /// C# nibbleMin（byte）：Float 槽 MinAC（咬钩窗口下限；Rust 未实现咬钩阶段，仅记录）
+    pub nibble_min: i32,
+    /// C# nibbleMax（byte）：Float 槽 MaxAC（咬钩窗口上限；FishingNibbleChance = 5 + Random(nibbleMin, nibbleMax)）
+    pub nibble_max: i32,
+    /// C# FishingAutoReelChance（sbyte）：Reel 槽 MaxMAC（自动收竿概率；Rust 未实现 FishFound 阶段，仅记录）
+    pub auto_reel_chance: i32,
+}
+
+/// 计算 C# FishingCast 钓具加成（PlayerObject.cs:10964-11066）：
+/// 基础值 = 鱼竿 Stats（flexibility: CriticalRate；success: MaxAC），随后遍历鱼竿 Slots[0..5]：
+/// - Hook：flexibility += AddedStats[CriticalRate] + realItem.Stats[CriticalRate]
+/// - Float：nibbleMin += realItem.Stats[MinAC]；nibbleMax += realItem.Stats[MaxAC]
+/// - Bait：successStat += realItem.Stats[MaxAC]
+/// - Finder：failedAddSuccessMin += realItem.Stats[MinAC]；failedAddSuccessMax += realItem.Stats[MaxAC]
+/// - Reel：FishingAutoReelChance += realItem.Stats[MaxMAC]；successStat += realItem.Stats[MaxAC]
+/// 数值按 C# 目标类型钳制：flexibility/nibble/failedAdd 为 byte（0..=255），success/autoReel 为 sbyte（-128..=127）。
+/// 注：DB item_type 为 C# 编号（Hook=28..Reel=32），经 shared_item_type 转 SharedRust 枚举后匹配。
+fn compute_fishing_gear_bonuses(
+    rod_info: Option<&crate::db::ItemInfo>,
+    slots: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> FishingGearBonuses {
+    use mir2_shared::enums::{ItemType, Stat};
+
+    let stat =
+        |info: &crate::db::ItemInfo, s: Stat| info.stats.get(&(s as u8)).copied().unwrap_or(0);
+
+    let mut b = FishingGearBonuses::default();
+    if let Some(rod) = rod_info {
+        b.flexibility += stat(rod, Stat::CriticalRate);
+        b.success_stat += stat(rod, Stat::MaxAC);
+    }
+    for slot in slots.iter().flatten() {
+        let Some(info) = item_infos.get(&slot.item_index) else {
+            continue;
+        };
+        match shared_item_type(info.item_type) {
+            ItemType::Hook => {
+                b.flexibility +=
+                    slot.added_stats.get(Stat::CriticalRate) + stat(info, Stat::CriticalRate);
+            }
+            ItemType::Float => {
+                b.nibble_min += stat(info, Stat::MinAC);
+                b.nibble_max += stat(info, Stat::MaxAC);
+            }
+            ItemType::Bait => {
+                b.success_stat += stat(info, Stat::MaxAC);
+            }
+            ItemType::Finder => {
+                b.failed_add_min += stat(info, Stat::MinAC);
+                b.failed_add_max += stat(info, Stat::MaxAC);
+            }
+            ItemType::Reel => {
+                b.auto_reel_chance += stat(info, Stat::MaxMAC);
+                b.success_stat += stat(info, Stat::MaxAC);
+            }
+            _ => {}
+        }
+    }
+    b.flexibility = b.flexibility.clamp(0, 255);
+    b.nibble_min = b.nibble_min.clamp(0, 255);
+    b.nibble_max = b.nibble_max.clamp(0, 255);
+    b.failed_add_min = b.failed_add_min.clamp(0, 255);
+    b.failed_add_max = b.failed_add_max.clamp(0, 255);
+    b.success_stat = b.success_stat.clamp(-128, 127);
+    b.auto_reel_chance = b.auto_reel_chance.clamp(-128, 127);
+    b
+}
+
+/// C# FishingCast 抛竿成功率（PlayerObject.cs:11054-11060）：
+/// SuccessStart + successStat + (FishingChanceCounter!=0 ? Random(failedAddSuccessMin, failedAddSuccessMax) : 0)
+///     + FishingChanceCounter*SuccessMultiplier + FishRatePercent，钳制 0..=100。
+fn compute_fishing_chance(
+    success_start: i32,
+    success_stat: i32,
+    fish_rate_percent: i32,
+    success_counter: i32,
+    success_multiplier: i32,
+    failed_add_min: i32,
+    failed_add_max: i32,
+) -> i32 {
+    let failed_add = if success_counter != 0 {
+        cs_random_next(failed_add_min, failed_add_max)
+    } else {
+        0
+    };
+    (success_start
+        + success_stat
+        + fish_rate_percent
+        + failed_add
+        + success_counter * success_multiplier)
+        .clamp(0, 100)
+}
+
+/// C# Envir.Random.Next(min, max)：上界开区间（min <= result < max）；min == max 返回 min（C# 文档行为）。
+/// min > max 是 C# 会抛异常的非法数据，这里保守返回 min，避免服务器 panic。
+pub(crate) fn cs_random_next(min: i32, max: i32) -> i32 {
+    if min >= max {
+        min
+    } else {
+        fastrand::i32(min..max)
+    }
+}
+
 pub struct FishingCastRequest {
     pub session_id: u64,
     pub fishing_type: u8,
@@ -1793,25 +1908,33 @@ impl Message<FishingCastRequest> for WorldActor {
         }
         let cell_attribute = map_data.fishing_attribute(fx, fy);
 
+        // C# FishingCast：鱼钩必需（rod.Slots[Hook] == null → NeedHook；#2352）
+        if rod_item.slots.get(0).and_then(|s| s.as_ref()).is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "你需要鱼钩（放在鱼竿鱼钩槽）");
+            return;
+        }
+
         // C# FishingCast：successStat = rod.Info.Stats[Stat.MaxAC]；flexibilityStat = CriticalRate
-        // （鱼钩/鱼漂/鱼饵/卷线器/探鱼器插槽后续批次接入；行会 BuffFishRate 已由 tick 缓存）
-        let success_stat = rod_info
-            .as_ref()
-            .and_then(|i| i.stats.get(&(mir2_shared::enums::Stat::MaxAC as u8)).copied())
-            .unwrap_or(0);
-        let flexibility = rod_info
-            .as_ref()
-            .and_then(|i| i.stats.get(&(mir2_shared::enums::Stat::CriticalRate as u8)).copied())
-            .unwrap_or(0);
+        // + 5 个钓具插槽加成（#2352：Hook 灵活度 / Bait、Reel 成功率 / Finder 失败补偿）
+        // （行会 BuffFishRate 已由 tick 缓存；Float 咬钩窗口与 Reel 自动收竿见 compute_fishing_gear_bonuses 注释）
+        let bonuses = compute_fishing_gear_bonuses(rod_info.as_ref(), &rod_item.slots, &self.item_infos);
+        let success_stat = bonuses.success_stat;
+        let flexibility = bonuses.flexibility;
         let fish_rate = state.guild_buff_fish_rate_percent;
-        // C#：FishingChance = SuccessStart + successStat + FishRatePercent + Counter*SuccessMultiplier
-        //（FishingChanceCounter 跨抛竿保留：每次满进度 +1，成功收获清零）
+        // C#：FishingChance = SuccessStart + successStat
+        //     + (FishingChanceCounter!=0 ? Random(failedAddSuccessMin, failedAddSuccessMax) : 0)
+        //     + FishingChanceCounter*SuccessMultiplier + FishRatePercent
+        //（FishingChanceCounter 跨抛竿保留：每次满进度 +1，成功收获清零；失败补偿 = Finder 槽）
         let success_counter = self.fishing_success_counters.get(&msg.session_id).copied().unwrap_or(0);
-        let chance = (self.fishing_cfg.success_start
-            + success_stat
-            + fish_rate
-            + (success_counter as i32) * self.fishing_cfg.success_multiplier)
-            .clamp(0, 100);
+        let chance = compute_fishing_chance(
+            self.fishing_cfg.success_start,
+            success_stat,
+            fish_rate,
+            success_counter as i32,
+            self.fishing_cfg.success_multiplier,
+            bonuses.failed_add_min,
+            bonuses.failed_add_max,
+        );
 
         // #1313：抛竿消耗鱼竿 Bait 槽 1 个鱼饵（C# GetBait/ConsumeItem；无饵不能抛竿）
         if !record.actor_ref.ask(crate::actors::player::FishingConsumeBait { amount: 1 }).await.unwrap_or(false) {
@@ -1847,7 +1970,7 @@ impl Message<FishingCastRequest> for WorldActor {
             }).await;
         }
 
-        debug!("FishingCast: {} type={} at ({},{}) attr={} chance={}", state.name, msg.fishing_type, fx, fy, cell_attribute, chance);
+        debug!("FishingCast: {} type={} at ({},{}) attr={} chance={} flexibility={}", state.name, msg.fishing_type, fx, fy, cell_attribute, chance, flexibility);
     }
 }
 
@@ -2537,3 +2660,159 @@ impl Message<StorageUnlockedRequest> for WorldActor {
         info!("Storage unlocked for session {}", msg.session_id);
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mir2_shared::data::item::UserItem;
+    use mir2_shared::data::stats::Stats;
+    use mir2_shared::enums::{ItemType, Stat};
+    use std::collections::HashMap;
+
+    fn info(index: i32, cs_type: i32, stats: &[(Stat, i32)]) -> crate::db::ItemInfo {
+        crate::db::ItemInfo {
+            index,
+            item_type: cs_type,
+            stats: stats.iter().map(|(s, v)| (*s as u8, *v)).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn gear(index: i32, added: &[(Stat, i32)]) -> UserItem {
+        let mut added_stats = Stats::new();
+        for (s, v) in added {
+            added_stats.set(*s, *v);
+        }
+        UserItem {
+            item_index: index,
+            added_stats,
+            ..Default::default()
+        }
+    }
+
+    /// C# 编号：Hook=28 Float=29 Bait=30 Finder=31 Reel=32（DB item_infos.type）
+    #[test]
+    fn test_rod_only_bonuses() {
+        let rod = info(793, 1, &[(Stat::CriticalRate, 5), (Stat::MaxAC, 3)]);
+        let infos = HashMap::from([(793, rod.clone())]);
+        let b = compute_fishing_gear_bonuses(Some(&rod), &[], &infos);
+        assert_eq!(b.flexibility, 5);
+        assert_eq!(b.success_stat, 3);
+        assert_eq!(b.failed_add_min, 0);
+        assert_eq!(b.failed_add_max, 0);
+        assert_eq!(b.nibble_min, 0);
+        assert_eq!(b.nibble_max, 0);
+        assert_eq!(b.auto_reel_chance, 0);
+    }
+
+    #[test]
+    fn test_hook_bonus_uses_added_and_real_stats() {
+        let rod = info(793, 1, &[]);
+        let hook = info(795, 28, &[(Stat::CriticalRate, 7)]);
+        let infos = HashMap::from([(793, rod.clone()), (795, hook.clone())]);
+        // AddedStats[CriticalRate]=2 + realItem.Stats[CriticalRate]=7
+        let b = compute_fishing_gear_bonuses(
+            Some(&rod),
+            &[
+                Some(gear(795, &[(Stat::CriticalRate, 2)])),
+                None,
+                None,
+                None,
+                None,
+            ],
+            &infos,
+        );
+        assert_eq!(b.flexibility, 9);
+    }
+
+    #[test]
+    fn test_float_bait_finder_reel_bonuses() {
+        let rod = info(793, 1, &[(Stat::MaxAC, 3)]);
+        let float = info(796, 29, &[(Stat::MinAC, 1), (Stat::MaxAC, 2)]);
+        let bait = info(798, 30, &[(Stat::MaxAC, 4)]);
+        let finder = info(800, 31, &[(Stat::MinAC, 5), (Stat::MaxAC, 6)]);
+        let reel = info(802, 32, &[(Stat::MaxMAC, 7), (Stat::MaxAC, 8)]);
+        let infos = HashMap::from([
+            (793, rod.clone()),
+            (796, float.clone()),
+            (798, bait.clone()),
+            (800, finder.clone()),
+            (802, reel.clone()),
+        ]);
+        let slots = [
+            None,
+            Some(gear(796, &[])),
+            Some(gear(798, &[])),
+            Some(gear(800, &[])),
+            Some(gear(802, &[])),
+        ];
+        let b = compute_fishing_gear_bonuses(Some(&rod), &slots, &infos);
+        assert_eq!(b.success_stat, 3 + 4 + 8); // 鱼竿 + Bait + Reel
+        assert_eq!(b.nibble_min, 1);
+        assert_eq!(b.nibble_max, 2);
+        assert_eq!(b.failed_add_min, 5);
+        assert_eq!(b.failed_add_max, 6);
+        assert_eq!(b.auto_reel_chance, 7);
+    }
+
+    #[test]
+    fn test_bonuses_clamped_like_cs_byte_sbyte() {
+        let rod = info(793, 1, &[]);
+        let hook = info(795, 28, &[(Stat::CriticalRate, 300)]);
+        let reel = info(802, 32, &[(Stat::MaxMAC, 300), (Stat::MaxAC, 300)]);
+        let infos = HashMap::from([(793, rod.clone()), (795, hook.clone()), (802, reel.clone())]);
+        let slots = [
+            Some(gear(795, &[(Stat::CriticalRate, 300)])),
+            None,
+            None,
+            None,
+            Some(gear(802, &[])),
+        ];
+        let b = compute_fishing_gear_bonuses(Some(&rod), &slots, &infos);
+        assert_eq!(b.flexibility, 255); // byte
+        assert_eq!(b.success_stat, 127); // sbyte
+        assert_eq!(b.auto_reel_chance, 127); // sbyte
+    }
+
+    #[test]
+    fn test_fishing_chance_failed_add_applied_only_with_counter() {
+        // 无失败计数：不加 Finder 补偿
+        // 有失败计数：+ Random(failedAddMin, failedAddMax)，min==max 时确定返回 min
+        let c0 = compute_fishing_chance(10, 20, 5, 0, 10, 9, 9);
+        assert_eq!(c0, 35); // 10 + 20 + 5 + 0
+        let c1 = compute_fishing_chance(10, 20, 5, 1, 10, 9, 9);
+        assert_eq!(c1, 10 + 20 + 5 + 9 + 1 * 10);
+        // 钳制 0..=100
+        let c2 = compute_fishing_chance(10, 200, 5, 0, 10, 0, 0);
+        assert_eq!(c2, 100);
+    }
+
+    #[test]
+    fn test_cs_random_next_semantics() {
+        assert_eq!(cs_random_next(0, 0), 0); // C# Next(0,0) 返回 0
+        assert_eq!(cs_random_next(9, 9), 9);
+        assert_eq!(cs_random_next(5, 3), 5); // 非法区间保守返回 min，不 panic
+        for _ in 0..100 {
+            let v = cs_random_next(0, 10);
+            assert!((0..10).contains(&v));
+        }
+    }
+
+    #[test]
+    fn test_missing_gear_info_skipped() {
+        let rod = info(793, 1, &[(Stat::CriticalRate, 5)]);
+        let infos = HashMap::from([(793, rod.clone())]);
+        // 槽内有物品但 item_infos 无记录 → 跳过不崩溃
+        let b = compute_fishing_gear_bonuses(Some(&rod), &[Some(gear(9999, &[]))], &infos);
+        assert_eq!(b.flexibility, 5);
+    }
+
+    #[test]
+    fn test_shared_item_type_mapping() {
+        assert_eq!(shared_item_type(28), ItemType::Hook);
+        assert_eq!(shared_item_type(29), ItemType::Float);
+        assert_eq!(shared_item_type(30), ItemType::Bait);
+        assert_eq!(shared_item_type(31), ItemType::Finder);
+        assert_eq!(shared_item_type(32), ItemType::Reel);
+    }
+}
+
