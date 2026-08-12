@@ -2326,6 +2326,13 @@ impl Message<FishingCastRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
         if state.is_dead { return; }
 
+        // #2386：C# FishingCast(false)——收竿（无需重新校验鱼竿/水域；有鱼才判定收获）
+        if msg.fishing_type != 0 {
+            let fish_found = self.fishing_sessions.get(&msg.session_id).map(|s| s.fish_found).unwrap_or(false);
+            self.reel_fishing(msg.session_id, fish_found).await;
+            return;
+        }
+
         // C# FishingCast：鱼竿校验（IsFishingRod = shape 49/50 + CurrentDura != 0）
         let rod_item = match state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon) {
             Some(r) => r.clone(),
@@ -2390,12 +2397,20 @@ impl Message<FishingCastRequest> for WorldActor {
             let _ = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 3, amount: 1 }).await;
         }
 
+        // #2386：咬钩概率（C# FishingNibbleChance = 5 + Random(nibbleMin,nibbleMax)）与自动收竿概率（Reel 槽）
+        let nibble_chance = (5 + cs_random_next(bonuses.nibble_min, bonuses.nibble_max)).clamp(0, 100);
+        let auto_reel_chance = bonuses.auto_reel_chance.clamp(0, 100);
         self.fishing_sessions.insert(
             msg.session_id,
             FishingSession {
                 cell_attribute,
                 chance,
                 flexibility,
+                nibble_chance,
+                auto_reel_chance,
+                fish_found: false,
+                found_tick: 0,
+                progress: 0,
             },
         );
 

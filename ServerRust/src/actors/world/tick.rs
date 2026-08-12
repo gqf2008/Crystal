@@ -932,6 +932,48 @@ fn storage_expiry_passed(has_expanded: bool, expiry: i64, now_unix: i64) -> bool
     has_expanded && expiry > 0 && now_unix > expiry
 }
 
+    /// 钓鱼相位推进结果（#2386：C# PlayerObject.UpdateFish 各分支）
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum FishingPhase {
+        /// 继续等待（无事件）
+        Wait,
+        /// 本轮刚咬钩（发 FishingUpdate{2,true} + Float 耐久 -1）
+        Bite,
+        /// 可收竿（有鱼：自动收竿 roll 通过 或 3 秒窗口到期）
+        Reel,
+        /// 超时无鱼自动收竿（C# FishingProgress > 100 → FishingCast(false)）
+        Timeout,
+    }
+
+    /// #2386：钓鱼相位推进（C# UpdateFish：PlayerObject.cs:11199-11236）
+    /// - 等待：每 tick 进度 +1，按 nibble_chance 咬钩 roll；进度超 attempts（≈百分比 100）无鱼收竿
+    /// - 已咬钩：auto_reel_chance roll 通过 或 found_tick+30（3 秒）窗口到期 → 收竿
+    pub(crate) fn tick_fishing_phase(
+        session: &mut FishingSession,
+        now_tick: u64,
+        attempts: u32,
+        bite_roll: bool,
+        auto_reel_roll: bool,
+    ) -> FishingPhase {
+        session.progress = session.progress.saturating_add(1);
+        if !session.fish_found {
+            if bite_roll {
+                session.fish_found = true;
+                session.found_tick = now_tick;
+                return FishingPhase::Bite;
+            }
+            if session.progress > attempts {
+                return FishingPhase::Timeout;
+            }
+            return FishingPhase::Wait;
+        }
+        if auto_reel_roll || now_tick >= session.found_tick + 30 {
+            return FishingPhase::Reel;
+        }
+        FishingPhase::Wait
+    }
+
+
 impl WorldActor {
 
     /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。
@@ -2670,83 +2712,146 @@ pub(crate) async fn tick_player_conditions(&mut self) {
         }
     }
 
-    /// 钓鱼收获判定（每 tick；对齐 C# PlayerObject.UpdateFish + FishingCast(false) 收获）
+    /// 钓鱼收获判定（每 tick；#2386 改为相位驱动：咬钩→收竿，对齐 C# UpdateFish）
     pub(crate) async fn tick_fishing(&mut self) {
-        let mut caught = Vec::new(); // session_id
+        let attempts = self.fishing_cfg.attempts.max(1) as u32;
+        let now_tick = self.tick_count;
+        let mut sessions_update: Vec<(u64, FishingSession)> = Vec::new();
+        let mut bites = Vec::new(); // session_id（咬钩后需发 bite 包）
+        let mut reels: Vec<(u64, bool)> = Vec::new(); // (session_id, fish_found)
         let mut stopped = Vec::new(); // session_id
-        // (session, item_index, 是否刷怪, x, y, map, autocast)
-        let mut events: Vec<(u64, Option<i32>, bool, i32, i32, u16, bool)> = Vec::new();
+
         for (session_id, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                if !state.is_fishing { continue; }
-
-                let counter = self.fishing_tick_counters.entry(*session_id).or_insert(0);
-                *counter += 1;
-
-                // C# FishingProgressMax = Settings.FishingAttempts（30 ticks ≈ 3 秒）
-                let attempts = self.fishing_cfg.attempts.max(1);
-                if *counter < attempts {
+                if !state.is_fishing {
                     continue;
                 }
-
-                let Some(session) = self.fishing_sessions.get(session_id).cloned() else {
+                let Some(mut session) = self.fishing_sessions.get(session_id).cloned() else {
                     stopped.push(*session_id);
                     continue;
                 };
-
-                // C# FishingCast(false)：FishingProgress > 99 → FishingChanceCounter++（跨抛竿保留）
-                let counter = self.fishing_success_counters.entry(*session_id).or_insert(0);
-                *counter = counter.saturating_add(1);
-
-                // C# FishingCast(false)：getChance = FishingChance + Random(10,24) + (进度>50 ? flexibility/2 : 0)
-                let get_chance = (session.chance + fastrand::i32(10..=24) + session.flexibility / 2).clamp(0, 100);
-
-                if fastrand::i32(0..=100) <= get_chance {
-                    // C# 成功收获 → FishingChanceCounter = 0
-                    self.fishing_success_counters.insert(*session_id, 0);
-                    // C#：Envir.FishingDrops.Where(Type == FishingAttribute) → AttemptDrop
-                    let item_index = self.attempt_fishing_drop(session.cell_attribute, 0);
-                    if let Some(idx) = item_index {
-                        let item = crate::actors::inventory::make_item(idx, 1);
-                        let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false);
-                        if added {
-                            send_system_message(&self.gate_ref, *session_id, "钓到了物品！");
-                        } else {
-                            send_system_message(&self.gate_ref, *session_id, "钓到了物品，但背包已满！");
-                        }
-                    } else {
-                        send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
+                let bite_roll = fastrand::i32(0..=100) <= session.nibble_chance;
+                let auto_reel_roll = session.auto_reel_chance > 0 && fastrand::i32(0..=100) <= session.auto_reel_chance;
+                match tick_fishing_phase(&mut session, now_tick, attempts, bite_roll, auto_reel_roll) {
+                    FishingPhase::Wait => {
+                        sessions_update.push((*session_id, session));
                     }
-
-                    // C#：收获时按 MonsterSpawnChance 刷 FishingMonster（Next(100-chance)==0；100% 恒刷）
-                    let spawn = self.fishing_cfg.monster_spawn_chance > 0
-                        && !self.fishing_cfg.monster.is_empty()
-                        && (self.fishing_cfg.monster_spawn_chance >= 100
-                            || fastrand::i32(0..(100 - self.fishing_cfg.monster_spawn_chance as i32)) == 0);
-
-                    // #1313：收获后卷线器耐久 -1（C# DamagedFishingItem(Reel,1)）；损坏且自动钓鱼 → 停止自动钓鱼
-                    let reel_result = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 4, amount: 1 }).await.unwrap_or(0);
-                    let autocast = state.fishing_autocast && reel_result != 2;
-                    events.push((*session_id, item_index, spawn, state.x, state.y, state.map_index, autocast));
-                } else {
-                    send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
-                    stopped.push(*session_id);
+                    FishingPhase::Bite => {
+                        // C#：咬钩时浮子耐久 -1（DamagedFishingItem(Float)）
+                        let _ = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 2, amount: 1 }).await;
+                        sessions_update.push((*session_id, session));
+                        bites.push(*session_id);
+                    }
+                    FishingPhase::Reel => {
+                        reels.push((*session_id, true));
+                    }
+                    FishingPhase::Timeout => {
+                        reels.push((*session_id, false));
+                    }
                 }
             }
         }
-        for (session_id, _item_index, spawn, x, y, map_index, autocast) in events {
-            if spawn {
-                let monster = self.fishing_cfg.monster.clone();
-                let _ = self.spawn_monster_named(&monster, x, y, 1, map_index).await;
-            }
-            if autocast {
-                caught.push(session_id);
-            } else {
-                stopped.push(session_id);
+        for (sid, session) in sessions_update {
+            self.fishing_sessions.insert(sid, session);
+        }
+        for session_id in bites {
+            // C# GetFishInfo FoundFish=true → 客户端显示上钩
+            let bite_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate { fishing_progress: 2, fishing_success: true };
+            let mut body = Vec::new();
+            if let Ok(()) = mir2_shared::packets::Packet::write_body(&bite_packet, &mut body) {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FishingUpdate as i16, &body),
+                }).await;
             }
         }
-        for session_id in caught {
-            self.fishing_tick_counters.insert(session_id, 0);
+        for (sid, fish_found) in reels {
+            self.reel_fishing(sid, fish_found).await;
+        }
+        for session_id in stopped {
+            self.fishing_sessions.remove(&session_id);
+            if let Some(record) = self.players.get(&session_id) {
+                let _ = record.actor_ref.ask(crate::actors::player::SetFishing { is_fishing: false, autocast: false }).await;
+            }
+            // Send idle state
+            let idle_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate { fishing_progress: 0, fishing_success: false };
+            let mut body = Vec::new();
+            if let Ok(()) = mir2_shared::packets::Packet::write_body(&idle_packet, &mut body) {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FishingUpdate as i16, &body),
+                }).await;
+            }
+        }
+    }
+
+    /// #2386：收竿（C# FishingCast(false)）：有鱼 → 收获判定；无鱼 → 直接结束
+    pub(crate) async fn reel_fishing(&mut self, session_id: u64, fish_found: bool) {
+        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(session) = self.fishing_sessions.remove(&session_id) else { return };
+
+        let attempts = self.fishing_cfg.attempts.max(1) as u32;
+        // C# FishingCast(false)：FishingProgress > 99 → FishingChanceCounter++（跨抛竿保留）
+        if session.progress >= attempts {
+            let counter = self.fishing_success_counters.entry(session_id).or_insert(0);
+            *counter = counter.saturating_add(1);
+        }
+
+        let mut keep_fishing = false;
+        if fish_found {
+            // C# FishingCast(false)：getChance = FishingChance + Random(10,24) + (进度>50 ? flexibility/2 : 0)
+            let progress_over_half = session.progress * 2 > attempts;
+            let get_chance = (session.chance + fastrand::i32(10..=24)
+                + if progress_over_half { session.flexibility / 2 } else { 0 }).clamp(0, 100);
+
+            if fastrand::i32(0..=100) <= get_chance {
+                // C# 成功收获 → FishingChanceCounter = 0
+                self.fishing_success_counters.insert(session_id, 0);
+                // C#：Envir.FishingDrops.Where(Type == FishingAttribute) → AttemptDrop
+                let item_index = self.attempt_fishing_drop(session.cell_attribute, 0);
+                if let Some(idx) = item_index {
+                    let item = crate::actors::inventory::make_item(idx, 1);
+                    let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false);
+                    if added {
+                        send_system_message(&self.gate_ref, session_id, "钓到了物品！");
+                    } else {
+                        send_system_message(&self.gate_ref, session_id, "钓到了物品，但背包已满！");
+                    }
+                } else {
+                    send_system_message(&self.gate_ref, session_id, "鱼跑了...");
+                }
+
+                // C#：收获时按 MonsterSpawnChance 刷 FishingMonster
+                let spawn = self.fishing_cfg.monster_spawn_chance > 0
+                    && !self.fishing_cfg.monster.is_empty()
+                    && (self.fishing_cfg.monster_spawn_chance >= 100
+                        || fastrand::i32(0..(100 - self.fishing_cfg.monster_spawn_chance as i32)) == 0);
+                if spawn {
+                    let monster = self.fishing_cfg.monster.clone();
+                    let _ = self.spawn_monster_named(&monster, state.x, state.y, 1, state.map_index).await;
+                }
+
+                // C#：收获后卷线器耐久 -1；损坏且自动钓鱼 → 停止自动钓鱼
+                let reel_result = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 4, amount: 1 }).await.unwrap_or(0);
+                keep_fishing = state.fishing_autocast && reel_result != 2;
+            } else {
+                send_system_message(&self.gate_ref, session_id, "鱼跑了...");
+            }
+        }
+
+        if keep_fishing {
+            // C# FishingAutocast 续抛（简化：不重耗饵/耐久，直接重置会话继续等待）
+            self.fishing_sessions.insert(session_id, FishingSession {
+                cell_attribute: session.cell_attribute,
+                chance: session.chance,
+                flexibility: session.flexibility,
+                nibble_chance: session.nibble_chance,
+                auto_reel_chance: session.auto_reel_chance,
+                fish_found: false,
+                found_tick: 0,
+                progress: 0,
+            });
             // Send bite state then auto-recast waiting state
             let bite_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate { fishing_progress: 2, fishing_success: true };
             let mut body = Vec::new();
@@ -2756,7 +2861,6 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FishingUpdate as i16, &body),
                 }).await;
             }
-            // Then immediately send waiting state for autocast
             let wait_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate { fishing_progress: 1, fishing_success: false };
             let mut body2 = Vec::new();
             if let Ok(()) = mir2_shared::packets::Packet::write_body(&wait_packet, &mut body2) {
@@ -2765,14 +2869,10 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FishingUpdate as i16, &body2),
                 }).await;
             }
-        }
-        for session_id in stopped {
-            self.fishing_tick_counters.remove(&session_id);
-            self.fishing_sessions.remove(&session_id);
+        } else {
             if let Some(record) = self.players.get(&session_id) {
                 let _ = record.actor_ref.ask(crate::actors::player::SetFishing { is_fishing: false, autocast: false }).await;
             }
-            // Send idle state
             let idle_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate { fishing_progress: 0, fishing_success: false };
             let mut body = Vec::new();
             if let Ok(()) = mir2_shared::packets::Packet::write_body(&idle_packet, &mut body) {
@@ -8554,19 +8654,55 @@ mod tests {
         assert_eq!(crate::util::normalized_monster_name("Sep High Warrior"), "sephighwarrior");
         assert_eq!(crate::util::normalized_monster_name(""), "");
     }
+
+    /// #2386：钓鱼相位推进——等待咬钩 / 超时 / 收竿 / 窗口
+    #[test]
+    fn fishing_phase_transitions() {
+        use super::FishingPhase;
+        let mk = |nibble: i32, auto: i32| super::FishingSession {
+            cell_attribute: 1,
+            chance: 50,
+            flexibility: 10,
+            nibble_chance: nibble,
+            auto_reel_chance: auto,
+            fish_found: false,
+            found_tick: 0,
+            progress: 0,
+        };
+
+        // 等待：无咬钩 roll，进度+1
+        let mut s = mk(0, 0);
+        assert_eq!(super::tick_fishing_phase(&mut s, 10, 30, false, false), FishingPhase::Wait);
+        assert_eq!(s.progress, 1);
+        assert!(!s.fish_found);
+
+        // 咬钩 roll 通过 → Bite + 记录 found_tick
+        let mut s = mk(100, 0);
+        assert_eq!(super::tick_fishing_phase(&mut s, 10, 30, true, false), FishingPhase::Bite);
+        assert!(s.fish_found);
+        assert_eq!(s.found_tick, 10);
+
+        // 已咬钩：自动收竿 roll 通过 → Reel
+        let mut s = mk(0, 100);
+        s.fish_found = true;
+        s.found_tick = 10;
+        assert_eq!(super::tick_fishing_phase(&mut s, 11, 30, false, true), FishingPhase::Reel);
+
+        // 已咬钩：3 秒窗口到期（found_tick+30） → Reel
+        let mut s = mk(0, 0);
+        s.fish_found = true;
+        s.found_tick = 10;
+        assert_eq!(super::tick_fishing_phase(&mut s, 40, 30, false, false), FishingPhase::Reel);
+
+        // 已咬钩：窗口内无自动收竿 → 继续等待
+        let mut s = mk(0, 0);
+        s.fish_found = true;
+        s.found_tick = 10;
+        assert_eq!(super::tick_fishing_phase(&mut s, 20, 30, false, false), FishingPhase::Wait);
+
+        // 等待超时：进度 > attempts → Timeout
+        let mut s = mk(0, 0);
+        s.progress = 30;
+        assert_eq!(super::tick_fishing_phase(&mut s, 40, 30, false, false), FishingPhase::Timeout);
+    }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
