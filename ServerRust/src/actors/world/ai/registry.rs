@@ -10,6 +10,11 @@ use super::bosses;
 /// 根据怪物名称构建 behavior（Boss 返回专属 impl，其他返回 DefaultBehavior）
 pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Sync> {
     let name = monster_name.to_lowercase();
+    // #2338：PurpleFaeFlower（紫妖花）——CanMove=false 但 CanAttack=true 的不可移动远程怪，
+    // 曾误归为静态物导致永不攻击（#1089 RestlessJar 同类）；现走专属 behavior
+    if name.contains("purplefaeflower") || name.contains("purple fae flower") || name.contains("紫妖花") {
+        return Box::new(bosses::purple_fae_flower::PurpleFaeFlowerBehavior::new());
+    }
     // 环境物体（静态/被动）不走 Boss behavior，优先判断
     if is_static_object(&name) || is_passive_object(&name) {
         return Box::new(DefaultBehavior::new());
@@ -723,6 +728,7 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("mandrill") || name.contains("山魈")
         || name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎")
         || name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛")
+    || name.contains("purplefaeflower") || name.contains("purple fae flower") || name.contains("紫妖花")
         || name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍")
         || name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇")
         || name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像")
@@ -865,7 +871,6 @@ pub fn is_static_object(monster_name: &str) -> bool {
         || name == "evilmirbody" || name.contains("evil mir body") || name.contains("邪龙身躯")
         || name == "cargobox" || name.contains("cargo box") || name.contains("货箱")
         // 注意：RestlessJar 曾在此列表（CanMove=false），但它 CanAttack=true，已改由专属 RestlessJarBehavior 处理（#1089）
-        || name == "purplefaeflower" || name.contains("purple fae flower") || name.contains("紫妖花")
         || name == "blockingobject" || name.contains("blocking object") || name.contains("阻挡物")
 }
 
@@ -933,7 +938,7 @@ mod tests {
             "TrapRock", "SepWarrior", "SepArcher", "SepTaoist", "SepWizard", "SepAssassin",
             "SepHighWarrior", "SepHighArcher", "SepHighTaoist", "SepHighWizard", "SepHighAssassin",
             "DragonWarrior", "SackWarrior", "ArcherGuard", "ConquestArcher", "DragonStatue",
-            "FloatingRock", "HoodedSummonerScrolls", "Siege",
+            "FloatingRock", "HoodedSummonerScrolls", "Siege", "PurpleFaeFlower",
         ] {
             assert!(is_registered_boss(name), "{} should be registered", name);
             // make_behavior 注册命中（DefaultBehavior 无 as_any_mut 区分，仅验证注册 + 可构建）
@@ -944,7 +949,7 @@ mod tests {
     #[test]
     fn static_and_passive_stay_default() {
         for name in ["Tree", "Wall", "CaveStatue",
-                      "CargoBox", "PurpleFaeFlower", "BlockingObject", "EvilMirBody",
+                      "CargoBox", "BlockingObject", "EvilMirBody",
                       "Deer", "Doe", "Football"] {
             assert!(!is_registered_boss(name), "{} should not be registered", name);
         }
@@ -955,6 +960,9 @@ mod tests {
         assert!(!is_static_object("WoodBox"));
         assert!(!is_static_object("IcePillar"));
         assert!(!is_static_object("BoulderSpirit"));
+        // #2338：PurpleFaeFlower 不可移动但可攻击 → 专属 behavior（非静态）
+        assert!(is_registered_boss("PurpleFaeFlower"));
+        assert!(!is_static_object("PurpleFaeFlower"));
         assert!(is_static_object("Tree"));
         assert!(is_static_object("Wall"));
         assert!(is_static_object("CaveStatue"));
