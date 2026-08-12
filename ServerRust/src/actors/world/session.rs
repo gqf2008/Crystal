@@ -5089,6 +5089,31 @@ async fn send_user_location_sync(
     }).await;
 }
 
+impl WorldActor {
+    /// #2398：C# Envir.ProcessNewDay（Envir.cs:4856-4862）——跨零点：全在线玩家清每日任务 + 触发 [@_Daily]
+    pub(crate) async fn process_new_day(&mut self, today: i64) {
+        self.current_day = today;
+        let daily: Vec<i32> = self.quest_infos.values()
+            .filter(|q| q.quest_type == 1) // QuestType.Daily
+            .map(|q| q.index)
+            .collect();
+        let sessions: Vec<u64> = self.players.keys().copied().collect();
+        let online = sessions.len();
+        for sid in sessions {
+            if let Some(r) = self.players.get(&sid) {
+                if !daily.is_empty() {
+                    let _ = r.actor_ref.ask(crate::actors::player::ClearDailyQuests {
+                        quest_indices: daily.clone(),
+                    }).await;
+                }
+                // C# c.Player?.CallDefaultNPC(DefaultNPCType.Daily)
+                self.queue_default_npc(sid, "_daily");
+            }
+        }
+        info!("ProcessNewDay: day={} online={}", today, online);
+    }
+}
+
 /// #2384：启动时归档长期未登录角色（C# AccountInfo.Load：Settings.ArchiveInactiveCharacterAfterMonths=12）
 pub struct ArchiveInactiveCharacters {
     /// 归档月数（C# Settings.ArchiveInactiveCharacterAfterMonths）

@@ -1337,6 +1337,8 @@ pub(crate) struct FishingSession {
 pub struct WorldActor {
     /// Tick 计数器
     pub(crate) tick_count: u64,
+    /// 当前日（unix 秒/86400；C# Envir.dailyTime，ProcessNewDay 用）
+    pub(crate) current_day: i64,
     /// 在线玩家 Actor 引用（按 session_id 索引）
     pub(crate) players: HashMap<u64, PlayerRecord>,
     /// 商店回购列表（session_id -> 最近卖出的物品，最多保留 10 个）
@@ -1891,6 +1893,10 @@ impl WorldActor {
     pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
         Self {
             tick_count: 0,
+            current_day: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64 / 86_400)
+                .unwrap_or(0),
             experience_list: Vec::new(),
             npc_timers: HashMap::new(),
             session_last_movement: HashMap::new(),
@@ -5841,6 +5847,10 @@ impl Actor for WorldActor {
 
 Ok(Self {
             tick_count: 0,
+            current_day: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64 / 86_400)
+                .unwrap_or(0),
             npc_timers: HashMap::new(),
             session_last_movement: HashMap::new(),
             npc_delayed_actions: HashMap::new(),
