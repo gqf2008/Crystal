@@ -564,8 +564,8 @@ impl Message<AwakeningRequest> for WorldActor {
             return;
         }
 
-        // 验证：未达最大等级
-        if item.awake.is_max_level() {
+        // 验证：未达最大等级（#2416：MaxUpgradeLevel 配置化）
+        if item.awake.awake_level() >= self.awakening_cfg.max_awake_level {
             self.send_awakening_result(msg.session_id, AWAKE_RESULT_MAX_LEVEL, -1);
             return;
         }
@@ -668,16 +668,16 @@ impl Message<AwakeningRequest> for WorldActor {
 
         // 执行觉醒：70% 成功率
         let roll = fastrand::u8(0..100);
-        if roll < mir2_shared::data::item::Awake::SUCCESS_RATE {
-            // 成功：计算觉醒值
-            let chance_max = mir2_shared::data::item::Awake::CHANCE_MAX
+        if roll < self.awakening_cfg.success_rate {
+            // 成功：计算觉醒值（#2416：AwakeningSystem.ini 配置化）
+            let chance_max = self.awakening_cfg.chance_max
                 .get(grade.saturating_sub(1) as usize)
                 .copied()
                 .unwrap_or(1);
             let rate = match item_info.item_type {
-                1 => mir2_shared::data::item::Awake::WEAPON_RATE,  // Weapon
-                4 => mir2_shared::data::item::Awake::HELMET_RATE,  // Helmet
-                2 => mir2_shared::data::item::Awake::ARMOUR_RATE,  // Armour
+                1 => self.awakening_cfg.weapon_rate,  // Weapon
+                4 => self.awakening_cfg.helmet_rate,  // Helmet
+                2 => self.awakening_cfg.armor_rate,  // Armour
                 _ => 1,
             };
             let value = (fastrand::u8(1..=chance_max) as i32 * rate as i32).max(1) as u8;
@@ -821,7 +821,6 @@ impl WorldActor {
         item_type: mir2_shared::enums::ItemType,
         awake_type: mir2_shared::enums::AwakeType,
     ) {
-        use mir2_shared::data::item::Awake;
         let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
@@ -831,8 +830,8 @@ impl WorldActor {
             if info.item_type != item_type { continue; }
             let Some(item_info) = self.item_infos.get(&item.item_index) else { continue };
 
-            // C# CheckAwakening：可觉醒 / 未满级 / 类型兼容 / 品级
-            if !item_info.can_awakening || item.awake.is_max_level() {
+            // C# CheckAwakening：可觉醒 / 未满级 / 类型兼容 / 品级（#2416：MaxUpgradeLevel 配置化）
+            if !item_info.can_awakening || item.awake.awake_level() >= self.awakening_cfg.max_awake_level {
                 send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
                 continue;
             }
@@ -856,19 +855,19 @@ impl WorldActor {
                 continue;
             }
 
-            // C# UpgradeAwake：70% 成功；失败仅提示（GM 语义不销毁物品）
+            // C# UpgradeAwake：70% 成功；失败仅提示（GM 语义不销毁物品，#2416 配置化）
             let roll = fastrand::u8(0..100);
-            if roll >= Awake::SUCCESS_RATE {
+            if roll >= self.awakening_cfg.success_rate {
                 send_system_message(&self.gate_ref, session_id, &format!("觉醒失败：{}", item_info.name));
                 continue;
             }
 
             // 成功：计算觉醒值（与 NPC 觉醒一致：grade→chance_max，item_type→rate）
-            let chance_max = Awake::CHANCE_MAX.get(grade.saturating_sub(1) as usize).copied().unwrap_or(1);
+            let chance_max = self.awakening_cfg.chance_max.get(grade.saturating_sub(1) as usize).copied().unwrap_or(1);
             let rate = match info.item_type {
-                mir2_shared::enums::ItemType::Weapon => Awake::WEAPON_RATE,
-                mir2_shared::enums::ItemType::Helmet => Awake::HELMET_RATE,
-                mir2_shared::enums::ItemType::Armour => Awake::ARMOUR_RATE,
+                mir2_shared::enums::ItemType::Weapon => self.awakening_cfg.weapon_rate,
+                mir2_shared::enums::ItemType::Helmet => self.awakening_cfg.helmet_rate,
+                mir2_shared::enums::ItemType::Armour => self.awakening_cfg.armor_rate,
                 _ => 1,
             };
             let value = (fastrand::u8(1..=chance_max) as i32 * rate as i32).max(1) as u8;

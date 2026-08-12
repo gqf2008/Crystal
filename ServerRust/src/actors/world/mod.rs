@@ -164,6 +164,10 @@ pub struct WorldActorArgs {
     pub orbs_dmg_list: Vec<i32>,
     /// 元素防御加成（C# Settings.OrbsDefList：[Def] Orb1..N；空 = 回退默认 [2,4,6,8]）
     pub orbs_def_list: Vec<i32>,
+    /// 觉醒配置（C# Settings.LoadAwakeAttribute：Configs/AwakeningSystem.ini）
+    pub awakening_cfg: crate::util::ini::AwakeningIniSettings,
+    /// 宝石配置（C# Settings.LoadGem：Configs/GemSystem.ini）
+    pub gem_cfg: crate::util::ini::GemIniSettings,
 }
 
 /// 世界中的玩家记录
@@ -1577,6 +1581,10 @@ pub struct WorldActor {
     pub(crate) orbs_exp_list: Vec<i32>,
     pub(crate) orbs_dmg_list: Vec<i32>,
     pub(crate) orbs_def_list: Vec<i32>,
+    /// 觉醒配置（#2416：Configs/AwakeningSystem.ini）
+    pub(crate) awakening_cfg: crate::util::ini::AwakeningIniSettings,
+    /// 宝石配置（#2416：Configs/GemSystem.ini）
+    pub(crate) gem_cfg: crate::util::ini::GemIniSettings,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -2035,6 +2043,8 @@ impl WorldActor {
             orbs_exp_list: Vec::new(),
             orbs_dmg_list: Vec::new(),
             orbs_def_list: Vec::new(),
+            awakening_cfg: crate::util::ini::AwakeningIniSettings::default(),
+            gem_cfg: crate::util::ini::GemIniSettings::default(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5991,6 +6001,8 @@ Ok(Self {
             orbs_exp_list: args.orbs_exp_list,
             orbs_dmg_list: args.orbs_dmg_list,
             orbs_def_list: args.orbs_def_list,
+            awakening_cfg: args.awakening_cfg,
+            gem_cfg: args.gem_cfg,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

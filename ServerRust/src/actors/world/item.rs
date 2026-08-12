@@ -3451,9 +3451,6 @@ fn compute_sealed_info(minutes: i64, now_ticks: i64) -> mir2_shared::data::item:
     }
 }
 
-/// C# Settings.GemStatIndependent（Settings.cs:278，默认 true）——成功率按宝石主属性独立计算；Rust 暂无配置项，按默认常量
-const GEM_STAT_INDEPENDENT: bool = true;
-
 /// C# UserItem.GetTotal（ItemData.cs:511-514）：AddedStats[type] + Info.Stats[type]（DB stats 已 +3 转 SharedRust Stat 键）
 fn item_get_total(
     item: &mir2_shared::data::item::UserItem,
@@ -3871,7 +3868,7 @@ impl Message<CombineItemRequest> for WorldActor {
             // 成功率（C# 6888-6999）：successchance = 宝石 Reflect；GemStatIndependent 按主属性乘目标当前值，否则乘 GemCount
             let mut successchance: i64 = gem_stat(mir2_shared::enums::Stat::Reflect) as i64;
             let gem_type = gem_type(&source, source_info);
-            if GEM_STAT_INDEPENDENT {
+            if self.gem_cfg.stat_independent {
                 successchance *= match gem_type {
                     Some(mir2_shared::enums::Stat::MaxAC) => target.added_stats.get(mir2_shared::enums::Stat::MaxAC) as i64,
                     Some(mir2_shared::enums::Stat::MaxMAC) => target.added_stats.get(mir2_shared::enums::Stat::MaxMAC) as i64,

@@ -54,6 +54,13 @@ pub fn ini_get_i64(parsed: &HashMap<String, HashMap<String, String>>, section: &
         .unwrap_or(default)
 }
 
+/// 从解析结果取浮点数（找不到/解析失败返回默认值）
+pub fn ini_get_f32(parsed: &HashMap<String, HashMap<String, String>>, section: &str, key: &str, default: f32) -> f32 {
+    ini_get(parsed, section, key)
+        .and_then(|v| v.trim().parse::<f32>().ok())
+        .unwrap_or(default)
+}
+
 /// 钓鱼系统配置（C# `Settings.Fishing*`：`Configs/FishingSystem.ini`）
 #[derive(Debug, Clone)]
 pub struct FishingConfig {
@@ -504,6 +511,95 @@ pub fn load_orbs_settings(configs_dir: &Path) -> OrbsIniSettings {
     out
 }
 
+/// 觉醒配置（C# Settings.LoadAwakeAttribute：Configs/AwakeningSystem.ini；缺失返回 C# 默认）
+#[derive(Debug, Clone)]
+pub struct AwakeningIniSettings {
+    /// C# Awake.AwakeSuccessRate（[Attribute] SuccessRate = 70）
+    pub success_rate: u8,
+    /// C# Awake.AwakeHitRate（[Attribute] HitRate = 70；Rust 觉醒值生成暂未使用）
+    pub hit_rate: u8,
+    /// C# Awake.MaxAwakeLevel（[Attribute] MaxUpgradeLevel = 5）
+    pub max_awake_level: usize,
+    /// C# Awake.Awake_WeaponRate（[IncreaseValue] WeaponValue = 1）
+    pub weapon_rate: u8,
+    /// C# Awake.Awake_HelmetRate（[IncreaseValue] HelmetValue = 1）
+    pub helmet_rate: u8,
+    /// C# Awake.Awake_ArmorRate（[IncreaseValue] ArmorValue = 5）
+    pub armor_rate: u8,
+    /// C# Awake.AwakeChanceMax（[Value] ChanceMax_Common..Heroic；默认 [1,2,3,4,5]）
+    pub chance_max: [u8; 5],
+    /// C# Awake.AwakeMaterialRate（[Materials_IncreaseValue] Materials_Common..Heroic；默认 [1.0;5]）
+    pub material_rate: [f32; 5],
+}
+
+impl Default for AwakeningIniSettings {
+    fn default() -> Self {
+        Self {
+            success_rate: 70,
+            hit_rate: 70,
+            max_awake_level: 5,
+            weapon_rate: 1,
+            helmet_rate: 1,
+            armor_rate: 5,
+            chance_max: [1, 2, 3, 4, 5],
+            material_rate: [1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+/// 从 `Configs/AwakeningSystem.ini` 加载觉醒配置（文件缺失返回 C# 默认）
+pub fn load_awakening_settings(configs_dir: &Path) -> AwakeningIniSettings {
+    let path = configs_dir.join("AwakeningSystem.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return AwakeningIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut out = AwakeningIniSettings::default();
+    out.success_rate = ini_get_i64(&parsed, "Attribute", "SuccessRate", out.success_rate as i64) as u8;
+    out.hit_rate = ini_get_i64(&parsed, "Attribute", "HitRate", out.hit_rate as i64) as u8;
+    out.max_awake_level = ini_get_i64(&parsed, "Attribute", "MaxUpgradeLevel", out.max_awake_level as i64).max(1) as usize;
+    out.weapon_rate = ini_get_i64(&parsed, "IncreaseValue", "WeaponValue", out.weapon_rate as i64) as u8;
+    out.helmet_rate = ini_get_i64(&parsed, "IncreaseValue", "HelmetValue", out.helmet_rate as i64) as u8;
+    out.armor_rate = ini_get_i64(&parsed, "IncreaseValue", "ArmorValue", out.armor_rate as i64) as u8;
+    const GRADES: [&str; 5] = ["Common", "Rare", "Legendary", "Mythical", "Heroic"];
+    for i in 0..5 {
+        out.chance_max[i] = ini_get_i64(
+            &parsed, "Value", &format!("ChanceMax_{}", GRADES[i]), out.chance_max[i] as i64,
+        ).max(1) as u8;
+        out.material_rate[i] = ini_get_f32(
+            &parsed, "Materials_IncreaseValue", &format!("Materials_{}", GRADES[i]), out.material_rate[i],
+        );
+    }
+    out
+}
+
+/// 宝石配置（C# Settings.LoadGem：Configs/GemSystem.ini；缺失返回 C# 默认）
+#[derive(Debug, Clone)]
+pub struct GemIniSettings {
+    /// C# Settings.GemStatIndependent（[Config] GemStatIndependent = true）
+    pub stat_independent: bool,
+}
+
+impl Default for GemIniSettings {
+    fn default() -> Self {
+        Self { stat_independent: true }
+    }
+}
+
+/// 从 `Configs/GemSystem.ini` 加载宝石配置（文件缺失返回 C# 默认）
+pub fn load_gem_settings(configs_dir: &Path) -> GemIniSettings {
+    let path = configs_dir.join("GemSystem.ini");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return GemIniSettings::default();
+    };
+    let parsed = parse_ini(&content);
+    let mut out = GemIniSettings::default();
+    if let Some(v) = ini_get(&parsed, "Config", "GemStatIndependent") {
+        out.stat_independent = v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    out
+}
+
 /// 从 `Configs/GuildSettings.ini` 加载行会 Buff 定义（`[Buff-0]`..`[Buff-15]`，TotalBuffs=16）
 pub fn load_guild_buff_infos(configs_dir: &Path) -> Vec<GuildBuffInfo> {
     let path = configs_dir.join("GuildSettings.ini");
@@ -675,6 +771,51 @@ BuffExpRate=0
         assert_eq!(s.exp_list, vec![50, 100, 150, 200]);
         assert_eq!(s.def_list, vec![2, 4, 6, 8]);
         assert_eq!(s.dmg_list, vec![4, 8, 12, 16]);
+    }
+
+    /// #2416：load_awakening_settings / load_gem_settings 解析 + 真实文件集成
+    #[test]
+    fn test_load_awakening_and_gem_settings() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_awakegem");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("AwakeningSystem.ini"),
+            "[Attribute]\nSuccessRate=70\nHitRate=70\nMaxUpgradeLevel=5\n\n[IncreaseValue]\nWeaponValue=1\nHelmetValue=1\nArmorValue=5\n\n[Value]\nChanceMax_Common=1\nChanceMax_Rare=2\nChanceMax_Legendary=3\nChanceMax_Mythical=4\n\n[Materials_IncreaseValue]\nMaterials_Common=1\nMaterials_Rare=1\nMaterials_Legendary=1\nMaterials_Mythical=1\n",
+        ).unwrap();
+        std::fs::write(dir.join("GemSystem.ini"), "[Config]\nGemStatIndependent=True\n").unwrap();
+        let a = load_awakening_settings(&dir);
+        assert_eq!(a.success_rate, 70);
+        assert_eq!(a.hit_rate, 70);
+        assert_eq!(a.max_awake_level, 5);
+        assert_eq!(a.weapon_rate, 1);
+        assert_eq!(a.helmet_rate, 1);
+        assert_eq!(a.armor_rate, 5);
+        // Heroic 未配置 → 保持默认 5（对齐 C# ReadByte 默认值）
+        assert_eq!(a.chance_max, [1, 2, 3, 4, 5]);
+        assert_eq!(a.material_rate, [1.0, 1.0, 1.0, 1.0, 1.0]);
+        let g = load_gem_settings(&dir);
+        assert!(g.stat_independent);
+        std::fs::remove_dir_all(&dir).ok();
+
+        // 文件缺失 → C# 默认
+        let d = load_awakening_settings(Path::new("C:/definitely/not/exists"));
+        assert_eq!(d.success_rate, 70);
+        assert_eq!(d.chance_max, [1, 2, 3, 4, 5]);
+        assert!(load_gem_settings(Path::new("C:/definitely/not/exists")).stat_independent);
+
+        // 真实文件集成
+        let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));
+        if real.join("AwakeningSystem.ini").exists() {
+            let a2 = load_awakening_settings(real);
+            assert_eq!(a2.success_rate, 70);
+            assert_eq!(a2.hit_rate, 70);
+            assert_eq!(a2.max_awake_level, 5);
+            assert_eq!(a2.weapon_rate, 1);
+            assert_eq!(a2.helmet_rate, 1);
+            assert_eq!(a2.armor_rate, 5);
+            assert_eq!(a2.chance_max, [1, 2, 3, 4, 5]);
+            assert!(load_gem_settings(real).stat_independent);
+        }
     }
 
     /// #2406：load_guild_settings 解析（[Guilds]/经验与上限列表）；文件缺失返回 C# 默认
