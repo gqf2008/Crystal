@@ -3042,14 +3042,21 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     if let Some(ref item) = state.refine_log.active_refine {
                         if item.status == RefineStatus::Pending && current_time >= item.finish_time {
                             let mut log = state.refine_log.clone();
-                            let success = log.finish();
-                            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
-                            if success {
-                                send_system_message(&self.gate_ref, *session_id, "精炼完成！物品已提升");
-                            } else {
-                                send_system_message(&self.gate_ref, *session_id, "精炼失败，物品已损毁");
+                            match log.settle_check() {
+                                Some(crate::actors::refine::RefineCheckResult::Applied) => {
+                                    let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                                    send_system_message(&self.gate_ref, *session_id, "精炼完成！物品已提升");
+                                    debug!("AutoRefine: {} applied", state.name);
+                                }
+                                Some(crate::actors::refine::RefineCheckResult::Destroyed) => {
+                                    // C# CheckRefine 失败 → 物品粉碎（PlayerObject.cs:12961-12967）
+                                    let _ = log.cancel();
+                                    let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                                    send_system_message(&self.gate_ref, *session_id, "精炼失败，物品已损毁");
+                                    debug!("AutoRefine: {} destroyed", state.name);
+                                }
+                                None => {}
                             }
-                            debug!("AutoRefine: {} result={}", state.name, success);
                         }
                     }
                 }

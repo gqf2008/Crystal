@@ -515,8 +515,15 @@ pub(crate) fn auto_refine_test(
                 *stage = 9;
                 return;
             }
-            if chat_has(&chat, "精炼成功") || chat_has(&chat, "精炼失败") || chat_has(&chat, "已完成") {
+            if chat_has(&chat, "精炼成功") || chat_has(&chat, "精炼失败") || chat_has(&chat, "已完成")
+                || chat_has(&chat, "粉碎") || chat_has(&chat, "损毁") {
                 tracing::info!("[REFINETEST] ✅ 精炼结果已返回");
+                // 无材料精炼 → 物品粉碎（C# CheckRefine 失败销毁），跳过取回
+                if chat_has(&chat, "粉碎") || chat_has(&chat, "损毁") {
+                    tracing::warn!("[REFINETEST] ⚠️ 物品已粉碎，跳过取回");
+                    *stage = 9;
+                    return;
+                }
                 match hud.inventory.items.iter().position(|s| s.is_none()) {
                     Some(grid) => {
                         net.send_packet(&client_bevy::network::RefineRetrieveWire {

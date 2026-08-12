@@ -22,20 +22,37 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             _ => return,
         };
 
-        // C# DepositRefineItem（:12529-12559）：From 为背包格、To 为精炼栏格（Rust 单槽 to=0）
+        // C# DepositRefineItem（:12529-12559）：From 为背包格、To 为精炼栏格；To=0 武器槽（Rust 单槽），To=1..10 材料槽
+        if msg.to < 0 || msg.to as usize > crate::actors::refine::REFINE_MATERIAL_SLOTS {
+            send_system_message(&self.gate_ref, msg.session_id, "精炼栏已满");
+            return;
+        }
         let from = msg.from;
         if from < 0 || from as usize >= state.inventory.backpack.len() {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
-            return;
-        }
-        if msg.to != 0 {
-            send_system_message(&self.gate_ref, msg.session_id, "精炼栏已满");
             return;
         }
         let Some(item) = state.inventory.backpack[from as usize].as_ref().map(|s| s.item.clone()) else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
+
+        // 材料槽（To 1..=10）：C# Info.Refine 材料格（材料可为任意装备/矿，不做 DontUpgrade 限制）
+        if msg.to != 0 {
+            let Some(item) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: item.unique_id }).await.unwrap_or(None) else {
+                send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                return;
+            };
+            let mut log = state.refine_log;
+            if !log.deposit_material((msg.to - 1) as usize, item) {
+                send_system_message(&self.gate_ref, msg.session_id, "该精炼栏格子已被占用");
+                return;
+            }
+            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+            send_system_message(&self.gate_ref, msg.session_id, "精炼材料已存入");
+            debug!("DepositRefineItem(material): {} from={} to={}", state.name, msg.from, msg.to);
+            return;
+        }
 
         // #926：C# BindMode.DontUpgrade(0x40)：不可精炼/升级（含租赁绑定，:12678）
         if self.item_infos.get(&item.item_index)
@@ -87,8 +104,8 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
             _ => return,
         };
 
-        // C# RetrieveRefineItem（:12568-12600）：From=精炼栏格（Rust 单槽 0）、To=背包格
-        if msg.from != 0 || state.refine_log.active_refine.is_none() {
+        // C# RetrieveRefineItem（:12568-12600）：From=精炼栏格（0=武器 / 1..=10 材料）、To=背包格
+        if msg.from < 0 || msg.from as usize > crate::actors::refine::REFINE_MATERIAL_SLOTS {
             send_system_message(&self.gate_ref, msg.session_id, "没有精炼物品可取回");
             return;
         }
@@ -99,23 +116,46 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
         }
 
         let mut log = state.refine_log.clone();
-        if let Some(ri) = log.retrieve() {
-            // C# RetrieveRefineItem（:12590）：返还到指定背包格
-            if let Some(item) = ri.item {
-                let ok = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
-                if !ok {
-                    // 放置失败回放精炼栏（避免物品丢失）
-                    let mut log2 = state.refine_log.clone();
-                    if log2.deposit_item(item) {
-                        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log2 }).await;
+        if msg.from == 0 {
+            // 武器槽（C# :12590 返还到指定背包格）
+            if state.refine_log.active_refine.is_none() {
+                send_system_message(&self.gate_ref, msg.session_id, "没有精炼物品可取回");
+                return;
+            }
+            if let Some(ri) = log.retrieve() {
+                if let Some(item) = ri.item {
+                    let ok = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
+                    if !ok {
+                        // 放置失败回放精炼栏（避免物品丢失）
+                        let mut log2 = state.refine_log.clone();
+                        if log2.deposit_item(item) {
+                            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log2 }).await;
+                        }
+                        send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+                        return;
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, "背包已满");
-                    return;
                 }
+                let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "精炼物品已取回");
+                debug!("RetrieveRefineItem: {} to={}", state.name, to);
+            }
+        } else {
+            // 材料槽（C# :12590 返还材料到指定背包格）
+            let Some(item) = log.retrieve_material((msg.from - 1) as usize) else {
+                send_system_message(&self.gate_ref, msg.session_id, "该材料格为空");
+                return;
+            };
+            let ok = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
+            if !ok {
+                // 放置失败回放材料格（避免物品丢失）
+                let _ = log.deposit_material((msg.from - 1) as usize, item);
+                let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+                return;
             }
             let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
-            send_system_message(&self.gate_ref, msg.session_id, "精炼物品已取回");
-            debug!("RetrieveRefineItem: {} to={}", state.name, to);
+            send_system_message(&self.gate_ref, msg.session_id, "精炼材料已取回");
+            debug!("RetrieveRefineItem(material): {} from={} to={}", state.name, msg.from, to);
         }
     }
 }
@@ -138,14 +178,13 @@ impl Message<RefineCancelRequest> for WorldActor {
             _ => return,
         };
 
-        if state.refine_log.active_refine.is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "没有精炼可取消");
-            return;
-        }
-
         let mut log = state.refine_log;
+        // 返还全部材料（C# RefineCancel :12603-12639）
+        for m in log.take_all_materials().into_iter().flatten() {
+            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item: m }).await;
+        }
+        // 返还武器（如有）
         if let Some(ri) = log.cancel() {
-            // 取消同样返还物品（C# CollectRefine 返还语义）
             if let Some(item) = ri.item {
                 let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
             }
@@ -231,21 +270,47 @@ impl Message<RefineItemRequest> for WorldActor {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let mut log = state.refine_log;
         let duration = REFINE_TIME_MINUTES * 60; // C# Settings.RefineTime=20 分钟
-        // C# RefineItem 成功率公式（:12811-12845）；材料槽未实现时材料输入全 0 → 无材料恒失败（C# :12753）
+        // C# RefineItem 材料聚合（:12710-12751）→ RefinedValue/refineStat（:12790-12806）→ 成功率（:12811-12845）
+        let aggregates = crate::actors::refine::refine_material_aggregates(
+            &state.refine_log.materials,
+            &self.item_infos,
+            crate::actors::refine::REFINE_ORE_NAME,
+        );
+        let (refined_value, refine_stat) = if aggregates.total_dc > aggregates.total_mc && aggregates.total_dc > aggregates.total_sc {
+            (mir2_shared::enums::RefinedValue::Dc, aggregates.total_dc)
+        } else if aggregates.total_mc > aggregates.total_dc && aggregates.total_mc > aggregates.total_sc {
+            (mir2_shared::enums::RefinedValue::Mc, aggregates.total_mc)
+        } else if aggregates.total_sc > aggregates.total_dc && aggregates.total_sc > aggregates.total_mc {
+            (mir2_shared::enums::RefinedValue::Sc, aggregates.total_sc)
+        } else {
+            (mir2_shared::enums::RefinedValue::None, 0)
+        };
         let luck = deposited.added_stats.get(mir2_shared::enums::Stat::Luck);
         let added_dc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxDC);
         let added_mc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxMC);
         let added_sc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxSC);
         let success_chance = crate::actors::refine::refine_success_chance(
-            0, item_db.required_amount, 0, 0, 0, 0, 0, 0,
+            refine_stat, item_db.required_amount, aggregates.required_level,
+            aggregates.item_amount, aggregates.durability_count, aggregates.current_dura_count,
+            aggregates.ore_amount, aggregates.ore_purity,
             luck, added_dc, added_mc, added_sc, true,
         ).clamp(0, 255) as u8;
+        let mut log = state.refine_log;
         if !log.begin_refine(current_time, duration, success_chance) {
             send_system_message(&self.gate_ref, msg.session_id, "没有待精炼的物品");
             return;
         }
+        // 设置精炼字段（C# :12808 RefineAdded=RefineIncrease；:12845 RefineSuccessChance）
+        if let Some(ri) = log.active_refine.as_mut() {
+            if let Some(item) = ri.item.as_mut() {
+                item.refined_value = refined_value;
+                item.refine_added = crate::actors::refine::REFINE_INCREASE;
+                item.refine_success_chance = success_chance as i32;
+            }
+        }
+        // 消耗材料（C# :12729 / :12750 清空 Info.Refine）
+        log.take_all_materials();
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
 
         // C# RefineItem（:12703）：开始时发 S.RefineItem { UniqueID }
@@ -287,30 +352,39 @@ impl Message<CheckRefineRequest> for WorldActor {
 
         if let Some(ref item) = state.refine_log.active_refine {
             if item.status == RefineStatus::Pending && current_time >= item.finish_time {
-                // 精炼完成，自动标记为完成
-                let refined_item = state.refine_log.active_refine.as_ref().and_then(|ri| ri.item.clone());
                 let mut log = state.refine_log;
-                let success = log.finish();
-                let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
-                if success {
-                    // C# CheckRefine（:12970）：成功发 S.ItemUpgraded { Item }
-                    if let Some(item) = refined_item {
-                        let pkt = mir2_shared::packets::server::ItemUpgraded { item };
-                        let mut body = Vec::new();
-                        if mir2_shared::packets::base::serialize_packet(
-                            &mut std::io::Cursor::new(&mut body), &pkt,
-                        ).is_ok() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: msg.session_id,
-                                data: body,
-                            }).await;
+                match log.settle_check() {
+                    Some(crate::actors::refine::RefineCheckResult::Applied) => {
+                        let refined_item = log.active_refine.as_ref().and_then(|ri| ri.item.clone());
+                        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                        // C# CheckRefine（:12970）：成功发 S.ItemUpgraded { Item }
+                        if let Some(item) = refined_item {
+                            let pkt = mir2_shared::packets::server::ItemUpgraded { item };
+                            let mut body = Vec::new();
+                            if mir2_shared::packets::base::serialize_packet(
+                                &mut std::io::Cursor::new(&mut body), &pkt,
+                            ).is_ok() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: body,
+                                }).await;
+                            }
                         }
+                        send_system_message(&self.gate_ref, msg.session_id, "精炼成功！请取回物品");
+                        debug!("CheckRefine: {} applied", state.name);
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, "精炼成功！请取回物品");
-                } else {
-                    send_system_message(&self.gate_ref, msg.session_id, "精炼失败，请取回物品");
+                    Some(crate::actors::refine::RefineCheckResult::Destroyed) => {
+                        // C# :12961-12967：失败/无 RefinedValue → 物品粉碎
+                        let _ = log.cancel();
+                        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                        send_system_message(&self.gate_ref, msg.session_id, "精炼失败，物品已粉碎");
+                        debug!("CheckRefine: {} destroyed", state.name);
+                    }
+                    None => {
+                        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                        send_system_message(&self.gate_ref, msg.session_id, "精炼进行中");
+                    }
                 }
-                debug!("CheckRefine: {} result={}", state.name, success);
             } else if item.status == RefineStatus::Ready {
                 send_system_message(&self.gate_ref, msg.session_id, "精炼已完成，请取回物品");
             } else {
