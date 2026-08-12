@@ -971,10 +971,10 @@ impl Message<NewHeroRequest> for WorldActor {
         };
 
         // C# Settings.AllowNewHero → Result=0
-        let (allow_new_hero, can_create_class) = self.social_ref
+        let (allow_new_hero, can_create_class, hero_required_level) = self.social_ref
             .ask(crate::actors::social::NpcGetHeroCreateOptions)
             .await
-            .unwrap_or((true, vec![true; 5]));
+            .unwrap_or((true, vec![true; 5], 22));
         if !allow_new_hero {
             let body = vec![0u8];
             let _ = self.gate_ref.tell(SendToClient {
@@ -983,6 +983,14 @@ impl Message<NewHeroRequest> for WorldActor {
             }).await;
             return;
         }
+        // #2366：C# Settings.Hero_RequiredLevel（NPC [@CREATEHERO] 页等级门槛，NPCScript.cs:1117-1121）
+        // Bevy 客户端从 Hero 管理对话框直发 NewHero，绕过 NPC 页 → 服务端补校验
+        if state.level < hero_required_level as u16 {
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("需要 {} 级才能创建英雄", hero_required_level));
+            return;
+        }
+
         // C# CharacterReg：名称 3..15，中文/下划线/ASCII 字母数字 → Result=1
         let name_len = msg.name.chars().count();
         let valid_name = (3..=15).contains(&name_len)

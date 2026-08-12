@@ -178,6 +178,9 @@ pub struct SocialConfig {
     /// 英雄可创建职业（C# Settings.Hero_CanCreateClass[5]，默认全 true）
     #[serde(default = "default_hero_can_create_class")]
     pub hero_can_create_class: Vec<bool>,
+    /// 创建英雄所需等级（C# Settings.Hero_RequiredLevel = 22；NPC [@CREATEHERO] 页门槛）
+    #[serde(default = "default_hero_required_level")]
+    pub hero_required_level: u8,
     /// 邮件寄金币费用（每 1000 金币，C# Settings.MailCostPer1KGold = 100）
     #[serde(default = "default_mail_cost_per_1k_gold")]
     pub mail_cost_per_1k_gold: u32,
@@ -221,6 +224,10 @@ fn default_true() -> bool {
 
 fn default_hero_can_create_class() -> Vec<bool> {
     vec![true; 5]
+}
+
+fn default_hero_required_level() -> u8 {
+    22 // C# Settings.Hero_RequiredLevel
 }
 
 fn default_mail_cost_per_1k_gold() -> u32 {
@@ -290,6 +297,7 @@ impl Default for SocialConfig {
             allow_create_archer: default_true(),
             allow_new_hero: default_true(),
             hero_can_create_class: default_hero_can_create_class(),
+            hero_required_level: default_hero_required_level(),
             mail_cost_per_1k_gold: default_mail_cost_per_1k_gold(),
             mail_item_insurance_percentage: default_mail_item_insurance_percentage(),
             mail_free_with_stamp: default_true(),
@@ -621,5 +629,12 @@ mod tests {
         assert_eq!(c.extend_gold, 1_000_000); // C# ExtendGT
         assert_eq!(c.gt_sale_min_price, 2_000_000); // C# NPCSegment GTSale 最低 200 万
         assert_eq!(c.gt_days, 30);            // C# GTDays
+    }
+
+    /// #2366：SocialConfig 英雄创建等级门槛默认 22（C# Settings.Hero_RequiredLevel）
+    #[test]
+    fn hero_required_level_defaults_to_22() {
+        let c = SocialConfig::default();
+        assert_eq!(c.hero_required_level, 22);
     }
 }
