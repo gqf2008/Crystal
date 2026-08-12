@@ -154,6 +154,7 @@ async fn start_server_with_world() -> u16 {
         monster_recall_enabled: true,
         monster_recall_range: 12,
         monster_recall_cooldown_ms: 5000,
+        exp_mob_level_difference: true,
         refine_cfg: crystal_server::util::config::RefineConfig::default(),
         replace_wedring_cost: 125,
         lover_exp_bonus: 5,

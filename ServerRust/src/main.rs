@@ -232,6 +232,7 @@ async fn async_main() -> anyhow::Result<()> {
         monster_recall_enabled: cfg.server.monster_recall_enabled,
         monster_recall_range: cfg.server.monster_recall_range,
         monster_recall_cooldown_ms: cfg.server.monster_recall_cooldown_ms,
+        exp_mob_level_difference: cfg.server.exp_mob_level_difference,
         refine_cfg: cfg.refine.clone(),
         replace_wedring_cost: marriage_ini.replace_wedring_cost,
         lover_exp_bonus: marriage_ini.lover_exp_bonus,

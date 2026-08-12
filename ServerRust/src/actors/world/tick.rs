@@ -442,10 +442,10 @@ pub(crate) fn multiplier_paused_in_safe(pause_in_safe: bool, in_safe: bool) -> b
 
 /// #914：C# HumanObject.ReduceExp——等级差经验衰减
 /// （玩家等级 >= 怪物等级+10 时：amount - Round(Max(amount/15,1)*(Level-(targetLevel+10)))，最低 1；
-///  C# Settings.ExpMobLevelDifference 默认开启）
-fn reduce_exp(amount: i32, level: u16, target_level: i32) -> i32 {
+///  C# Settings.ExpMobLevelDifference 默认开启；关闭时不衰减（#2410 配置化）
+fn reduce_exp(amount: i32, level: u16, target_level: i32, enabled: bool) -> i32 {
     let target = target_level.max(0) as u16;
-    if level < target + 10 {
+    if !enabled || level < target + 10 {
         return amount;
     }
     let diff = (level - (target + 10)) as f64;
@@ -7951,7 +7951,7 @@ impl Message<Tick> for WorldActor {
                             if !group_sessions.is_empty() {
                                 // C# WinExp：先按击杀者等级做等级差衰减，再按 partyExpRate × 等级权重分配
                                 let mon_level = self.monster_infos.get(&monster.monster_index).map(|m| m.level).unwrap_or(0);
-                                let xp_after_reduce = reduce_exp(monster.xp, killer_level, mon_level);
+                                let xp_after_reduce = reduce_exp(monster.xp, killer_level, mon_level, self.exp_mob_level_difference);
                                 let mut sum_level = 0i32;
                                 let mut member_levels: Vec<(u64, u16, bool)> = Vec::new();
                                 for sid in &group_sessions {
@@ -8001,7 +8001,7 @@ impl Message<Tick> for WorldActor {
                             // C# WinExp：单人路径同样做等级差衰减
                             let mon_level = self.monster_infos.get(&monster.monster_index).map(|m| m.level).unwrap_or(0);
                             let xp_after = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                                reduce_exp(monster.xp, st.level, mon_level)
+                                reduce_exp(monster.xp, st.level, mon_level, self.exp_mob_level_difference)
                             } else {
                                 monster.xp
                             };
@@ -8036,7 +8036,7 @@ impl Message<Tick> for WorldActor {
                                         .unwrap_or(1);
                                     let mon_level = self.monster_infos.get(&monster.monster_index)
                                         .map(|m| m.level).unwrap_or(0);
-                                    let share = reduce_exp(monster.xp, hero_level, mon_level);
+                                    let share = reduce_exp(monster.xp, hero_level, mon_level, self.exp_mob_level_difference);
                                     let share = self.apply_global_exp_multiplier(share).max(0) as u32;
                                     if share > 0 {
                                         self.grant_hero_experience(session_id, share).await;
@@ -8274,14 +8274,16 @@ mod tests {
     #[test]
     fn test_reduce_exp() {
         // #914：C# ReduceExp——等级 < 怪物+10 不减；否则扣 Round(Max(amount/15,1)*diff)，最低 1
-        assert_eq!(reduce_exp(1000, 30, 25), 1000); // 30 < 35：不减
-        assert_eq!(reduce_exp(1000, 35, 25), 1000); // 35 == 35：不减
+        assert_eq!(reduce_exp(1000, 30, 25, true), 1000); // 30 < 35：不减
+        assert_eq!(reduce_exp(1000, 35, 25, true), 1000); // 35 == 35：不减
         // 40 级打 25 级怪：diff=5，penalty=Round(66.67*5)=333 → 667
-        assert_eq!(reduce_exp(1000, 40, 25), 667);
+        assert_eq!(reduce_exp(1000, 40, 25, true), 667);
         // 100 级打 1 级怪：diff=89，penalty 很大 → 最低 1
-        assert_eq!(reduce_exp(100, 100, 1), 1);
+        assert_eq!(reduce_exp(100, 100, 1, true), 1);
         // amount 很小时 penalty 至少 1*diff
-        assert_eq!(reduce_exp(5, 40, 25), 1); // 5 - 5 = 0 → 最低 1
+        assert_eq!(reduce_exp(5, 40, 25, true), 1); // 5 - 5 = 0 → 最低 1
+        // #2410：ExpMobLevelDifference=false 时不衰减（C# !ExpMobLevelDifference）
+        assert_eq!(reduce_exp(1000, 100, 1, false), 1000);
     }
 
     /// #2340：unix 秒 → .NET DateTime ticks
