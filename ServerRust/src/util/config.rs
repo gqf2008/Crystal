@@ -368,6 +368,15 @@ pub struct ServerWorldConfig {
     /// 长期未登录角色自动归档月数（C# Settings.ArchiveInactiveCharacterAfterMonths = 12；启动时执行）
     #[serde(default = "default_archive_inactive_after_months")]
     pub archive_inactive_after_months: u32,
+    /// 怪物召回（防风筝）总开关（C# Settings.MonsterRecallEnabled = true）
+    #[serde(default = "default_true")]
+    pub monster_recall_enabled: bool,
+    /// 怪物召回距离（C# Settings.MonsterRecallRange = 12；Math.Max(1,...)）
+    #[serde(default = "default_monster_recall_range")]
+    pub monster_recall_range: i32,
+    /// 怪物召回冷却毫秒（C# Settings.MonsterRecallCooldown = 5000；Math.Max(0,...)）
+    #[serde(default = "default_monster_recall_cooldown_ms")]
+    pub monster_recall_cooldown_ms: u64,
     /// 回血权重（C# Settings.HealthRegenWeight = 10：healthRegen += regen * HealthRecovery / weight）
     #[serde(default = "default_health_regen_weight")]
     pub health_regen_weight: u32,
@@ -445,6 +454,14 @@ fn default_movement_pacing_ms() -> u64 {
 
 fn default_archive_inactive_after_months() -> u32 {
     12
+}
+
+fn default_monster_recall_range() -> i32 {
+    12
+}
+
+fn default_monster_recall_cooldown_ms() -> u64 {
+    5000
 }
 
 fn default_death_exp_penalty_percent() -> u32 {
@@ -634,6 +651,9 @@ impl Default for ServerConfig {
                 death_exp_penalty_percent: default_death_exp_penalty_percent(),
                 movement_pacing_ms: default_movement_pacing_ms(),
                 archive_inactive_after_months: default_archive_inactive_after_months(),
+                monster_recall_enabled: default_true(),
+                monster_recall_range: default_monster_recall_range(),
+                monster_recall_cooldown_ms: default_monster_recall_cooldown_ms(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
@@ -708,5 +728,14 @@ mod tests {
     fn archive_inactive_after_months_defaults_to_12() {
         let c = ServerConfig::default().server;
         assert_eq!(c.archive_inactive_after_months, 12);
+    }
+
+    /// #2390：怪物召回配置默认值（C# Settings.MonsterRecall*）
+    #[test]
+    fn monster_recall_defaults_match_csharp() {
+        let c = ServerConfig::default().server;
+        assert!(c.monster_recall_enabled);
+        assert_eq!(c.monster_recall_range, 12);
+        assert_eq!(c.monster_recall_cooldown_ms, 5000);
     }
 }

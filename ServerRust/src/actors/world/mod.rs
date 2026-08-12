@@ -140,6 +140,10 @@ pub struct WorldActorArgs {
     pub safe_zone_healing: bool,
     /// 长期未登录角色自动归档月数（C# Settings.ArchiveInactiveCharacterAfterMonths = 12）
     pub archive_inactive_after_months: u32,
+    /// 怪物召回开关/距离/冷却（C# Settings.MonsterRecall*）
+    pub monster_recall_enabled: bool,
+    pub monster_recall_range: i32,
+    pub monster_recall_cooldown_ms: u64,
 }
 
 /// 世界中的玩家记录
@@ -1529,6 +1533,10 @@ pub struct WorldActor {
     pub(crate) goods_buy_back_max_stored: u32,
     /// 安全区回血（C# Settings.SafeZoneHealing，默认 false）
     pub(crate) safe_zone_healing: bool,
+    /// 怪物召回开关/距离/冷却（C# Settings.MonsterRecall*）
+    pub(crate) monster_recall_enabled: bool,
+    pub(crate) monster_recall_range: i32,
+    pub(crate) monster_recall_cooldown_ms: u64,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1970,6 +1978,9 @@ impl WorldActor {
             goods_buy_back_time_minutes: 60,
             goods_buy_back_max_stored: 20,
             safe_zone_healing: false,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5909,6 +5920,9 @@ Ok(Self {
             goods_buy_back_time_minutes: args.goods_buy_back_time_minutes,
             goods_buy_back_max_stored: args.goods_buy_back_max_stored,
             safe_zone_healing: args.safe_zone_healing,
+            monster_recall_enabled: args.monster_recall_enabled,
+            monster_recall_range: args.monster_recall_range,
+            monster_recall_cooldown_ms: args.monster_recall_cooldown_ms,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
