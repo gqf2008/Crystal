@@ -94,8 +94,14 @@ fn main() {
     app.init_state::<AppState>();
     // --skip-login: 直接从登录界面进入游戏（诊断呈现问题用）
     if std::env::args().any(|a| a == "--skip-login") {
-        app.add_systems(Update, |mut next: ResMut<NextState<AppState>>| {
-            next.set(AppState::Game)
+        // #UI-align：skip-login 只应触发一次状态跳转。
+        // Bevy 每帧 set 同一个 NextState 会反复执行 OnExit/OnEnter，导致游戏场景每帧重建、
+        // UI 大量闪烁/残留白块并刷 “Entity despawned” 告警。用 Local<bool> 保证只跳一次。
+        app.add_systems(Update, |mut next: ResMut<NextState<AppState>>, mut done: Local<bool>| {
+            if !*done {
+                *done = true;
+                next.set(AppState::Game);
+            }
         });
     }
     app.add_plugins(EventBusPlugin);
