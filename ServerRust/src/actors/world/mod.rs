@@ -9608,6 +9608,28 @@ mod tests {
         assert!(!item.slots.is_empty(), "slot should be created");
     }
 
+    /// #2358：CaveMaggot/ToxicGhoul/Deer 系可采集；Deer AI2=5 皮、AI1=2 皮（C# RemainingSkinCount）
+    #[test]
+    fn harvestable_families_match_csharp() {
+        for name in ["CaveMaggot", "Dung", "WedgeMoth", "SpiderBat", "ToxicGhoul", "Deer", "Hen", "Bull", "Sheep"] {
+            let b = crate::actors::world::ai::make_behavior(name);
+            assert!(b.is_harvestable(), "{} should be harvestable", name);
+        }
+        let mut st = test_monster_state();
+        st.name = "Deer".to_string();
+        let b = crate::actors::world::ai::make_behavior("Deer");
+        assert_eq!(b.harvest_skin_count(&st), 5);
+        st.name = "Deer1".to_string();
+        assert_eq!(b.harvest_skin_count(&st), 5);
+        st.name = "Sheep".to_string();
+        assert_eq!(b.harvest_skin_count(&st), 5);
+        st.name = "Hen".to_string();
+        let b2 = crate::actors::world::ai::make_behavior("Hen");
+        assert_eq!(b2.harvest_skin_count(&st), 2);
+        st.name = "Pig".to_string();
+        assert_eq!(b2.harvest_skin_count(&st), 2);
+    }
+
     /// #2354：from_db_ai 映射对齐 C# MonsterObject.GetMonster（MonsterObject.cs:18-）
     #[test]
     fn monster_ai_from_db_mapping_matches_csharp_getmonster() {

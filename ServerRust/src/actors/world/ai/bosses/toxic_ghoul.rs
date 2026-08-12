@@ -22,6 +22,11 @@ impl ToxicGhoulBehavior {
 }
 
 impl MonsterBehavior for ToxicGhoulBehavior {
+    /// #2358：C# ToxicGhoul : HarvestMonster（AI 28）——可采集
+    fn is_harvestable(&self) -> bool {
+        true
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
             Some(t) => *t,
