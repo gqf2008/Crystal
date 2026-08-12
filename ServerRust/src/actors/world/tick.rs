@@ -541,10 +541,6 @@ fn pet_speed_interval_ticks(base_ticks: u64, name: &str, max_pet_level: u32, is_
     (base_ticks * 100).saturating_sub(reduce as u64).max(400) / 100
 }
 
-/// #2042：C# Settings.MonsterRecallRange = 12 / MonsterRecallCooldown = 5000ms（50 ticks）
-const MONSTER_RECALL_RANGE: i32 = 12;
-const MONSTER_RECALL_COOLDOWN_TICKS: u64 = 50;
-
 /// #2042：C# FindRecallPoint（MonsterObject.cs:1898-1907）——目标格可走则用；否则 8 向 1 格兜底；再不行返回目标格
 fn find_recall_point<F: Fn(i32, i32) -> bool>(walkable: F, tx: i32, ty: i32) -> (i32, i32) {
     if walkable(tx, ty) {
@@ -6195,18 +6191,22 @@ impl Message<Tick> for WorldActor {
                     self.monster_search_ticks.insert(*oid, self.tick_count + SEARCH_DELAY_TICKS);
                 }
 
-                // #2042：C# MonsterObject.TryRecallToTarget（1864-1900）——CanRecall 怪物远离目标时召回（防风筝）
-                if monster.can_recall && self.tick_count >= monster.next_recall_tick {
+                // #2042：C# MonsterObject.TryRecallToTarget（1864-1900）——CanRecall 怪物远离目标时召回（防风筝；#2390 改用配置）
+                if self.monster_recall_enabled && monster.can_recall && self.tick_count >= monster.next_recall_tick {
                     if let Some((_, px, py, _)) = chase_target {
+                        // C# Math.Max(1, Settings.MonsterRecallRange)
+                        let recall_range = self.monster_recall_range.max(1);
                         let cheb = (monster.x - px).abs().max((monster.y - py).abs());
-                        if cheb > MONSTER_RECALL_RANGE {
+                        if cheb > recall_range {
                             let map_ref = self.maps.get(&monster.map_index);
                             let (tx, ty) = find_recall_point(
                                 |x, y| map_ref.map(|m| m.is_walkable(x, y)).unwrap_or(false),
                                 px, py,
                             );
                             if map_ref.map(|m| m.is_walkable(tx, ty)).unwrap_or(false) {
-                                monster.next_recall_tick = self.tick_count + MONSTER_RECALL_COOLDOWN_TICKS;
+                                // C# Math.Max(0, Settings.MonsterRecallCooldown)ms → 100ms tick
+                                let cooldown_ticks = self.monster_recall_cooldown_ms / 100;
+                                monster.next_recall_tick = self.tick_count + cooldown_ticks;
                                 boss_monster_teleports.push((*oid, tx, ty));
                             }
                         }
