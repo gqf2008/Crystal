@@ -136,6 +136,7 @@ async fn async_main() -> anyhow::Result<()> {
         mail_cost_per_1k_gold: cfg.social.mail_cost_per_1k_gold,
         mail_item_insurance_percentage: cfg.social.mail_item_insurance_percentage,
         mail_free_with_stamp: cfg.social.mail_free_with_stamp,
+        mail_capacity: cfg.social.mail_capacity,
         allow_start_game: cfg.social.allow_start_game,
         allow_change_password: cfg.social.allow_change_password,
         allow_new_account: cfg.social.allow_new_account,

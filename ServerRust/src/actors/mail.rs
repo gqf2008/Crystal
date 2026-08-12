@@ -104,6 +104,25 @@ impl Mailbox {
     pub fn unread_count(&self) -> usize {
         self.inbox.iter().filter(|m| !m.read).count()
     }
+
+    /// #2382：收件箱超容量时清理“已读+已收取+无附件”的最旧邮件（C# Envir :3545-3554）
+    pub fn trim_to_capacity(&mut self, capacity: usize) -> usize {
+        let mut removed = 0usize;
+        while self.inbox.len() > capacity {
+            match self
+                .inbox
+                .iter()
+                .position(|m| m.read && m.collected && m.items.is_empty() && m.gold == 0)
+            {
+                Some(pos) => {
+                    self.inbox.remove(pos);
+                    removed += 1;
+                }
+                None => break,
+            }
+        }
+        removed
+    }
 }
 
 /// 全局邮件 ID 计数器（#73：服务器重启从 1 开始会与 DB 已有 mail_id 冲突 → UNIQUE 约束失败）
@@ -194,5 +213,55 @@ mod tests {
         mailbox.add_mail(mail1);
         mailbox.add_mail(mail2);
         assert_eq!(mailbox.unread_count(), 1);
+    }
+
+    /// #2382：超容量清理已读+已收取+无附件的旧邮件
+    #[test]
+    fn test_trim_to_capacity_removes_collected_old_mail() {
+        let mut mailbox = Mailbox::new();
+        let mk = |id: u64| MailMessage {
+            mail_id: id,
+            sender_name: "s".into(),
+            receiver_name: "r".into(),
+            subject: String::new(),
+            body: String::new(),
+            timestamp: 0,
+            read: true,
+            collected: true,
+            locked: false,
+            gold: 0,
+            items: vec![],
+        };
+        for id in 1..=5 {
+            mailbox.add_mail(mk(id));
+        }
+        let removed = mailbox.trim_to_capacity(3);
+        assert_eq!(removed, 2);
+        assert_eq!(mailbox.inbox.len(), 3);
+    }
+
+    /// #2382：未读/未收取/带附件的邮件不被清理
+    #[test]
+    fn test_trim_keeps_unread_or_attachment_mail() {
+        let mut mailbox = Mailbox::new();
+        let mk = |id: u64, read: bool, collected: bool, gold: u64| MailMessage {
+            mail_id: id,
+            sender_name: "s".into(),
+            receiver_name: "r".into(),
+            subject: String::new(),
+            body: String::new(),
+            timestamp: 0,
+            read,
+            collected,
+            locked: false,
+            gold,
+            items: vec![],
+        };
+        mailbox.add_mail(mk(1, false, true, 0)); // 未读
+        mailbox.add_mail(mk(2, true, false, 0)); // 未收取
+        mailbox.add_mail(mk(3, true, true, 50)); // 带金币
+        let removed = mailbox.trim_to_capacity(1);
+        assert_eq!(removed, 0);
+        assert_eq!(mailbox.inbox.len(), 3);
     }
 }

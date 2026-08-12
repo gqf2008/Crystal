@@ -282,7 +282,17 @@ impl Message<StartGameRequest> for WorldActor {
                     if idx < chars.len() {
                         let (char_name, _map_idx, _x, _y) = &chars[idx];
                         info!("Loading character '{}' for account '{}'", char_name, msg.account_username);
-                        if let Ok(Some(loaded)) = db::load_character(&self.db_pool, char_name).await {
+                        if let Ok(Some(mut loaded)) = db::load_character(&self.db_pool, char_name).await {
+                            // #2382：C# Envir :3545 收件箱超 MailCapacity 清理已读已收取无附件的旧邮件
+                            let mail_capacity = self.social_ref
+                                .ask(crate::actors::social::NpcGetMailSettings)
+                                .await
+                                .map(|(_, _, _, c)| c)
+                                .unwrap_or(100);
+                            let trimmed = loaded.mailbox.trim_to_capacity(mail_capacity as usize);
+                            if trimmed > 0 {
+                                debug!("MailCapacity: trimmed {} old mails for '{}'", trimmed, char_name);
+                            }
                             state = Some(loaded);
                         } else {
                             warn!("Failed to load character '{}' from DB", char_name);

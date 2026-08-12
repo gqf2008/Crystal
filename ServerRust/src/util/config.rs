@@ -190,6 +190,9 @@ pub struct SocialConfig {
     /// 邮票免费寄信（C# Settings.MailFreeWithStamp = true；Rust 暂无邮票，默认按收费处理）
     #[serde(default = "default_true")]
     pub mail_free_with_stamp: bool,
+    /// 收件箱容量上限（C# Settings.MailCapacity = 100；登录时清理已读已收取无附件的旧邮件）
+    #[serde(default = "default_mail_capacity")]
+    pub mail_capacity: u32,
     /// 是否允许进入游戏（C# Settings.AllowStartGame，默认 false；GM 不受限；这里默认 true 避免破坏现状）
     #[serde(default = "default_true")]
     pub allow_start_game: bool,
@@ -231,6 +234,10 @@ fn default_hero_required_level() -> u8 {
 }
 
 fn default_mail_cost_per_1k_gold() -> u32 {
+    100
+}
+
+fn default_mail_capacity() -> u32 {
     100
 }
 
@@ -301,6 +308,7 @@ impl Default for SocialConfig {
             mail_cost_per_1k_gold: default_mail_cost_per_1k_gold(),
             mail_item_insurance_percentage: default_mail_item_insurance_percentage(),
             mail_free_with_stamp: default_true(),
+            mail_capacity: default_mail_capacity(),
             allow_start_game: default_true(),
             allow_change_password: default_true(),
             allow_new_account: default_true(),
@@ -678,5 +686,12 @@ mod tests {
         assert_eq!(c.goods_max_stored, 15);
         assert_eq!(c.goods_buy_back_time_minutes, 60);
         assert_eq!(c.goods_buy_back_max_stored, 20);
+    }
+
+    /// #2382：MailCapacity 默认 100（C# Settings.MailCapacity）
+    #[test]
+    fn mail_capacity_defaults_to_100() {
+        let c = ServerConfig::default().social;
+        assert_eq!(c.mail_capacity, 100);
     }
 }
