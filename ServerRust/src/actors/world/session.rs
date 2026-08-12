@@ -2500,12 +2500,22 @@ impl Message<ChatRequest> for WorldActor {
                                 self.item_infos.iter().find(|(_, i)| i.name.eq_ignore_ascii_case(&name)).map(|(k, _)| *k)
                             };
                             if let Some(idx) = item_idx {
-                                let mut item = crate::actors::inventory::make_item(idx, count);
-                                if let Some(info) = self.item_infos.get(&idx) {
-                                    item.max_dura = info.durability as u16;
-                                    item.current_dura = info.durability as u16;
+                                // C# MAKE（PlayerObject.cs:2362-2401）：按 StackSize 分批生成（CreateDropItem + GMMade=true；#2364）
+                                let stack_size = self.item_infos.get(&idx)
+                                    .map(|i| i.stack_size as u16).unwrap_or(1).max(1);
+                                let mut remaining = count;
+                                while remaining > 0 {
+                                    let batch = remaining.min(stack_size);
+                                    let mut item = crate::actors::inventory::make_item(idx, batch);
+                                    if let Some(info) = self.item_infos.get(&idx) {
+                                        item.max_dura = info.durability as u16;
+                                        item.current_dura = info.durability as u16;
+                                    }
+                                    item.is_gm_made = true; // C# item.GMMade
+                                    crate::actors::world::enrich_item_info(&mut item, &self.item_infos);
+                                    let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                                    remaining -= batch;
                                 }
-                                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
                                 send_system_message(&self.gate_ref, msg.session_id, &format!("已生成 {} x{}", name, count));
                             } else {
                                 send_system_message(&self.gate_ref, msg.session_id, &format!("未找到物品：{}", name));
