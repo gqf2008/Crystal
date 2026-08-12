@@ -2555,11 +2555,12 @@ impl WorldActor {
     }
 
     /// 发送 NPCGoods 通用实现（rate 由 NPC 配置决定）
-    fn send_npc_goods_items(
+    pub(crate) fn send_npc_goods_items_panel(
         &self,
         session_id: u64,
         npc: &NpcState,
         items: Vec<mir2_shared::data::item::UserItem>,
+        panel_type: mir2_shared::enums::PanelType,
     ) {
         // Use DB rate if available, default 1.0
         let rate = if npc.db_index > 0 {
@@ -2571,7 +2572,7 @@ impl WorldActor {
         let npc_goods_packet = mir2_shared::packets::server::npc_interaction::NPCGoods {
             list: items.clone(),
             rate,
-            panel_type: mir2_shared::enums::PanelType::Buy,
+            panel_type,
             hide_added_stats: self.goods_hide_added_stats,
         };
 
@@ -2587,6 +2588,16 @@ impl WorldActor {
             data: body,
         }).try_send();
         debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", items.len(), npc.name, rate, session_id);
+    }
+
+    /// 发送普通商店商品（PanelType::Buy；C# SendNPCGoods 默认购买面板）
+    fn send_npc_goods_items(
+        &self,
+        session_id: u64,
+        npc: &NpcState,
+        items: Vec<mir2_shared::data::item::UserItem>,
+    ) {
+        self.send_npc_goods_items_panel(session_id, npc, items, mir2_shared::enums::PanelType::Buy);
     }
 
     /// 发送 NPC 面板（出售/修理等，空商品列表）
