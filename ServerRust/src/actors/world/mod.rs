@@ -350,6 +350,13 @@ fn load_route_file(path: &std::path::Path) -> Vec<RoutePoint> {
     content.lines().filter_map(parse_route_line).collect()
 }
 
+/// 解析 DragonItem.txt（C# DragonInfo.LoadDrops：每行 `1/chance Gold amount level` 或 `1/chance ItemName level`）
+fn load_dragon_drops(map_dir: &std::path::Path) -> Vec<dragon::DragonDropEntry> {
+    let path = map_dir.join("Envir").join("Drops").join("DragonItem.txt");
+    let Ok(content) = std::fs::read_to_string(&path) else { return Vec::new() };
+    content.lines().filter_map(dragon::parse_dragon_drop_line).collect()
+}
+
 /// 扫描 Envir/Routes 目录，键 = 相对路径小写（去 .txt；C# Settings.RoutePath）
 fn load_route_files(map_dir: &std::path::Path) -> HashMap<String, Vec<RoutePoint>> {
     let mut out = HashMap::new();
@@ -1510,6 +1517,8 @@ pub struct WorldActor {
     pub(crate) robot_last_check_minute: u32,
     /// 龙系统状态
     pub(crate) dragon_state: Option<dragon::DragonState>,
+    /// 龙等级掉落表（C# DragonInfo.Drops；DragonItem.txt 解析，按等级索引）
+    pub(crate) dragon_drops: Vec<dragon::DragonDropEntry>,
     /// 征服区域列表
     pub(crate) conquest_instances: Vec<conquest::ConquestInstance>,
     /// 城门/城墙/攻城武器
@@ -1750,6 +1759,7 @@ impl WorldActor {
             self_ref: None,
             chat_items_sent: HashMap::new(),
             routes: load_route_files(&map_dir),
+            dragon_drops: load_dragon_drops(&map_dir),
             map_dir,
             spawn_dir,
             script_dir: PathBuf::from("."),
@@ -5618,6 +5628,7 @@ Ok(Self {
             self_ref: Some(actor_ref),
             chat_items_sent: HashMap::new(),
             routes: load_route_files(&args.map_dir),
+            dragon_drops: load_dragon_drops(&args.map_dir),
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             script_dir: args.quest_dir.clone(),

@@ -4,6 +4,39 @@
 use kameo::actor::ActorRef;
 use crate::gate::actor::GateActor;
 
+/// 龙等级掉落条目（C# DragonInfo.DropInfo：DragonItem.txt）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DragonDropEntry {
+    /// 对应龙等级（1-12）
+    pub level: u8,
+    /// 1/chance 概率（C# DropInfo.Chance；rate = max(1, Chance/DropRate)）
+    pub chance: i32,
+    /// 物品名（None=金币条目；C# DropInfo.Item）
+    pub item_name: Option<String>,
+    /// 金币金额（C# DropInfo.Gold；>0 时物品为 None）
+    pub gold: u64,
+}
+
+/// C# DragonInfo.DropInfo.FromLine：`1/3 Gold 30000 1` / `1/10 ItemName 3`
+pub fn parse_dragon_drop_line(line: &str) -> Option<DragonDropEntry> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with(';') { return None; }
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 3 { return None; }
+    // 机会格式 "1/3" → 3（C# parts[0].Substring(2)）
+    let chance: i32 = parts[0].strip_prefix("1/")?.parse().ok()?;
+    if chance <= 0 { return None; }
+    if parts[1].eq_ignore_ascii_case("gold") {
+        if parts.len() < 4 { return None; }
+        let gold: u64 = parts[2].parse().ok()?;
+        let level: u8 = parts[3].parse().ok()?;
+        Some(DragonDropEntry { level, chance, item_name: None, gold })
+    } else {
+        let level: u8 = parts[2].parse().ok()?;
+        Some(DragonDropEntry { level, chance, item_name: Some(parts[1].to_string()), gold: 0 })
+    }
+}
+
 /// 龙的状态数据
 #[derive(Debug, Clone)]
 pub struct DragonState {
@@ -134,6 +167,29 @@ pub async fn tick_dragon_delevel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2344：C# DragonInfo.DropInfo.FromLine 解析
+    #[test]
+    fn test_parse_dragon_drop_line() {
+        assert_eq!(
+            parse_dragon_drop_line("1/3 Gold 30000 1"),
+            Some(DragonDropEntry { level: 1, chance: 3, item_name: None, gold: 30000 })
+        );
+        assert_eq!(
+            parse_dragon_drop_line("1/10 BlackStone 3"),
+            Some(DragonDropEntry { level: 3, chance: 10, item_name: Some("BlackStone".to_string()), gold: 0 })
+        );
+        assert_eq!(parse_dragon_drop_line(";comment"), None);
+        assert_eq!(parse_dragon_drop_line(""), None);
+        assert_eq!(parse_dragon_drop_line("Gold 30000 1"), None);
+        assert_eq!(parse_dragon_drop_line("1/3 Gold 30000"), None);
+    }
+
+    #[test]
+    fn body_part_offsets_count_24() {
+        // C# Dragon.BodyLocations 24 个身体部件偏移
+        assert_eq!(super::DragonState::body_part_offsets().len(), 24);
+    }
 
     #[test]
     fn test_gain_exp_level_up() {
