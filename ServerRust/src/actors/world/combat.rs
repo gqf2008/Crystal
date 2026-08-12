@@ -575,7 +575,7 @@ impl Message<WorldAttackRequest> for WorldActor {
             let curse_pct = crate::combat::buff::get_stat_bonus(
                 &state.buffs, &crate::combat::buff::BuffType::Curse { percent: 0 },
             );
-            let total_atk_spd = (state.attack_speed + atk_spd_bonus) * (100 - curse_pct) / 100;
+            let total_atk_spd = ((state.attack_speed + atk_spd_bonus) * (100 - curse_pct) / 100) * (100 + state.attack_speed_rate_percent) / 100;
             let interval = player_attack_speed_ms(total_atk_spd, state.level);
             let last = self
                 .player_last_attack_ms
@@ -1833,7 +1833,7 @@ impl Message<RangeAttackRequest> for WorldActor {
         let curse_pct = crate::combat::buff::get_stat_bonus(
             &state.buffs, &crate::combat::buff::BuffType::Curse { percent: 0 },
         );
-        let total_atk_spd = (state.attack_speed + atk_spd_bonus) * (100 - curse_pct) / 100;
+        let total_atk_spd = ((state.attack_speed + atk_spd_bonus) * (100 - curse_pct) / 100) * (100 + state.attack_speed_rate_percent) / 100;
         let interval = player_attack_speed_ms(total_atk_spd, state.level);
         let last = self
             .player_last_attack_ms

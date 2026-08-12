@@ -335,6 +335,22 @@ pub struct PlayerState {
     pub gem_rate_percent: i32,
     /// 装备合成成功率加成（C# Stats[Stat.CraftRatePercent]；装备/行会 Buff 合计）
     pub craft_rate_percent: i32,
+    /// C# Stats[Stat.HPRatePercent]（RefreshStats :1751-1759）
+    pub hp_rate_percent: i32,
+    /// C# Stats[Stat.MPRatePercent]（RefreshStats :1751-1759）
+    pub mp_rate_percent: i32,
+    /// C# Stats[Stat.MaxACRatePercent]（RefreshStats :1751-1759）
+    pub max_ac_rate_percent: i32,
+    /// C# Stats[Stat.MaxMACRatePercent]（RefreshStats :1751-1759）
+    pub max_mac_rate_percent: i32,
+    /// C# Stats[Stat.MaxDCRatePercent]（RefreshStats :1751-1759）
+    pub max_dc_rate_percent: i32,
+    /// C# Stats[Stat.MaxMCRatePercent]（RefreshStats :1751-1759）
+    pub max_mc_rate_percent: i32,
+    /// C# Stats[Stat.MaxSCRatePercent]（RefreshStats :1751-1759）
+    pub max_sc_rate_percent: i32,
+    /// C# Stats[Stat.AttackSpeedRatePercent]（RefreshStats :1751-1759）
+    pub attack_speed_rate_percent: i32,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -420,7 +436,10 @@ impl PlayerState {
         );
         // #1888：RhinoPriestDebuff 固定降低 MaxDC（C# RhinoPriest.cs:91）
         let rhino = crate::combat::buff::get_rhino_priest_debuff(&self.buffs);
-        ((base + buff_bonus + slaying_bonus) * (100 - curse) / 100 + rhino.0).max(self.effective_min_attack())
+        let v = (base + buff_bonus + slaying_bonus) * (100 - curse) / 100 + rhino.0;
+        // #2314：C# RefreshStats——Stats[MaxDC] += Stats[MaxDC] * MaxDCRatePercent / 100（Buff 后）
+        let v = v + v * self.max_dc_rate_percent / 100;
+        v.max(self.effective_min_attack())
     }
 
     pub fn effective_min_mc(&self) -> i32 {
@@ -441,7 +460,10 @@ impl PlayerState {
         );
         // #1888：RhinoPriestDebuff 固定降低 MaxMC（C# RhinoPriest.cs:91）
         let rhino = crate::combat::buff::get_rhino_priest_debuff(&self.buffs);
-        ((base + buff_bonus) * (100 - curse) / 100 + rhino.1).max(self.effective_min_mc())
+        let v = (base + buff_bonus) * (100 - curse) / 100 + rhino.1;
+        // #2314：C# RefreshStats——Stats[MaxMC] += Stats[MaxMC] * MaxMCRatePercent / 100
+        let v = v + v * self.max_mc_rate_percent / 100;
+        v.max(self.effective_min_mc())
     }
 
     pub fn effective_min_sc(&self) -> i32 {
@@ -462,7 +484,10 @@ impl PlayerState {
         );
         // #1888：RhinoPriestDebuff 固定降低 MaxSC（C# RhinoPriest.cs:91）
         let rhino = crate::combat::buff::get_rhino_priest_debuff(&self.buffs);
-        ((base + buff_bonus) * (100 - curse) / 100 + rhino.2).max(self.effective_min_sc())
+        let v = (base + buff_bonus) * (100 - curse) / 100 + rhino.2;
+        // #2314：C# RefreshStats——Stats[MaxSC] += Stats[MaxSC] * MaxSCRatePercent / 100
+        let v = v + v * self.max_sc_rate_percent / 100;
+        v.max(self.effective_min_sc())
     }
 
     /// 计算包含装备+Buff加成的防御力
@@ -490,7 +515,9 @@ impl PlayerState {
             &self.buffs,
             &crate::combat::buff::BuffType::AcDefenseBoost { bonus: 0 },
         );
-        (self.max_ac + self.bonus_max_ac + buff_bonus).max(self.effective_min_ac())
+        let v = self.max_ac + self.bonus_max_ac + buff_bonus;
+        // #2314：C# RefreshStats——Stats[MaxAC] += Stats[MaxAC] * MaxACRatePercent / 100
+        (v + v * self.max_ac_rate_percent / 100).max(self.effective_min_ac())
     }
 
     pub fn effective_min_mac(&self) -> i32 {
@@ -506,23 +533,29 @@ impl PlayerState {
             &self.buffs,
             &crate::combat::buff::BuffType::MacDefenseBoost { bonus: 0 },
         );
-        (self.max_mac + self.bonus_max_mac + buff_bonus).max(self.effective_min_mac())
+        let v = self.max_mac + self.bonus_max_mac + buff_bonus;
+        // #2314：C# RefreshStats——Stats[MaxMAC] += Stats[MaxMAC] * MaxMACRatePercent / 100
+        (v + v * self.max_mac_rate_percent / 100).max(self.effective_min_mac())
     }
 
     /// 最大 HP（基础+装备+MaxHpBoost buff；C# Stats[Stat.HP]，HealthAid/MaxHpBoost 计入）
     pub fn effective_max_hp(&self) -> i32 {
-        self.max_hp + crate::combat::buff::get_stat_bonus(
+        let total = self.max_hp + crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 },
-        )
+        );
+        // #2314：C# RefreshStats——Stats[HP] += Stats[HP] * HPRatePercent / 100
+        total + total * self.hp_rate_percent / 100
     }
 
     /// 最大 MP（基础+装备+MaxMpBoost buff；C# Stats[Stat.MP]，ManaAid/MaxMpBoost 计入）
     pub fn effective_max_mp(&self) -> i32 {
-        self.max_mp + crate::combat::buff::get_stat_bonus(
+        let total = self.max_mp + crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 },
-        )
+        );
+        // #2314：C# RefreshStats——Stats[MP] += Stats[MP] * MPRatePercent / 100
+        total + total * self.mp_rate_percent / 100
     }
 
     /// 构建战斗公式用的属性快照（对齐 C# Stats 投影到 CombatStats）
@@ -830,6 +863,14 @@ allow_group: false,
             mine_rate_percent: 0,
             gem_rate_percent: 0,
             craft_rate_percent: 0,
+            hp_rate_percent: 0,
+            mp_rate_percent: 0,
+            max_ac_rate_percent: 0,
+            max_mac_rate_percent: 0,
+            max_dc_rate_percent: 0,
+            max_mc_rate_percent: 0,
+            max_sc_rate_percent: 0,
+            attack_speed_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
@@ -2501,6 +2542,22 @@ pub struct SetStatBonuses {
     pub gem_rate_percent: i32,
     /// 装备合成成功率加成（C# Stats[Stat.CraftRatePercent]；装备/行会 Buff 合计）
     pub craft_rate_percent: i32,
+    /// C# Stats[Stat.HPRatePercent]（RefreshStats :1751-1759）
+    pub hp_rate_percent: i32,
+    /// C# Stats[Stat.MPRatePercent]（RefreshStats :1751-1759）
+    pub mp_rate_percent: i32,
+    /// C# Stats[Stat.MaxACRatePercent]（RefreshStats :1751-1759）
+    pub max_ac_rate_percent: i32,
+    /// C# Stats[Stat.MaxMACRatePercent]（RefreshStats :1751-1759）
+    pub max_mac_rate_percent: i32,
+    /// C# Stats[Stat.MaxDCRatePercent]（RefreshStats :1751-1759）
+    pub max_dc_rate_percent: i32,
+    /// C# Stats[Stat.MaxMCRatePercent]（RefreshStats :1751-1759）
+    pub max_mc_rate_percent: i32,
+    /// C# Stats[Stat.MaxSCRatePercent]（RefreshStats :1751-1759）
+    pub max_sc_rate_percent: i32,
+    /// C# Stats[Stat.AttackSpeedRatePercent]（RefreshStats :1751-1759）
+    pub attack_speed_rate_percent: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -2597,6 +2654,14 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.mine_rate_percent = msg.mine_rate_percent;
         self.state.gem_rate_percent = msg.gem_rate_percent;
         self.state.craft_rate_percent = msg.craft_rate_percent;
+        self.state.hp_rate_percent = msg.hp_rate_percent;
+        self.state.mp_rate_percent = msg.mp_rate_percent;
+        self.state.max_ac_rate_percent = msg.max_ac_rate_percent;
+        self.state.max_mac_rate_percent = msg.max_mac_rate_percent;
+        self.state.max_dc_rate_percent = msg.max_dc_rate_percent;
+        self.state.max_mc_rate_percent = msg.max_mc_rate_percent;
+        self.state.max_sc_rate_percent = msg.max_sc_rate_percent;
+        self.state.attack_speed_rate_percent = msg.attack_speed_rate_percent;
 
         if changed {
             self.send_user_information_refresh();
@@ -6477,6 +6542,17 @@ mod tests {
         assert_eq!(st.effective_max_mp(), 80);
     }
 
+    #[test]
+    fn test_effective_max_hp_applies_rate_percent() {
+        // #2314：C# RefreshStats——Stats[HP] += Stats[HP] * HPRatePercent / 100
+        let mut st = make_state();
+        st.max_hp = 100;
+        st.hp_rate_percent = 20;
+        assert_eq!(st.effective_max_hp(), 120);
+        st.hp_rate_percent = 0;
+        assert_eq!(st.effective_max_hp(), 100);
+    }
+
     fn make_state() -> PlayerState {
         PlayerState {
             object_id: 1000,
@@ -6642,6 +6718,14 @@ allow_group: false,
             mine_rate_percent: 0,
             gem_rate_percent: 0,
             craft_rate_percent: 0,
+            hp_rate_percent: 0,
+            mp_rate_percent: 0,
+            max_ac_rate_percent: 0,
+            max_mac_rate_percent: 0,
+            max_dc_rate_percent: 0,
+            max_mc_rate_percent: 0,
+            max_sc_rate_percent: 0,
+            attack_speed_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
