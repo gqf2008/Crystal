@@ -6279,7 +6279,11 @@ impl WorldActor {
     pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {
         let record = self.players.get(&session_id)?;
         let state = record.actor_ref.ask(GetPlayerState).await.ok()??;
-        let b = calculate_equipment_bonuses(&state.inventory.equipment, &self.item_infos);
+        let mut b = calculate_equipment_bonuses(&state.inventory.equipment, &self.item_infos);
+        // #2310：C# RefreshGuildBuffs——行会激活 Buff 全属性（AC/MAC/DC/MC/SC/HP/MP/GemRate 等）计入玩家属性
+        for (stat, v) in state.guild_buff_stats.iter() {
+            apply_equipment_stat(&mut b, stat, v);
+        }
         let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
             bonus_min_attack: b.min_atk,
             bonus_max_attack: b.max_atk,
@@ -6877,6 +6881,45 @@ fn apply_equipment_stat(b: &mut EquipmentBonuses, stat: mir2_shared::enums::Stat
         Stat::HandWeight => b.hand_weight += value,
         _ => {}
     }
+}
+
+/// C# GuildBuffInfo.Stats（GuildData.cs:133-150）：行会 Buff 各字段 → Stat 映射
+pub(crate) fn guild_buff_stats(info: &crate::util::ini::GuildBuffInfo) -> mir2_shared::data::stats::Stats {
+    use mir2_shared::enums::Stat;
+    let mut s = mir2_shared::data::stats::Stats::new();
+    s.set(Stat::MaxAC, info.buff_ac);
+    s.set(Stat::MaxMAC, info.buff_mac);
+    s.set(Stat::MaxDC, info.buff_dc);
+    s.set(Stat::MaxMC, info.buff_mc);
+    s.set(Stat::MaxSC, info.buff_sc);
+    s.set(Stat::HP, info.buff_max_hp);
+    s.set(Stat::MP, info.buff_max_mp);
+    s.set(Stat::MineRatePercent, info.buff_mine_rate);
+    s.set(Stat::GemRatePercent, info.buff_gem_rate);
+    s.set(Stat::FishRatePercent, info.buff_fish_rate);
+    s.set(Stat::ExpRatePercent, info.buff_exp_rate);
+    s.set(Stat::CraftRatePercent, info.buff_craft_rate);
+    s.set(Stat::SkillGainMultiplier, info.buff_skill_rate);
+    s.set(Stat::HealthRecovery, info.buff_hp_regen);
+    s.set(Stat::SpellRecovery, info.buff_mp_regen);
+    s.set(Stat::AttackBonus, info.buff_attack);
+    s.set(Stat::ItemDropRatePercent, info.buff_drop_rate);
+    s.set(Stat::GoldDropRatePercent, info.buff_gold_rate);
+    s
+}
+
+/// 聚合行会激活 Buff 的全部属性（C# RefreshGuildBuffs：Stats.Add(buff.Info.Stats)）
+pub(crate) fn sum_active_guild_buff_stats(
+    infos: &std::collections::HashMap<u32, crate::util::ini::GuildBuffInfo>,
+    active: &[u32],
+) -> mir2_shared::data::stats::Stats {
+    let mut total = mir2_shared::data::stats::Stats::new();
+    for id in active {
+        if let Some(info) = infos.get(id) {
+            total.add_assign(&guild_buff_stats(info));
+        }
+    }
+    total
 }
 
 pub(crate) fn calculate_equipment_bonuses(
@@ -10054,6 +10097,28 @@ mod set_bonus_tests {
         let mode2 = equipment_special_mode(&eq);
         assert!(mode2.contains(SpecialItemMode::MUSCLE));
         assert!(!mode2.contains(SpecialItemMode::PARALIZE));
+    }
+
+    #[test]
+    fn test_guild_buff_stats_mapping() {
+        // #2310：C# GuildBuffInfo.Stats（GuildData.cs:133-150）映射 + 聚合
+        use mir2_shared::enums::Stat;
+        let mut info = crate::util::ini::GuildBuffInfo::default();
+        info.id = 1;
+        info.buff_ac = 5;
+        info.buff_dc = 3;
+        info.buff_max_hp = 100;
+        info.buff_gem_rate = 2;
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, info);
+        let stats = sum_active_guild_buff_stats(&infos, &[1]);
+        assert_eq!(stats.get(Stat::MaxAC), 5);
+        assert_eq!(stats.get(Stat::MaxDC), 3);
+        assert_eq!(stats.get(Stat::HP), 100);
+        assert_eq!(stats.get(Stat::GemRatePercent), 2);
+        // 未激活 → 0
+        let empty = sum_active_guild_buff_stats(&infos, &[]);
+        assert_eq!(empty.get(Stat::MaxAC), 0);
     }
 
     #[test]

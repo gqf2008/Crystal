@@ -371,6 +371,8 @@ pub struct PlayerState {
     pub guild_buff_fish_rate_percent: i32,
     /// 行会 Buff 采矿掉落率加成百分比缓存（C# GuildBuffInfo.BuffMineRate）
     pub guild_buff_mine_rate_percent: i32,
+    /// 行会激活 Buff 全属性聚合（C# RefreshGuildBuffs：Stats.Add(buff.Info.Stats)；含 GemRatePercent 等）
+    pub guild_buff_stats: mir2_shared::data::stats::Stats,
     /// 当前地图是否无经验（C# MapInfo.NoExperience，#932；set_map_data 时从地图数据缓存，避免 AddExperience 反向 ask WorldActor 死锁）
     pub no_experience_map: bool,
     /// 灰名截止时间（毫秒；C# HumanObject.BrownTime，攻击低 PK 玩家后 1 分钟）
@@ -826,6 +828,7 @@ allow_group: false,
             mine_rate_percent: 0,
             gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
+            guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
@@ -6633,6 +6636,7 @@ allow_group: false,
             mine_rate_percent: 0,
             gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
+            guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,

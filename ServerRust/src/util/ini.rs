@@ -85,7 +85,7 @@ impl Default for FishingConfig {
 }
 
 /// 行会 Buff 定义（C# `GuildBuffInfo`：`Configs/GuildSettings.ini` `[Buff-*]`）
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GuildBuffInfo {
     /// C# GuildBuffInfo.Id（客户端用 Id 标识，与数组下标无关）
     pub id: u32,

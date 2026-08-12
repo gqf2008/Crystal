@@ -800,6 +800,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             mine_rate_percent: 0,
             gem_rate_percent: 0,
             guild_buff_mine_rate_percent: 0,
+            guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,

@@ -502,12 +502,15 @@ impl WorldActor {
                 mine += info.buff_mine_rate;
             }
         }
+        // #2310：C# RefreshGuildBuffs——行会激活 Buff 全属性（AC/DC/MC/SC/HP/MP/GemRate 等）
+        let stats = super::sum_active_guild_buff_stats(&self.guild_buff_infos, buffs);
         for (sid, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 if state.guild_name.as_deref() != Some(guild_name) { continue; }
                 if state.guild_buff_exp_percent == exp
                     && state.guild_buff_fish_rate_percent == fish
                     && state.guild_buff_mine_rate_percent == mine
+                    && state.guild_buff_stats == stats
                 {
                     continue;
                 }
@@ -515,7 +518,10 @@ impl WorldActor {
                 new_state.guild_buff_exp_percent = exp;
                 new_state.guild_buff_fish_rate_percent = fish;
                 new_state.guild_buff_mine_rate_percent = mine;
+                new_state.guild_buff_stats = stats.clone();
                 let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                // C# RefreshStats：Buff 变化后立即重算玩家属性
+                self.recalculate_and_set_stat_bonuses(*sid).await;
             }
         }
     }
