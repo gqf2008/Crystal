@@ -582,7 +582,11 @@ impl PlayerState {
             agility: self.agility + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
             accuracy: self.accuracy + spirit_sword_accuracy(&self.magics) + fencing_accuracy(&self.magics) + slaying_accuracy(&self.magics),
             luck: self.luck,
-            critical_rate: self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 }),
+            critical_rate: {
+                // C# RefreshStatCaps：CriticalRate 上限（BaseStats.caps；Buff 后再次 cap，C# RefreshStats 顺序）
+                let v = self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 });
+                v.min(mir2_shared::data::stats::BaseStats::new(self.class).caps.get(mir2_shared::enums::Stat::CriticalRate))
+            },
             critical_damage: self.critical_damage,
             magic_resist: self.magic_resist,
             reflect: self.reflect + get_stat_bonus(&self.buffs, &BuffType::Reflect { percent: 0 }),
@@ -2560,6 +2564,26 @@ pub struct SetStatBonuses {
     pub attack_speed_rate_percent: i32,
 }
 
+/// C# HumanObject.RefreshStatCaps（:2229-2253）：Stats[key] = min(cap, Stats[key])——职业属性上限（BaseStats.caps）
+pub(crate) fn cap_player_stats(class: mir2_shared::enums::MirClass, st: &mut PlayerState) {
+    use mir2_shared::enums::Stat;
+    let caps = mir2_shared::data::stats::BaseStats::new(class).caps;
+    for (stat, cap) in caps.iter() {
+        match stat {
+            Stat::MagicResist => st.magic_resist = st.magic_resist.min(cap),
+            Stat::PoisonResist => st.poison_resist = st.poison_resist.min(cap),
+            Stat::CriticalRate => st.critical_rate = st.critical_rate.min(cap),
+            Stat::CriticalDamage => st.critical_damage = st.critical_damage.min(cap),
+            Stat::Freezing => st.freezing = st.freezing.min(cap),
+            Stat::PoisonAttack => st.poison_attack = st.poison_attack.min(cap),
+            Stat::HealthRecovery => st.health_recovery = st.health_recovery.min(cap),
+            Stat::SpellRecovery => st.spell_recovery = st.spell_recovery.min(cap),
+            Stat::PoisonRecovery => st.poison_recovery = st.poison_recovery.min(cap),
+            _ => {}
+        }
+    }
+}
+
 impl Message<SetStatBonuses> for PlayerActor {
     type Reply = ();
 
@@ -2662,6 +2686,9 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.max_mc_rate_percent = msg.max_mc_rate_percent;
         self.state.max_sc_rate_percent = msg.max_sc_rate_percent;
         self.state.attack_speed_rate_percent = msg.attack_speed_rate_percent;
+
+        // C# RefreshStatCaps（:2229-2253）：职业属性上限（装备/附加/觉醒/宝石/行会 Buff 后统一 cap）
+        cap_player_stats(self.state.class, &mut self.state);
 
         if changed {
             self.send_user_information_refresh();
@@ -6540,6 +6567,19 @@ mod tests {
             crate::combat::buff::BuffType::MaxMpBoost { bonus: 20 }, 600, 1));
         assert_eq!(st.effective_max_hp(), 150);
         assert_eq!(st.effective_max_mp(), 80);
+    }
+
+    #[test]
+    fn test_cap_player_stats() {
+        // #2322：C# RefreshStatCaps——Stats[key] = min(cap, Stats[key])
+        let mut st = make_state();
+        st.magic_resist = 10;   // cap 2
+        st.critical_rate = 30;  // cap 18
+        st.poison_resist = 3;   // cap 6，低于上限不变
+        cap_player_stats(mir2_shared::enums::MirClass::Warrior, &mut st);
+        assert_eq!(st.magic_resist, 2);
+        assert_eq!(st.critical_rate, 18);
+        assert_eq!(st.poison_resist, 3);
     }
 
     #[test]
