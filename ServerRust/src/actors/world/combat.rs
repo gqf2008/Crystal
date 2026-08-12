@@ -1285,7 +1285,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
                                         slot: crate::actors::inventory::EquipmentSlot::Weapon,
                                     }).await {
-                                        if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
+                                        if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -(crate::combat::attack::max_luck()) && fastrand::i32(..4) == 0 { // #2424：C# Settings.MaxLuck
                                             let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
                                             send_system_message(&self.gate_ref, msg.session_id, "你的武器受到了诅咒！");
                                             debug!("Weapon cursed on player kill: {} -> {}", record.name, weapon.item_index);
@@ -2183,7 +2183,7 @@ impl WorldActor {
                         if let Ok(Some(weapon)) = attacker_record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
                             slot: crate::actors::inventory::EquipmentSlot::Weapon,
                         }).await {
-                            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
+                            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -(crate::combat::attack::max_luck()) && fastrand::i32(..4) == 0 { // #2424：C# Settings.MaxLuck
                                 let _ = attacker_record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
                                 send_system_message(&self.gate_ref, attacker_session, "你的武器受到了诅咒！");
                                 debug!("Weapon cursed on player kill: {} -> {}", attacker_record.name, weapon.item_index);
