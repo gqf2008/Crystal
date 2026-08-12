@@ -350,6 +350,24 @@ fn load_route_file(path: &std::path::Path) -> Vec<RoutePoint> {
     content.lines().filter_map(parse_route_line).collect()
 }
 
+/// C# Envir.LoadDisabledChars：解析 DisabledChars.txt 内容（每行一个禁用名，转大写；空行/注释忽略）
+fn parse_disabled_chars(content: &str) -> HashSet<String> {
+    content.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with(';') && !l.starts_with('#'))
+        .map(|l| l.to_uppercase())
+        .collect()
+}
+
+/// C# Envir.LoadDisabledChars：加载 DisabledChars.txt
+fn load_disabled_chars(map_dir: &std::path::Path) -> HashSet<String> {
+    let path = map_dir.join("Envir").join("DisabledChars.txt");
+    match std::fs::read_to_string(&path) {
+        Ok(content) => parse_disabled_chars(&content),
+        Err(_) => HashSet::new(),
+    }
+}
+
 /// 解析 DragonItem.txt（C# DragonInfo.LoadDrops：每行 `1/chance Gold amount level` 或 `1/chance ItemName level`）
 fn load_dragon_drops(map_dir: &std::path::Path) -> Vec<dragon::DragonDropEntry> {
     let path = map_dir.join("Envir").join("Drops").join("DragonItem.txt");
@@ -1238,6 +1256,8 @@ pub struct WorldActor {
     pub(crate) map_dir: PathBuf,
     /// 巡逻路线表（route_path 小写 → 路线点；C# MapRespawn.LoadRoutes）
     pub(crate) routes: HashMap<String, Vec<RoutePoint>>,
+    /// 角色/英雄名禁用名单（C# Envir.DisabledCharNames；DisabledChars.txt 每行，转大写）
+    pub(crate) disabled_char_names: HashSet<String>,
     /// 刷怪配置目录
     pub(crate) spawn_dir: Option<PathBuf>,
     /// NPC 脚本/INI 根目录（C# NPCPath 等价，SAVEVALUE/LOADVALUE 用）
@@ -1760,6 +1780,7 @@ impl WorldActor {
             chat_items_sent: HashMap::new(),
             routes: load_route_files(&map_dir),
             dragon_drops: load_dragon_drops(&map_dir),
+            disabled_char_names: load_disabled_chars(&map_dir),
             map_dir,
             spawn_dir,
             script_dir: PathBuf::from("."),
@@ -5629,6 +5650,7 @@ Ok(Self {
             chat_items_sent: HashMap::new(),
             routes: load_route_files(&args.map_dir),
             dragon_drops: load_dragon_drops(&args.map_dir),
+            disabled_char_names: load_disabled_chars(&args.map_dir),
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             script_dir: args.quest_dir.clone(),
@@ -9319,6 +9341,16 @@ fn replace_pos_marker(message: &str, x: i32, y: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #2346：C# Envir.LoadDisabledChars 解析（大写归一/空行/注释）
+    #[test]
+    fn test_parse_disabled_chars() {
+        let s = parse_disabled_chars("Admin\nGM\n;comment\n#hash\n\n  admin  \n");
+        assert_eq!(s.len(), 2);
+        assert!(s.contains("ADMIN"));
+        assert!(s.contains("GM"));
+        assert!(!s.contains("admin")); // 已转大写
+    }
+
     /// #2342：C# RouteInfo.FromText 路线行解析
     #[test]
     fn test_parse_route_line() {
