@@ -42,7 +42,7 @@ impl MonsterBehavior for IcePhantomBehavior {
             } else {
                 // 远程 MC MAC（冰系）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1)
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1)
             };
 
             if dist <= MELEE_RANGE {

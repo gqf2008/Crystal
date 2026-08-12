@@ -66,7 +66,7 @@ impl MonsterBehavior for KingGuardBehavior {
             } else {
                 // 远程：2/3 MC MAC + 绿毒；1/3 MC*2 MAC + AOE Slow/Paralysis
                 if fastrand::i32(0..3) > 0 {
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
@@ -84,7 +84,7 @@ impl MonsterBehavior for KingGuardBehavior {
                     }
                 } else {
                     // 重击 MC*2 + AOE(AttackRange) Slow + KingGuard 特效
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac * 2, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc * 2, 0).max(1);
                     // C# CompleteRangeAttack FindAllTargets(AttackRange, CurrentLocation)：AOE 以怪物自身为中心
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                         attacker_oid: monster.object_id,

@@ -52,7 +52,7 @@ impl MonsterBehavior for TucsonMageBehavior {
             } else {
                 // Type1 WideLineAttack（MC）：前方 + 三个偏转方向各 2 格 AOE
                 let main_dir = direction_towards(monster.x, monster.y, target.x, target.y);
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 // C# WideLineAttack：前方 1 格直击 + PreviousDir 起 3 个方向各 2 格。
                 // 从怪物视角的扇形方向 = main±1（#1832：原 ±2 打错方向）
                 let fan_dirs = tucson_mage_fan_dirs(main_dir);

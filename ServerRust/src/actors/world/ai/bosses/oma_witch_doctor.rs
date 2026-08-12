@@ -42,7 +42,7 @@ impl MonsterBehavior for OmaWitchDoctorBehavior {
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# 直线/远程用 MinMC/MaxMC（OmaWitchDoctor.cs:65/76）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             if dist <= 1 {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;

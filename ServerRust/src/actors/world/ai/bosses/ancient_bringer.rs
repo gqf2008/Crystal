@@ -90,8 +90,8 @@ impl MonsterBehavior for AncientBringerBehavior {
                 // 远程：9/10 MC AOE(4)；1/10 MC*2 AOE(5) + 召唤蝙蝠
                 let rare = fastrand::i32(0..10) == 0;
                 monster.next_attack_tick = ctx.tick_count + if rare { 12 } else { 8 };
-                let max_mc = if rare { monster.max_mac * 2 } else { monster.max_mac };
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, max_mc, 0).max(1);
+                let max_mc = if rare { monster.max_mc * 2 } else { monster.max_mc };
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, max_mc, 0).max(1);
                 let splash = if rare { 5 } else { 4 };
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,

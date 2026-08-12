@@ -31,6 +31,8 @@ impl MonsterBehavior for FlameScytheBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             if dist <= 1 {
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -46,7 +48,7 @@ impl MonsterBehavior for FlameScytheBehavior {
                     center_x: target.x,
                     center_y: target.y,
                     radius: AOE_RADIUS,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             }

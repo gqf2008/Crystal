@@ -35,7 +35,7 @@ impl MonsterBehavior for DarkBeastBehavior {
             // C# Envir.Random.Next(5) > 0：80% 物理 DC / 20% 魔法 MC（Type=1）
             let magic = fastrand::i32(0..5) == 0;
             let damage = if magic {
-                crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
             } else {
                 crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1)
             };

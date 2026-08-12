@@ -115,7 +115,7 @@ impl MonsterBehavior for OmaKingBehavior {
                 }
             } else {
                 // 1/3 或远距离：远程 MC 弹道（C# Type=1，DefenceType.MAC）
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,

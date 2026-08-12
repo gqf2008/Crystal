@@ -59,7 +59,7 @@ impl MonsterBehavior for StoneGolemBehavior {
                 let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as usize) % 8;
                 let center_x = monster.x + DIR_DX[dir] * QUAKE_OFFSET;
                 let center_y = monster.y + DIR_DY[dir] * QUAKE_OFFSET;
-                let value = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let value = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 // 5x5 法术场：C# 每格一个 SpellObject（全 25 格）
                 for oy in -QUAKE_RADIUS..=QUAKE_RADIUS {
                     for ox in -QUAKE_RADIUS..=QUAKE_RADIUS {

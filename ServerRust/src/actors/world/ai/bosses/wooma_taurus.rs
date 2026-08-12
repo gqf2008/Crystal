@@ -138,7 +138,7 @@ impl MonsterBehavior for WoomaTaurusBehavior {
             // 狂暴期攻击冷却减半
             let cooldown = if self.rage_end_tick > 0 { 3 } else { 5 };
             monster.next_attack_tick = ctx.tick_count + cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,

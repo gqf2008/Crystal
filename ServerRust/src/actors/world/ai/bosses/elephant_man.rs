@@ -43,7 +43,7 @@ impl MonsterBehavior for ElephantManBehavior {
                 });
             } else {
                 // C# 魔法分支：GetAttackPower(MinMC, MaxMC) + FindAllTargets(1, CurrentLocation)
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
                     center_x: monster.x,

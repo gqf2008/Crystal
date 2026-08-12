@@ -46,7 +46,7 @@ impl MonsterBehavior for ManectricKingBehavior {
         if hp_pct < 20 && ctx.tick_count >= self.next_mass_tick {
             // C# MassAttackTime = Time + 2000 + Random(5)*1000
             self.next_mass_tick = ctx.tick_count + 20 + fastrand::u64(0..5) * 10;
-            let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
             let targets: Vec<crate::actors::world::ai::PlayerSnap> =
                 ctx.find_targets_in_range(monster.x, monster.y, MASS_RADIUS, monster.map_index)
                     .into_iter().copied().collect();
@@ -90,7 +90,7 @@ impl MonsterBehavior for ManectricKingBehavior {
                 });
             } else {
                 // Type0 MC LineAttack(3)
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =
                     ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)

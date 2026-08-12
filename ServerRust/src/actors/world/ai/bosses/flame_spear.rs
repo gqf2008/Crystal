@@ -35,6 +35,8 @@ impl MonsterBehavior for FlameSpearBehavior {
         if in_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             if dist <= 1 {
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
@@ -51,7 +53,7 @@ impl MonsterBehavior for FlameSpearBehavior {
                     origin_y: monster.y,
                     direction: dir,
                     range: ATTACK_RANGE,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
             }

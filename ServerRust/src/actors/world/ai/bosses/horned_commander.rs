@@ -124,7 +124,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
                     let (anchor_x, anchor_y) = self.rock_spike_anchors[self.rock_spike_index];
                     self.rock_spike_index += 1;
                     // C# SpawnRockSpikes 值=MC（HornedCommander.cs:391/398）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     for dy in -2..=2i32 {
                         for dx in -2..=2i32 {
                             ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {

@@ -56,7 +56,7 @@ impl MonsterBehavior for TreeQueenBehavior {
                 // 3/4：单根（SpawnRoots）— 玩家附近随机点
                 if let Some(t) = ctx.nearest_target(monster.x, monster.y, 30, monster.map_index).copied() {
                     // C# SpawnRoots 值=MC 嵌套随机（TreeQueen.cs:166）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0);
                     let dx = fastrand::i32(-5..=5);
                     let dy = fastrand::i32(-5..=5);
                     ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
@@ -77,7 +77,7 @@ impl MonsterBehavior for TreeQueenBehavior {
                     .copied().collect();
                 if let Some(t) = targets.get(fastrand::usize(0..targets.len())) {
                     // C# SpawnMassRoots 值=MC（TreeQueen.cs:216/223）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0);
                     let offsets: [(i32, i32); 5] = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)];
                     for (ox, oy) in offsets {
                         ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {

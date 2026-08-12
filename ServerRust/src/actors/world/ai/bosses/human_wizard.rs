@@ -49,7 +49,7 @@ impl MonsterBehavior for HumanWizardBehavior {
         {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // 雷电术：MC MAC（C# GetAttackPower MinMC/MaxMC + DefenceType.MAC）
-            let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,

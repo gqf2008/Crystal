@@ -56,7 +56,7 @@ impl MonsterBehavior for DarkCaptainBehavior {
             // ---- Thunder（2 格 AOE）----
             if ctx.tick_count >= self.next_thunder_tick {
                 self.next_thunder_tick = ctx.tick_count + 100 + fastrand::u64(0..100);
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =
                     ctx.find_targets_in_range(monster.x, monster.y, 2, monster.map_index)
                         .into_iter().copied().collect();
@@ -75,7 +75,7 @@ impl MonsterBehavior for DarkCaptainBehavior {
             // ---- MassThunder（5 格大 AOE）----
             if ctx.tick_count >= self.next_mass_thunder_tick {
                 self.next_mass_thunder_tick = ctx.tick_count + 200 + fastrand::u64(0..300);
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =
                     ctx.find_targets_in_range(monster.x, monster.y, 5, monster.map_index)
                         .into_iter().copied().collect();

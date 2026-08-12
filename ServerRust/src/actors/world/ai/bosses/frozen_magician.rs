@@ -35,7 +35,7 @@ impl MonsterBehavior for FrozenMagicianBehavior {
             if ctx.tick_count >= monster.next_attack_tick && fastrand::i32(0..2) == 0 {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 10;
                 // C# 远程用 MinMC/MaxMC（FrozenMagician.cs:107），Type=1
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
                 let dmg = if fastrand::i32(0..3) == 0 { (damage as f32 * 1.5) as i32 } else { damage };
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
@@ -70,7 +70,7 @@ impl MonsterBehavior for FrozenMagicianBehavior {
             } else {
                 // C# 近战内 1/3 远程（MC，Type=1）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 10;
-                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
                 let dmg = if fastrand::i32(0..3) == 0 { (mc_damage as f32 * 1.5) as i32 } else { mc_damage };
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,

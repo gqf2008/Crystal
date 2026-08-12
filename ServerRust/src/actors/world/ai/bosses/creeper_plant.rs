@@ -66,6 +66,12 @@ impl MonsterBehavior for CreeperPlantBehavior {
                 monster.luck,
             )
             .max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             if dist <= 1 {
                 ctx.out_attacks
                     .push(crate::actors::world::ai::AttackAction::Melee {
@@ -81,7 +87,7 @@ impl MonsterBehavior for CreeperPlantBehavior {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
                         target_object_id: target.object_id,
-                        damage,
+                        damage: mc_damage,
                         spell_id: 0,
                     });
             }

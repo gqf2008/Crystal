@@ -41,6 +41,8 @@ impl MonsterBehavior for PeacockSpiderBehavior {
         if ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# 远程/魔法攻击用 MC（#2328）
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             // C# !ranged && Random.Next(4) > 0：近战 3/4
             if dist <= MELEE_RANGE && fastrand::i32(0..4) > 0 {
                 // 毒云优先（20s 冷却）
@@ -104,7 +106,7 @@ impl MonsterBehavior for PeacockSpiderBehavior {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
-                    damage,
+                    damage: mc_damage,
                     spell_id: 0,
                 });
                 if fastrand::i32(0..4) == 0 {

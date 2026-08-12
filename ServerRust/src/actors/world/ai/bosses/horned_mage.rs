@@ -43,7 +43,7 @@ impl MonsterBehavior for HornedMageBehavior {
                     ctx.find_targets_in_range(monster.x, monster.y, 3, monster.map_index)
                         .into_iter().copied().collect();
                 for h in hits {
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                         attacker_oid: monster.object_id,
                         target_session: h.session_id,

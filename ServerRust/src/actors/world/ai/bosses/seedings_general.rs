@@ -57,7 +57,7 @@ impl MonsterBehavior for SeedingsGeneralBehavior {
                     });
                 } else {
                     // Type1 MC 绿色溅射（MACAgility）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
@@ -70,7 +70,7 @@ impl MonsterBehavior for SeedingsGeneralBehavior {
                 // 远程 4/5：MC 回声喊 / 1/5：MC 践踏
                 if fastrand::i32(0..5) > 0 {
                     // Type0 echo 单体 + Slow
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
@@ -87,7 +87,7 @@ impl MonsterBehavior for SeedingsGeneralBehavior {
                         }
                 } else {
                     // Type1 stomp AOE 2 格 + Frozen
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     let hits: Vec<crate::actors::world::ai::PlayerSnap> =
                         ctx.find_targets_in_range(monster.x, monster.y, STOMP_RADIUS, monster.map_index)
                             .into_iter().copied().collect();

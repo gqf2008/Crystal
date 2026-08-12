@@ -82,7 +82,7 @@ impl MonsterBehavior for IcePillarBehavior {
                 let nearby: Vec<crate::actors::world::ai::PlayerSnap> =
                     ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
                         .into_iter().copied().collect();
-                let mc_power = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let mc_power = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
                 for p in nearby {
                     // C# CloseAttack（IcePillar.cs:158）：每个命中目标广播 IcePillar 特效

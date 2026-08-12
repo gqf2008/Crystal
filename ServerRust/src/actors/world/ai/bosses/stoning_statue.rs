@@ -79,7 +79,7 @@ impl MonsterBehavior for StoningStatueBehavior {
                 ctx.find_targets_in_range(monster.x, monster.y, 2, monster.map_index)
                     .into_iter().copied().collect();
             for h in hits {
-                let dmg = monster.max_mac.max(1);
+                let dmg = monster.max_mc.max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: h.session_id,

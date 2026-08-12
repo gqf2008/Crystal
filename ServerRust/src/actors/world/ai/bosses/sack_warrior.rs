@@ -60,7 +60,7 @@ impl MonsterBehavior for SackWarriorBehavior {
                 }
             } else {
                 // C# 魔法近战 MC（SackWarrior.cs:42）
-                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,

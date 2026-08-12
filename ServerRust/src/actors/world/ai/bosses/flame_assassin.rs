@@ -40,7 +40,7 @@ impl MonsterBehavior for FlameAssassinBehavior {
                 spell_id: 0,
             });
             // C# CompleteRangeAttack：PoisonTarget(1, MC, Slow, 1000)：100%、时长=MC 攻秒数、值=SC
-            let mc_power = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+            let mc_power = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
             let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                 session_id: target.session_id,

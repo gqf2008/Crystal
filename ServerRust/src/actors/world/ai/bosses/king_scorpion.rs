@@ -61,7 +61,7 @@ impl MonsterBehavior for KingScorpionBehavior {
             ctx.find_targets_in_range(cx, cy, 2, monster.map_index)
                 .into_iter().copied().collect();
         let damage = if use_mc {
-            crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1)
+            crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1)
         } else {
             crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
         };

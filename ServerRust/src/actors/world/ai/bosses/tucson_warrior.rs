@@ -36,7 +36,7 @@ impl MonsterBehavior for TucsonWarriorBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# SmashAttack 用 MinMC/MaxMC（TucsonWarrior.cs:62）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
             // C# !range && Random.Next(5) > 0：近战 4/5 Halfmoon / 1/5 Smash
             if dist <= 1 && fastrand::i32(0..5) > 0 {
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);

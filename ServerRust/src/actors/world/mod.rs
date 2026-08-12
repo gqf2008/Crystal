@@ -614,6 +614,9 @@ pub struct MonsterState {
     /// 最小/最大灵魂攻击力（C# Stat.MinSC/MaxSC；毒值/道士伤害用）
     pub min_sc: i32,
     pub max_sc: i32,
+    /// 最小/最大魔法攻击力（C# Stat.MinMC/MaxMC；魔法攻击用，勿用 min_mac 代替）
+    pub min_mc: i32,
+    pub max_mc: i32,
     pub agility: i32,
     pub accuracy: i32,
     /// 护甲倍率（C# ArmourRate，默认 1.0）
@@ -914,6 +917,8 @@ impl MonsterState {
         self.max_mac = get(Stat::MaxMAC);
         self.min_sc = get(Stat::MinSC);
         self.max_sc = get(Stat::MaxSC);
+        self.min_mc = get(Stat::MinMC);
+        self.max_mc = get(Stat::MaxMC);
         self.agility = get(Stat::Agility);
         self.accuracy = get(Stat::Accuracy);
         self.magic_resist = get(Stat::MagicResist);
@@ -2607,7 +2612,7 @@ impl WorldActor {
             exp_owner_session: None,
             exp_owner_tick: 0,
             pending_brown_attacker: None,
-            min_sc: 0, max_sc: 0, provoked: false,
+            min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0, provoked: false,
             is_elite: false, is_boss: false,
             min_ac, max_ac, min_mac, max_mac,
             agility: 0, accuracy: 0,
@@ -4564,7 +4569,7 @@ impl WorldActor {
                                     exp_owner_session: None,
                                     exp_owner_tick: 0,
                                     pending_brown_attacker: None,
-                                    min_sc: 0, max_sc: 0,
+                                    min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
                                     provoked: true, // Boss is always aggressive
                                     is_elite: false,
                                     is_boss: true,
@@ -4866,7 +4871,7 @@ impl WorldActor {
                                         exp_owner_session: None,
                                         exp_owner_tick: 0,
                                         pending_brown_attacker: None,
-                                        min_sc: 0, max_sc: 0, provoked: false,
+                                        min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0, provoked: false,
                                         is_elite: false, is_boss: false,
                                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
@@ -5870,7 +5875,7 @@ impl WorldActor {
                 exp_owner_session: None,
                 exp_owner_tick: 0,
                 pending_brown_attacker: None,
-                min_sc: 0, max_sc: 0,
+                min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
                 provoked: false,
                 is_elite: false,
                 is_boss: false,
@@ -8753,7 +8758,7 @@ async fn spawn_npcs_and_monsters(
             exp_owner_session: None,
             exp_owner_tick: 0,
             pending_brown_attacker: None,
-            min_sc: 0, max_sc: 0,
+            min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
             provoked: false,
             rarity,
             is_elite,
@@ -8848,7 +8853,7 @@ async fn spawn_npcs_and_monsters(
                         exp_owner_session: None,
                         exp_owner_tick: 0,
                         pending_brown_attacker: None,
-                        min_sc: 0, max_sc: 0,
+                        min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
                         provoked: false,
                         is_elite: false,
                         is_boss: false,
@@ -9422,7 +9427,7 @@ mod tests {
             exp_owner_session: None,
             exp_owner_tick: 0,
             pending_brown_attacker: None,
-            min_sc: 0, max_sc: 0,
+            min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
             provoked: false,
             is_elite: false,
             is_boss: true,
@@ -9498,7 +9503,7 @@ mod tests {
             exp_owner_session: None,
             exp_owner_tick: 0,
             pending_brown_attacker: None,
-            min_sc: 0, max_sc: 0,
+            min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0,
             provoked: false,
             is_elite: false,
             is_boss: true,
@@ -9531,6 +9536,47 @@ mod tests {
             next_recall_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         }
+    }
+
+    #[test]
+    fn test_fill_combat_stats_extracts_mc() {
+        // #2328：fill_combat_stats 提取 MinMC(9)/MaxMC(10)，供魔法攻击使用（勿用 min_mac 代替）
+        let mut m = test_monster_state();
+        let mut stats = std::collections::HashMap::new();
+        stats.insert(mir2_shared::enums::Stat::MinDC as u8, 5);
+        stats.insert(mir2_shared::enums::Stat::MaxDC as u8, 10);
+        stats.insert(mir2_shared::enums::Stat::MinMC as u8, 12);
+        stats.insert(mir2_shared::enums::Stat::MaxMC as u8, 24);
+        stats.insert(mir2_shared::enums::Stat::MinMAC as u8, 30);
+        stats.insert(mir2_shared::enums::Stat::MaxMAC as u8, 40);
+        let info = crate::db::MonsterInfo {
+            index: 1,
+            name: "Test".to_string(),
+            image: 0,
+            ai: 0,
+            effect: 0,
+            level: 1,
+            view_range: 0,
+            cool_eye: 0,
+            stats_json: "{}".to_string(),
+            stats,
+            light: 0,
+            attack_speed: 0,
+            move_speed: 0,
+            experience: 0,
+            can_push: false,
+            can_tame: false,
+            auto_rev: false,
+            undead: false,
+            can_recall: false,
+            drop_path: None,
+        };
+        m.fill_combat_stats(&info);
+        assert_eq!(m.min_mc, 12);
+        assert_eq!(m.max_mc, 24);
+        assert_eq!(m.min_mac, 30);
+        assert_eq!(m.max_mac, 40);
+        assert_eq!(m.min_dmg, 50); // 不受影响（test_monster_state 默认 50）
     }
 
     #[test]

@@ -74,7 +74,7 @@ impl MonsterBehavior for EarthGolemBehavior {
                 });
             } else {
                 // 远程：目标点 3x3 地面冲击法术场（C# EarthGolemPile）
-                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                 ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
                     spell: Spell::EarthGolemPile,
                     x: target.x,

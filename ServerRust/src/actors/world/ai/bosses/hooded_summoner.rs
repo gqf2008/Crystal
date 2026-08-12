@@ -54,7 +54,7 @@ impl MonsterBehavior for HoodedSummonerBehavior {
             match roll {
                 0..=3 => {
                     // 远程 MC 弹道（MAC）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
@@ -79,7 +79,7 @@ impl MonsterBehavior for HoodedSummonerBehavior {
                         });
                     } else {
                         // 冷却中：退化为远程弹道
-                        let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
+                        let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
                         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                             attacker_oid: monster.object_id,
                             target_session: target.session_id,

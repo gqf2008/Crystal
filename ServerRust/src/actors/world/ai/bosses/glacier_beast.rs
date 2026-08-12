@@ -36,7 +36,7 @@ impl MonsterBehavior for GlacierBeastBehavior {
             // C# CrazyManworm：2/3 物理 DC（attackType=0）/ 1/3 魔法 MC（attackType=1）
             let magic = fastrand::i32(0..3) == 0;
             let damage = if magic {
-                crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
             } else {
                 crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1)
             };
