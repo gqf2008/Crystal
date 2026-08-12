@@ -925,4 +925,22 @@ mod tests {
         assert_eq!(c.mentor_damage_boost, 10);
         assert_eq!(c.mentee_exp_bank, 1);
     }
+
+    /// #2402：真实 config/server.toml 能被解析（新配置段不破坏服务器启动）
+    #[test]
+    fn load_real_server_toml_parses() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/config/server.toml");
+        let cfg = load_config(path).expect("server.toml 必须能解析");
+        // 抽查近期新增段/字段的真实文件值
+        assert!(cfg.server.goods_on);
+        assert_eq!(cfg.server.goods_max_stored, 15);
+        assert_eq!(cfg.server.monster_recall_range, 12);
+        assert_eq!(cfg.server.archive_inactive_after_months, 12);
+        assert_eq!(cfg.social.marriage_cooldown_days, 7);
+        assert_eq!(cfg.social.mentor_damage_boost, 10);
+        assert_eq!(cfg.social.mentee_exp_bank, 1);
+        assert_eq!(cfg.refine.cost, 125);
+        assert_eq!(cfg.refine.base_chance, 20);
+        assert_eq!(cfg.refine.ore_name, "BlackIronOre");
+    }
 }
