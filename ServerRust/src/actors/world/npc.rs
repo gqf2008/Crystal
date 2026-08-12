@@ -811,6 +811,8 @@ impl Message<NewCharacterRequest> for WorldActor {
             chat_banned_until_ms: 0,
             chat_window_start_ms: 0,
             chat_tick: 0,
+            char_ban_expiry_ticks: 0,
+            char_ban_reason: String::new(),
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),

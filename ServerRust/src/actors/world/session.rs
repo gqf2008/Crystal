@@ -116,6 +116,11 @@ fn chat_throttle_decision(
     ChatDecision::Allow
 }
 
+/// #2336：C# MirConnection.cs:1111-1118——角色封禁判定（Banned && ExpiryDate > Now）
+fn char_ban_active(expiry_ticks: i64, now_ticks: i64) -> bool {
+    expiry_ticks > now_ticks
+}
+
 impl WorldActor {
     /// 登录公告（C# Settings.Notice + S.UpdateNotice）
     async fn send_login_notice(&mut self, session_id: u64, character_name: &str) {
@@ -293,7 +298,7 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // C#：找不到角色 → S.StartGame { Result = 2 }（不再隐式创建默认角色，避免绕过角色上限）
-        let state = match state {
+        let mut state = match state {
             Some(s) => s,
             None => {
                 let packet = mir2_shared::packets::server::login::StartGame { result: 2, resolution: 0 };
@@ -308,6 +313,29 @@ impl Message<StartGameRequest> for WorldActor {
                 return;
             }
         };
+
+        // #2336：C# MirConnection.cs:1111-1121——角色封禁：Banned && ExpiryDate > Now → S.StartGameBanned；到期自动解封
+        let now_ticks = crate::actors::world::tick::dotnet_now_ticks();
+        if char_ban_active(state.char_ban_expiry_ticks, now_ticks) {
+            let packet = mir2_shared::packets::server::login::StartGameBanned {
+                reason: state.char_ban_reason.clone(),
+                expiry_date: state.char_ban_expiry_ticks,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StartGameBanned as i16, &body),
+                }).await;
+            }
+            warn!("StartGame rejected: character '{}' banned until ticks {}", state.name, state.char_ban_expiry_ticks);
+            return;
+        }
+        if state.char_ban_expiry_ticks > 0 {
+            // 到期自动解封（C# info.Banned=false + 清空原因/过期时间后继续）
+            state.char_ban_expiry_ticks = 0;
+            state.char_ban_reason = String::new();
+        }
 
         // C# Settings.AllowStartGame：非 GM 且关闭时 → S.StartGame{Result=0}（GM 用加载角色的 is_gm 判断）
         if !self.social_ref.ask(crate::actors::social::NpcGetAllowStartGame).await.unwrap_or(true) && !state.is_gm {
@@ -4897,6 +4925,8 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             chat_banned_until_ms: 0,
             chat_window_start_ms: 0,
             chat_tick: 0,
+            char_ban_expiry_ticks: 0,
+            char_ban_reason: String::new(),
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
@@ -4986,7 +5016,7 @@ mod tests {
     use mir2_shared::packets::Packet;
     use super::{
         effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by,
-        user_location_body, parse_chat_channel, chat_throttle_decision, ChatChannel, ChatDecision, ChatThrottle,
+        user_location_body, parse_chat_channel, char_ban_active, chat_throttle_decision, ChatChannel, ChatDecision, ChatThrottle,
     };
 
     #[test]
@@ -5035,6 +5065,16 @@ mod tests {
         );
         // 到期后（banned_until <= now）→ 正常放行路径
         assert_eq!(chat_throttle_decision(&mut t, 6000, 5000, false), ChatDecision::Allow);
+    }
+
+    /// #2336：C# MirConnection.cs:1111-1118 角色封禁判定
+    #[test]
+    fn test_char_ban_active() {
+        let now = 638_000_000_000_000_000i64; // 任意固定 now
+        assert!(!char_ban_active(0, now));               // 未封禁
+        assert!(char_ban_active(now + 1, now));          // 封禁中
+        assert!(!char_ban_active(now - 1, now));         // 已到期
+        assert!(!char_ban_active(now, now));             // 恰好到期
     }
 
     /// #2184：C# PlayerObject.Chat 频道前缀解析（/、!!、!~、!#、:)、@!、!）
