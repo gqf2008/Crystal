@@ -3936,6 +3936,9 @@ impl Message<MagicRequest> for WorldActor {
                             let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
                             let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
                             let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                            // #2428：Clone 走 HumanWizard（C# AI 55）用 MC 远程伤害，需从 MonsterInfo 补 MC
+                            let min_mc = info.stats.get(&(mir2_shared::enums::Stat::MinMC as u8)).copied().unwrap_or(0);
+                            let max_mc = info.stats.get(&(mir2_shared::enums::Stat::MaxMC as u8)).copied().unwrap_or(0);
                             let spawn = MonsterSpawn {
                                 name: info.name.clone(),
                                 image: info.image as u16,
@@ -3971,7 +3974,7 @@ impl Message<MagicRequest> for WorldActor {
                                 exp_owner_session: None,
                                 exp_owner_tick: 0,
                                 pending_brown_attacker: None,
-                                min_sc: 0, max_sc: 0, min_mc: 0, max_mc: 0, provoked: false,
+                                min_sc: 0, max_sc: 0, min_mc, max_mc, provoked: false,
                                 is_elite: false, is_boss: false,
                                 min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                 agility: 0, accuracy: 0,
