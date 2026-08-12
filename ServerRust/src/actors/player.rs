@@ -351,6 +351,8 @@ pub struct PlayerState {
     pub max_sc_rate_percent: i32,
     /// C# Stats[Stat.AttackSpeedRatePercent]（RefreshStats :1751-1759）
     pub attack_speed_rate_percent: i32,
+    /// C# Stats[Stat.SkillGainMultiplier]（LevelMagic 技能经验倍率；装备/行会 Buff 合计）
+    pub skill_gain_multiplier: i32,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -875,6 +877,7 @@ allow_group: false,
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
@@ -2562,6 +2565,8 @@ pub struct SetStatBonuses {
     pub max_sc_rate_percent: i32,
     /// C# Stats[Stat.AttackSpeedRatePercent]（RefreshStats :1751-1759）
     pub attack_speed_rate_percent: i32,
+    /// C# Stats[Stat.SkillGainMultiplier]（LevelMagic 技能经验倍率；装备/行会 Buff 合计）
+    pub skill_gain_multiplier: i32,
 }
 
 /// C# HumanObject.RefreshStatCaps（:2229-2253）：Stats[key] = min(cap, Stats[key])——职业属性上限（BaseStats.caps）
@@ -2686,6 +2691,7 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.max_mc_rate_percent = msg.max_mc_rate_percent;
         self.state.max_sc_rate_percent = msg.max_sc_rate_percent;
         self.state.attack_speed_rate_percent = msg.attack_speed_rate_percent;
+        self.state.skill_gain_multiplier = msg.skill_gain_multiplier;
 
         // C# RefreshStatCaps（:2229-2253）：职业属性上限（装备/附加/觉醒/宝石/行会 Buff 后统一 cap）
         cap_player_stats(self.state.class, &mut self.state);
@@ -5721,9 +5727,15 @@ impl PlayerState {
         amount: u16,
         info: Option<&crate::db::MagicInfo>,
     ) -> Option<(mir2_shared::enums::Spell, u8, u16)> {
-        // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
+        // #942/#2326：C# LevelMagic——Stats[SkillGainMultiplier]（默认 1；宝石 Skill=3；装备/行会 BuffSkillRate 经属性管线）
         // #1246：破损装备特殊模式失效（C# RefreshStats continue）；#2308 槽位宝石 Skill 也计入（C# RefreshSocketStats :1973）
-        let skill_multiplier = crate::actors::world::has_special_equipped(self, mir2_shared::enums::SpecialItemMode::SKILL);
+        let skill_multiplier = if self.skill_gain_multiplier > 0 {
+            self.skill_gain_multiplier as u16
+        } else if crate::actors::world::has_special_equipped(self, mir2_shared::enums::SpecialItemMode::SKILL) {
+            3
+        } else {
+            1
+        };
         let spell_cs = spell_shared.saturating_sub(3) as i32;
         let magic = self.magics.iter_mut().find(|m| m.spell == spell_cs)?;
         if magic.level >= 3 {
@@ -5741,13 +5753,12 @@ impl PlayerState {
             }
         }
         let mut amount = amount;
-        if skill_multiplier {
-            amount = amount.saturating_mul(3);
-        } else if self.is_mentor && self.mentor_damage_bonus {
-            // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2
-            //（C#：仅当 Stats[SkillGainMultiplier]==1 时 ×2，随后再 ×SkillGainMultiplier）
+        if skill_multiplier == 1 && self.is_mentor && self.mentor_damage_bonus {
+            // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2（仅当 multiplier==1，C# :6915）
             amount = amount.saturating_mul(2);
         }
+        // C# :6924：exp *= Stats[SkillGainMultiplier]
+        amount = amount.saturating_mul(skill_multiplier);
         magic.experience = magic.experience.saturating_add(amount);
         let xp_needed = match info {
             Some(i) => match magic.level {
@@ -6583,6 +6594,30 @@ mod tests {
     }
 
     #[test]
+    fn test_skill_gain_multiplier() {
+        // #2326：C# LevelMagic——exp × Stats[SkillGainMultiplier]
+        let mut st = make_state();
+        st.magics.push(PlayerMagic::new(2)); // Slaying C#=2
+        st.skill_gain_multiplier = 2;
+        let r = st.gain_spell_exp(5, 1, None); // SharedRust spell = C#+3
+        assert!(r.is_none()); // 经验 2 < need1(1000)，不升级
+        assert_eq!(st.magics[0].experience, 2);
+
+        // multiplier=3（宝石 Skill）：×3
+        let mut st2 = make_state();
+        st2.magics.push(PlayerMagic::new(2));
+        st2.skill_gain_multiplier = 3;
+        let _ = st2.gain_spell_exp(5, 1, None);
+        assert_eq!(st2.magics[0].experience, 3);
+
+        // 默认 1：×1
+        let mut st3 = make_state();
+        st3.magics.push(PlayerMagic::new(2));
+        let _ = st3.gain_spell_exp(5, 1, None);
+        assert_eq!(st3.magics[0].experience, 1);
+    }
+
+    #[test]
     fn test_effective_max_hp_applies_rate_percent() {
         // #2314：C# RefreshStats——Stats[HP] += Stats[HP] * HPRatePercent / 100
         let mut st = make_state();
@@ -6766,6 +6801,7 @@ allow_group: false,
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,

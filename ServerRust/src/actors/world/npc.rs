@@ -808,6 +808,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,

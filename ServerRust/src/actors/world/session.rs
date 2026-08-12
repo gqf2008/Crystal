@@ -4808,6 +4808,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             max_mc_rate_percent: 0,
             max_sc_rate_percent: 0,
             attack_speed_rate_percent: 0,
+            skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
             no_experience_map: false,
