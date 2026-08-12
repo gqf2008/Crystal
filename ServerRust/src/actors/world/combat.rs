@@ -1744,14 +1744,19 @@ impl Message<TownReviveRequest> for WorldActor {
         // - PKPoints >= 200 → PK 城（Settings.PKTownMapName="3" / (848,677)），PK 城地图缺失则回绑定点
         // - 否则回绑定点；绑定点无效回退当前地图安全区出生点
         let (revive_map, spawn_x, spawn_y) = if state.pk_points >= 200 {
+            // #2422：C# Settings.PKTownMapName / PKTownPositionX/Y（Configs/Setup.ini [PKTown]）
+            let cfg_name = self.setup_cfg.pk_town_map_name.to_lowercase();
             let pk_town_map = self.map_infos.values()
                 .find(|m| {
                     let f = m.file_name.to_lowercase();
-                    f == "3" || f.starts_with("3.") || f.contains("mongchon") || f.contains("pranja")
+                    f == cfg_name
+                        || f.starts_with(&format!("{}.", cfg_name))
+                        || f.contains("mongchon")
+                        || f.contains("pranja")
                 })
                 .map(|m| m.index as u16);
             match pk_town_map {
-                Some(m) => (m, PK_TOWN_X, PK_TOWN_Y),
+                Some(m) => (m, self.setup_cfg.pk_town_x, self.setup_cfg.pk_town_y),
                 None => self.default_revive_spot(&state),
             }
         } else {
