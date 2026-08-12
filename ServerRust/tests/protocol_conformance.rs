@@ -100,14 +100,19 @@ async fn start_server_with_login() -> u16 {
     port
 }
 
-/// 启动带 WorldActor 的完整服务器(支持 StartGame 流程)。
+/// 启动带 WorldActor 的完整服务器(支持 StartGame 流程；in-memory DB)。
 /// 需要 Daneo1989/ 目录(地图 + 任务文件)。
 async fn start_server_with_world() -> u16 {
+    start_server_with_world_url("sqlite::memory:").await
+}
+
+/// 启动带 WorldActor 的完整服务器（指定 DB URL；#2438 真实库副本回归用）。
+async fn start_server_with_world_url(db_url: &str) -> u16 {
     let port = find_free_port();
     let gate_ref = GateActor::spawn_with_mailbox((), kameo::mailbox::unbounded());
     let _ = gate_ref.ask(SetMaxConnections(1024)).await;
 
-    let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+    let db_pool = db::init_db_pool(db_url).await.expect("init_db");
 
     // AccountActor
     let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
@@ -437,5 +442,112 @@ fn test_startgame_full_flow() {
     assert!(got_startgame, "Expected StartGame response from server (map_changed={} userinfo={} health={} loc={} amode={} pmode={} defaultnpc={} basestats={})",
         got_map_changed, got_userinfo, got_health, got_location, got_amode, got_pmode, got_defaultnpc, got_basestats);
     });
+}
+
+
+/// #2438：真实库副本启动/登录/建号/进图回归——用 `Data/crystal.db` 的临时副本跑完整服务器，
+/// 防止旧库 schema 漂移（如 monster_infos.can_recall 迁移缺失导致启动 panic）与出生地图解析回归；
+/// 数据目录缺失时跳过（CI 无数据版本）。只读写临时副本，不触碰真实 DB。
+#[test]
+fn test_startgame_real_db_copy() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("crystal_server=debug,kameo=debug")
+        .try_init();
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let db_src = manifest.join("Data/crystal.db");
+    if !db_src.exists() || !manifest.join("Daneo1989").exists() {
+        eprintln!("real data missing (Data/crystal.db / Daneo1989), skipping real-db regression test");
+        return;
+    }
+    let db_copy = std::env::temp_dir().join(format!(
+        "crystal_real_db_smoke_{}_{}.db",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+    ));
+    std::fs::copy(&db_src, &db_copy).expect("copy Data/crystal.db to temp");
+    let _ = std::fs::remove_file(db_copy.with_extension("db-wal"));
+    let _ = std::fs::remove_file(db_copy.with_extension("db-shm"));
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .unwrap();
+    let result: Result<(), String> = rt.block_on(async {
+        let url = format!("sqlite:{}", db_copy.to_string_lossy().replace('\\', "/"));
+        let port = start_server_with_world_url(&url).await;
+        // 等待 WorldActor 完成真实库加载（避免连接过早导致请求在启动中途到达）
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).await.map_err(|e| e.to_string())?;
+
+        // Connected + ClientVersion
+        let _ = recv_packet(&mut stream).await;
+        let hash = b"real_db_smoke_hash!";
+        let mut cv_body = Vec::new();
+        cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+        cv_body.extend_from_slice(hash);
+        stream.write_all(&make_packet(0, &cv_body)).await.map_err(|e| e.to_string())?;
+        let _ = recv_packet(&mut stream).await;
+
+        // NewAccount（副本内新建；重跑若已存在则 Login 兜底）
+        // 用户名/角色名须 3-15 字符（校验：validate_username/validate_character_name）
+        let pid_part = std::process::id() % 100000;
+        let ms_part = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) % 1000;
+        let suffix = format!("{:05}{:03}", pid_part, ms_part); // 8 位
+        let acct = format!("sm{}", suffix); // 10 字符
+        let mut na_body = Vec::new();
+        mir2_shared::binary::write_dotnet_string(&mut na_body, &acct).unwrap();
+        mir2_shared::binary::write_dotnet_string(&mut na_body, "smokepass").unwrap();
+        na_body.extend_from_slice(&0i64.to_le_bytes());
+        mir2_shared::binary::write_dotnet_string(&mut na_body, "RealDB Smoke").unwrap();
+        mir2_shared::binary::write_dotnet_string(&mut na_body, "q").unwrap();
+        mir2_shared::binary::write_dotnet_string(&mut na_body, "a").unwrap();
+        mir2_shared::binary::write_dotnet_string(&mut na_body, "smoke@example.com").unwrap();
+        stream.write_all(&make_packet(3, &na_body)).await.map_err(|e| e.to_string())?;
+        let _ = recv_packet(&mut stream).await;
+
+        // Login -> LoginSuccess(9)
+        let mut login_body = Vec::new();
+        mir2_shared::binary::write_dotnet_string(&mut login_body, &acct).unwrap();
+        mir2_shared::binary::write_dotnet_string(&mut login_body, "smokepass").unwrap();
+        stream.write_all(&make_packet(5, &login_body)).await.map_err(|e| e.to_string())?;
+        let mut login_ok = false;
+        for _ in 0..50 {
+            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await.map_err(|_| "login response timeout".to_string())?;
+            if op == 9 { login_ok = true; break; }
+        }
+        if !login_ok { return Err("LoginSuccess not received".to_string()); }
+
+        // NewCharacter -> NewCharacterSuccess(11)
+        let chname = format!("Sm{}", suffix); // 10 字符
+        let mut nc_body = Vec::new();
+        mir2_shared::binary::write_dotnet_string(&mut nc_body, &chname).unwrap();
+        nc_body.push(0u8); // Male
+        nc_body.push(0u8); // Warrior
+        stream.write_all(&make_packet(6, &nc_body)).await.map_err(|e| e.to_string())?;
+        let mut nc_ok = false;
+        for _ in 0..50 {
+            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await.map_err(|_| "newchar response timeout".to_string())?;
+            if op == 11 { nc_ok = true; break; }
+        }
+        if !nc_ok { return Err("NewCharacterSuccess not received".to_string()); }
+
+        // StartGame(8) -> 收到 StartGame(14)（出生地图解析/数据加载正常才会下发）
+        stream.write_all(&make_packet(8, &0i32.to_le_bytes())).await.map_err(|e| e.to_string())?;
+        let mut got_startgame = false;
+        for _ in 0..60 {
+            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await.map_err(|_| "startgame response timeout".to_string())?;
+            if op == 14 { got_startgame = true; break; }
+        }
+        if !got_startgame { return Err("StartGame response not received".to_string()); }
+        Ok(())
+    });
+
+    // 清理临时副本（含 WAL/SHM 残留）
+    let _ = std::fs::remove_file(&db_copy);
+    let _ = std::fs::remove_file(db_copy.with_extension("db-wal"));
+    let _ = std::fs::remove_file(db_copy.with_extension("db-shm"));
+
+    result.expect("real-db startgame regression failed");
 }
 
