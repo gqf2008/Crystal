@@ -545,4 +545,25 @@ mod tests {
         assert!(item.is_some());
         assert!(log.active_refine.is_none());
     }
+
+    /// #2378：CollectRefine 语义——结算（Applied）后 retrieve 返回已应用属性的物品，精炼字段已清空
+    #[test]
+    fn test_settle_applied_then_retrieve_returns_upgraded_item() {
+        use mir2_shared::enums::{RefinedValue, Stat};
+        let mut log = RefineLog::new();
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = 9;
+        it.refined_value = RefinedValue::Dc;
+        it.refine_added = 1;
+        it.refine_success_chance = 100; // 必成功
+        assert!(log.deposit_item(it));
+        assert!(log.begin_refine(0, 3600, 100));
+        assert_eq!(log.settle_check(), Some(RefineCheckResult::Applied));
+        let ri = log.retrieve().unwrap();
+        let item = ri.item.unwrap();
+        assert!(item.added_stats.get(Stat::MaxDC) >= 1);
+        assert_eq!(item.refined_value, RefinedValue::None);
+        assert_eq!(item.refine_added, 0);
+        assert!(log.active_refine.is_none());
+    }
 }
