@@ -638,6 +638,12 @@ pub struct SetupIniSettings {
     pub max_boss_tames: u32,
     /// C# Settings.RangeAccuracyBonus（[Bonus] RangeAccuracyBonus = 0）
     pub range_accuracy_bonus: i32,
+    /// C# Settings.PKTownMapName（[PKTown] PKTownMapName = "3"）
+    pub pk_town_map_name: String,
+    /// C# Settings.PKTownPositionX（[PKTown] PKTownPositionX = 848）
+    pub pk_town_x: i32,
+    /// C# Settings.PKTownPositionY（[PKTown] PKTownPositionY = 677）
+    pub pk_town_y: i32,
 }
 
 impl Default for SetupIniSettings {
@@ -652,6 +658,9 @@ impl Default for SetupIniSettings {
             trade_delay_ms: 2000,
             max_boss_tames: 1,
             range_accuracy_bonus: 0,
+            pk_town_map_name: "3".to_string(),
+            pk_town_x: 848,
+            pk_town_y: 677,
         }
     }
 }
@@ -675,6 +684,12 @@ pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
     out.trade_delay_ms = ini_get_i64(&parsed, "Game", "TradeDelay", out.trade_delay_ms);
     out.max_boss_tames = ini_get_i64(&parsed, "Game", "MaxBossTames", out.max_boss_tames as i64).max(0) as u32;
     out.range_accuracy_bonus = ini_get_i64(&parsed, "Bonus", "RangeAccuracyBonus", out.range_accuracy_bonus as i64) as i32;
+    // #2422：PK 城复活点（C# Settings.PKTown*）
+    if let Some(v) = ini_get(&parsed, "PKTown", "PKTownMapName") {
+        out.pk_town_map_name = v.to_string();
+    }
+    out.pk_town_x = ini_get_i64(&parsed, "PKTown", "PKTownPositionX", out.pk_town_x as i64) as i32;
+    out.pk_town_y = ini_get_i64(&parsed, "PKTown", "PKTownPositionY", out.pk_town_y as i64) as i32;
     out
 }
 
@@ -922,7 +937,7 @@ BuffExpRate=0
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("Setup.ini"),
-            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n",
+            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n",
         ).unwrap();
         let s = load_setup_settings(&dir);
         assert!(s.gather_orbs_per_level);
@@ -934,6 +949,10 @@ BuffExpRate=0
         assert_eq!(s.trade_delay_ms, 2000);
         assert_eq!(s.max_boss_tames, 1);
         assert_eq!(s.range_accuracy_bonus, 0);
+        // #2422：PK 城复活点
+        assert_eq!(s.pk_town_map_name, "3");
+        assert_eq!(s.pk_town_x, 848);
+        assert_eq!(s.pk_town_y, 677);
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → C# 默认
@@ -941,6 +960,9 @@ BuffExpRate=0
         assert!(d.gather_orbs_per_level);
         assert_eq!(d.line_message_timer_minutes, 10);
         assert_eq!(d.teleport_to_npc_cost, 3000);
+        assert_eq!(d.pk_town_map_name, "3");
+        assert_eq!(d.pk_town_x, 848);
+        assert_eq!(d.pk_town_y, 677);
 
         // 真实文件集成（Daneo1989/Configs/Setup.ini）
         let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));
@@ -952,6 +974,10 @@ BuffExpRate=0
             assert_eq!(r.group_invite_delay_ms, 2000);
             assert_eq!(r.trade_delay_ms, 2000);
             assert_eq!(r.range_accuracy_bonus, 0);
+            // #2422：PK 城复活点
+            assert_eq!(r.pk_town_map_name, "3");
+            assert_eq!(r.pk_town_x, 848);
+            assert_eq!(r.pk_town_y, 677);
         }
     }
 
