@@ -150,6 +150,7 @@ async fn start_server_with_world() -> u16 {
         goods_buy_back_time_minutes: 60,
         goods_buy_back_max_stored: 20,
         safe_zone_healing: false,
+        archive_inactive_after_months: 12,
         experience_list: Vec::new(),
         fishing_cfg: Default::default(),
         random_item_stats: Vec::new(),

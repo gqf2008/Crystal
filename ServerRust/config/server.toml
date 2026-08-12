@@ -24,6 +24,7 @@ goods_on = true
 goods_max_stored = 15
 goods_buy_back_time_minutes = 60
 goods_buy_back_max_stored = 20
+archive_inactive_after_months = 12  # C# Settings.ArchiveInactiveCharacterAfterMonths（#2384）
 
 [rarity]
 # 对齐 C# Settings.MonsterRarity*（#2360）：Elite 0.1% / HP 2.25 / 伤害 1.65 / 经验 2.20

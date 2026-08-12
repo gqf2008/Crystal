@@ -5089,6 +5089,67 @@ async fn send_user_location_sync(
     }).await;
 }
 
+/// #2384：启动时归档长期未登录角色（C# AccountInfo.Load：Settings.ArchiveInactiveCharacterAfterMonths=12）
+pub struct ArchiveInactiveCharacters {
+    /// 归档月数（C# Settings.ArchiveInactiveCharacterAfterMonths）
+    pub months: u32,
+}
+
+impl Message<ArchiveInactiveCharacters> for WorldActor {
+    type Reply = usize;
+
+    async fn handle(&mut self, msg: ArchiveInactiveCharacters, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let months = msg.months.max(1);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        // 月份按 30 天近似（C# AddMonths 为日历月；背景归档低风险）
+        let cutoff = now - months as i64 * 30 * 24 * 3600;
+        let chars = match db::list_all_characters(&self.db_pool).await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("ArchiveInactiveCharacters: list_all_characters failed: {}", e);
+                return 0;
+            }
+        };
+        let mut archived = 0usize;
+        for (name, account, last_access) in chars {
+            // 跳过在线角色（C# 归档只发生在账号加载时，不会碰在线数据）
+            if self.players.values().any(|r| r.name.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            // 从未登录（last_access==0）：Rust 无角色创建时间列，无法判龄，跳过
+            if last_access <= 0 || last_access >= cutoff {
+                continue;
+            }
+            // 归档流程与 @ARCHIVEPLAYER 一致：load → JSON → archive_player_json → delete_character
+            match db::load_character(&self.db_pool, &name).await {
+                Ok(Some(state)) => {
+                    let mut ok = false;
+                    if let Ok(json) = serde_json::to_string(&state) {
+                        if db::archive_player_json(&self.db_pool, &name, &account, &json).await.is_ok()
+                            && db::delete_character(&self.db_pool, &name).await.is_ok()
+                        {
+                            ok = true;
+                        }
+                    }
+                    if ok {
+                        info!("ArchiveInactiveCharacters: archived '{}' (inactive {}s)", name, now - last_access);
+                        archived += 1;
+                    } else {
+                        warn!("ArchiveInactiveCharacters: failed to archive '{}'", name);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => warn!("ArchiveInactiveCharacters: load '{}' failed: {}", name, e),
+            }
+        }
+        info!("ArchiveInactiveCharacters: archived {} characters (months={})", archived, months);
+        archived
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mir2_shared::packets::Packet;
