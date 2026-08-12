@@ -6328,6 +6328,7 @@ impl WorldActor {
             max_mc_rate_percent: b.max_mc_rate_percent,
             max_sc_rate_percent: b.max_sc_rate_percent,
             attack_speed_rate_percent: b.attack_speed_rate_percent,
+            skill_gain_multiplier: b.skill_gain_multiplier,
         }).await;
         Some(state)
     }
@@ -6861,6 +6862,8 @@ pub struct EquipmentBonuses {
     pub max_mc_rate_percent: i32,
     pub max_sc_rate_percent: i32,
     pub attack_speed_rate_percent: i32,
+    // #2326：技能经验倍率（C# Stats[Stat.SkillGainMultiplier]；装备/行会 Buff 合计）
+    pub skill_gain_multiplier: i32,
     // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
     pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
     /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
@@ -6912,6 +6915,7 @@ fn apply_equipment_stat(b: &mut EquipmentBonuses, stat: mir2_shared::enums::Stat
         Stat::MaxMCRatePercent => b.max_mc_rate_percent += value,
         Stat::MaxSCRatePercent => b.max_sc_rate_percent += value,
         Stat::AttackSpeedRatePercent => b.attack_speed_rate_percent += value,
+        Stat::SkillGainMultiplier => b.skill_gain_multiplier += value,
         Stat::BagWeight => b.bag_weight += value,
         Stat::WearWeight => b.wear_weight += value,
         Stat::HandWeight => b.hand_weight += value,
@@ -7013,6 +7017,7 @@ pub(crate) fn calculate_equipment_bonuses(
             b.max_mc_rate_percent += get(Stat::MaxMCRatePercent);
             b.max_sc_rate_percent += get(Stat::MaxSCRatePercent);
             b.attack_speed_rate_percent += get(Stat::AttackSpeedRatePercent);
+            b.skill_gain_multiplier += get(Stat::SkillGainMultiplier);
             b.holy += get(Stat::Holy);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
