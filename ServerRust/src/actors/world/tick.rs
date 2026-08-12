@@ -3240,7 +3240,7 @@ pub(crate) async fn tick_player_conditions(&mut self) {
                     if let Some(ref item) = state.refine_log.active_refine {
                         if item.status == RefineStatus::Pending && current_time >= item.finish_time {
                             let mut log = state.refine_log.clone();
-                            match log.settle_check() {
+                            match log.settle_check(self.refine_cfg.crit_chance, self.refine_cfg.crit_increase) {
                                 Some(crate::actors::refine::RefineCheckResult::Applied) => {
                                     let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
                                     send_system_message(&self.gate_ref, *session_id, "精炼完成！物品已提升");

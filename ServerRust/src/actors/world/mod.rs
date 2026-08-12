@@ -144,6 +144,8 @@ pub struct WorldActorArgs {
     pub monster_recall_enabled: bool,
     pub monster_recall_range: i32,
     pub monster_recall_cooldown_ms: u64,
+    /// 精炼配置（C# Settings.Refine*）
+    pub refine_cfg: crate::util::config::RefineConfig,
 }
 
 /// 世界中的玩家记录
@@ -1537,6 +1539,8 @@ pub struct WorldActor {
     pub(crate) monster_recall_enabled: bool,
     pub(crate) monster_recall_range: i32,
     pub(crate) monster_recall_cooldown_ms: u64,
+    /// 精炼配置（C# Settings.Refine*）
+    pub(crate) refine_cfg: crate::util::config::RefineConfig,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1981,6 +1985,7 @@ impl WorldActor {
             monster_recall_enabled: true,
             monster_recall_range: 12,
             monster_recall_cooldown_ms: 5000,
+            refine_cfg: crate::util::config::RefineConfig::default(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -5923,6 +5928,7 @@ Ok(Self {
             monster_recall_enabled: args.monster_recall_enabled,
             monster_recall_range: args.monster_recall_range,
             monster_recall_cooldown_ms: args.monster_recall_cooldown_ms,
+            refine_cfg: args.refine_cfg,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

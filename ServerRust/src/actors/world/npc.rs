@@ -248,7 +248,7 @@ impl Message<NPCCallRequest> for WorldActor {
             // C# RefineKey：S.NPCRefine{Rate=Settings.RefineCost, Refining=CurrentRefine!=null}（:958-966）
             Some(EngineNpcAction::Refine) => {
                 // C# RefineKey（NPCScript.cs:982-990）：Refining = CurrentRefine != null
-                let packet = mir2_shared::packets::server::npc::NPCRefine { rate: 125.0, refining: player_state.refine_log.active_refine.is_some() };
+                let packet = mir2_shared::packets::server::npc::NPCRefine { rate: self.refine_cfg.cost as f32, refining: player_state.refine_log.active_refine.is_some() };
                 let mut body = Vec::new();
                 if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
                     let _ = self.gate_ref.tell(SendToClient {
@@ -294,7 +294,7 @@ impl Message<NPCCallRequest> for WorldActor {
                 // 就绪且未结算：先按 CheckRefine 语义结算（成功应用属性/失败粉碎）
                 let mut log = player_state.refine_log;
                 if status == crate::actors::refine::RefineStatus::Pending {
-                    match log.settle_check() {
+                    match log.settle_check(self.refine_cfg.crit_chance, self.refine_cfg.crit_increase) {
                         Some(crate::actors::refine::RefineCheckResult::Applied) => {}
                         Some(crate::actors::refine::RefineCheckResult::Destroyed) => {
                             let _ = log.cancel();
