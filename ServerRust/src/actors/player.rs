@@ -359,6 +359,10 @@ pub struct PlayerState {
     pub chat_window_start_ms: i64,
     /// 聊天窗口内计数（C# ChatTick）
     pub chat_tick: u32,
+    /// 角色封禁到期（.NET DateTime ticks；0=未封禁；C# CharacterInfo.Banned+ExpiryDate，外部工具设置）
+    pub char_ban_expiry_ticks: i64,
+    /// 角色封禁原因（C# CharacterInfo.BanReason）
+    pub char_ban_reason: String,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -886,6 +890,8 @@ allow_group: false,
             chat_banned_until_ms: 0,
             chat_window_start_ms: 0,
             chat_tick: 0,
+            char_ban_expiry_ticks: 0,
+            char_ban_reason: String::new(),
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
@@ -6824,6 +6830,8 @@ allow_group: false,
             chat_banned_until_ms: 0,
             chat_window_start_ms: 0,
             chat_tick: 0,
+            char_ban_expiry_ticks: 0,
+            char_ban_reason: String::new(),
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),

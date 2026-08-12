@@ -86,6 +86,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             allow_group INTEGER NOT NULL DEFAULT 0,
             pk_points INTEGER NOT NULL DEFAULT 0,
             pk_kill_count INTEGER NOT NULL DEFAULT 0,
+            banned INTEGER NOT NULL DEFAULT 0,
+            ban_reason TEXT NOT NULL DEFAULT '',
+            ban_expiry_ticks INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (account_username) REFERENCES accounts(username),
             FOREIGN KEY (guild_name) REFERENCES guilds(name)
         );
@@ -800,6 +803,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // heroslots：英雄槽位上限（safe to re-run）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN maximum_hero_count INTEGER NOT NULL DEFAULT 1")
         .execute(&pool).await;
+    // #2336：角色封禁（C# CharacterInfo.Banned/BanReason/ExpiryDate；外部工具设置，StartGame 拦截）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN ban_expiry_ticks INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN dead INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
@@ -1497,8 +1507,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             spouse_name, married_date, allow_mentor, allow_marriage, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count, maximum_hero_count,
-            last_access, bind_map_index, bind_x, bind_y, is_mentor, mentor_exp, backpack_size
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)"#
+            last_access, bind_map_index, bind_x, bind_y, is_mentor, mentor_exp, backpack_size,
+            banned, ban_reason, ban_expiry_ticks
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1565,6 +1576,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.is_mentor { 1 } else { 0 })
     .bind(state.mentor_exp)
     .bind(state.inventory.backpack.len() as i32)
+    .bind(if state.char_ban_expiry_ticks > 0 { 1 } else { 0 })
+    .bind(state.char_ban_expiry_ticks)
+    .bind(&state.char_ban_reason)
     .execute(&mut *tx)
     .await?;
 
@@ -1838,6 +1852,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             chat_banned_until_ms: 0,
             chat_window_start_ms: 0,
             chat_tick: 0,
+            char_ban_expiry_ticks: row.try_get("ban_expiry_ticks").unwrap_or(0),
+            char_ban_reason: row.try_get("ban_reason").unwrap_or_default(),
             skill_gain_multiplier: 0,
             guild_buff_mine_rate_percent: 0,
             guild_buff_stats: mir2_shared::data::stats::Stats::new(),
