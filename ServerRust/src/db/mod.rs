@@ -77,6 +77,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             allow_mentor INTEGER NOT NULL DEFAULT 0,
             allow_marriage INTEGER NOT NULL DEFAULT 0,
             mentor_name TEXT,
+            mentor_date INTEGER NOT NULL DEFAULT 0,
             hero_index INTEGER NOT NULL DEFAULT 0,
             is_fishing INTEGER NOT NULL DEFAULT 0,
             fishing_autocast INTEGER NOT NULL DEFAULT 0,
@@ -855,6 +856,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mentor_exp INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #2374：师徒期限（C# CharacterInfo.MentorDate，unix 秒；到期/冷却判定）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mentor_date INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
@@ -1504,12 +1508,12 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             min_mc, max_mc, min_sc, max_sc,
             freezing, poison_attack, poison_recovery, holy, accuracy, agility,
             gold, group_id, guild_name, guild_rank,
-            spouse_name, married_date, allow_mentor, allow_marriage, mentor_name, hero_index, hero_behaviour,
+            spouse_name, married_date, allow_mentor, allow_marriage, mentor_name, mentor_date, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count, maximum_hero_count,
             last_access, bind_map_index, bind_x, bind_y, is_mentor, mentor_exp, backpack_size,
             banned, ban_reason, ban_expiry_ticks
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1552,6 +1556,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.allow_mentor { 1 } else { 0 })
     .bind(if state.allow_marriage { 1 } else { 0 })
     .bind(&state.mentor_name)
+    .bind(state.mentor_date)
     .bind(state.hero_index as i32)
     .bind(state.hero_behaviour as i32)
     .bind(state.auto_pot_hp as i64)
@@ -1747,6 +1752,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         allow_mentor: row.get::<i32, _>("allow_mentor") != 0,
         allow_marriage: row.try_get::<i32, _>("allow_marriage").unwrap_or(0) != 0,
         mentor_name: row.get::<Option<String>, _>("mentor_name"),
+        mentor_date: row.try_get::<i64, _>("mentor_date").unwrap_or(0),
         creature_log,
         hero_index: row.get::<i32, _>("hero_index") as u8,
         hero_behaviour: row.try_get::<i32, _>("hero_behaviour").unwrap_or(0) as u8,

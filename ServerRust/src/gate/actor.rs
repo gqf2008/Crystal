@@ -2673,7 +2673,7 @@ fn handle_allow_mentor(social_ref: &Option<ActorRef<crate::actors::social::Socia
 fn handle_cancel_mentor(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("CancelMentor: session={}", session_id);
     let social_ref = match social_ref { Some(s) => s, None => return };
-    let _ = social_ref.tell(crate::actors::social::SocialCancelMentor { session_id }).try_send();
+    let _ = social_ref.tell(crate::actors::social::SocialCancelMentor { session_id, force: true }).try_send();
 }
 
 // ============================================================================
