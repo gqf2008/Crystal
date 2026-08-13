@@ -469,8 +469,11 @@ pub(crate) fn actor_hover_tooltip_system(
         Some((name, head)) => {
             if let Ok(vp) = map_cam.world_to_viewport(map_gtf, head) {
                 // world_to_viewport 返回的已是逻辑视口坐标（0..1024, 0..768），勿再缩放
-                // tooltip_panel 在 state+(16,16)，往上多留面板高度 → 面板显示在头顶上方
-                tooltip.update(12, true, name.clone(), vec![name], vp.x - 16.0, vp.y - 70.0);
+                // C# MapObject.DrawName：名字标签水平居中于目标头顶。这里按 tooltip_panel_system
+                // 相同的估算公式计算面板宽度，让 tooltip 在头顶居中；y 保持面板底部贴近头顶。
+                let chars = name.chars().count().max(1) as f32;
+                let width = (chars * 13.0 + 20.0).clamp(40.0, 500.0);
+                tooltip.update(12, true, name.clone(), vec![name], vp.x - width * 0.5, vp.y - 70.0);
             } else {
                 tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0);
             }
