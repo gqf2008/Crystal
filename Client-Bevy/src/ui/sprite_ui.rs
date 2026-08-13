@@ -69,7 +69,7 @@ pub fn spawn_ui_camera(mut commands: Commands) {
             ..default()
         },
         // 只渲染 UI 层，避免把地图实体也画一遍（见 game/mod.rs）
-        bevy::camera::visibility::RenderLayers::layer(1),
+        bevy::camera::visibility::RenderLayers::from_layers(&[1, 2]),
     ));
 }
 

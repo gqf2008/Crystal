@@ -12,7 +12,6 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin, MeshMaterial2d};
 
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiEntity;
 
 /// 昼夜状态
 #[derive(Resource)]
@@ -100,13 +99,13 @@ fn spawn_overlay(
         color: LinearRgba::new(1.0, 1.0, 1.0, 1.0),
     });
     commands.spawn((
-        UiEntity,
         NightOverlay,
         Mesh2d(quad),
         MeshMaterial2d(mat),
         // z=0.8：只压暗场景（地图/角色 z<=0.5），灯光 0.9 在其上，UI z>=1 不受影响
         Transform::from_xyz(512.0, -384.0, 0.8),
         Visibility::Visible,
+        bevy::camera::visibility::RenderLayers::layer(2),
     ));
 }
 
