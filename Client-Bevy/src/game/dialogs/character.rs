@@ -466,7 +466,7 @@ fn spawn_character_dialog(
         commands.entity(e).insert((
             CharStatText(i),
             DialogRoot(DialogKind::Character),
-            CharDialogWidget,
+            CharPageBg(1), // C# Parent=StatusPage(Title[506]=页1)，仅状态页可见
         ));
     }
     // State 页数值标签（#210：Exp%/负重/躲避/恢复/神圣/冻结/中毒攻击，12 项）
@@ -948,5 +948,56 @@ mod tests {
     fn server_slot_mapping_covers_all() {
         assert_eq!(SERVER_SLOT_TO_POS.len(), 14);
         assert_eq!(EQUIP_SLOTS.len(), 14);
+    }
+
+    /// 页门控护栏（#2505）：跑真实 spawn，断言状态/State 数值标签挂在正确页背景组件上。
+    /// C# 证据：StatusPage=Title[506]=页1、StatePage=Title[507]=页2（CharacterDialog.cs:86-113），
+    /// 13 个状态标签 Parent=StatusPage（:351-449）、12 个 State 标签 Parent=StatePage（:457-545）。
+    #[test]
+    fn stat_labels_ride_correct_page_bg() {
+        use crate::resources::libraries::Libraries;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new("Data")));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(UiImageCache::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(HudState::default());
+        world
+            .run_system_once(spawn_character_dialog)
+            .expect("spawn_character_dialog 应成功");
+
+        // 状态标签：必须挂 CharPageBg(1)=StatusPage，且不得挂全页常显 CharDialogWidget
+        let mut stat_q = world.query::<(
+            &CharStatText,
+            Option<&CharPageBg>,
+            Option<&CharDialogWidget>,
+        )>();
+        let mut stat_n = 0;
+        for (_s, bg, widget) in stat_q.iter(&world) {
+            stat_n += 1;
+            assert!(widget.is_none(), "状态标签不应挂全页常显 CharDialogWidget");
+            assert_eq!(
+                bg.map(|b| b.0),
+                Some(1),
+                "状态标签应挂 CharPageBg(1)=StatusPage"
+            );
+        }
+        assert_eq!(stat_n, 13, "C# StatusPage 13 个状态数值标签");
+
+        // State 标签：挂 CharPageBg(2)=StatePage
+        let mut state_q = world.query::<(&CharState2Text, Option<&CharPageBg>)>();
+        let mut state_n = 0;
+        for (_s, bg) in state_q.iter(&world) {
+            state_n += 1;
+            assert_eq!(
+                bg.map(|b| b.0),
+                Some(2),
+                "State 标签应挂 CharPageBg(2)=StatePage"
+            );
+        }
+        assert_eq!(state_n, 12, "C# StatePage 12 个 State 数值标签");
     }
 }
