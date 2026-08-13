@@ -345,6 +345,102 @@ fn skill_bar_aligned() {
     println!("  ✓ 技能快捷栏 底图/格网/切换钮/8 格/键名标签/23 冷却帧 布局对齐");
 }
 
+/// HUD 底栏文本标签（#2497 对齐 C# MainDialog，MainDialogs.cs L13+ 构造器/Update）。
+/// 坐标引用 `client_bevy::game::hud` 的 pub 常量（防代码漂移），底栏/球/经验条用真实精灵尺寸
+/// （基线 = 本次实测：Prguse[1]=1024x152、Prguse[4]=104x80、Prguse[8]=1004x8）。
+#[test]
+fn hud_labels_aligned() {
+    use client_bevy::game::hud;
+    let mut libs = Libs::new();
+
+    // C# 源码字面值（MainDialogs.cs）——独立于被测代码的真源，常量漂移任意一个即红：
+    // (常量值, C# 字面值, 说明)
+    let consts: &[(f32, f32, &str)] = &[
+        (hud::HUD_LEVEL_X, 5.0, "LevelLabel.x = C# (5,108)"),
+        (hud::HUD_LEVEL_Y, 108.0, "LevelLabel.y = C# (5,108)"),
+        (hud::HUD_NAME_X, 6.0, "CharacterName.x = C# (6,120)"),
+        (hud::HUD_NAME_Y, 120.0, "CharacterName.y = C# (6,120)"),
+        (hud::HUD_NAME_W, 90.0, "CharacterName 框宽 = C# 90"),
+        (hud::HUD_NAME_H, 16.0, "CharacterName 框高 = C# 16"),
+        (hud::HUD_GOLD_DX, 105.0, "GoldLabel 距右 = C# Width-105"),
+        (hud::HUD_GOLD_Y, 119.0, "GoldLabel.y = C# 119"),
+        (hud::HUD_ORB_CX, 50.0, "球体标签居中 x = C# 球心 50"),
+        (hud::HUD_HP_ORB_Y, 27.0, "HealthLabel 球体相对 y = C# 27"),
+        (hud::HUD_MP_ORB_Y, 42.0, "ManaLabel 球体相对 y = C# 42"),
+        (
+            hud::HUD_EXP_LABEL_DY,
+            10.0,
+            "ExperienceLabel 条上方 = C# -10",
+        ),
+        (
+            hud::HUD_EXP_LABEL_DX,
+            20.0,
+            "ExperienceLabel 居中偏左 = C# -20",
+        ),
+    ];
+    for (got, want, what) in consts {
+        assert_eq!(got, want, "[常量] {what}");
+    }
+
+    // 底栏真实尺寸（Prguse[1]=1024x152）：main_x=(1024-w)/2, main_y=768-h；经验条宽 Prguse[8]=1004
+    let (bw, bh) = libs.size(LibraryName::Prguse, 1);
+    let (ew, _eh) = libs.size(LibraryName::Prguse, 8);
+    let main_x = (SW - bw) / 2.0;
+    let main_y = SH - bh;
+
+    // 各标签落在底栏 bbox 内（文本按 12px 字号、给合理宽度框做包含校验）。
+    // (名称, 栏内x, 栏内y, 估宽, 估高)；经验标签 x = 9+条宽/2-20、y = 143-10
+    let exp_lx = 9.0 + ew / 2.0 - hud::HUD_EXP_LABEL_DX;
+    let exp_ly = 143.0 - hud::HUD_EXP_LABEL_DY;
+    let labels: &[(&str, f32, f32, f32, f32)] = &[
+        ("LevelLabel", hud::HUD_LEVEL_X, hud::HUD_LEVEL_Y, 24.0, 12.0),
+        (
+            "CharacterName",
+            hud::HUD_NAME_X,
+            hud::HUD_NAME_Y,
+            90.0,
+            16.0,
+        ),
+        (
+            "GoldLabel",
+            bw - hud::HUD_GOLD_DX,
+            hud::HUD_GOLD_Y,
+            99.0,
+            13.0,
+        ),
+        ("ExperienceLabel", exp_lx, exp_ly, 40.0, 12.0),
+        (
+            "HealthLabel",
+            hud::HUD_ORB_CX - 30.0,
+            30.0 + hud::HUD_HP_ORB_Y,
+            60.0,
+            12.0,
+        ),
+        (
+            "ManaLabel",
+            hud::HUD_ORB_CX - 30.0,
+            30.0 + hud::HUD_MP_ORB_Y,
+            60.0,
+            12.0,
+        ),
+    ];
+    for (name, rx, ry, w, h) in labels {
+        assert_inside(
+            name,
+            main_x + rx,
+            main_y + ry,
+            *w,
+            *h,
+            main_x,
+            main_y,
+            bw,
+            bh,
+        );
+    }
+
+    println!("  ✓ HUD 底栏 Level/Name/Gold/Exp/HP/MP 标签位置对齐 C# MainDialog");
+}
+
 #[test]
 fn login_select_meta_aligned() {
     let mut libs = Libs::new();
