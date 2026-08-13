@@ -23,6 +23,12 @@ const SPLASH_RADIUS: i32 = 3;
 
 pub struct MinotaurKingBehavior;
 
+impl Default for MinotaurKingBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MinotaurKingBehavior {
     pub fn new() -> Self {
         Self

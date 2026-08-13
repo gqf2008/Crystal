@@ -19,6 +19,12 @@ pub struct HellLordBehavior {
     rage_end_tick: u64,
 }
 
+impl Default for HellLordBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HellLordBehavior {
     pub fn new() -> Self {
         Self {

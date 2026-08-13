@@ -14,6 +14,12 @@ pub struct SepWizardBehavior {
     next_repulsion_tick: u64,
 }
 
+impl Default for SepWizardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepWizardBehavior {
     pub fn new() -> Self {
         Self {

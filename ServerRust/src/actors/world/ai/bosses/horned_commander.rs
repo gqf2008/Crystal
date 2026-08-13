@@ -40,6 +40,12 @@ fn teleport_random_point(
     None
 }
 
+impl Default for HornedCommanderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HornedCommanderBehavior {
     pub fn new() -> Self {
         Self {
@@ -141,7 +147,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
         }
 
         // Phase 1: HP∈[10%,50%) 周期刷 RockSpike（C# ProcessAI Phase 1）
-        if hp_pct < 50.0 && hp_pct >= 10.0 {
+        if (10.0..50.0).contains(&hp_pct) {
             if !self.called_rock_spikes {
                 self.called_rock_spikes = true;
                 // C# SetupRockSpike：以地图中心为基准的 7×7 锚点网格，间距 5 格

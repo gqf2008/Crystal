@@ -556,7 +556,7 @@ fn spawn_config_from_db(
                     xp: mi.experience,
                     map_index: map_info.index as u16,
                     count: 1,
-                    spread: r.spread.max(0) as i32,
+                    spread: r.spread.max(0),
                     route: route.clone(),
                 })
                 .collect::<Vec<_>>()
@@ -671,7 +671,7 @@ impl MonsterAiType {
             // C# GetMonster default（AI 0）= 基础 MonsterObject：CanMove/CanAttack 默认 true，主动索敌攻击
             0 => Self::Aggressive,
             // C# GetMonster：1/2=Deer、3=Tree（被动/静态）
-            1 | 2 | 3 => Self::Passive,
+            1..=3 => Self::Passive,
             // C# GetMonster：64=IntelligentCreatureObject（智能宠物/幼宠，被动）、68=Football（CanAttack=false）
             64 | 68 => Self::Passive,
             // C# GetMonster：81=Gate、82=Wall（攻城静态结构）→ Passive；252=未知强化版保留 Boss
@@ -687,9 +687,9 @@ impl MonsterAiType {
             // C# 20=DarkDevil（远程 RangeAttack）→ Mage；21/22=IncarnatedGhoul/ZT 为近战 → 默认 Aggressive
             20 => Self::Mage,
             // C# 30=BoneLord（AttackRange=7 远程魔法/召唤）、31=RightGuard/32=LeftGuard（AttackRange=8 远程魔法）→ Mage
-            30 | 31 | 32 => Self::Mage,
+            30..=32 => Self::Mage,
             // C# 40=BombSpider、41/42=YinDevilNode/YangDevilNode（召唤/增益）→ Summoner
-            40 | 41 | 42 => Self::Summoner,
+            40..=42 => Self::Summoner,
             _ => Self::Aggressive,
         }
     }
@@ -1429,10 +1429,7 @@ pub(crate) fn parse_mine_sets(
 }
 
 /// C# GetMinePayout：槽位选取（MinSlot<=slot<=MaxSlot 首个命中）
-pub(crate) fn pick_mine_drop<'a>(
-    drops: &'a [MineDropConfig],
-    slot: u32,
-) -> Option<&'a MineDropConfig> {
+pub(crate) fn pick_mine_drop(drops: &[MineDropConfig], slot: u32) -> Option<&MineDropConfig> {
     drops
         .iter()
         .find(|d| slot >= d.min_slot as u32 && slot <= d.max_slot as u32)
@@ -1898,7 +1895,7 @@ pub struct WorldActor {
     pub(crate) player_heroes: HashMap<u64, Vec<HeroInfo>>,
 }
 
-/// 英雄信息（#188：C# ClientHeroInformation 语义，内存态）
+// 英雄信息（#188：C# ClientHeroInformation 语义，内存态）
 
 /// 英雄创建结果码（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success；CreateHero :9595-9599）
 pub(crate) fn hero_create_result(name: &str, hero_count: usize, max_count: u8) -> u8 {
@@ -2045,7 +2042,7 @@ fn upgrade_item(
         x
     }
     // C#：Chance>0 且 Random.Next(Chance)==0 → AddedStats = RandomomRange(MaxStat-1, StatChance)+1
-    let mut stat_roll = |chance: u8, max_stat: u8, stat_chance: u8| -> i32 {
+    let stat_roll = |chance: u8, max_stat: u8, stat_chance: u8| -> i32 {
         if chance > 0 && fastrand::i32(0..chance as i32) == 0 {
             randomom_range(max_stat.saturating_sub(1), stat_chance) + 1
         } else {
@@ -3216,7 +3213,7 @@ impl WorldActor {
             mir2_shared::enums::ServerPacketIds::ObjectPushed as i16,
             &obj_body,
         );
-        for (sid, _) in &self.players {
+        for sid in self.players.keys() {
             if *sid == session_id {
                 continue;
             }
@@ -3256,7 +3253,7 @@ impl WorldActor {
             return 0;
         }
         let (dx, dy) = (MON_DIR_DX[dir as usize], MON_DIR_DY[dir as usize]);
-        let mut occupied: std::collections::HashSet<(i32, i32)> = self
+        let occupied: std::collections::HashSet<(i32, i32)> = self
             .monsters
             .values()
             .filter(|m| m.hp > 0)
@@ -3299,7 +3296,7 @@ impl WorldActor {
             mir2_shared::enums::ServerPacketIds::ObjectPushed as i16,
             &obj_body,
         );
-        for (sid, _) in &self.players {
+        for sid in self.players.keys() {
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -3883,7 +3880,7 @@ impl WorldActor {
 
     /// 潜行半径检测（C# CheckSneakRadius 每 tick）：有玩家靠近 3 格 → 潜行失效并广播
     pub(crate) async fn tick_sneak_radius(&mut self) {
-        if self.tick_count % 10 != 0 {
+        if !self.tick_count.is_multiple_of(10) {
             return;
         }
         let sessions: Vec<u64> = self.sneaking_sessions.keys().copied().collect();
@@ -4708,7 +4705,7 @@ impl WorldActor {
                         let lower_raw = child.gold / 2;
                         let upper_raw = child.gold + child.gold / 2;
                         let lower = lower_raw + (lower_raw as f64 * gold_pct / 100.0) as u64;
-                        let gold_raw = fastrand::u64(lower as u64..=upper_raw as u64);
+                        let gold_raw = fastrand::u64(lower..=upper_raw);
                         // C# ApplyGoldModifier：精英 GoldMultiplier=2.5 最后应用
                         let rarity_gold_mul = if monster.is_elite {
                             self.rarity_cfg.elite_gold_multiplier
@@ -4738,7 +4735,7 @@ impl WorldActor {
                 let lower_raw = drop.gold / 2;
                 let upper_raw = drop.gold + drop.gold / 2;
                 let lower = lower_raw + (lower_raw as f64 * gold_pct / 100.0) as u64;
-                let gold_raw = fastrand::u64(lower as u64..=upper_raw as u64);
+                let gold_raw = fastrand::u64(lower..=upper_raw);
                 // C# ApplyGoldModifier：精英 GoldMultiplier=2.5 最后应用
                 let rarity_gold_mul = if monster.is_elite {
                     self.rarity_cfg.elite_gold_multiplier
@@ -5301,9 +5298,7 @@ impl WorldActor {
                                     if state.spouse_name.is_none() {
                                         skip = true;
                                     }
-                                } else if state.spouse_name.as_ref().map(|s| s.as_str())
-                                    != Some(&required)
-                                {
+                                } else if state.spouse_name.as_deref() != Some(&required) {
                                     skip = true;
                                 }
                             }
@@ -5483,7 +5478,7 @@ impl WorldActor {
                         if let Some(record) = self.players.get(&session_id) {
                             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                                 let mut nearby = 0usize;
-                                for (_, other) in &self.players {
+                                for other in self.players.values() {
                                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
                                     {
                                         if os.session_id == state.session_id {
@@ -5738,16 +5733,16 @@ impl WorldActor {
                                     ) {
                                         continue;
                                     }
-                                    if info.durability == 0 || info.price <= 0 {
+                                    if info.durability == 0 || info.price == 0 {
                                         continue;
                                     }
                                     // C# UserItem.RepairPrice：p = Floor(maxDura*((price/2)/dura) + price/2) * (stats*0.1+1)
-                                    let price = info.price.max(0) as f64;
+                                    let price = info.price as f64;
                                     let dura = info.durability.max(1) as f64;
                                     let max_dura = slot.max_dura as f64;
                                     let mut p =
                                         (max_dura * ((price / 2.0) / dura) + price / 2.0).floor();
-                                    p = p * (slot.added_stats.len() as f64 * 0.1 + 1.0);
+                                    p *= slot.added_stats.len() as f64 * 0.1 + 1.0;
                                     total_cost += (p * slot.count as f64) as u64;
                                 }
                                 if needs_repair && total_cost > state.inventory.gold {
@@ -7182,11 +7177,7 @@ impl WorldActor {
                                     .actor_ref
                                     .ask(crate::actors::player::ChangeClass { class })
                                     .await;
-                                send_system_message(
-                                    &self.gate_ref,
-                                    session_id,
-                                    &format!("转职成功！"),
-                                );
+                                send_system_message(&self.gate_ref, session_id, "转职成功！");
                             }
                         }
                     }
@@ -7862,11 +7853,7 @@ impl Actor for WorldActor {
                         if aid >= next_auction_id {
                             next_auction_id = aid + 1;
                         }
-                        let starting_bid = if item_type == 1 {
-                            (price as u64).max(0)
-                        } else {
-                            0
-                        };
+                        let starting_bid = if item_type == 1 { price as u64 } else { 0 };
                         auctions.push(AuctionListing {
                             auction_id: aid,
                             seller_name: seller,
@@ -8489,7 +8476,7 @@ impl WorldActor {
     ) -> usize {
         let Some(&idx) = self
             .monster_name_index
-            .get(&crate::util::normalized_monster_name(&name))
+            .get(&crate::util::normalized_monster_name(name))
         else {
             warn!("spawn_monster_named: monster '{}' not found", name);
             return 0;
@@ -8830,7 +8817,7 @@ impl WorldActor {
         };
         let Some(gid) = gid else { return 0 };
         let mut count = 0usize;
-        for (_, rec) in &self.players {
+        for rec in self.players.values() {
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                 if s.group_id == Some(gid) {
                     count += 1;
@@ -8962,7 +8949,7 @@ impl WorldActor {
             .collect();
         new_state
             .magics
-            .retain(|m| !(m.temp_skill && !desired.contains(&m.spell)));
+            .retain(|m| !m.temp_skill || desired.contains(&m.spell));
         let mut to_add: Vec<i32> = Vec::new();
         for spell in &desired {
             if !new_state.magics.iter().any(|m| m.spell == *spell) {
@@ -9227,7 +9214,7 @@ impl WorldActor {
     ) -> String {
         use mir2_shared::enums::MirGridType;
         // 1. <title> → <title/uid>（C# ProcessChatItems 文本替换）
-        let mut out = replace_linked_item_markers(message, linked_items);
+        let out = replace_linked_item_markers(message, linked_items);
         // 2. %物品名#uid% → [物品:物品名] + uid 收集（客户端 chat_dialog 渲染 ItemLink）
         let (out, uids) = replace_item_link_markers(&out);
         if linked_items.is_empty() && uids.is_empty() {
@@ -9252,35 +9239,27 @@ impl WorldActor {
         };
         for ci in linked_items {
             if ci.grid == MirGridType::Inventory || ci.grid == MirGridType::Equipment {
-                for slot in state.inventory.backpack.iter() {
-                    if let Some(s) = slot {
-                        if s.item.unique_id == ci.unique_id {
-                            push_item(&s.item);
-                        }
+                for s in state.inventory.backpack.iter().flatten() {
+                    if s.item.unique_id == ci.unique_id {
+                        push_item(&s.item);
                     }
                 }
-                for eq in state.inventory.equipment.iter() {
-                    if let Some(it) = eq {
-                        if it.unique_id == ci.unique_id {
-                            push_item(it);
-                        }
+                for it in state.inventory.equipment.iter().flatten() {
+                    if it.unique_id == ci.unique_id {
+                        push_item(it);
                     }
                 }
             }
         }
         for uid in &uids {
-            for slot in state.inventory.backpack.iter() {
-                if let Some(s) = slot {
-                    if s.item.unique_id == *uid {
-                        push_item(&s.item);
-                    }
+            for s in state.inventory.backpack.iter().flatten() {
+                if s.item.unique_id == *uid {
+                    push_item(&s.item);
                 }
             }
-            for eq in state.inventory.equipment.iter() {
-                if let Some(it) = eq {
-                    if it.unique_id == *uid {
-                        push_item(it);
-                    }
+            for it in state.inventory.equipment.iter().flatten() {
+                if it.unique_id == *uid {
+                    push_item(it);
                 }
             }
         }
@@ -9486,9 +9465,8 @@ fn extract_quoted(s: &str) -> Option<String> {
         if b == quote {
             if start.is_none() {
                 start = Some(i + 1);
-            } else {
+            } else if let Some(s_start) = start {
                 // 闭合引号
-                let s_start = start.unwrap();
                 return Some(s[s_start..i].to_string());
             }
         }
@@ -14600,7 +14578,7 @@ impl Message<GmGotoRequest> for WorldActor {
     ) -> Self::Reply {
         let target = {
             let mut found = None;
-            for (_sid, other) in &self.players {
+            for other in self.players.values() {
                 if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                     if os.name.eq_ignore_ascii_case(&msg.target_name) {
                         found = Some((os.name.clone(), os.map_index, os.x, os.y));

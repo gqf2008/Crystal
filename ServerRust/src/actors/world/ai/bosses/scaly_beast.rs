@@ -16,6 +16,12 @@ const STOMP_RADIUS: i32 = 2;
 
 pub struct ScalyBeastBehavior;
 
+impl Default for ScalyBeastBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScalyBeastBehavior {
     pub fn new() -> Self {
         Self

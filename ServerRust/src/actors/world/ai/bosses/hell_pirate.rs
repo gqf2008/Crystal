@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct HellPirateBehavior;
 
+impl Default for HellPirateBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HellPirateBehavior {
     pub fn new() -> Self {
         Self

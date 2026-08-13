@@ -22,6 +22,12 @@ pub struct DragonStatueBehavior {
     death_announced: bool,
 }
 
+impl Default for DragonStatueBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DragonStatueBehavior {
     pub fn new() -> Self {
         Self {

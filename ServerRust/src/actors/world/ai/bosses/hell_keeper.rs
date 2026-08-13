@@ -25,6 +25,12 @@ const ATTACK_COOLDOWN: u64 = 8;
 
 pub struct HellKeeperBehavior;
 
+impl Default for HellKeeperBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HellKeeperBehavior {
     pub fn new() -> Self {
         Self

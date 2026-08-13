@@ -26,6 +26,12 @@ pub struct BoneLordBehavior {
     called: [bool; 3],
 }
 
+impl Default for BoneLordBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BoneLordBehavior {
     pub fn new() -> Self {
         Self {

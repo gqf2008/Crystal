@@ -27,6 +27,12 @@ pub struct DarkCaptainBehavior {
     spawned: bool,
 }
 
+impl Default for DarkCaptainBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DarkCaptainBehavior {
     pub fn new() -> Self {
         Self {

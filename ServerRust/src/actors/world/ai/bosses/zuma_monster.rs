@@ -26,6 +26,12 @@ pub struct ZumaMonsterBehavior {
     stoned: bool,
 }
 
+impl Default for ZumaMonsterBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ZumaMonsterBehavior {
     pub fn new() -> Self {
         Self { stoned: true }

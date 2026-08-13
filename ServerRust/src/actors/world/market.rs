@@ -47,15 +47,11 @@ fn market_search_matches(
         return false;
     }
     match filter_market_type {
-        1 => {
-            if auction_market_type != 0 {
-                return false;
-            }
+        1 if auction_market_type != 0 => {
+            return false;
         } // Consign
-        2 => {
-            if auction_market_type != 1 {
-                return false;
-            }
+        2 if auction_market_type != 1 => {
+            return false;
         } // Auction
         _ => {} // Market/其他：不过滤
     }
@@ -123,7 +119,7 @@ impl Message<MarketSearchRequest> for WorldActor {
         }
 
         let total = results.len();
-        let pages = (total / 10 + if total % 10 > 0 { 1 } else { 0 }).max(1);
+        let pages = (total / 10 + if !total.is_multiple_of(10) { 1 } else { 0 }).max(1);
 
         // Store search results for pagination
         self.market_search_cache.insert(
@@ -211,7 +207,7 @@ impl Message<MarketRefreshRequest> for WorldActor {
         }
 
         let total = results.len();
-        let pages = (total / 10 + if total % 10 > 0 { 1 } else { 0 }).max(1);
+        let pages = (total / 10 + if !total.is_multiple_of(10) { 1 } else { 0 }).max(1);
 
         // Update search cache
         self.market_search_cache.insert(
@@ -559,11 +555,7 @@ impl Message<MarketBuyRequest> for WorldActor {
             );
         }
 
-        send_system_message(
-            &self.gate_ref,
-            msg.session_id,
-            &format!("购买成功：获得物品"),
-        );
+        send_system_message(&self.gate_ref, msg.session_id, "购买成功：获得物品");
 
         // 完整 UserInformation 刷新（背包 + 金币）
         if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -642,79 +634,75 @@ impl Message<MarketGetBackRequest> for WorldActor {
         let auction = self.auctions[auction_idx].clone();
 
         // Any(0)/Expired(2)：取回物品（未售出或已到期）
-        if msg.mode == 0 || msg.mode == 2 {
-            if !auction.sold || auction.expired {
-                // C# TakeAuction：过期拍卖若有当前出价 → 退款给出价人（:8680-8684）
-                if let Some(buyer) = &auction.current_buyer {
-                    let bid = auction.current_bid;
-                    if bid > 0 {
-                        let mail = MailMessage {
-                            mail_id: generate_mail_id(),
-                            sender_name: "市场交易".to_string(),
-                            receiver_name: buyer.clone(),
-                            subject: "拍卖过期退款".to_string(),
-                            body: format!("你出价的物品已过期，出价 {} 金币已退回", bid),
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs() as i64)
-                                .unwrap_or(0),
-                            read: false,
-                            collected: false,
-                            locked: false,
-                            gold: bid,
-                            items: Vec::new(),
-                        };
-                        let _ = db::insert_mail(&self.db_pool, buyer, &mail).await;
-                    }
+        if (msg.mode == 0 || msg.mode == 2) && (!auction.sold || auction.expired) {
+            // C# TakeAuction：过期拍卖若有当前出价 → 退款给出价人（:8680-8684）
+            if let Some(buyer) = &auction.current_buyer {
+                let bid = auction.current_bid;
+                if bid > 0 {
+                    let mail = MailMessage {
+                        mail_id: generate_mail_id(),
+                        sender_name: "市场交易".to_string(),
+                        receiver_name: buyer.clone(),
+                        subject: "拍卖过期退款".to_string(),
+                        body: format!("你出价的物品已过期，出价 {} 金币已退回", bid),
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0),
+                        read: false,
+                        collected: false,
+                        locked: false,
+                        gold: bid,
+                        items: Vec::new(),
+                    };
+                    let _ = db::insert_mail(&self.db_pool, buyer, &mail).await;
                 }
-                // 取回物品（C# CanGainItem 失败 → Fail 5）
-                let added = record
-                    .actor_ref
-                    .ask(AddItemToInventory {
-                        item: auction.item.clone(),
-                    })
-                    .await
-                    .unwrap_or(false);
-                if !added {
-                    self.send_market_fail(msg.session_id, 5);
-                    return;
-                }
-                let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
-                self.auctions.remove(auction_idx);
-                self.send_market_success(msg.session_id, "取回寄售物品成功".to_string());
+            }
+            // 取回物品（C# CanGainItem 失败 → Fail 5）
+            let added = record
+                .actor_ref
+                .ask(AddItemToInventory {
+                    item: auction.item.clone(),
+                })
+                .await
+                .unwrap_or(false);
+            if !added {
+                self.send_market_fail(msg.session_id, 5);
                 return;
             }
+            let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+            self.auctions.remove(auction_idx);
+            self.send_market_success(msg.session_id, "取回寄售物品成功".to_string());
+            return;
         }
 
         // Any(0)/Sold(1)：领取售出金币（含佣金）
-        if msg.mode == 0 || msg.mode == 1 {
-            if auction.sold {
-                let cost = if auction.item_type == 1 {
-                    auction.current_bid
-                } else {
-                    auction.price as u64
-                };
-                let gold = market_collect_gold(&auction);
-                if !record
-                    .actor_ref
-                    .ask(crate::actors::player::CanGainGold {
-                        amount: gold as u32,
-                    })
-                    .await
-                    .unwrap_or(false)
-                {
-                    self.send_market_fail(msg.session_id, 8);
-                    return;
-                }
-                let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
-                let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
-                self.auctions.remove(auction_idx);
-                let commission = cost - gold;
-                let text = format!("售出金币 {}（含佣金 {}）已领取", gold, commission);
-                send_system_message(&self.gate_ref, msg.session_id, &text);
-                self.send_market_success(msg.session_id, text);
+        if (msg.mode == 0 || msg.mode == 1) && auction.sold {
+            let cost = if auction.item_type == 1 {
+                auction.current_bid
+            } else {
+                auction.price as u64
+            };
+            let gold = market_collect_gold(&auction);
+            if !record
+                .actor_ref
+                .ask(crate::actors::player::CanGainGold {
+                    amount: gold as u32,
+                })
+                .await
+                .unwrap_or(false)
+            {
+                self.send_market_fail(msg.session_id, 8);
                 return;
             }
+            let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
+            let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+            self.auctions.remove(auction_idx);
+            let commission = cost - gold;
+            let text = format!("售出金币 {}（含佣金 {}）已领取", gold, commission);
+            send_system_message(&self.gate_ref, msg.session_id, &text);
+            self.send_market_success(msg.session_id, text);
+            return;
         }
 
         send_system_message(&self.gate_ref, msg.session_id, "当前状态无法领取");
@@ -845,7 +833,7 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                 .map(|a| a.item.clone());
             if let Some(item) = item {
                 let mut delivered = false;
-                for (_, record) in &world.players {
+                for record in world.players.values() {
                     if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                         if st.name == winner {
                             let _ = record
@@ -1045,7 +1033,7 @@ impl Message<ConsignItemRequest> for WorldActor {
         const CONSIGN_FEE: u64 = 5000;
         const MIN_PRICE: u32 = 5000;
         const MAX_PRICE: u32 = 50_000_000;
-        if price < MIN_PRICE || price > MAX_PRICE {
+        if !(MIN_PRICE..=MAX_PRICE).contains(&price) {
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
@@ -1587,7 +1575,7 @@ impl Message<CancelItemRentalRequest> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) {
         // Cancel can be sent by either renter or owner
-        let (initiator, is_renter) = if let Some(_) = self.rental_sessions.get(&msg.session_id) {
+        let (initiator, is_renter) = if self.rental_sessions.contains_key(&msg.session_id) {
             (msg.session_id, true)
         } else {
             match self
@@ -1855,7 +1843,7 @@ pub struct ConfirmItemRentalMsg {
 impl Message<ConfirmItemRentalMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ConfirmItemRentalMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        let (initiator, _) = if let Some(_) = self.rental_sessions.get(&msg.session_id) {
+        let (initiator, _) = if self.rental_sessions.contains_key(&msg.session_id) {
             (msg.session_id, true)
         } else {
             match self

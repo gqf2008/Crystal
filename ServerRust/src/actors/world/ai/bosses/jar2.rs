@@ -21,6 +21,12 @@ pub struct Jar2Behavior {
     die_tick: u64,
 }
 
+impl Default for Jar2Behavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Jar2Behavior {
     pub fn new() -> Self {
         Self {

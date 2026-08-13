@@ -24,6 +24,12 @@ pub struct HolyDevaBehavior {
     fear_end_tick: u64,
 }
 
+impl Default for HolyDevaBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HolyDevaBehavior {
     pub fn new() -> Self {
         Self { fear_end_tick: 0 }

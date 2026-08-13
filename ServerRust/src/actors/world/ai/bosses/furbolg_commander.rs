@@ -12,6 +12,12 @@ const ATTACK_RANGE: i32 = 8;
 
 pub struct FurbolgCommanderBehavior;
 
+impl Default for FurbolgCommanderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FurbolgCommanderBehavior {
     pub fn new() -> Self {
         Self

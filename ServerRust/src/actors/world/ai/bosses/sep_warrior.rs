@@ -14,6 +14,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct SepWarriorBehavior;
 
+impl Default for SepWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepWarriorBehavior {
     pub fn new() -> Self {
         Self

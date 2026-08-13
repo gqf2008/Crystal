@@ -33,6 +33,12 @@ pub struct ShinsuBehavior {
     base_image: u16,
 }
 
+impl Default for ShinsuBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShinsuBehavior {
     pub fn new() -> Self {
         Self {

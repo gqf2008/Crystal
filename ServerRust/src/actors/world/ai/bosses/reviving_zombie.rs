@@ -30,6 +30,12 @@ pub struct RevivingZombieBehavior {
     dying: bool,
 }
 
+impl Default for RevivingZombieBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RevivingZombieBehavior {
     pub fn new() -> Self {
         Self {
@@ -62,7 +68,7 @@ impl MonsterBehavior for RevivingZombieBehavior {
                 self.dying = false;
                 // C# newhp = HP * (100 - 25*RevivalCount) / 100
                 let pct = 100 - 25 * self.revival_count as i32;
-                monster.hp = (monster.max_hp as i32 * pct / 100).max(1);
+                monster.hp = (monster.max_hp * pct / 100).max(1);
             } else {
                 return;
             }

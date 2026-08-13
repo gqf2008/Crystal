@@ -2001,37 +2001,37 @@ pub async fn save_character(
     .await?;
 
     // Save backpack
-    save_inventory(&mut *tx, &state.name, &state.inventory).await?;
+    save_inventory(&mut tx, &state.name, &state.inventory).await?;
 
     // Save hero inventory
-    save_hero_inventory(&mut *tx, &state.name, &state.hero_inventory).await?;
+    save_hero_inventory(&mut tx, &state.name, &state.hero_inventory).await?;
 
     // Save friends
-    save_friends(&mut *tx, &state.name, &state.friend_list).await?;
+    save_friends(&mut tx, &state.name, &state.friend_list).await?;
 
     // Save mail
-    save_mail(&mut *tx, &state.name, &state.mailbox).await?;
+    save_mail(&mut tx, &state.name, &state.mailbox).await?;
 
     // Save quests
-    save_quests(&mut *tx, &state.name, &state.quest_log).await?;
+    save_quests(&mut tx, &state.name, &state.quest_log).await?;
 
     // Save creatures
-    save_creatures(&mut *tx, &state.name, &state.creature_log).await?;
+    save_creatures(&mut tx, &state.name, &state.creature_log).await?;
 
     // Save refine
-    save_refine(&mut *tx, &state.name, &state.refine_log).await?;
+    save_refine(&mut tx, &state.name, &state.refine_log).await?;
 
     // Save magics
-    save_magics(&mut *tx, &state.name, &state.magics).await?;
+    save_magics(&mut tx, &state.name, &state.magics).await?;
 
     // Save hero magics (#218)
-    save_hero_magics(&mut *tx, &state.name, &state.hero_magics).await?;
+    save_hero_magics(&mut tx, &state.name, &state.hero_magics).await?;
 
     // Save flags
-    save_flags(&mut *tx, &state.name, &state.flags).await?;
+    save_flags(&mut tx, &state.name, &state.flags).await?;
 
     // Save buffs（C# CharacterInfo.Buffs；墙钟到期，离线衰减）
-    save_buffs(&mut *tx, &state.name, &state.buffs).await?;
+    save_buffs(&mut tx, &state.name, &state.buffs).await?;
 
     // 提交事务 — 所有写入原子生效
     tx.commit().await?;
@@ -3239,22 +3239,26 @@ async fn load_refine(pool: &DbPool, character_name: &str) -> anyhow::Result<Refi
             let uid: Option<i64> = r.get("active_original_uid");
             let status: i32 = r.get("active_status");
 
-            let active_refine = if uid.is_some() && uid != Some(0) {
-                Some(RefiningItem {
-                    original_uid: uid.unwrap() as u64,
-                    item_index: r.get::<i32, _>("active_item_index") as u32,
-                    start_time: r.get::<i64, _>("active_start_time") as u64,
-                    finish_time: r.get::<i64, _>("active_finish_time") as u64,
-                    status: RefineStatus::from_i32(status).unwrap_or(RefineStatus::None),
-                    success_chance: r.get::<i32, _>("active_success_chance") as u8,
-                    item: r
-                        .try_get::<Option<String>, _>("active_item_json")
-                        .unwrap_or(None)
-                        .as_deref()
-                        .and_then(|s| {
-                            serde_json::from_str::<mir2_shared::data::item::UserItem>(s).ok()
-                        }),
-                })
+            let active_refine = if let Some(u) = uid {
+                if u != 0 {
+                    Some(RefiningItem {
+                        original_uid: u as u64,
+                        item_index: r.get::<i32, _>("active_item_index") as u32,
+                        start_time: r.get::<i64, _>("active_start_time") as u64,
+                        finish_time: r.get::<i64, _>("active_finish_time") as u64,
+                        status: RefineStatus::from_i32(status).unwrap_or(RefineStatus::None),
+                        success_chance: r.get::<i32, _>("active_success_chance") as u8,
+                        item: r
+                            .try_get::<Option<String>, _>("active_item_json")
+                            .unwrap_or(None)
+                            .as_deref()
+                            .and_then(|s| {
+                                serde_json::from_str::<mir2_shared::data::item::UserItem>(s).ok()
+                            }),
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -5493,27 +5497,19 @@ pub async fn import_recipes_from_dir(
             }
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             match section.as_str() {
-                "recipe" => {
-                    if parts.len() >= 2 {
-                        match parts[0].to_uppercase().as_str() {
-                            "AMOUNT" => amount = parts[1].parse().unwrap_or(1),
-                            "CHANCE" => chance = parts[1].parse().unwrap_or(100),
-                            "GOLD" => gold_cost = parts[1].parse().unwrap_or(0),
-                            _ => {}
-                        }
-                    }
+                "recipe" if parts.len() >= 2 => match parts[0].to_uppercase().as_str() {
+                    "AMOUNT" => amount = parts[1].parse().unwrap_or(1),
+                    "CHANCE" => chance = parts[1].parse().unwrap_or(100),
+                    "GOLD" => gold_cost = parts[1].parse().unwrap_or(0),
+                    _ => {}
+                },
+                "ingredients" if !parts.is_empty() => {
+                    let name = parts[0].to_string();
+                    let count: u16 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+                    ingredients.push((name, count));
                 }
-                "ingredients" => {
-                    if !parts.is_empty() {
-                        let name = parts[0].to_string();
-                        let count: u16 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
-                        ingredients.push((name, count));
-                    }
-                }
-                "tools" => {
-                    if !parts.is_empty() {
-                        tools.push(parts[0].to_string());
-                    }
+                "tools" if !parts.is_empty() => {
+                    tools.push(parts[0].to_string());
                 }
                 _ => {}
             }

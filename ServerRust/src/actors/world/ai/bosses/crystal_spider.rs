@@ -22,6 +22,12 @@ const LINE_RANGE: i32 = 3;
 
 pub struct CrystalSpiderBehavior;
 
+impl Default for CrystalSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CrystalSpiderBehavior {
     pub fn new() -> Self {
         Self

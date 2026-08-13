@@ -12,6 +12,12 @@ const ATTACK_RANGE: i32 = 9;
 
 pub struct RedThunderZumaBehavior;
 
+impl Default for RedThunderZumaBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RedThunderZumaBehavior {
     pub fn new() -> Self {
         Self

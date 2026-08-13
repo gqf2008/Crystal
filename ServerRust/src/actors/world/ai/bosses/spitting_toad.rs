@@ -14,6 +14,12 @@ const MASTER_RANGE: i32 = 15;
 
 pub struct SpittingToadBehavior;
 
+impl Default for SpittingToadBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpittingToadBehavior {
     pub fn new() -> Self {
         Self

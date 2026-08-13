@@ -14,6 +14,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct ChieftainArcherBehavior;
 
+impl Default for ChieftainArcherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChieftainArcherBehavior {
     pub fn new() -> Self {
         Self

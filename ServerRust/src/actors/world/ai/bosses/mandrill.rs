@@ -46,6 +46,12 @@ fn maybe_teleport_to_weaker(monster: &mut MonsterState, ctx: &mut AiCtx, view_ra
 
 pub struct MandrillBehavior;
 
+impl Default for MandrillBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MandrillBehavior {
     pub fn new() -> Self {
         Self

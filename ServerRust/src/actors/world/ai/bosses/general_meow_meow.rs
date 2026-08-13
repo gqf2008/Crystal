@@ -40,6 +40,12 @@ pub struct GeneralMeowMeowBehavior {
     shield_end_tick: u64,
 }
 
+impl Default for GeneralMeowMeowBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeneralMeowMeowBehavior {
     pub fn new() -> Self {
         Self {
@@ -77,7 +83,7 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
             self.next_slave_tick = ctx.tick_count + SLAVE_SPAWN_INTERVAL_TICKS;
             // #1441：C# count = min(3, 6 - SlaveList.Count)
             for i in 0..slave_spawn_count(3, ctx.slave_count, 6) {
-                let dir = (i as usize) % 8;
+                let dir = i % 8;
                 let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];
                 ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                     monster_name: name.to_string(),
@@ -103,7 +109,7 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
             0
         };
         let in_bubble_stage =
-            (hp_pct >= 70 && hp_pct <= 80) || (hp_pct >= 40 && hp_pct <= 50) || hp_pct <= 20;
+            (70..=80).contains(&hp_pct) || (40..=50).contains(&hp_pct) || hp_pct <= 20;
 
         if in_bubble_stage && self.shield_end_tick == 0 {
             // 激活护盾（C# AddBuff(GeneralMeowMeowShield, 30s)）

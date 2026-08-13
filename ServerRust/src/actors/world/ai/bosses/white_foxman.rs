@@ -17,6 +17,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct WhiteFoxmanBehavior;
 
+impl Default for WhiteFoxmanBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WhiteFoxmanBehavior {
     pub fn new() -> Self {
         Self

@@ -22,6 +22,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct IceGuardBehavior;
 
+impl Default for IceGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IceGuardBehavior {
     pub fn new() -> Self {
         Self

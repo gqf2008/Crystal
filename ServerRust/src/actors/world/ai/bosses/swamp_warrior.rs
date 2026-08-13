@@ -17,6 +17,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct SwampWarriorBehavior;
 
+impl Default for SwampWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SwampWarriorBehavior {
     pub fn new() -> Self {
         Self

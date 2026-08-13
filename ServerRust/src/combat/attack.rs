@@ -145,10 +145,8 @@ pub fn get_attack_power(min: i32, max: i32, luck: i32) -> i32 {
         if luck > rand_below(max_luck()) {
             return max;
         }
-    } else if luck < 0 {
-        if luck < -rand_below(max_luck()) {
-            return min;
-        }
+    } else if luck < 0 && luck < -rand_below(max_luck()) {
+        return min;
     }
     rand_in_range(min, max)
 }
@@ -263,23 +261,23 @@ pub fn apply_negative_effects(
     }
 
     // Freezing → Slow（level_offset==0 时 C# Random(0) 抛异常被吞，等效不触发）
-    if attacker.freezing > 0 && level_offset > 0 {
-        if rand_below(combat_weight(CombatWeight::FreezingAttack)) < attacker.freezing
-            && rand_below(level_offset as i32) == 0
-        {
-            let duration = (3 + rand_below(attacker.freezing)).min(10) as u32;
-            poisons.push(Poison::new(PoisonType::SLOW, duration, 0, 1000));
-        }
+    if attacker.freezing > 0
+        && level_offset > 0
+        && rand_below(combat_weight(CombatWeight::FreezingAttack)) < attacker.freezing
+        && rand_below(level_offset as i32) == 0
+    {
+        let duration = (3 + rand_below(attacker.freezing)).min(10) as u32;
+        poisons.push(Poison::new(PoisonType::SLOW, duration, 0, 1000));
     }
 
     // PoisonAttack → Green
-    if attacker.poison_attack > 0 && level_offset > 0 {
-        if rand_below(combat_weight(CombatWeight::PoisonAttack)) < attacker.poison_attack
-            && rand_below(level_offset as i32) == 0
-        {
-            let value = (3 + rand_below(attacker.poison_attack)).min(10);
-            poisons.push(Poison::new(PoisonType::GREEN, 5, value, 1000));
-        }
+    if attacker.poison_attack > 0
+        && level_offset > 0
+        && rand_below(combat_weight(CombatWeight::PoisonAttack)) < attacker.poison_attack
+        && rand_below(level_offset as i32) == 0
+    {
+        let value = (3 + rand_below(attacker.poison_attack)).min(10);
+        poisons.push(Poison::new(PoisonType::GREEN, 5, value, 1000));
     }
 
     poisons

@@ -13,6 +13,12 @@ const LINE_RANGE: i32 = 2;
 
 pub struct BoneSpearmanBehavior;
 
+impl Default for BoneSpearmanBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BoneSpearmanBehavior {
     pub fn new() -> Self {
         Self

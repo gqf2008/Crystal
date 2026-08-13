@@ -14,6 +14,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct SepArcherBehavior;
 
+impl Default for SepArcherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepArcherBehavior {
     pub fn new() -> Self {
         Self

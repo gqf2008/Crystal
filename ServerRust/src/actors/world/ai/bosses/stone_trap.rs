@@ -13,6 +13,12 @@ use crate::actors::world::MonsterState;
 
 pub struct StoneTrapBehavior;
 
+impl Default for StoneTrapBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StoneTrapBehavior {
     pub fn new() -> Self {
         Self
@@ -40,7 +46,7 @@ impl MonsterBehavior for StoneTrapBehavior {
         }
 
         // C# ProcessAI：嘲讽视野内怪物攻击自己（怪物互伤，monster_targets 由上层应用）
-        let view_range = monster.ai_profile.aggro_range.max(1) as i32;
+        let view_range = monster.ai_profile.aggro_range.max(1);
         for snap in ctx.monsters.iter() {
             if snap.object_id == monster.object_id {
                 continue;

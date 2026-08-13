@@ -18,6 +18,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct FlamingWoomaBehavior;
 
+impl Default for FlamingWoomaBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlamingWoomaBehavior {
     pub fn new() -> Self {
         Self

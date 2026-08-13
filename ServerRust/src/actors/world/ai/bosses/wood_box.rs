@@ -11,6 +11,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct WoodBoxBehavior;
 
+impl Default for WoodBoxBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WoodBoxBehavior {
     pub fn new() -> Self {
         Self

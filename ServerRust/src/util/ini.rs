@@ -668,18 +668,18 @@ pub fn load_awakening_settings(configs_dir: &Path) -> AwakeningIniSettings {
         out.armor_rate as i64,
     ) as u8;
     const GRADES: [&str; 5] = ["Common", "Rare", "Legendary", "Mythical", "Heroic"];
-    for i in 0..5 {
+    for (i, grade) in GRADES.iter().enumerate() {
         out.chance_max[i] = ini_get_i64(
             &parsed,
             "Value",
-            &format!("ChanceMax_{}", GRADES[i]),
+            &format!("ChanceMax_{}", grade),
             out.chance_max[i] as i64,
         )
         .max(1) as u8;
         out.material_rate[i] = ini_get_f32(
             &parsed,
             "Materials_IncreaseValue",
-            &format!("Materials_{}", GRADES[i]),
+            &format!("Materials_{}", grade),
             out.material_rate[i],
         );
     }

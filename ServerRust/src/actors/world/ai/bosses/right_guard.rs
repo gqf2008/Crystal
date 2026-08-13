@@ -20,6 +20,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct RightGuardBehavior;
 
+impl Default for RightGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RightGuardBehavior {
     pub fn new() -> Self {
         Self

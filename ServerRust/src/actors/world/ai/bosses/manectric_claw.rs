@@ -21,6 +21,12 @@ pub struct ManectricClawBehavior {
     next_thrust_tick: u64,
 }
 
+impl Default for ManectricClawBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ManectricClawBehavior {
     pub fn new() -> Self {
         Self {

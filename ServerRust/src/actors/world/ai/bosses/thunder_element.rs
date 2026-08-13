@@ -23,6 +23,12 @@ const MELEE_RANGE: i32 = 2;
 
 pub struct ThunderElementBehavior;
 
+impl Default for ThunderElementBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThunderElementBehavior {
     pub fn new() -> Self {
         Self

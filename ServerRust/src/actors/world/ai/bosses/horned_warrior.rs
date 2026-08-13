@@ -31,6 +31,12 @@ pub struct HornedWarriorBehavior {
     next_shield_available: u64,
 }
 
+impl Default for HornedWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HornedWarriorBehavior {
     pub fn new() -> Self {
         Self {

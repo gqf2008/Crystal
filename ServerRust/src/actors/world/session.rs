@@ -595,15 +595,11 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.holy = b.holy;
 
         // 给装备/背包物品补 ItemInfo（含 special_mode，供复活戒指等逻辑读取）
-        for slot in loaded_state.inventory.equipment.iter_mut() {
-            if let Some(item) = slot {
-                super::enrich_item_info(item, &self.item_infos);
-            }
+        for item in loaded_state.inventory.equipment.iter_mut().flatten() {
+            super::enrich_item_info(item, &self.item_infos);
         }
-        for slot in loaded_state.inventory.backpack.iter_mut() {
-            if let Some(s) = slot {
-                super::enrich_item_info(&mut s.item, &self.item_infos);
-            }
+        for s in loaded_state.inventory.backpack.iter_mut().flatten() {
+            super::enrich_item_info(&mut s.item, &self.item_infos);
         }
 
         let _ = player_ref
@@ -3187,7 +3183,7 @@ impl Message<ChatRequest> for WorldActor {
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
                 // 默认 NPC 自定义命令（C# PlayerObject.cs:4151-4156：Envir.CustomCommands，玩家可用无 GM 门槛）
-                if self.custom_commands.iter().any(|c| *c == cmd) {
+                if self.custom_commands.contains(&cmd) {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
@@ -3266,8 +3262,8 @@ impl Message<ChatRequest> for WorldActor {
                             // 在线 → 用实时状态 + 记录账号；离线 → 从 DB 加载 + 查账号（C# GetCharacterInfo 等价）
                             let mut state = None;
                             let mut account = None;
-                            for (_sid, rec) in &self.players {
-                                if rec.name.eq_ignore_ascii_case(&name) {
+                            for rec in self.players.values() {
+                                if rec.name.eq_ignore_ascii_case(name) {
                                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                                         state = Some(s);
                                         account = Some(rec.account_username.clone());
@@ -3276,10 +3272,9 @@ impl Message<ChatRequest> for WorldActor {
                                 }
                             }
                             if state.is_none() {
-                                if let Ok(Some(s)) = db::load_character(&self.db_pool, &name).await
-                                {
+                                if let Ok(Some(s)) = db::load_character(&self.db_pool, name).await {
                                     state = Some(s);
-                                    account = db::get_character_account(&self.db_pool, &name)
+                                    account = db::get_character_account(&self.db_pool, name)
                                         .await
                                         .unwrap_or(None);
                                 }
@@ -3333,7 +3328,7 @@ impl Message<ChatRequest> for WorldActor {
                             if self
                                 .players
                                 .values()
-                                .any(|r| r.name.eq_ignore_ascii_case(&name))
+                                .any(|r| r.name.eq_ignore_ascii_case(name))
                             {
                                 send_system_message(
                                     &self.gate_ref,
@@ -3342,9 +3337,9 @@ impl Message<ChatRequest> for WorldActor {
                                 );
                                 return;
                             }
-                            match db::load_character(&self.db_pool, &name).await {
+                            match db::load_character(&self.db_pool, name).await {
                                 Ok(Some(s)) => {
-                                    let account = db::get_character_account(&self.db_pool, &name)
+                                    let account = db::get_character_account(&self.db_pool, name)
                                         .await
                                         .unwrap_or(None);
                                     if let Some(acc) = account {
@@ -3358,7 +3353,7 @@ impl Message<ChatRequest> for WorldActor {
                                             .await;
                                         }
                                     }
-                                    match db::delete_character(&self.db_pool, &name).await {
+                                    match db::delete_character(&self.db_pool, name).await {
                                         Ok(()) => send_system_message(
                                             &self.gate_ref,
                                             msg.session_id,
@@ -3389,7 +3384,7 @@ impl Message<ChatRequest> for WorldActor {
                                 );
                                 return;
                             }
-                            if !db::character_exists_by_name(&self.db_pool, &name)
+                            if !db::character_exists_by_name(&self.db_pool, name)
                                 .await
                                 .unwrap_or(false)
                             {
@@ -3400,7 +3395,7 @@ impl Message<ChatRequest> for WorldActor {
                                 );
                                 return;
                             }
-                            let Some(account) = db::get_character_account(&self.db_pool, &name)
+                            let Some(account) = db::get_character_account(&self.db_pool, name)
                                 .await
                                 .unwrap_or(None)
                             else {
@@ -3411,7 +3406,7 @@ impl Message<ChatRequest> for WorldActor {
                                 );
                                 return;
                             };
-                            match db::load_archived_player(&self.db_pool, &name).await {
+                            match db::load_archived_player(&self.db_pool, name).await {
                                 Ok(Some((_, json))) => match serde_json::from_str::<
                                     crate::actors::player::PlayerState,
                                 >(&json)
@@ -3457,7 +3452,7 @@ impl Message<ChatRequest> for WorldActor {
                                 return;
                             }
                             let target_account = parts.get(2).map(|s| s.to_string());
-                            match db::load_archived_player(&self.db_pool, &name).await {
+                            match db::load_archived_player(&self.db_pool, name).await {
                                 Ok(Some((orig_account, json))) => match serde_json::from_str::<
                                     crate::actors::player::PlayerState,
                                 >(
@@ -3642,7 +3637,7 @@ impl Message<ChatRequest> for WorldActor {
                             } else {
                                 self.item_infos
                                     .iter()
-                                    .find(|(_, i)| i.name.eq_ignore_ascii_case(&name))
+                                    .find(|(_, i)| i.name.eq_ignore_ascii_case(name))
                                     .map(|(k, _)| *k)
                             };
                             if let Some(idx) = item_idx {
@@ -3795,7 +3790,7 @@ impl Message<ChatRequest> for WorldActor {
                             }
                             Some(n) => {
                                 let mut found = false;
-                                for (_sid, other) in &self.players {
+                                for other in self.players.values() {
                                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
                                     {
                                         if os.name.eq_ignore_ascii_case(n) {
@@ -3830,7 +3825,7 @@ impl Message<ChatRequest> for WorldActor {
                             }
                             Some(n) => {
                                 let mut found = false;
-                                for (_sid, other) in &self.players {
+                                for other in self.players.values() {
                                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
                                     {
                                         if os.name.eq_ignore_ascii_case(n) {
@@ -3869,7 +3864,7 @@ impl Message<ChatRequest> for WorldActor {
                             match parts.get(1).copied() {
                                 Some(n) if parts.len() >= 3 => {
                                     let mut found = false;
-                                    for (_sid, other) in &self.players {
+                                    for other in self.players.values() {
                                         if let Ok(Some(os)) =
                                             other.actor_ref.ask(GetPlayerState).await
                                         {
@@ -3915,7 +3910,7 @@ impl Message<ChatRequest> for WorldActor {
                             let (skill_arg, level_arg) = if parts.len() >= 3 {
                                 (
                                     parts.get(parts.len() - 2).copied().unwrap_or(""),
-                                    parts.get(parts.len() - 1).copied().unwrap_or("0"),
+                                    parts.last().copied().unwrap_or("0"),
                                 )
                             } else {
                                 (
@@ -4284,7 +4279,7 @@ impl Message<ChatRequest> for WorldActor {
                             match parts.get(1).copied() {
                                 Some(n) => {
                                     let mut found_player = false;
-                                    for (_sid, other) in &self.players {
+                                    for other in self.players.values() {
                                         if let Ok(Some(os)) =
                                             other.actor_ref.ask(GetPlayerState).await
                                         {
@@ -4405,7 +4400,7 @@ impl Message<ChatRequest> for WorldActor {
                                                     ts.direction,
                                                     0u8,
                                                 );
-                                                for (psid, _) in &self.players {
+                                                for psid in self.players.keys() {
                                                     let _ = self
                                                         .gate_ref
                                                         .tell(SendToClient {
@@ -4497,7 +4492,7 @@ impl Message<ChatRequest> for WorldActor {
                                         st.direction,
                                         0u8,
                                     );
-                                    for (sid, _) in &self.players {
+                                    for sid in self.players.keys() {
                                         let _ = self
                                             .gate_ref
                                             .tell(SendToClient {
@@ -4583,7 +4578,7 @@ impl Message<ChatRequest> for WorldActor {
                                         st.direction,
                                         0u8,
                                     );
-                                    for (sid, _) in &self.players {
+                                    for sid in self.players.keys() {
                                         let _ = self
                                             .gate_ref
                                             .tell(SendToClient {
@@ -5244,7 +5239,7 @@ impl Message<ChatRequest> for WorldActor {
                             match parts.get(1).copied() {
                                 Some(n) if parts.len() >= 3 => {
                                     let mut found = false;
-                                    for (_sid, other) in &self.players {
+                                    for other in self.players.values() {
                                         if let Ok(Some(os)) =
                                             other.actor_ref.ask(GetPlayerState).await
                                         {
@@ -5763,7 +5758,7 @@ impl Message<ChatRequest> for WorldActor {
                         }
                         self.last_probe_time.insert(msg.session_id, now_ms);
                     }
-                    for (_sid, other) in &self.players {
+                    for other in self.players.values() {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.name.eq_ignore_ascii_case(target_name) {
                                 let title = self
@@ -6656,10 +6651,10 @@ impl Message<ChatRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
                 return;
             }
-            let parts: Vec<&str> = eargs.trim().split_whitespace().collect();
+            let parts: Vec<&str> = eargs.split_whitespace().collect();
             if parts.len() >= 2 {
                 if let (Ok(mul), Ok(dur)) = (parts[0].parse::<f64>(), parts[1].parse::<u64>()) {
-                    if mul < 1.0 || mul > 10.0 {
+                    if !(1.0..=10.0).contains(&mul) {
                         send_system_message(&self.gate_ref, msg.session_id, "倍率范围: 1.0 ~ 10.0");
                         return;
                     }

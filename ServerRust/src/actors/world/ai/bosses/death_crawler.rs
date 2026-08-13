@@ -37,6 +37,12 @@ pub struct DeathCrawlerBehavior {
     breath_pending: u32,
 }
 
+impl Default for DeathCrawlerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeathCrawlerBehavior {
     pub fn new() -> Self {
         Self { breath_pending: 0 }

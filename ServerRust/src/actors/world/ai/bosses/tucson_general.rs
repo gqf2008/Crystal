@@ -30,6 +30,12 @@ pub struct TucsonGeneralBehavior {
     next_rage_tick: u64,
 }
 
+impl Default for TucsonGeneralBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TucsonGeneralBehavior {
     pub fn new() -> Self {
         Self { next_rage_tick: 0 }

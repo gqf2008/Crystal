@@ -9,6 +9,12 @@ use crate::actors::world::MonsterState;
 
 pub struct TrainerBehavior;
 
+impl Default for TrainerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TrainerBehavior {
     pub fn new() -> Self {
         Self

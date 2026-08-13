@@ -31,6 +31,12 @@ pub struct GreatFoxSpiritBehavior {
     next_recall_tick: u64,
 }
 
+impl Default for GreatFoxSpiritBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GreatFoxSpiritBehavior {
     pub fn new() -> Self {
         Self {
@@ -48,7 +54,7 @@ impl MonsterBehavior for GreatFoxSpiritBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // ---- 阶段计算（C# stage = 4 - HP/(MaxHP/4)）----
         if monster.max_hp >= 4 {
-            let stage = (4 - monster.hp / (monster.max_hp / 4)).max(0).min(3) as u8;
+            let stage = (4 - monster.hp / (monster.max_hp / 4)).clamp(0, 3) as u8;
             if stage > self.stage {
                 self.stage = stage;
             }

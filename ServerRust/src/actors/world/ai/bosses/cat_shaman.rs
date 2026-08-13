@@ -22,6 +22,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct CatShamanBehavior;
 
+impl Default for CatShamanBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CatShamanBehavior {
     pub fn new() -> Self {
         Self

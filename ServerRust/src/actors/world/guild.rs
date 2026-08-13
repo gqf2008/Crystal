@@ -14,7 +14,7 @@ impl Message<RequestUserNameMsg> for WorldActor {
         } else if let Some(mon) = self.monsters.get(&msg.object_id) {
             Some(mon.name.clone())
         } else {
-            for (_, record) in &self.players {
+            for record in self.players.values() {
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                     if state.object_id == msg.object_id {
                         // Found — send UserName response

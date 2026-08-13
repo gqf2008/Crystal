@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct CannibalTentaclesBehavior;
 
+impl Default for CannibalTentaclesBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CannibalTentaclesBehavior {
     pub fn new() -> Self {
         Self

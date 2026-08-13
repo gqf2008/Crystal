@@ -21,6 +21,12 @@ pub struct CreeperPlantBehavior {
     next_check_tick: u64,
 }
 
+impl Default for CreeperPlantBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CreeperPlantBehavior {
     pub fn new() -> Self {
         Self { next_check_tick: 0 }

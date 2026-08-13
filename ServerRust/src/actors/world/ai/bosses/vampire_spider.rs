@@ -22,6 +22,12 @@ const EXPLOSION_RADIUS: i32 = 1;
 
 pub struct VampireSpiderBehavior;
 
+impl Default for VampireSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VampireSpiderBehavior {
     pub fn new() -> Self {
         Self

@@ -16,6 +16,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct TucsonEggBehavior;
 
+impl Default for TucsonEggBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TucsonEggBehavior {
     pub fn new() -> Self {
         Self

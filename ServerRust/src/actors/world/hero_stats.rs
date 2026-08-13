@@ -47,7 +47,7 @@ impl HeroStats {
     }
 
     /// 转换为战斗属性（供 resolve_attack / hero AI 使用）
-    pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
+    pub fn to_combat_stats(self) -> crate::combat::attack::CombatStats {
         use crate::combat::attack::CombatStats;
         CombatStats {
             min_atk: self.min_dc,
@@ -156,10 +156,6 @@ pub fn hero_base_stats(class: MirClass, level: i32) -> HeroStats {
         Archer => (
             14, 4.0, 3.25, 11, 4.0, 0.0, 4.0, 33.0, 30.0, 8.0, 8.0, 8.0, 8.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 8, 15,
-        ),
-        _ => (
-            14, 4.0, 4.5, 11, 3.5, 0.0, 3.0, 20.0, 13.0, 5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0,
-            0.0, 5, 15,
         ),
     };
     HeroStats {

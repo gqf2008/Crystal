@@ -22,6 +22,12 @@ pub struct YimoogiBehavior {
     spawn_ready_tick: u64,
 }
 
+impl Default for YimoogiBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl YimoogiBehavior {
     pub fn new() -> Self {
         Self {

@@ -26,6 +26,12 @@ pub struct KhazardBehavior {
     next_pull_tick: u64,
 }
 
+impl Default for KhazardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KhazardBehavior {
     pub fn new() -> Self {
         Self { next_pull_tick: 0 }

@@ -32,6 +32,12 @@ pub struct FlameQueenBehavior {
     spawned: bool,
 }
 
+impl Default for FlameQueenBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlameQueenBehavior {
     pub fn new() -> Self {
         Self {
@@ -54,34 +60,31 @@ impl MonsterBehavior for FlameQueenBehavior {
         };
 
         // ---- HP<20% 阶段：周期 MassAttack（全体弹道）+ 火焰法术场 ----
-        if hp_pct < 20 {
-            if self.next_mass_tick == 0 || ctx.tick_count >= self.next_mass_tick {
-                // C# MassAttackTime = Envir.Time + 2000 + Random(5)*1000
-                self.next_mass_tick =
-                    ctx.tick_count + MASS_ATTACK_MIN_TICKS + fastrand::u64(0..5) * 10;
+        if hp_pct < 20 && (self.next_mass_tick == 0 || ctx.tick_count >= self.next_mass_tick) {
+            // C# MassAttackTime = Envir.Time + 2000 + Random(5)*1000
+            self.next_mass_tick = ctx.tick_count + MASS_ATTACK_MIN_TICKS + fastrand::u64(0..5) * 10;
 
-                // 对范围内每个玩家投放 FireWall 法术场（任务核心机制）
-                let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
-                    .find_targets_in_range(monster.x, monster.y, FIELD_RADIUS, monster.map_index)
-                    .into_iter()
-                    .copied()
-                    .collect();
-                for t in targets {
-                    let value =
-                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
-                            .max(1);
-                    ctx.out_spell_fields
-                        .push(crate::actors::world::ai::SpellFieldSpawn {
-                            spell: Spell::FireWall,
-                            x: t.x,
-                            y: t.y,
-                            value,
-                            duration_ms: 5000,
-                            tick_ms: 500,
-                            caster_oid: monster.object_id,
-                            caster_session: 0,
-                        });
-                }
+            // 对范围内每个玩家投放 FireWall 法术场（任务核心机制）
+            let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(monster.x, monster.y, FIELD_RADIUS, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
+            for t in targets {
+                let value =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                ctx.out_spell_fields
+                    .push(crate::actors::world::ai::SpellFieldSpawn {
+                        spell: Spell::FireWall,
+                        x: t.x,
+                        y: t.y,
+                        value,
+                        duration_ms: 5000,
+                        tick_ms: 500,
+                        caster_oid: monster.object_id,
+                        caster_session: 0,
+                    });
             }
         }
 

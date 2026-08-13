@@ -13,6 +13,12 @@ const BUFF_RADIUS: i32 = 7;
 
 pub struct YinDevilNodeBehavior;
 
+impl Default for YinDevilNodeBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl YinDevilNodeBehavior {
     pub fn new() -> Self {
         Self

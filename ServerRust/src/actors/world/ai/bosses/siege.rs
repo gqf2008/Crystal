@@ -10,6 +10,12 @@ use crate::actors::world::MonsterState;
 
 pub struct SiegeBehavior;
 
+impl Default for SiegeBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SiegeBehavior {
     pub fn new() -> Self {
         Self

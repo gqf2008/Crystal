@@ -63,7 +63,7 @@ pub fn validate_password(pw: &str) -> bool {
 /// `[\u4e00-\u9fa5_A-Za-z0-9]`（中文/下划线/ASCII 字母数字）。
 pub fn validate_character_name(name: &str) -> bool {
     let len = name.chars().count();
-    if len < MIN_CHAR_NAME_LEN || len > MAX_CHAR_NAME_LEN {
+    if !(MIN_CHAR_NAME_LEN..=MAX_CHAR_NAME_LEN).contains(&len) {
         return false;
     }
     name.chars()

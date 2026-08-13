@@ -20,6 +20,12 @@ const VIEW_RANGE: i32 = 15;
 
 pub struct WitchDoctorBehavior;
 
+impl Default for WitchDoctorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WitchDoctorBehavior {
     pub fn new() -> Self {
         Self

@@ -24,6 +24,12 @@ const MELEE_AOE_RADIUS: i32 = 3;
 
 pub struct KingGuardBehavior;
 
+impl Default for KingGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KingGuardBehavior {
     pub fn new() -> Self {
         Self

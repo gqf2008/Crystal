@@ -27,6 +27,12 @@ pub struct HumanWizardBehavior {
     fear_end_tick: u64,
 }
 
+impl Default for HumanWizardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HumanWizardBehavior {
     pub fn new() -> Self {
         Self { fear_end_tick: 0 }

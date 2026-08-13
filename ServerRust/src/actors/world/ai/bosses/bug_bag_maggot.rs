@@ -22,6 +22,12 @@ const SLAVE_CAP: usize = 20;
 
 pub struct BugBagMaggotBehavior;
 
+impl Default for BugBagMaggotBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BugBagMaggotBehavior {
     pub fn new() -> Self {
         Self

@@ -55,7 +55,7 @@ impl WorldActor {
     /// 行会 == Settings.NewbieGuild 且开关开启时获得 ExpRatePercent 加成）
     pub(crate) async fn tick_newbie_bonus(&mut self) {
         use super::*;
-        if self.tick_count % 50 != 0 {
+        if !self.tick_count.is_multiple_of(50) {
             return;
         }
         let (newbie_guild, enabled, _exp) = self

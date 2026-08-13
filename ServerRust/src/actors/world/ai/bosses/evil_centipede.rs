@@ -35,6 +35,12 @@ pub struct EvilCentipedeBehavior {
     spawned: bool,
 }
 
+impl Default for EvilCentipedeBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvilCentipedeBehavior {
     pub fn new() -> Self {
         Self {

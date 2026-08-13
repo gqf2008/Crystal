@@ -19,6 +19,12 @@ pub struct RedFoxmanBehavior {
     next_teleport_tick: u64,
 }
 
+impl Default for RedFoxmanBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RedFoxmanBehavior {
     pub fn new() -> Self {
         Self {

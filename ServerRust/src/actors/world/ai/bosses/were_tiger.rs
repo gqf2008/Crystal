@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct WereTigerBehavior;
 
+impl Default for WereTigerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WereTigerBehavior {
     pub fn new() -> Self {
         Self

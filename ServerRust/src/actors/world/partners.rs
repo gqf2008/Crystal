@@ -34,7 +34,7 @@ impl Message<GetLoverExpBonus> for WorldActor {
         let Some(spouse) = state.spouse_name.clone() else {
             return 0;
         };
-        for (_, other) in &self.players {
+        for other in self.players.values() {
             if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                 if os.is_dead || !os.name.eq_ignore_ascii_case(&spouse) {
                     continue;
@@ -86,7 +86,7 @@ impl Message<GetMenteeExpBonus> for WorldActor {
         if state.is_mentor {
             return 0;
         }
-        for (_, other) in &self.players {
+        for other in self.players.values() {
             if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                 if os.is_dead || !os.name.eq_ignore_ascii_case(&mentor_name) {
                     continue;
@@ -244,7 +244,7 @@ pub(crate) fn now_unix_secs() -> i64 {
 
 pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     use super::*;
-    if world.tick_count % 50 != 0 {
+    if !world.tick_count.is_multiple_of(50) {
         return;
     }
     const DATA_RANGE: i32 = 16;
@@ -255,7 +255,7 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             let active = if state.is_mentor {
                 if let Some(mentee_name) = state.mentor_name.clone() {
                     let mut found = false;
-                    for (_, other) in &world.players {
+                    for other in world.players.values() {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.is_dead || !os.name.eq_ignore_ascii_case(&mentee_name) {
                                 continue;
@@ -314,7 +314,7 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             // 配偶加成（C# GainExp：Lover 同图 + InRange(16) + 存活）
             let mut lover = 0i32;
             if let Some(spouse) = state.spouse_name.clone() {
-                for (_, other) in &world.players {
+                for other in world.players.values() {
                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                         if os.is_dead
                             || !os.name.eq_ignore_ascii_case(&spouse)
@@ -334,7 +334,7 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             let mut mentee = 0i32;
             if !state.is_mentor {
                 if let Some(mentor_name) = state.mentor_name.clone() {
-                    for (_, other) in &world.players {
+                    for other in world.players.values() {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.is_dead
                                 || !os.name.eq_ignore_ascii_case(&mentor_name)
@@ -386,7 +386,7 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     // WorldActor 持有 guild_buff_infos（启动时从 GuildSettings.ini [Buff-*] 加载），
     // 激活列表按行会从 SocialActor 查询，按行会聚合后只 ask 一次。
     let mut guild_active: HashMap<String, Vec<u32>> = HashMap::new();
-    for (_, record) in &world.players {
+    for record in world.players.values() {
         if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
             if let Some(g) = &st.guild_name {
                 if !guild_active.contains_key(g) {

@@ -30,6 +30,12 @@ fn crescent_slash_cells(x: i32, y: i32, facing: usize) -> Vec<(i32, i32)> {
 
 pub struct SepHighAssassinBehavior;
 
+impl Default for SepHighAssassinBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepHighAssassinBehavior {
     pub fn new() -> Self {
         Self
