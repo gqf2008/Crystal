@@ -782,6 +782,26 @@ fn chat_input_system(
         }
     }
 
+    // C# ChatPanel_KeyPress：@ / ! / 空格 / 斜杠 也能直接打开输入框。
+    for key in &key_list {
+        if key.state != bevy::input::ButtonState::Pressed || ime.consumes_key(key) {
+            continue;
+        }
+        let prefix: Option<String> = match &key.logical_key {
+            Key::Space => Some(String::new()),
+            Key::Character(c) if c.as_str() == "@" => Some("@".to_string()),
+            Key::Character(c) if c.as_str() == "!" => Some("!".to_string()),
+            Key::Character(c) if c.as_str() == "/" => {
+                Some(chat.last_pm.clone().map(|p| format!("{} ", p)).unwrap_or_default())
+            }
+            _ => None,
+        };
+        if let Some(prefix) = prefix {
+            chat.input_active = true;
+            chat.input_text = prefix;
+        }
+    }
+
     if !chat.input_active {
         return;
     }
