@@ -7,6 +7,7 @@
 //   nearby {}            返回周围实体（含 object_id）
 //   attack {object_id}   攻击指定对象
 //   interact {object_id} 与指定 NPC 对话
+//   pickup {object_id}  拾取指定地面物品
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -18,7 +19,8 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use serde_json::{json, Value};
 
 use crate::actor::{
-    ActorAnim, LocalPlayer, Monster, MonsterName, NetObjectId, Npc, NpcName, Player, PlayerName,
+    ActorAnim, GroundItem, LocalPlayer, Monster, MonsterName, NetObjectId, Npc, NpcName, Player,
+    PlayerName,
 };
 use crate::game::movement::{world_to_tile, LocalMove};
 use crate::game::pathfinding;
@@ -35,6 +37,7 @@ enum ControlCommand {
     Nearby { reply: Sender<String> },
     Attack { object_id: u32 },
     Interact { object_id: u32 },
+    Pickup { object_id: u32 },
 }
 
 #[derive(Resource)]
@@ -131,6 +134,18 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            "pickup" => {
+                let object_id = params
+                    .get("object_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                if object_id > 0 {
+                    let _ = tx.send(ControlCommand::Pickup { object_id });
+                    json!({"ok": true})
+                } else {
+                    json!({"error": "missing object_id"})
+                }
+            }
             "attack" => {
                 let object_id = params
                     .get("object_id")
@@ -179,6 +194,7 @@ fn apply_control_commands(
     >,
     npcs: Query<(&Transform, &NpcName, &NetObjectId), (With<Npc>, Without<LocalPlayer>)>,
     others: Query<(&Transform, &PlayerName, &NetObjectId), (With<Player>, Without<LocalPlayer>)>,
+    items: Query<(&Transform, &GroundItem, &NetObjectId), (With<GroundItem>, Without<LocalPlayer>)>,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
@@ -255,6 +271,13 @@ fn apply_control_commands(
                         arr.push(json!({"kind": "player", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
                     }
                 }
+                for (tf, item, oid) in items.iter() {
+                    let d =
+                        ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
+                    if d < 600.0 {
+                        arr.push(json!({"kind": "item", "name": item.name, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                    }
+                }
                 arr.sort_by_key(|v| v.get("dist").and_then(|d| d.as_i64()).unwrap_or(0));
                 let _ = reply.send(json!({"count": arr.len(), "entities": arr}).to_string());
             }
@@ -290,6 +313,44 @@ fn apply_control_commands(
                     key: "[@Main]".to_string(),
                 });
                 tracing::info!("🎮 control interact: {object_id}");
+            }
+            ControlCommand::Pickup { object_id } => {
+                let Ok((pe, ptf, _)) = players.single() else {
+                    continue;
+                };
+                let Some((item_tf, _, _)) = items.iter().find(|(_, _, id)| id.0 == object_id)
+                else {
+                    tracing::warn!("🎮 control pickup: item {object_id} not found");
+                    continue;
+                };
+                let from = world_to_tile(ptf.translation.x, ptf.translation.y);
+                let item_tile = world_to_tile(item_tf.translation.x, item_tf.translation.y);
+                let adjacent =
+                    (item_tile.0 - from.0).abs() <= 1 && (item_tile.1 - from.1).abs() <= 1;
+                if adjacent {
+                    net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+                    control_state.attack_target = None;
+                    tracing::info!("🎮 control pickup: {object_id}");
+                } else if let Some(map) = &game_data.map {
+                    if let Some(p) = pathfinding::find_path(map, from, item_tile) {
+                        if p.is_empty() {
+                            tracing::debug!("🎮 control pickup unreachable: {object_id}");
+                        } else {
+                            let len = p.len();
+                            commands.entity(pe).insert(LocalMove {
+                                path: p.into(),
+                                step_timer_ms: 0.0,
+                                run: true,
+                                last: None,
+                                step_origin: None,
+                                turn_acc: 0.0,
+                            });
+                            control_state.attack_target = None;
+                            control_state.pickup_target = Some(object_id);
+                            tracing::info!("🎮 control pickup walk: {object_id} ({len} tiles)");
+                        }
+                    }
+                }
             }
         }
     }
