@@ -658,7 +658,8 @@ impl Plugin for PinyinImePlugin {
         app.insert_resource(PinyinIme::new(PinyinDict::load()));
         app.init_resource::<ImeFocus>();
         app.add_systems(PreUpdate, (pinyin_ime_system, clear_ime_focus).chain());
-        app.add_systems(Update, pinyin_candidate_ui_system);
+        // 候选条必须在 Update 所有输入框回填 ImeFocus 之后渲染；否则聚焦框尚未设置，候选条不会显示。
+        app.add_systems(PostUpdate, pinyin_candidate_ui_system);
     }
 }
 
