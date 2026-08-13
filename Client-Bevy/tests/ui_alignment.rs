@@ -291,6 +291,28 @@ fn game_chat_death_aligned() {
     println!("  ✓ 游戏内聊天面板 + 死亡弹窗 布局对齐");
 }
 
+#[test]
+fn login_select_meta_aligned() {
+    let mut libs = Libs::new();
+
+    // LoginScene.Version：左下角 Build 标签 @(5, ScreenHeight-20)
+    assert_in_canvas("登录版本标签", 5.0, 748.0, 220.0, 18.0);
+
+    // LoginScene.TestLabel：Prguse[79] @(ScreenWidth-116, 10)，仅测试配置可见
+    let (tw, th) = libs.size(LibraryName::Prguse, 79);
+    assert!(tw > 0.0 && th > 0.0, "[尺寸] Prguse[79] 登录 TestLabel 应存在");
+    assert_in_canvas("登录 TestLabel", 908.0, 10.0, tw, th);
+
+    // SelectScene.ServerLabel：@(432,60)，宽约 155
+    assert_in_canvas("选角服务器名", 432.0, 60.0, 155.0, 17.0);
+
+    // SelectScene.LastAccessLabel：标题 @(200,609)，值 @(265,609)
+    assert_in_canvas("选角最后登录标题", 200.0, 609.0, 100.0, 21.0);
+    assert_in_canvas("选角最后登录值", 265.0, 609.0, 180.0, 21.0);
+
+    println!("  ✓ 登录/选角元信息（版本/TestLabel/服务器名/最后登录）位置对齐");
+}
+
 /// 两个 [x, x+w) 区间是否重叠（同行 y 假设一致）。
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
