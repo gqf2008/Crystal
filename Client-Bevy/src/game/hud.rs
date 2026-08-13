@@ -338,6 +338,9 @@ pub const HUD_LEVEL_Y: f32 = 108.0;
 /// CharacterName @ (6,120) 90x16
 pub const HUD_NAME_X: f32 = 6.0;
 pub const HUD_NAME_Y: f32 = 120.0;
+/// CharacterName 框尺寸 Size(90,16)：C# DrawFormat=HCenter|VCenter 在框内双向居中
+pub const HUD_NAME_W: f32 = 90.0;
+pub const HUD_NAME_H: f32 = 16.0;
 /// GoldLabel @ (Width-105, 119)
 pub const HUD_GOLD_DX: f32 = 105.0;
 pub const HUD_GOLD_Y: f32 = 119.0;
@@ -518,6 +521,7 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         &mut commands,
         &font,
         HpHpText,
+        Anchor::TOP_CENTER,
         orb_x + HUD_ORB_CX,
         orb_y + HUD_HP_ORB_Y,
         "",
@@ -526,6 +530,7 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         &mut commands,
         &font,
         MpMpText,
+        Anchor::TOP_CENTER,
         orb_x + HUD_ORB_CX,
         orb_y + HUD_MP_ORB_Y,
         "",
@@ -563,15 +568,15 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         main_y + HUD_GOLD_Y,
         "",
     );
-    // C# CharacterName @ (6,120) 90x16
-    spawn_text(
+    // C# CharacterName @ (6,120) Size(90,16)，DrawFormat=HCenter|VCenter 在框内双向居中
+    // → 用 CENTER 锚定框心 (6+90/2, 120+16/2)=(51,128)，短名字也在 90px 框内居中、内容变化自动重居中
+    spawn_centered_text(
         &mut commands,
         &font,
-        &mut images,
-        &mut cache,
         NameText,
-        main_x + HUD_NAME_X,
-        main_y + HUD_NAME_Y,
+        Anchor::CENTER,
+        main_x + HUD_NAME_X + HUD_NAME_W / 2.0,
+        main_y + HUD_NAME_Y + HUD_NAME_H / 2.0,
         "",
     );
 
@@ -761,12 +766,15 @@ fn spawn_text(
     commands.entity(e).insert(_marker);
 }
 
-/// 水平居中标签（C# MirLabel Label_SizeChanged 语义：x = 中心 - width/2，内容变化自动重居中）。
-/// 用 TOP_CENTER 锚定，x 传“居中点”。
+/// 居中标签（内容变化自动重居中，复刻 C# 居中语义）。`anchor` 决定居中方式、`(x,y)` 传锚点：
+/// - TOP_CENTER：C# Label_SizeChanged「x=中心-width/2、y 不变」（HP/MP 球标签，水平居中于球心）。
+/// - CENTER：C# DrawFormat=HCenter|VCenter 框内双向居中（CharacterName 90x16 框，锚点=框心）。
+#[allow(clippy::too_many_arguments)]
 fn spawn_centered_text(
     commands: &mut Commands,
     font: &Handle<Font>,
     _marker: impl Component,
+    anchor: Anchor,
     x: f32,
     y: f32,
     text: &str,
@@ -775,7 +783,7 @@ fn spawn_centered_text(
         .spawn((
             UiEntity,
             Text2d::new(text),
-            Anchor::TOP_CENTER,
+            anchor,
             TextFont {
                 font: FontSource::Handle(font.clone()),
                 font_size: FontSize::Px(12.0),
@@ -944,7 +952,8 @@ fn hud_update_system(
             }
         } else if mp.is_some() {
             if opt.hp_view {
-                format!("MP {}/{}", hud.mp, hud.max_mp)
+                // C# "MP {0}/{1} " 带尾随空格（影响居中测量，与 C# 一致）
+                format!("MP {}/{} ", hud.mp, hud.max_mp)
             } else {
                 format!("{}/{}", hud.mp, hud.max_mp)
             }

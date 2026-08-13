@@ -360,6 +360,8 @@ fn hud_labels_aligned() {
         (hud::HUD_LEVEL_Y, 108.0, "LevelLabel.y = C# (5,108)"),
         (hud::HUD_NAME_X, 6.0, "CharacterName.x = C# (6,120)"),
         (hud::HUD_NAME_Y, 120.0, "CharacterName.y = C# (6,120)"),
+        (hud::HUD_NAME_W, 90.0, "CharacterName 框宽 = C# 90"),
+        (hud::HUD_NAME_H, 16.0, "CharacterName 框高 = C# 16"),
         (hud::HUD_GOLD_DX, 105.0, "GoldLabel 距右 = C# Width-105"),
         (hud::HUD_GOLD_Y, 119.0, "GoldLabel.y = C# 119"),
         (hud::HUD_ORB_CX, 50.0, "球体标签居中 x = C# 球心 50"),
