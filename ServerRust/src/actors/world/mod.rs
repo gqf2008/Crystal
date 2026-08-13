@@ -86,6 +86,8 @@ pub struct WorldActorArgs {
     pub spawn_dir: Option<PathBuf>,
     /// 任务文件所在目录（{file_name}.txt）
     pub quest_dir: PathBuf,
+    /// NPC 脚本目录（C# Settings.NPCPath = Envir/NPCs；00Default.txt 所在）
+    pub npc_script_dir: PathBuf,
     /// SQLite 数据库连接池
     pub db_pool: DbPool,
     /// SocialActor 引用（用于转发社交命令）
@@ -5950,7 +5952,7 @@ Ok(Self {
             online_hint_next_tick: 0,
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
-            script_dir: args.quest_dir.clone(),
+            script_dir: args.npc_script_dir.clone(),
             next_object_id: next_oid,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
@@ -6110,9 +6112,9 @@ Ok(Self {
             guild_war_ends: HashMap::new(),
             hero_ai_states: HashMap::new(),
             player_heroes: HashMap::new(),
-            default_npc: npc_script::load_default_npc(&args.quest_dir),
+            default_npc: npc_script::load_default_npc(&args.npc_script_dir),
             default_npc_object_id,
-            custom_commands: npc_script::load_custom_commands(&args.quest_dir),
+            custom_commands: npc_script::load_custom_commands(&args.npc_script_dir),
             active_coords,
         })
     }
