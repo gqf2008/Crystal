@@ -662,6 +662,63 @@ fn login_select_meta_aligned() {
     println!("  ✓ 登录/选角元信息（版本/TestLabel/服务器名/最后登录）位置对齐");
 }
 
+/// 菜单对话框 + 耐久切换钮（对齐 C# MenuDialog / DuraStatusDialog，MainDialogs.cs）。
+/// 两者都曾被硬编码的错误精灵尺寸假设带偏（菜单 Title[567] 误为 44x224、底栏误为 150；
+/// 耐久钮漏算 +20 相对偏移且 y 用既非大也非小的 124）。这里锚定真实精灵尺寸。
+#[test]
+fn menu_dura_aligned() {
+    use client_bevy::game::dialogs::dura_status as ds;
+    use client_bevy::game::dialogs::menu as mu;
+    let mut libs = Libs::new();
+
+    // ---- 菜单（C# MenuDialog，MainDialogs.cs:3024-3029）常量 == C# 字面值/实测 ----
+    assert_eq!(mu::MENU_W, 36.0, "菜单宽 = Title[567] 实测 36");
+    assert_eq!(mu::MENU_H, 282.0, "菜单高 = Title[567] 实测 282");
+    assert_eq!(mu::MAIN_DIALOG_H, 152.0, "主底栏高 = Prguse[1] 实测 152");
+    assert_eq!(mu::MENU_X, 988.0, "菜单 x = ScreenWidth-Width = 1024-36");
+    assert_eq!(
+        mu::MENU_Y,
+        349.0,
+        "菜单 y = MainDialog.Y(616)-Height(282)+15"
+    );
+    assert_eq!(mu::MENU_BTN_DX, 3.0, "按钮相对 x = C# 按钮 Location.X=3");
+    // 菜单背景 Title[567] 实测尺寸 == 常量，且 ⊆ 画布
+    let (mw, mh) = libs.size(LibraryName::Title, 567);
+    assert_eq!(
+        (mw, mh),
+        (mu::MENU_W, mu::MENU_H),
+        "[尺寸] 菜单常量应等于 Title[567] 实测"
+    );
+    assert_in_canvas("菜单背景", mu::MENU_X, mu::MENU_Y, mw, mh);
+
+    // ---- 耐久切换钮（C# DuraStatusDialog，MainDialogs.cs:3911,3919）----
+    assert_eq!(ds::MINIMAP_X, 898.0, "小地图 x = ScreenWidth-126");
+    assert_eq!(
+        ds::MINIMAP_H_BIG,
+        154.0,
+        "小地图大模式高 = Prguse[2090] 实测 154"
+    );
+    assert_eq!(
+        ds::MINIMAP_H_SMALL,
+        45.0,
+        "小地图小模式高 = Prguse[2091] 实测 45"
+    );
+    assert_eq!(ds::BTN_X, 1004.0, "耐久钮 x = MiniMap.X+86+20");
+    assert_eq!(ds::dura_btn_y(true), 154.0, "大模式钮 y = 小地图大高 154");
+    assert_eq!(ds::dura_btn_y(false), 45.0, "小模式钮 y = 小地图小高 45");
+    // 切换钮 Prguse[2113] 实测 20x19，大/小模式均 ⊆ 画布
+    let (bw, bh) = libs.size(LibraryName::Prguse, 2113);
+    assert_eq!(
+        (bw, bh),
+        (20.0, 19.0),
+        "[尺寸] 耐久钮应为 20x19（C# Size(20,19) + 实测）"
+    );
+    assert_in_canvas("耐久钮(大模式)", ds::BTN_X, ds::dura_btn_y(true), bw, bh);
+    assert_in_canvas("耐久钮(小模式)", ds::BTN_X, ds::dura_btn_y(false), bw, bh);
+
+    println!("  ✓ 菜单背景(988,349) Title[567]=36x282、耐久钮(1004, 小地图高154/45) 对齐 C#");
+}
+
 /// 两个 [x, x+w) 区间是否重叠（同行 y 假设一致）。
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS

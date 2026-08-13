@@ -1,7 +1,8 @@
 // ============================================================================
 // 耐久面板（M55）
 // 参考：C# CharacterDuraPanel（Client/MirScenes/Dialogs/MainDialogs.cs）
-//   - 切换按钮 DuraStatusDialog：Prguse[2111/2112/2113]（打开时 2110）@ (984,124)
+//   - 切换按钮 DuraStatusDialog：Prguse[2111/2112/2113]（打开时 2110）
+//     @ (MiniMap.X+86+20, MiniMap.Height) = (1004, 大154/小45)（随小地图大/小模式）
 //   - 面板 Prguse[2105]（64x85）@ (963,200)，装备部位按耐久阈值切换
 //     Prguse 索引：正常/警告/损坏 三态（2122-2160）
 // 纯客户端：数据来自 HudState.equipment（UserInformation 下发，含 current_dura/max_dura）
@@ -10,6 +11,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::inventory::InvItem;
+use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
@@ -22,9 +24,27 @@ use crate::ui::sprite_ui::{
 /// 面板位置（C#：ScreenWidth-61=963, y=200；背景图 (3,3) 内布局）
 const PANEL_X: f32 = 963.0;
 const PANEL_Y: f32 = 200.0;
-/// 切换按钮位置（C#：MiniMapDialog.X+86, MiniMapDialog.Height）
-const BTN_X: f32 = 984.0;
-const BTN_Y: f32 = 124.0;
+
+// C# DuraStatusDialog（MainDialogs.cs:3911）容器 @ (MiniMap.X+86, MiniMap.Size.Height)，
+//   Character 切换钮相对 (20,0)（:3919）→ 绝对 (MiniMap.X+106, MiniMap.Height)，
+//   且 SetBigMode/SetSmallMode（:2060,2070）随小地图大/小模式更新 Y。
+//   MiniMap.X = 1024-126 = 898；高度 大=Prguse[2090]实测154 / 小=Prguse[2091]实测45。
+/// 小地图左边 x = ScreenWidth-126（C# MiniMapDialog Location）
+pub const MINIMAP_X: f32 = 1024.0 - 126.0; // 898
+/// 小地图大/小模式高度（Prguse[2090]/[2091] 实测）
+pub const MINIMAP_H_BIG: f32 = 154.0;
+pub const MINIMAP_H_SMALL: f32 = 45.0;
+/// 切换钮 X = MiniMap.X + 86（容器）+ 20（钮相对）（C#）
+pub const BTN_X: f32 = MINIMAP_X + 86.0 + 20.0; // 1004
+
+/// 切换钮 Y = 小地图当前高度（C# Location.Y = MiniMap.Size.Height，随大/小模式）
+pub fn dura_btn_y(minimap_big: bool) -> f32 {
+    if minimap_big {
+        MINIMAP_H_BIG
+    } else {
+        MINIMAP_H_SMALL
+    }
+}
 
 /// 装备部位（对应 ServerRust EquipmentSlot 0..13，#1136 补 Torch/Belt/Stone）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -111,11 +131,11 @@ fn spawn_dura_status(
 ) {
     libs.0.ensure_initialized();
 
-    // 切换按钮（Prguse 2111 hover / 2112 pressed / 2113 normal）
+    // 切换按钮（Prguse 2111 hover / 2112 pressed / 2113 normal）；默认大模式 y=154
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Prguse, 2113, 2111, 2112,
-        BTN_X, BTN_Y, 6.0, 20.0, 19.0,
+        BTN_X, dura_btn_y(true), 6.0, 20.0, 19.0,
     ) {
         commands.entity(e).insert((
             DuraToggleBtn,
@@ -197,12 +217,20 @@ fn dura_index(item: &InvItem, kind: DuraPieceKind) -> i32 {
 fn dura_status_ui_system(
     mut mgr: ResMut<DialogManager>,
     hud: Res<HudState>,
+    mode: Res<MiniMapMode>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut widgets: Query<&mut Visibility, (With<DuraWidget>, Without<DuraPiece>)>,
     mut pieces: Query<(&mut Visibility, &mut Sprite, &DuraPiece)>,
-    mut toggle: Query<(&UiButton, &mut crate::ui::sprite_ui::ButtonFrames), With<DuraToggleBtn>>,
+    mut toggle: Query<
+        (
+            &mut UiButton,
+            &mut crate::ui::sprite_ui::ButtonFrames,
+            &mut Transform,
+        ),
+        With<DuraToggleBtn>,
+    >,
     mut logged: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::DuraStatus);
@@ -229,7 +257,7 @@ fn dura_status_ui_system(
     }
 
     // 切换按钮点击（C# Character.Click）
-    for (btn, mut frames) in &mut toggle {
+    for (mut btn, mut frames, mut tf) in &mut toggle {
         if btn.clicked {
             if open {
                 mgr.close(DialogKind::DuraStatus);
@@ -242,6 +270,13 @@ fn dura_status_ui_system(
             if frames.normal != h {
                 frames.normal = h.clone();
             }
+        }
+        // Y 跟随小地图大/小模式（C# SetBigMode/SetSmallMode 更新 DuraStatusPanel.Location）：
+        // 同步命中区 rect.1（y 向下）与视觉 Transform.y（取负），二者不可脱节
+        let want_y = dura_btn_y(mode.big);
+        if (btn.rect.1 - want_y).abs() > 0.5 {
+            btn.rect.1 = want_y;
+            tf.translation.y = -want_y;
         }
     }
 
