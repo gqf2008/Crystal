@@ -383,7 +383,10 @@ fn advance_local_move(
     let from = lm.last.or(lm.step_origin).unwrap_or(cur);
     let first = *lm.path.front().unwrap();
     let d1 = (first.0 - from.0, first.1 - from.1);
-    let mut use_run = lm.run && lm.path.len() >= 2 && d1.0.abs() + d1.1.abs() == 1;
+    // C# CanRun：stepCounter > 0 才能跑（Walk 先走一格热身）。首段降级 Walk，避免
+    // stepCounter=0 时发 Run 被服务器拒绝，导致客户端/服务器位置不同步（#2498）。
+    let warmed_up = lm.last.is_some();
+    let mut use_run = warmed_up && lm.run && lm.path.len() >= 2 && d1.0.abs() + d1.1.abs() == 1;
     if use_run {
         let second = *lm.path.get(1).unwrap();
         let d2 = (second.0 - first.0, second.1 - first.1);
