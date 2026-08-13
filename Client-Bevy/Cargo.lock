@@ -2002,6 +2002,7 @@ dependencies = [
  "image",
  "mir2_shared",
  "once_cell",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]
