@@ -21,8 +21,8 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton,
-    UiEntity, UiFont, UiImageCache,
+    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, spawn_ui_text_anchored, ui_button_system,
+    ui_image, UiButton, UiEntity, UiFont, UiImageCache,
 };
 
 /// 角色状态（网络写入；当前服务器未下发属性，先默认值）
@@ -97,13 +97,14 @@ impl Default for CharacterState {
     }
 }
 
-pub(crate) const DIALOG_X: f32 = 1024.0 - 264.0;
-pub(crate) const DIALOG_Y: f32 = 0.0;
-const PAGE_X: f32 = 8.0;
-const PAGE_Y: f32 = 90.0;
+pub const DIALOG_X: f32 = 1024.0 - 264.0;
+pub const DIALOG_Y: f32 = 0.0;
+/// C# CharacterPage @ (8,90)（CharacterDialog.cs:45）：装备格父容器的页偏移
+pub const PAGE_X: f32 = 8.0;
+pub const PAGE_Y: f32 = 90.0;
 
-/// 装备槽位置（C# EquipmentSlot 顺序）
-pub(crate) const EQUIP_SLOTS: [(f32, f32); 14] = [
+/// 装备槽位置（C# EquipmentSlot 页内坐标，CharacterDialog.cs:229-340；屏坐标 = DIALOG + PAGE + 此偏移）
+pub const EQUIP_SLOTS: [(f32, f32); 14] = [
     (123.0, 7.0),   // Weapon
     (163.0, 7.0),   // Armor
     (203.0, 7.0),   // Helmet
@@ -119,7 +120,17 @@ pub(crate) const EQUIP_SLOTS: [(f32, f32); 14] = [
     (128.0, 242.0), // Stone
     (203.0, 62.0),  // Mount
 ];
-pub(crate) const SLOT_SIZE: f32 = 36.0;
+/// C# MirItemCell 装备格 Size(36,32)（MirItemCell.cs:186；纵向步进 36=32+4 间隙，如 BraceletL(8,170)→RingL(8,206)）
+pub const SLOT_W: f32 = 36.0;
+pub const SLOT_H: f32 = 32.0;
+/// C# NameLabel (0,12) 264x20 / GuildLabel (0,33) 264x30，HCenter|VCenter 框心（对话框相对）：
+/// x=264/2=132；name y=12+20/2=22；guild y=33+30/2=48（CharacterDialog.cs:202-217）
+pub const NAME_CX: f32 = 132.0;
+pub const NAME_CY: f32 = 22.0;
+pub const GUILD_CY: f32 = 48.0;
+/// C# ClassImage @ (15,33)（CharacterDialog.cs:222，对话框相对、常显不随页）
+pub const CLASS_IMG_X: f32 = 15.0;
+pub const CLASS_IMG_Y: f32 = 33.0;
 
 #[derive(Component)]
 pub struct CharDialogWidget;
@@ -189,16 +200,19 @@ pub struct CharSkillNext;
 #[derive(Component)]
 pub struct CharSkillBack;
 
-/// 装备格屏幕矩形（server_slot 0..13 → 绝对屏幕坐标；C# MirItemCell 36x36）
+/// 装备格屏坐标原点（对话框(760,0) + CharacterPage(8,90) + 页内偏移）。
+/// 生成/右键/tooltip 三处统一用此换算——#2503 修的偏移 bug 即生成与右键漏加页偏移所致。
+fn slot_screen_origin(pos: usize) -> Option<(f32, f32)> {
+    EQUIP_SLOTS
+        .get(pos)
+        .map(|(ox, oy)| (DIALOG_X + PAGE_X + ox, DIALOG_Y + PAGE_Y + oy))
+}
+
+/// 装备格屏幕矩形（server_slot 0..13 → 绝对屏幕坐标 + C# MirItemCell 36x32 尺寸）
 fn equip_slot_screen_rect(server_slot: usize) -> Option<(f32, f32, f32, f32)> {
     let pos_idx = *SERVER_SLOT_TO_POS.get(server_slot)?;
-    let (ox, oy) = EQUIP_SLOTS.get(pos_idx)?;
-    Some((
-        DIALOG_X + PAGE_X + ox,
-        DIALOG_Y + PAGE_Y + oy,
-        SLOT_SIZE,
-        SLOT_SIZE,
-    ))
+    let (x, y) = slot_screen_origin(pos_idx)?;
+    Some((x, y, SLOT_W, SLOT_H))
 }
 
 /// 已装备格子悬停 tooltip（C# CharacterDialog MirItemCell；复用 #1244 item_tooltip_lines）
@@ -268,6 +282,7 @@ fn spawn_character_dialog(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    hud: Res<HudState>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -337,14 +352,59 @@ fn spawn_character_dialog(
         ));
     }
 
-    // 名字/行会（C# NameLabel (0,12) 264x20；GuildLabel (0,33)）
-    let name = spawn_ui_text(&mut commands, &font, "", DIALOG_X + 132.0 - 40.0, DIALOG_Y + 12.0, 14.0, Color::WHITE, 8.0);
+    // C# ClassImage = Prguse[100+职业] @ (15,33)（CharacterDialog.cs:218-225，Parent=this 常显不随页）
+    let class_idx = 100 + (hud.class as usize).min(4); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        class_idx,
+    ) {
+        let e = spawn_ui_sprite(
+            &mut commands,
+            h,
+            DIALOG_X + CLASS_IMG_X,
+            DIALOG_Y + CLASS_IMG_Y,
+            6.3,
+            1.0,
+        );
+        commands.entity(e).insert((
+            DialogRoot(DialogKind::Character),
+            CharDialogWidget,
+            Visibility::Hidden,
+        ));
+    }
+
+    // 名字/行会（C# NameLabel (0,12) 264x20 / GuildLabel (0,33) 264x30，HCenter|VCenter 框内双向居中）
+    // → CENTER 锚定框心 (132, 12+10=22) / (132, 33+15=48)，内容变化自动重居中
+    let name = spawn_ui_text_anchored(
+        &mut commands,
+        &font,
+        "",
+        Anchor::CENTER,
+        DIALOG_X + NAME_CX,
+        DIALOG_Y + NAME_CY,
+        14.0,
+        Color::WHITE,
+        8.0,
+    );
     commands.entity(name).insert((
         CharNameText,
         DialogRoot(DialogKind::Character),
         CharDialogWidget,
     ));
-    let guild = spawn_ui_text(&mut commands, &font, "", DIALOG_X + 132.0 - 30.0, DIALOG_Y + 33.0, 12.0, Color::srgb(1.0, 0.85, 0.3), 8.0);
+    let guild = spawn_ui_text_anchored(
+        &mut commands,
+        &font,
+        "",
+        Anchor::CENTER,
+        DIALOG_X + NAME_CX,
+        DIALOG_Y + GUILD_CY,
+        12.0,
+        Color::srgb(1.0, 0.85, 0.3),
+        8.0,
+    );
     commands.entity(guild).insert((
         CharGuildText,
         DialogRoot(DialogKind::Character),
@@ -352,22 +412,25 @@ fn spawn_character_dialog(
     ));
 
     // 装备槽（14 个，深色底；服务端 14 槽按 SERVER_SLOT_TO_POS 映射）
+    // C# 装备格 Parent=CharacterPage(8,90)：屏坐标=DIALOG+PAGE+页内偏移（slot_screen_origin），
+    // 且随 CharacterPage 仅角色页可见 → 挂 CharPageBg(0) 骑页门控（改用非常显的 CharDialogWidget）。
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    for (pos, (ox, oy)) in EQUIP_SLOTS.iter().enumerate() {
+    for pos in 0..EQUIP_SLOTS.len() {
+        let (sx, sy) = slot_screen_origin(pos).unwrap();
         let slot_entity = commands
             .spawn((
                 UiEntity,
                 DialogRoot(DialogKind::Character),
-                CharDialogWidget,
+                CharPageBg(0),
                 CharEquipSlot(pos),
                 Sprite {
                     image: white.clone(),
                     color: Color::srgba(0.0, 0.0, 0.0, 0.25),
-                    custom_size: Some(Vec2::new(SLOT_SIZE, SLOT_SIZE)),
+                    custom_size: Some(Vec2::new(SLOT_W, SLOT_H)),
                     ..default()
                 },
                 Anchor::TOP_LEFT,
-                Transform::from_xyz(DIALOG_X + ox, -(DIALOG_Y + oy), 6.3),
+                Transform::from_xyz(sx, -sy, 6.3),
                 Visibility::Hidden,
             ))
             .id();
@@ -379,7 +442,7 @@ fn spawn_character_dialog(
                     CharEquipIcon(si),
                     Sprite {
                         image: white.clone(),
-                        custom_size: Some(Vec2::new(SLOT_SIZE - 4.0, SLOT_SIZE - 4.0)),
+                        custom_size: Some(Vec2::new(SLOT_W - 4.0, SLOT_H - 4.0)),
                         ..default()
                     },
                     Anchor::TOP_LEFT,
@@ -671,13 +734,14 @@ fn char_equip_system(
     {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
-                for (pos, (ox, oy)) in EQUIP_SLOTS.iter().enumerate() {
-                    let sx = DIALOG_X + ox;
-                    let sy = DIALOG_Y + oy;
+                for pos in 0..EQUIP_SLOTS.len() {
+                    let Some((sx, sy)) = slot_screen_origin(pos) else {
+                        continue;
+                    };
                     if cursor.x >= sx
-                        && cursor.x <= sx + SLOT_SIZE
+                        && cursor.x <= sx + SLOT_W
                         && cursor.y >= sy
-                        && cursor.y <= sy + SLOT_SIZE
+                        && cursor.y <= sy + SLOT_H
                     {
                         // 位置 → 服务端槽位（SERVER_SLOT_TO_POS 反查）
                         if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
@@ -871,11 +935,11 @@ mod tests {
 
     #[test]
     fn equip_slot_screen_rect_weapon() {
-        // 武器 server_slot=0 → EQUIP_SLOTS[0]=(123,7) + PAGE(8,90) + DIALOG(760,0)
+        // 武器 server_slot=0 → EQUIP_SLOTS[0]=(123,7) + PAGE(8,90) + DIALOG(760,0)；格尺寸 C# 36x32
         let r = equip_slot_screen_rect(0).unwrap();
         assert_eq!(
             r,
-            (1024.0 - 264.0 + 8.0 + 123.0, 0.0 + 90.0 + 7.0, 36.0, 36.0)
+            (1024.0 - 264.0 + 8.0 + 123.0, 0.0 + 90.0 + 7.0, 36.0, 32.0)
         );
         assert_eq!(equip_slot_screen_rect(14), None);
     }

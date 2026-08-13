@@ -1717,12 +1717,12 @@ fn inv_item_action_system(
         // 角色对话框装备格区域不触发
         if mgr.is_open(DialogKind::Character) {
             let in_eq = character::EQUIP_SLOTS.iter().any(|(ox, oy)| {
-                let sx = character::DIALOG_X + ox;
-                let sy = character::DIALOG_Y + oy;
+                let sx = character::DIALOG_X + character::PAGE_X + ox;
+                let sy = character::DIALOG_Y + character::PAGE_Y + oy;
                 cursor.x >= sx
-                    && cursor.x <= sx + character::SLOT_SIZE
+                    && cursor.x <= sx + character::SLOT_W
                     && cursor.y >= sy
-                    && cursor.y <= sy + character::SLOT_SIZE
+                    && cursor.y <= sy + character::SLOT_H
             });
             if in_eq {
                 return;

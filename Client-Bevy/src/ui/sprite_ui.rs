@@ -147,6 +147,38 @@ pub fn spawn_ui_text(
         .id()
 }
 
+/// UI 居中文本（Text2d）：`anchor` 为锚点、`(x,y)` 传锚点（屏幕坐标，y 向下），内容变化自动重排。
+/// 复刻 C# MirLabel 居中语义：`DrawFormat=HCenter|VCenter` 用 `Anchor::CENTER` 锚定框心；
+/// `Label_SizeChanged{x=中心-width/2}` 用 `Anchor::TOP_CENTER` 锚定顶边中点。
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_ui_text_anchored(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+    text: &str,
+    anchor: Anchor,
+    x: f32,
+    y: f32,
+    size: f32,
+    color: Color,
+    z: f32,
+) -> Entity {
+    commands
+        .spawn((
+            UiEntity,
+            Text2d::new(text),
+            anchor,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(size),
+                ..default()
+            },
+            TextColor(color),
+            Transform::from_xyz(x, -y, z),
+            Visibility::default(),
+        ))
+        .id()
+}
+
 /// UI 按钮（矩形命中测试）
 #[derive(Component)]
 pub struct UiButton {
