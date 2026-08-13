@@ -165,6 +165,7 @@ async fn start_server_with_world_url(db_url: &str) -> u16 {
         lover_exp_bonus: 5,
         mentor_exp_boost: 10,
         mentor_damage_boost: 10,
+        mentor_skill_boost: true,
         mentee_exp_bank: 1,
         orbs_exp_list: Vec::new(),
         orbs_dmg_list: Vec::new(),

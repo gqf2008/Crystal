@@ -391,6 +391,9 @@ pub struct PlayerState {
     pub mentor_damage_bonus: bool,
     /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10；spawn 时由 WorldActor 配置注入）
     pub mentor_damage_rate_percent: i32,
+    /// 导师技能经验翻倍开关（C# Settings.MentorSkillBoost，spawn 时注入）
+    #[serde(default = "default_true")]
+    pub mentor_skill_boost: bool,
     /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1；spawn 时注入）
     pub mentee_exp_bank: u32,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
@@ -715,6 +718,11 @@ pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
     }
 }
 
+/// serde 默认：MentorSkillBoost 默认 true（C# Settings.MentorSkillBoost）。
+fn default_true() -> bool {
+    true
+}
+
 impl PlayerActor {
     pub fn new(
         object_id: u32,
@@ -725,6 +733,7 @@ impl PlayerActor {
         world_ref: ActorRef<crate::actors::world::WorldActor>,
         mentor_damage_boost: u8,
         mentee_exp_bank: u8,
+        mentor_skill_boost: bool,
     ) -> Self {
         Self {
             state: PlayerState {
@@ -885,6 +894,7 @@ allow_group: false,
             mentor_damage_bonus: false,
             mentor_damage_rate_percent: mentor_damage_boost as i32,
             mentee_exp_bank: mentee_exp_bank as u32,
+            mentor_skill_boost,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
@@ -1060,16 +1070,16 @@ allow_group: false,
 }
 
 impl Actor for PlayerActor {
-    type Args = (u32, String, u64, u16, ActorRef<GateActor>, ActorRef<crate::actors::world::WorldActor>, u8, u8);
+    type Args = (u32, String, u64, u16, ActorRef<GateActor>, ActorRef<crate::actors::world::WorldActor>, u8, u8, bool);
     type Error = anyhow::Error;
 
     async fn on_start(
         args: Self::Args,
         _actor_ref: ActorRef<Self>,
     ) -> Result<Self, Self::Error> {
-        let (object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank) = args;
+        let (object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank, mentor_skill_boost) = args;
         debug!("PlayerActor spawned: {} (object_id={}, session={})", name, object_id, session_id);
-        Ok(Self::new(object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank))
+        Ok(Self::new(object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank, mentor_skill_boost))
     }
 }
 
@@ -5822,7 +5832,7 @@ impl PlayerState {
             }
         }
         let mut amount = amount;
-        if skill_multiplier == 1 && self.is_mentor && self.mentor_damage_bonus {
+        if skill_multiplier == 1 && self.is_mentor && self.mentor_damage_bonus && self.mentor_skill_boost {
             // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2（仅当 multiplier==1，C# :6915）
             amount = amount.saturating_mul(2);
         }
@@ -5916,7 +5926,7 @@ impl PlayerState {
         });
         if skill_multiplier {
             amount = amount.saturating_mul(3);
-        } else if self.is_mentor && self.mentor_damage_bonus {
+        } else if self.is_mentor && self.mentor_damage_bonus && self.mentor_skill_boost {
             // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2
             amount = amount.saturating_mul(2);
         }
@@ -6855,6 +6865,7 @@ allow_group: false,
             mentor_date: 0,
             mentor_damage_bonus: false,
             mentor_damage_rate_percent: 10,
+            mentor_skill_boost: true,
             mentee_exp_bank: 1,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
@@ -7304,6 +7315,20 @@ allow_group: false,
         assert_eq!(
             s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
             700
+        );
+    }
+
+    #[test]
+    fn test_mentor_skill_boost_disabled_by_config() {
+        let mut s = make_state();
+        assert!(s.learn_magic(31));
+        s.is_mentor = true;
+        s.mentor_damage_bonus = true;
+        s.mentor_skill_boost = false; // C# MentorSkillBoost=false → 不 ×2
+        let _ = s.gain_spell_exp(34, 100, None);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            100
         );
     }
 

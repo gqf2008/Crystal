@@ -268,6 +268,7 @@ async fn async_main() -> anyhow::Result<()> {
         lover_exp_bonus: marriage_ini.lover_exp_bonus,
         mentor_exp_boost: mentor_ini.exp_boost,
         mentor_damage_boost: mentor_ini.damage_boost,
+        mentor_skill_boost: mentor_ini.skill_boost,
         mentee_exp_bank: mentor_ini.exp_bank,
         orbs_exp_list: orbs_ini.exp_list,
         orbs_dmg_list: orbs_ini.dmg_list,

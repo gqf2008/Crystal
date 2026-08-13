@@ -375,6 +375,7 @@ impl Message<StartGameRequest> for WorldActor {
             self.self_ref.clone().expect("world self_ref set"),
             self.mentor_damage_boost,
             self.mentee_exp_bank,
+            self.mentor_skill_boost,
         ));
 
         // 加载地图 — 优先用 DB 中的 map_infos 获取文件名
@@ -4955,6 +4956,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         mount_type: 0,
         allow_lover_recall: false,
         mentor_damage_rate_percent: 0,
+        mentor_skill_boost: true,
         mentee_exp_bank: 1,
         is_gm: false,
         gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
