@@ -215,6 +215,27 @@ fn equip_slot_screen_rect(server_slot: usize) -> Option<(f32, f32, f32, f32)> {
     Some((x, y, SLOT_W, SLOT_H))
 }
 
+/// 状态页数值标签文本（逐项对齐 C# StatusPage.BeforeDraw，CharacterDialog.cs:96-108）。
+/// 关键差异：CritD（index 8）C# 是 `{0}` 不带 %（:104），仅 CritR（index 7）带 %（:103）。
+fn stat_label_text(idx: usize, state: &CharacterState) -> String {
+    match idx {
+        0 => format!("{}/{}", state.hp, state.max_hp), // HP {0}/{1}
+        1 => format!("{}/{}", state.mp, state.max_mp), // MP {0}/{1}
+        2 => format!("{}-{}", state.stats[0][0], state.stats[0][1]), // AC {0}-{1}
+        3 => format!("{}-{}", state.stats[1][0], state.stats[1][1]), // MAC
+        4 => format!("{}-{}", state.stats[2][0], state.stats[2][1]), // DC
+        5 => format!("{}-{}", state.stats[3][0], state.stats[3][1]), // MC
+        6 => format!("{}-{}", state.stats[4][0], state.stats[4][1]), // SC
+        7 => format!("{}%", state.critical_rate),      // CritR {0}%
+        8 => format!("{}", state.critical_damage),     // CritD {0}（C# 无 %）
+        9 => format!("{}", state.attack_speed),        // AtkSpd {0}
+        10 => format!("+{}", state.accuracy),          // Acc +{0}
+        11 => format!("+{}", state.agility),           // Agil +{0}
+        12 => format!("{}", state.luck),               // Luck {0}
+        _ => String::new(),
+    }
+}
+
 /// 已装备格子悬停 tooltip（C# CharacterDialog MirItemCell；复用 #1244 item_tooltip_lines）
 fn char_equip_tooltip_system(
     mgr: Res<DialogManager>,
@@ -668,22 +689,7 @@ fn character_ui_system(
         t.0 = state.guild.clone();
     }
     for (mut t, idx) in &mut stat_texts {
-        t.0 = match idx.0 {
-            0 => format!("{}/{}", state.hp, state.max_hp),
-            1 => format!("{}/{}", state.mp, state.max_mp),
-            2 => format!("{}-{}", state.stats[0][0], state.stats[0][1]),
-            3 => format!("{}-{}", state.stats[1][0], state.stats[1][1]),
-            4 => format!("{}-{}", state.stats[2][0], state.stats[2][1]),
-            5 => format!("{}-{}", state.stats[3][0], state.stats[3][1]),
-            6 => format!("{}-{}", state.stats[4][0], state.stats[4][1]),
-            7 => format!("{}%", state.critical_rate),
-            8 => format!("{}%", state.critical_damage),
-            9 => format!("{}", state.attack_speed),
-            10 => format!("+{}", state.accuracy),
-            11 => format!("+{}", state.agility),
-            12 => format!("{}", state.luck),
-            _ => String::new(),
-        };
+        t.0 = stat_label_text(idx.0, &state);
     }
     // State 页（#210）
     for (mut t, idx) in &mut state2_texts {
@@ -999,5 +1005,36 @@ mod tests {
             );
         }
         assert_eq!(state_n, 12, "C# StatePage 12 个 State 数值标签");
+    }
+
+    /// 状态页数值格式护栏：逐项对照 C# StatusPage.BeforeDraw 字面值（CharacterDialog.cs:96-108）。
+    /// 关键：CritD(index 8) C# 无 %（:104），与 CritR(index 7) 的 {0}%（:103）区分。
+    #[test]
+    fn stat_label_text_matches_csharp() {
+        let mut s = CharacterState::default();
+        s.hp = 120;
+        s.max_hp = 130;
+        s.mp = 40;
+        s.max_mp = 50;
+        s.stats = [[1, 9], [2, 8], [3, 7], [4, 6], [5, 10]]; // AC/MAC/DC/MC/SC [min,max]
+        s.critical_rate = 15;
+        s.critical_damage = 150;
+        s.attack_speed = 3;
+        s.accuracy = 7;
+        s.agility = 9;
+        s.luck = 2;
+        assert_eq!(stat_label_text(0, &s), "120/130"); // HP {0}/{1}
+        assert_eq!(stat_label_text(1, &s), "40/50"); // MP {0}/{1}
+        assert_eq!(stat_label_text(2, &s), "1-9"); // AC {0}-{1}
+        assert_eq!(stat_label_text(3, &s), "2-8"); // MAC
+        assert_eq!(stat_label_text(4, &s), "3-7"); // DC
+        assert_eq!(stat_label_text(5, &s), "4-6"); // MC
+        assert_eq!(stat_label_text(6, &s), "5-10"); // SC
+        assert_eq!(stat_label_text(7, &s), "15%"); // CritR {0}%
+        assert_eq!(stat_label_text(8, &s), "150"); // CritD {0}（C# 无 %）
+        assert_eq!(stat_label_text(9, &s), "3"); // AtkSpd {0}
+        assert_eq!(stat_label_text(10, &s), "+7"); // Acc +{0}
+        assert_eq!(stat_label_text(11, &s), "+9"); // Agil +{0}
+        assert_eq!(stat_label_text(12, &s), "2"); // Luck {0}
     }
 }
