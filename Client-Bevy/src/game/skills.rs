@@ -79,6 +79,14 @@ impl MagicCooldowns {
             .find(|(s, _, _)| *s == spell)
             .map(|(_, r, _)| *r)
     }
+
+    /// 总冷却秒（无冷却=None；C# ProcessSkillDelay Delay）
+    pub fn total(&self, spell: Spell) -> Option<f32> {
+        self.map
+            .iter()
+            .find(|(s, _, _)| *s == spell)
+            .map(|(_, _, t)| *t)
+    }
 }
 
 /// #1376：冷却递减（Time 驱动）
@@ -231,7 +239,9 @@ impl SkillBarState {
         }
         // C# GameScene.DialogProcess（L1329-1331）：存档越界则丢弃，回落构造默认 (0,0)。
         // 判定为严格大于：x > Resolution-100（逻辑分辨率 1024 → 924）或 y > 700。
-        if s.pos.0 > 924.0 || s.pos.1 > 700.0 {
+        // 负值兜底：C# 运行时拖动钳制（OnMouseMove L910-913）保证永不产生负坐标，故其加载不查负；
+        // Bevy 旧版本无钳制可能存过负值 → 一并按无效处理回落默认（与越界同一语义，永不可见的栏不可留）。
+        if s.pos.0 > 924.0 || s.pos.1 > 700.0 || s.pos.0 < 0.0 || s.pos.1 < 0.0 {
             s.pos = (0.0, 0.0);
         }
         s
@@ -423,6 +433,23 @@ mod tests {
         assert_eq!(s.pos, (0.0, 0.0), "y>700 应回落默认");
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=924\nSkillbar0Y=700\n");
         assert_eq!(s.pos, (924.0, 700.0), "边界值保留（C# 为严格 >）");
+        // 负值兜底：旧版本无拖动钳制可能存过负坐标 → 视为无效回落默认（栏永不可拖出屏幕）
+        let s = SkillBarState::from_ini("[Game]\nSkillbar0X=-50\nSkillbar0Y=100\n");
+        assert_eq!(s.pos, (0.0, 0.0), "负 x 应回落默认");
+        let s = SkillBarState::from_ini("[Game]\nSkillbar0X=100\nSkillbar0Y=-10\n");
+        assert_eq!(s.pos, (0.0, 0.0), "负 y 应回落默认");
+    }
+
+    /// C# MirControl.OnMouseMove（L901-913）：拖动位置钳制在父容器（全屏）内，栏不可拖出屏幕。
+    /// 上界 = 1024-216 / 768-28 = (808,740)，下界 0。此处断言钳制常量与栏/屏尺寸的 C# 关系。
+    #[test]
+    fn skill_bar_drag_clamp_bounds_match_csharp() {
+        assert_eq!(SKILL_BAR_MAX_X, 1024.0 - SKILL_BAR_W, "X 上界 = 屏宽-栏宽");
+        assert_eq!(SKILL_BAR_MAX_Y, 768.0 - SKILL_BAR_H, "Y 上界 = 屏高-栏高");
+        assert_eq!((SKILL_BAR_MAX_X, SKILL_BAR_MAX_Y), (808.0, 740.0));
+        // 栏在钳制范围内始终完整可见
+        assert!(SKILL_BAR_MAX_X + SKILL_BAR_W <= 1024.0);
+        assert!(SKILL_BAR_MAX_Y + SKILL_BAR_H <= 768.0);
     }
 
     /// C# Update()：Cells[i].Index = magic.Icon * 2（MagIcon 成对帧）
@@ -433,13 +460,37 @@ mod tests {
         assert_eq!(magic_icon_index(111), 222);
     }
 
-    /// C# ProcessSkillDelay：startFrame = 22 - timeLeft/(Delay/22)，22 帧扫过
+    /// C# ProcessSkillDelay（L1735-1741）：delayPerFrame=(int)(Delay/22)、startFrame=22-(int)(timeLeft/delayPerFrame)，
+    /// startFrame∈[0,22]（末帧 22 → Prguse2[1282]，timeLeft<100ms 由调用方隐藏）。
     #[test]
     fn cooldown_frame_sweeps_with_remaining() {
-        assert_eq!(cooldown_frame(1.0), 0, "刚施放（剩余100%）从第0帧开始");
-        assert_eq!(cooldown_frame(0.5), 11, "剩余一半 → 第11帧");
-        assert_eq!(cooldown_frame(0.01), 21, "即将结束 → 最后一帧");
-        assert_eq!(cooldown_frame(0.0), 21, "钳位在最后一帧（调用方负责隐藏）");
+        // Delay=5000ms → per_frame=(int)(5000/22)=227
+        assert_eq!(
+            cooldown_frame(5.0, 5.0),
+            0,
+            "刚施放（timeLeft=Delay）从第0帧开始"
+        );
+        assert_eq!(
+            cooldown_frame(2.5, 5.0),
+            11,
+            "剩余一半 2500/227=11 → 22-11=11"
+        );
+        // C# 审查反例：Delay=5000、timeLeft=4773 → (int)(4773/227)=21 → startFrame=1
+        assert_eq!(
+            cooldown_frame(4.773, 5.0),
+            1,
+            "C# 反例 timeLeft=4773 → 第1帧"
+        );
+        assert_eq!(
+            cooldown_frame(0.1, 5.0),
+            22,
+            "timeLeft=100ms → 22-0=末帧22（idx 1282）"
+        );
+        assert_eq!(
+            cooldown_frame(0.0, 5.0),
+            22,
+            "timeLeft=0 → 钳位末帧22（调用方负责隐藏）"
+        );
     }
 
     /// C# Cells[i] bbox：@(i*25+15, 3) 24x22；命中格子不触发拖动
@@ -747,6 +798,10 @@ fn skills_window_system(
 /// 栏尺寸 = 底图 Prguse[2190] 实测 216x28
 pub const SKILL_BAR_W: f32 = 216.0;
 pub const SKILL_BAR_H: f32 = 28.0;
+/// 拖动钳制上界（C# MirControl.OnMouseMove L901-913，Parent=GameScene 全屏分支，无 -1）：
+/// X ≤ Parent.Width - W = 1024-216 = 808；Y ≤ Parent.Height - H = 768-28 = 740；下界 0。
+pub const SKILL_BAR_MAX_X: f32 = 808.0;
+pub const SKILL_BAR_MAX_Y: f32 = 740.0;
 /// 格网 Prguse[2193] 相对栏的偏移（C# BeforeDraw：DisplayLocation + (12, 0)）
 pub const SKILL_GRID_OFFSET_X: f32 = 12.0;
 /// 技能格 24x22（MagIcon/冷却帧实测自然尺寸）、步进 25、首格 @(15,3)
@@ -757,7 +812,7 @@ pub const SKILL_SLOT_X: f32 = 15.0;
 pub const SKILL_SLOT_Y: f32 = 3.0;
 /// 键名标签 @(i*25+13, 0)（相对格左缘 -2、栏顶 0）
 pub const SKILL_KEY_X: f32 = 13.0;
-/// 冷却帧 Prguse2[1260..1260+22)
+/// 冷却帧 Prguse2[1260..=1282]（C# Index=1260+startFrame，startFrame∈[0,22]，共 23 帧，实测均 24x22）
 pub const SKILL_COOLDOWN_BASE: usize = 1260;
 pub const SKILL_COOLDOWN_FRAMES: usize = 22;
 
@@ -770,11 +825,20 @@ fn magic_icon_index(icon: u8) -> usize {
     icon as usize * 2
 }
 
-/// C# ProcessSkillDelay：startFrame = totalFrames - timeLeft/delayPerFrame（22 帧扫过）。
-/// remaining_fraction = 剩余/总 = timeLeft/Delay；fraction=1（刚施放）→ 帧 0。
-fn cooldown_frame(remaining_fraction: f32) -> usize {
-    ((SKILL_COOLDOWN_FRAMES as f32 * (1.0 - remaining_fraction)).floor() as usize)
-        .min(SKILL_COOLDOWN_FRAMES - 1)
+/// C# ProcessSkillDelay（L1735-1741）整数毫秒公式：
+/// `delayPerFrame = (int)(Delay/22)`；`startFrame = 22 - (int)(timeLeft/delayPerFrame)`；`Index = 1260+startFrame`。
+/// startFrame ∈ [0,22]（timeLeft→Delay 时 0、timeLeft∈[100ms,delayPerFrame) 时 22），故帧索引 1260..=1282 共 23 帧
+/// （Prguse2[1260..1282] 实测均为 24x22）。剩余/总为浮点秒（逐帧累减），转毫秒取整后与 C# 截断方向一致，
+/// 端点精确、中段至多因浮点累减误差 ±1 帧（纯视觉）。
+fn cooldown_frame(remaining_secs: f32, total_secs: f32) -> usize {
+    let delay_ms = (total_secs * 1000.0).round() as i64;
+    let time_left_ms = (remaining_secs * 1000.0).round() as i64;
+    if delay_ms <= 0 {
+        return 0;
+    }
+    let per_frame = (delay_ms / SKILL_COOLDOWN_FRAMES as i64).max(1);
+    let start = SKILL_COOLDOWN_FRAMES as i64 - (time_left_ms / per_frame);
+    start.clamp(0, SKILL_COOLDOWN_FRAMES as i64) as usize
 }
 
 fn spawn_skill_bar(
@@ -937,6 +1001,7 @@ fn skill_bar_pointer_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     opt: Res<crate::game::dialogs::option::OptionState>,
+    magics: Res<MagicsState>,
     mut roots: Query<&mut Transform, With<SkillBarRoot>>,
 ) {
     if !crate::game::dialogs::option::view_should_show(
@@ -956,7 +1021,10 @@ fn skill_bar_pointer_system(
         && cursor.y >= bar.pos.1
         && cursor.y <= bar.pos.1 + SKILL_BAR_H;
     if mouse.just_pressed(MouseButton::Left) {
-        bar.pressed_slot = skill_slot_at(&bar, cursor);
+        // C# 空格 Index=-1 → AutoSize 尺寸 0x0 永不命中，鼠标事件落回对话框本体触发 Movable 拖动；
+        // 仅占用格（绑定技能、显示图标）才走点击流程。故按下点命中空格时按“未命中格”处理 → 拖动。
+        bar.pressed_slot =
+            skill_slot_at(&bar, cursor).filter(|&i| magics.by_key(i as u8 + 1).is_some());
         if bar.pressed_slot.is_none() && in_bar {
             bar.drag_offset = Some((cursor.x - bar.pos.0, cursor.y - bar.pos.1));
             tracing::debug!("⚙️ 技能栏开始拖动");
@@ -964,7 +1032,11 @@ fn skill_bar_pointer_system(
     }
     if let Some(off) = bar.drag_offset {
         if mouse.pressed(MouseButton::Left) {
-            bar.pos = (cursor.x - off.0, cursor.y - off.1);
+            // C# OnMouseMove：拖动位置钳制在父容器（全屏）内，栏永远不可拖出屏幕（修复：拖出后丢失）
+            bar.pos = (
+                (cursor.x - off.0).clamp(0.0, SKILL_BAR_MAX_X),
+                (cursor.y - off.1).clamp(0.0, SKILL_BAR_MAX_Y),
+            );
         } else {
             bar.drag_offset = None;
             bar.save();
@@ -1037,7 +1109,7 @@ fn skill_bar_icon_system(
     }
 }
 
-/// 技能栏冷却遮罩（C# ProcessSkillDelay L1704-1743：Prguse2[1260+startFrame] 22 帧扫过，
+/// 技能栏冷却遮罩（C# ProcessSkillDelay L1704-1743：Prguse2[1260+startFrame]，startFrame∈[0,22] 扫过，
 /// 60% 透明；timeLeft < 100ms 时隐藏）
 fn skill_bar_cooldown_system(
     magics: Res<MagicsState>,
@@ -1049,12 +1121,12 @@ fn skill_bar_cooldown_system(
 ) {
     for (mut sprite, mut vis, slot) in &mut overlays {
         let magic = magics.by_key(slot.0 as u8 + 1);
-        let state = magic.map(|m| (cds.fraction(m.spell), cds.remaining(m.spell)));
+        let state = magic.map(|m| (cds.remaining(m.spell), cds.total(m.spell)));
         match state {
             // C#：timeLeft ∈ (0,100ms) → Visible=false；冷却结束（条目移除）→ None
-            Some((_, Some(r))) if r < 0.1 => *vis = Visibility::Hidden,
-            Some((frac, Some(_))) if frac > 0.0 => {
-                let idx = SKILL_COOLDOWN_BASE + cooldown_frame(frac);
+            Some((Some(r), Some(_))) if r < 0.1 => *vis = Visibility::Hidden,
+            Some((Some(r), Some(t))) if r > 0.0 => {
+                let idx = SKILL_COOLDOWN_BASE + cooldown_frame(r, t);
                 match ui_image(
                     &mut libs,
                     &mut images,

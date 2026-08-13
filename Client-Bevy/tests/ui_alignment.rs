@@ -336,13 +336,13 @@ fn skill_bar_aligned() {
         // 键名标签 @(i*25+13, 0)（C# Size 25x25）：落在底图内
         assert_inside("键名标签", sk::SKILL_KEY_X + i as f32 * sk::SKILL_SLOT_STEP, 0.0, 25.0, 25.0, 0.0, 0.0, bw, bh);
     }
-    // 冷却帧 Prguse2[1260..1260+22) 全部存在且为格尺寸
-    for f in 0..sk::SKILL_COOLDOWN_FRAMES {
+    // 冷却帧 Prguse2[1260..=1282]（C# Index=1260+startFrame，startFrame∈[0,22] 共 23 帧）全部存在且为格尺寸
+    for f in 0..=sk::SKILL_COOLDOWN_FRAMES {
         let (fw, fh) = libs.size(LibraryName::Prguse2, sk::SKILL_COOLDOWN_BASE + f);
         assert_eq!((fw, fh), (iw, ih), "[尺寸] 冷却帧 {} 应与技能格同尺寸", f);
     }
 
-    println!("  ✓ 技能快捷栏 底图/格网/切换钮/8 格/键名标签/22 冷却帧 布局对齐");
+    println!("  ✓ 技能快捷栏 底图/格网/切换钮/8 格/键名标签/23 冷却帧 布局对齐");
 }
 
 #[test]
