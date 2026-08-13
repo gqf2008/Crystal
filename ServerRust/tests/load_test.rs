@@ -5,16 +5,16 @@
 //!
 //! 输出:并发数 / 成功率 / 平均延迟 / 最大延迟 / 总耗时
 
-use std::sync::Arc;
+use kameo::actor::Spawn;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use kameo::actor::Spawn;
 
-use crystal_server::gate::actor::{GateActor, run_gate_listener, SetAccountRef, SetMaxConnections};
 use crystal_server::actors::account::AccountActor;
 use crystal_server::db;
+use crystal_server::gate::actor::{run_gate_listener, GateActor, SetAccountRef, SetMaxConnections};
 
 const XOR_KEY: u8 = 0xAA;
 
@@ -43,7 +43,11 @@ async fn recv_packet(stream: &mut TcpStream) -> (i16, Vec<u8>) {
     let inner = xor(&enc);
     let inner_len = u16::from_le_bytes([inner[0], inner[1]]) as usize;
     let opcode = i16::from_le_bytes([inner[2], inner[3]]);
-    let body = if inner_len > 4 { inner[4..inner_len].to_vec() } else { Vec::new() };
+    let body = if inner_len > 4 {
+        inner[4..inner_len].to_vec()
+    } else {
+        Vec::new()
+    };
     (opcode, body)
 }
 
@@ -65,7 +69,9 @@ async fn simulate_client(port: u16, id: usize) -> Result<u64, String> {
 
     // 1. Connected
     let (op, _) = recv_packet(&mut stream).await;
-    if op != 0 { return Err(format!("expected Connected, got {}", op)); }
+    if op != 0 {
+        return Err(format!("expected Connected, got {}", op));
+    }
 
     // 2. ClientVersion
     let mut body = Vec::new();
@@ -82,21 +88,25 @@ async fn simulate_client(port: u16, id: usize) -> Result<u64, String> {
     let mut login_body = Vec::new();
     mir2_shared::binary::write_dotnet_string(&mut login_body, &format!("user{}", id)).unwrap();
     mir2_shared::binary::write_dotnet_string(&mut login_body, "pass").unwrap();
-    stream.write_all(&make_packet(5, &login_body)).await.unwrap();
+    stream
+        .write_all(&make_packet(5, &login_body))
+        .await
+        .unwrap();
 
     // 5. Wait for LoginSuccess (opcode=9)
     //    AccountActor 处理 Argon2 密码哈希是串行的,并发登录会被串行化。
     //    给 30 秒超时容忍 Argon2 + actor 调度延迟。
-    let (op, resp_body) = tokio::time::timeout(
-        Duration::from_secs(30),
-        recv_packet(&mut stream),
-    ).await.map_err(|_| "login timeout (>30s)".to_string())?;
+    let (op, resp_body) = tokio::time::timeout(Duration::from_secs(30), recv_packet(&mut stream))
+        .await
+        .map_err(|_| "login timeout (>30s)".to_string())?;
 
     if op == 9 {
         // Verify character count = 0
         if resp_body.len() >= 4 {
             let count = i32::from_le_bytes(resp_body[0..4].try_into().unwrap_or([0; 4]));
-            if count != 0 { return Err(format!("unexpected char count {}", count)); }
+            if count != 0 {
+                return Err(format!("unexpected char count {}", count));
+            }
         }
         Ok(start.elapsed().as_millis() as u64)
     } else {
@@ -143,7 +153,9 @@ async fn run_load_test(concurrent: usize) {
             }
         }));
     }
-    for h in handles { let _ = h.await; }
+    for h in handles {
+        let _ = h.await;
+    }
 
     let total_ms = test_start.elapsed().as_millis();
     let ok = success.load(Ordering::Relaxed);
@@ -151,16 +163,39 @@ async fn run_load_test(concurrent: usize) {
     let mut lats = latencies.lock().unwrap().clone();
     lats.sort_unstable();
 
-    let avg = if lats.is_empty() { 0.0 } else { lats.iter().sum::<u64>() as f64 / lats.len() as f64 };
-    let p50 = if lats.is_empty() { 0 } else { lats[lats.len() / 2] };
-    let p99 = if lats.is_empty() { 0 } else { lats[(lats.len() as f64 * 0.99) as usize] };
+    let avg = if lats.is_empty() {
+        0.0
+    } else {
+        lats.iter().sum::<u64>() as f64 / lats.len() as f64
+    };
+    let p50 = if lats.is_empty() {
+        0
+    } else {
+        lats[lats.len() / 2]
+    };
+    let p99 = if lats.is_empty() {
+        0
+    } else {
+        lats[(lats.len() as f64 * 0.99) as usize]
+    };
     let max = lats.last().copied().unwrap_or(0);
 
-    println!("  Success:   {}/{} ({:.1}%)", ok, concurrent, ok as f64 / concurrent as f64 * 100.0);
+    println!(
+        "  Success:   {}/{} ({:.1}%)",
+        ok,
+        concurrent,
+        ok as f64 / concurrent as f64 * 100.0
+    );
     println!("  Failed:    {}", failed);
     println!("  Total:     {}ms", total_ms);
-    println!("  Throughput: {:.1} clients/sec", concurrent as f64 / (total_ms as f64 / 1000.0));
-    println!("  Latency avg: {:.0}ms  p50: {}ms  p99: {}ms  max: {}ms", avg, p50, p99, max);
+    println!(
+        "  Throughput: {:.1} clients/sec",
+        concurrent as f64 / (total_ms as f64 / 1000.0)
+    );
+    println!(
+        "  Latency avg: {:.0}ms  p50: {}ms  p99: {}ms  max: {}ms",
+        avg, p50, p99, max
+    );
     println!();
 
     assert!(ok > 0, "At least some clients should succeed");

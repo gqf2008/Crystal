@@ -6,19 +6,25 @@ use std::collections::{HashMap, HashSet};
 use kameo::actor::{Actor, ActorRef};
 use kameo::message::Message;
 use kameo::prelude::Context;
-use tokio::sync::RwLock;
 use std::sync::Arc;
-use tracing::{debug, warn, info};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
-use crate::actors::player::{PlayerActor, GetPlayerState, SetPlayerState, SetGroupId, SetSpouse, SetGuildInfo, SetAllowMentor, SetAllowMarriage, SetAllowLoverRecall, SetMentor, SetMentorExp, SetPlayerPosition, SetLastRecallTime, SetEnableGroupRecall, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddGold, DeductGold, AddItemToInventory, RemoveItemFromInventory, GetItemInfo, CanGainItems, CanGainGold};
-use crate::actors::inventory::EquipmentSlot;
 use crate::actors::group::{Group, GroupMember};
-use crate::actors::trade::TradeSession;
 use crate::actors::guild::{Guild, GuildRank};
+use crate::actors::inventory::EquipmentSlot;
+use crate::actors::player::{
+    AddFriendToSelf, AddGold, AddItemToInventory, CanGainGold, CanGainItems, DeductGold,
+    GetItemInfo, GetPlayerState, PlayerActor, RemoveFriendFromSelf, RemoveItemFromInventory,
+    SetAllowLoverRecall, SetAllowMarriage, SetAllowMentor, SetEnableGroupRecall, SetFriendMemo,
+    SetGroupId, SetGuildInfo, SetLastRecallTime, SetMentor, SetMentorExp, SetPlayerPosition,
+    SetPlayerState, SetSpouse,
+};
+use crate::actors::social_packets::*;
+use crate::actors::trade::TradeSession;
+use crate::actors::world::ai::{direction_towards, max_distance};
 use crate::db::{self, DbPool};
 use crate::gate::actor::{GateActor, SendToClient};
-use crate::actors::social_packets::*;
-use crate::actors::world::ai::{direction_towards, max_distance};
 use crate::util::wire::build_packet_bytes;
 use mir2_shared::enums::ServerPacketIds;
 
@@ -264,12 +270,21 @@ pub struct NpcGetGuildGold {
 impl Message<NpcGetGuildGold> for SocialActor {
     type Reply = u64;
 
-    async fn handle(&mut self, msg: NpcGetGuildGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: NpcGetGuildGold,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return 0 },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return 0,
+            },
             None => return 0,
         };
-        let Some(guild_name) = state.guild_name else { return 0 };
+        let Some(guild_name) = state.guild_name else {
+            return 0;
+        };
         self.guilds.get(&guild_name).map(|g| g.gold).unwrap_or(0)
     }
 }
@@ -282,14 +297,27 @@ pub struct NpcGetGuildMemberOptions {
 impl Message<NpcGetGuildMemberOptions> for SocialActor {
     type Reply = u8;
 
-    async fn handle(&mut self, msg: NpcGetGuildMemberOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: NpcGetGuildMemberOptions,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return 0 },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return 0,
+            },
             None => return 0,
         };
-        let Some(guild_name) = &state.guild_name else { return 0 };
-        let Some(guild) = self.guilds.get(guild_name) else { return 0 };
-        let Some(member) = guild.members.iter().find(|m| m.name == state.name) else { return 0 };
+        let Some(guild_name) = &state.guild_name else {
+            return 0;
+        };
+        let Some(guild) = self.guilds.get(guild_name) else {
+            return 0;
+        };
+        let Some(member) = guild.members.iter().find(|m| m.name == state.name) else {
+            return 0;
+        };
         member.rank.default_options()
     }
 }
@@ -303,8 +331,14 @@ pub struct GuildDeductGold {
 impl Message<GuildDeductGold> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: GuildDeductGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return false };
+    async fn handle(
+        &mut self,
+        msg: GuildDeductGold,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else {
+            return false;
+        };
         if guild.gold < msg.amount {
             return false;
         }
@@ -322,7 +356,11 @@ pub struct NpcGuildExists {
 impl Message<NpcGuildExists> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: NpcGuildExists, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: NpcGuildExists,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.guilds.contains_key(&msg.guild_name)
     }
 }
@@ -335,8 +373,15 @@ pub struct NpcGetGuildBuffs {
 impl Message<NpcGetGuildBuffs> for SocialActor {
     type Reply = Vec<u32>;
 
-    async fn handle(&mut self, msg: NpcGetGuildBuffs, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.guilds.get(&msg.guild_name).map(|g| g.buffs.clone()).unwrap_or_default()
+    async fn handle(
+        &mut self,
+        msg: NpcGetGuildBuffs,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.guilds
+            .get(&msg.guild_name)
+            .map(|g| g.buffs.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -348,8 +393,14 @@ pub struct NpcGetGuildFlagAppearance {
 impl Message<NpcGetGuildFlagAppearance> for SocialActor {
     type Reply = Option<(u16, i32)>;
 
-    async fn handle(&mut self, msg: NpcGetGuildFlagAppearance, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.guilds.get(&msg.guild_name).map(|g| (g.flag_image, g.flag_colour))
+    async fn handle(
+        &mut self,
+        msg: NpcGetGuildFlagAppearance,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.guilds
+            .get(&msg.guild_name)
+            .map(|g| (g.flag_image, g.flag_colour))
     }
 }
 
@@ -363,8 +414,14 @@ pub struct NpcSetGuildFlagAppearance {
 impl Message<NpcSetGuildFlagAppearance> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: NpcSetGuildFlagAppearance, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return false };
+    async fn handle(
+        &mut self,
+        msg: NpcSetGuildFlagAppearance,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else {
+            return false;
+        };
         guild.flag_image = msg.flag_image;
         guild.flag_colour = msg.flag_colour;
         self.save_guild_to_db(&msg.guild_name).await;
@@ -398,8 +455,14 @@ fn apply_guild_war_mirror(
     at_war: bool,
 ) {
     if at_war {
-        guild_wars.entry(guild_name.to_string()).or_default().insert(other.to_string());
-        guild_wars.entry(other.to_string()).or_default().insert(guild_name.to_string());
+        guild_wars
+            .entry(guild_name.to_string())
+            .or_default()
+            .insert(other.to_string());
+        guild_wars
+            .entry(other.to_string())
+            .or_default()
+            .insert(guild_name.to_string());
         return;
     }
     let remove_first = {
@@ -437,7 +500,12 @@ impl Message<NpcSetGuildWar> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: NpcSetGuildWar, _ctx: &mut Context<Self, Self::Reply>) {
-        apply_guild_war_mirror(&mut self.guild_wars, &msg.guild_name, &msg.other, msg.at_war);
+        apply_guild_war_mirror(
+            &mut self.guild_wars,
+            &msg.guild_name,
+            &msg.other,
+            msg.at_war,
+        );
     }
 }
 
@@ -461,7 +529,9 @@ impl Message<GuildGainExp> for SocialActor {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let (leveled, broadcast_gain, guild_level, guild_exp, guild_cap) = {
-            let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return };
+            let Some(guild) = self.guilds.get_mut(&msg.guild_name) else {
+                return;
+            };
             let leveled = guild.apply_gain_exp(
                 msg.amount,
                 self.config.guild_exp_rate,
@@ -478,14 +548,25 @@ impl Message<GuildGainExp> for SocialActor {
             } else {
                 false
             };
-            (leveled, broadcast_gain, guild.level, guild.experience, guild.member_cap)
+            (
+                leveled,
+                broadcast_gain,
+                guild.level,
+                guild.experience,
+                guild.member_cap,
+            )
         };
         let sessions: Vec<u64> = {
-            let Some(guild) = self.guilds.get(&msg.guild_name) else { return };
+            let Some(guild) = self.guilds.get(&msg.guild_name) else {
+                return;
+            };
             guild.members.iter().filter_map(|m| m.session_id).collect()
         };
         if leveled {
-            debug!("Guild '{}' leveled to {} (exp={} cap={})", msg.guild_name, guild_level, guild_exp, guild_cap);
+            debug!(
+                "Guild '{}' leveled to {} (exp={} cap={})",
+                msg.guild_name, guild_level, guild_exp, guild_cap
+            );
             // C# 升级：广播 GuildStatus 给在线成员
             for sid in &sessions {
                 send_guild_status_packet(&self.gate_ref, *sid, true);
@@ -497,12 +578,18 @@ impl Message<GuildGainExp> for SocialActor {
             body.extend_from_slice(&exp_amount.to_le_bytes());
             let data = build_packet_bytes(ServerPacketIds::GuildExpGain as i16, &body);
             for sid in sessions {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: sid,
-                    data: data.clone(),
-                }).try_send();
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: sid,
+                        data: data.clone(),
+                    })
+                    .try_send();
             }
-            debug!("Guild '{}' gained {} exp (GuildExpGain broadcast)", msg.guild_name, exp_amount);
+            debug!(
+                "Guild '{}' gained {} exp (GuildExpGain broadcast)",
+                msg.guild_name, exp_amount
+            );
         }
     }
 }
@@ -515,12 +602,21 @@ pub struct NpcIsGroupLeader {
 impl Message<NpcIsGroupLeader> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: NpcIsGroupLeader, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: NpcIsGroupLeader,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return false },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return false,
+            },
             None => return false,
         };
-        let Some(group_id) = state.group_id else { return false };
+        let Some(group_id) = state.group_id else {
+            return false;
+        };
         match self.groups.get(&group_id) {
             Some(g) => g.leader_session() == Some(msg.session_id),
             None => false,
@@ -534,7 +630,11 @@ pub struct NpcGetAllowLogin;
 impl Message<NpcGetAllowLogin> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: NpcGetAllowLogin, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetAllowLogin,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.config.allow_login
     }
 }
@@ -545,7 +645,11 @@ pub struct NpcGetAllowNewAccount;
 impl Message<NpcGetAllowNewAccount> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: NpcGetAllowNewAccount, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetAllowNewAccount,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.config.allow_new_account
     }
 }
@@ -556,7 +660,11 @@ pub struct NpcGetAllowChangePassword;
 impl Message<NpcGetAllowChangePassword> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: NpcGetAllowChangePassword, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetAllowChangePassword,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.config.allow_change_password
     }
 }
@@ -567,7 +675,11 @@ pub struct NpcGetAllowStartGame;
 impl Message<NpcGetAllowStartGame> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: NpcGetAllowStartGame, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetAllowStartGame,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.config.allow_start_game
     }
 }
@@ -578,7 +690,11 @@ pub struct NpcGetMailSettings;
 impl Message<NpcGetMailSettings> for SocialActor {
     type Reply = (u32, u32, bool, u32, bool, bool);
 
-    async fn handle(&mut self, _msg: NpcGetMailSettings, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetMailSettings,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         (
             self.config.mail_cost_per_1k_gold,
             self.config.mail_item_insurance_percentage,
@@ -596,7 +712,11 @@ pub struct NpcGetHeroCreateOptions;
 impl Message<NpcGetHeroCreateOptions> for SocialActor {
     type Reply = (bool, Vec<bool>, u8);
 
-    async fn handle(&mut self, _msg: NpcGetHeroCreateOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetHeroCreateOptions,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         (
             self.config.allow_new_hero,
             self.config.hero_can_create_class.clone(),
@@ -611,8 +731,15 @@ pub struct NpcGetCreateClassOptions;
 impl Message<NpcGetCreateClassOptions> for SocialActor {
     type Reply = (bool, bool);
 
-    async fn handle(&mut self, _msg: NpcGetCreateClassOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        (self.config.allow_create_assassin, self.config.allow_create_archer)
+    async fn handle(
+        &mut self,
+        _msg: NpcGetCreateClassOptions,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        (
+            self.config.allow_create_assassin,
+            self.config.allow_create_archer,
+        )
     }
 }
 
@@ -622,7 +749,11 @@ pub struct NpcGetAllowDeleteCharacter;
 impl Message<NpcGetAllowDeleteCharacter> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: NpcGetAllowDeleteCharacter, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetAllowDeleteCharacter,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.config.allow_delete_character
     }
 }
@@ -633,7 +764,11 @@ pub struct NpcGetAllowNewCharacter;
 impl Message<NpcGetAllowNewCharacter> for SocialActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: NpcGetAllowNewCharacter, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetAllowNewCharacter,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.config.allow_new_character
     }
 }
@@ -663,7 +798,11 @@ pub struct NpcGetGuildWarSettings;
 impl Message<NpcGetGuildWarSettings> for SocialActor {
     type Reply = (u32, i64);
 
-    async fn handle(&mut self, _msg: NpcGetGuildWarSettings, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: NpcGetGuildWarSettings,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         (self.config.guild_war_cost, self.config.guild_war_time)
     }
 }
@@ -681,29 +820,50 @@ impl Message<NpcGuildGoldChange> for SocialActor {
 
     async fn handle(&mut self, msg: NpcGuildGoldChange, _ctx: &mut Context<Self, Self::Reply>) {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            },
             None => return,
         };
-        let Some(guild_name) = state.guild_name.clone() else { return };
-        let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+        let Some(guild_name) = state.guild_name.clone() else {
+            return;
+        };
+        let Some(guild) = self.guilds.get_mut(&guild_name) else {
+            return;
+        };
         match msg.change_type {
             2 => {
                 let amount = (msg.amount as u64).min(guild.gold);
                 guild.gold -= amount;
-                self.send_guild_storage_gold_change(msg.session_id, &state.name, amount as u32, 2).await;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库减少 {} 金币", amount));
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, amount as u32, 2)
+                    .await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("行会仓库减少 {} 金币", amount),
+                );
             }
             _ => {
                 // C# GiveGuildGold：行会金币上限 uint.MaxValue
-                let add = (msg.amount as u64).min((u32::MAX as u64).saturating_sub(guild.gold.min(u32::MAX as u64)));
+                let add = (msg.amount as u64)
+                    .min((u32::MAX as u64).saturating_sub(guild.gold.min(u32::MAX as u64)));
                 guild.gold += add;
-                self.send_guild_storage_gold_change(msg.session_id, &state.name, add as u32, 3).await;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库增加 {} 金币", add));
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, add as u32, 3)
+                    .await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("行会仓库增加 {} 金币", add),
+                );
             }
         }
         self.save_guild_to_db(&guild_name).await;
         self.broadcast_guild_info(&guild_name).await;
-        debug!("NPC GuildGoldChange: {} {} (type {})", state.name, msg.amount, msg.change_type);
+        debug!(
+            "NPC GuildGoldChange: {} {} (type {})",
+            state.name, msg.amount, msg.change_type
+        );
     }
 }
 
@@ -715,13 +875,25 @@ pub struct NpcGetGuildLevelSparePoints {
 impl Message<NpcGetGuildLevelSparePoints> for SocialActor {
     type Reply = (u8, u8);
 
-    async fn handle(&mut self, msg: NpcGetGuildLevelSparePoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: NpcGetGuildLevelSparePoints,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return (0, 0) },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return (0, 0),
+            },
             None => return (0, 0),
         };
-        let Some(guild_name) = state.guild_name else { return (0, 0) };
-        self.guilds.get(&guild_name).map(|g| (g.level, g.spare_points)).unwrap_or((0, 0))
+        let Some(guild_name) = state.guild_name else {
+            return (0, 0);
+        };
+        self.guilds
+            .get(&guild_name)
+            .map(|g| (g.level, g.spare_points))
+            .unwrap_or((0, 0))
     }
 }
 
@@ -737,22 +909,33 @@ impl Message<NpcGuildBuffCharge> for SocialActor {
 
     async fn handle(&mut self, msg: NpcGuildBuffCharge, _ctx: &mut Context<Self, Self::Reply>) {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            },
             None => return,
         };
-        let Some(guild_name) = state.guild_name.clone() else { return };
-        let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+        let Some(guild_name) = state.guild_name.clone() else {
+            return;
+        };
+        let Some(guild) = self.guilds.get_mut(&guild_name) else {
+            return;
+        };
         if msg.points > 0 {
             guild.spare_points = guild.spare_points.saturating_sub(msg.points.min(255) as u8);
         }
         if msg.gold > 0 {
             let amount = (msg.gold as u64).min(guild.gold);
             guild.gold -= amount;
-            self.send_guild_storage_gold_change(msg.session_id, &state.name, amount as u32, 2).await;
+            self.send_guild_storage_gold_change(msg.session_id, &state.name, amount as u32, 2)
+                .await;
         }
         self.save_guild_to_db(&guild_name).await;
         self.broadcast_guild_info(&guild_name).await;
-        debug!("NPC GuildBuffCharge: {} points={} gold={}", guild_name, msg.points, msg.gold);
+        debug!(
+            "NPC GuildBuffCharge: {} points={} gold={}",
+            guild_name, msg.points, msg.gold
+        );
     }
 }
 
@@ -766,8 +949,11 @@ impl Message<NpcGuildGoldGive> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: NpcGuildGoldGive, _ctx: &mut Context<Self, Self::Reply>) {
-        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return };
-        let add = (msg.amount as u64).min((u32::MAX as u64).saturating_sub(guild.gold.min(u32::MAX as u64)));
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else {
+            return;
+        };
+        let add = (msg.amount as u64)
+            .min((u32::MAX as u64).saturating_sub(guild.gold.min(u32::MAX as u64)));
         guild.gold += add;
         self.save_guild_to_db(&msg.guild_name).await;
         self.broadcast_guild_info(&msg.guild_name).await;
@@ -785,7 +971,10 @@ impl Message<NpcForceDivorce> for SocialActor {
 
     async fn handle(&mut self, msg: NpcForceDivorce, _ctx: &mut Context<Self, Self::Reply>) {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            },
             None => return,
         };
         let Some(spouse_name) = state.spouse_name.clone() else {
@@ -794,24 +983,44 @@ impl Message<NpcForceDivorce> for SocialActor {
         };
         // 清除自己婚姻状态
         if let Some(record) = self.players.get(&msg.session_id) {
-            let _ = record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
+            let _ = record
+                .ask(SetSpouse {
+                    spouse_name: None,
+                    married_date: 0,
+                })
+                .await;
         }
         // 配偶在线则同步清除
         let online: Vec<u64> = self.players.keys().copied().collect();
         for sid in online {
-            if sid == msg.session_id { continue; }
+            if sid == msg.session_id {
+                continue;
+            }
             if let Some(record) = self.players.get(&sid) {
                 if let Ok(Some(os)) = record.ask(GetPlayerState).await {
                     if os.name.eq_ignore_ascii_case(&spouse_name) {
-                        let _ = record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
-                        send_system_message(&self.gate_ref, sid, &format!("你已与 {} 强制离婚", state.name));
+                        let _ = record
+                            .ask(SetSpouse {
+                                spouse_name: None,
+                                married_date: 0,
+                            })
+                            .await;
+                        send_system_message(
+                            &self.gate_ref,
+                            sid,
+                            &format!("你已与 {} 强制离婚", state.name),
+                        );
                         send_lover_update_packet(&self.gate_ref, sid, "", 0, "", 0);
                         break;
                     }
                 }
             }
         }
-        send_system_message(&self.gate_ref, msg.session_id, &format!("你已与 {} 强制离婚", spouse_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("你已与 {} 强制离婚", spouse_name),
+        );
         send_lover_update_packet(&self.gate_ref, msg.session_id, "", 0, "", 0);
         debug!("NPC ForceDivorce: {} <- {}", state.name, spouse_name);
     }
@@ -829,7 +1038,10 @@ impl Message<NpcAddToGuild> for SocialActor {
     async fn handle(&mut self, msg: NpcAddToGuild, _ctx: &mut Context<Self, Self::Reply>) {
         let guild_name = msg.guild_name.clone();
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            },
             None => return,
         };
         // 已有行会则忽略（对齐 C# player.MyGuild != null return）
@@ -839,7 +1051,11 @@ impl Message<NpcAddToGuild> for SocialActor {
         }
         let full = {
             let Some(guild) = self.guilds.get_mut(&guild_name) else {
-                send_system_message(&self.gate_ref, msg.session_id, &format!("行会 \"{}\" 不存在", guild_name));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("行会 \"{}\" 不存在", guild_name),
+                );
                 return;
             };
             if guild.member_count() >= GUILD_MAX_MEMBERS {
@@ -854,16 +1070,22 @@ impl Message<NpcAddToGuild> for SocialActor {
             return;
         }
         if let Some(record) = self.players.get(&msg.session_id) {
-            let _ = record.ask(SetGuildInfo {
-                guild_name: Some(guild_name.clone()),
-                rank: GuildRank::Member,
-            }).await;
+            let _ = record
+                .ask(SetGuildInfo {
+                    guild_name: Some(guild_name.clone()),
+                    rank: GuildRank::Member,
+                })
+                .await;
         }
         send_guild_status_packet(&self.gate_ref, msg.session_id, true);
         if let Some(guild) = self.guilds.get(&guild_name) {
             send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
         }
-        send_system_message(&self.gate_ref, msg.session_id, &format!("你已加入行会 \"{}\"", guild_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("你已加入行会 \"{}\"", guild_name),
+        );
         // #1374：C# BroadcastInfo——加入行会后重发外观（同图玩家看到行会名/职位）
         if let Some(record) = self.players.get(&msg.session_id) {
             if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
@@ -884,7 +1106,10 @@ impl Message<NpcRemoveFromGuild> for SocialActor {
 
     async fn handle(&mut self, msg: NpcRemoveFromGuild, _ctx: &mut Context<Self, Self::Reply>) {
         let state = match self.players.get(&msg.session_id) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            },
             None => return,
         };
         let Some(guild_name) = state.guild_name.clone() else {
@@ -892,15 +1117,26 @@ impl Message<NpcRemoveFromGuild> for SocialActor {
             return;
         };
         let removed = {
-            let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+            let Some(guild) = self.guilds.get_mut(&guild_name) else {
+                return;
+            };
             guild.remove_member(&state.name)
         };
         if removed {
             if let Some(record) = self.players.get(&msg.session_id) {
-                let _ = record.ask(SetGuildInfo { guild_name: None, rank: GuildRank::Member }).await;
+                let _ = record
+                    .ask(SetGuildInfo {
+                        guild_name: None,
+                        rank: GuildRank::Member,
+                    })
+                    .await;
             }
             send_guild_status_packet(&self.gate_ref, msg.session_id, false);
-            send_system_message(&self.gate_ref, msg.session_id, &format!("你已离开行会 \"{}\"", guild_name));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("你已离开行会 \"{}\"", guild_name),
+            );
             // #1374：C# BroadcastInfo——退出行会后重发外观（行会名清除）
             if let Some(record) = self.players.get(&msg.session_id) {
                 if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
@@ -922,34 +1158,57 @@ impl Message<NpcGroupRecall> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: NpcGroupRecall, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
-        let Some(group_id) = state.group_id else { return };
-        let Some(group) = self.groups.get(&group_id).cloned() else { return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let Some(group_id) = state.group_id else {
+            return;
+        };
+        let Some(group) = self.groups.get(&group_id).cloned() else {
+            return;
+        };
 
         let target_map = state.map_index;
         let target_x = state.x;
         let target_y = state.y;
         for member in &group.members {
-            if member.session_id == msg.session_id { continue; }
-            if !member.online { continue; }
+            if member.session_id == msg.session_id {
+                continue;
+            }
+            if !member.online {
+                continue;
+            }
             if let Some(mem_record) = self.players.get(&member.session_id) {
                 if let Ok(Some(mem_state)) = mem_record.ask(GetPlayerState).await {
-                    let _ = mem_record.ask(SetPlayerPosition {
-                        x: target_x, y: target_y,
-                        direction: mem_state.direction,
-                        map_index: Some(target_map),
-                        is_mounted: None,
-                    }).await;
+                    let _ = mem_record
+                        .ask(SetPlayerPosition {
+                            x: target_x,
+                            y: target_y,
+                            direction: mem_state.direction,
+                            map_index: Some(target_map),
+                            is_mounted: None,
+                        })
+                        .await;
                     let mut body = Vec::new();
                     body.extend_from_slice(&target_x.to_le_bytes());
                     body.extend_from_slice(&target_y.to_le_bytes());
                     body.push(mem_state.direction);
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: member.session_id,
-                        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                    }).await;
-                    debug!("NPC GROUPRECALL: {} recalled to ({},{}) map {}", mem_state.name, target_x, target_y, target_map);
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: member.session_id,
+                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
+                        })
+                        .await;
+                    debug!(
+                        "NPC GROUPRECALL: {} recalled to ({},{}) map {}",
+                        mem_state.name, target_x, target_y, target_map
+                    );
                 }
             }
         }
@@ -1102,7 +1361,10 @@ impl Actor for SocialActor {
     type Args = SocialActorArgs;
     type Error = anyhow::Error;
 
-    async fn on_start(args: SocialActorArgs, _actor_ref: ActorRef<Self>) -> Result<Self, Self::Error> {
+    async fn on_start(
+        args: SocialActorArgs,
+        _actor_ref: ActorRef<Self>,
+    ) -> Result<Self, Self::Error> {
         // Load guilds from DB
         let guilds = match db::load_guilds(&args.db_pool).await {
             Ok(g) => {
@@ -1174,10 +1436,7 @@ pub struct SocialActor {
 }
 
 /// C# Functions.FacingEachOther：双方朝向彼此
-fn facing_each_other(
-    dir_a: u8, ax: i32, ay: i32,
-    dir_b: u8, bx: i32, by: i32,
-) -> bool {
+fn facing_each_other(dir_a: u8, ax: i32, ay: i32, dir_b: u8, bx: i32, by: i32) -> bool {
     dir_a == direction_towards(ax, ay, bx, by) && dir_b == direction_towards(bx, by, ax, ay)
 }
 
@@ -1230,11 +1489,19 @@ fn marriage_target_check(
     }
     // C# :13180 目标等级（MarriageLevelRequired=10）
     if ctx.target_level < marriage_level_required {
-        return Some(format!("{} 需要达到 {} 级才能结婚", ctx.target_name, marriage_level_required));
+        return Some(format!(
+            "{} 需要达到 {} 级才能结婚",
+            ctx.target_name, marriage_level_required
+        ));
     }
     // C# :13186 目标离婚冷却（MarriageCooldown=7 天）
-    if ctx.target_married_date > 0 && now_unix < ctx.target_married_date + marriage_cooldown_days * 86_400 {
-        return Some(format!("{} 离婚后 {} 天内无法再次结婚", ctx.target_name, marriage_cooldown_days));
+    if ctx.target_married_date > 0
+        && now_unix < ctx.target_married_date + marriage_cooldown_days * 86_400
+    {
+        return Some(format!(
+            "{} 离婚后 {} 天内无法再次结婚",
+            ctx.target_name, marriage_cooldown_days
+        ));
     }
     // C# :13192 目标是否允许求婚（AllowMarriage 开关）
     if !ctx.target_allow_marriage {
@@ -1269,8 +1536,12 @@ fn marriage_target_check(
 const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
-fn player_dir_x(dir: u8) -> i32 { DIR_DX[dir as usize & 7] }
-fn player_dir_y(dir: u8) -> i32 { DIR_DY[dir as usize & 7] }
+fn player_dir_x(dir: u8) -> i32 {
+    DIR_DX[dir as usize & 7]
+}
+fn player_dir_y(dir: u8) -> i32 {
+    DIR_DY[dir as usize & 7]
+}
 
 // ============================================================
 // Helper methods
@@ -1295,7 +1566,10 @@ impl SocialActor {
     /// #1329：查询地图标题（LoverUpdate MapName；WorldActor GetMapTitle）
     async fn map_title(&self, map_index: u16) -> String {
         if let Some(world) = &self.world_ref {
-            if let Ok(Some(title)) = world.ask(crate::actors::world::GetMapTitle { map_index }).await {
+            if let Ok(Some(title)) = world
+                .ask(crate::actors::world::GetMapTitle { map_index })
+                .await
+            {
                 return title;
             }
         }
@@ -1305,7 +1579,10 @@ impl SocialActor {
     /// #2012：查询玩家是否在安全区（C# InSafeZone；WorldActor IsInSafeZone）
     async fn is_in_safe_zone(&self, map_index: u16, x: i32, y: i32) -> bool {
         if let Some(world) = &self.world_ref {
-            if let Ok(safe) = world.ask(crate::actors::world::IsInSafeZone { map_index, x, y }).await {
+            if let Ok(safe) = world
+                .ask(crate::actors::world::IsInSafeZone { map_index, x, y })
+                .await
+            {
                 return safe;
             }
         }
@@ -1326,27 +1603,28 @@ impl SocialActor {
 
     /// 查找交易（不可变）
     fn find_trade(&self, session_id: u64) -> Option<&TradeSession> {
-        self.active_trades.values().find(|t| {
-            t.side_a.session_id == session_id || t.side_b.session_id == session_id
-        })
+        self.active_trades
+            .values()
+            .find(|t| t.side_a.session_id == session_id || t.side_b.session_id == session_id)
     }
 
     /// 查找交易（可变）
     fn find_trade_mut(&mut self, session_id: u64) -> Option<&mut TradeSession> {
-        self.active_trades.values_mut().find(|t| {
-            t.side_a.session_id == session_id || t.side_b.session_id == session_id
-        })
+        self.active_trades
+            .values_mut()
+            .find(|t| t.side_a.session_id == session_id || t.side_b.session_id == session_id)
     }
 
     /// 发送好友列表
     async fn send_friends_list(&self, session_id: u64) {
-
         let record = match self.players.get(&session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         // 收集所有在线 object_ids 与名字（离线添加的好友按名字判定在线）
@@ -1359,7 +1637,14 @@ impl SocialActor {
             }
         }
 
-        send_friends_list_packet(&self.gate_ref, session_id, &state.friend_list.friends, &state.friend_list.blocked, &online_object_ids, &online_names);
+        send_friends_list_packet(
+            &self.gate_ref,
+            session_id,
+            &state.friend_list.friends,
+            &state.friend_list.blocked,
+            &online_object_ids,
+            &online_names,
+        );
     }
 
     /// 向所有在线行会成员广播完整行会信息
@@ -1408,10 +1693,13 @@ impl SocialActor {
         )
         .is_ok()
         {
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id,
-                data: body,
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id,
+                    data: body,
+                })
+                .await;
         }
     }
 
@@ -1438,13 +1726,15 @@ impl SocialActor {
         )
         .is_ok()
         {
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id,
-                data: body,
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id,
+                    data: body,
+                })
+                .await;
         }
     }
-
 
     async fn save_guild_to_db(&self, guild_name: &str) {
         if let Some(guild) = self.guilds.get(guild_name) {
@@ -1457,7 +1747,12 @@ impl SocialActor {
     // === 组队辅助方法 ===
 
     /// 加入或创建组队
-    async fn join_or_create_group(&mut self, joiner_session: u64, target_session: u64, joiner_name: &str) {
+    async fn join_or_create_group(
+        &mut self,
+        joiner_session: u64,
+        target_session: u64,
+        joiner_name: &str,
+    ) {
         let joiner_name = joiner_name.to_string();
 
         // 获取加入者信息
@@ -1501,22 +1796,47 @@ impl SocialActor {
                 }
                 // 更新加入者的 group_id
                 if let Some(record) = self.players.get(&joiner_session) {
-                    let _ = record.ask(SetGroupId { group_id: Some(target_group_id) }).await;
+                    let _ = record
+                        .ask(SetGroupId {
+                            group_id: Some(target_group_id),
+                        })
+                        .await;
                 }
-                send_system_message(&self.gate_ref, joiner_session, &format!("已加入队伍 #{}", target_group_id));
+                send_system_message(
+                    &self.gate_ref,
+                    joiner_session,
+                    &format!("已加入队伍 #{}", target_group_id),
+                );
                 self.broadcast_group_update(target_group_id);
                 debug!("Player {} joined group #{}", joiner_name, target_group_id);
             } else {
                 // #835：目标 group_id 指向已不存在的组（陈旧引用）——清掉并新建组队，
                 // 否则旧成员永远无法再次组队
-                debug!("Player {} has stale group_id {} (group gone); creating new group", target_state.name, target_group_id);
+                debug!(
+                    "Player {} has stale group_id {} (group gone); creating new group",
+                    target_state.name, target_group_id
+                );
                 if let Some(record) = self.players.get(&target_session) {
                     let _ = record.ask(SetGroupId { group_id: None }).await;
                 }
-                self.create_new_group(joiner_session, &joiner_name, joiner_member, target_session, target_state).await;
+                self.create_new_group(
+                    joiner_session,
+                    &joiner_name,
+                    joiner_member,
+                    target_session,
+                    target_state,
+                )
+                .await;
             }
         } else {
-            self.create_new_group(joiner_session, &joiner_name, joiner_member, target_session, target_state).await;
+            self.create_new_group(
+                joiner_session,
+                &joiner_name,
+                joiner_member,
+                target_session,
+                target_state,
+            )
+            .await;
         }
     }
 
@@ -1544,18 +1864,37 @@ impl SocialActor {
 
         // 更新两个玩家的 group_id
         if let Some(record) = self.players.get(&target_session) {
-            let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
+            let _ = record
+                .ask(SetGroupId {
+                    group_id: Some(group_id),
+                })
+                .await;
         }
         if let Some(record) = self.players.get(&joiner_session) {
-            let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
+            let _ = record
+                .ask(SetGroupId {
+                    group_id: Some(group_id),
+                })
+                .await;
         }
 
         self.groups.insert(group_id, group);
-        send_system_message(&self.gate_ref, joiner_session, &format!("队伍 #{} 已创建", group_id));
-        send_system_message(&self.gate_ref, target_session, &format!("队伍 #{} 已创建", group_id));
+        send_system_message(
+            &self.gate_ref,
+            joiner_session,
+            &format!("队伍 #{} 已创建", group_id),
+        );
+        send_system_message(
+            &self.gate_ref,
+            target_session,
+            &format!("队伍 #{} 已创建", group_id),
+        );
         // 创建后广播成员列表（C# 语义：双方立即看到组队面板）
         self.broadcast_group_update(group_id);
-        debug!("Created group #{} with {} and {}", group_id, target_state.name, joiner_name);
+        debug!(
+            "Created group #{} with {} and {}",
+            group_id, target_state.name, joiner_name
+        );
     }
 
     /// 离开组队
@@ -1606,11 +1945,17 @@ impl SocialActor {
 
         // #924：锁定后复检（C# TradeConfirm——!InRange || 不同地图 || 死亡 → TradeCancel）
         let a_state = match self.players.get(&s1) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(st)) => Some(st), _ => None },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(st)) => Some(st),
+                _ => None,
+            },
             None => None,
         };
         let b_state = match self.players.get(&s2) {
-            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(st)) => Some(st), _ => None },
+            Some(r) => match r.ask(GetPlayerState).await {
+                Ok(Some(st)) => Some(st),
+                _ => None,
+            },
             None => None,
         };
         let recheck_ok = match (a_state, b_state) {
@@ -1642,8 +1987,17 @@ impl SocialActor {
                 let incoming_b: Vec<mir2_shared::data::item::UserItem> =
                     items_b.iter().filter_map(|t| t.item_data.clone()).collect();
                 let items_ok = incoming_b.is_empty()
-                    || rec.ask(crate::actors::player::CanGainItemsFor { items: incoming_b }).await.unwrap_or(false);
-                let gold_ok = gold_b == 0 || rec.ask(CanGainGold { amount: (gold_b as u32).min(u32::MAX) }).await.unwrap_or(false);
+                    || rec
+                        .ask(crate::actors::player::CanGainItemsFor { items: incoming_b })
+                        .await
+                        .unwrap_or(false);
+                let gold_ok = gold_b == 0
+                    || rec
+                        .ask(CanGainGold {
+                            amount: (gold_b as u32).min(u32::MAX),
+                        })
+                        .await
+                        .unwrap_or(false);
                 items_ok && gold_ok
             }
             None => false,
@@ -1654,15 +2008,28 @@ impl SocialActor {
                 let incoming_a: Vec<mir2_shared::data::item::UserItem> =
                     items_a.iter().filter_map(|t| t.item_data.clone()).collect();
                 let items_ok = incoming_a.is_empty()
-                    || rec.ask(crate::actors::player::CanGainItemsFor { items: incoming_a }).await.unwrap_or(false);
-                let gold_ok = gold_a == 0 || rec.ask(CanGainGold { amount: (gold_a as u32).min(u32::MAX) }).await.unwrap_or(false);
+                    || rec
+                        .ask(crate::actors::player::CanGainItemsFor { items: incoming_a })
+                        .await
+                        .unwrap_or(false);
+                let gold_ok = gold_a == 0
+                    || rec
+                        .ask(CanGainGold {
+                            amount: (gold_a as u32).min(u32::MAX),
+                        })
+                        .await
+                        .unwrap_or(false);
                 items_ok && gold_ok
             }
             None => false,
         };
 
         if !a_can_receive {
-            send_system_message(&self.gate_ref, s1, "你的背包已满或金币已达上限，无法完成交易");
+            send_system_message(
+                &self.gate_ref,
+                s1,
+                "你的背包已满或金币已达上限，无法完成交易",
+            );
             send_trade_cancel_packet(&self.gate_ref, s1);
             send_trade_cancel_packet(&self.gate_ref, s2);
             send_trade_close_packet(&self.gate_ref, s1);
@@ -1671,7 +2038,11 @@ impl SocialActor {
             return;
         }
         if !b_can_receive {
-            send_system_message(&self.gate_ref, s2, "你的背包已满或金币已达上限，无法完成交易");
+            send_system_message(
+                &self.gate_ref,
+                s2,
+                "你的背包已满或金币已达上限，无法完成交易",
+            );
             send_trade_cancel_packet(&self.gate_ref, s1);
             send_trade_cancel_packet(&self.gate_ref, s2);
             send_trade_close_packet(&self.gate_ref, s1);
@@ -1686,7 +2057,11 @@ impl SocialActor {
                 let _ = rec.ask(DeductGold { amount: gold_a }).await;
             }
             for item in &items_a {
-                let _ = rec.ask(RemoveItemFromInventory { unique_id: item.uid }).await;
+                let _ = rec
+                    .ask(RemoveItemFromInventory {
+                        unique_id: item.uid,
+                    })
+                    .await;
             }
         }
 
@@ -1696,7 +2071,11 @@ impl SocialActor {
                 let _ = rec.ask(DeductGold { amount: gold_b }).await;
             }
             for item in &items_b {
-                let _ = rec.ask(RemoveItemFromInventory { unique_id: item.uid }).await;
+                let _ = rec
+                    .ask(RemoveItemFromInventory {
+                        unique_id: item.uid,
+                    })
+                    .await;
             }
         }
 
@@ -1710,7 +2089,12 @@ impl SocialActor {
                 if let Some(data) = item.item_data.clone() {
                     let _ = rec.ask(AddItemToInventory { item: data }).await;
                 } else if let Some(rec2) = self.players.get(&s2) {
-                    if let Ok(Some(item_data)) = rec2.ask(GetItemInfo { unique_id: item.uid }).await {
+                    if let Ok(Some(item_data)) = rec2
+                        .ask(GetItemInfo {
+                            unique_id: item.uid,
+                        })
+                        .await
+                    {
                         let _ = rec.ask(AddItemToInventory { item: item_data }).await;
                     }
                 }
@@ -1726,7 +2110,12 @@ impl SocialActor {
                 if let Some(data) = item.item_data.clone() {
                     let _ = rec.ask(AddItemToInventory { item: data }).await;
                 } else if let Some(rec2) = self.players.get(&s1) {
-                    if let Ok(Some(item_data)) = rec2.ask(GetItemInfo { unique_id: item.uid }).await {
+                    if let Ok(Some(item_data)) = rec2
+                        .ask(GetItemInfo {
+                            unique_id: item.uid,
+                        })
+                        .await
+                    {
                         let _ = rec.ask(AddItemToInventory { item: item_data }).await;
                     }
                 }
@@ -1739,7 +2128,13 @@ impl SocialActor {
         send_trade_success_packet(&self.gate_ref, s1);
         send_trade_success_packet(&self.gate_ref, s2);
 
-        debug!("Trade executed: {} gold + {} items <-> {} gold + {} items", gold_a, items_a.len(), gold_b, items_b.len());
+        debug!(
+            "Trade executed: {} gold + {} items <-> {} gold + {} items",
+            gold_a,
+            items_a.len(),
+            gold_b,
+            items_b.len()
+        );
 
         send_trade_close_packet(&self.gate_ref, s1);
         send_trade_close_packet(&self.gate_ref, s2);
@@ -1774,12 +2169,22 @@ impl SocialActor {
 
     /// GROUPRECALL - 召回所有组队成员
     async fn handle_group_recall(&mut self, leader_session: u64) {
-        let record = match self.players.get(&leader_session) { Some(r) => r.clone(), None => return };
-        let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&leader_session) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         // Must be group leader
-        let Some(group_id) = state.group_id else { return; };
-        let Some(group) = self.groups.get(&group_id) else { return; };
+        let Some(group_id) = state.group_id else {
+            return;
+        };
+        let Some(group) = self.groups.get(&group_id) else {
+            return;
+        };
         if group.leader_session() != Some(leader_session) {
             send_system_message(&self.gate_ref, leader_session, "你不是队长");
             return;
@@ -1787,7 +2192,11 @@ impl SocialActor {
 
         // Check dead
         if state.is_dead {
-            send_system_message(&self.gate_ref, leader_session, "你无法在死亡状态下使用组队召回");
+            send_system_message(
+                &self.gate_ref,
+                leader_session,
+                "你无法在死亡状态下使用组队召回",
+            );
             return;
         }
 
@@ -1809,13 +2218,21 @@ impl SocialActor {
             .unwrap_or(0);
         if now_ms < state.last_recall_time {
             let remaining = (state.last_recall_time - now_ms + 999) / 1000;
-            send_system_message(&self.gate_ref, leader_session, &format!("你还需要等待 {} 秒才能再次使用组队召回", remaining));
+            send_system_message(
+                &self.gate_ref,
+                leader_session,
+                &format!("你还需要等待 {} 秒才能再次使用组队召回", remaining),
+            );
             return;
         }
 
         // Check Recall item set
         if !self.check_recall_set(leader_session).await {
-            send_system_message(&self.gate_ref, leader_session, "你需要装备完整的召回套装才能使用组队召回");
+            send_system_message(
+                &self.gate_ref,
+                leader_session,
+                "你需要装备完整的召回套装才能使用组队召回",
+            );
             return;
         }
 
@@ -1825,36 +2242,61 @@ impl SocialActor {
 
         // Set cooldown BEFORE loop
         let new_recall_time = now_ms + 180_000;
-        let _ = record.ask(SetLastRecallTime { last_recall_time: new_recall_time }).await;
+        let _ = record
+            .ask(SetLastRecallTime {
+                last_recall_time: new_recall_time,
+            })
+            .await;
 
         // Teleport all group members (only those with EnableGroupRecall=true)
         // Clone group to avoid borrowing self while iterating + calling ask()
         let group = self.groups.get(&group_id).unwrap().clone();
         for member in &group.members {
-            if member.session_id == leader_session { continue; }
-            if !member.online { continue; }
+            if member.session_id == leader_session {
+                continue;
+            }
+            if !member.online {
+                continue;
+            }
             if let Some(mem_record) = self.players.get(&member.session_id) {
                 if let Ok(Some(mem_state)) = mem_record.ask(GetPlayerState).await {
                     if !mem_state.enable_group_recall {
-                        send_system_message(&self.gate_ref, mem_state.session_id, "有人试图未经你允许进行组队召回");
-                        send_system_message(&self.gate_ref, leader_session, &format!("{} 拒绝了组队召回", mem_state.name));
+                        send_system_message(
+                            &self.gate_ref,
+                            mem_state.session_id,
+                            "有人试图未经你允许进行组队召回",
+                        );
+                        send_system_message(
+                            &self.gate_ref,
+                            leader_session,
+                            &format!("{} 拒绝了组队召回", mem_state.name),
+                        );
                         continue;
                     }
-                    let _ = mem_record.ask(SetPlayerPosition {
-                        x: target_x, y: target_y,
-                        direction: mem_state.direction,
-                        map_index: Some(target_map),
-                        is_mounted: None,
-                    }).await;
+                    let _ = mem_record
+                        .ask(SetPlayerPosition {
+                            x: target_x,
+                            y: target_y,
+                            direction: mem_state.direction,
+                            map_index: Some(target_map),
+                            is_mounted: None,
+                        })
+                        .await;
                     let mut body = Vec::new();
                     body.extend_from_slice(&target_x.to_le_bytes());
                     body.extend_from_slice(&target_y.to_le_bytes());
                     body.push(mem_state.direction);
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: member.session_id,
-                        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                    }).await;
-                    debug!("GROUPRECALL: {} recalled to ({}, {}) on map {}", mem_state.name, target_x, target_y, target_map);
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: member.session_id,
+                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
+                        })
+                        .await;
+                    debug!(
+                        "GROUPRECALL: {} recalled to ({}, {}) on map {}",
+                        mem_state.name, target_x, target_y, target_map
+                    );
                 }
             }
         }
@@ -1862,18 +2304,32 @@ impl SocialActor {
 
     /// RECALLMEMBER <name> - 召回指定成员
     async fn handle_recall_member(&mut self, leader_session: u64, member_name: &str) {
-        let record = match self.players.get(&leader_session) { Some(r) => r.clone(), None => return };
-        let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&leader_session) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
-        let Some(group_id) = state.group_id else { return; };
-        let Some(group) = self.groups.get(&group_id) else { return; };
+        let Some(group_id) = state.group_id else {
+            return;
+        };
+        let Some(group) = self.groups.get(&group_id) else {
+            return;
+        };
         if group.leader_session() != Some(leader_session) {
             send_system_message(&self.gate_ref, leader_session, "你不是队长");
             return;
         }
 
         if state.is_dead {
-            send_system_message(&self.gate_ref, leader_session, "你无法在死亡状态下使用组队召回");
+            send_system_message(
+                &self.gate_ref,
+                leader_session,
+                "你无法在死亡状态下使用组队召回",
+            );
             return;
         }
 
@@ -1893,12 +2349,20 @@ impl SocialActor {
             .unwrap_or(0);
         if now_ms < state.last_recall_time {
             let remaining = (state.last_recall_time - now_ms + 999) / 1000;
-            send_system_message(&self.gate_ref, leader_session, &format!("你还需要等待 {} 秒才能再次使用组队召回", remaining));
+            send_system_message(
+                &self.gate_ref,
+                leader_session,
+                &format!("你还需要等待 {} 秒才能再次使用组队召回", remaining),
+            );
             return;
         }
 
         if !self.check_recall_set(leader_session).await {
-            send_system_message(&self.gate_ref, leader_session, "你需要装备完整的召回套装才能使用组队召回");
+            send_system_message(
+                &self.gate_ref,
+                leader_session,
+                "你需要装备完整的召回套装才能使用组队召回",
+            );
             return;
         }
 
@@ -1910,32 +2374,60 @@ impl SocialActor {
         // Clone group to avoid borrowing self while iterating + calling ask()
         let group = self.groups.get(&group_id).unwrap().clone();
         for member in &group.members {
-            if member.session_id == leader_session { continue; }
-            if !member.online { continue; }
+            if member.session_id == leader_session {
+                continue;
+            }
+            if !member.online {
+                continue;
+            }
             if let Some(mem_record) = self.players.get(&member.session_id) {
                 if let Ok(Some(mem_state)) = mem_record.ask(GetPlayerState).await {
                     if mem_state.name.eq_ignore_ascii_case(member_name) {
                         if !mem_state.enable_group_recall {
-                            send_system_message(&self.gate_ref, mem_state.session_id, "有人试图未经你允许进行组队召回");
-                            send_system_message(&self.gate_ref, leader_session, &format!("{} 拒绝了组队召回", mem_state.name));
+                            send_system_message(
+                                &self.gate_ref,
+                                mem_state.session_id,
+                                "有人试图未经你允许进行组队召回",
+                            );
+                            send_system_message(
+                                &self.gate_ref,
+                                leader_session,
+                                &format!("{} 拒绝了组队召回", mem_state.name),
+                            );
                             return;
                         }
-                        let _ = record.ask(SetLastRecallTime { last_recall_time: now_ms + 60_000 }).await;
-                        let _ = mem_record.ask(SetPlayerPosition {
-                            x: target_x, y: target_y,
-                            direction: mem_state.direction,
-                            map_index: Some(target_map),
-                            is_mounted: None,
-                        }).await;
+                        let _ = record
+                            .ask(SetLastRecallTime {
+                                last_recall_time: now_ms + 60_000,
+                            })
+                            .await;
+                        let _ = mem_record
+                            .ask(SetPlayerPosition {
+                                x: target_x,
+                                y: target_y,
+                                direction: mem_state.direction,
+                                map_index: Some(target_map),
+                                is_mounted: None,
+                            })
+                            .await;
                         let mut body = Vec::new();
                         body.extend_from_slice(&target_x.to_le_bytes());
                         body.extend_from_slice(&target_y.to_le_bytes());
                         body.push(mem_state.direction);
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: member.session_id,
-                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                        }).await;
-                        debug!("RECALLMEMBER: {} recalled to ({}, {})", mem_state.name, target_x, target_y);
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: member.session_id,
+                                data: build_packet_bytes(
+                                    ServerPacketIds::UserLocation as i16,
+                                    &body,
+                                ),
+                            })
+                            .await;
+                        debug!(
+                            "RECALLMEMBER: {} recalled to ({}, {})",
+                            mem_state.name, target_x, target_y
+                        );
                         return;
                     }
                 }
@@ -1946,8 +2438,14 @@ impl SocialActor {
 
     /// RECALL - 召回配偶（对应 C# PlayerObject.cs:2439 RECALLLOVER）
     async fn handle_recall_lover(&mut self, session_id: u64) {
-        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         let Some(spouse_name) = &state.spouse_name else {
             send_system_message(&self.gate_ref, session_id, "你需要有配偶才能使用召回");
@@ -1971,7 +2469,11 @@ impl SocialActor {
 
         let ring_l = state.inventory.get_equipment(EquipmentSlot::RingL);
         if ring_l.is_none() {
-            send_system_message(&self.gate_ref, session_id, "你需要佩戴结婚戒指才能使用配偶召回");
+            send_system_message(
+                &self.gate_ref,
+                session_id,
+                "你需要佩戴结婚戒指才能使用配偶召回",
+            );
             return;
         }
 
@@ -1994,7 +2496,9 @@ impl SocialActor {
 
         // Find spouse and teleport
         for (other_session, other_record) in &self.players {
-            if *other_session == session_id { continue; }
+            if *other_session == session_id {
+                continue;
+            }
             if let Ok(Some(other_state)) = other_record.ask(GetPlayerState).await {
                 if other_state.name.eq_ignore_ascii_case(&spouse_name) {
                     // 检查配偶是否死亡（对应 C# player.Dead）
@@ -2006,22 +2510,46 @@ impl SocialActor {
                     // 检查配偶是否也佩戴了结婚戒指（对应 C# player.Info.Equipment[RingL] == null）
                     let spouse_ring_l = other_state.inventory.get_equipment(EquipmentSlot::RingL);
                     if spouse_ring_l.is_none() {
-                        send_system_message(&self.gate_ref, *other_session, "你需要佩戴结婚戒指才能被召回");
-                        send_system_message(&self.gate_ref, session_id, &format!("{} 没有佩戴结婚戒指", other_state.name));
+                        send_system_message(
+                            &self.gate_ref,
+                            *other_session,
+                            "你需要佩戴结婚戒指才能被召回",
+                        );
+                        send_system_message(
+                            &self.gate_ref,
+                            session_id,
+                            &format!("{} 没有佩戴结婚戒指", other_state.name),
+                        );
                         return;
                     }
                     let spouse_ring = spouse_ring_l.unwrap();
                     // 检查配偶戒指绑定是否正确（对应 C# player.Info.Equipment[RingL].WeddingRing != player.Info.Married）
                     if spouse_ring.wedding_ring == 0 {
-                        send_system_message(&self.gate_ref, *other_session, "你需要佩戴已绑定的结婚戒指才能被召回");
-                        send_system_message(&self.gate_ref, session_id, &format!("{} 没有佩戴已绑定的结婚戒指", other_state.name));
+                        send_system_message(
+                            &self.gate_ref,
+                            *other_session,
+                            "你需要佩戴已绑定的结婚戒指才能被召回",
+                        );
+                        send_system_message(
+                            &self.gate_ref,
+                            session_id,
+                            &format!("{} 没有佩戴已绑定的结婚戒指", other_state.name),
+                        );
                         return;
                     }
 
                     // 检查配偶是否允许配偶召回（对应 C# player.AllowLoverRecall）
                     if !other_state.allow_lover_recall {
-                        send_system_message(&self.gate_ref, *other_session, "有人试图未经你允许进行配偶召回");
-                        send_system_message(&self.gate_ref, session_id, &format!("{} 拒绝了配偶召回", other_state.name));
+                        send_system_message(
+                            &self.gate_ref,
+                            *other_session,
+                            "有人试图未经你允许进行配偶召回",
+                        );
+                        send_system_message(
+                            &self.gate_ref,
+                            session_id,
+                            &format!("{} 拒绝了配偶召回", other_state.name),
+                        );
                         return;
                     }
 
@@ -2032,39 +2560,64 @@ impl SocialActor {
                         .unwrap_or(0);
                     if now_ms < state.last_recall_time {
                         let remaining = (state.last_recall_time - now_ms + 999) / 1000;
-                        send_system_message(&self.gate_ref, session_id, &format!("你还需要等待 {} 秒才能再次使用配偶召回", remaining));
+                        send_system_message(
+                            &self.gate_ref,
+                            session_id,
+                            &format!("你还需要等待 {} 秒才能再次使用配偶召回", remaining),
+                        );
                         return;
                     }
                     if now_ms < other_state.last_recall_time {
                         let remaining = (other_state.last_recall_time - now_ms + 999) / 1000;
-                        send_system_message(&self.gate_ref, session_id, &format!("配偶还需要等待 {} 秒才能再次使用召回", remaining));
+                        send_system_message(
+                            &self.gate_ref,
+                            session_id,
+                            &format!("配偶还需要等待 {} 秒才能再次使用召回", remaining),
+                        );
                         return;
                     }
 
                     // 设置冷却（60s，对应 C# LastRecallTime = Envir.Time + 60000; player.LastRecallTime = Envir.Time + 60000）
                     let new_recall_time = now_ms + 60_000;
-                    let _ = record.ask(SetLastRecallTime { last_recall_time: new_recall_time }).await;
-                    let _ = other_record.ask(SetLastRecallTime { last_recall_time: new_recall_time }).await;
+                    let _ = record
+                        .ask(SetLastRecallTime {
+                            last_recall_time: new_recall_time,
+                        })
+                        .await;
+                    let _ = other_record
+                        .ask(SetLastRecallTime {
+                            last_recall_time: new_recall_time,
+                        })
+                        .await;
 
                     // 尝试 Teleport（对应 C# player.Teleport(CurrentMap, Front)，失败则 CurrentLocation）
                     // Front = 发起者当前位置前方一格
                     let front_x = target_x + player_dir_x(state.direction);
                     let front_y = target_y + player_dir_y(state.direction);
-                    let _ = other_record.ask(SetPlayerPosition {
-                        x: front_x, y: front_y,
-                        direction: other_state.direction,
-                        map_index: Some(target_map),
-                        is_mounted: None,
-                    }).await;
+                    let _ = other_record
+                        .ask(SetPlayerPosition {
+                            x: front_x,
+                            y: front_y,
+                            direction: other_state.direction,
+                            map_index: Some(target_map),
+                            is_mounted: None,
+                        })
+                        .await;
                     let mut body = Vec::new();
                     body.extend_from_slice(&front_x.to_le_bytes());
                     body.extend_from_slice(&front_y.to_le_bytes());
                     body.push(other_state.direction);
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *other_session,
-                        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                    }).await;
-                    debug!("RECALL: {} recalled {} to ({}, {})", state.name, spouse_name, front_x, front_y);
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: *other_session,
+                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
+                        })
+                        .await;
+                    debug!(
+                        "RECALL: {} recalled {} to ({}, {})",
+                        state.name, spouse_name, front_x, front_y
+                    );
                     return;
                 }
             }
@@ -2082,17 +2635,27 @@ impl SocialActor {
                 return;
             }
         };
-        let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         let mount_item = match state.inventory.get_equipment(EquipmentSlot::Mount) {
             Some(m) => m.clone(),
             None => {
-                debug!("RIDE: no mount equipped (slots={:?})", state.inventory.equipment.len());
+                debug!(
+                    "RIDE: no mount equipped (slots={:?})",
+                    state.inventory.equipment.len()
+                );
                 send_system_message(&self.gate_ref, session_id, "你没有装备坐骑");
                 return;
             }
         };
-        debug!("RIDE: mount item idx={} slots={}", mount_item.item_index, mount_item.slots.len());
+        debug!(
+            "RIDE: mount item idx={} slots={}",
+            mount_item.item_index,
+            mount_item.slots.len()
+        );
 
         let has_saddle = mount_item.slots.get(2).and_then(|s| s.as_ref()).is_some();
         if !has_saddle {
@@ -2107,16 +2670,21 @@ impl SocialActor {
         }
 
         if state.is_mounted {
-            let _ = record.ask(SetPlayerPosition {
-                x: state.x, y: state.y,
-                direction: state.direction,
-                map_index: None,
-                is_mounted: Some(false),
-            }).await;
+            let _ = record
+                .ask(SetPlayerPosition {
+                    x: state.x,
+                    y: state.y,
+                    direction: state.direction,
+                    map_index: None,
+                    is_mounted: Some(false),
+                })
+                .await;
             // M60：清坐骑类型 + 同步外观给自身与同图玩家
             if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
                 st.mount_type = 0;
-                let _ = record.ask(crate::actors::player::SetPlayerState { state: st.clone() }).await;
+                let _ = record
+                    .ask(crate::actors::player::SetPlayerState { state: st.clone() })
+                    .await;
                 self.broadcast_ride_appearance(session_id, &st).await;
             }
             send_system_message(&self.gate_ref, session_id, "你下了坐骑");
@@ -2130,26 +2698,38 @@ impl SocialActor {
                 if mi.need_bridle {
                     let has_reins = mount_item.slots.first().and_then(|s| s.as_ref()).is_some();
                     if !has_reins {
-                        send_system_message(&self.gate_ref, session_id, "该地图需要给坐骑装备缰绳才能骑乘");
+                        send_system_message(
+                            &self.gate_ref,
+                            session_id,
+                            "该地图需要给坐骑装备缰绳才能骑乘",
+                        );
                         return;
                     }
                 }
             }
 
-            let _ = record.ask(SetPlayerPosition {
-                x: state.x, y: state.y,
-                direction: state.direction,
-                map_index: None,
-                is_mounted: Some(true),
-            }).await;
+            let _ = record
+                .ask(SetPlayerPosition {
+                    x: state.x,
+                    y: state.y,
+                    direction: state.direction,
+                    map_index: None,
+                    is_mounted: Some(true),
+                })
+                .await;
             // M60：坐骑类型取装备坐骑物品 shape（C# Mount.MountType）
             let mount_type: i16 = {
                 let infos = self.config.item_infos.read().await;
-                infos.get(&mount_item.item_index).map(|i| i.shape as i16).unwrap_or(0)
+                infos
+                    .get(&mount_item.item_index)
+                    .map(|i| i.shape as i16)
+                    .unwrap_or(0)
             };
             if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
                 st.mount_type = mount_type;
-                let _ = record.ask(crate::actors::player::SetPlayerState { state: st.clone() }).await;
+                let _ = record
+                    .ask(crate::actors::player::SetPlayerState { state: st.clone() })
+                    .await;
                 self.broadcast_ride_appearance(session_id, &st).await;
             }
             send_system_message(&self.gate_ref, session_id, "你骑上了坐骑");
@@ -2157,8 +2737,6 @@ impl SocialActor {
         }
     }
 }
-
-
 
 // ============================================================
 // Message: SocialPlayerJoined
@@ -2182,7 +2760,9 @@ impl Message<SocialPlayerJoined> for SocialActor {
         let new_oid = state.object_id;
         let new_name = state.name.clone();
         for (sid, r) in &self.players {
-            if *sid == msg.session_id { continue; }
+            if *sid == msg.session_id {
+                continue;
+            }
             if let Ok(Some(mut os)) = r.ask(GetPlayerState).await {
                 let mut changed = false;
                 for f in os.friend_list.friends.iter_mut() {
@@ -2215,7 +2795,13 @@ impl Message<SocialPlayerJoined> for SocialActor {
 
         // #2374：C# PlayerObject.cs:1194-1196——师徒到期（MentorDate.AddDays(7) < Now）登录时自动解除（force=false 无冷却）
         let now_secs = crate::actors::world::partners::now_unix_secs();
-        if state.mentor_name.is_some() && mentor_relationship_expired(state.mentor_date, now_secs, self.config.mentor_length_days as i64) {
+        if state.mentor_name.is_some()
+            && mentor_relationship_expired(
+                state.mentor_date,
+                now_secs,
+                self.config.mentor_length_days as i64,
+            )
+        {
             self.do_mentor_break(msg.session_id, false).await;
         }
         // 重新取状态（到期解除可能已清空师徒关系）
@@ -2224,10 +2810,10 @@ impl Message<SocialPlayerJoined> for SocialActor {
             _ => return,
         };
 
-
         // 师徒状态同步（C# GetMentor 语义：上线时通知双方，双方各发 MentorUpdate）
         if let Some(partner_name) = &state.mentor_name {
-            if let Some(partner_sid) = self.find_player_by_name(partner_name, msg.session_id).await {
+            if let Some(partner_sid) = self.find_player_by_name(partner_name, msg.session_id).await
+            {
                 if let Some(partner_record) = self.players.get(&partner_sid) {
                     if let Ok(Some(partner_state)) = partner_record.ask(GetPlayerState).await {
                         // 上线者视角：对方（师父/徒弟）信息
@@ -2249,12 +2835,17 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             true,
                             partner_state.mentor_exp,
                         );
-                        let rel = if partner_state.mentor_name.as_deref() == Some(state.name.as_str()) {
-                            "徒弟"
-                        } else {
-                            "师父"
-                        };
-                        send_system_message(&self.gate_ref, partner_sid, &format!("你的{} {} 上线了", rel, state.name));
+                        let rel =
+                            if partner_state.mentor_name.as_deref() == Some(state.name.as_str()) {
+                                "徒弟"
+                            } else {
+                                "师父"
+                            };
+                        send_system_message(
+                            &self.gate_ref,
+                            partner_sid,
+                            &format!("你的{} {} 上线了", rel, state.name),
+                        );
                     }
                 }
             } else {
@@ -2294,7 +2885,11 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             &self_map,
                             self.married_days(spouse_state.married_date),
                         );
-                        send_system_message(&self.gate_ref, spouse_sid, &format!("你的配偶 {} 上线了", state.name));
+                        send_system_message(
+                            &self.gate_ref,
+                            spouse_sid,
+                            &format!("你的配偶 {} 上线了", state.name),
+                        );
                     }
                 }
             } else {
@@ -2324,7 +2919,13 @@ impl Message<SocialPlayerLeft> for SocialActor {
         // 提前取师徒/配偶信息（随后从 players 移除）
         let leaving_mentor = if let Some(rec) = self.players.get(&msg.session_id) {
             match rec.ask(GetPlayerState).await {
-                Ok(Some(s)) => Some((s.name.clone(), s.level, s.mentor_name.clone(), s.is_mentor, s.mentee_exp)),
+                Ok(Some(s)) => Some((
+                    s.name.clone(),
+                    s.level,
+                    s.mentor_name.clone(),
+                    s.is_mentor,
+                    s.mentee_exp,
+                )),
                 _ => None,
             }
         } else {
@@ -2333,7 +2934,10 @@ impl Message<SocialPlayerLeft> for SocialActor {
         // #1329：配偶下线通知（C# LogoutRelationship）
         let leaving_spouse = if let Some(rec) = self.players.get(&msg.session_id) {
             match rec.ask(GetPlayerState).await {
-                Ok(Some(s)) => s.spouse_name.clone().map(|n| (s.name.clone(), n, s.married_date)),
+                Ok(Some(s)) => s
+                    .spouse_name
+                    .clone()
+                    .map(|n| (s.name.clone(), n, s.married_date)),
                 _ => None,
             }
         } else {
@@ -2344,7 +2948,10 @@ impl Message<SocialPlayerLeft> for SocialActor {
 
         // 师徒下线通知 + MentorExp 转移（C# LogoutMentor：徒弟下线 → mentor.MentorExp += MenteeEXP）
         if let Some((name, level, Some(partner_name), is_mentor, mentee_exp)) = leaving_mentor {
-            if let Some(partner_sid) = self.find_player_by_name(&partner_name, msg.session_id).await {
+            if let Some(partner_sid) = self
+                .find_player_by_name(&partner_name, msg.session_id)
+                .await
+            {
                 if let Some(partner_record) = self.players.get(&partner_sid) {
                     if let Ok(Some(partner_state)) = partner_record.ask(GetPlayerState).await {
                         let partner_mentor_exp = if !is_mentor && mentee_exp > 0 {
@@ -2362,7 +2969,11 @@ impl Message<SocialPlayerLeft> for SocialActor {
                             false,
                             partner_mentor_exp,
                         );
-                        send_system_message(&self.gate_ref, partner_sid, &format!("{} 下线了", name));
+                        send_system_message(
+                            &self.gate_ref,
+                            partner_sid,
+                            &format!("{} 下线了", name),
+                        );
                     }
                 }
             } else if !is_mentor && mentee_exp > 0 {
@@ -2387,7 +2998,11 @@ impl Message<SocialPlayerLeft> for SocialActor {
 
         // 行会成员离线标记（保持 session 为空，行会广播/在线显示正确）
         for guild in self.guilds.values_mut() {
-            if let Some(member) = guild.members.iter_mut().find(|m| m.session_id == Some(msg.session_id)) {
+            if let Some(member) = guild
+                .members
+                .iter_mut()
+                .find(|m| m.session_id == Some(msg.session_id))
+            {
                 member.session_id = None;
                 debug!("SocialActor: guild member {} offline", member.name);
             }
@@ -2421,10 +3036,13 @@ impl Message<SocialPlayerLeft> for SocialActor {
         });
 
         // 清理邀请
-        self.pending_invites.retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
+        self.pending_invites
+            .retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
         self.pending_guild_invites.remove(&msg.session_id);
-        self.pending_marriage_invites.retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
-        self.pending_mentor_invites.retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
+        self.pending_marriage_invites
+            .retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
+        self.pending_mentor_invites
+            .retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
 
         debug!("SocialActor: player left (session={})", msg.session_id);
     }
@@ -2444,7 +3062,8 @@ impl Message<SocialChatCommand> for SocialActor {
             }
             "RECALLMEMBER" => {
                 if !msg.args.is_empty() {
-                    self.handle_recall_member(msg.session_id, &msg.args[0]).await;
+                    self.handle_recall_member(msg.session_id, &msg.args[0])
+                        .await;
                 }
             }
             "RECALLLOVER" => {
@@ -2496,7 +3115,8 @@ impl Message<SwitchGroupRequest> for SocialActor {
         if !msg.allow_group {
             // 禁止组队 → 离开当前组队
             if let Some(group_id) = state.group_id {
-                self.leave_group(group_id, msg.session_id, &state.name).await;
+                self.leave_group(group_id, msg.session_id, &state.name)
+                    .await;
             }
             send_system_message(&self.gate_ref, msg.session_id, "已关闭组队");
         } else {
@@ -2557,7 +3177,10 @@ impl Message<GroupInviteRequest> for SocialActor {
             return;
         }
 
-        let Some(target_session) = self.find_player_by_name(&msg.target_name, msg.session_id).await else {
+        let Some(target_session) = self
+            .find_player_by_name(&msg.target_name, msg.session_id)
+            .await
+        else {
             send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
             return;
         };
@@ -2588,15 +3211,27 @@ impl Message<GroupInviteRequest> for SocialActor {
             let map_infos = self.config.map_infos.read().await;
             if let Some(mi) = map_infos.get(&(target_state.map_index as i32)) {
                 if mi.no_group {
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("对方所在地图无法组队（{}）", target_state.name));
-                    send_system_message(&self.gate_ref, target_session, "对方无法接受组队邀请（当前地图禁止组队）");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("对方所在地图无法组队（{}）", target_state.name),
+                    );
+                    send_system_message(
+                        &self.gate_ref,
+                        target_session,
+                        "对方无法接受组队邀请（当前地图禁止组队）",
+                    );
                     return;
                 }
             }
         }
 
         if !target_state.allow_group {
-            send_system_message(&self.gate_ref, msg.session_id, "对方未开启组队（请对方先开启允许组队）");
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "对方未开启组队（请对方先开启允许组队）",
+            );
             return;
         }
 
@@ -2619,10 +3254,18 @@ impl Message<GroupInviteRequest> for SocialActor {
         }
 
         // 发送邀请给目标玩家
-        send_group_invite_packet(&self.gate_ref, target_session, &inviter_state.name, msg.session_id);
+        send_group_invite_packet(
+            &self.gate_ref,
+            target_session,
+            &inviter_state.name,
+            msg.session_id,
+        );
         // 记录待处理邀请
         self.pending_invites.insert(target_session, msg.session_id);
-        debug!("Group invite: {} -> {}", inviter_state.name, target_state.name);
+        debug!(
+            "Group invite: {} -> {}",
+            inviter_state.name, target_state.name
+        );
     }
 }
 
@@ -2631,7 +3274,9 @@ impl Message<GroupInviteReply> for SocialActor {
 
     async fn handle(&mut self, msg: GroupInviteReply, _ctx: &mut Context<Self, Self::Reply>) {
         // 解析邀请者 ID
-        let inviter_id = self.pending_invites.remove(&msg.session_id)
+        let inviter_id = self
+            .pending_invites
+            .remove(&msg.session_id)
             .unwrap_or(msg.inviter_id);
 
         if !msg.accept {
@@ -2686,8 +3331,16 @@ impl Message<GroupInviteReply> for SocialActor {
             let map_infos = self.config.map_infos.read().await;
             if let Some(mi) = map_infos.get(&(inviter_state.map_index as i32)) {
                 if mi.no_group {
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("对方所在地图无法组队（{}）", inviter_state.name));
-                    send_system_message(&self.gate_ref, inviter_id, "对方无法接受组队邀请（当前地图禁止组队）");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("对方所在地图无法组队（{}）", inviter_state.name),
+                    );
+                    send_system_message(
+                        &self.gate_ref,
+                        inviter_id,
+                        "对方无法接受组队邀请（当前地图禁止组队）",
+                    );
                     return;
                 }
             }
@@ -2705,7 +3358,8 @@ impl Message<GroupInviteReply> for SocialActor {
             }
         };
 
-        self.join_or_create_group(msg.session_id, inviter_id, &reply_name).await;
+        self.join_or_create_group(msg.session_id, inviter_id, &reply_name)
+            .await;
     }
 }
 
@@ -2753,11 +3407,19 @@ impl Message<DellMemberRequest> for SocialActor {
                 Some(g) => g,
                 None => return,
             };
-            group.members.iter().find(|m| m.name == msg.member_name).map(|m| m.session_id)
+            group
+                .members
+                .iter()
+                .find(|m| m.name == msg.member_name)
+                .map(|m| m.session_id)
         };
 
         let Some(member_session) = member_session else {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("找不到名为 '{}' 的队员", msg.member_name));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("找不到名为 '{}' 的队员", msg.member_name),
+            );
             return;
         };
 
@@ -2773,7 +3435,11 @@ impl Message<DellMemberRequest> for SocialActor {
                 send_system_message(&self.gate_ref, member_session, "你已被移出队伍");
 
                 debug!("Kicked {} from group #{}", msg.member_name, group_id);
-                send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已被踢出队伍", msg.member_name));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("{} 已被踢出队伍", msg.member_name),
+                );
 
                 // 组队空了 → 删除；只剩 1 人 → 解散（C# LeaveGroup 语义）
                 if group.member_count() == 0 {
@@ -2850,8 +3516,10 @@ impl Message<TradeStartRequest> for SocialActor {
             }
             if let Some(rec) = self.players.get(sid) {
                 if let Ok(Some(other_state)) = rec.ask(GetPlayerState).await {
-                    if other_state.is_dead { continue; } // 死亡状态下无法交易
-                    // #911：C# PlayerObject（~10686）目标关闭交易（@ALLOWTRADE）→ 拒绝
+                    if other_state.is_dead {
+                        continue;
+                    } // 死亡状态下无法交易
+                      // #911：C# PlayerObject（~10686）目标关闭交易（@ALLOWTRADE）→ 拒绝
                     if !other_state.allow_trade {
                         found_trade_closed = true;
                         continue;
@@ -2861,8 +3529,12 @@ impl Message<TradeStartRequest> for SocialActor {
                     if other_state.x == fx
                         && other_state.y == fy
                         && facing_each_other(
-                            state.direction, player_pos.0, player_pos.1,
-                            other_state.direction, other_state.x, other_state.y,
+                            state.direction,
+                            player_pos.0,
+                            player_pos.1,
+                            other_state.direction,
+                            other_state.x,
+                            other_state.y,
                         )
                     {
                         nearest_target = Some((*sid, 1));
@@ -2881,9 +3553,16 @@ impl Message<TradeStartRequest> for SocialActor {
             }
             self.pending_invites.insert(target, msg.session_id);
             send_trade_invite_packet(&self.gate_ref, target, &state.name);
-            debug!("Trade request: {} -> session {} (dist={})", state.name, target, _dist);
+            debug!(
+                "Trade request: {} -> session {} (dist={})",
+                state.name, target, _dist
+            );
         } else if found_trade_closed {
-            send_system_message(&self.gate_ref, msg.session_id, "附近玩家关闭了交易（请对方先使用 @ALLOWTRADE 开启）");
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "附近玩家关闭了交易（请对方先使用 @ALLOWTRADE 开启）",
+            );
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "附近没有其他玩家");
         }
@@ -2895,11 +3574,15 @@ impl Message<TradeStartReply> for SocialActor {
 
     async fn handle(&mut self, msg: TradeStartReply, _ctx: &mut Context<Self, Self::Reply>) {
         // 解析发起者
-        let initiator_id = self.pending_invites.remove(&msg.session_id)
-            .or_else(|| self.active_trades.get(&msg.session_id).map(|t| {
-                if t.side_a.session_id == msg.session_id { t.side_b.session_id }
-                else { t.side_a.session_id }
-            }));
+        let initiator_id = self.pending_invites.remove(&msg.session_id).or_else(|| {
+            self.active_trades.get(&msg.session_id).map(|t| {
+                if t.side_a.session_id == msg.session_id {
+                    t.side_b.session_id
+                } else {
+                    t.side_a.session_id
+                }
+            })
+        });
 
         let Some(initiator_id) = initiator_id else {
             return;
@@ -2922,25 +3605,37 @@ impl Message<TradeStartReply> for SocialActor {
         }
 
         let initiator_record = match self.players.get(&initiator_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let initiator_name = match initiator_record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s.name.clone(), _ => return,
+            Ok(Some(s)) => s.name.clone(),
+            _ => return,
         };
         let target_record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let target_name = match target_record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s.name.clone(), _ => return,
+            Ok(Some(s)) => s.name.clone(),
+            _ => return,
         };
 
-        let trade = TradeSession::new(initiator_id, initiator_name.clone(), msg.session_id, target_name.clone());
+        let trade = TradeSession::new(
+            initiator_id,
+            initiator_name.clone(),
+            msg.session_id,
+            target_name.clone(),
+        );
         self.active_trades.insert(initiator_id, trade);
 
         // 通知双方打开交易窗口
         send_trade_open_packet(&self.gate_ref, initiator_id, &target_name);
         send_trade_open_packet(&self.gate_ref, msg.session_id, &initiator_name);
-        debug!("Trade session created: {} <-> {}", initiator_name, target_name);
+        debug!(
+            "Trade session created: {} <-> {}",
+            initiator_name, target_name
+        );
     }
 }
 
@@ -2951,7 +3646,8 @@ impl Message<TradeAddGold> for SocialActor {
         // 先检查金币（避免可变借用冲突）
         let has_enough_gold = {
             let record = match self.players.get(&msg.session_id) {
-                Some(r) => r, None => return,
+                Some(r) => r,
+                None => return,
             };
             match record.ask(GetPlayerState).await {
                 Ok(Some(s)) => s.inventory.gold >= msg.amount as u64,
@@ -2965,11 +3661,15 @@ impl Message<TradeAddGold> for SocialActor {
 
         let trade = match self.find_trade_mut(msg.session_id) {
             Some(t) => t,
-            None => { send_system_message(&self.gate_ref, msg.session_id, "你不在交易中"); return; }
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "你不在交易中");
+                return;
+            }
         };
 
         let side = match trade.side_of_mut(msg.session_id) {
-            Some(s) => s, None => return,
+            Some(s) => s,
+            None => return,
         };
         side.gold = msg.amount as u64;
         side.unlock();
@@ -2986,11 +3686,13 @@ impl Message<TradeConfirmLock> for SocialActor {
 
     async fn handle(&mut self, msg: TradeConfirmLock, _ctx: &mut Context<Self, Self::Reply>) {
         let trade = match self.find_trade_mut(msg.session_id) {
-            Some(t) => t, None => return,
+            Some(t) => t,
+            None => return,
         };
 
         let side = match trade.side_of_mut(msg.session_id) {
-            Some(s) => s, None => return,
+            Some(s) => s,
+            None => return,
         };
         side.locked = msg.locked;
 
@@ -3045,11 +3747,20 @@ impl Message<TradeAddItem> for SocialActor {
         // C# CanTradeItem：BindMode.DontTrade(0x10) 物品不可交易（含租赁绑定）
         {
             let infos = self.config.item_infos.read().await;
-            let bind = state.inventory.get_item(msg.unique_id)
+            let bind = state
+                .inventory
+                .get_item(msg.unique_id)
                 .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
                 .unwrap_or(0);
-            let rental_dont_trade = state.inventory.get_item(msg.unique_id)
-                .map(|it| crate::actors::world::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_TRADE.bits()))
+            let rental_dont_trade = state
+                .inventory
+                .get_item(msg.unique_id)
+                .map(|it| {
+                    crate::actors::world::rental_has_flag(
+                        it,
+                        mir2_shared::enums::BindMode::DONT_TRADE.bits(),
+                    )
+                })
                 .unwrap_or(false);
             if (bind & 0x0010) != 0 || rental_dont_trade {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
@@ -3064,7 +3775,10 @@ impl Message<TradeAddItem> for SocialActor {
         }
         {
             let trade_full = match self.find_trade(msg.session_id) {
-                Some(t) => t.side_of(msg.session_id).map(|side| !side.can_add_item(msg.unique_id)).unwrap_or(false),
+                Some(t) => t
+                    .side_of(msg.session_id)
+                    .map(|side| !side.can_add_item(msg.unique_id))
+                    .unwrap_or(false),
                 None => false,
             };
             if trade_full {
@@ -3075,18 +3789,39 @@ impl Message<TradeAddItem> for SocialActor {
 
         // #923：C# TradeItem——放入交易即从背包移除并锁定（防交易中消耗/重复放入）
         // #2006：部分堆叠按数量拆分（C# 原堆扣减 count、剩余保留）；全叠/非堆叠整件移除
-        let full_count = state.inventory.get_item(msg.unique_id).map(|it| it.count).unwrap_or(0);
+        let full_count = state
+            .inventory
+            .get_item(msg.unique_id)
+            .map(|it| it.count)
+            .unwrap_or(0);
         let removed = if msg.count > 0 && msg.count < full_count {
-            record.ask(crate::actors::player::RemoveItemFromInventoryCount { unique_id: msg.unique_id, count: msg.count }).await.ok().flatten()
+            record
+                .ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: msg.unique_id,
+                    count: msg.count,
+                })
+                .await
+                .ok()
+                .flatten()
         } else {
-            record.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.ok().flatten()
+            record
+                .ask(RemoveItemFromInventory {
+                    unique_id: msg.unique_id,
+                })
+                .await
+                .ok()
+                .flatten()
         };
         let Some(item_data) = removed else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
         // #2010：整堆/非堆叠放入时 count 取物品实际堆叠数（C# TradeItem 整件移动）
-        let eff_count = if msg.count > 0 && msg.count < full_count { msg.count } else { item_data.count };
+        let eff_count = if msg.count > 0 && msg.count < full_count {
+            msg.count
+        } else {
+            item_data.count
+        };
 
         // 交易不存在/已锁定 → 回滚归还
         let other_session = {
@@ -3115,7 +3850,14 @@ impl Message<TradeAddItem> for SocialActor {
 
         // 通知对方
         if let Some(other) = other_session {
-            send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, msg.grid, eff_count, true);
+            send_trade_item_update_packet(
+                &self.gate_ref,
+                other,
+                msg.unique_id,
+                msg.grid,
+                eff_count,
+                true,
+            );
         }
     }
 }
@@ -3125,18 +3867,23 @@ impl Message<TradeRemoveItem> for SocialActor {
 
     async fn handle(&mut self, msg: TradeRemoveItem, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r.clone(), None => return,
+            Some(r) => r.clone(),
+            None => return,
         };
 
         // #2010：C# RetrieveTradeItem 语义——移除即放回背包；锁定后不可改动（与 TradeAddItem 一致）
         let removed = {
             let trade = match self.find_trade_mut(msg.session_id) {
-                Some(t) => t, None => return,
+                Some(t) => t,
+                None => return,
             };
             let side = match trade.side_of_mut(msg.session_id) {
-                Some(s) => s, None => return,
+                Some(s) => s,
+                None => return,
             };
-            if side.locked { return; }
+            if side.locked {
+                return;
+            }
             let removed = side.remove_item(msg.unique_id);
             side.unlock();
             removed
@@ -3144,7 +3891,10 @@ impl Message<TradeRemoveItem> for SocialActor {
 
         // 归还背包（整叠/拆分部分均回 item_data，避免物品销毁）
         if let Some(item_data) = removed.and_then(|ti| ti.item_data) {
-            let ok = record.ask(AddItemToInventory { item: item_data }).await.unwrap_or(false);
+            let ok = record
+                .ask(AddItemToInventory { item: item_data })
+                .await
+                .unwrap_or(false);
             if !ok {
                 debug!("TradeRemoveItem: 归还背包失败 session={}", msg.session_id);
             }
@@ -3152,7 +3902,8 @@ impl Message<TradeRemoveItem> for SocialActor {
 
         // 通知对方
         let trade = match self.find_trade_mut(msg.session_id) {
-            Some(t) => t, None => return,
+            Some(t) => t,
+            None => return,
         };
         if let Some(other) = trade.other_session(msg.session_id) {
             send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, 0, 0, false);
@@ -3166,10 +3917,12 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
     async fn handle(&mut self, msg: DepositTradeItemBySlot, _ctx: &mut Context<Self, Self::Reply>) {
         // Resolve from_slot → unique_id from player inventory
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r.clone(), None => return,
+            Some(r) => r.clone(),
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         let slot = msg.from_slot as usize;
@@ -3177,7 +3930,12 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
         let uid = match slot_data {
             Some(s) => s.item.unique_id,
             None => {
-                send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                send_deposit_trade_item_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    msg.from_slot,
+                    false,
+                );
                 return;
             }
         };
@@ -3185,15 +3943,29 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
         // #2010：C# DepositTradeItem（10545-10553）——BindMode.DontTrade(0x10) 绑定物品不可放入交易（含租赁绑定）
         {
             let infos = self.config.item_infos.read().await;
-            let bind = state.inventory.get_item(uid)
+            let bind = state
+                .inventory
+                .get_item(uid)
                 .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
                 .unwrap_or(0);
-            let rental_dont_trade = state.inventory.get_item(uid)
-                .map(|it| crate::actors::world::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_TRADE.bits()))
+            let rental_dont_trade = state
+                .inventory
+                .get_item(uid)
+                .map(|it| {
+                    crate::actors::world::rental_has_flag(
+                        it,
+                        mir2_shared::enums::BindMode::DONT_TRADE.bits(),
+                    )
+                })
                 .unwrap_or(false);
             if (bind & 0x0010) != 0 || rental_dont_trade {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
-                send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                send_deposit_trade_item_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    msg.from_slot,
+                    false,
+                );
                 return;
             }
         }
@@ -3201,22 +3973,38 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
         // Check trade exists and not locked
         {
             let trade = match self.find_trade_mut(msg.session_id) {
-                Some(t) => t, None => {
-                    send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                Some(t) => t,
+                None => {
+                    send_deposit_trade_item_packet(
+                        &self.gate_ref,
+                        msg.session_id,
+                        msg.from_slot,
+                        false,
+                    );
                     return;
                 }
             };
             let side = match trade.side_of_mut(msg.session_id) {
-                Some(s) => s, None => return,
+                Some(s) => s,
+                None => return,
             };
             if side.locked {
-                send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                send_deposit_trade_item_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    msg.from_slot,
+                    false,
+                );
                 return;
             }
         }
 
         // Remove item from player inventory
-        let removed = record.ask(RemoveItemFromInventory { unique_id: uid }).await.ok().flatten();
+        let removed = record
+            .ask(RemoveItemFromInventory { unique_id: uid })
+            .await
+            .ok()
+            .flatten();
         let item_data = removed.clone();
         // #2010：C# 整格移动整叠（Info.Trade[to]=temp），count 取物品实际堆叠数
         let item_count = item_data.as_ref().map(|it| it.count).unwrap_or(1);
@@ -3224,17 +4012,24 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
         // Add to trade side
         let other_session = {
             let trade = match self.find_trade_mut(msg.session_id) {
-                Some(t) => t, None => {
+                Some(t) => t,
+                None => {
                     // Rollback: return item to player
                     if let Some(item) = removed {
                         let _ = record.ask(AddItemToInventory { item }).await;
                     }
-                    send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    send_deposit_trade_item_packet(
+                        &self.gate_ref,
+                        msg.session_id,
+                        msg.from_slot,
+                        false,
+                    );
                     return;
                 }
             };
             let side = match trade.side_of_mut(msg.session_id) {
-                Some(s) => s, None => {
+                Some(s) => s,
+                None => {
                     if let Some(item) = removed {
                         let _ = record.ask(AddItemToInventory { item }).await;
                     }
@@ -3247,7 +4042,14 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
         };
 
         if let Some(other) = other_session {
-            send_trade_item_update_packet(&self.gate_ref, other, uid, msg.to_slot as u8, item_count, true);
+            send_trade_item_update_packet(
+                &self.gate_ref,
+                other,
+                uid,
+                msg.to_slot as u8,
+                item_count,
+                true,
+            );
         }
         send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, true);
     }
@@ -3256,30 +4058,54 @@ impl Message<DepositTradeItemBySlot> for SocialActor {
 impl Message<RetrieveTradeItemBySlot> for SocialActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: RetrieveTradeItemBySlot, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: RetrieveTradeItemBySlot,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r.clone(), None => return,
+            Some(r) => r.clone(),
+            None => return,
         };
 
         // Find trade item by grid slot and extract
         let removed_trade_item = {
             let trade = match self.find_trade_mut(msg.session_id) {
-                Some(t) => t, None => {
-                    send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                Some(t) => t,
+                None => {
+                    send_retrieve_trade_item_packet(
+                        &self.gate_ref,
+                        msg.session_id,
+                        msg.from_slot,
+                        false,
+                    );
                     return;
                 }
             };
             let side = match trade.side_of_mut(msg.session_id) {
-                Some(s) => s, None => {
-                    send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                Some(s) => s,
+                None => {
+                    send_retrieve_trade_item_packet(
+                        &self.gate_ref,
+                        msg.session_id,
+                        msg.from_slot,
+                        false,
+                    );
                     return;
                 }
             };
             if side.locked {
-                send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                send_retrieve_trade_item_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    msg.from_slot,
+                    false,
+                );
                 return;
             }
-            let uid = side.items.iter()
+            let uid = side
+                .items
+                .iter()
                 .find(|i| i.grid == msg.from_slot as u8)
                 .map(|i| i.uid);
             match uid {
@@ -3289,7 +4115,12 @@ impl Message<RetrieveTradeItemBySlot> for SocialActor {
                     removed
                 }
                 None => {
-                    send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    send_retrieve_trade_item_packet(
+                        &self.gate_ref,
+                        msg.session_id,
+                        msg.from_slot,
+                        false,
+                    );
                     return;
                 }
             }
@@ -3298,14 +4129,21 @@ impl Message<RetrieveTradeItemBySlot> for SocialActor {
         // Add item back to player inventory
         if let Some(trade_item) = &removed_trade_item {
             if let Some(item_data) = &trade_item.item_data {
-                let _ = record.ask(AddItemToInventory { item: item_data.clone() }).await;
+                let _ = record
+                    .ask(AddItemToInventory {
+                        item: item_data.clone(),
+                    })
+                    .await;
             }
         }
 
         // Notify other party
         if let Some(trade_item) = &removed_trade_item {
             let trade = match self.find_trade(msg.session_id) {
-                Some(t) => t, None => { return; }
+                Some(t) => t,
+                None => {
+                    return;
+                }
             };
             if let Some(other) = trade.other_session(msg.session_id) {
                 send_trade_item_update_packet(&self.gate_ref, other, trade_item.uid, 0, 0, false);
@@ -3324,11 +4162,13 @@ impl Message<AddFriendRequest> for SocialActor {
 
     async fn handle(&mut self, msg: AddFriendRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         if msg.friend_name == state.name {
@@ -3354,7 +4194,11 @@ impl Message<AddFriendRequest> for SocialActor {
             let canonical = match db::find_character_name(&self.db_pool, &msg.friend_name).await {
                 Ok(Some(n)) => n,
                 _ => {
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("找不到名为 '{}' 的玩家", msg.friend_name));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("找不到名为 '{}' 的玩家", msg.friend_name),
+                    );
                     return;
                 }
             };
@@ -3367,29 +4211,47 @@ impl Message<AddFriendRequest> for SocialActor {
         // 检查是否已在黑名单（按名字忽略大小写，防离线/在线双份）
         if msg.blocked {
             let record = match self.players.get(&msg.session_id) {
-                Some(r) => r, None => return,
+                Some(r) => r,
+                None => return,
             };
             let mut state = match record.ask(GetPlayerState).await {
-                Ok(Some(s)) => s, _ => return,
+                Ok(Some(s)) => s,
+                _ => return,
             };
-            if state.friend_list.is_blocked_name(&target_name) || state.friend_list.is_blocked(target_oid) {
-                send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已在黑名单", target_name));
+            if state.friend_list.is_blocked_name(&target_name)
+                || state.friend_list.is_blocked(target_oid)
+            {
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("{} 已在黑名单", target_name),
+                );
                 return;
             }
-            state.friend_list.add_blocked(target_oid, target_name.clone());
+            state
+                .friend_list
+                .add_blocked(target_oid, target_name.clone());
             let _ = record.ask(SetPlayerState { state }).await;
             self.send_friends_list(msg.session_id).await;
-            send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 加入黑名单", target_name));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("已将 {} 加入黑名单", target_name),
+            );
             return;
         }
 
         // 检查是否已是好友（按名字忽略大小写，防离线/在线双份）
         let is_already_friend = {
             let record = match self.players.get(&msg.session_id) {
-                Some(r) => r, None => return,
+                Some(r) => r,
+                None => return,
             };
             match record.ask(GetPlayerState).await {
-                Ok(Some(s)) => s.friend_list.is_friend_name(&target_name) || s.friend_list.is_friend(target_oid),
+                Ok(Some(s)) => {
+                    s.friend_list.is_friend_name(&target_name)
+                        || s.friend_list.is_friend(target_oid)
+                }
                 _ => return,
             }
         };
@@ -3401,15 +4263,27 @@ impl Message<AddFriendRequest> for SocialActor {
         // 添加好友（在线目标双方互相添加；离线目标仅添加自己——C# AddFriend 本身只加自己）
         {
             let record = match self.players.get(&msg.session_id) {
-                Some(r) => r, None => return,
+                Some(r) => r,
+                None => return,
             };
-            let _ = record.ask(AddFriendToSelf { friend_oid: target_oid, friend_name: target_name.clone() }).await;
+            let _ = record
+                .ask(AddFriendToSelf {
+                    friend_oid: target_oid,
+                    friend_name: target_name.clone(),
+                })
+                .await;
         }
         if target_session != 0 {
             let target_r = match self.players.get(&target_session) {
-                Some(r) => r, None => return,
+                Some(r) => r,
+                None => return,
             };
-            let _ = target_r.ask(AddFriendToSelf { friend_oid: state.object_id, friend_name: state.name.clone() }).await;
+            let _ = target_r
+                .ask(AddFriendToSelf {
+                    friend_oid: state.object_id,
+                    friend_name: state.name.clone(),
+                })
+                .await;
         }
 
         // 通知（离线添加只通知自己）
@@ -3418,7 +4292,11 @@ impl Message<AddFriendRequest> for SocialActor {
             self.send_friends_list(target_session).await;
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 添加为好友", target_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("已将 {} 添加为好友", target_name),
+        );
     }
 }
 
@@ -3427,11 +4305,18 @@ impl Message<RemoveFriendRequest> for SocialActor {
 
     async fn handle(&mut self, msg: RemoveFriendRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
-        let success = match record.ask(RemoveFriendFromSelf { friend_oid: msg.friend_object_id }).await {
-            Ok(s) => s, _ => return,
+        let success = match record
+            .ask(RemoveFriendFromSelf {
+                friend_oid: msg.friend_object_id,
+            })
+            .await
+        {
+            Ok(s) => s,
+            _ => return,
         };
 
         // #1303：好友/黑名单通用删除（先试好友，再试黑名单）
@@ -3439,7 +4324,8 @@ impl Message<RemoveFriendRequest> for SocialActor {
             true
         } else {
             let mut st = match record.ask(GetPlayerState).await {
-                Ok(Some(s)) => s, _ => return,
+                Ok(Some(s)) => s,
+                _ => return,
             };
             let ok = st.friend_list.remove_blocked(msg.friend_object_id);
             if ok {
@@ -3468,11 +4354,19 @@ impl Message<AddMemoRequest> for SocialActor {
 
     async fn handle(&mut self, msg: AddMemoRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
-        let success = match record.ask(SetFriendMemo { friend_oid: msg.friend_object_id, memo: msg.memo.clone() }).await {
-            Ok(s) => s, _ => return,
+        let success = match record
+            .ask(SetFriendMemo {
+                friend_oid: msg.friend_object_id,
+                memo: msg.memo.clone(),
+            })
+            .await
+        {
+            Ok(s) => s,
+            _ => return,
         };
 
         if success {
@@ -3491,10 +4385,12 @@ impl Message<CreateGuildRequest> for SocialActor {
 
     async fn handle(&mut self, msg: CreateGuildRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         // 检查是否已在行会
@@ -3505,7 +4401,14 @@ impl Message<CreateGuildRequest> for SocialActor {
 
         // 等级检查（对应 C# Info.Level < Settings.Guild_RequiredLevel）
         if state.level < self.config.guild_required_level {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("等级不足，创建行会需要 {} 级", self.config.guild_required_level));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!(
+                    "等级不足，创建行会需要 {} 级",
+                    self.config.guild_required_level
+                ),
+            );
             return;
         }
 
@@ -3516,7 +4419,11 @@ impl Message<CreateGuildRequest> for SocialActor {
         }
 
         // 新手行会名称限制（对应 C# !Info.AccountInfo.AdminAccount && guildName == Settings.NewbieGuild）
-        if !state.is_gm && msg.guild_name.eq_ignore_ascii_case(&self.config.newbie_guild) {
+        if !state.is_gm
+            && msg
+                .guild_name
+                .eq_ignore_ascii_case(&self.config.newbie_guild)
+        {
             send_system_message(&self.gate_ref, msg.session_id, "不能创建该名称的行会");
             return;
         }
@@ -3535,22 +4442,40 @@ impl Message<CreateGuildRequest> for SocialActor {
                     match &cost.item_name {
                         None => {
                             if state.inventory.gold < cost.amount as u64 {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", cost.amount));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("金币不足，创建行会需要 {} 金币", cost.amount),
+                                );
                                 return;
                             }
                         }
                         Some(name) => {
                             let idx = {
                                 let infos = self.config.item_infos.read().await;
-                                infos.values().find(|i| i.name.eq_ignore_ascii_case(name)).map(|i| i.index)
+                                infos
+                                    .values()
+                                    .find(|i| i.name.eq_ignore_ascii_case(name))
+                                    .map(|i| i.index)
                             };
                             let Some(idx) = idx else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("缺少建会材料：{}", name));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("缺少建会材料：{}", name),
+                                );
                                 return;
                             };
-                            let count = record.ask(crate::actors::player::CountItemsByIndex { item_index: idx }).await.unwrap_or(0);
+                            let count = record
+                                .ask(crate::actors::player::CountItemsByIndex { item_index: idx })
+                                .await
+                                .unwrap_or(0);
                             if (count as u32) < cost.amount {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("缺少建会材料：{} ×{}", name, cost.amount));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("缺少建会材料：{} ×{}", name, cost.amount),
+                                );
                                 return;
                             }
                         }
@@ -3560,15 +4485,23 @@ impl Message<CreateGuildRequest> for SocialActor {
                 for cost in &self.config.guild_creation_costs {
                     match &cost.item_name {
                         None => {
-                            let _ = record.ask(crate::actors::player::DeductGold { amount: cost.amount as u64 }).await;
+                            let _ = record
+                                .ask(crate::actors::player::DeductGold {
+                                    amount: cost.amount as u64,
+                                })
+                                .await;
                         }
                         Some(name) => {
                             let infos = self.config.item_infos.read().await;
-                            if let Some(i) = infos.values().find(|i| i.name.eq_ignore_ascii_case(name)) {
-                                let _ = record.ask(crate::actors::player::ConsumeItemsByIndex {
-                                    item_index: i.index,
-                                    count: cost.amount.min(u16::MAX as u32) as u16,
-                                }).await;
+                            if let Some(i) =
+                                infos.values().find(|i| i.name.eq_ignore_ascii_case(name))
+                            {
+                                let _ = record
+                                    .ask(crate::actors::player::ConsumeItemsByIndex {
+                                        item_index: i.index,
+                                        count: cost.amount.min(u16::MAX as u32) as u16,
+                                    })
+                                    .await;
                             }
                         }
                     }
@@ -3576,18 +4509,39 @@ impl Message<CreateGuildRequest> for SocialActor {
             } else {
                 // 兼容：无 Required 列表时回退金币仅（guild_creation_cost_gold）
                 if state.inventory.gold < self.config.guild_creation_cost_gold as u64 {
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", self.config.guild_creation_cost_gold));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!(
+                            "金币不足，创建行会需要 {} 金币",
+                            self.config.guild_creation_cost_gold
+                        ),
+                    );
                     return;
                 }
-                let _ = record.ask(DeductGold { amount: self.config.guild_creation_cost_gold }).await;
+                let _ = record
+                    .ask(DeductGold {
+                        amount: self.config.guild_creation_cost_gold,
+                    })
+                    .await;
             }
         }
 
         let mut guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
         // #2406：C# GuildInfo 构造——MaxExperience = Guild_ExperienceList[Level]（Level=1 → index1）；
         // 上限从 MembercapList 读取（数据占位值 <5 时回退 50 保护）
-        guild.max_experience = self.config.guild_experience_list.get(1).copied().unwrap_or(0);
-        let cap = self.config.guild_membercap_list.get(1).copied().unwrap_or(50);
+        guild.max_experience = self
+            .config
+            .guild_experience_list
+            .get(1)
+            .copied()
+            .unwrap_or(0);
+        let cap = self
+            .config
+            .guild_membercap_list
+            .get(1)
+            .copied()
+            .unwrap_or(50);
         guild.member_cap = if cap >= 5 { cap } else { 50 };
         self.guilds.insert(msg.guild_name.clone(), guild);
 
@@ -3599,12 +4553,18 @@ impl Message<CreateGuildRequest> for SocialActor {
         }
 
         // 更新玩家行会信息
-        let _ = record.ask(SetGuildInfo {
-            guild_name: Some(msg.guild_name.clone()),
-            rank: GuildRank::Leader,
-        }).await;
+        let _ = record
+            .ask(SetGuildInfo {
+                guild_name: Some(msg.guild_name.clone()),
+                rank: GuildRank::Leader,
+            })
+            .await;
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("行会 \"{}\" 已创建", msg.guild_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("行会 \"{}\" 已创建", msg.guild_name),
+        );
         // 发送完整行会信息（客户端据此显示行会对话框）
         if let Some(guild) = self.guilds.get(&msg.guild_name) {
             send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
@@ -3619,10 +4579,12 @@ impl Message<GmCreateGuildRequest> for SocialActor {
     type Reply = ();
     async fn handle(&mut self, msg: GmCreateGuildRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         // 已在行会则拒绝（C# CREATEGUILD：PlayerAlreadyInGuild）
@@ -3631,8 +4593,13 @@ impl Message<GmCreateGuildRequest> for SocialActor {
             return;
         }
         // 名称长度限制（C#：gName.Length 3-20）
-        if msg.guild_name.trim().is_empty() || msg.guild_name.len() < 3 || msg.guild_name.len() > 20 {
-            send_system_message(&self.gate_ref, msg.session_id, "行会名称长度需为 3-20 个字符");
+        if msg.guild_name.trim().is_empty() || msg.guild_name.len() < 3 || msg.guild_name.len() > 20
+        {
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "行会名称长度需为 3-20 个字符",
+            );
             return;
         }
         // 名称唯一性检查
@@ -3645,8 +4612,18 @@ impl Message<GmCreateGuildRequest> for SocialActor {
         let mut guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
         // #2406：C# GuildInfo 构造——MaxExperience = Guild_ExperienceList[Level]（Level=1 → index1）；
         // 上限从 MembercapList 读取（数据占位值 <5 时回退 50 保护）
-        guild.max_experience = self.config.guild_experience_list.get(1).copied().unwrap_or(0);
-        let cap = self.config.guild_membercap_list.get(1).copied().unwrap_or(50);
+        guild.max_experience = self
+            .config
+            .guild_experience_list
+            .get(1)
+            .copied()
+            .unwrap_or(0);
+        let cap = self
+            .config
+            .guild_membercap_list
+            .get(1)
+            .copied()
+            .unwrap_or(50);
         guild.member_cap = if cap >= 5 { cap } else { 50 };
         self.guilds.insert(msg.guild_name.clone(), guild);
         if let Some(guild) = self.guilds.get(&msg.guild_name) {
@@ -3654,12 +4631,18 @@ impl Message<GmCreateGuildRequest> for SocialActor {
                 warn!("Failed to save guild '{}' to DB: {}", msg.guild_name, e);
             }
         }
-        let _ = record.ask(SetGuildInfo {
-            guild_name: Some(msg.guild_name.clone()),
-            rank: GuildRank::Leader,
-        }).await;
+        let _ = record
+            .ask(SetGuildInfo {
+                guild_name: Some(msg.guild_name.clone()),
+                rank: GuildRank::Leader,
+            })
+            .await;
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("行会 \"{}\" 已创建", msg.guild_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("行会 \"{}\" 已创建", msg.guild_name),
+        );
         if let Some(guild) = self.guilds.get(&msg.guild_name) {
             send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
         } else {
@@ -3687,7 +4670,8 @@ impl Message<GuildInviteReply> for SocialActor {
 
         // 获取行会
         let guild = match self.guilds.get_mut(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         // 检查行会人数上限
@@ -3708,10 +4692,12 @@ impl Message<GuildInviteReply> for SocialActor {
         // 检查是否已在行会
         {
             let record = match self.players.get(&msg.session_id) {
-                Some(r) => r, None => return,
+                Some(r) => r,
+                None => return,
             };
             let state = match record.ask(GetPlayerState).await {
-                Ok(Some(s)) => s, _ => return,
+                Ok(Some(s)) => s,
+                _ => return,
             };
             if state.guild_name.is_some() {
                 send_system_message(&self.gate_ref, msg.session_id, "你已经有行会了");
@@ -3724,10 +4710,12 @@ impl Message<GuildInviteReply> for SocialActor {
 
         // 更新玩家行会信息
         if let Some(record) = self.players.get(&msg.session_id) {
-            let _ = record.ask(SetGuildInfo {
-                guild_name: Some(guild_name.clone()),
-                rank: GuildRank::Member,
-            }).await;
+            let _ = record
+                .ask(SetGuildInfo {
+                    guild_name: Some(guild_name.clone()),
+                    rank: GuildRank::Member,
+                })
+                .await;
             // #918：C# JoinGuild（~10005）——加入行会后 EnableGuildInvite 重置 false
             if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
                 st.enable_guild_invite = false;
@@ -3747,11 +4735,24 @@ impl Message<GuildInviteReply> for SocialActor {
             send_guild_member_change_packet(&self.gate_ref, sid, &invitee_name, true);
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("已加入行会 \"{}\"", guild_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("已加入行会 \"{}\"", guild_name),
+        );
         if let Some(inv_record) = self.players.get(&inviter_session) {
             if let Ok(Some(_inv_state)) = inv_record.ask(GetPlayerState).await {
-                send_system_message(&self.gate_ref, inviter_session, &format!("{} 加入了行会", invitee_name));
-                send_guild_member_change_packet(&self.gate_ref, inviter_session, &invitee_name, true);
+                send_system_message(
+                    &self.gate_ref,
+                    inviter_session,
+                    &format!("{} 加入了行会", invitee_name),
+                );
+                send_guild_member_change_packet(
+                    &self.gate_ref,
+                    inviter_session,
+                    &invitee_name,
+                    true,
+                );
             }
         }
 
@@ -3760,10 +4761,12 @@ impl Message<GuildInviteReply> for SocialActor {
             send_guild_info_packet(&self.gate_ref, msg.session_id, g);
         }
 
-        debug!("Guild invite accepted: {} joined {}", invitee_name, guild_name);
+        debug!(
+            "Guild invite accepted: {} joined {}",
+            invitee_name, guild_name
+        );
         // #2170：成员变更持久化（guild_members 表，重启后保持）
         self.save_guild_to_db(&guild_name).await;
-
     }
 }
 
@@ -3772,10 +4775,12 @@ impl Message<RequestGuildInfo> for SocialActor {
 
     async fn handle(&mut self, msg: RequestGuildInfo, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         let guild_name = match &state.guild_name {
@@ -3787,7 +4792,8 @@ impl Message<RequestGuildInfo> for SocialActor {
         };
 
         let guild = match self.guilds.get(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         // 发送行会信息
@@ -3801,19 +4807,23 @@ impl Message<EditGuildMemberRequest> for SocialActor {
 
     async fn handle(&mut self, msg: EditGuildMemberRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         let guild_name = match &state.guild_name {
-            Some(n) => n.clone(), None => return,
+            Some(n) => n.clone(),
+            None => return,
         };
         let my_rank = state.guild_rank;
 
         let guild = match self.guilds.get_mut(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         // #1463：C# 权限位——邀请 CanRecruit / 踢出 CanKick / 职务操作 CanChangeRank
@@ -3830,7 +4840,8 @@ impl Message<EditGuildMemberRequest> for SocialActor {
 
         let mut guild_changed = false;
         match msg.change_type {
-            0 => { // 邀请加入（C# EditGuildMember ChangeType=0 add member）
+            0 => {
+                // 邀请加入（C# EditGuildMember ChangeType=0 add member）
                 // 查找目标玩家（在线）
                 let mut target_session: Option<u64> = None;
                 for (sid, r) in &self.players {
@@ -3866,7 +4877,11 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     None => true,
                 };
                 if target_invite_disabled {
-                    send_system_message(&self.gate_ref, msg.session_id, "对方关闭了行会邀请（请对方先使用 @ALLOWGUILD 开启）");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "对方关闭了行会邀请（请对方先使用 @ALLOWGUILD 开启）",
+                    );
                     return;
                 }
                 // 已有待处理邀请
@@ -3875,17 +4890,36 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     return;
                 }
                 // C# PlayerObject.cs:9880-9884：MyGuild.IsAtWar() -> CannotRecruitDuringWar（仅拦截招募）
-                if self.guild_wars.get(&guild_name).map(|s| !s.is_empty()).unwrap_or(false) {
-                    send_system_message(&self.gate_ref, msg.session_id, "行会处于战争状态，无法招募成员");
+                if self
+                    .guild_wars
+                    .get(&guild_name)
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false)
+                {
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "行会处于战争状态，无法招募成员",
+                    );
                     return;
                 }
-                self.pending_guild_invites.insert(target, (msg.session_id, guild_name.clone()));
+                self.pending_guild_invites
+                    .insert(target, (msg.session_id, guild_name.clone()));
                 send_guild_invite_packet(&self.gate_ref, target, &guild_name);
-                send_system_message(&self.gate_ref, msg.session_id, &format!("已向 {} 发送行会邀请", msg.member_name));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("已向 {} 发送行会邀请", msg.member_name),
+                );
             }
-            1 => { // 踢出（C# ChangeType=1 delete member）
+            1 => {
+                // 踢出（C# ChangeType=1 delete member）
                 // 不能踢会长
-                if guild.members.iter().any(|m| m.name == msg.member_name && m.rank == GuildRank::Leader) {
+                if guild
+                    .members
+                    .iter()
+                    .any(|m| m.name == msg.member_name && m.rank == GuildRank::Leader)
+                {
                     send_system_message(&self.gate_ref, msg.session_id, "不能踢出会长");
                     return;
                 }
@@ -3900,7 +4934,11 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 }
 
                 let kicked_session = guild.members.iter().find_map(|m| {
-                    if m.name == msg.member_name { m.session_id } else { None }
+                    if m.name == msg.member_name {
+                        m.session_id
+                    } else {
+                        None
+                    }
                 });
 
                 if guild.remove_member(&msg.member_name) {
@@ -3908,9 +4946,12 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     guild_changed = true;
                     if let Some(sid) = kicked_session {
                         if let Some(rec) = self.players.get(&sid) {
-                            let _ = rec.ask(SetGuildInfo {
-                                guild_name: None, rank: GuildRank::Member,
-                            }).await;
+                            let _ = rec
+                                .ask(SetGuildInfo {
+                                    guild_name: None,
+                                    rank: GuildRank::Member,
+                                })
+                                .await;
                             send_guild_status_packet(&self.gate_ref, sid, false);
                             // C# RefreshStats：行会关系结束后立即清除行会/新手 buff 加成缓存
                             if let Ok(Some(mut st)) = rec.ask(GetPlayerState).await {
@@ -3924,12 +4965,22 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     }
                     // 通知行会成员
                     for sid in guild.online_sessions(0) {
-                        send_guild_member_change_packet(&self.gate_ref, sid, &msg.member_name, false);
+                        send_guild_member_change_packet(
+                            &self.gate_ref,
+                            sid,
+                            &msg.member_name,
+                            false,
+                        );
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已被踢出行会", msg.member_name));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("{} 已被踢出行会", msg.member_name),
+                    );
                 }
             }
-            2 => { // #1395：按职务索引移动成员（C# EditGuildMember ChangeType=2 带 RankIndex）
+            2 => {
+                // #1395：按职务索引移动成员（C# EditGuildMember ChangeType=2 带 RankIndex）
                 let target = msg.rank_index;
                 if !guild.rank_defs.iter().any(|d| d.index == target) {
                     send_system_message(&self.gate_ref, msg.session_id, "职务不存在");
@@ -3938,18 +4989,32 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 if let Some(m) = guild.members.iter_mut().find(|m| m.name == msg.member_name) {
                     m.rank_index = target;
                     // 目标职务为 0/1 档时同步逻辑档（2+ 视为成员档）
-                    m.rank = match target { 0 => GuildRank::Leader, 1 => GuildRank::Officer, _ => GuildRank::Member };
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已调整职务", msg.member_name));
+                    m.rank = match target {
+                        0 => GuildRank::Leader,
+                        1 => GuildRank::Officer,
+                        _ => GuildRank::Member,
+                    };
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("{} 已调整职务", msg.member_name),
+                    );
                 }
                 guild_changed = true;
             }
-            3 => { // 降职
+            3 => {
+                // 降职
                 if guild.set_rank(&msg.member_name, GuildRank::Member) {
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已降职为成员", msg.member_name));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("{} 已降职为成员", msg.member_name),
+                    );
                 }
                 guild_changed = true;
             }
-            4 => { // #1395：添加职务（C# EditGuildMember ChangeType=4 add rank）
+            4 => {
+                // #1395：添加职务（C# EditGuildMember ChangeType=4 add rank）
                 if msg.rank_name.trim().is_empty() {
                     send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
                     return;
@@ -3959,16 +5024,29 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_guild_info_packet(&self.gate_ref, sid, guild);
                 }
                 guild_changed = true;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("已添加职务：{}（#{})", msg.rank_name.trim(), new_idx));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("已添加职务：{}（#{})", msg.rank_name.trim(), new_idx),
+                );
             }
-            5 => { // #1395：切换职务权限位（C# EditGuildMember ChangeType=5；rank_name=选项位，name=true/false）
+            5 => {
+                // #1395：切换职务权限位（C# EditGuildMember ChangeType=5；rank_name=选项位，name=true/false）
                 let bit = msg.rank_name.trim().parse::<u8>().unwrap_or(0);
                 if bit >= 8 {
                     return;
                 }
                 let on = msg.member_name.trim() == "true";
-                if let Some(d) = guild.rank_defs.iter_mut().find(|d| d.index == msg.rank_index) {
-                    if on { d.options |= 1 << bit; } else { d.options &= !(1 << bit); }
+                if let Some(d) = guild
+                    .rank_defs
+                    .iter_mut()
+                    .find(|d| d.index == msg.rank_index)
+                {
+                    if on {
+                        d.options |= 1 << bit;
+                    } else {
+                        d.options &= !(1 << bit);
+                    }
                 }
                 for sid in guild.online_sessions(0) {
                     send_guild_info_packet(&self.gate_ref, sid, guild);
@@ -3976,9 +5054,12 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 guild_changed = true;
                 send_system_message(&self.gate_ref, msg.session_id, "职务权限已更新");
             }
-            6 => { // #1362：职务改名（C# EditGuildMember ChangeType=3 rename；Rust 用 6 避免与降职冲突）
+            6 => {
+                // #1362：职务改名（C# EditGuildMember ChangeType=3 rename；Rust 用 6 避免与降职冲突）
                 let idx = msg.rank_index;
-                if !guild.rank_defs.iter().any(|d| d.index == idx) || msg.rank_name.trim().is_empty() {
+                if !guild.rank_defs.iter().any(|d| d.index == idx)
+                    || msg.rank_name.trim().is_empty()
+                {
                     send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
                     return;
                 }
@@ -4006,22 +5087,28 @@ impl Message<EditGuildNoticeRequest> for SocialActor {
 
     async fn handle(&mut self, msg: EditGuildNoticeRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         let guild_name = match &state.guild_name {
-            Some(n) => n.clone(), None => return,
+            Some(n) => n.clone(),
+            None => return,
         };
 
         let guild = match self.guilds.get_mut(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         // #1461：C# CanChangeNotice
-        if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_CHANGE_NOTICE == 0 {
+        if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_CHANGE_NOTICE
+            == 0
+        {
             send_system_message(&self.gate_ref, msg.session_id, "权限不足");
             return;
         }
@@ -4065,27 +5152,45 @@ impl Message<LeaveGuildRequest> for SocialActor {
 
     async fn handle(&mut self, msg: LeaveGuildRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         let guild_name = match &state.guild_name {
-            Some(n) => n.clone(), None => return,
+            Some(n) => n.clone(),
+            None => return,
         };
 
         // C# LEAVEGUILD（PlayerObject.cs:3251-3259）：MyGuild.IsAtWar() -> CannotLeaveGuildAtWar
         // 置于会长/解散逻辑之前：普通退会与最后会长解散两条路径统一拦截
-        if self.guild_wars.get(&guild_name).map(|s| !s.is_empty()).unwrap_or(false) {
-            send_system_message(&self.gate_ref, msg.session_id, "行会处于战争状态，无法退出行会");
+        if self
+            .guild_wars
+            .get(&guild_name)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+        {
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "行会处于战争状态，无法退出行会",
+            );
             return;
         }
 
         // C# GuildObject.DeleteMember（:455-510）：会长离开 → 最后成员解散 / 多会长正常退 / 唯一会长有成员阻止
         if state.guild_rank == GuildRank::Leader {
-            let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
-            let leader_count = guild.members.iter().filter(|m| m.rank == GuildRank::Leader).count();
+            let Some(guild) = self.guilds.get_mut(&guild_name) else {
+                return;
+            };
+            let leader_count = guild
+                .members
+                .iter()
+                .filter(|m| m.rank == GuildRank::Leader)
+                .count();
             let member_total = guild.members.len();
             match leader_leave_outcome(member_total, leader_count) {
                 LeaderLeaveOutcome::Disband => {
@@ -4096,7 +5201,12 @@ impl Message<LeaveGuildRequest> for SocialActor {
                     let _ = db::delete_guild(&self.db_pool, &guild_name).await;
                     for sid in online {
                         if let Some(rec) = self.players.get(&sid) {
-                            let _ = rec.ask(SetGuildInfo { guild_name: None, rank: GuildRank::Member }).await;
+                            let _ = rec
+                                .ask(SetGuildInfo {
+                                    guild_name: None,
+                                    rank: GuildRank::Member,
+                                })
+                                .await;
                             send_guild_status_packet(&self.gate_ref, sid, false);
                             // C# RefreshStats：行会关系结束后立即清除行会/新手 buff 加成缓存
                             if let Ok(Some(mut st)) = rec.ask(GetPlayerState).await {
@@ -4109,14 +5219,21 @@ impl Message<LeaveGuildRequest> for SocialActor {
                             if let Ok(Some(fresh)) = rec.ask(GetPlayerState).await {
                                 self.broadcast_ride_appearance(sid, &fresh).await;
                             }
-                            send_system_message(&self.gate_ref, sid, &format!("行会 \"{}\" 已解散", guild_name));
+                            send_system_message(
+                                &self.gate_ref,
+                                sid,
+                                &format!("行会 \"{}\" 已解散", guild_name),
+                            );
                         }
                     }
                     return;
                 }
                 LeaderLeaveOutcome::Blocked => {
-                    send_system_message(&self.gate_ref, msg.session_id,
-                        "你是唯一会长且行会还有其他成员，无法离开（需要最后一名会长才能解散行会）");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "你是唯一会长且行会还有其他成员，无法离开（需要最后一名会长才能解散行会）",
+                    );
                     return;
                 }
                 LeaderLeaveOutcome::Leave => {
@@ -4126,13 +5243,17 @@ impl Message<LeaveGuildRequest> for SocialActor {
         }
 
         let guild = match self.guilds.get_mut(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         guild.remove_member(&state.name);
-        let _ = record.ask(SetGuildInfo {
-            guild_name: None, rank: GuildRank::Member,
-        }).await;
+        let _ = record
+            .ask(SetGuildInfo {
+                guild_name: None,
+                rank: GuildRank::Member,
+            })
+            .await;
         send_guild_status_packet(&self.gate_ref, msg.session_id, false);
 
         // 通知其他行会成员
@@ -4149,7 +5270,11 @@ impl Message<LeaveGuildRequest> for SocialActor {
             send_guild_member_change_packet(&self.gate_ref, sid, &state.name, false);
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("已离开行会 \"{}\"", guild_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("已离开行会 \"{}\"", guild_name),
+        );
         // #1374：C# BroadcastInfo——退出行会后重发外观（行会名清除）
         if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
             self.broadcast_ride_appearance(msg.session_id, &fresh).await;
@@ -4162,26 +5287,38 @@ impl Message<LeaveGuildRequest> for SocialActor {
 impl Message<GuildStorageGoldChangeRequest> for SocialActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: GuildStorageGoldChangeRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: GuildStorageGoldChangeRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         let guild_name = match &state.guild_name {
-            Some(n) => n.clone(), None => return,
+            Some(n) => n.clone(),
+            None => return,
         };
 
         let guild = match self.guilds.get_mut(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         match msg.change_type {
-            0 => { // 存入
+            0 => {
+                // 存入
                 // #1462：C# CanStoreItem
-                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_STORE_ITEM == 0 {
+                if guild.member_options(&state.name)
+                    & crate::actors::guild::GuildRank::CAN_STORE_ITEM
+                    == 0
+                {
                     send_system_message(&self.gate_ref, msg.session_id, "权限不足");
                     return;
                 }
@@ -4190,17 +5327,30 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, "金币不足");
                     return;
                 }
-                let _ = record.ask(DeductGold { amount: msg.amount as u64 }).await;
+                let _ = record
+                    .ask(DeductGold {
+                        amount: msg.amount as u64,
+                    })
+                    .await;
                 guild.gold += msg.amount as u64;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("已存入 {} 金币到行会仓库", msg.amount));
-                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 0).await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("已存入 {} 金币到行会仓库", msg.amount),
+                );
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 0)
+                    .await;
                 self.save_guild_to_db(&guild_name).await;
                 self.broadcast_guild_info(&guild_name).await;
             }
-            1 => { // 取出
+            1 => {
+                // 取出
                 // 只有会长和副会长可以取出
                 // #1462：C# CanRetrieveItem
-                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_RETRIEVE_ITEM == 0 {
+                if guild.member_options(&state.name)
+                    & crate::actors::guild::GuildRank::CAN_RETRIEVE_ITEM
+                    == 0
+                {
                     send_system_message(&self.gate_ref, msg.session_id, "权限不足");
                     return;
                 }
@@ -4209,9 +5359,18 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                     return;
                 }
                 guild.gold -= msg.amount as u64;
-                let _ = record.ask(AddGold { amount: msg.amount as u64 }).await;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("已从行会仓库取出 {} 金币", msg.amount));
-                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 1).await;
+                let _ = record
+                    .ask(AddGold {
+                        amount: msg.amount as u64,
+                    })
+                    .await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("已从行会仓库取出 {} 金币", msg.amount),
+                );
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 1)
+                    .await;
                 self.save_guild_to_db(&guild_name).await;
                 self.broadcast_guild_info(&guild_name).await;
             }
@@ -4223,35 +5382,55 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
 impl Message<GuildStorageItemChangeRequest> for SocialActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: GuildStorageItemChangeRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: GuildStorageItemChangeRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
         let state = match record.ask(GetPlayerState).await {
-            Ok(Some(s)) => s, _ => return,
+            Ok(Some(s)) => s,
+            _ => return,
         };
 
         // #2012：C# GuildStorageItemChange（10134）——type != 3 需在安全区
-        if msg.change_type != 3 && !self.is_in_safe_zone(state.map_index, state.x, state.y).await {
-            send_system_message(&self.gate_ref, msg.session_id, "必须在安全区才能使用行会仓库");
+        if msg.change_type != 3
+            && !self
+                .is_in_safe_zone(state.map_index, state.x, state.y)
+                .await
+        {
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "必须在安全区才能使用行会仓库",
+            );
             return;
         }
 
         let guild_name = match &state.guild_name {
-            Some(n) => n.clone(), None => {
+            Some(n) => n.clone(),
+            None => {
                 send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
                 return;
             }
         };
 
         let guild = match self.guilds.get_mut(&guild_name) {
-            Some(g) => g, None => return,
+            Some(g) => g,
+            None => return,
         };
 
         match msg.change_type {
-            0 => { // 存入物品
+            0 => {
+                // 存入物品
                 // #1462：C# CanStoreItem
-                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_STORE_ITEM == 0 {
+                if guild.member_options(&state.name)
+                    & crate::actors::guild::GuildRank::CAN_STORE_ITEM
+                    == 0
+                {
                     send_system_message(&self.gate_ref, msg.session_id, "权限不足");
                     return;
                 }
@@ -4266,18 +5445,32 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                 }
                 // C#：BindMode.DontStore(0x8) 物品不可存入行会仓库（含租赁绑定，:10167）
                 let infos = self.config.item_infos.read().await;
-                let bind = state.inventory.get_item(msg.unique_id)
+                let bind = state
+                    .inventory
+                    .get_item(msg.unique_id)
                     .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
                     .unwrap_or(0);
-                let rental_dont_store = state.inventory.get_item(msg.unique_id)
-                    .map(|it| crate::actors::world::rental_has_flag(it, mir2_shared::enums::BindMode::DONT_STORE.bits()))
+                let rental_dont_store = state
+                    .inventory
+                    .get_item(msg.unique_id)
+                    .map(|it| {
+                        crate::actors::world::rental_has_flag(
+                            it,
+                            mir2_shared::enums::BindMode::DONT_STORE.bits(),
+                        )
+                    })
                     .unwrap_or(false);
                 if (bind & 0x0008) != 0 || rental_dont_store {
                     send_system_message(&self.gate_ref, msg.session_id, "该物品无法存入仓库");
                     return;
                 }
 
-                let removed = record.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None);
+                let removed = record
+                    .ask(RemoveItemFromInventory {
+                        unique_id: msg.unique_id,
+                    })
+                    .await
+                    .unwrap_or(None);
                 let mut deposited = false;
                 if let Some(removed_item) = removed {
                     let item_index = removed_item.item_index;
@@ -4287,7 +5480,10 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     let slot_val = msg.grid as usize;
                     if guild.deposit_item_at(removed_item.clone(), stored_qty, slot_val) {
                         send_system_message(&self.gate_ref, msg.session_id, "物品已存入行会仓库");
-                        debug!("GuildStorageItem: {} deposited item={} slot={}", state.name, item_index, slot_val);
+                        debug!(
+                            "GuildStorageItem: {} deposited item={} slot={}",
+                            state.name, item_index, slot_val
+                        );
                         // #295：实时通知（C# S.GuildStorageItemChange type=0 存入）
                         self.send_guild_storage_item_change(
                             msg.session_id,
@@ -4296,11 +5492,16 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                             0,
                             state.object_id as i32,
                             Some((state.object_id as i64, removed_item)),
-                        ).await;
+                        )
+                        .await;
                         deposited = true;
                     } else {
                         let _ = record.ask(AddItemToInventory { item: removed_item }).await;
-                        send_system_message(&self.gate_ref, msg.session_id, "该仓库格子已有物品或无效");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "该仓库格子已有物品或无效",
+                        );
                     }
                 }
                 if deposited {
@@ -4311,9 +5512,13 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     debug!("GuildStorageItem: deposit failed");
                 }
             }
-            1 => { // 取出物品
+            1 => {
+                // 取出物品
                 // #1462：C# CanRetrieveItem
-                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_RETRIEVE_ITEM == 0 {
+                if guild.member_options(&state.name)
+                    & crate::actors::guild::GuildRank::CAN_RETRIEVE_ITEM
+                    == 0
+                {
                     send_system_message(&self.gate_ref, msg.session_id, "权限不足");
                     return;
                 }
@@ -4326,15 +5531,24 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                 // #2012：历史脏数据自愈——存储 qty 与物品实际堆叠数对齐（C# 整件语义）
                 if let Some((item, qty)) = &guild.storage_items[msg.grid as usize] {
                     if *qty != item.count as u32 {
-                        warn!("GuildStorageItem: 修正脏数据 slot={} qty={} -> {}", msg.grid, qty, item.count);
-                        guild.storage_items[msg.grid as usize] = Some((item.clone(), item.count as u32));
+                        warn!(
+                            "GuildStorageItem: 修正脏数据 slot={} qty={} -> {}",
+                            msg.grid, qty, item.count
+                        );
+                        guild.storage_items[msg.grid as usize] =
+                            Some((item.clone(), item.count as u32));
                     }
                 }
                 let result = guild.withdraw_item(msg.grid);
                 let mut withdrew = false;
                 match result {
                     Some((item_data, qty, _slot)) => {
-                        let added = record.ask(AddItemToInventory { item: item_data.clone() }).await.unwrap_or(false);
+                        let added = record
+                            .ask(AddItemToInventory {
+                                item: item_data.clone(),
+                            })
+                            .await
+                            .unwrap_or(false);
                         if added {
                             send_system_message(&self.gate_ref, msg.session_id, "物品已取出");
                             // #295：实时通知（C# S.GuildStorageItemChange type=1 取出）
@@ -4345,7 +5559,8 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                                 msg.grid as i32,
                                 state.object_id as i32,
                                 None,
-                            ).await;
+                            )
+                            .await;
                             withdrew = true;
                         } else {
                             guild.storage_items[msg.grid as usize] = Some((item_data, qty));
@@ -4364,7 +5579,8 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     debug!("GuildStorageItem: withdraw failed");
                 }
             }
-            3 => { // 请求仓库列表（C# GuildStorageItemChange type=3 语义）
+            3 => {
+                // 请求仓库列表（C# GuildStorageItemChange type=3 语义）
                 send_guild_storage_list_packet(&self.gate_ref, msg.session_id, guild);
             }
             _ => {}
@@ -4401,16 +5617,29 @@ impl Message<MarriageRequest> for SocialActor {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         if requester_state.married_date > 0 {
-            if now_unix < requester_state.married_date + self.config.marriage_cooldown_days * 86_400 {
-                send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("离婚后 {} 天内无法再次结婚", self.config.marriage_cooldown_days));
+            if now_unix < requester_state.married_date + self.config.marriage_cooldown_days * 86_400
+            {
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!(
+                        "离婚后 {} 天内无法再次结婚",
+                        self.config.marriage_cooldown_days
+                    ),
+                );
                 return;
             }
         }
         // C# MarriageRequest（:13146-13150）：等级要求（Settings.MarriageLevelRequired=10）
         if requester_state.level < self.config.marriage_level_required {
-            send_system_message(&self.gate_ref, msg.session_id,
-                &format!("需要达到 {} 级才能结婚", self.config.marriage_level_required));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!(
+                    "需要达到 {} 级才能结婚",
+                    self.config.marriage_level_required
+                ),
+            );
             return;
         }
 
@@ -4421,7 +5650,10 @@ impl Message<MarriageRequest> for SocialActor {
         }
 
         // 查找目标玩家
-        let target_session = match self.find_player_by_name(&msg.target_name, msg.session_id).await {
+        let target_session = match self
+            .find_player_by_name(&msg.target_name, msg.session_id)
+            .await
+        {
             Some(sid) => sid,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
@@ -4460,15 +5692,24 @@ impl Message<MarriageRequest> for SocialActor {
             target_spouse: target_state.spouse_name.is_some(),
             target_has_pending: self.pending_marriage_invites.contains_key(&target_session),
         };
-        if let Some(reason) = marriage_target_check(&marriage_ctx, now_unix, self.config.marriage_level_required, self.config.marriage_cooldown_days) {
+        if let Some(reason) = marriage_target_check(
+            &marriage_ctx,
+            now_unix,
+            self.config.marriage_level_required,
+            self.config.marriage_cooldown_days,
+        ) {
             send_system_message(&self.gate_ref, msg.session_id, &reason);
             return;
         }
 
         // 发送结婚请求给目标
-        self.pending_marriage_invites.insert(target_session, msg.session_id);
+        self.pending_marriage_invites
+            .insert(target_session, msg.session_id);
         send_marriage_invite_packet(&self.gate_ref, target_session, &requester_state.name);
-        debug!("MarriageRequest: {} -> {} (session {})", requester_state.name, msg.target_name, target_session);
+        debug!(
+            "MarriageRequest: {} -> {} (session {})",
+            requester_state.name, msg.target_name, target_session
+        );
     }
 }
 
@@ -4504,8 +5745,15 @@ impl Message<MarriageReply> for SocialActor {
                     Ok(Some(s)) => s,
                     _ => return,
                 };
-                send_system_message(&self.gate_ref, requester_session, &format!("{} 拒绝了结婚请求", replier_state.name));
-                debug!("MarriageReply: {} rejected {}'s proposal", replier_state.name, req_state.name);
+                send_system_message(
+                    &self.gate_ref,
+                    requester_session,
+                    &format!("{} 拒绝了结婚请求", replier_state.name),
+                );
+                debug!(
+                    "MarriageReply: {} rejected {}'s proposal",
+                    replier_state.name, req_state.name
+                );
             }
             return;
         }
@@ -4530,7 +5778,11 @@ impl Message<MarriageReply> for SocialActor {
             return;
         }
         if requester_state.spouse_name.is_some() {
-            send_system_message(&self.gate_ref, replier_session, &format!("{} 已经结婚了", requester_state.name));
+            send_system_message(
+                &self.gate_ref,
+                replier_session,
+                &format!("{} 已经结婚了", requester_state.name),
+            );
             return;
         }
 
@@ -4538,17 +5790,52 @@ impl Message<MarriageReply> for SocialActor {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        let _ = replier_record.ask(SetSpouse { spouse_name: Some(requester_state.name.clone()), married_date }).await;
-        let _ = requester_record.ask(SetSpouse { spouse_name: Some(replier_state.name.clone()), married_date }).await;
+        let _ = replier_record
+            .ask(SetSpouse {
+                spouse_name: Some(requester_state.name.clone()),
+                married_date,
+            })
+            .await;
+        let _ = requester_record
+            .ask(SetSpouse {
+                spouse_name: Some(replier_state.name.clone()),
+                married_date,
+            })
+            .await;
 
-        send_system_message(&self.gate_ref, replier_session, &format!("结婚成功，你的配偶是: {}", requester_state.name));
-        send_system_message(&self.gate_ref, requester_session, &format!("结婚成功，你的配偶是: {}", replier_state.name));
+        send_system_message(
+            &self.gate_ref,
+            replier_session,
+            &format!("结婚成功，你的配偶是: {}", requester_state.name),
+        );
+        send_system_message(
+            &self.gate_ref,
+            requester_session,
+            &format!("结婚成功，你的配偶是: {}", replier_state.name),
+        );
         // #1329：全量 LoverUpdate（双方视角：对方名字/结婚日期/当前地图/结婚天数）
         let requester_map = self.map_title(requester_state.map_index).await;
         let replier_map = self.map_title(replier_state.map_index).await;
-        send_lover_update_packet(&self.gate_ref, replier_session, &requester_state.name, married_date, &requester_map, 0);
-        send_lover_update_packet(&self.gate_ref, requester_session, &replier_state.name, married_date, &replier_map, 0);
-        debug!("Marriage: {} <-> {} married", requester_state.name, replier_state.name);
+        send_lover_update_packet(
+            &self.gate_ref,
+            replier_session,
+            &requester_state.name,
+            married_date,
+            &requester_map,
+            0,
+        );
+        send_lover_update_packet(
+            &self.gate_ref,
+            requester_session,
+            &replier_state.name,
+            married_date,
+            &replier_map,
+            0,
+        );
+        debug!(
+            "Marriage: {} <-> {} married",
+            requester_state.name, replier_state.name
+        );
     }
 }
 
@@ -4572,7 +5859,10 @@ impl Message<SocialDivorceRequest> for SocialActor {
         }
 
         // 查找配偶是否在线
-        let target_session = match self.find_player_by_name(&msg.partner_name, msg.session_id).await {
+        let target_session = match self
+            .find_player_by_name(&msg.partner_name, msg.session_id)
+            .await
+        {
             Some(sid) => sid,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
@@ -4600,7 +5890,10 @@ impl Message<SocialDivorceRequest> for SocialActor {
 
         // 发送离婚请求
         send_divorce_request_packet(&self.gate_ref, target_session, &requester_state.name);
-        debug!("DivorceRequest: {} -> {}", requester_state.name, msg.partner_name);
+        debug!(
+            "DivorceRequest: {} -> {}",
+            requester_state.name, msg.partner_name
+        );
     }
 }
 
@@ -4628,16 +5921,30 @@ impl Message<SocialDivorceReply> for SocialActor {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let spouse_name = replier_state.spouse_name.clone();
-        let _ = replier_record.ask(SetSpouse { spouse_name: None, married_date: now_unix }).await;
+        let _ = replier_record
+            .ask(SetSpouse {
+                spouse_name: None,
+                married_date: now_unix,
+            })
+            .await;
         // C# DivorceReply（:13380-13392）：离婚清除左戒婚戒标记 + RefreshItem
-        let _ = replier_record.ask(crate::actors::player::ClearWeddingRing).await;
+        let _ = replier_record
+            .ask(crate::actors::player::ClearWeddingRing)
+            .await;
 
         // 通知前配偶
         if let Some(ref name) = spouse_name {
             if let Some(target_session) = self.find_player_by_name(name, msg.session_id).await {
                 if let Some(target_record) = self.players.get(&target_session) {
-                    let _ = target_record.ask(SetSpouse { spouse_name: None, married_date: now_unix }).await;
-                    let _ = target_record.ask(crate::actors::player::ClearWeddingRing).await;
+                    let _ = target_record
+                        .ask(SetSpouse {
+                            spouse_name: None,
+                            married_date: now_unix,
+                        })
+                        .await;
+                    let _ = target_record
+                        .ask(crate::actors::player::ClearWeddingRing)
+                        .await;
                     send_system_message(&self.gate_ref, target_session, "你已离婚");
                     // M49：前配偶状态同步（原实现只更新确认方）
                     send_lover_update_packet(&self.gate_ref, target_session, "", now_unix, "", 0);
@@ -4672,24 +5979,40 @@ impl Message<SocialChangeMarriage> for SocialActor {
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
-                if new_allow { "你现在允许配偶召回" } else { "你现在禁止配偶召回" },
+                if new_allow {
+                    "你现在允许配偶召回"
+                } else {
+                    "你现在禁止配偶召回"
+                },
             );
-            debug!("ChangeMarriage: session={} married, allow_lover_recall={}", msg.session_id, new_allow);
+            debug!(
+                "ChangeMarriage: session={} married, allow_lover_recall={}",
+                msg.session_id, new_allow
+            );
         } else {
             let new_allow = !state.allow_marriage;
             let _ = record.ask(SetAllowMarriage { allow: new_allow }).await;
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
-                if new_allow { "你现在允许接收求婚" } else { "你现在禁止接收求婚" },
+                if new_allow {
+                    "你现在允许接收求婚"
+                } else {
+                    "你现在禁止接收求婚"
+                },
             );
-            debug!("ChangeMarriage: session={} unmarried, allow_marriage={}", msg.session_id, new_allow);
+            debug!(
+                "ChangeMarriage: session={} unmarried, allow_marriage={}",
+                msg.session_id, new_allow
+            );
         }
 
         // 刷新 LoverUpdate 显示（原有行为保留）
         if in_marriage {
             let spouse_name = state.spouse_name.clone().unwrap_or_default();
-            let spouse_map = if let Some(spouse_sid) = self.find_player_by_name(&spouse_name, msg.session_id).await {
+            let spouse_map = if let Some(spouse_sid) =
+                self.find_player_by_name(&spouse_name, msg.session_id).await
+            {
                 if let Some(spouse_record) = self.players.get(&spouse_sid) {
                     if let Ok(Some(spouse_state)) = spouse_record.ask(GetPlayerState).await {
                         self.map_title(spouse_state.map_index).await
@@ -4740,7 +6063,10 @@ impl Message<SocialAddMentor> for SocialActor {
         }
 
         // 查找目标玩家
-        let target_session = match self.find_player_by_name(&msg.mentor_name, msg.session_id).await {
+        let target_session = match self
+            .find_player_by_name(&msg.mentor_name, msg.session_id)
+            .await
+        {
             Some(sid) => sid,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
@@ -4779,15 +6105,25 @@ impl Message<SocialAddMentor> for SocialActor {
             send_system_message(&self.gate_ref, msg.session_id, "只能拜同职业的师父");
             return;
         }
-        if (requester_state.level as u32 + self.config.mentor_level_gap as u32) > target_state.level as u32 {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("师父等级需高于徒弟至少 {} 级", self.config.mentor_level_gap));
+        if (requester_state.level as u32 + self.config.mentor_level_gap as u32)
+            > target_state.level as u32
+        {
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("师父等级需高于徒弟至少 {} 级", self.config.mentor_level_gap),
+            );
             return;
         }
 
         // #2374：C# AddMentor 冷却门（PlayerObject.cs:13536/13542：MentorDate > Now 拒绝）
         let now_secs = crate::actors::world::partners::now_unix_secs();
         if requester_state.mentor_date > now_secs {
-            send_system_message(&self.gate_ref, msg.session_id, "你正处于解除师徒的冷却期，暂时不能拜师");
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "你正处于解除师徒的冷却期，暂时不能拜师",
+            );
             return;
         }
         if target_state.mentor_date > now_secs {
@@ -4796,8 +6132,14 @@ impl Message<SocialAddMentor> for SocialActor {
         }
 
         // 发送拜师请求给目标（C# S.MentorRequest：Name + Level）
-        self.pending_mentor_invites.insert(target_session, msg.session_id);
-        send_mentor_invite_packet(&self.gate_ref, target_session, &requester_state.name, requester_state.level);
+        self.pending_mentor_invites
+            .insert(target_session, msg.session_id);
+        send_mentor_invite_packet(
+            &self.gate_ref,
+            target_session,
+            &requester_state.name,
+            requester_state.level,
+        );
         debug!("AddMentor: {} -> {}", requester_state.name, msg.mentor_name);
     }
 }
@@ -4833,8 +6175,15 @@ impl Message<SocialMentorReply> for SocialActor {
                     Ok(Some(s)) => s,
                     _ => return,
                 };
-                send_system_message(&self.gate_ref, requester_session, &format!("{} 拒绝了拜师请求", replier_state.name));
-                debug!("MentorReply: {} rejected {}'s request", replier_state.name, req_state.name);
+                send_system_message(
+                    &self.gate_ref,
+                    requester_session,
+                    &format!("{} 拒绝了拜师请求", replier_state.name),
+                );
+                debug!(
+                    "MentorReply: {} rejected {}'s request",
+                    replier_state.name, req_state.name
+                );
             }
             return;
         }
@@ -4859,7 +6208,11 @@ impl Message<SocialMentorReply> for SocialActor {
             return;
         }
         if requester_state.mentor_name.is_some() {
-            send_system_message(&self.gate_ref, replier_session, &format!("{} 已有师徒关系", requester_state.name));
+            send_system_message(
+                &self.gate_ref,
+                replier_session,
+                &format!("{} 已有师徒关系", requester_state.name),
+            );
             return;
         }
         if replier_state.class != requester_state.class {
@@ -4867,21 +6220,49 @@ impl Message<SocialMentorReply> for SocialActor {
             return;
         }
         // C# :13631-13635：徒弟等级需低于师父至少 10 级（Settings.MentorLevelGap=10，与 AddMentor 一致）
-        if (requester_state.level as u32 + self.config.mentor_level_gap as u32) > replier_state.level as u32 {
-            send_system_message(&self.gate_ref, replier_session, &format!("徒弟等级需低于师父至少 {} 级", self.config.mentor_level_gap));
+        if (requester_state.level as u32 + self.config.mentor_level_gap as u32)
+            > replier_state.level as u32
+        {
+            send_system_message(
+                &self.gate_ref,
+                replier_session,
+                &format!("徒弟等级需低于师父至少 {} 级", self.config.mentor_level_gap),
+            );
             return;
         }
 
         // C#：student.Info.Mentor = 导师；导师 Info.IsMentor = true（PlayerObject.cs:13637-13640）
-        let _ = replier_record.ask(SetMentor { mentor_name: Some(requester_state.name.clone()), is_mentor: true }).await;
-        let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()), is_mentor: false }).await;
+        let _ = replier_record
+            .ask(SetMentor {
+                mentor_name: Some(requester_state.name.clone()),
+                is_mentor: true,
+            })
+            .await;
+        let _ = requester_record
+            .ask(SetMentor {
+                mentor_name: Some(replier_state.name.clone()),
+                is_mentor: false,
+            })
+            .await;
         // #2374：C# 双方 MentorDate = Envir.Now（:13641-13642）——拜师成功即开始 7 天期限
         let now_secs = crate::actors::world::partners::now_unix_secs();
-        let _ = replier_record.ask(crate::actors::player::SetMentorDate { date: now_secs }).await;
-        let _ = requester_record.ask(crate::actors::player::SetMentorDate { date: now_secs }).await;
+        let _ = replier_record
+            .ask(crate::actors::player::SetMentorDate { date: now_secs })
+            .await;
+        let _ = requester_record
+            .ask(crate::actors::player::SetMentorDate { date: now_secs })
+            .await;
 
-        send_system_message(&self.gate_ref, replier_session, &format!("收徒成功，你的徒弟是: {}", requester_state.name));
-        send_system_message(&self.gate_ref, requester_session, &format!("拜师成功，你的导师是: {}", replier_state.name));
+        send_system_message(
+            &self.gate_ref,
+            replier_session,
+            &format!("收徒成功，你的徒弟是: {}", requester_state.name),
+        );
+        send_system_message(
+            &self.gate_ref,
+            requester_session,
+            &format!("拜师成功，你的导师是: {}", replier_state.name),
+        );
 
         // 双方 MentorUpdate 同步（C# GetMentor 语义：Name = 对方）
         send_mentor_update_packet(
@@ -4900,7 +6281,10 @@ impl Message<SocialMentorReply> for SocialActor {
             true,
             requester_state.mentor_exp,
         );
-        debug!("Mentor: {} is mentor of {}", replier_state.name, requester_state.name);
+        debug!(
+            "Mentor: {} is mentor of {}",
+            replier_state.name, requester_state.name
+        );
     }
 }
 
@@ -4916,9 +6300,16 @@ impl Message<SocialAllowMentor> for SocialActor {
         send_system_message(
             &self.gate_ref,
             msg.session_id,
-            if msg.allow { "已允许拜师" } else { "已禁止拜师" },
+            if msg.allow {
+                "已允许拜师"
+            } else {
+                "已禁止拜师"
+            },
         );
-        debug!("AllowMentor: session={} allow={}", msg.session_id, msg.allow);
+        debug!(
+            "AllowMentor: session={} allow={}",
+            msg.session_id, msg.allow
+        );
     }
 }
 
@@ -4964,15 +6355,25 @@ impl SocialActor {
             };
 
         // C# MentorBreak 转移（仅对方在线：Info.MentorExp += partnerP.MenteeEXP / partner.MentorExp += MenteeEXP）
-        let (new_self_mentor_exp, new_self_mentee_exp, new_partner_mentor_exp, new_partner_mentee_exp) =
-            mentor_break_transfer(
-                self_is_mentor,
-                state.mentor_exp,
-                state.mentee_exp,
-                partner_online.as_ref().map(|(_, s)| s.mentor_exp).unwrap_or(0),
-                partner_online.as_ref().map(|(_, s)| s.mentee_exp).unwrap_or(0),
-                partner_online.is_some(),
-            );
+        let (
+            new_self_mentor_exp,
+            new_self_mentee_exp,
+            new_partner_mentor_exp,
+            new_partner_mentee_exp,
+        ) = mentor_break_transfer(
+            self_is_mentor,
+            state.mentor_exp,
+            state.mentee_exp,
+            partner_online
+                .as_ref()
+                .map(|(_, s)| s.mentor_exp)
+                .unwrap_or(0),
+            partner_online
+                .as_ref()
+                .map(|(_, s)| s.mentee_exp)
+                .unwrap_or(0),
+            partner_online.is_some(),
+        );
 
         // 清除自身师徒关系 + 写入新银行（C# Info.Mentor=0 → GetMentor(false)）
         let mut new_self_state = state.clone();
@@ -4982,13 +6383,24 @@ impl SocialActor {
         new_self_state.mentee_exp = new_self_mentee_exp;
         // #2374：手动解除（force=true）→ 7 天冷却（C# :13463 MentorDate = Now.AddDays(7)）
         if force {
-            new_self_state.mentor_date = mentor_cooldown_until(crate::actors::world::partners::now_unix_secs(), self.config.mentor_length_days as i64);
+            new_self_state.mentor_date = mentor_cooldown_until(
+                crate::actors::world::partners::now_unix_secs(),
+                self.config.mentor_length_days as i64,
+            );
         }
-        let _ = record.ask(SetPlayerState { state: new_self_state }).await;
+        let _ = record
+            .ask(SetPlayerState {
+                state: new_self_state,
+            })
+            .await;
         // C#：自身结算 IsMentor && MentorExp > 0 → GainExp + 清零
         if mentor_settle_amount(self_is_mentor, new_self_mentor_exp) > 0 {
             if let Some(world) = &self.world_ref {
-                let _ = world.ask(crate::actors::world::partners::SettleMentorExp { session_id: session_id }).await;
+                let _ = world
+                    .ask(crate::actors::world::partners::SettleMentorExp {
+                        session_id: session_id,
+                    })
+                    .await;
             }
         }
         send_mentor_cancel_packet(&self.gate_ref, session_id);
@@ -5005,17 +6417,32 @@ impl SocialActor {
                 let _ = partner_record.ask(SetPlayerState { state: ps }).await;
                 if mentor_settle_amount(!self_is_mentor, new_partner_mentor_exp) > 0 {
                     if let Some(world) = &self.world_ref {
-                        let _ = world.ask(crate::actors::world::partners::SettleMentorExp { session_id: partner_sid }).await;
+                        let _ = world
+                            .ask(crate::actors::world::partners::SettleMentorExp {
+                                session_id: partner_sid,
+                            })
+                            .await;
                     }
                 }
                 send_mentor_cancel_packet(&self.gate_ref, partner_sid);
-                send_system_message(&self.gate_ref, partner_sid, &format!("{} 解除了师徒关系", state.name));
+                send_system_message(
+                    &self.gate_ref,
+                    partner_sid,
+                    &format!("{} 解除了师徒关系", state.name),
+                );
             }
         } else if !self_is_mentor {
             // 对方（导师）离线：C# partner.Experience += partner.MentorExp 直接入账 + 清零
-            if let Ok(Some(partner_db)) = crate::db::load_character(&self.db_pool, &partner_name).await {
+            if let Ok(Some(partner_db)) =
+                crate::db::load_character(&self.db_pool, &partner_name).await
+            {
                 if partner_db.is_mentor && partner_db.mentor_exp > 0 {
-                    let _ = crate::db::add_character_experience(&self.db_pool, &partner_name, partner_db.mentor_exp).await;
+                    let _ = crate::db::add_character_experience(
+                        &self.db_pool,
+                        &partner_name,
+                        partner_db.mentor_exp,
+                    )
+                    .await;
                     let _ = crate::db::reset_mentor_exp(&self.db_pool, &partner_name).await;
                 }
             }
@@ -5051,16 +6478,30 @@ fn mentor_break_transfer(
     }
     if self_is_mentor {
         // C#：Info.MentorExp += partnerP.MenteeEXP; partnerP.MenteeEXP = 0
-        (self_mentor_exp + partner_mentee_exp, 0, partner_mentor_exp, 0)
+        (
+            self_mentor_exp + partner_mentee_exp,
+            0,
+            partner_mentor_exp,
+            0,
+        )
     } else {
         // C#：partner.MentorExp += MenteeEXP; MenteeEXP = 0
-        (self_mentor_exp, 0, partner_mentor_exp + self_mentee_exp, partner_mentee_exp)
+        (
+            self_mentor_exp,
+            0,
+            partner_mentor_exp + self_mentee_exp,
+            partner_mentee_exp,
+        )
     }
 }
 
 /// C# MentorBreak 结算：IsMentor && MentorExp > 0 → GainExp(MentorExp)（返回应入账经验）
 fn mentor_settle_amount(is_mentor: bool, mentor_exp: i64) -> i64 {
-    if is_mentor && mentor_exp > 0 { mentor_exp } else { 0 }
+    if is_mentor && mentor_exp > 0 {
+        mentor_exp
+    } else {
+        0
+    }
 }
 
 impl SocialActor {
@@ -5097,7 +6538,10 @@ impl SocialActor {
             state.y,
             state.direction,
             state.level,
-            crate::actors::world::name_colour_for_pk(state.pk_points, crate::actors::world::is_brown(state.brown_until_ms)),
+            crate::actors::world::name_colour_for_pk(
+                state.pk_points,
+                crate::actors::world::is_brown(state.brown_until_ms),
+            ),
             state.class,
             state.gender,
             state.hair,
@@ -5112,7 +6556,10 @@ impl SocialActor {
         );
         let _ = self
             .gate_ref
-            .tell(SendToClient { session_id, data: packet.clone() })
+            .tell(SendToClient {
+                session_id,
+                data: packet.clone(),
+            })
             .await;
         for (sid, other) in &self.players {
             if *sid == session_id {
@@ -5122,7 +6569,10 @@ impl SocialActor {
                 if os.map_index == state.map_index {
                     let _ = self
                         .gate_ref
-                        .tell(SendToClient { session_id: *sid, data: packet.clone() })
+                        .tell(SendToClient {
+                            session_id: *sid,
+                            data: packet.clone(),
+                        })
                         .await;
                 }
             }
@@ -5130,10 +6580,12 @@ impl SocialActor {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::{apply_guild_war_mirror, facing_each_other, front_tile, leader_leave_outcome, LeaderLeaveOutcome};
+    use super::{
+        apply_guild_war_mirror, facing_each_other, front_tile, leader_leave_outcome,
+        LeaderLeaveOutcome,
+    };
 
     #[test]
     fn leader_leave_outcome_matches_csharp_deletemember() {
@@ -5171,7 +6623,7 @@ mod tests {
     /// #2180：C# MarriageRequest 目标侧校验（PlayerObject.cs:13174-13226）每项拒绝路径
     #[test]
     fn marriage_target_check_rejects_like_csharp() {
-        use super::{MarriageTargetCtx, marriage_target_check};
+        use super::{marriage_target_check, MarriageTargetCtx};
         let now = 1_700_000_000i64;
         let base = MarriageTargetCtx {
             requester_map: 1,
@@ -5195,43 +6647,106 @@ mod tests {
         assert_eq!(marriage_target_check(&base, now, 10, 7), None);
 
         // 1. 双方面对面
-        let c = MarriageTargetCtx { requester_dir: 6, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "结婚需要双方面对面");
+        let c = MarriageTargetCtx {
+            requester_dir: 6,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "结婚需要双方面对面"
+        );
 
         // 2. 目标等级不足
-        let c = MarriageTargetCtx { target_level: 9, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 需要达到 10 级才能结婚");
+        let c = MarriageTargetCtx {
+            target_level: 9,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "Target 需要达到 10 级才能结婚"
+        );
 
         // 3. 目标离婚冷却
-        let c = MarriageTargetCtx { target_married_date: now - 1, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 离婚后 7 天内无法再次结婚");
+        let c = MarriageTargetCtx {
+            target_married_date: now - 1,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "Target 离婚后 7 天内无法再次结婚"
+        );
         // 冷却已过
-        let c = MarriageTargetCtx { target_married_date: now - 8 * 86_400, ..base };
+        let c = MarriageTargetCtx {
+            target_married_date: now - 8 * 86_400,
+            ..base
+        };
         assert_eq!(marriage_target_check(&c, now, 10, 7), None);
 
         // 4. 目标未允许求婚
-        let c = MarriageTargetCtx { target_allow_marriage: false, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "目标玩家当前不允许接收求婚");
+        let c = MarriageTargetCtx {
+            target_allow_marriage: false,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "目标玩家当前不允许接收求婚"
+        );
 
         // 5. 双方死亡
-        let c = MarriageTargetCtx { requester_dead: true, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "死亡状态下无法求婚");
-        let c = MarriageTargetCtx { target_dead: true, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "死亡状态下无法求婚");
+        let c = MarriageTargetCtx {
+            requester_dead: true,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "死亡状态下无法求婚"
+        );
+        let c = MarriageTargetCtx {
+            target_dead: true,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "死亡状态下无法求婚"
+        );
 
         // 6. 目标已有待处理求婚
-        let c = MarriageTargetCtx { target_has_pending: true, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 已有待处理的求婚");
+        let c = MarriageTargetCtx {
+            target_has_pending: true,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "Target 已有待处理的求婚"
+        );
 
         // 7. 距离 > DataRange(16) 或不同地图
-        let c = MarriageTargetCtx { target_x: 120, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 不在可求婚范围内");
-        let c = MarriageTargetCtx { target_map: 2, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "Target 不在可求婚范围内");
+        let c = MarriageTargetCtx {
+            target_x: 120,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "Target 不在可求婚范围内"
+        );
+        let c = MarriageTargetCtx {
+            target_map: 2,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "Target 不在可求婚范围内"
+        );
 
         // 8. 目标已婚
-        let c = MarriageTargetCtx { target_spouse: true, ..base };
-        assert_eq!(marriage_target_check(&c, now, 10, 7).unwrap(), "目标玩家已经结婚了");
+        let c = MarriageTargetCtx {
+            target_spouse: true,
+            ..base
+        };
+        assert_eq!(
+            marriage_target_check(&c, now, 10, 7).unwrap(),
+            "目标玩家已经结婚了"
+        );
     }
 
     /// #2138：行会战争镜像双向增删（宣战/停战），与 C# WarringGuilds 语义一致
@@ -5280,11 +6795,20 @@ mod tests {
     fn mentor_break_transfer_and_settle_matches_csharp() {
         use super::{mentor_break_transfer, mentor_settle_amount};
         // 自己是导师、对方（徒弟）在线：收徒弟 MenteeEXP，徒弟清零
-        assert_eq!(mentor_break_transfer(true, 100, 5, 0, 30, true), (130, 0, 0, 0));
+        assert_eq!(
+            mentor_break_transfer(true, 100, 5, 0, 30, true),
+            (130, 0, 0, 0)
+        );
         // 自己是徒弟、对方（导师）在线：MenteeEXP 转导师，自身清零
-        assert_eq!(mentor_break_transfer(false, 0, 30, 100, 0, true), (0, 0, 130, 0));
+        assert_eq!(
+            mentor_break_transfer(false, 0, 30, 100, 0, true),
+            (0, 0, 130, 0)
+        );
         // 对方离线：不转移，自身 MenteeEXP 清零
-        assert_eq!(mentor_break_transfer(false, 0, 30, 100, 0, false), (0, 0, 100, 0));
+        assert_eq!(
+            mentor_break_transfer(false, 0, 30, 100, 0, false),
+            (0, 0, 100, 0)
+        );
         // 结算：仅导师且银行 > 0
         assert_eq!(mentor_settle_amount(true, 130), 130);
         assert_eq!(mentor_settle_amount(true, 0), 0);

@@ -6,10 +6,10 @@
 //!   - 目标持有 PoisonShot buff 且 1/2：CrippleShot——目标+3×3 区域受伤（MAC）+ 绿毒，消耗 buff
 //!   - 否则：PoisonShot 投射（延迟 ACAgility）+ 5/10 给目标上 PoisonShot buff（10s）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -30,7 +30,9 @@ pub struct SepHighArcherBehavior {
 
 impl SepHighArcherBehavior {
     pub fn new() -> Self {
-        Self { poison_shot_active_until: 0 }
+        Self {
+            poison_shot_active_until: 0,
+        }
     }
 }
 
@@ -45,7 +47,12 @@ impl MonsterBehavior for SepHighArcherBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
 
             // C# 目标<=2 且 1/3：BackStep 后跳（反向最多 3 格；boss_moves 应用时校验 walkable）
             if dist <= 2 && fastrand::i32(0..3) == 0 {
@@ -62,43 +69,52 @@ impl MonsterBehavior for SepHighArcherBehavior {
                 self.poison_shot_active_until = 0;
                 // C# PoisonTarget(Target, 5, 8, Green, 2000)：主目标额外 1/5、8s、值=SC
                 if fastrand::i32(0..5) == 0 {
-                    let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, sc_value, 2000),
-                    });
+                    let sc_value =
+                        crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0)
+                            .max(1);
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 8, sc_value, 2000),
+                        });
                 }
-                for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0
-                    && max_distance(target.x, target.y, p.x, p.y) <= 1) {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: p.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 2,
-                    });
+                for p in ctx.players.iter().filter(|p| {
+                    p.map_index == monster.map_index
+                        && p.hp > 0
+                        && max_distance(target.x, target.y, p.x, p.y) <= 1
+                }) {
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: p.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 2,
+                        });
                     // C# 3×3 区域绿毒：value = damage/25+4，tick 2000ms
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: p.session_id,
-                        poison: Poison::new(
-                            PoisonType::GREEN,
-                            (fastrand::i32(1..3) + 1) as u32 * 7,
-                            cripple_area_poison_value(damage),
-                            2000,
-                        ),
-                    });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: p.session_id,
+                            poison: Poison::new(
+                                PoisonType::GREEN,
+                                (fastrand::i32(1..3) + 1) as u32 * 7,
+                                cripple_area_poison_value(damage),
+                                2000,
+                            ),
+                        });
                 }
                 return;
             }
 
             // C# PoisonShot：投射（延迟 ACAgility）+ 5/10 上 buff（10s）
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
             if fastrand::i32(0..10) <= 4 {
                 self.poison_shot_active_until = ctx.tick_count + POISON_BUFF_TICKS;
             }

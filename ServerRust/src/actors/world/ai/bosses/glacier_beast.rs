@@ -5,10 +5,10 @@
 //!   - 继承 CrazyManworm：2/3 物理近战（DC，attackType=0）/ 1/3 魔法近战（MC，attackType=1）
 //!   - GlacierBeast CompleteAttack：attackType==1 时 1/3 减速毒（5s，tick 2000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -36,23 +36,40 @@ impl MonsterBehavior for GlacierBeastBehavior {
             // C# CrazyManworm：2/3 物理 DC（attackType=0）/ 1/3 魔法 MC（attackType=1）
             let magic = fastrand::i32(0..3) == 0;
             let damage = if magic {
-                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1)
             } else {
-                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1)
             };
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: if magic { 1 } else { 0 },
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: if magic { 1 } else { 0 },
+                });
             // C# GlacierBeast CompleteAttack：attackType==1 → PoisonTarget(3, 5, Slow, 2000)：1/3、5s
             if magic && fastrand::i32(0..3) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(
+                            PoisonType::SLOW,
+                            5,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            2000,
+                        ),
+                    });
             }
             return;
         }

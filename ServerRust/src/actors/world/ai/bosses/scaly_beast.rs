@@ -4,10 +4,10 @@
 //! 机制：2/3 物理近战（MAC）/ 1/3 践踏（Type=1）：
 //!      践踏 FindAllTargets(2) AOE + 每个目标 1/5 麻痹毒（4s，tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -33,34 +33,50 @@ impl MonsterBehavior for ScalyBeastBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Envir.Random.Next(3) > 0：2/3 近战 / 1/3 践踏
             if fastrand::i32(0..3) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: STOMP_RADIUS,
-                    damage,
-                    spell_id: 0,
-                });
-                let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, STOMP_RADIUS, monster.map_index)
-                    .iter().map(|p| p.session_id).collect();
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: STOMP_RADIUS,
+                        damage,
+                        spell_id: 0,
+                    });
+                let nearby: Vec<u64> = ctx
+                    .find_targets_in_range(monster.x, monster.y, STOMP_RADIUS, monster.map_index)
+                    .iter()
+                    .map(|p| p.session_id)
+                    .collect();
                 for sid in nearby {
                     // PoisonTarget(5, 4, Paralysis, 1000)：1/5 概率、4s
                     if fastrand::i32(0..5) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::PARALYSIS, 4, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(
+                                    PoisonType::PARALYSIS,
+                                    4,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
                     }
                 }
             }

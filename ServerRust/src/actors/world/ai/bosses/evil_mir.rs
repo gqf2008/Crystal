@@ -4,11 +4,11 @@
 //! 机制：不能移动、睡眠周期、全图视野、1/8 概率全屏大招 vs 普攻、攻击带绿毒+麻痹、
 //! 睡眠期完全免疫；DragonLink 模式下死亡=睡眠 5 分钟（sleep_on_death，满血苏醒，非真死）
 
+use crate::actors::world::ai::behavior::MonsterBehavior;
+use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
-use crate::actors::world::ai::behavior::MonsterBehavior;
-use crate::actors::world::ai::ctx::AiCtx;
 
 /// 睡眠唤醒延迟（5 分钟，单位 tick；100ms/tick → 5min=3000 ticks）
 pub(crate) const SLEEP_DURATION_TICKS: u64 = 3000;
@@ -38,7 +38,6 @@ impl EvilMirBehavior {
         self.sleeping = true;
         self.wake_up_tick = tick_count + SLEEP_DURATION_TICKS;
     }
-
 }
 
 impl MonsterBehavior for EvilMirBehavior {
@@ -103,8 +102,16 @@ impl MonsterBehavior for EvilMirBehavior {
             0
         };
         let damage = crate::combat::attack::get_attack_power(
-            monster.min_dmg, monster.max_dmg + dragon_bonus, monster.luck);
-        let final_damage = if is_mass { damage } else { (damage as f32 * 0.75) as i32 }.max(1);
+            monster.min_dmg,
+            monster.max_dmg + dragon_bonus,
+            monster.luck,
+        );
+        let final_damage = if is_mass {
+            damage
+        } else {
+            (damage as f32 * 0.75) as i32
+        }
+        .max(1);
 
         // C# EvilMir.cs:139-150：MAC 伤害 + 绿毒 + 麻痹
         // 全屏大招：FindAllTargets(17)；普攻：FindAllTargets(2, target)
@@ -115,33 +122,49 @@ impl MonsterBehavior for EvilMirBehavior {
         };
 
         // 广播攻击
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-            center_x,
-            center_y,
-            radius,
-            damage: final_damage,
-            spell_id: 0,
-        });
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Aoe {
+                attacker_oid: monster.object_id,
+                center_x,
+                center_y,
+                radius,
+                damage: final_damage,
+                spell_id: 0,
+            });
 
         // 对命中目标施毒（绿毒 15s + 麻痹 5s）。先收集 session_id 避免借用冲突。
-        let hit_sessions: Vec<u64> = ctx.find_targets_in_range(center_x, center_y, radius, monster.map_index)
-            .iter().map(|p| p.session_id).collect();
+        let hit_sessions: Vec<u64> = ctx
+            .find_targets_in_range(center_x, center_y, radius, monster.map_index)
+            .iter()
+            .map(|p| p.session_id)
+            .collect();
         for sid in hit_sessions {
             // C# PoisonTarget 1/5
-                if fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: sid,
-                    poison: Poison::new(PoisonType::GREEN, 15, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                });
-                }
+            if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: sid,
+                        poison: Poison::new(
+                            PoisonType::GREEN,
+                            15,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            2000,
+                        ),
+                    });
+            }
             // C# PoisonTarget 1/5
-                if fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: sid,
-                    poison: Poison::new(PoisonType::PARALYSIS, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                });
-                }
+            if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: sid,
+                        poison: Poison::new(
+                            PoisonType::PARALYSIS,
+                            5,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            1000,
+                        ),
+                    });
+            }
         }
     }
 

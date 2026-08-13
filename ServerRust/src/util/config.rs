@@ -708,20 +708,48 @@ fn default_uncommon_chance() -> f64 {
 fn default_rare_chance() -> f64 {
     0.75
 }
-fn default_uncommon_hp() -> f64 { 1.25 }
-fn default_uncommon_defense() -> f64 { 1.15 }
-fn default_uncommon_damage() -> f64 { 1.15 }
-fn default_uncommon_exp() -> f64 { 1.20 }
-fn default_uncommon_gold() -> f64 { 1.25 }
-fn default_uncommon_item_bonus() -> i32 { 15 }
-fn default_uncommon_gold_bonus() -> i32 { 15 }
-fn default_rare_hp() -> f64 { 1.60 }
-fn default_rare_defense() -> f64 { 1.30 }
-fn default_rare_damage() -> f64 { 1.35 }
-fn default_rare_exp() -> f64 { 1.60 }
-fn default_rare_gold() -> f64 { 1.75 }
-fn default_rare_item_bonus() -> i32 { 35 }
-fn default_rare_gold_bonus() -> i32 { 35 }
+fn default_uncommon_hp() -> f64 {
+    1.25
+}
+fn default_uncommon_defense() -> f64 {
+    1.15
+}
+fn default_uncommon_damage() -> f64 {
+    1.15
+}
+fn default_uncommon_exp() -> f64 {
+    1.20
+}
+fn default_uncommon_gold() -> f64 {
+    1.25
+}
+fn default_uncommon_item_bonus() -> i32 {
+    15
+}
+fn default_uncommon_gold_bonus() -> i32 {
+    15
+}
+fn default_rare_hp() -> f64 {
+    1.60
+}
+fn default_rare_defense() -> f64 {
+    1.30
+}
+fn default_rare_damage() -> f64 {
+    1.35
+}
+fn default_rare_exp() -> f64 {
+    1.60
+}
+fn default_rare_gold() -> f64 {
+    1.75
+}
+fn default_rare_item_bonus() -> i32 {
+    35
+}
+fn default_rare_gold_bonus() -> i32 {
+    35
+}
 
 fn default_elite_hp_multiplier() -> f64 {
     2.25 // C# MonsterRarityData.Elite HpMultiplier
@@ -797,7 +825,7 @@ impl Default for ServerConfig {
                 tick_ms: 100,
                 map_data_dir: "Data".to_string(),
                 drop_rate: default_drop_rate(),
-            experience_list: Vec::new(),
+                experience_list: Vec::new(),
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
                 drop_gold: default_drop_gold(),
@@ -841,8 +869,8 @@ mod tests {
     #[test]
     fn rarity_defaults_match_csharp_settings() {
         let c = RarityConfig::default();
-        assert_eq!(c.elite_chance_percent, 0.1);   // C# MonsterRarityEliteChancePercent
-        assert_eq!(c.rare_chance_percent, 0.75);   // C# MonsterRarityRareChancePercent
+        assert_eq!(c.elite_chance_percent, 0.1); // C# MonsterRarityEliteChancePercent
+        assert_eq!(c.rare_chance_percent, 0.75); // C# MonsterRarityRareChancePercent
         assert_eq!(c.uncommon_chance_percent, 3.0); // C# MonsterRarityUncommonChancePercent
         assert_eq!(c.elite_hp_multiplier, 2.25);
         assert_eq!(c.elite_defense_multiplier, 1.55);
@@ -857,10 +885,10 @@ mod tests {
     #[test]
     fn conquest_defaults_match_csharp_settings() {
         let c = ConquestConfig::default();
-        assert_eq!(c.buy_gold, 10_000_000);   // C# BuyGTGold
+        assert_eq!(c.buy_gold, 10_000_000); // C# BuyGTGold
         assert_eq!(c.extend_gold, 1_000_000); // C# ExtendGT
         assert_eq!(c.gt_sale_min_price, 2_000_000); // C# NPCSegment GTSale 最低 200 万
-        assert_eq!(c.gt_days, 30);            // C# GTDays
+        assert_eq!(c.gt_days, 30); // C# GTDays
     }
 
     /// #2366：SocialConfig 英雄创建等级门槛默认 22（C# Settings.Hero_RequiredLevel）

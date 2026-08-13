@@ -72,7 +72,11 @@ pub enum BuffType {
     /// 诅咒（C# BuffType.Curse：MaxDC/MC/SC RatePercent 降低输出，玩家另 AttackSpeedRatePercent 降低攻速）
     Curse { percent: i32 },
     /// 犀牛祭司减益（C# BuffType.RhinoPriestDebuff：MaxDC/MC/SC 固定值降低，时长 5+damage 秒）
-    RhinoPriestDebuff { max_dc: i32, max_mc: i32, max_sc: i32 },
+    RhinoPriestDebuff {
+        max_dc: i32,
+        max_mc: i32,
+        max_sc: i32,
+    },
 }
 
 /// Buff 实例
@@ -144,7 +148,8 @@ impl SavedBuff {
         }
         Some(BuffInstance {
             buff_type: self.buff_type,
-            remaining_ticks: (((remaining_ms as u64) / BUFF_TICK_MS).max(1)).min(u32::MAX as u64) as u32,
+            remaining_ticks: (((remaining_ms as u64) / BUFF_TICK_MS).max(1)).min(u32::MAX as u64)
+                as u32,
             tick_interval: self.tick_interval,
             tick_counter: self.tick_counter,
             source_id: self.source_id,
@@ -255,12 +260,16 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
 
 /// RhinoPriestDebuff：取 MaxDC/MC/SC 固定减益之和（C# RhinoPriestDebuff，值均为负数）
 pub fn get_rhino_priest_debuff(buffs: &[BuffInstance]) -> (i32, i32, i32) {
-    buffs.iter().fold((0, 0, 0), |(dc, mc, sc), b| match b.buff_type {
-        BuffType::RhinoPriestDebuff { max_dc, max_mc, max_sc } => {
-            (dc + max_dc, mc + max_mc, sc + max_sc)
-        }
-        _ => (dc, mc, sc),
-    })
+    buffs
+        .iter()
+        .fold((0, 0, 0), |(dc, mc, sc), b| match b.buff_type {
+            BuffType::RhinoPriestDebuff {
+                max_dc,
+                max_mc,
+                max_sc,
+            } => (dc + max_dc, mc + max_mc, sc + max_sc),
+            _ => (dc, mc, sc),
+        })
 }
 
 /// #1906：是否 Debuff（对齐 C# BuffProperty.Debuff；PowerBead Effect==1 净化用）
@@ -284,22 +293,30 @@ pub fn is_debuff(buff_type: &BuffType) -> bool {
 
 /// 检查是否处于失控状态（Stun/Frozen 等，无法行动/攻击）
 pub fn is_incacapacitated(buffs: &[BuffInstance]) -> bool {
-    buffs.iter().any(|b| matches!(b.buff_type, BuffType::Stun | BuffType::Frozen))
+    buffs
+        .iter()
+        .any(|b| matches!(b.buff_type, BuffType::Stun | BuffType::Frozen))
 }
 
 /// 检查是否隐身
 pub fn is_invisible(buffs: &[BuffInstance]) -> bool {
-    buffs.iter().any(|b| matches!(b.buff_type, BuffType::Invisibility))
+    buffs
+        .iter()
+        .any(|b| matches!(b.buff_type, BuffType::Invisibility))
 }
 
 /// 检查是否被沉默（无法施法）
 pub fn is_silenced(buffs: &[BuffInstance]) -> bool {
-    buffs.iter().any(|b| matches!(b.buff_type, BuffType::Silence))
+    buffs
+        .iter()
+        .any(|b| matches!(b.buff_type, BuffType::Silence))
 }
 
 /// 检查是否减速（影响移动间隔）
 pub fn is_slowed(buffs: &[BuffInstance]) -> bool {
-    buffs.iter().any(|b| matches!(b.buff_type, BuffType::Slow { .. }))
+    buffs
+        .iter()
+        .any(|b| matches!(b.buff_type, BuffType::Slow { .. }))
 }
 
 #[cfg(test)]
@@ -340,25 +357,54 @@ mod tests {
             BuffInstance::new(BuffType::AcDefenseBoost { bonus: 7 }, 70, 5),
             BuffInstance::new(BuffType::MacDefenseBoost { bonus: 6 }, 70, 5),
         ];
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::AcDefenseBoost { bonus: 0 }), 7);
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::MacDefenseBoost { bonus: 0 }), 6);
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }), 0);
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::AcDefenseBoost { bonus: 0 }),
+            7
+        );
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::MacDefenseBoost { bonus: 0 }),
+            6
+        );
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }),
+            0
+        );
     }
 
     #[test]
     fn get_stat_bonus_includes_max_hp_boost() {
         // C# BuffType.HealthAid：生命上限加成应计入
-        let buffs = vec![BuffInstance::new(BuffType::MaxHpBoost { bonus: 30 }, 600, 1)];
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::MaxHpBoost { bonus: 0 }), 30);
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::MaxMpBoost { bonus: 0 }), 0);
+        let buffs = vec![BuffInstance::new(
+            BuffType::MaxHpBoost { bonus: 30 },
+            600,
+            1,
+        )];
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::MaxHpBoost { bonus: 0 }),
+            30
+        );
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::MaxMpBoost { bonus: 0 }),
+            0
+        );
     }
 
     #[test]
     fn get_stat_bonus_includes_bag_weight_boost() {
         // C# BuffType.BagWeight：负重上限加成应计入
-        let buffs = vec![BuffInstance::new(BuffType::BagWeightBoost { bonus: 500 }, 600, 1)];
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::BagWeightBoost { bonus: 0 }), 500);
-        assert_eq!(get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }), 0);
+        let buffs = vec![BuffInstance::new(
+            BuffType::BagWeightBoost { bonus: 500 },
+            600,
+            1,
+        )];
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::BagWeightBoost { bonus: 0 }),
+            500
+        );
+        assert_eq!(
+            get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }),
+            0
+        );
     }
 
     #[test]
@@ -394,9 +440,21 @@ mod tests {
     #[test]
     fn test_buff_replacement() {
         let mut buffs = Vec::new();
-        apply_buff(&mut buffs, BuffInstance::new(BuffType::HpRegen { amount_per_tick: 5 }, 3, 1));
+        apply_buff(
+            &mut buffs,
+            BuffInstance::new(BuffType::HpRegen { amount_per_tick: 5 }, 3, 1),
+        );
         // 添加新的同类型 Buff 应该替换旧的
-        apply_buff(&mut buffs, BuffInstance::new(BuffType::HpRegen { amount_per_tick: 10 }, 5, 1));
+        apply_buff(
+            &mut buffs,
+            BuffInstance::new(
+                BuffType::HpRegen {
+                    amount_per_tick: 10,
+                },
+                5,
+                1,
+            ),
+        );
 
         assert_eq!(buffs.len(), 1);
         assert_eq!(buffs[0].remaining_ticks, 5);
@@ -423,7 +481,11 @@ mod tests {
     #[test]
     fn test_paused_buff_does_not_tick() {
         // C# PauseBuff：暂停期间剩余时长冻结、不触发效果（@TOGGLETRANSFORM #2144）
-        let mut buffs = vec![BuffInstance::new(BuffType::HpRegen { amount_per_tick: 5 }, 3, 1)];
+        let mut buffs = vec![BuffInstance::new(
+            BuffType::HpRegen { amount_per_tick: 5 },
+            3,
+            1,
+        )];
         buffs[0].paused = true;
         let results = tick_buffs(&mut buffs, 1);
         assert!(results.is_empty());

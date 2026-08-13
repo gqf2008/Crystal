@@ -4,10 +4,10 @@
 
 #![allow(dead_code)]
 
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::Read;
-use byteorder::{LittleEndian, ReadBytesExt};
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 
 // ============================================================
 // BinaryReader compatible with C# BinaryReader
@@ -19,19 +19,56 @@ struct BinaryReader<R: Read> {
 }
 
 impl<R: Read> BinaryReader<R> {
-    fn new(inner: R) -> Self { Self { inner, pos: 0 } }
-    fn position(&self) -> usize { self.pos }
-    fn read_raw_i32(&mut self) -> std::io::Result<i32> { self.pos += 4; self.inner.read_i32::<LittleEndian>() }
-    fn read_raw_u32(&mut self) -> std::io::Result<u32> { self.pos += 4; self.inner.read_u32::<LittleEndian>() }
-    fn read_raw_i64(&mut self) -> std::io::Result<i64> { self.pos += 8; self.inner.read_i64::<LittleEndian>() }
-    fn read_raw_u64(&mut self) -> std::io::Result<u64> { self.pos += 8; self.inner.read_u64::<LittleEndian>() }
-    fn read_raw_u16(&mut self) -> std::io::Result<u16> { self.pos += 2; self.inner.read_u16::<LittleEndian>() }
-    fn read_raw_i16(&mut self) -> std::io::Result<i16> { self.pos += 2; self.inner.read_i16::<LittleEndian>() }
-    fn read_raw_u8(&mut self) -> std::io::Result<u8> { self.pos += 1; self.inner.read_u8() }
-    fn read_raw_i8(&mut self) -> std::io::Result<i8> { self.pos += 1; self.inner.read_i8() }
-    fn read_raw_f32(&mut self) -> std::io::Result<f32> { self.pos += 4; self.inner.read_f32::<LittleEndian>() }
-    fn read_raw_f64(&mut self) -> std::io::Result<f64> { self.pos += 8; self.inner.read_f64::<LittleEndian>() }
-    fn read_boolean(&mut self) -> std::io::Result<bool> { self.pos += 1; Ok(self.inner.read_u8()? != 0) }
+    fn new(inner: R) -> Self {
+        Self { inner, pos: 0 }
+    }
+    fn position(&self) -> usize {
+        self.pos
+    }
+    fn read_raw_i32(&mut self) -> std::io::Result<i32> {
+        self.pos += 4;
+        self.inner.read_i32::<LittleEndian>()
+    }
+    fn read_raw_u32(&mut self) -> std::io::Result<u32> {
+        self.pos += 4;
+        self.inner.read_u32::<LittleEndian>()
+    }
+    fn read_raw_i64(&mut self) -> std::io::Result<i64> {
+        self.pos += 8;
+        self.inner.read_i64::<LittleEndian>()
+    }
+    fn read_raw_u64(&mut self) -> std::io::Result<u64> {
+        self.pos += 8;
+        self.inner.read_u64::<LittleEndian>()
+    }
+    fn read_raw_u16(&mut self) -> std::io::Result<u16> {
+        self.pos += 2;
+        self.inner.read_u16::<LittleEndian>()
+    }
+    fn read_raw_i16(&mut self) -> std::io::Result<i16> {
+        self.pos += 2;
+        self.inner.read_i16::<LittleEndian>()
+    }
+    fn read_raw_u8(&mut self) -> std::io::Result<u8> {
+        self.pos += 1;
+        self.inner.read_u8()
+    }
+    fn read_raw_i8(&mut self) -> std::io::Result<i8> {
+        self.pos += 1;
+        self.inner.read_i8()
+    }
+    fn read_raw_f32(&mut self) -> std::io::Result<f32> {
+        self.pos += 4;
+        self.inner.read_f32::<LittleEndian>()
+    }
+    fn read_raw_f64(&mut self) -> std::io::Result<f64> {
+        self.pos += 8;
+        self.inner.read_f64::<LittleEndian>()
+    }
+    fn read_boolean(&mut self) -> std::io::Result<bool> {
+        self.pos += 1;
+        Ok(self.inner.read_u8()? != 0)
+    }
 
     fn read_string(&mut self) -> std::io::Result<String> {
         let mut len: u32 = 0;
@@ -41,8 +78,15 @@ impl<R: Read> BinaryReader<R> {
             self.pos += 1;
             len |= ((b & 0x7F) as u32) << shift;
             shift += 7;
-            if b & 0x80 == 0 { break; }
-            if shift > 35 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "String length overflow")); }
+            if b & 0x80 == 0 {
+                break;
+            }
+            if shift > 35 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "String length overflow",
+                ));
+            }
         }
         self.pos += len as usize;
         let mut buf = vec![0u8; len as usize];
@@ -419,7 +463,8 @@ fn read_stats_dict<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<Has
 }
 
 fn stats_to_json(stats: &HashMap<u8, i32>) -> String {
-    let items: Vec<String> = stats.iter()
+    let items: Vec<String> = stats
+        .iter()
         .map(|(k, v)| format!("\"{}\":{}", k, v))
         .collect();
     format!("{{{}}}", items.join(","))
@@ -434,10 +479,18 @@ fn read_safe_zone<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<Pars
     let y = reader.read_raw_i32()?;
     let size = reader.read_raw_u16()?;
     let start_point = reader.read_boolean()?;
-    Ok(ParsedSafeZone { x, y, size, start_point })
+    Ok(ParsedSafeZone {
+        x,
+        y,
+        size,
+        start_point,
+    })
 }
 
-fn read_respawn_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<ParsedRespawnInfo> {
+fn read_respawn_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<ParsedRespawnInfo> {
     let monster_index = reader.read_raw_i32()?;
     let x = reader.read_raw_i32()?;
     let y = reader.read_raw_i32()?;
@@ -454,12 +507,25 @@ fn read_respawn_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> st
     let respawn_ticks = reader.read_raw_u16()?;
 
     Ok(ParsedRespawnInfo {
-        monster_index, x, y, count, spread, delay, direction, route_path,
-        random_delay, respawn_index, save_respawn_time, respawn_ticks,
+        monster_index,
+        x,
+        y,
+        count,
+        spread,
+        delay,
+        direction,
+        route_path,
+        random_delay,
+        respawn_index,
+        save_respawn_time,
+        respawn_ticks,
     })
 }
 
-fn read_movement_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedMovementInfo> {
+fn read_movement_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedMovementInfo> {
     let map_index = reader.read_raw_i32()?;
     let source_x = reader.read_raw_i32()?;
     let source_y = reader.read_raw_i32()?;
@@ -470,7 +536,11 @@ fn read_movement_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> st
 
     // ConquestIndex added at v69; ShowOnBigMap+Icon added at v95
     let (conquest_index, show_on_big_map, icon) = if version >= 95 {
-        (reader.read_raw_i32()?, reader.read_boolean()?, reader.read_raw_i32()?)
+        (
+            reader.read_raw_i32()?,
+            reader.read_boolean()?,
+            reader.read_raw_i32()?,
+        )
     } else if version >= 69 {
         (reader.read_raw_i32()?, false, 0)
     } else {
@@ -478,8 +548,16 @@ fn read_movement_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> st
     };
 
     Ok(ParsedMovementInfo {
-        map_index, source_x, source_y, dest_x, dest_y,
-        need_hole, need_move, conquest_index, show_on_big_map, icon,
+        map_index,
+        source_x,
+        source_y,
+        dest_x,
+        dest_y,
+        need_hole,
+        need_move,
+        conquest_index,
+        show_on_big_map,
+        icon,
     })
 }
 
@@ -491,7 +569,10 @@ fn read_mine_zone<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<Pars
     Ok(ParsedMineZone { x, y, size, mine })
 }
 
-fn read_map_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedMapInfo> {
+fn read_map_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedMapInfo> {
     let index = reader.read_raw_i32()?;
     let file_name = reader.read_string()?;
     let title = reader.read_string()?;
@@ -553,23 +634,78 @@ fn read_map_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io
     let music = reader.read_raw_u16()?;
     // Version-gated tail fields: these were added to Save in later commits
     // The MirDB was saved by the server at version 83, which didn't have these yet
-    let no_town_teleport = if version >= 78 { reader.read_boolean()? } else { false };
-    let no_reincarnation = if version >= 79 { reader.read_boolean()? } else { false };
-    let weather_particles = if version >= 110 { reader.read_raw_u16()? } else { 0 };
-    let gt = if version >= 111 { reader.read_boolean()? } else { false };
-    let gt_index = if version >= 111 { reader.read_raw_u8()? } else { 0 };
+    let no_town_teleport = if version >= 78 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
+    let no_reincarnation = if version >= 79 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
+    let weather_particles = if version >= 110 {
+        reader.read_raw_u16()?
+    } else {
+        0
+    };
+    let gt = if version >= 111 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
+    let gt_index = if version >= 111 {
+        reader.read_raw_u8()?
+    } else {
+        0
+    };
 
     Ok(ParsedMapInfo {
-        index, file_name, title, mini_map, light, big_map, safe_zones, respawns, movements,
-        no_teleport, no_reconnect, no_reconnect_map, no_random, no_escape, no_recall,
-        no_drug, no_position, no_throw_item, no_drop_player, no_drop_monster, no_names,
-        fight, fire, fire_damage, lightning, lightning_damage, map_dark_light,
-        mine_zones, mine_index, no_mount, need_bridle, no_fight, music,
-        no_town_teleport, no_reincarnation, weather_particles, gt, gt_index,
+        index,
+        file_name,
+        title,
+        mini_map,
+        light,
+        big_map,
+        safe_zones,
+        respawns,
+        movements,
+        no_teleport,
+        no_reconnect,
+        no_reconnect_map,
+        no_random,
+        no_escape,
+        no_recall,
+        no_drug,
+        no_position,
+        no_throw_item,
+        no_drop_player,
+        no_drop_monster,
+        no_names,
+        fight,
+        fire,
+        fire_damage,
+        lightning,
+        lightning_damage,
+        map_dark_light,
+        mine_zones,
+        mine_index,
+        no_mount,
+        need_bridle,
+        no_fight,
+        music,
+        no_town_teleport,
+        no_reincarnation,
+        weather_particles,
+        gt,
+        gt_index,
     })
 }
 
-fn read_item_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<ParsedItemInfo> {
+fn read_item_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<ParsedItemInfo> {
     // File was saved with OLD Save format (before commit 8d03fafe added Slots to Save).
     // Format: Index, Name, 6 type/grade bytes, Shape(i16), Weight, Light, ReqAmount,
     // Image(u16), Durability(u16), StackSize(u32), Price(u32),
@@ -600,54 +736,54 @@ fn read_item_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::
     let price = reader.read_raw_u32()?;
 
     let mut stats = HashMap::new();
-    stats.insert(0u8, reader.read_raw_u8()? as i32);   // MinAC
-    stats.insert(1u8, reader.read_raw_u8()? as i32);   // MaxAC
-    stats.insert(2u8, reader.read_raw_u8()? as i32);   // MinMAC
-    stats.insert(3u8, reader.read_raw_u8()? as i32);   // MaxMAC
-    stats.insert(4u8, reader.read_raw_u8()? as i32);   // MinDC
-    stats.insert(5u8, reader.read_raw_u8()? as i32);   // MaxDC
-    stats.insert(6u8, reader.read_raw_u8()? as i32);   // MinMC
-    stats.insert(7u8, reader.read_raw_u8()? as i32);   // MaxMC
-    stats.insert(8u8, reader.read_raw_u8()? as i32);   // MinSC
-    stats.insert(9u8, reader.read_raw_u8()? as i32);   // MaxSC
+    stats.insert(0u8, reader.read_raw_u8()? as i32); // MinAC
+    stats.insert(1u8, reader.read_raw_u8()? as i32); // MaxAC
+    stats.insert(2u8, reader.read_raw_u8()? as i32); // MinMAC
+    stats.insert(3u8, reader.read_raw_u8()? as i32); // MaxMAC
+    stats.insert(4u8, reader.read_raw_u8()? as i32); // MinDC
+    stats.insert(5u8, reader.read_raw_u8()? as i32); // MaxDC
+    stats.insert(6u8, reader.read_raw_u8()? as i32); // MinMC
+    stats.insert(7u8, reader.read_raw_u8()? as i32); // MaxMC
+    stats.insert(8u8, reader.read_raw_u8()? as i32); // MinSC
+    stats.insert(9u8, reader.read_raw_u8()? as i32); // MaxSC
     stats.insert(12u8, reader.read_raw_u16()? as i32); // HP
     stats.insert(13u8, reader.read_raw_u16()? as i32); // MP
-    stats.insert(10u8, reader.read_raw_u8()? as i32);  // Accuracy
-    stats.insert(11u8, reader.read_raw_u8()? as i32);  // Agility
-    stats.insert(15u8, reader.read_raw_i8()? as i32);  // Luck
-    stats.insert(14u8, reader.read_raw_i8()? as i32);  // AttackSpeed
+    stats.insert(10u8, reader.read_raw_u8()? as i32); // Accuracy
+    stats.insert(11u8, reader.read_raw_u8()? as i32); // Agility
+    stats.insert(15u8, reader.read_raw_i8()? as i32); // Luck
+    stats.insert(14u8, reader.read_raw_i8()? as i32); // AttackSpeed
 
     let start_item = reader.read_boolean()?;
 
-    stats.insert(16u8, reader.read_raw_u8()? as i32);  // BagWeight
-    stats.insert(17u8, reader.read_raw_u8()? as i32);  // HandWeight
-    stats.insert(18u8, reader.read_raw_u8()? as i32);  // WearWeight
+    stats.insert(16u8, reader.read_raw_u8()? as i32); // BagWeight
+    stats.insert(17u8, reader.read_raw_u8()? as i32); // HandWeight
+    stats.insert(18u8, reader.read_raw_u8()? as i32); // WearWeight
 
     let effect = reader.read_raw_u8()?;
 
-    stats.insert(20u8, reader.read_raw_u8()? as i32);  // Strong
-    stats.insert(30u8, reader.read_raw_u8()? as i32);  // MagicResist
-    stats.insert(31u8, reader.read_raw_u8()? as i32);  // PoisonResist
-    stats.insert(32u8, reader.read_raw_u8()? as i32);  // HealthRecovery
-    stats.insert(33u8, reader.read_raw_u8()? as i32);  // SpellRecovery
-    stats.insert(34u8, reader.read_raw_u8()? as i32);  // PoisonRecovery
-    stats.insert(46u8, reader.read_raw_u8()? as i32);  // HPRatePercent
-    stats.insert(47u8, reader.read_raw_u8()? as i32);  // MPRatePercent
-    stats.insert(35u8, reader.read_raw_u8()? as i32);  // CriticalRate
-    stats.insert(36u8, reader.read_raw_u8()? as i32);  // CriticalDamage
+    stats.insert(20u8, reader.read_raw_u8()? as i32); // Strong
+    stats.insert(30u8, reader.read_raw_u8()? as i32); // MagicResist
+    stats.insert(31u8, reader.read_raw_u8()? as i32); // PoisonResist
+    stats.insert(32u8, reader.read_raw_u8()? as i32); // HealthRecovery
+    stats.insert(33u8, reader.read_raw_u8()? as i32); // SpellRecovery
+    stats.insert(34u8, reader.read_raw_u8()? as i32); // PoisonRecovery
+    stats.insert(46u8, reader.read_raw_u8()? as i32); // HPRatePercent
+    stats.insert(47u8, reader.read_raw_u8()? as i32); // MPRatePercent
+    stats.insert(35u8, reader.read_raw_u8()? as i32); // CriticalRate
+    stats.insert(36u8, reader.read_raw_u8()? as i32); // CriticalDamage
 
     let bool_flags = reader.read_raw_u8()?;
 
-    stats.insert(40u8, reader.read_raw_u8()? as i32);  // MaxACRatePercent
-    stats.insert(41u8, reader.read_raw_u8()? as i32);  // MaxMACRatePercent
-    stats.insert(21u8, reader.read_raw_u8()? as i32);  // Holy
-    stats.insert(22u8, reader.read_raw_u8()? as i32);  // Freezing
-    stats.insert(23u8, reader.read_raw_u8()? as i32);  // PoisonAttack
+    stats.insert(40u8, reader.read_raw_u8()? as i32); // MaxACRatePercent
+    stats.insert(41u8, reader.read_raw_u8()? as i32); // MaxMACRatePercent
+    stats.insert(21u8, reader.read_raw_u8()? as i32); // Holy
+    stats.insert(22u8, reader.read_raw_u8()? as i32); // Freezing
+    stats.insert(23u8, reader.read_raw_u8()? as i32); // PoisonAttack
 
     let bind_mode = reader.read_raw_i16()?;
 
-    stats.insert(19u8, reader.read_raw_u8()? as i32);  // Reflect
-    stats.insert(48u8, reader.read_raw_u8()? as i32);  // HPDrainRatePercent
+    stats.insert(19u8, reader.read_raw_u8()? as i32); // Reflect
+    stats.insert(48u8, reader.read_raw_u8()? as i32); // HPDrainRatePercent
 
     let special_mode = reader.read_raw_i16()?; // Unique
     let random_stats_id = reader.read_raw_u8()?;
@@ -660,17 +796,48 @@ fn read_item_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::
     let stats_json = stats_to_json(&stats);
 
     let has_tool_tip = reader.read_boolean()?;
-    let tool_tip = if has_tool_tip { reader.read_string()? } else { String::new() };
+    let tool_tip = if has_tool_tip {
+        reader.read_string()?
+    } else {
+        String::new()
+    };
 
     Ok(ParsedItemInfo {
-        index, name, type_byte, grade, required_type, required_class, required_gender,
-        set_type, shape, weight, light, required_amount, image, durability, stack_size,
-        price, start_item, effect, bool_flags, bind_mode, special_mode, random_stats_id,
-        can_fast_run, can_awakening, slots, stats_json, has_tool_tip, tool_tip,
+        index,
+        name,
+        type_byte,
+        grade,
+        required_type,
+        required_class,
+        required_gender,
+        set_type,
+        shape,
+        weight,
+        light,
+        required_amount,
+        image,
+        durability,
+        stack_size,
+        price,
+        start_item,
+        effect,
+        bool_flags,
+        bind_mode,
+        special_mode,
+        random_stats_id,
+        can_fast_run,
+        can_awakening,
+        slots,
+        stats_json,
+        has_tool_tip,
+        tool_tip,
     })
 }
 
-fn read_monster_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<ParsedMonsterInfo> {
+fn read_monster_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<ParsedMonsterInfo> {
     // File was saved with OLD MonsterInfo Save format (before commit 4ee54261).
     // Format: Index(i32), Name, Image(u16), AI(u8), Effect(u8), Level(u16),
     // ViewRange(u8), CoolEye(u8), HP(u32),
@@ -691,19 +858,19 @@ fn read_monster_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> st
     let mut stats = HashMap::new();
     stats.insert(38u8, reader.read_raw_u32()? as i32); // HP
 
-    stats.insert(0u8, reader.read_raw_u16()? as i32);  // MinAC
-    stats.insert(1u8, reader.read_raw_u16()? as i32);  // MaxAC
-    stats.insert(2u8, reader.read_raw_u16()? as i32);  // MinMAC
-    stats.insert(3u8, reader.read_raw_u16()? as i32);  // MaxMAC
-    stats.insert(4u8, reader.read_raw_u16()? as i32);  // MinDC
-    stats.insert(5u8, reader.read_raw_u16()? as i32);  // MaxDC
-    stats.insert(6u8, reader.read_raw_u16()? as i32);  // MinMC
-    stats.insert(7u8, reader.read_raw_u16()? as i32);  // MaxMC
-    stats.insert(8u8, reader.read_raw_u16()? as i32);  // MinSC
-    stats.insert(9u8, reader.read_raw_u16()? as i32);  // MaxSC
+    stats.insert(0u8, reader.read_raw_u16()? as i32); // MinAC
+    stats.insert(1u8, reader.read_raw_u16()? as i32); // MaxAC
+    stats.insert(2u8, reader.read_raw_u16()? as i32); // MinMAC
+    stats.insert(3u8, reader.read_raw_u16()? as i32); // MaxMAC
+    stats.insert(4u8, reader.read_raw_u16()? as i32); // MinDC
+    stats.insert(5u8, reader.read_raw_u16()? as i32); // MaxDC
+    stats.insert(6u8, reader.read_raw_u16()? as i32); // MinMC
+    stats.insert(7u8, reader.read_raw_u16()? as i32); // MaxMC
+    stats.insert(8u8, reader.read_raw_u16()? as i32); // MinSC
+    stats.insert(9u8, reader.read_raw_u16()? as i32); // MaxSC
 
-    stats.insert(10u8, reader.read_raw_u8()? as i32);  // Accuracy
-    stats.insert(11u8, reader.read_raw_u8()? as i32);  // Agility
+    stats.insert(10u8, reader.read_raw_u8()? as i32); // Accuracy
+    stats.insert(11u8, reader.read_raw_u8()? as i32); // Agility
 
     let stats_json = stats_to_json(&stats);
 
@@ -720,15 +887,32 @@ fn read_monster_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> st
     let drop_path = String::new();
 
     Ok(ParsedMonsterInfo {
-        index, name, image, ai, effect, level, view_range, cool_eye, stats_json,
-        light, attack_speed, move_speed, experience, can_push, can_tame,
-        auto_rev, undead,
+        index,
+        name,
+        image,
+        ai,
+        effect,
+        level,
+        view_range,
+        cool_eye,
+        stats_json,
+        light,
+        attack_speed,
+        move_speed,
+        experience,
+        can_push,
+        can_tame,
+        auto_rev,
+        undead,
         can_recall: false, // 旧格式二进制无 CanRecall（v115+ 字段），默认 false
         drop_path,
     })
 }
 
-fn read_npc_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedNPCInfo> {
+fn read_npc_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedNPCInfo> {
     let index = reader.read_raw_i32()?;
     let map_index = reader.read_raw_i32()?;
 
@@ -763,22 +947,31 @@ fn read_npc_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io
     let rate = reader.read_raw_u16()?;
 
     // TimeVisible block: v64+
-    let (time_visible, hour_start, minute_start, hour_end, minute_end, min_lev, max_lev, day_of_week, class_required) =
-        if version >= 64 {
-            (
-                reader.read_boolean()?,
-                reader.read_raw_u8()?,
-                reader.read_raw_u8()?,
-                reader.read_raw_u8()?,
-                reader.read_raw_u8()?,
-                reader.read_raw_i16()?,
-                reader.read_raw_i16()?,
-                reader.read_string()?,
-                reader.read_string()?,
-            )
-        } else {
-            (false, 0, 0, 0, 1, 0, 0, String::new(), String::new())
-        };
+    let (
+        time_visible,
+        hour_start,
+        minute_start,
+        hour_end,
+        minute_end,
+        min_lev,
+        max_lev,
+        day_of_week,
+        class_required,
+    ) = if version >= 64 {
+        (
+            reader.read_boolean()?,
+            reader.read_raw_u8()?,
+            reader.read_raw_u8()?,
+            reader.read_raw_u8()?,
+            reader.read_raw_u8()?,
+            reader.read_raw_i16()?,
+            reader.read_raw_i16()?,
+            reader.read_string()?,
+            reader.read_string()?,
+        )
+    } else {
+        (false, 0, 0, 0, 1, 0, 0, String::new(), String::new())
+    };
 
     // Conquest (v66+) or Sabuk (v65 and below)
     let conquest = if version >= 66 {
@@ -797,21 +990,52 @@ fn read_npc_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io
     };
 
     // CanTeleportTo: v97+ (version > 96)
-    let can_teleport_to = if version > 96 { reader.read_boolean()? } else { false };
+    let can_teleport_to = if version > 96 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
 
     // ConquestVisible: v107+
-    let conquest_visible = if version >= 107 { reader.read_boolean()? } else { true };
+    let conquest_visible = if version >= 107 {
+        reader.read_boolean()?
+    } else {
+        true
+    };
 
     Ok(ParsedNPCInfo {
-        index, map_index, collect_quest_indexes, finish_quest_indexes,
-        file_name, name, x, y, image, rate,
-        time_visible, hour_start, minute_start, hour_end, minute_end,
-        min_lev, max_lev, day_of_week, class_required, conquest, flag_needed,
-        show_on_big_map, big_map_icon, can_teleport_to, conquest_visible,
+        index,
+        map_index,
+        collect_quest_indexes,
+        finish_quest_indexes,
+        file_name,
+        name,
+        x,
+        y,
+        image,
+        rate,
+        time_visible,
+        hour_start,
+        minute_start,
+        hour_end,
+        minute_end,
+        min_lev,
+        max_lev,
+        day_of_week,
+        class_required,
+        conquest,
+        flag_needed,
+        show_on_big_map,
+        big_map_icon,
+        can_teleport_to,
+        conquest_visible,
     })
 }
 
-fn read_quest_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedQuestInfo> {
+fn read_quest_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedQuestInfo> {
     let index = reader.read_raw_i32()?;
     let name = reader.read_string()?;
     let group_name = reader.read_string()?;
@@ -827,12 +1051,22 @@ fn read_quest_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::
     let flag_message = reader.read_string()?;
 
     // TimeLimitInSeconds: v91+ (version > 90)
-    let time_limit_seconds = if version > 90 { reader.read_raw_i32()? } else { 0 };
+    let time_limit_seconds = if version > 90 {
+        reader.read_raw_i32()?
+    } else {
+        0
+    };
 
     Ok(ParsedQuestInfo {
-        index, name, group_name, file_name,
-        required_min_level, required_max_level, required_quest,
-        required_class, quest_type,
+        index,
+        name,
+        group_name,
+        file_name,
+        required_min_level,
+        required_max_level,
+        required_quest,
+        required_class,
+        quest_type,
         // quest rewards (exp/gold) 不在 Server.MirDB binary;这些在 master
         // C# 端也是从 quest .txt 文件 [@FIXEDREWARDS] / 完成的 NPC script
         // (GIVEEXP/GIVEGOLD 命令) 里取。
@@ -844,12 +1078,18 @@ fn read_quest_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::
         // 所以这 2 个字段在 ParsedQuestInfo 上**未用**(留给向后兼容)
         exp_reward: 0,
         gold_reward: 0,
-        goto_message, kill_message, item_message, flag_message,
+        goto_message,
+        kill_message,
+        item_message,
+        flag_message,
         time_limit_seconds,
     })
 }
 
-fn read_dragon_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<ParsedDragonInfo> {
+fn read_dragon_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<ParsedDragonInfo> {
     let enabled = reader.read_boolean()?;
     let map_file_name = reader.read_string()?;
     let monster_name = reader.read_string()?;
@@ -869,15 +1109,24 @@ fn read_dragon_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std
     let exps_json = serde_json::to_string(&exps).unwrap_or_default();
 
     Ok(ParsedDragonInfo {
-        enabled, map_file_name, monster_name, body_name,
-        location_x, location_y,
-        drop_area_top_x, drop_area_top_y,
-        drop_area_bottom_x, drop_area_bottom_y,
+        enabled,
+        map_file_name,
+        monster_name,
+        body_name,
+        location_x,
+        location_y,
+        drop_area_top_x,
+        drop_area_top_y,
+        drop_area_bottom_x,
+        drop_area_bottom_y,
         exps_json,
     })
 }
 
-fn read_magic_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedMagicInfo> {
+fn read_magic_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedMagicInfo> {
     let name = reader.read_string()?;
     let spell = reader.read_raw_u8()?;
     let base_cost = reader.read_raw_u8()?;
@@ -897,7 +1146,11 @@ fn read_magic_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::
     let mpower_bonus = reader.read_raw_u16()?;
 
     // Range: v67+ (version > 66); Multiplier: v71+ (version > 70)
-    let range = if version > 66 { reader.read_raw_u8()? } else { 9 };
+    let range = if version > 66 {
+        reader.read_raw_u8()?
+    } else {
+        9
+    };
     let (multiplier_base, multiplier_bonus) = if version > 70 {
         (reader.read_raw_f32()?, reader.read_raw_f32()?)
     } else {
@@ -905,14 +1158,33 @@ fn read_magic_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::
     };
 
     Ok(ParsedMagicInfo {
-        name, spell, base_cost, level_cost, icon, level1, level2, level3,
-        need1, need2, need3, delay_base, delay_reduction,
-        power_base, power_bonus, mpower_base, mpower_bonus,
-        range, multiplier_base, multiplier_bonus,
+        name,
+        spell,
+        base_cost,
+        level_cost,
+        icon,
+        level1,
+        level2,
+        level3,
+        need1,
+        need2,
+        need3,
+        delay_base,
+        delay_reduction,
+        power_base,
+        power_bonus,
+        mpower_base,
+        mpower_bonus,
+        range,
+        multiplier_base,
+        multiplier_bonus,
     })
 }
 
-fn read_game_shop_item<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedGameShopItem> {
+fn read_game_shop_item<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedGameShopItem> {
     let item_index = reader.read_raw_i32()?;
     let gindex = reader.read_raw_i32()?;
     let gold_price = reader.read_raw_u32()?;
@@ -939,13 +1211,26 @@ fn read_game_shop_item<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     };
 
     Ok(ParsedGameShopItem {
-        item_index, gindex, gold_price, credit_price, count,
-        class_name, category, stock, infinite_stock, deal, top_item, date,
-        can_buy_credit, can_buy_gold,
+        item_index,
+        gindex,
+        gold_price,
+        credit_price,
+        count,
+        class_name,
+        category,
+        stock,
+        infinite_stock,
+        deal,
+        top_item,
+        date,
+        can_buy_credit,
+        can_buy_gold,
     })
 }
 
-fn read_conquest_archer<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<(i32, i32, i32, i32, String, u32)> {
+fn read_conquest_archer<R: Read>(
+    reader: &mut BinaryReader<R>,
+) -> std::io::Result<(i32, i32, i32, i32, String, u32)> {
     let index = reader.read_raw_i32()?;
     let x = reader.read_raw_i32()?;
     let y = reader.read_raw_i32()?;
@@ -955,7 +1240,10 @@ fn read_conquest_archer<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Resul
     Ok((index, x, y, mob_index, name, repair_cost))
 }
 
-fn read_conquest_gate<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<(i32, i32, i32, i32, String, i32)> {
+fn read_conquest_gate<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<(i32, i32, i32, i32, String, i32)> {
     let index = reader.read_raw_i32()?;
     let x = reader.read_raw_i32()?;
     let y = reader.read_raw_i32()?;
@@ -966,7 +1254,9 @@ fn read_conquest_gate<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> s
     Ok((index, x, y, mob_index, name, repair_cost))
 }
 
-fn read_conquest_flag<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<(i32, i32, i32, String, String)> {
+fn read_conquest_flag<R: Read>(
+    reader: &mut BinaryReader<R>,
+) -> std::io::Result<(i32, i32, i32, String, String)> {
     let index = reader.read_raw_i32()?;
     let x = reader.read_raw_i32()?;
     let y = reader.read_raw_i32()?;
@@ -975,7 +1265,10 @@ fn read_conquest_flag<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<
     Ok((index, x, y, name, file_name))
 }
 
-fn read_conquest_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<ParsedConquestInfo> {
+fn read_conquest_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<ParsedConquestInfo> {
     let index = reader.read_raw_i32()?;
 
     // Save always writes FullMap
@@ -1065,27 +1358,79 @@ fn read_conquest_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> s
     }
 
     Ok(ParsedConquestInfo {
-        index, full_map, location_x, location_y, size, name,
-        map_index, palace_index, guard_index, gate_index, wall_index, siege_index,
-        flag_index, extra_maps_json,
-        start_hour, war_length, conquest_type, conquest_game, days,
-        king_x, king_y, king_size, control_point_index,
-        guards: guards.into_iter().map(|g| ParsedConquestGuard {
-            index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
-        }).collect(),
-        gates: gates.into_iter().map(|g| ParsedConquestGate {
-            index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
-        }).collect(),
-        walls: walls.into_iter().map(|g| ParsedConquestGate {
-            index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
-        }).collect(),
-        flags: flags.into_iter().map(|g| ParsedConquestFlag {
-            index: g.0, x: g.1, y: g.2, name: g.3, file_name: g.4,
-        }).collect(),
+        index,
+        full_map,
+        location_x,
+        location_y,
+        size,
+        name,
+        map_index,
+        palace_index,
+        guard_index,
+        gate_index,
+        wall_index,
+        siege_index,
+        flag_index,
+        extra_maps_json,
+        start_hour,
+        war_length,
+        conquest_type,
+        conquest_game,
+        days,
+        king_x,
+        king_y,
+        king_size,
+        control_point_index,
+        guards: guards
+            .into_iter()
+            .map(|g| ParsedConquestGuard {
+                index: g.0,
+                x: g.1,
+                y: g.2,
+                mob_index: g.3,
+                name: g.4,
+                repair_cost: g.5,
+            })
+            .collect(),
+        gates: gates
+            .into_iter()
+            .map(|g| ParsedConquestGate {
+                index: g.0,
+                x: g.1,
+                y: g.2,
+                mob_index: g.3,
+                name: g.4,
+                repair_cost: g.5,
+            })
+            .collect(),
+        walls: walls
+            .into_iter()
+            .map(|g| ParsedConquestGate {
+                index: g.0,
+                x: g.1,
+                y: g.2,
+                mob_index: g.3,
+                name: g.4,
+                repair_cost: g.5,
+            })
+            .collect(),
+        flags: flags
+            .into_iter()
+            .map(|g| ParsedConquestFlag {
+                index: g.0,
+                x: g.1,
+                y: g.2,
+                name: g.3,
+                file_name: g.4,
+            })
+            .collect(),
     })
 }
 
-fn read_gt_map<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io::Result<ParsedGTMap> {
+fn read_gt_map<R: Read>(
+    reader: &mut BinaryReader<R>,
+    _version: i32,
+) -> std::io::Result<ParsedGTMap> {
     let index = reader.read_raw_i32()?;
     let key = reader.read_raw_i32()?;
     let name = reader.read_string()?;
@@ -1095,7 +1440,17 @@ fn read_gt_map<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> std::io:
     let price = reader.read_raw_i32()?;
     let days = reader.read_raw_i32()?;
     let begin_time = reader.read_raw_i32()?;
-    Ok(ParsedGTMap { index, key, name, owner, leader, leader2, price, days, begin_time })
+    Ok(ParsedGTMap {
+        index,
+        key,
+        name,
+        owner,
+        leader,
+        leader2,
+        price,
+        days,
+        begin_time,
+    })
 }
 
 // ============================================================
@@ -1439,8 +1794,10 @@ async fn create_tables(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
             FOREIGN KEY (recipe_id) REFERENCES recipes(recipe_id)
         );
         CREATE INDEX IF NOT EXISTS idx_recipe_tools_recipe ON recipe_tools(recipe_id);
-        "#
-    ).execute(pool).await?;
+        "#,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1453,10 +1810,14 @@ async fn insert_map_info(pool: &sqlx::SqlitePool, map: &ParsedMapInfo) -> anyhow
             no_drop_monster, no_names, fight, fire, fire_damage, lightning,
             lightning_damage, map_dark_light, mine_index, no_mount, need_bridle,
             no_fight, music, no_town_teleport, no_reincarnation
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(map.index).bind(&map.file_name).bind(&map.title)
-    .bind(map.mini_map as i32).bind(map.light as i32).bind(map.big_map as i32)
+    .bind(map.index)
+    .bind(&map.file_name)
+    .bind(&map.title)
+    .bind(map.mini_map as i32)
+    .bind(map.light as i32)
+    .bind(map.big_map as i32)
     .bind(if map.no_teleport { 1 } else { 0 })
     .bind(if map.no_reconnect { 1 } else { 0 })
     .bind(&map.no_reconnect_map)
@@ -1482,7 +1843,8 @@ async fn insert_map_info(pool: &sqlx::SqlitePool, map: &ParsedMapInfo) -> anyhow
     .bind(map.music as i32)
     .bind(if map.no_town_teleport { 1 } else { 0 })
     .bind(if map.no_reincarnation { 1 } else { 0 })
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
 
     for sz in &map.safe_zones {
         sqlx::query(
@@ -1498,15 +1860,23 @@ async fn insert_map_info(pool: &sqlx::SqlitePool, map: &ParsedMapInfo) -> anyhow
             r#"INSERT INTO map_respawns (
                 map_index, monster_index, x, y, count, spread, delay, direction,
                 route_path, random_delay, respawn_index, save_respawn_time, respawn_ticks
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
         )
-        .bind(map.index).bind(rs.monster_index).bind(rs.x).bind(rs.y)
-        .bind(rs.count as i32).bind(rs.spread as i32).bind(rs.delay as i32)
-        .bind(rs.direction as i32).bind(&rs.route_path)
-        .bind(rs.random_delay as i32).bind(rs.respawn_index)
+        .bind(map.index)
+        .bind(rs.monster_index)
+        .bind(rs.x)
+        .bind(rs.y)
+        .bind(rs.count as i32)
+        .bind(rs.spread as i32)
+        .bind(rs.delay as i32)
+        .bind(rs.direction as i32)
+        .bind(&rs.route_path)
+        .bind(rs.random_delay as i32)
+        .bind(rs.respawn_index)
         .bind(if rs.save_respawn_time { 1 } else { 0 })
         .bind(rs.respawn_ticks as i32)
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     }
 
     for mv in &map.movements {
@@ -1514,24 +1884,31 @@ async fn insert_map_info(pool: &sqlx::SqlitePool, map: &ParsedMapInfo) -> anyhow
             r#"INSERT INTO map_movements (
                 map_index, source_x, source_y, dest_x, dest_y,
                 need_hole, need_move, conquest_index, show_on_big_map, icon
-            ) VALUES (?,?,?,?,?,?,?,?,?,?)"#
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)"#,
         )
-        .bind(mv.map_index).bind(mv.source_x).bind(mv.source_y)
-        .bind(mv.dest_x).bind(mv.dest_y)
+        .bind(mv.map_index)
+        .bind(mv.source_x)
+        .bind(mv.source_y)
+        .bind(mv.dest_x)
+        .bind(mv.dest_y)
         .bind(if mv.need_hole { 1 } else { 0 })
         .bind(if mv.need_move { 1 } else { 0 })
         .bind(mv.conquest_index)
         .bind(if mv.show_on_big_map { 1 } else { 0 })
         .bind(mv.icon)
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     }
 
     for mz in &map.mine_zones {
-        sqlx::query(
-            "INSERT INTO mine_zones (map_index, x, y, size, mine) VALUES (?,?,?,?,?)"
-        )
-        .bind(map.index).bind(mz.x).bind(mz.y).bind(mz.size as i32).bind(mz.mine as i32)
-        .execute(pool).await?;
+        sqlx::query("INSERT INTO mine_zones (map_index, x, y, size, mine) VALUES (?,?,?,?,?)")
+            .bind(map.index)
+            .bind(mz.x)
+            .bind(mz.y)
+            .bind(mz.size as i32)
+            .bind(mz.mine as i32)
+            .execute(pool)
+            .await?;
     }
 
     Ok(())
@@ -1545,21 +1922,38 @@ async fn insert_item_info(pool: &sqlx::SqlitePool, item: &ParsedItemInfo) -> any
             stack_size, price, start_item, effect, bool_flags, bind_mode, special_mode,
             random_stats_id, can_fast_run, can_awakening, slots, stats_json,
             has_tool_tip, tool_tip
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(item.index).bind(&item.name).bind(item.type_byte as i32).bind(item.grade as i32)
-    .bind(item.required_type as i32).bind(item.required_class as i32).bind(item.required_gender as i32)
-    .bind(item.set_type as i32).bind(item.shape as i32).bind(item.weight as i32)
-    .bind(item.light as i32).bind(item.required_amount as i32).bind(item.image as i32)
-    .bind(item.durability as i32).bind(item.stack_size as i32).bind(item.price as i64)
-    .bind(if item.start_item { 1 } else { 0 }).bind(item.effect as i32)
-    .bind(item.bool_flags as i32).bind(item.bind_mode as i32).bind(item.special_mode as i32)
+    .bind(item.index)
+    .bind(&item.name)
+    .bind(item.type_byte as i32)
+    .bind(item.grade as i32)
+    .bind(item.required_type as i32)
+    .bind(item.required_class as i32)
+    .bind(item.required_gender as i32)
+    .bind(item.set_type as i32)
+    .bind(item.shape as i32)
+    .bind(item.weight as i32)
+    .bind(item.light as i32)
+    .bind(item.required_amount as i32)
+    .bind(item.image as i32)
+    .bind(item.durability as i32)
+    .bind(item.stack_size as i32)
+    .bind(item.price as i64)
+    .bind(if item.start_item { 1 } else { 0 })
+    .bind(item.effect as i32)
+    .bind(item.bool_flags as i32)
+    .bind(item.bind_mode as i32)
+    .bind(item.special_mode as i32)
     .bind(item.random_stats_id as i32)
     .bind(if item.can_fast_run { 1 } else { 0 })
     .bind(if item.can_awakening { 1 } else { 0 })
-    .bind(item.slots as i32).bind(&item.stats_json)
-    .bind(if item.has_tool_tip { 1 } else { 0 }).bind(&item.tool_tip)
-    .execute(pool).await?;
+    .bind(item.slots as i32)
+    .bind(&item.stats_json)
+    .bind(if item.has_tool_tip { 1 } else { 0 })
+    .bind(&item.tool_tip)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1569,17 +1963,29 @@ async fn insert_monster_info(pool: &sqlx::SqlitePool, m: &ParsedMonsterInfo) -> 
             idx, name, image, ai, effect, level, view_range, cool_eye, stats_json,
             light, attack_speed, move_speed, experience, can_push, can_tame,
             auto_rev, undead, can_recall, drop_path
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(m.index).bind(&m.name).bind(m.image as i32).bind(m.ai as i32)
-    .bind(m.effect as i32).bind(m.level as i32).bind(m.view_range as i32)
-    .bind(m.cool_eye as i32).bind(&m.stats_json).bind(m.light as i32)
-    .bind(m.attack_speed as i32).bind(m.move_speed as i32).bind(m.experience as i64)
-    .bind(if m.can_push { 1 } else { 0 }).bind(if m.can_tame { 1 } else { 0 })
-    .bind(if m.auto_rev { 1 } else { 0 }).bind(if m.undead { 1 } else { 0 })
+    .bind(m.index)
+    .bind(&m.name)
+    .bind(m.image as i32)
+    .bind(m.ai as i32)
+    .bind(m.effect as i32)
+    .bind(m.level as i32)
+    .bind(m.view_range as i32)
+    .bind(m.cool_eye as i32)
+    .bind(&m.stats_json)
+    .bind(m.light as i32)
+    .bind(m.attack_speed as i32)
+    .bind(m.move_speed as i32)
+    .bind(m.experience as i64)
+    .bind(if m.can_push { 1 } else { 0 })
+    .bind(if m.can_tame { 1 } else { 0 })
+    .bind(if m.auto_rev { 1 } else { 0 })
+    .bind(if m.undead { 1 } else { 0 })
     .bind(if m.can_recall { 1 } else { 0 })
     .bind(&m.drop_path)
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1591,23 +1997,35 @@ async fn insert_npc_info(pool: &sqlx::SqlitePool, npc: &ParsedNPCInfo) -> anyhow
             min_lev, max_lev, day_of_week, class_required, conquest, flag_needed,
             show_on_big_map, big_map_icon, can_teleport_to, conquest_visible,
             collect_quest_indexes, finish_quest_indexes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(npc.index).bind(npc.map_index).bind(&npc.file_name).bind(&npc.name)
-    .bind(npc.x).bind(npc.y).bind(npc.image as i32).bind(npc.rate as i32)
+    .bind(npc.index)
+    .bind(npc.map_index)
+    .bind(&npc.file_name)
+    .bind(&npc.name)
+    .bind(npc.x)
+    .bind(npc.y)
+    .bind(npc.image as i32)
+    .bind(npc.rate as i32)
     .bind(if npc.time_visible { 1 } else { 0 })
-    .bind(npc.hour_start as i32).bind(npc.minute_start as i32)
-    .bind(npc.hour_end as i32).bind(npc.minute_end as i32)
-    .bind(npc.min_lev as i32).bind(npc.max_lev as i32)
-    .bind(&npc.day_of_week).bind(&npc.class_required)
-    .bind(npc.conquest).bind(npc.flag_needed)
+    .bind(npc.hour_start as i32)
+    .bind(npc.minute_start as i32)
+    .bind(npc.hour_end as i32)
+    .bind(npc.minute_end as i32)
+    .bind(npc.min_lev as i32)
+    .bind(npc.max_lev as i32)
+    .bind(&npc.day_of_week)
+    .bind(&npc.class_required)
+    .bind(npc.conquest)
+    .bind(npc.flag_needed)
     .bind(if npc.show_on_big_map { 1 } else { 0 })
     .bind(npc.big_map_icon)
     .bind(if npc.can_teleport_to { 1 } else { 0 })
     .bind(if npc.conquest_visible { 1 } else { 0 })
     .bind(&npc.collect_quest_indexes)
     .bind(&npc.finish_quest_indexes)
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1619,15 +2037,26 @@ async fn insert_quest_info(pool: &sqlx::SqlitePool, q: &ParsedQuestInfo) -> anyh
             required_class, quest_type, exp_reward, gold_reward,
             goto_message, kill_message, item_message, flag_message,
             time_limit_seconds
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(q.index).bind(&q.name).bind(&q.group_name).bind(&q.file_name)
-    .bind(q.required_min_level).bind(q.required_max_level).bind(q.required_quest)
-    .bind(q.required_class as i32).bind(q.quest_type as i32)
-    .bind(q.exp_reward).bind(q.gold_reward)
-    .bind(&q.goto_message).bind(&q.kill_message).bind(&q.item_message).bind(&q.flag_message)
+    .bind(q.index)
+    .bind(&q.name)
+    .bind(&q.group_name)
+    .bind(&q.file_name)
+    .bind(q.required_min_level)
+    .bind(q.required_max_level)
+    .bind(q.required_quest)
+    .bind(q.required_class as i32)
+    .bind(q.quest_type as i32)
+    .bind(q.exp_reward)
+    .bind(q.gold_reward)
+    .bind(&q.goto_message)
+    .bind(&q.kill_message)
+    .bind(&q.item_message)
+    .bind(&q.flag_message)
     .bind(q.time_limit_seconds)
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1637,15 +2066,21 @@ async fn insert_dragon_info(pool: &sqlx::SqlitePool, d: &ParsedDragonInfo) -> an
             id, enabled, map_file_name, monster_name, body_name,
             location_x, location_y, drop_area_top_x, drop_area_top_y,
             drop_area_bottom_x, drop_area_bottom_y, exps_json
-        ) VALUES (1,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (1,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
     .bind(if d.enabled { 1 } else { 0 })
-    .bind(&d.map_file_name).bind(&d.monster_name).bind(&d.body_name)
-    .bind(d.location_x).bind(d.location_y)
-    .bind(d.drop_area_top_x).bind(d.drop_area_top_y)
-    .bind(d.drop_area_bottom_x).bind(d.drop_area_bottom_y)
+    .bind(&d.map_file_name)
+    .bind(&d.monster_name)
+    .bind(&d.body_name)
+    .bind(d.location_x)
+    .bind(d.location_y)
+    .bind(d.drop_area_top_x)
+    .bind(d.drop_area_top_y)
+    .bind(d.drop_area_bottom_x)
+    .bind(d.drop_area_bottom_y)
     .bind(&d.exps_json)
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1656,40 +2091,67 @@ async fn insert_magic_info(pool: &sqlx::SqlitePool, m: &ParsedMagicInfo) -> anyh
             need1, need2, need3, delay_base, delay_reduction,
             power_base, power_bonus, mpower_base, mpower_bonus,
             range, multiplier_base, multiplier_bonus
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(&m.name).bind(m.spell as i32).bind(m.base_cost as i32).bind(m.level_cost as i32)
-    .bind(m.icon as i32).bind(m.level1 as i32).bind(m.level2 as i32).bind(m.level3 as i32)
-    .bind(m.need1 as i32).bind(m.need2 as i32).bind(m.need3 as i32)
-    .bind(m.delay_base as i64).bind(m.delay_reduction as i64)
-    .bind(m.power_base as i32).bind(m.power_bonus as i32)
-    .bind(m.mpower_base as i32).bind(m.mpower_bonus as i32)
-    .bind(m.range as i32).bind(m.multiplier_base).bind(m.multiplier_bonus)
-    .execute(pool).await?;
+    .bind(&m.name)
+    .bind(m.spell as i32)
+    .bind(m.base_cost as i32)
+    .bind(m.level_cost as i32)
+    .bind(m.icon as i32)
+    .bind(m.level1 as i32)
+    .bind(m.level2 as i32)
+    .bind(m.level3 as i32)
+    .bind(m.need1 as i32)
+    .bind(m.need2 as i32)
+    .bind(m.need3 as i32)
+    .bind(m.delay_base as i64)
+    .bind(m.delay_reduction as i64)
+    .bind(m.power_base as i32)
+    .bind(m.power_bonus as i32)
+    .bind(m.mpower_base as i32)
+    .bind(m.mpower_bonus as i32)
+    .bind(m.range as i32)
+    .bind(m.multiplier_base)
+    .bind(m.multiplier_bonus)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-async fn insert_game_shop_item(pool: &sqlx::SqlitePool, g: &ParsedGameShopItem) -> anyhow::Result<()> {
+async fn insert_game_shop_item(
+    pool: &sqlx::SqlitePool,
+    g: &ParsedGameShopItem,
+) -> anyhow::Result<()> {
     sqlx::query(
         r#"INSERT OR REPLACE INTO game_shop_items (
             item_index, gindex, gold_price, credit_price, count,
             class, category, stock, infinite_stock, deal, top_item, date,
             can_buy_credit, can_buy_gold
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(g.item_index).bind(g.gindex).bind(g.gold_price as i64).bind(g.credit_price as i64)
-    .bind(g.count as i32).bind(&g.class_name).bind(&g.category).bind(g.stock)
+    .bind(g.item_index)
+    .bind(g.gindex)
+    .bind(g.gold_price as i64)
+    .bind(g.credit_price as i64)
+    .bind(g.count as i32)
+    .bind(&g.class_name)
+    .bind(&g.category)
+    .bind(g.stock)
     .bind(if g.infinite_stock { 1 } else { 0 })
     .bind(if g.deal { 1 } else { 0 })
     .bind(if g.top_item { 1 } else { 0 })
     .bind(g.date)
     .bind(if g.can_buy_credit { 1 } else { 0 })
     .bind(if g.can_buy_gold { 1 } else { 0 })
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -> anyhow::Result<()> {
+async fn insert_conquest_info(
+    pool: &sqlx::SqlitePool,
+    c: &ParsedConquestInfo,
+) -> anyhow::Result<()> {
     sqlx::query(
         r#"INSERT OR REPLACE INTO conquest_infos (
             idx, full_map, location_x, location_y, size, name,
@@ -1698,27 +2160,45 @@ async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -
             start_hour, war_length, conquest_type, conquest_game,
             monday, tuesday, wednesday, thursday, friday, saturday, sunday,
             king_x, king_y, king_size, control_point_index
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(c.index).bind(if c.full_map { 1 } else { 0 })
-    .bind(c.location_x).bind(c.location_y).bind(c.size as i32).bind(&c.name)
-    .bind(c.map_index).bind(c.palace_index).bind(c.guard_index)
-    .bind(c.gate_index).bind(c.wall_index).bind(c.siege_index)
-    .bind(c.flag_index).bind(&c.extra_maps_json)
-    .bind(c.start_hour as i32).bind(c.war_length)
-    .bind(c.conquest_type as i32).bind(c.conquest_game as i32)
-    .bind(if c.days[0] { 1 } else { 0 }).bind(if c.days[1] { 1 } else { 0 })
-    .bind(if c.days[2] { 1 } else { 0 }).bind(if c.days[3] { 1 } else { 0 })
-    .bind(if c.days[4] { 1 } else { 0 }).bind(if c.days[5] { 1 } else { 0 })
+    .bind(c.index)
+    .bind(if c.full_map { 1 } else { 0 })
+    .bind(c.location_x)
+    .bind(c.location_y)
+    .bind(c.size as i32)
+    .bind(&c.name)
+    .bind(c.map_index)
+    .bind(c.palace_index)
+    .bind(c.guard_index)
+    .bind(c.gate_index)
+    .bind(c.wall_index)
+    .bind(c.siege_index)
+    .bind(c.flag_index)
+    .bind(&c.extra_maps_json)
+    .bind(c.start_hour as i32)
+    .bind(c.war_length)
+    .bind(c.conquest_type as i32)
+    .bind(c.conquest_game as i32)
+    .bind(if c.days[0] { 1 } else { 0 })
+    .bind(if c.days[1] { 1 } else { 0 })
+    .bind(if c.days[2] { 1 } else { 0 })
+    .bind(if c.days[3] { 1 } else { 0 })
+    .bind(if c.days[4] { 1 } else { 0 })
+    .bind(if c.days[5] { 1 } else { 0 })
     .bind(if c.days[6] { 1 } else { 0 })
-    .bind(c.king_x).bind(c.king_y).bind(c.king_size as i32)
+    .bind(c.king_x)
+    .bind(c.king_y)
+    .bind(c.king_size as i32)
     .bind(c.control_point_index)
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
 
     // 守卫/箭塔落点（C# ConquestInfo.ConquestGuards）
     sqlx::query("DELETE FROM conquest_guards WHERE conquest_idx = ?")
         .bind(c.index)
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     for g in &c.guards {
         sqlx::query(
             "INSERT OR REPLACE INTO conquest_guards (conquest_idx, idx, x, y, mob_index, name, repair_cost) VALUES (?,?,?,?,?,?,?)"
@@ -1731,7 +2211,8 @@ async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -
     for (table, list) in [("conquest_gates", &c.gates), ("conquest_walls", &c.walls)] {
         sqlx::query(&format!("DELETE FROM {} WHERE conquest_idx = ?", table))
             .bind(c.index)
-            .execute(pool).await?;
+            .execute(pool)
+            .await?;
         for g in list {
             sqlx::query(&format!(
                 "INSERT OR REPLACE INTO {} (conquest_idx, idx, x, y, mob_index, name, repair_cost) VALUES (?,?,?,?,?,?,?)", table
@@ -1744,7 +2225,8 @@ async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -
     // 旗子（C# ConquestInfo.ConquestFlags）
     sqlx::query("DELETE FROM conquest_flags WHERE conquest_idx = ?")
         .bind(c.index)
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     for f in &c.flags {
         sqlx::query(
             "INSERT OR REPLACE INTO conquest_flags (conquest_idx, idx, x, y, name, file_name) VALUES (?,?,?,?,?,?)"
@@ -1760,11 +2242,19 @@ async fn insert_gt_map(pool: &sqlx::SqlitePool, g: &ParsedGTMap) -> anyhow::Resu
     sqlx::query(
         r#"INSERT OR REPLACE INTO gt_maps (
             idx, key, name, owner, leader, leader2, price, days, begin_time
-        ) VALUES (?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?)"#,
     )
-    .bind(g.index).bind(g.key).bind(&g.name).bind(&g.owner)
-    .bind(&g.leader).bind(&g.leader2).bind(g.price).bind(g.days).bind(g.begin_time)
-    .execute(pool).await?;
+    .bind(g.index)
+    .bind(g.key)
+    .bind(&g.name)
+    .bind(&g.owner)
+    .bind(&g.leader)
+    .bind(&g.leader2)
+    .bind(g.price)
+    .bind(g.days)
+    .bind(g.begin_time)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1774,7 +2264,7 @@ async fn insert_recipe_info(pool: &sqlx::SqlitePool, r: &ParsedRecipeInfo) -> an
         r#"INSERT OR REPLACE INTO recipes (
             recipe_id, product_item_index, product_count, gold_cost, chance,
             required_level, required_gender, required_flags, required_quests, required_classes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)"#,
     )
     .bind(r.recipe_id)
     .bind(r.product_item_index)
@@ -1786,28 +2276,34 @@ async fn insert_recipe_info(pool: &sqlx::SqlitePool, r: &ParsedRecipeInfo) -> an
     .bind(serde_json::to_string(&r.required_flags).unwrap_or_else(|_| "[]".into()))
     .bind(serde_json::to_string(&r.required_quests).unwrap_or_else(|_| "[]".into()))
     .bind(serde_json::to_string(&r.required_classes).unwrap_or_else(|_| "[]".into()))
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
 
     // Replace ingredients for this recipe
     sqlx::query("DELETE FROM recipe_ingredients WHERE recipe_id = ?")
-        .bind(r.recipe_id).execute(pool).await?;
+        .bind(r.recipe_id)
+        .execute(pool)
+        .await?;
     for ing in &r.ingredients {
-        sqlx::query(
-            "INSERT INTO recipe_ingredients (recipe_id, item_index, count) VALUES (?,?,?)"
-        )
-        .bind(r.recipe_id).bind(ing.item_index).bind(ing.count as i32)
-        .execute(pool).await?;
+        sqlx::query("INSERT INTO recipe_ingredients (recipe_id, item_index, count) VALUES (?,?,?)")
+            .bind(r.recipe_id)
+            .bind(ing.item_index)
+            .bind(ing.count as i32)
+            .execute(pool)
+            .await?;
     }
 
     // Replace tools for this recipe
     sqlx::query("DELETE FROM recipe_tools WHERE recipe_id = ?")
-        .bind(r.recipe_id).execute(pool).await?;
+        .bind(r.recipe_id)
+        .execute(pool)
+        .await?;
     for tool_idx in &r.tools {
-        sqlx::query(
-            "INSERT INTO recipe_tools (recipe_id, item_index) VALUES (?,?)"
-        )
-        .bind(r.recipe_id).bind(tool_idx)
-        .execute(pool).await?;
+        sqlx::query("INSERT INTO recipe_tools (recipe_id, item_index) VALUES (?,?)")
+            .bind(r.recipe_id)
+            .bind(tool_idx)
+            .execute(pool)
+            .await?;
     }
 
     Ok(())
@@ -1835,8 +2331,14 @@ fn default_recipes() -> Vec<ParsedRecipeInfo> {
             gold_cost: 0,
             chance: 80,
             ingredients: vec![
-                ParsedRecipeIngredient { item_index: 1, count: 3 },
-                ParsedRecipeIngredient { item_index: 2, count: 2 },
+                ParsedRecipeIngredient {
+                    item_index: 1,
+                    count: 3,
+                },
+                ParsedRecipeIngredient {
+                    item_index: 2,
+                    count: 2,
+                },
             ],
             tools: vec![],
             required_level: None,
@@ -1853,8 +2355,14 @@ fn default_recipes() -> Vec<ParsedRecipeInfo> {
             gold_cost: 0,
             chance: 95,
             ingredients: vec![
-                ParsedRecipeIngredient { item_index: 3, count: 2 },
-                ParsedRecipeIngredient { item_index: 4, count: 1 },
+                ParsedRecipeIngredient {
+                    item_index: 3,
+                    count: 2,
+                },
+                ParsedRecipeIngredient {
+                    item_index: 4,
+                    count: 1,
+                },
             ],
             tools: vec![],
             required_level: None,
@@ -1870,9 +2378,10 @@ fn default_recipes() -> Vec<ParsedRecipeInfo> {
             product_count: 1,
             gold_cost: 0,
             chance: 60,
-            ingredients: vec![
-                ParsedRecipeIngredient { item_index: 2, count: 5 },
-            ],
+            ingredients: vec![ParsedRecipeIngredient {
+                item_index: 2,
+                count: 5,
+            }],
             tools: vec![],
             required_level: None,
             required_gender: None,
@@ -1886,10 +2395,14 @@ fn default_recipes() -> Vec<ParsedRecipeInfo> {
 /// Seed the `recipes` tables with defaults if they are empty.
 async fn seed_default_recipes(pool: &sqlx::SqlitePool) -> anyhow::Result<usize> {
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM recipes")
-        .fetch_one(pool).await
+        .fetch_one(pool)
+        .await
         .unwrap_or((0,));
     if count.0 > 0 {
-        info!("Recipes table already populated ({} rows), skipping seed", count.0);
+        info!(
+            "Recipes table already populated ({} rows), skipping seed",
+            count.0
+        );
         return Ok(0);
     }
 
@@ -1929,8 +2442,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Source: {}", db_path);
     info!("Target: {}", sqlite_path);
 
-    let data = std::fs::read(db_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", db_path, e))?;
+    let data =
+        std::fs::read(db_path).map_err(|e| anyhow::anyhow!("Failed to read {}: {}", db_path, e))?;
     let file_size = data.len();
     info!("File size: {} bytes", file_size);
 
@@ -1944,9 +2457,21 @@ async fn main() -> anyhow::Result<()> {
     let monster_index = reader.read_raw_i32()?;
     let npc_index = reader.read_raw_i32()?;
     let quest_index = reader.read_raw_i32()?;
-    let gameshop_index = if version >= 63 { reader.read_raw_i32()? } else { 0 };
-    let conquest_index = if version >= 66 { reader.read_raw_i32()? } else { 0 };
-    let respawn_index = if version > 68 { reader.read_raw_i32()? } else { 0 };
+    let gameshop_index = if version >= 63 {
+        reader.read_raw_i32()?
+    } else {
+        0
+    };
+    let conquest_index = if version >= 66 {
+        reader.read_raw_i32()?
+    } else {
+        0
+    };
+    let respawn_index = if version > 68 {
+        reader.read_raw_i32()?
+    } else {
+        0
+    };
 
     info!("Version: {}.{}", version, custom_version);
     info!("Next IDs: map={}, item={}, monster={}, npc={}, quest={}, gameshop={}, conquest={}, respawn={}",
@@ -1957,7 +2482,8 @@ async fn main() -> anyhow::Result<()> {
     let abs_path = if std::path::Path::new(sqlite_path).is_absolute() {
         sqlite_path.to_string()
     } else {
-        let cwd = std::env::current_dir().map_err(|e| anyhow::anyhow!("Failed to get current dir: {}", e))?;
+        let cwd = std::env::current_dir()
+            .map_err(|e| anyhow::anyhow!("Failed to get current dir: {}", e))?;
         cwd.join(sqlite_path).to_string_lossy().to_string()
     };
     let normalized = abs_path.replace('\\', "/");
@@ -1965,13 +2491,19 @@ async fn main() -> anyhow::Result<()> {
 
     // Ensure parent directory and file exist (sqlx won't create them)
     if let Some(parent) = std::path::Path::new(&abs_path).parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", parent.display(), e))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!("Failed to create directory {}: {}", parent.display(), e)
+        })?;
     }
-    std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&abs_path)
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&abs_path)
         .map_err(|e| anyhow::anyhow!("Failed to create DB file {}: {}", abs_path, e))?;
 
-    let pool = sqlx::SqlitePool::connect(&db_url).await
+    let pool = sqlx::SqlitePool::connect(&db_url)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to {}: {}", sqlite_path, e))?;
 
     info!("Creating tables...");
@@ -2126,7 +2658,10 @@ async fn main() -> anyhow::Result<()> {
     if version >= 66 {
         let conquest_count = reader.read_raw_i32()?;
         if conquest_count > 100_000 {
-            warn!("Conquest count ({}) seems invalid, skipping", conquest_count);
+            warn!(
+                "Conquest count ({}) seems invalid, skipping",
+                conquest_count
+            );
         } else {
             info!("Migrating {} conquests...", conquest_count);
             let mut conquest_ok = 0;
@@ -2158,14 +2693,22 @@ async fn main() -> anyhow::Result<()> {
             reader.read_raw_i32()?; // UserCount
             reader.read_raw_f64()?; // DelayLoss (f64)
         }
-        info!("Skipped RespawnTick ({} entries) (position: {})", rt_count, reader.position());
+        info!(
+            "Skipped RespawnTick ({} entries) (position: {})",
+            rt_count,
+            reader.position()
+        );
     }
 
     // === GTMap[] (v111+) ===
     // GTMap feature was added at DB version 111
     let _gt_ok = if version >= 111 {
         let gt_count = reader.read_raw_i32()?;
-        info!("Migrating {} GT maps... (position: {})", gt_count, reader.position());
+        info!(
+            "Migrating {} GT maps... (position: {})",
+            gt_count,
+            reader.position()
+        );
         let mut gt_ok = 0;
         for i in 0..gt_count {
             match read_gt_map(&mut reader, version) {
@@ -2206,13 +2749,30 @@ async fn main() -> anyhow::Result<()> {
     info!("Database: {}", sqlite_path);
 
     // Verify counts
-    let tables = ["map_infos", "safe_zones", "map_respawns", "map_movements", "mine_zones",
-                   "item_infos", "monster_infos", "npc_infos", "quest_infos", "dragon_info",
-                   "magic_infos", "game_shop_items", "conquest_infos", "gt_maps",
-                   "recipes", "recipe_ingredients", "recipe_tools"];
+    let tables = [
+        "map_infos",
+        "safe_zones",
+        "map_respawns",
+        "map_movements",
+        "mine_zones",
+        "item_infos",
+        "monster_infos",
+        "npc_infos",
+        "quest_infos",
+        "dragon_info",
+        "magic_infos",
+        "game_shop_items",
+        "conquest_infos",
+        "gt_maps",
+        "recipes",
+        "recipe_ingredients",
+        "recipe_tools",
+    ];
     for t in &tables {
         let count: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {}", t))
-            .fetch_one(&pool).await.unwrap_or((0,));
+            .fetch_one(&pool)
+            .await
+            .unwrap_or((0,));
         info!("  {}: {}", t, count.0);
     }
 

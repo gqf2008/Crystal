@@ -10,12 +10,12 @@
 //! CompleteRangeAttack（C# :71-90）：poison→Green；else→Paralysis。
 //! Die（C# :111-136）：CompleteDeath→SpawnSlaves(2)。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
@@ -43,52 +43,71 @@ impl MonsterBehavior for KingHydraxBehavior {
             // 近战 DC 单体
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
         } else if dist <= VIEW_RANGE {
             // 远程双弹道
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
                 if fastrand::i32(0..2) == 0 {
                     // Type0 即时弹道 + Paralysis
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
-                    // C# PoisonTarget 1/3
-                        if fastrand::i32(0..3) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 10, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage,
+                            spell_id: 0,
                         });
-                        }
+                    // C# PoisonTarget 1/3
+                    if fastrand::i32(0..3) == 0 {
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::PARALYSIS,
+                                    10,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
+                    }
                 } else {
                     // Type1 延迟弹道 + Green
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 1,
-                    });
-                    // C# PoisonTarget 1/2
-                        if fastrand::i32(0..2) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 10, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage,
+                            spell_id: 1,
                         });
-                        }
+                    // C# PoisonTarget 1/2
+                    if fastrand::i32(0..2) == 0 {
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::GREEN,
+                                    10,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
+                    }
                 }
             }
         } else if ctx.tick_count >= monster.next_move_tick {

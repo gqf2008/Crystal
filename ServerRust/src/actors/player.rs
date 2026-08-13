@@ -7,12 +7,12 @@ use kameo::message::Message;
 use kameo::prelude::Context;
 use tracing::{debug, info, warn};
 
-use crate::actors::inventory::{PlayerInventory, EquipmentSlot};
-use crate::actors::friend::FriendList;
-use crate::actors::mail::Mailbox;
-use crate::actors::guild::GuildRank;
-use crate::actors::quest::QuestLog;
 use crate::actors::creature::CreatureLog;
+use crate::actors::friend::FriendList;
+use crate::actors::guild::GuildRank;
+use crate::actors::inventory::{EquipmentSlot, PlayerInventory};
+use crate::actors::mail::Mailbox;
+use crate::actors::quest::QuestLog;
 use crate::actors::refine::RefineLog;
 use crate::gate::actor::{GateActor, SendToClient};
 use crate::maps::loader::MapData;
@@ -35,7 +35,15 @@ pub struct PlayerMagic {
 
 impl PlayerMagic {
     pub fn new(spell: i32) -> Self {
-        Self { spell, level: 0, experience: 0, key: 0, toggled: false, cast_time: 0, temp_skill: false }
+        Self {
+            spell,
+            level: 0,
+            experience: 0,
+            key: 0,
+            toggled: false,
+            cast_time: 0,
+            temp_skill: false,
+        }
     }
 }
 
@@ -44,8 +52,7 @@ const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
 /// 玩家状态
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlayerState {
     /// 唯一对象 ID
     pub object_id: u32,
@@ -561,20 +568,22 @@ impl PlayerState {
 
     /// 最大 HP（基础+装备+MaxHpBoost buff；C# Stats[Stat.HP]，HealthAid/MaxHpBoost 计入）
     pub fn effective_max_hp(&self) -> i32 {
-        let total = self.max_hp + crate::combat::buff::get_stat_bonus(
-            &self.buffs,
-            &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 },
-        );
+        let total = self.max_hp
+            + crate::combat::buff::get_stat_bonus(
+                &self.buffs,
+                &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 },
+            );
         // #2314：C# RefreshStats——Stats[HP] += Stats[HP] * HPRatePercent / 100
         total + total * self.hp_rate_percent / 100
     }
 
     /// 最大 MP（基础+装备+MaxMpBoost buff；C# Stats[Stat.MP]，ManaAid/MaxMpBoost 计入）
     pub fn effective_max_mp(&self) -> i32 {
-        let total = self.max_mp + crate::combat::buff::get_stat_bonus(
-            &self.buffs,
-            &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 },
-        );
+        let total = self.max_mp
+            + crate::combat::buff::get_stat_bonus(
+                &self.buffs,
+                &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 },
+            );
         // #2314：C# RefreshStats——Stats[MP] += Stats[MP] * MPRatePercent / 100
         total + total * self.mp_rate_percent / 100
     }
@@ -600,13 +609,22 @@ impl PlayerState {
             max_ac: self.effective_max_ac(),
             min_mac: self.effective_min_mac(),
             max_mac: self.effective_max_mac(),
-            agility: self.agility + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
-            accuracy: self.accuracy + spirit_sword_accuracy(&self.magics) + fencing_accuracy(&self.magics) + slaying_accuracy(&self.magics),
+            agility: self.agility
+                + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
+            accuracy: self.accuracy
+                + spirit_sword_accuracy(&self.magics)
+                + fencing_accuracy(&self.magics)
+                + slaying_accuracy(&self.magics),
             luck: self.luck,
             critical_rate: {
                 // C# RefreshStatCaps：CriticalRate 上限（BaseStats.caps；Buff 后再次 cap，C# RefreshStats 顺序）
-                let v = self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 });
-                v.min(mir2_shared::data::stats::BaseStats::new(self.class).caps.get(mir2_shared::enums::Stat::CriticalRate))
+                let v = self.critical_rate
+                    + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 });
+                v.min(
+                    mir2_shared::data::stats::BaseStats::new(self.class)
+                        .caps
+                        .get(mir2_shared::enums::Stat::CriticalRate),
+                )
             },
             critical_damage: self.critical_damage,
             magic_resist: self.magic_resist,
@@ -627,7 +645,10 @@ impl PlayerState {
             freezing: self.freezing,
             poison_attack: self.poison_attack,
             // C# SpecialItemMode.Paralize：任意装备/槽位宝石带 Paralize（1/14 概率麻痹，Random.Next(1,15)==1；#2308 含宝石）
-            paralize: crate::actors::world::has_special_equipped(self, mir2_shared::enums::SpecialItemMode::PARALIZE),
+            paralize: crate::actors::world::has_special_equipped(
+                self,
+                mir2_shared::enums::SpecialItemMode::PARALIZE,
+            ),
         }
     }
 }
@@ -680,7 +701,6 @@ pub struct PlayerActor {
     /// 当前地图数据（用于边界+障碍物校验）
     map_data: Option<MapData>,
 }
-
 
 /// M44：Buff 类型 → 客户端 tag（与 Client-Bevy buff.rs 名称表对应）
 pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
@@ -753,13 +773,13 @@ impl PlayerActor {
                 level: 1,
                 experience: 0,
                 max_experience: 100,
-        can_gain_exp: true,
-        pearl_count: 0,
-        maximum_hero_count: 1,
-        step_counter: 0,
-        run_counter: 0,
-        run_time_ms: 0,
-        cell_time_ms: 0,
+                can_gain_exp: true,
+                pearl_count: 0,
+                maximum_hero_count: 1,
+                step_counter: 0,
+                run_counter: 0,
+                run_time_ms: 0,
+                cell_time_ms: 0,
                 hp: 120,
                 max_hp: 120,
                 mp: 60,
@@ -782,10 +802,10 @@ impl PlayerActor {
                 bonus_max_sc: 0,
                 freezing: 0,
                 poison_attack: 0,
-            health_recovery: 0,
-            spell_recovery: 0,
-            attack_speed: 0,
-            poison_resist: 0,
+                health_recovery: 0,
+                spell_recovery: 0,
+                attack_speed: 0,
+                poison_resist: 0,
                 poison_recovery: 0,
                 holy: 0,
                 accuracy: 0,
@@ -836,15 +856,15 @@ impl PlayerActor {
                 is_mounted: false,
                 mount_type: 0,
                 is_dead: false,
-            unlock_curse: false,
-            last_revival_time: 0,
-            last_access: 0,
-            rested_counter: 0,
-            rested_exp_percent: 0,
-            rested_exp_end_tick: 0,
-            has_map_shout: false,
-            has_server_shout: false,
-            last_shout_time: 0,
+                unlock_curse: false,
+                last_revival_time: 0,
+                last_access: 0,
+                rested_counter: 0,
+                rested_exp_percent: 0,
+                rested_exp_end_tick: 0,
+                has_map_shout: false,
+                has_server_shout: false,
+                last_shout_time: 0,
                 pk_points: 0,
                 pk_kill_count: 0,
                 fishing_autocast: false,
@@ -855,7 +875,7 @@ impl PlayerActor {
                 last_recall_time: 0,
                 allow_lover_recall: false,
                 is_gm: false,
-                gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+                gm_never_die: false,   // #1480：GM 无敌模式（C# GMNeverDie）
                 special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
                 has_expanded_storage: false,
                 expanded_storage_expiry_date: 0,
@@ -864,71 +884,71 @@ impl PlayerActor {
                 storage_password_last_set: 0,
                 allow_observe: false,
                 enable_guild_invite: false,
-allow_trade: false,
+                allow_trade: false,
 
-allow_group: false,
+                allow_group: false,
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
                 exp_multiplier: 1.0,
                 exp_rate: 1.0,
                 exp_multiplier_end_tick: 0,
-            drop_multiplier: 1.0,
-            drop_multiplier_end_tick: 0,
-            exp_multiplier_pause_in_safe: false,
-            drop_multiplier_pause_in_safe: false,
-            item_drop_rate_percent: 0,
-            gold_drop_rate_percent: 0,
-            elements_level: 0,
-            has_elemental: false,
-            concentration_interrupted: false,
-            concentration_interrupt_time: 0,
-            bind_map_index: 0,
-            bind_x: 0,
-            bind_y: 0,
-            level_effects: 0,
-            is_mentor: false,
-            mentee_exp: 0,
-            mentor_exp: 0,
-            mentor_date: 0,
-            mentor_damage_bonus: false,
-            mentor_damage_rate_percent: mentor_damage_boost as i32,
-            mentee_exp_bank: mentee_exp_bank as u32,
-            mentor_skill_boost,
-            newbie_exp_bonus: false,
-            exp_bonus_lover_percent: 0,
-            exp_bonus_mentee_percent: 0,
-            exp_bonus_newbie_percent: 0,
-            guild_buff_exp_percent: 0,
-            guild_buff_fish_rate_percent: 0,
-            mine_rate_percent: 0,
-            gem_rate_percent: 0,
-            craft_rate_percent: 0,
-            hp_rate_percent: 0,
-            mp_rate_percent: 0,
-            max_ac_rate_percent: 0,
-            max_mac_rate_percent: 0,
-            max_dc_rate_percent: 0,
-            max_mc_rate_percent: 0,
-            max_sc_rate_percent: 0,
-            attack_speed_rate_percent: 0,
-            chat_banned_until_ms: 0,
-            chat_window_start_ms: 0,
-            chat_tick: 0,
-            char_ban_expiry_ticks: 0,
-            char_ban_reason: String::new(),
-            skill_gain_multiplier: 0,
-            guild_buff_mine_rate_percent: 0,
-            guild_buff_stats: mir2_shared::data::stats::Stats::new(),
-            no_experience_map: false,
-            brown_until_ms: 0,
-            mount_loyalty_decrease_time: 0,
-            mount_loyalty_increase_time: 0,
-            torch_burn_time: 0,
-            last_damage_ms: 0,
-            pot_hp_amount: 0,
-            pot_mp_amount: 0,
-            pot_time_ms: 0,
+                drop_multiplier: 1.0,
+                drop_multiplier_end_tick: 0,
+                exp_multiplier_pause_in_safe: false,
+                drop_multiplier_pause_in_safe: false,
+                item_drop_rate_percent: 0,
+                gold_drop_rate_percent: 0,
+                elements_level: 0,
+                has_elemental: false,
+                concentration_interrupted: false,
+                concentration_interrupt_time: 0,
+                bind_map_index: 0,
+                bind_x: 0,
+                bind_y: 0,
+                level_effects: 0,
+                is_mentor: false,
+                mentee_exp: 0,
+                mentor_exp: 0,
+                mentor_date: 0,
+                mentor_damage_bonus: false,
+                mentor_damage_rate_percent: mentor_damage_boost as i32,
+                mentee_exp_bank: mentee_exp_bank as u32,
+                mentor_skill_boost,
+                newbie_exp_bonus: false,
+                exp_bonus_lover_percent: 0,
+                exp_bonus_mentee_percent: 0,
+                exp_bonus_newbie_percent: 0,
+                guild_buff_exp_percent: 0,
+                guild_buff_fish_rate_percent: 0,
+                mine_rate_percent: 0,
+                gem_rate_percent: 0,
+                craft_rate_percent: 0,
+                hp_rate_percent: 0,
+                mp_rate_percent: 0,
+                max_ac_rate_percent: 0,
+                max_mac_rate_percent: 0,
+                max_dc_rate_percent: 0,
+                max_mc_rate_percent: 0,
+                max_sc_rate_percent: 0,
+                attack_speed_rate_percent: 0,
+                chat_banned_until_ms: 0,
+                chat_window_start_ms: 0,
+                chat_tick: 0,
+                char_ban_expiry_ticks: 0,
+                char_ban_reason: String::new(),
+                skill_gain_multiplier: 0,
+                guild_buff_mine_rate_percent: 0,
+                guild_buff_stats: mir2_shared::data::stats::Stats::new(),
+                no_experience_map: false,
+                brown_until_ms: 0,
+                mount_loyalty_decrease_time: 0,
+                mount_loyalty_increase_time: 0,
+                torch_burn_time: 0,
+                last_damage_ms: 0,
+                pot_hp_amount: 0,
+                pot_mp_amount: 0,
+                pot_time_ms: 0,
             },
             gate_ref,
             world_ref,
@@ -981,10 +1001,16 @@ allow_group: false,
     /// C# HumanObject.CanRun（:131-137）：跑步需最近走过一步（_stepCounter>0）或 FastRun
     /// （装备 CanFastRun → FastRun=true :1886；Transform buff → FastRun=true :2340）
     fn can_run(&self) -> bool {
-        let fast_run = self.state.inventory.equipment.iter().flatten()
+        let fast_run = self
+            .state
+            .inventory
+            .equipment
+            .iter()
+            .flatten()
             .any(|it| it.info.as_ref().map(|i| i.can_fast_run).unwrap_or(false))
-            || self.state.buffs.iter()
-                .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }) && !b.paused);
+            || self.state.buffs.iter().any(|b| {
+                matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }) && !b.paused
+            });
         can_run_now(self.state.step_counter, fast_run)
     }
 
@@ -995,10 +1021,16 @@ allow_group: false,
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                    &body,
+                ),
+            })
+            .try_send();
         if self.state.hp == 0 && !self.state.is_dead {
             self.state.is_dead = true;
             // #1319：C# Die()——清 Buff + PoisonList + 灰名，并逐 buff 下发 S.RemoveBuff
@@ -1008,50 +1040,75 @@ allow_group: false,
             death_body.extend_from_slice(&self.state.x.to_le_bytes());
             death_body.extend_from_slice(&self.state.y.to_le_bytes());
             death_body.push(self.state.direction);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &death_body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::Death as i16,
+                        &death_body,
+                    ),
+                })
+                .try_send();
         }
     }
 
     /// 检查是否有指定类型的 Buff
     fn has_buff(&self, buff_type: crate::combat::buff::BuffType) -> bool {
         let tag = std::mem::discriminant(&buff_type);
-        self.state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == tag)
+        self.state
+            .buffs
+            .iter()
+            .any(|b| std::mem::discriminant(&b.buff_type) == tag)
     }
 
     /// #1319：死亡清理（对齐 C# Die()）——清 Buff 并逐 buff 下发 S.RemoveBuff、毒清空、灰名重置
     fn clear_death_state(&mut self) {
         // C# Die（:646-662）：只移除 RemoveOnDeath（Curse/Blindness）+ 显式 MagicShield/ElementalBarrier
         // + 毒镜像 debuff（对应 C# PoisonList.Clear）；其余 buff 保留自然到期
-        let removed: Vec<(u8, Option<mir2_shared::enums::SpellEffect>)> = self.state.buffs.iter()
+        let removed: Vec<(u8, Option<mir2_shared::enums::SpellEffect>)> = self
+            .state
+            .buffs
+            .iter()
             .filter(|b| buff_removed_on_death(&b.buff_type))
             .map(|b| {
                 let down = match b.buff_type {
-                    crate::combat::buff::BuffType::DamageReduction { kind, .. } => shield_down_effect(kind),
+                    crate::combat::buff::BuffType::DamageReduction { kind, .. } => {
+                        shield_down_effect(kind)
+                    }
                     _ => None,
                 };
                 (buff_tag(&b.buff_type), down)
             })
             .collect();
-        self.state.buffs.retain(|b| !buff_removed_on_death(&b.buff_type));
+        self.state
+            .buffs
+            .retain(|b| !buff_removed_on_death(&b.buff_type));
         self.state.poison_list.clear();
         self.state.brown_until_ms = 0;
         for (tag, down) in removed {
             let mut body = Vec::new();
             body.push(tag);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
             // C# Die → ProcessBuffs 移除路径：盾移除广播 Down 特效
             if let Some(effect) = down {
-                let _ = self.world_ref.tell(crate::actors::world::BroadcastObjectEffect {
-                    object_id: self.state.object_id,
-                    effect,
-                    map_index: self.state.map_index,
-                }).try_send();
+                let _ = self
+                    .world_ref
+                    .tell(crate::actors::world::BroadcastObjectEffect {
+                        object_id: self.state.object_id,
+                        effect,
+                        map_index: self.state.map_index,
+                    })
+                    .try_send();
             }
         }
     }
@@ -1062,24 +1119,60 @@ allow_group: false,
         body.extend_from_slice(&self.state.x.to_le_bytes());
         body.extend_from_slice(&self.state.y.to_le_bytes());
         body.push(self.state.direction);
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                    &body,
+                ),
+            })
+            .try_send();
     }
 }
 
 impl Actor for PlayerActor {
-    type Args = (u32, String, u64, u16, ActorRef<GateActor>, ActorRef<crate::actors::world::WorldActor>, u8, u8, bool);
+    type Args = (
+        u32,
+        String,
+        u64,
+        u16,
+        ActorRef<GateActor>,
+        ActorRef<crate::actors::world::WorldActor>,
+        u8,
+        u8,
+        bool,
+    );
     type Error = anyhow::Error;
 
-    async fn on_start(
-        args: Self::Args,
-        _actor_ref: ActorRef<Self>,
-    ) -> Result<Self, Self::Error> {
-        let (object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank, mentor_skill_boost) = args;
-        debug!("PlayerActor spawned: {} (object_id={}, session={})", name, object_id, session_id);
-        Ok(Self::new(object_id, name, session_id, map_index, gate_ref, world_ref, mentor_damage_boost, mentee_exp_bank, mentor_skill_boost))
+    async fn on_start(args: Self::Args, _actor_ref: ActorRef<Self>) -> Result<Self, Self::Error> {
+        let (
+            object_id,
+            name,
+            session_id,
+            map_index,
+            gate_ref,
+            world_ref,
+            mentor_damage_boost,
+            mentee_exp_bank,
+            mentor_skill_boost,
+        ) = args;
+        debug!(
+            "PlayerActor spawned: {} (object_id={}, session={})",
+            name, object_id, session_id
+        );
+        Ok(Self::new(
+            object_id,
+            name,
+            session_id,
+            map_index,
+            gate_ref,
+            world_ref,
+            mentor_damage_boost,
+            mentee_exp_bank,
+            mentor_skill_boost,
+        ))
     }
 }
 
@@ -1196,7 +1289,11 @@ pub struct SetItemInfo {
 impl Message<SetItemInfo> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetItemInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetItemInfo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         for slot in self.state.inventory.equipment.iter_mut() {
             if let Some(item) = slot {
                 if item.unique_id == msg.unique_id {
@@ -1222,7 +1319,11 @@ pub struct SetRestedCounter {
 impl Message<SetRestedCounter> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetRestedCounter, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetRestedCounter,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.rested_counter = msg.counter;
     }
 }
@@ -1236,7 +1337,11 @@ pub struct SetRestedExp {
 impl Message<SetRestedExp> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetRestedExp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetRestedExp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.rested_exp_percent = msg.percent;
         self.state.rested_exp_end_tick = msg.end_tick;
     }
@@ -1253,7 +1358,11 @@ pub struct GiveRestedBonus {
 impl Message<GiveRestedBonus> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: GiveRestedBonus, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GiveRestedBonus,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if msg.count == 0 {
             return;
         }
@@ -1262,7 +1371,10 @@ impl Message<GiveRestedBonus> for PlayerActor {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let buff_ms = msg.buff_length_minutes.max(1) as i64 * 60_000;
-        let existing = self.state.rested_exp_end_tick.saturating_sub(now_ms.max(0) as u64) as i64;
+        let existing = self
+            .state
+            .rested_exp_end_tick
+            .saturating_sub(now_ms.max(0) as u64) as i64;
         let add = msg.count as i64 * buff_ms;
         let max_dur = msg.max_bonus.max(1) as i64 * buff_ms;
         let total = (existing + add).min(max_dur).max(0);
@@ -1272,9 +1384,18 @@ impl Message<GiveRestedBonus> for PlayerActor {
         crate::actors::world::send_system_message(
             &self.gate_ref,
             self.state.session_id,
-            &format!("休息经验加成已生效：+{}% 经验（剩余 {} 分钟）", msg.exp_bonus_percent, total / 60_000),
+            &format!(
+                "休息经验加成已生效：+{}% 经验（剩余 {} 分钟）",
+                msg.exp_bonus_percent,
+                total / 60_000
+            ),
         );
-        debug!("Player {} rested bonus: +{}% for {} min", self.state.name, msg.exp_bonus_percent, total / 60_000);
+        debug!(
+            "Player {} rested bonus: +{}% for {} min",
+            self.state.name,
+            msg.exp_bonus_percent,
+            total / 60_000
+        );
     }
 }
 
@@ -1288,7 +1409,11 @@ pub struct SetShoutState {
 impl Message<SetShoutState> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetShoutState, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetShoutState,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.has_map_shout = msg.map_shout;
         self.state.has_server_shout = msg.server_shout;
         self.state.last_shout_time = msg.last_shout_time;
@@ -1346,7 +1471,11 @@ pub struct RevivePlayer {
 impl Message<RevivePlayer> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RevivePlayer, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RevivePlayer,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.is_dead = false;
         self.state.x = msg.x;
         self.state.y = msg.y;
@@ -1363,12 +1492,12 @@ impl Message<RevivePlayer> for PlayerActor {
 // ============================================================
 
 /// #1614：C# HumanObject.CanWalk——麻痹/冰冻毒禁止移动（Paralysis/LRParalysis/Frozen）
-pub(crate) fn movement_blocked_by_poison(
-    poison_list: &[crate::combat::poison::Poison],
-) -> bool {
+pub(crate) fn movement_blocked_by_poison(poison_list: &[crate::combat::poison::Poison]) -> bool {
     poison_list.iter().any(|p| {
-        p.p_type.intersects(mir2_shared::enums::PoisonType::PARALYSIS)
-            || p.p_type.intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
+        p.p_type
+            .intersects(mir2_shared::enums::PoisonType::PARALYSIS)
+            || p.p_type
+                .intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
             || p.p_type.intersects(mir2_shared::enums::PoisonType::FROZEN)
     })
 }
@@ -1395,7 +1524,8 @@ impl Message<MoveRequest> for PlayerActor {
         // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2；Walk = 1
         let steps = if msg.is_run {
             if self.state.is_mounted
-                || self.has_buff(crate::combat::buff::BuffType::MoveSpeedBoost { percent: 0 }) {
+                || self.has_buff(crate::combat::buff::BuffType::MoveSpeedBoost { percent: 0 })
+            {
                 3
             } else {
                 2
@@ -1483,10 +1613,13 @@ impl Message<BroadcastMovement> for PlayerActor {
         body.extend_from_slice(&msg.y.to_le_bytes());
         body.push(msg.direction);
 
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(opcode as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(opcode as i16, &body),
+            })
+            .await;
     }
 }
 
@@ -1572,7 +1705,13 @@ impl PlayerActor {
             crate::actors::inventory::EquipmentSlot::RingL as usize,
             crate::actors::inventory::EquipmentSlot::RingR as usize,
         ] {
-            if let Some(ring) = self.state.inventory.equipment.get(idx).and_then(|s| s.as_ref()) {
+            if let Some(ring) = self
+                .state
+                .inventory
+                .equipment
+                .get(idx)
+                .and_then(|s| s.as_ref())
+            {
                 let has_revival = ring
                     .info
                     .as_ref()
@@ -1608,31 +1747,54 @@ impl Message<TakeDamage> for PlayerActor {
         // （HumanObject.ChangeHP → ChangeMP(amount)，不致死；Struck 动画照常）
         if damage > 0
             && self.state.mp > 0
-            && self.state.inventory.equipment.iter().flatten()
-                .any(|it| it.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::PROTECTION)).unwrap_or(false))
+            && self.state.inventory.equipment.iter().flatten().any(|it| {
+                it.info
+                    .as_ref()
+                    .map(|i| {
+                        i.unique
+                            .contains(mir2_shared::enums::SpecialItemMode::PROTECTION)
+                    })
+                    .unwrap_or(false)
+            })
         {
             self.state.mp = (self.state.mp - damage).max(0);
             let mut struck_body = Vec::new();
             struck_body.extend_from_slice(&msg.attacker_id.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Struck as i16, &struck_body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::Struck as i16,
+                        &struck_body,
+                    ),
+                })
+                .await;
             let mut hb = Vec::new();
             hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &hb),
-            }).await;
-            debug!("Player {} absorbed {} damage with MP (Protection)", self.state.name, damage);
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                        &hb,
+                    ),
+                })
+                .await;
+            debug!(
+                "Player {} absorbed {} damage with MP (Protection)",
+                self.state.name, damage
+            );
             return false;
         }
         self.state.hp = (self.state.hp - damage).max(0);
 
         // C# HumanObject.Attacked：被玩家攻击时攻击者获得灰名（BrownTime，世界侧校验 PK/开战）
         if msg.attacker_session != 0 {
-            let _ = self.world_ref
+            let _ = self
+                .world_ref
                 .tell(crate::actors::world::partners::MarkBrown {
                     attacker_session: msg.attacker_session,
                     victim_session: self.state.session_id,
@@ -1648,10 +1810,16 @@ impl Message<TakeDamage> for PlayerActor {
         // 发送 Struck（自己被攻击的动画）
         let mut struck_body = Vec::new();
         struck_body.extend_from_slice(&msg.attacker_id.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Struck as i16, &struck_body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::Struck as i16,
+                    &struck_body,
+                ),
+            })
+            .await;
 
         // #1480：GM 无敌（C# GMNeverDie）——HP 钳到 ≥1，不进入死亡流程
         if self.state.gm_never_die {
@@ -1660,10 +1828,16 @@ impl Message<TakeDamage> for PlayerActor {
                 let mut hb = Vec::new();
                 hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
                 hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &hb),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                            &hb,
+                        ),
+                    })
+                    .await;
             }
             return false;
         }
@@ -1691,28 +1865,46 @@ impl Message<TakeDamage> for PlayerActor {
                     };
                     let mut dc_body = Vec::new();
                     if dc.write_body(&mut dc_body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: self.state.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DuraChanged as i16, &dc_body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: self.state.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::DuraChanged as i16,
+                                    &dc_body,
+                                ),
+                            })
+                            .await;
                     }
                     // S.HealthChanged 回满血
                     let mut hb = Vec::new();
                     hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
                     hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: self.state.session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &hb),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: self.state.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                                &hb,
+                            ),
+                        })
+                        .await;
                     self.send_equipment_changed();
-                    debug!("Player {} revived by ring (dura={})", self.state.name, ring_dura);
+                    debug!(
+                        "Player {} revived by ring (dura={})",
+                        self.state.name, ring_dura
+                    );
                     return false;
                 }
             }
             self.state.is_dead = true;
             // #1319：C# Die()——清 Buff（逐 buff 下发 S.RemoveBuff）+ 毒清空 + 灰名重置
             self.clear_death_state();
-            debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
+            debug!(
+                "Player {} died (attacker={})",
+                self.state.name, msg.attacker_id
+            );
 
             // 发送 S.Death 包给死亡玩家（C# Shared/ServerPackets.cs Death: [Location Point][Direction u8]）
             // 之前误发空 body，客户端 read_body 解析失败 → 不进入死亡状态（#55 实测发现）
@@ -1720,10 +1912,16 @@ impl Message<TakeDamage> for PlayerActor {
             death_body.extend_from_slice(&self.state.x.to_le_bytes());
             death_body.extend_from_slice(&self.state.y.to_le_bytes());
             death_body.push(self.state.direction);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &death_body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::Death as i16,
+                        &death_body,
+                    ),
+                })
+                .await;
             // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
 
             return true;
@@ -1734,10 +1932,16 @@ impl Message<TakeDamage> for PlayerActor {
             let mut health_body = Vec::new();
             health_body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             health_body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &health_body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                        &health_body,
+                    ),
+                })
+                .await;
         }
         false
     }
@@ -1782,11 +1986,15 @@ impl Message<AddExperience> for PlayerActor {
         };
         // 行会 Buff 经验加成（C# GuildBuffInfo.BuffExpRate → Stat.ExpRatePercent）
         let guild_buff_bonus = self.state.guild_buff_exp_percent;
-        let amount = (base as f64 * self.state.exp_multiplier * self.state.exp_rate * rested_mul
+        let amount = (base as f64
+            * self.state.exp_multiplier
+            * self.state.exp_rate
+            * rested_mul
             * (1.0 + lover_bonus as f64 / 100.0)
             * (1.0 + mentee_bonus as f64 / 100.0)
             * (1.0 + newbie_bonus as f64 / 100.0)
-            * (1.0 + guild_buff_bonus as f64 / 100.0)).round() as i64;
+            * (1.0 + guild_buff_bonus as f64 / 100.0))
+            .round() as i64;
         self.state.experience += amount;
 
         // C# GainExp：徒弟经验积累 MenteeEXP += amount * Settings.MenteeExpBank(1) / 100
@@ -1799,24 +2007,38 @@ impl Message<AddExperience> for PlayerActor {
 
         // C# GainExp：行会获得经验（MyGuild.GainExp；新手行会由 WorldActor 侧过滤）
         if self.state.guild_name.is_some() {
-            let _ = self.world_ref.tell(crate::actors::world::GuildExpEarned {
-                session_id: self.state.session_id,
-                amount,
-            }).try_send();
+            let _ = self
+                .world_ref
+                .tell(crate::actors::world::GuildExpEarned {
+                    session_id: self.state.session_id,
+                    amount,
+                })
+                .try_send();
         }
 
         debug!(
             "Player {} gained {} exp (base={} x{:.1}) (total={}/{})",
-            self.state.name, amount, base, self.state.exp_multiplier, self.state.experience, self.state.max_experience
+            self.state.name,
+            amount,
+            base,
+            self.state.exp_multiplier,
+            self.state.experience,
+            self.state.max_experience
         );
 
         // 发送 GainExperience 给客户端
         let mut body = Vec::new();
         body.extend_from_slice(&(amount as u32).to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainExperience as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::GainExperience as i16,
+                    &body,
+                ),
+            })
+            .await;
 
         // 检查升级（用 SharedRust BaseStats 公式计算属性，对齐 C# RefreshLevelStats）
         const MAX_LEVEL: u16 = 200;
@@ -1824,7 +2046,8 @@ impl Message<AddExperience> for PlayerActor {
             self.state.experience -= self.state.max_experience;
             self.state.level += 1;
             // #283：通知 WorldActor 广播 ObjectLeveled 给同图其他玩家
-            let _ = self.world_ref
+            let _ = self
+                .world_ref
                 .tell(crate::actors::world::PlayerLeveled {
                     session_id: self.state.session_id,
                     object_id: self.state.object_id,
@@ -1838,8 +2061,14 @@ impl Message<AddExperience> for PlayerActor {
                 let val = bs.calculate(self.state.class, self.state.level as i32);
                 use mir2_shared::enums::Stat;
                 match bs.stat {
-                    Stat::HP => { self.state.max_hp = val; self.state.hp = val; }
-                    Stat::MP => { self.state.max_mp = val; self.state.mp = val; }
+                    Stat::HP => {
+                        self.state.max_hp = val;
+                        self.state.hp = val;
+                    }
+                    Stat::MP => {
+                        self.state.max_mp = val;
+                        self.state.mp = val;
+                    }
                     Stat::MinDC => self.state.min_attack = val,
                     Stat::MaxDC => self.state.max_attack = val,
                     Stat::MinMC => self.state.min_mc = val,
@@ -1847,7 +2076,10 @@ impl Message<AddExperience> for PlayerActor {
                     Stat::MinSC => self.state.min_sc = val,
                     Stat::MaxSC => self.state.max_sc = val,
                     Stat::MinAC => self.state.min_ac = val,
-                    Stat::MaxAC => { self.state.max_ac = val; self.state.defence = val; }
+                    Stat::MaxAC => {
+                        self.state.max_ac = val;
+                        self.state.defence = val;
+                    }
                     Stat::MinMAC => self.state.min_mac = val,
                     Stat::MaxMAC => self.state.max_mac = val,
                     Stat::Agility => self.state.agility = val,
@@ -1866,21 +2098,35 @@ impl Message<AddExperience> for PlayerActor {
                 0 // 超出经验表：不再升级（C# 语义）
             };
 
-            info!("Player {} leveled up to {}! (hp={} mp={} atk={}-{} mc={}-{} sc={}-{})",
-                  self.state.name, self.state.level, self.state.max_hp, self.state.max_mp,
-                  self.state.min_attack, self.state.max_attack,
-                  self.state.min_mc, self.state.max_mc,
-                  self.state.min_sc, self.state.max_sc);
+            info!(
+                "Player {} leveled up to {}! (hp={} mp={} atk={}-{} mc={}-{} sc={}-{})",
+                self.state.name,
+                self.state.level,
+                self.state.max_hp,
+                self.state.max_mp,
+                self.state.min_attack,
+                self.state.max_attack,
+                self.state.min_mc,
+                self.state.max_mc,
+                self.state.min_sc,
+                self.state.max_sc
+            );
 
             // 发送 LevelChanged
             let mut lv_body = Vec::new();
             lv_body.extend_from_slice(&self.state.level.to_le_bytes());
             lv_body.extend_from_slice(&self.state.experience.to_le_bytes());
             lv_body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LevelChanged as i16, &lv_body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::LevelChanged as i16,
+                        &lv_body,
+                    ),
+                })
+                .await;
         }
         amount
     }
@@ -1913,10 +2159,16 @@ impl Message<DeductExperience> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.experience.to_le_bytes());
         body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainExperience as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::GainExperience as i16,
+                    &body,
+                ),
+            })
+            .await;
 
         deducted
     }
@@ -1930,11 +2182,7 @@ pub struct Heal {
 impl Message<Heal> for PlayerActor {
     type Reply = i32; // 实际回复量
 
-    async fn handle(
-        &mut self,
-        msg: Heal,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
+    async fn handle(&mut self, msg: Heal, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         if self.state.is_dead || msg.amount <= 0 {
             return 0;
         }
@@ -1946,12 +2194,21 @@ impl Message<Heal> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                    &body,
+                ),
+            })
+            .await;
 
-        debug!("Player {} healed for {} HP ({} -> {})", self.state.name, healed, before, self.state.hp);
+        debug!(
+            "Player {} healed for {} HP ({} -> {})",
+            self.state.name, healed, before, self.state.hp
+        );
         healed
     }
 }
@@ -1972,8 +2229,16 @@ impl Message<AddPotionPool> for PlayerActor {
     ) -> Self::Reply {
         // #1667：C# PotHealthAmount/PotManaAmount = Min(ushort.MaxValue, ...)（PlayerObject.cs:5832）
         const POT_POOL_CAP: u32 = 65535;
-        self.state.pot_hp_amount = self.state.pot_hp_amount.saturating_add(msg.hp).min(POT_POOL_CAP);
-        self.state.pot_mp_amount = self.state.pot_mp_amount.saturating_add(msg.mp).min(POT_POOL_CAP);
+        self.state.pot_hp_amount = self
+            .state
+            .pot_hp_amount
+            .saturating_add(msg.hp)
+            .min(POT_POOL_CAP);
+        self.state.pot_mp_amount = self
+            .state
+            .pot_mp_amount
+            .saturating_add(msg.mp)
+            .min(POT_POOL_CAP);
     }
 }
 
@@ -2035,11 +2300,7 @@ pub struct Revive;
 impl Message<Revive> for PlayerActor {
     type Reply = ();
 
-    async fn handle(
-        &mut self,
-        _msg: Revive,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
+    async fn handle(&mut self, _msg: Revive, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         if !self.state.is_dead {
             return;
         }
@@ -2051,18 +2312,30 @@ impl Message<Revive> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
         body.extend_from_slice(&self.state.mp.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                    &body,
+                ),
+            })
+            .await;
 
         // 发送 S.Revived（空 body）：客户端靠它清除死亡状态恢复输入（#55 实测缺失会导致卡死）
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
+            })
+            .await;
 
-        debug!("Player {} revived (hp={} mp={})", self.state.name, self.state.hp, self.state.mp);
+        debug!(
+            "Player {} revived (hp={} mp={})",
+            self.state.name, self.state.hp, self.state.mp
+        );
     }
 }
 
@@ -2093,7 +2366,11 @@ pub struct SetSpecialShotArmed {
 impl Message<SetSpecialShotArmed> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetSpecialShotArmed, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetSpecialShotArmed,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.special_shot_armed = msg.armed.min(2);
     }
 }
@@ -2106,7 +2383,11 @@ pub struct SetGmNeverDie {
 impl Message<SetGmNeverDie> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetGmNeverDie, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetGmNeverDie,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.gm_never_die = msg.enabled;
     }
 }
@@ -2140,11 +2421,7 @@ pub struct SetBind {
 impl Message<SetBind> for PlayerActor {
     type Reply = ();
 
-    async fn handle(
-        &mut self,
-        msg: SetBind,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
+    async fn handle(&mut self, msg: SetBind, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.state.bind_map_index = msg.map_index;
         self.state.bind_x = msg.x;
         self.state.bind_y = msg.y;
@@ -2186,10 +2463,16 @@ impl Message<ApplyBuff> for PlayerActor {
         let mut body = Vec::new();
         body.push(buff_tag(&msg.buff.buff_type));
         body.extend_from_slice(&msg.buff.remaining_ticks.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AddBuff as i16, &body),
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::AddBuff as i16,
+                    &body,
+                ),
+            })
+            .try_send();
     }
 }
 
@@ -2231,7 +2514,10 @@ impl Message<ApplyDamageReduction> for PlayerActor {
     ) -> Self::Reply {
         self.state.damage_reduction_percent = msg.percent;
         let buff = crate::combat::buff::BuffInstance::new(
-            crate::combat::buff::BuffType::DamageReduction { percent: msg.percent, kind: msg.kind },
+            crate::combat::buff::BuffType::DamageReduction {
+                percent: msg.percent,
+                kind: msg.kind,
+            },
             msg.duration_ticks,
             1,
         );
@@ -2240,10 +2526,16 @@ impl Message<ApplyDamageReduction> for PlayerActor {
 }
 
 /// C# ProcessBuffs：减伤 buff 过期对应的 Down 特效（Other/EnergyShield 无）
-pub(crate) fn shield_down_effect(kind: crate::combat::buff::ShieldKind) -> Option<mir2_shared::enums::SpellEffect> {
+pub(crate) fn shield_down_effect(
+    kind: crate::combat::buff::ShieldKind,
+) -> Option<mir2_shared::enums::SpellEffect> {
     match kind {
-        crate::combat::buff::ShieldKind::MagicShield => Some(mir2_shared::enums::SpellEffect::MagicShieldDown),
-        crate::combat::buff::ShieldKind::ElementalBarrier => Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown),
+        crate::combat::buff::ShieldKind::MagicShield => {
+            Some(mir2_shared::enums::SpellEffect::MagicShieldDown)
+        }
+        crate::combat::buff::ShieldKind::ElementalBarrier => {
+            Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown)
+        }
         crate::combat::buff::ShieldKind::Other => None,
     }
 }
@@ -2254,7 +2546,8 @@ pub(crate) fn buff_removed_on_death(buff_type: &crate::combat::buff::BuffType) -
         crate::combat::buff::BuffType::Curse { .. } => true,
         crate::combat::buff::BuffType::DamageReduction { kind, .. } => matches!(
             kind,
-            crate::combat::buff::ShieldKind::MagicShield | crate::combat::buff::ShieldKind::ElementalBarrier
+            crate::combat::buff::ShieldKind::MagicShield
+                | crate::combat::buff::ShieldKind::ElementalBarrier
         ),
         crate::combat::buff::BuffType::Stun
         | crate::combat::buff::BuffType::Frozen
@@ -2276,18 +2569,29 @@ impl Message<PurifyPoisons> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         // #1906：C# PowerBead Effect==1 净化 = 移除全部 Debuff Buff + 清空毒列表
-        let tags: Vec<u8> = self.state.buffs.iter()
+        let tags: Vec<u8> = self
+            .state
+            .buffs
+            .iter()
             .filter(|b| crate::combat::buff::is_debuff(&b.buff_type))
             .map(|b| buff_tag(&b.buff_type))
             .collect();
-        self.state.buffs.retain(|b| !crate::combat::buff::is_debuff(&b.buff_type));
+        self.state
+            .buffs
+            .retain(|b| !crate::combat::buff::is_debuff(&b.buff_type));
         for tag in tags {
             let mut body = Vec::new();
             body.push(tag);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
         }
         self.state.poison_list.clear();
     }
@@ -2310,10 +2614,16 @@ impl Message<RemoveBuff> for PlayerActor {
         // M44：推送 RemoveBuff（[tag u8]）
         let mut body = Vec::new();
         body.push(buff_tag(&msg.buff_type));
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                    &body,
+                ),
+            })
+            .try_send();
     }
 }
 
@@ -2324,7 +2634,10 @@ impl Message<ToggleTransform> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, _msg: ToggleTransform, _ctx: &mut Context<Self, Self::Reply>) {
-        let Some(buff) = self.state.buffs.iter_mut()
+        let Some(buff) = self
+            .state
+            .buffs
+            .iter_mut()
             .find(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Transform { .. }))
         else {
             return; // C#：无 Transform buff 时 no-op
@@ -2339,16 +2652,26 @@ impl Message<ToggleTransform> for PlayerActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::PauseBuff as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::PauseBuff as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
         }
         // C#：RefreshStats 后提示 TransformDisabled / TransformEnabled
         crate::actors::world::send_system_message(
             &self.gate_ref,
             self.state.session_id,
-            if paused { "变身效果已暂停" } else { "变身效果已恢复" },
+            if paused {
+                "变身效果已暂停"
+            } else {
+                "变身效果已恢复"
+            },
         );
     }
 }
@@ -2361,13 +2684,21 @@ pub struct RemoveAwakeningByItemType {
 impl Message<RemoveAwakeningByItemType> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: RemoveAwakeningByItemType, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: RemoveAwakeningByItemType,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let mut updated: Vec<(mir2_shared::data::item::UserItem, usize)> = Vec::new();
         let mut failed_count = 0usize;
         for eq in self.state.inventory.equipment.iter_mut() {
             let Some(item) = eq else { continue };
-            let Some(info) = item.info.as_ref() else { continue };
-            if info.item_type != msg.item_type { continue; }
+            let Some(info) = item.info.as_ref() else {
+                continue;
+            };
+            if info.item_type != msg.item_type {
+                continue;
+            }
             // C# RemoveAwake：无等级返回 0 → 失败消息；有等级移除最后一级（清空后置 None）
             if item.awake.levels.is_empty() {
                 failed_count += 1;
@@ -2385,7 +2716,11 @@ impl Message<RemoveAwakeningByItemType> for PlayerActor {
             );
         }
         for _ in 0..failed_count {
-            crate::actors::world::send_system_message(&self.gate_ref, self.state.session_id, "该物品没有觉醒等级可移除");
+            crate::actors::world::send_system_message(
+                &self.gate_ref,
+                self.state.session_id,
+                "该物品没有觉醒等级可移除",
+            );
         }
     }
 }
@@ -2409,16 +2744,31 @@ pub struct ClearAllBuffs;
 impl Message<ClearAllBuffs> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, _msg: ClearAllBuffs, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let tags: Vec<u8> = self.state.buffs.iter().map(|b| buff_tag(&b.buff_type)).collect();
+    async fn handle(
+        &mut self,
+        _msg: ClearAllBuffs,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let tags: Vec<u8> = self
+            .state
+            .buffs
+            .iter()
+            .map(|b| buff_tag(&b.buff_type))
+            .collect();
         self.state.buffs.clear();
         for tag in tags {
             let mut body = Vec::new();
             body.push(tag);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
         }
     }
 }
@@ -2440,9 +2790,17 @@ impl Message<TickBuff> for PlayerActor {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         // C# HumanObject.Process（:259）：静止超过 CellTime+700ms 后 _stepCounter 清零（跑步热身失效）
-        reset_step_counter_if_idle(&mut self.state.step_counter, self.state.cell_time_ms, now_ms);
+        reset_step_counter_if_idle(
+            &mut self.state.step_counter,
+            self.state.cell_time_ms,
+            now_ms,
+        );
         // C# HumanObject.Process（:288-292）：RunTime 每 1500ms 回充 1 点 _runCounter（带 idle catch-up）
-        recharge_run_counter(&mut self.state.run_counter, &mut self.state.run_time_ms, now_ms);
+        recharge_run_counter(
+            &mut self.state.run_counter,
+            &mut self.state.run_time_ms,
+            now_ms,
+        );
         if now_ms >= self.state.mount_loyalty_increase_time {
             self.state.mount_loyalty_increase_time = now_ms + 60_000;
             let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
@@ -2458,10 +2816,16 @@ impl Message<TickBuff> for PlayerActor {
                     };
                     let mut body = Vec::new();
                     if ir.write_body(&mut body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: self.state.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemRepaired as i16, &body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: self.state.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ItemRepaired as i16,
+                                    &body,
+                                ),
+                            })
+                            .await;
                     }
                 }
             }
@@ -2483,42 +2847,62 @@ impl Message<TickBuff> for PlayerActor {
             self.state.mp = (self.state.mp + total_mp).clamp(0, self.state.effective_max_mp());
         }
         // 收集过期 buff 的 tag（C# RemoveBuff 客户端通知，格式与 M44 AddBuff 一致：[tag u8]）
-        let expired_tags: Vec<u8> = self.state.buffs.iter()
+        let expired_tags: Vec<u8> = self
+            .state
+            .buffs
+            .iter()
             .filter(|b| b.remaining_ticks == 0)
             .map(|b| buff_tag(&b.buff_type))
             .collect();
         // #2106：C# ProcessBuffs——MagicShield/ElementalBarrier 过期广播 Down 特效
-        let shield_downs: Vec<mir2_shared::enums::SpellEffect> = self.state.buffs.iter()
+        let shield_downs: Vec<mir2_shared::enums::SpellEffect> = self
+            .state
+            .buffs
+            .iter()
             .filter(|b| b.remaining_ticks == 0)
             .filter_map(|b| match b.buff_type {
-                crate::combat::buff::BuffType::DamageReduction { kind, .. } => shield_down_effect(kind),
+                crate::combat::buff::BuffType::DamageReduction { kind, .. } => {
+                    shield_down_effect(kind)
+                }
                 _ => None,
             })
             .collect();
         // 移除过期 buff
-        crate::combat::buff::expire_buffs(&mut self.state.buffs,
-        );
+        crate::combat::buff::expire_buffs(&mut self.state.buffs);
         for tag in expired_tags {
             let mut body = Vec::new();
             body.push(tag);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
         }
         // #2106：C# ProcessBuffs CurrentMap.Broadcast——Down 特效给同图玩家
         for effect in shield_downs {
-            let _ = self.world_ref.tell(crate::actors::world::BroadcastObjectEffect {
-                object_id: self.state.object_id,
-                effect,
-                map_index: self.state.map_index,
-            }).try_send();
+            let _ = self
+                .world_ref
+                .tell(crate::actors::world::BroadcastObjectEffect {
+                    object_id: self.state.object_id,
+                    effect,
+                    map_index: self.state.map_index,
+                })
+                .try_send();
         }
 
         // DamageReduction buff 过期后重置 damage_reduction_percent
         // （MagicShield/ElementalBarrier/ProtectionField 的减伤不应永久生效）
-        let has_dr = self.state.buffs.iter().any(|b|
-            matches!(b.buff_type, crate::combat::buff::BuffType::DamageReduction { .. }));
+        let has_dr = self.state.buffs.iter().any(|b| {
+            matches!(
+                b.buff_type,
+                crate::combat::buff::BuffType::DamageReduction { .. }
+            )
+        });
         if !has_dr {
             self.state.damage_reduction_percent = 0;
         }
@@ -2543,10 +2927,16 @@ impl Message<TickBuff> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&self.state.hp.to_le_bytes());
             body.extend_from_slice(&self.state.mp.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 }
@@ -2650,8 +3040,15 @@ impl Message<SetStatBonuses> for PlayerActor {
         let d_min_sc = msg.bonus_min_sc - self.state.bonus_min_sc;
         let d_max_sc = msg.bonus_max_sc - self.state.bonus_max_sc;
 
-        let changed = d_min != 0 || d_max != 0 || d_def != 0 || d_hp != 0 || d_mp != 0
-            || d_min_mc != 0 || d_max_mc != 0 || d_min_sc != 0 || d_max_sc != 0
+        let changed = d_min != 0
+            || d_max != 0
+            || d_def != 0
+            || d_hp != 0
+            || d_mp != 0
+            || d_min_mc != 0
+            || d_max_mc != 0
+            || d_min_sc != 0
+            || d_max_sc != 0
             || msg.bonus_min_ac != self.state.bonus_min_ac
             || msg.bonus_max_ac != self.state.bonus_max_ac
             || msg.bonus_min_mac != self.state.bonus_min_mac
@@ -2802,24 +3199,26 @@ impl Message<DamageEquipment> for PlayerActor {
         msg: DamageEquipment,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let (changed, broke) =
-            if let Some(item) = self.state.inventory.equipment[msg.slot as usize].as_mut() {
-                // C# DamageItem（HumanObject.cs:7852）：婚戒（RingL 且已婚绑定）不受耐久损耗
-                if msg.slot == crate::actors::inventory::EquipmentSlot::RingL && item.wedding_ring != 0 {
-                    (false, false)
-                } else if item.current_dura == 0 {
-                    // #1246：C# DamageItem——CurrentDura == 0 已破损直接返回（不再扣/不再发 DuraChanged）。
-                    // 但 Torch 仍需返回 broke 供 tick 路径卸下删除（C# Process 对 0 耐久火把同样移除）。
-                    (
-                        false,
-                        msg.slot == crate::actors::inventory::EquipmentSlot::Torch,
-                    )
-                } else {
-                    apply_dura_damage(item, msg.amount)
-                }
-            } else {
+        let (changed, broke) = if let Some(item) =
+            self.state.inventory.equipment[msg.slot as usize].as_mut()
+        {
+            // C# DamageItem（HumanObject.cs:7852）：婚戒（RingL 且已婚绑定）不受耐久损耗
+            if msg.slot == crate::actors::inventory::EquipmentSlot::RingL && item.wedding_ring != 0
+            {
                 (false, false)
-            };
+            } else if item.current_dura == 0 {
+                // #1246：C# DamageItem——CurrentDura == 0 已破损直接返回（不再扣/不再发 DuraChanged）。
+                // 但 Torch 仍需返回 broke 供 tick 路径卸下删除（C# Process 对 0 耐久火把同样移除）。
+                (
+                    false,
+                    msg.slot == crate::actors::inventory::EquipmentSlot::Torch,
+                )
+            } else {
+                apply_dura_damage(item, msg.amount)
+            }
+        } else {
+            (false, false)
+        };
 
         // C#：装备耐久变化 → S.DuraChanged（HumanObject Process 每 tick 冲刷 DuraChanged 标志）
         if changed {
@@ -2830,10 +3229,16 @@ impl Message<DamageEquipment> for PlayerActor {
                 };
                 let mut body = Vec::new();
                 if dc.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: self.state.session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DuraChanged as i16, &body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: self.state.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::DuraChanged as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
             }
         }
@@ -2884,7 +3289,9 @@ impl Message<RepairAllEquipment> for PlayerActor {
         for slot_idx in 0..crate::actors::inventory::EquipmentSlot::COUNT {
             if let Some(ref mut item) = self.state.inventory.equipment[slot_idx] {
                 // #926：C# BindMode.DontRepair(0x20)：不可修理
-                let dont_repair = item.info.as_ref()
+                let dont_repair = item
+                    .info
+                    .as_ref()
                     .map(|i| i.bind.contains(mir2_shared::enums::BindMode::DONT_REPAIR))
                     .unwrap_or(false);
                 if dont_repair {
@@ -2942,7 +3349,11 @@ pub struct SetItemSealedInfo {
 impl Message<SetItemSealedInfo> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetItemSealedInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetItemSealedInfo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         for slot in self.state.inventory.equipment.iter_mut().flatten() {
             if slot.unique_id == msg.unique_id {
                 slot.sealed_info = msg.sealed_info.clone();
@@ -2966,7 +3377,11 @@ pub struct ClearBackpack;
 impl Message<ClearBackpack> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, _msg: ClearBackpack, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: ClearBackpack,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let mut removed: Vec<(u64, u32)> = Vec::new();
         for slot in self.state.inventory.backpack.iter_mut() {
             if let Some(s) = slot.take() {
@@ -2974,13 +3389,22 @@ impl Message<ClearBackpack> for PlayerActor {
             }
         }
         for (uid, count) in removed {
-            let pkt = mir2_shared::packets::server::experience::DeleteItem { unique_id: uid, count };
+            let pkt = mir2_shared::packets::server::experience::DeleteItem {
+                unique_id: uid,
+                count,
+            };
             let mut body = Vec::new();
             if pkt.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteItem as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::DeleteItem as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
         }
         self.send_inventory_changed();
@@ -2997,7 +3421,11 @@ pub struct ResizeHeroInventory;
 impl Message<ResizeHeroInventory> for PlayerActor {
     type Reply = usize;
 
-    async fn handle(&mut self, _msg: ResizeHeroInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: ResizeHeroInventory,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let len = self.state.hero_inventory.backpack.len();
         if len >= 42 {
             return len;
@@ -3005,13 +3433,21 @@ impl Message<ResizeHeroInventory> for PlayerActor {
         let new_len = (len + 8).min(42);
         self.state.hero_inventory.backpack.resize(new_len, None);
         // C# HeroObject.cs:490——S.ResizeInventory（客户端英雄背包刷新）
-        let pkt = mir2_shared::packets::server::ui_events::ResizeInventory { size: new_len as i32 };
+        let pkt = mir2_shared::packets::server::ui_events::ResizeInventory {
+            size: new_len as i32,
+        };
         let mut body = Vec::new();
         if pkt.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeInventory as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ResizeInventory as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
         debug!("Hero inventory resized to {}", new_len);
         new_len
@@ -3028,7 +3464,11 @@ pub struct PlaceItemAtSlot {
 impl Message<PlaceItemAtSlot> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: PlaceItemAtSlot, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: PlaceItemAtSlot,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let ok = self.state.inventory.place_item_at(msg.slot, msg.item);
         if ok {
             self.send_inventory_changed();
@@ -3044,18 +3484,32 @@ pub struct AddItemToInventory {
 impl Message<AddItemToInventory> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: AddItemToInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: AddItemToInventory,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         // 金币（item_index=0）：直接加 gold，不占背包（C# 金币独立于背包）
         if msg.item.item_index == 0 {
-            self.state.inventory.gold = self.state.inventory.gold.saturating_add(msg.item.count as u64);
+            self.state.inventory.gold = self
+                .state
+                .inventory
+                .gold
+                .saturating_add(msg.item.count as u64);
             // #1588：拾取金币应发 S.GainedGold（客户端 Gold += Gold）；
             // 原先错发 LoseGold 会让客户端先扣余额再靠 UserInformation 回刷。
             let mut body = Vec::new();
             body.extend_from_slice(&(msg.item.count as u32).to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedGold as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::GainedGold as i16,
+                        &body,
+                    ),
+                })
+                .await;
             return true;
         }
         // C# GainItem：Enqueue(new S.GainedItem { Item = clonedItem })——克隆原物品（AddItem 会合并数量）
@@ -3066,12 +3520,18 @@ impl Message<AddItemToInventory> for PlayerActor {
                 let packet = mir2_shared::packets::server::drops::GainedItem { item: gained_item };
                 let mut body = Vec::new();
                 if mir2_shared::packets::base::serialize_packet(
-                    &mut std::io::Cursor::new(&mut body), &packet,
-                ).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: self.state.session_id,
-                        data: body,
-                    }).await;
+                    &mut std::io::Cursor::new(&mut body),
+                    &packet,
+                )
+                .is_ok()
+                {
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: self.state.session_id,
+                            data: body,
+                        })
+                        .await;
                 }
                 // 发送 ItemChanged 通知客户端更新背包
                 self.send_inventory_changed();
@@ -3091,7 +3551,11 @@ pub struct InventoryMoveItem {
 impl Message<InventoryMoveItem> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: InventoryMoveItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: InventoryMoveItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let success = self.state.inventory.move_item(msg.from_grid, msg.to_grid);
         if success {
             self.send_inventory_changed();
@@ -3108,7 +3572,11 @@ pub struct GetItemInfo {
 impl Message<GetItemInfo> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: GetItemInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetItemInfo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.get_item(msg.unique_id).cloned()
     }
 }
@@ -3121,7 +3589,11 @@ pub struct GetItemInfoByGrid {
 impl Message<GetItemInfoByGrid> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: GetItemInfoByGrid, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetItemInfoByGrid,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.get_item_by_grid(msg.grid).cloned()
     }
 }
@@ -3134,7 +3606,11 @@ pub struct ConsumeItem {
 impl Message<ConsumeItem> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ConsumeItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ConsumeItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let removed = self.state.inventory.remove_item_by_uid(msg.unique_id);
         if removed.is_some() {
             self.send_inventory_changed();
@@ -3246,7 +3722,11 @@ pub struct LearnHeroMagicWithLevel {
 impl Message<LearnHeroMagicWithLevel> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: LearnHeroMagicWithLevel, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: LearnHeroMagicWithLevel,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if self.state.hero_magics.iter().any(|m| m.spell == msg.spell) {
             return false;
         }
@@ -3265,25 +3745,41 @@ pub struct RemoveHeroMagicWithId {
 impl Message<RemoveHeroMagicWithId> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RemoveHeroMagicWithId, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let Some(idx) = self.state.hero_magics.iter().position(|m| m.spell == msg.spell) else {
+    async fn handle(
+        &mut self,
+        msg: RemoveHeroMagicWithId,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let Some(idx) = self
+            .state
+            .hero_magics
+            .iter()
+            .position(|m| m.spell == msg.spell)
+        else {
             return false;
         };
         self.state.hero_magics.remove(idx);
         if let Ok(spell) = mir2_shared::enums::Spell::try_from(msg.spell as u8) {
             let pkt = mir2_shared::packets::server::magic::RemoveMagic { spell, hero: true };
             let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &pkt).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: body,
-                }).try_send();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &pkt,
+            )
+            .is_ok()
+            {
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: body,
+                    })
+                    .try_send();
             }
         }
         true
     }
 }
-
 
 /// 装备物品
 pub struct InventoryEquipItem {
@@ -3294,7 +3790,11 @@ pub struct InventoryEquipItem {
 impl Message<InventoryEquipItem> for PlayerActor {
     type Reply = Option<(Option<mir2_shared::data::item::UserItem>, u64)>;
 
-    async fn handle(&mut self, msg: InventoryEquipItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: InventoryEquipItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let result = self.state.inventory.equip_item(msg.grid, msg.slot);
         if result.is_some() {
             self.send_inventory_changed();
@@ -3313,8 +3813,15 @@ pub struct StorageEquipItem {
 impl Message<StorageEquipItem> for PlayerActor {
     type Reply = Option<(Option<mir2_shared::data::item::UserItem>, u64)>;
 
-    async fn handle(&mut self, msg: StorageEquipItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let result = self.state.inventory.equip_from_storage(msg.storage_idx, msg.slot);
+    async fn handle(
+        &mut self,
+        msg: StorageEquipItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let result = self
+            .state
+            .inventory
+            .equip_from_storage(msg.storage_idx, msg.slot);
         if result.is_some() {
             self.send_inventory_changed();
             self.send_equipment_changed();
@@ -3330,7 +3837,11 @@ pub struct GetEquipmentInfo {
 impl Message<GetEquipmentInfo> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: GetEquipmentInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetEquipmentInfo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.get_equipment(msg.slot).cloned()
     }
 }
@@ -3343,7 +3854,11 @@ pub struct InventoryUnequipItem {
 impl Message<InventoryUnequipItem> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: InventoryUnequipItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: InventoryUnequipItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let result = self.state.inventory.unequip_item(msg.slot);
         if result.is_some() {
             self.send_inventory_changed();
@@ -3365,10 +3880,20 @@ pub struct FeedMount {
 impl Message<FeedMount> for PlayerActor {
     type Reply = Option<(u64, u16, u16)>;
 
-    async fn handle(&mut self, msg: FeedMount, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: FeedMount,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let result = {
             let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
-            let Some(m) = self.state.inventory.equipment.get_mut(slot).and_then(|s| s.as_mut()) else {
+            let Some(m) = self
+                .state
+                .inventory
+                .equipment
+                .get_mut(slot)
+                .and_then(|s| s.as_mut())
+            else {
                 return None;
             };
             if m.current_dura >= m.max_dura {
@@ -3380,7 +3905,8 @@ impl Message<FeedMount> for PlayerActor {
                 m.max_dura = ((m.max_dura as u32).saturating_sub(reduce)).max(0) as u16;
             }
             // C#：CurrentDura += item.CurrentDura（cap MaxDura）
-            m.current_dura = (m.current_dura as u32 + msg.amount as u32).min(m.max_dura as u32) as u16;
+            m.current_dura =
+                (m.current_dura as u32 + msg.amount as u32).min(m.max_dura as u32) as u16;
             m.dura_changed = true;
             Some((m.unique_id, m.max_dura, m.current_dura))
         };
@@ -3397,9 +3923,19 @@ pub struct AddWeaponLuck {
 impl Message<AddWeaponLuck> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: AddWeaponLuck, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: AddWeaponLuck,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let slot = crate::actors::inventory::EquipmentSlot::Weapon as usize;
-        let Some(w) = self.state.inventory.equipment.get_mut(slot).and_then(|s| s.as_mut()) else {
+        let Some(w) = self
+            .state
+            .inventory
+            .equipment
+            .get_mut(slot)
+            .and_then(|s| s.as_mut())
+        else {
             return false;
         };
         use mir2_shared::enums::Stat;
@@ -3423,10 +3959,20 @@ pub struct RepairWeapon {
 impl Message<RepairWeapon> for PlayerActor {
     type Reply = Option<(u64, u16, u16)>;
 
-    async fn handle(&mut self, msg: RepairWeapon, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RepairWeapon,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let result = {
             let slot = crate::actors::inventory::EquipmentSlot::Weapon as usize;
-            let Some(w) = self.state.inventory.equipment.get_mut(slot).and_then(|s| s.as_mut()) else {
+            let Some(w) = self
+                .state
+                .inventory
+                .equipment
+                .get_mut(slot)
+                .and_then(|s| s.as_mut())
+            else {
                 return None;
             };
             if w.max_dura == 0 || w.current_dura >= w.max_dura {
@@ -3445,7 +3991,11 @@ impl Message<RepairWeapon> for PlayerActor {
             // #967：C# 修理油后 S.RefreshItem 即时刷新客户端武器耐久显示（先快照结束借用）
             let weapon_snapshot = w.clone();
             self.send_refresh_item(&weapon_snapshot);
-            Some((weapon_snapshot.unique_id, weapon_snapshot.max_dura, weapon_snapshot.current_dura))
+            Some((
+                weapon_snapshot.unique_id,
+                weapon_snapshot.max_dura,
+                weapon_snapshot.current_dura,
+            ))
         };
         self.send_equipment_changed();
         result
@@ -3460,7 +4010,11 @@ pub struct SetItemIdentified {
 impl Message<SetItemIdentified> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: SetItemIdentified, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetItemIdentified,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         for s in self.state.inventory.backpack.iter_mut().flatten() {
             if s.item.unique_id == msg.unique_id {
                 if !s.item.identified {
@@ -3488,7 +4042,11 @@ pub struct RemoveItemFromInventoryCount {
 impl Message<RemoveItemFromInventoryCount> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: RemoveItemFromInventoryCount, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RemoveItemFromInventoryCount,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let backpack = &mut self.state.inventory.backpack;
         for slot in backpack.iter_mut() {
             let Some(s) = slot else { continue };
@@ -3515,7 +4073,6 @@ impl Message<RemoveItemFromInventoryCount> for PlayerActor {
     }
 }
 
-
 /// 客户端删除物品（C# C.DeleteItem）：按 uid 扣减背包/英雄背包数量，发 S.DeleteItem 确认
 pub struct DeleteItemFromInventory {
     pub unique_id: u64,
@@ -3526,8 +4083,16 @@ pub struct DeleteItemFromInventory {
 impl Message<DeleteItemFromInventory> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: DeleteItemFromInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let backpack = if msg.hero { &mut self.state.hero_inventory.backpack } else { &mut self.state.inventory.backpack };
+    async fn handle(
+        &mut self,
+        msg: DeleteItemFromInventory,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let backpack = if msg.hero {
+            &mut self.state.hero_inventory.backpack
+        } else {
+            &mut self.state.inventory.backpack
+        };
         let mut removed = 0u16;
         for slot in backpack.iter_mut() {
             if let Some(s) = slot {
@@ -3551,10 +4116,16 @@ impl Message<DeleteItemFromInventory> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.unique_id.to_le_bytes());
             body.extend_from_slice(&removed.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteItem as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::DeleteItem as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
             return true;
         }
         false
@@ -3564,7 +4135,11 @@ impl Message<DeleteItemFromInventory> for PlayerActor {
 impl Message<RemoveItemFromInventory> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: RemoveItemFromInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RemoveItemFromInventory,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let item = self.state.inventory.remove_item_by_uid(msg.unique_id);
         if item.is_some() {
             self.send_inventory_changed();
@@ -3582,7 +4157,11 @@ pub struct InventoryMergeItem {
 impl Message<InventoryMergeItem> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: InventoryMergeItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: InventoryMergeItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let success = self.state.inventory.merge_item(msg.from_grid, msg.to_grid);
         if success {
             self.send_inventory_changed();
@@ -3600,8 +4179,15 @@ pub struct InventorySplitItem {
 impl Message<InventorySplitItem> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: InventorySplitItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let result = self.state.inventory.split_item_by_uid(msg.unique_id, msg.count);
+    async fn handle(
+        &mut self,
+        msg: InventorySplitItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let result = self
+            .state
+            .inventory
+            .split_item_by_uid(msg.unique_id, msg.count);
         if result.is_some() {
             self.send_inventory_changed();
         }
@@ -3618,8 +4204,15 @@ pub struct DropInventoryItem {
 impl Message<DropInventoryItem> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: DropInventoryItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let item = self.state.inventory.remove_item_by_uid_partial(msg.unique_id, msg.count);
+    async fn handle(
+        &mut self,
+        msg: DropInventoryItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let item = self
+            .state
+            .inventory
+            .remove_item_by_uid_partial(msg.unique_id, msg.count);
         if item.is_some() {
             self.send_inventory_changed();
         }
@@ -3636,8 +4229,15 @@ pub struct MergeInventoryItemByUid {
 impl Message<MergeInventoryItemByUid> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: MergeInventoryItemByUid, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let success = self.state.inventory.merge_item_by_uid(msg.from_uid, msg.to_uid);
+    async fn handle(
+        &mut self,
+        msg: MergeInventoryItemByUid,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let success = self
+            .state
+            .inventory
+            .merge_item_by_uid(msg.from_uid, msg.to_uid);
         if success {
             self.send_inventory_changed();
         }
@@ -3655,7 +4255,11 @@ pub struct RepairItem {
 impl Message<RepairItem> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RepairItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RepairItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let success = self.state.inventory.repair_item(msg.unique_id, msg.special);
         if success {
             self.send_inventory_changed();
@@ -3674,8 +4278,15 @@ pub struct HammerRepairItem {
 impl Message<HammerRepairItem> for PlayerActor {
     type Reply = Option<(u16, u16)>; // (max_dura, current_dura)
 
-    async fn handle(&mut self, msg: HammerRepairItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let result = self.state.inventory.hammer_repair_item(msg.unique_id, msg.penalty);
+    async fn handle(
+        &mut self,
+        msg: HammerRepairItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let result = self
+            .state
+            .inventory
+            .hammer_repair_item(msg.unique_id, msg.penalty);
         if result.is_some() {
             self.send_inventory_changed();
         }
@@ -3691,7 +4302,11 @@ pub struct ExpandItemSlots {
 impl Message<ExpandItemSlots> for PlayerActor {
     type Reply = Option<usize>;
 
-    async fn handle(&mut self, msg: ExpandItemSlots, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ExpandItemSlots,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let result = self.state.inventory.expand_item_slots(msg.unique_id);
         if result.is_some() {
             self.send_inventory_changed();
@@ -3712,7 +4327,11 @@ pub struct ApplyItemUpgrade {
 impl Message<ApplyItemUpgrade> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ApplyItemUpgrade, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ApplyItemUpgrade,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) else {
             return false;
         };
@@ -3735,7 +4354,11 @@ pub struct ResetItemAddedStats {
 impl Message<ResetItemAddedStats> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ResetItemAddedStats, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ResetItemAddedStats,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) {
             item.awake = Default::default();
             item.added_stats = Default::default();
@@ -3756,7 +4379,11 @@ pub struct SetItemAwake {
 impl Message<SetItemAwake> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: SetItemAwake, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetItemAwake,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) {
             item.awake = msg.awake;
             self.send_inventory_changed();
@@ -3777,8 +4404,15 @@ pub struct SocketGem {
 impl Message<SocketGem> for PlayerActor {
     type Reply = Option<(u64, u64)>; // (source_uid, target_uid)
 
-    async fn handle(&mut self, msg: SocketGem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let result = self.state.inventory.socket_gem_by_uid(msg.from_uid, msg.to_uid, msg.target_slot_count);
+    async fn handle(
+        &mut self,
+        msg: SocketGem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let result =
+            self.state
+                .inventory
+                .socket_gem_by_uid(msg.from_uid, msg.to_uid, msg.target_slot_count);
         if result.is_some() {
             self.send_inventory_changed();
         }
@@ -3794,7 +4428,11 @@ pub struct CountItemsByIndex {
 impl Message<CountItemsByIndex> for PlayerActor {
     type Reply = u16;
 
-    async fn handle(&mut self, msg: CountItemsByIndex, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: CountItemsByIndex,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.count_item_by_index(msg.item_index)
     }
 }
@@ -3808,8 +4446,15 @@ pub struct ConsumeItemsByIndex {
 impl Message<ConsumeItemsByIndex> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ConsumeItemsByIndex, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let success = self.state.inventory.remove_item_by_index(msg.item_index, msg.count);
+    async fn handle(
+        &mut self,
+        msg: ConsumeItemsByIndex,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let success = self
+            .state
+            .inventory
+            .remove_item_by_index(msg.item_index, msg.count);
         if success {
             self.send_inventory_changed();
         }
@@ -3827,13 +4472,19 @@ pub struct ConsumeAmuletForSummon {
 impl Message<ConsumeAmuletForSummon> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ConsumeAmuletForSummon, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ConsumeAmuletForSummon,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let removed = self.state.consume_amulet_for_summon(msg.amount);
         if removed {
             self.send_equipment_changed();
         } else {
             // 仍有剩余：下发 RefreshItem 即时刷新护身符数量
-            if let Some(item) = self.state.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref() {
+            if let Some(item) =
+                self.state.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref()
+            {
                 self.send_refresh_item(item);
             }
         }
@@ -3849,11 +4500,17 @@ pub struct ConsumePoisonAmuletForPlague {
 impl Message<ConsumePoisonAmuletForPlague> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ConsumePoisonAmuletForPlague, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ConsumePoisonAmuletForPlague,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let removed = self.state.consume_poison_amulet(msg.shape);
         if removed {
             self.send_equipment_changed();
-        } else if let Some(item) = self.state.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref() {
+        } else if let Some(item) =
+            self.state.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref()
+        {
             self.send_refresh_item(item);
         }
         removed
@@ -3867,7 +4524,11 @@ pub struct DropGold {
 impl Message<DropGold> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: DropGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: DropGold,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if self.state.inventory.gold >= msg.amount {
             self.state.inventory.gold = self.state.inventory.gold.saturating_sub(msg.amount);
             self.send_gold_changed();
@@ -3900,10 +4561,16 @@ impl Message<AddGold> for PlayerActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedGold as i16, &body),
-                }).try_send();
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::GainedGold as i16,
+                            &body,
+                        ),
+                    })
+                    .try_send();
             }
         }
         true
@@ -3918,7 +4585,11 @@ pub struct DeductGold {
 impl Message<DeductGold> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: DeductGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: DeductGold,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if self.state.inventory.gold >= msg.amount {
             self.state.inventory.gold = self.state.inventory.gold.saturating_sub(msg.amount);
             self.send_gold_changed();
@@ -3950,17 +4621,27 @@ pub struct DeductMP {
 impl Message<DeductMP> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: DeductMP, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: DeductMP,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if self.state.mp >= msg.amount {
             self.state.mp -= msg.amount;
             // 同步客户端
             let mut body = Vec::new();
             body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                        &body,
+                    ),
+                })
+                .await;
             true
         } else {
             false
@@ -3977,16 +4658,24 @@ impl Message<AddMP> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: AddMP, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        if msg.amount <= 0 { return; }
+        if msg.amount <= 0 {
+            return;
+        }
         self.state.mp = (self.state.mp + msg.amount).min(self.state.effective_max_mp());
         // 同步客户端
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -4013,8 +4702,14 @@ pub struct RemoveItemByIndex {
 impl Message<RemoveItemByIndex> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RemoveItemByIndex, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.state.inventory.remove_item_by_index(msg.item_index, msg.count)
+    async fn handle(
+        &mut self,
+        msg: RemoveItemByIndex,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state
+            .inventory
+            .remove_item_by_index(msg.item_index, msg.count)
     }
 }
 
@@ -4028,8 +4723,14 @@ pub struct RemoveItemByIndexWithDura {
 impl Message<RemoveItemByIndexWithDura> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RemoveItemByIndexWithDura, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.state.inventory.remove_item_by_index_with_dura(msg.item_index, msg.count, msg.min_dura)
+    async fn handle(
+        &mut self,
+        msg: RemoveItemByIndexWithDura,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state
+            .inventory
+            .remove_item_by_index_with_dura(msg.item_index, msg.count, msg.min_dura)
     }
 }
 
@@ -4039,7 +4740,11 @@ pub struct HasItemSpace;
 impl Message<HasItemSpace> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: HasItemSpace, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: HasItemSpace,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.has_space()
     }
 }
@@ -4052,12 +4757,18 @@ pub struct AddPkPoints {
 impl Message<AddPkPoints> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: AddPkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: AddPkPoints,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if msg.points > 0 {
             self.state.pk_points += msg.points;
             self.state.pk_kill_count += 1;
-            debug!("Player {} PK points +{} (total={}, kills={})",
-                   self.state.name, msg.points, self.state.pk_points, self.state.pk_kill_count);
+            debug!(
+                "Player {} PK points +{} (total={}, kills={})",
+                self.state.name, msg.points, self.state.pk_points, self.state.pk_kill_count
+            );
         }
     }
 }
@@ -4070,9 +4781,16 @@ pub struct SetGender {
 impl Message<SetGender> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetGender, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetGender,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.gender = msg.gender;
-        debug!("Player {} gender changed to {:?}", self.state.name, msg.gender);
+        debug!(
+            "Player {} gender changed to {:?}",
+            self.state.name, msg.gender
+        );
     }
 }
 
@@ -4084,7 +4802,11 @@ pub struct RemoveMagicWithId {
 impl Message<RemoveMagicWithId> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RemoveMagicWithId, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RemoveMagicWithId,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let Some(idx) = self.state.magics.iter().position(|m| m.spell == msg.spell) else {
             return false;
         };
@@ -4093,14 +4815,25 @@ impl Message<RemoveMagicWithId> for PlayerActor {
         if let Ok(spell) = mir2_shared::enums::Spell::try_from(msg.spell as u8) {
             let pkt = mir2_shared::packets::server::magic::RemoveMagic { spell, hero: false };
             let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &pkt).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: body,
-                }).try_send();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &pkt,
+            )
+            .is_ok()
+            {
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: body,
+                    })
+                    .try_send();
             }
         }
-        debug!("Player {} removed magic spell={}", self.state.name, msg.spell);
+        debug!(
+            "Player {} removed magic spell={}",
+            self.state.name, msg.spell
+        );
         true
     }
 }
@@ -4111,7 +4844,11 @@ pub struct DecayPkPoints;
 impl Message<DecayPkPoints> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, _msg: DecayPkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: DecayPkPoints,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if self.state.pk_points > 0 {
             self.state.pk_points = (self.state.pk_points - 1).max(0);
         }
@@ -4126,9 +4863,16 @@ pub struct SetPkPoints {
 impl Message<SetPkPoints> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetPkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetPkPoints,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.pk_points = msg.points.max(0);
-        debug!("Player {} PK points set to {}", self.state.name, self.state.pk_points);
+        debug!(
+            "Player {} PK points set to {}",
+            self.state.name, self.state.pk_points
+        );
     }
 }
 
@@ -4140,9 +4884,16 @@ pub struct ReducePkPoints {
 impl Message<ReducePkPoints> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: ReducePkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ReducePkPoints,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.pk_points = (self.state.pk_points - msg.amount).max(0);
-        debug!("Player {} PK points reduced by {} (total={})", self.state.name, msg.amount, self.state.pk_points);
+        debug!(
+            "Player {} PK points reduced by {} (total={})",
+            self.state.name, msg.amount, self.state.pk_points
+        );
     }
 }
 
@@ -4154,7 +4905,11 @@ pub struct RestoreMp {
 impl Message<RestoreMp> for PlayerActor {
     type Reply = i32;
 
-    async fn handle(&mut self, msg: RestoreMp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RestoreMp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if self.state.is_dead || msg.amount <= 0 {
             return 0;
         }
@@ -4165,16 +4920,24 @@ impl Message<RestoreMp> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
         }
-        debug!("Player {} MP +{} (restored={})", self.state.name, msg.amount, restored);
+        debug!(
+            "Player {} MP +{} (restored={})",
+            self.state.name, msg.amount, restored
+        );
         restored
     }
 }
-
 
 /// 死亡时随机掉落背包物品（返回被掉落的物品列表）
 pub struct DropRandomItemsOnDeath;
@@ -4187,7 +4950,11 @@ pub struct TakeEquipmentOnDeath {
 impl Message<TakeEquipmentOnDeath> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 
-    async fn handle(&mut self, msg: TakeEquipmentOnDeath, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: TakeEquipmentOnDeath,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let result = self.state.inventory.take_equipment(msg.slot);
         if result.is_some() {
             self.send_equipment_changed();
@@ -4240,7 +5007,9 @@ impl Message<AddFriendToSelf> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: AddFriendToSelf, _ctx: &mut Context<Self, Self::Reply>) {
-        self.state.friend_list.add_friend(msg.friend_oid, msg.friend_name);
+        self.state
+            .friend_list
+            .add_friend(msg.friend_oid, msg.friend_name);
     }
 }
 
@@ -4252,7 +5021,11 @@ pub struct RemoveFriendFromSelf {
 impl Message<RemoveFriendFromSelf> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RemoveFriendFromSelf, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RemoveFriendFromSelf,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.friend_list.remove_friend(msg.friend_oid)
     }
 }
@@ -4266,7 +5039,11 @@ pub struct SetFriendMemo {
 impl Message<SetFriendMemo> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: SetFriendMemo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetFriendMemo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.friend_list.set_memo(msg.friend_oid, msg.memo)
     }
 }
@@ -4309,7 +5086,11 @@ pub struct MarkMailRead {
 impl Message<MarkMailRead> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: MarkMailRead, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: MarkMailRead,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.mailbox.mark_read(msg.mail_id)
     }
 }
@@ -4322,7 +5103,11 @@ pub struct CollectMailAttachment {
 impl Message<CollectMailAttachment> for PlayerActor {
     type Reply = Option<(u64, Vec<mir2_shared::data::item::UserItem>)>;
 
-    async fn handle(&mut self, msg: CollectMailAttachment, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: CollectMailAttachment,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.mailbox.collect_attachment(msg.mail_id)
     }
 }
@@ -4333,7 +5118,11 @@ pub struct ReleaseMailParcels;
 impl Message<ReleaseMailParcels> for PlayerActor {
     type Reply = usize;
 
-    async fn handle(&mut self, _msg: ReleaseMailParcels, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: ReleaseMailParcels,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.mailbox.release_parcels()
     }
 }
@@ -4346,7 +5135,11 @@ pub struct DeleteMail {
 impl Message<DeleteMail> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: DeleteMail, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: DeleteMail,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.mailbox.delete_mail(msg.mail_id)
     }
 }
@@ -4395,7 +5188,11 @@ pub struct AcceptQuest {
 impl Message<AcceptQuest> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: AcceptQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: AcceptQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log.accept_quest(msg.quest)
     }
 }
@@ -4409,9 +5206,17 @@ pub struct GmSetQuest {
 impl Message<GmSetQuest> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: GmSetQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GmSetQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let ql = &mut self.state.quest_log;
-        if let Some(idx) = ql.quests.iter().position(|q| q.quest_index == msg.quest_index) {
+        if let Some(idx) = ql
+            .quests
+            .iter()
+            .position(|q| q.quest_index == msg.quest_index)
+        {
             ql.quests.remove(idx);
         }
         if msg.complete {
@@ -4430,7 +5235,11 @@ pub struct GmClearQuests;
 impl Message<GmClearQuests> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, _msg: GmClearQuests, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: GmClearQuests,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log = crate::actors::quest::QuestLog::new();
     }
 }
@@ -4443,7 +5252,11 @@ pub struct CompleteQuest {
 impl Message<CompleteQuest> for PlayerActor {
     type Reply = Option<crate::actors::quest::QuestInstance>;
 
-    async fn handle(&mut self, msg: CompleteQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: CompleteQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let done = self.state.quest_log.complete_quest(msg.quest_index);
         if done.is_some() {
             // C# FinishQuest → RecalculateQuestBag：移除不再需要的任务物品
@@ -4461,7 +5274,11 @@ pub struct AbandonQuest {
 impl Message<AbandonQuest> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: AbandonQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: AbandonQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let done = self.state.quest_log.abandon_quest(msg.quest_index);
         if done {
             // C# AbandonQuest → RecalculateQuestBag
@@ -4479,7 +5296,11 @@ pub struct GetQuest {
 impl Message<GetQuest> for PlayerActor {
     type Reply = Option<crate::actors::quest::QuestInstance>;
 
-    async fn handle(&mut self, msg: GetQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log.get_quest(msg.quest_index).cloned()
     }
 }
@@ -4492,8 +5313,15 @@ pub struct HasCompletedQuest {
 impl Message<HasCompletedQuest> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: HasCompletedQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.state.quest_log.completed_indices.contains(&msg.quest_index)
+    async fn handle(
+        &mut self,
+        msg: HasCompletedQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state
+            .quest_log
+            .completed_indices
+            .contains(&msg.quest_index)
     }
 }
 
@@ -4506,8 +5334,17 @@ pub struct CheckQuestState {
 impl Message<CheckQuestState> for PlayerActor {
     type Reply = u8;
 
-    async fn handle(&mut self, msg: CheckQuestState, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        if self.state.quest_log.completed_indices.contains(&msg.quest_index) {
+    async fn handle(
+        &mut self,
+        msg: CheckQuestState,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self
+            .state
+            .quest_log
+            .completed_indices
+            .contains(&msg.quest_index)
+        {
             return 2;
         }
         if self.state.quest_log.get_quest(msg.quest_index).is_some() {
@@ -4525,7 +5362,11 @@ pub struct ProcessMonsterKill {
 impl Message<ProcessMonsterKill> for PlayerActor {
     type Reply = Vec<(i32, i32, bool)>;
 
-    async fn handle(&mut self, msg: ProcessMonsterKill, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ProcessMonsterKill,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log.process_kill(msg.monster_index)
     }
 }
@@ -4540,7 +5381,11 @@ pub struct ProcessKillQuest {
 impl Message<ProcessKillQuest> for PlayerActor {
     type Reply = Vec<(i32, i32, bool)>;
 
-    async fn handle(&mut self, msg: ProcessKillQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ProcessKillQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log.process_kill(msg.monster_index)
     }
 }
@@ -4553,7 +5398,11 @@ pub struct ProcessFlagQuest {
 impl Message<ProcessFlagQuest> for PlayerActor {
     type Reply = Vec<(i32, i32, bool)>;
 
-    async fn handle(&mut self, msg: ProcessFlagQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ProcessFlagQuest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log.process_flag(msg.flag_number)
     }
 }
@@ -4566,7 +5415,11 @@ pub struct ClearDailyQuests {
 impl Message<ClearDailyQuests> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: ClearDailyQuests, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ClearDailyQuests,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.quest_log.clear_daily_quests(&msg.quest_indices);
     }
 }
@@ -4580,11 +5433,17 @@ pub struct TryQuestItemPickup {
 impl Message<TryQuestItemPickup> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: TryQuestItemPickup, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: TryQuestItemPickup,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let item_index = msg.item.item_index;
         // C# CheckNeedQuestItem：活跃任务含该物品 ItemTask 且未完成
         let needed = self.state.quest_log.quests.iter().any(|q| {
-            q.progress.iter().any(|p| p.progress_id == item_index && p.current < p.target)
+            q.progress
+                .iter()
+                .any(|p| p.progress_id == item_index && p.current < p.target)
         });
         if !needed {
             return false;
@@ -4597,15 +5456,25 @@ impl Message<TryQuestItemPickup> for PlayerActor {
             let pkt = mir2_shared::packets::server::miscellaneous::GainedQuestItem { item };
             let mut body = Vec::new();
             if pkt.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedQuestItem as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::GainedQuestItem as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
             // 更新物品任务进度（C# ProcessItem：按任务格数量对齐进度）
             for quest in &mut self.state.quest_log.quests {
                 for p in &mut quest.progress {
-                    let count = self.state.inventory.count_quest_item_by_index(p.progress_id) as i32;
+                    let count = self
+                        .state
+                        .inventory
+                        .count_quest_item_by_index(p.progress_id)
+                        as i32;
                     if count > p.current && count <= p.target {
                         p.current = count;
                     } else if count >= p.target && p.current < p.target {
@@ -4624,12 +5493,19 @@ pub struct CheckQuestItemProgress;
 impl Message<CheckQuestItemProgress> for PlayerActor {
     type Reply = Vec<(i32, i32, bool)>;
 
-    async fn handle(&mut self, _msg: CheckQuestItemProgress, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: CheckQuestItemProgress,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let mut updated = Vec::new();
         for quest in &mut self.state.quest_log.quests {
             let mut any_changed = false;
             for p in &mut quest.progress {
-                let count = self.state.inventory.count_quest_item_by_index(p.progress_id);
+                let count = self
+                    .state
+                    .inventory
+                    .count_quest_item_by_index(p.progress_id);
                 let count_i32 = count as i32;
                 if count_i32 > p.current && count_i32 <= p.target {
                     p.current = count_i32;
@@ -4677,17 +5553,26 @@ pub struct MakeWeddingRing;
 impl Message<MakeWeddingRing> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: MakeWeddingRing, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: MakeWeddingRing,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         // 对齐 C# CheckMakeWeddingRing：需已婚
         if self.state.spouse_name.is_none() {
             return false;
         }
-        let Some(ring) = self.state.inventory.equipment
+        let Some(ring) = self
+            .state
+            .inventory
+            .equipment
             .get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize)
         else {
             return false;
         };
-        let Some(ring) = ring.as_mut() else { return false };
+        let Some(ring) = ring.as_mut() else {
+            return false;
+        };
         // Rust 约定：0 = 未绑定（社交召回检查 wedding_ring == 0）
         if ring.wedding_ring != 0 {
             return false;
@@ -4707,26 +5592,61 @@ pub struct ReplaceWeddingRingItem {
 impl Message<ReplaceWeddingRingItem> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: ReplaceWeddingRingItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ReplaceWeddingRingItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         // 新戒指在背包
         let Some(new_idx) = self.state.inventory.backpack.iter().position(|s| {
-            s.as_ref().map(|sl| sl.item.unique_id == msg.new_unique_id).unwrap_or(false)
-        }) else { return false };
+            s.as_ref()
+                .map(|sl| sl.item.unique_id == msg.new_unique_id)
+                .unwrap_or(false)
+        }) else {
+            return false;
+        };
         // 当前左戒是婚戒
-        let Some(old) = self.state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL).cloned() else { return false };
-        if old.wedding_ring == 0 { return false; }
+        let Some(old) = self
+            .state
+            .inventory
+            .get_equipment(crate::actors::inventory::EquipmentSlot::RingL)
+            .cloned()
+        else {
+            return false;
+        };
+        if old.wedding_ring == 0 {
+            return false;
+        }
         // 新戒标记婚戒；旧戒解除（equip_item 交换后旧戒回背包）
-        let grid = self.state.inventory.backpack[new_idx].as_ref().unwrap().grid;
-        self.state.inventory.backpack[new_idx].as_mut().unwrap().item.wedding_ring = 1;
-        if let Some(slot) = self.state.inventory.equipment.get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize) {
+        let grid = self.state.inventory.backpack[new_idx]
+            .as_ref()
+            .unwrap()
+            .grid;
+        self.state.inventory.backpack[new_idx]
+            .as_mut()
+            .unwrap()
+            .item
+            .wedding_ring = 1;
+        if let Some(slot) = self
+            .state
+            .inventory
+            .equipment
+            .get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize)
+        {
             if let Some(s) = slot.as_mut() {
                 s.wedding_ring = 0;
             }
         }
-        let _ = self.state.inventory.equip_item(grid, crate::actors::inventory::EquipmentSlot::RingL);
+        let _ = self
+            .state
+            .inventory
+            .equip_item(grid, crate::actors::inventory::EquipmentSlot::RingL);
         self.send_inventory_changed();
         self.send_equipment_changed();
-        debug!("Player {} wedding ring replaced (uid={})", self.state.name, msg.new_unique_id);
+        debug!(
+            "Player {} wedding ring replaced (uid={})",
+            self.state.name, msg.new_unique_id
+        );
         true
     }
 }
@@ -4737,13 +5657,24 @@ pub struct ClearWeddingRing;
 impl Message<ClearWeddingRing> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, _msg: ClearWeddingRing, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: ClearWeddingRing,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let snapshot = {
-            let Some(ring) = self.state.inventory.equipment
+            let Some(ring) = self
+                .state
+                .inventory
+                .equipment
                 .get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize)
-            else { return };
+            else {
+                return;
+            };
             let Some(ring) = ring.as_mut() else { return };
-            if ring.wedding_ring == 0 { return; }
+            if ring.wedding_ring == 0 {
+                return;
+            }
             ring.wedding_ring = 0;
             ring.clone()
         };
@@ -4760,7 +5691,11 @@ pub struct ChangeLevel {
 impl Message<ChangeLevel> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: ChangeLevel, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ChangeLevel,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         const MAX_LEVEL: u16 = 200;
         let new_level = msg.level.min(MAX_LEVEL);
         self.state.level = new_level;
@@ -4771,8 +5706,14 @@ impl Message<ChangeLevel> for PlayerActor {
             let val = bs.calculate(self.state.class, self.state.level as i32);
             use mir2_shared::enums::Stat;
             match bs.stat {
-                Stat::HP => { self.state.max_hp = val; self.state.hp = val; }
-                Stat::MP => { self.state.max_mp = val; self.state.mp = val; }
+                Stat::HP => {
+                    self.state.max_hp = val;
+                    self.state.hp = val;
+                }
+                Stat::MP => {
+                    self.state.max_mp = val;
+                    self.state.mp = val;
+                }
                 Stat::MinDC => self.state.min_attack = val,
                 Stat::MaxDC => self.state.max_attack = val,
                 Stat::MinMC => self.state.min_mc = val,
@@ -4780,7 +5721,10 @@ impl Message<ChangeLevel> for PlayerActor {
                 Stat::MinSC => self.state.min_sc = val,
                 Stat::MaxSC => self.state.max_sc = val,
                 Stat::MinAC => self.state.min_ac = val,
-                Stat::MaxAC => { self.state.max_ac = val; self.state.defence = val; }
+                Stat::MaxAC => {
+                    self.state.max_ac = val;
+                    self.state.defence = val;
+                }
                 Stat::MinMAC => self.state.min_mac = val,
                 Stat::MaxMAC => self.state.max_mac = val,
                 Stat::Agility => self.state.agility = val,
@@ -4793,19 +5737,29 @@ impl Message<ChangeLevel> for PlayerActor {
         lv_body.extend_from_slice(&self.state.level.to_le_bytes());
         lv_body.extend_from_slice(&self.state.experience.to_le_bytes());
         lv_body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LevelChanged as i16, &lv_body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::LevelChanged as i16,
+                    &lv_body,
+                ),
+            })
+            .await;
         // #283：通知 WorldActor 广播 ObjectLeveled
-        let _ = self.world_ref
+        let _ = self
+            .world_ref
             .tell(crate::actors::world::PlayerLeveled {
                 session_id: self.state.session_id,
                 object_id: self.state.object_id,
                 level: self.state.level,
             })
             .try_send();
-        info!("Player {} level changed to {}", self.state.name, self.state.level);
+        info!(
+            "Player {} level changed to {}",
+            self.state.name, self.state.level
+        );
     }
 }
 
@@ -4817,7 +5771,11 @@ pub struct SetCanGainExp {
 impl Message<SetCanGainExp> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetCanGainExp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetCanGainExp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.can_gain_exp = msg.can;
         debug!("Player {} can_gain_exp={}", self.state.name, msg.can);
     }
@@ -4831,10 +5789,18 @@ pub struct GainPearls {
 impl Message<GainPearls> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: GainPearls, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let capped = (msg.amount as i64 + self.state.pearl_count as i64).min(i32::MAX as i64) as i32;
+    async fn handle(
+        &mut self,
+        msg: GainPearls,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let capped =
+            (msg.amount as i64 + self.state.pearl_count as i64).min(i32::MAX as i64) as i32;
         self.state.pearl_count = capped;
-        debug!("Player {} pearls +{} (total={})", self.state.name, msg.amount, self.state.pearl_count);
+        debug!(
+            "Player {} pearls +{} (total={})",
+            self.state.name, msg.amount, self.state.pearl_count
+        );
     }
 }
 
@@ -4846,15 +5812,18 @@ pub struct LosePearls {
 impl Message<LosePearls> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: LosePearls, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: LosePearls,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.pearl_count = (self.state.pearl_count - msg.amount as i32).max(0);
-        debug!("Player {} pearls -{} (total={})", self.state.name, msg.amount, self.state.pearl_count);
+        debug!(
+            "Player {} pearls -{} (total={})",
+            self.state.name, msg.amount, self.state.pearl_count
+        );
     }
 }
-
-
-
-
 
 /// 设置是否允许拜师
 pub struct SetAllowMentor {
@@ -5006,13 +5975,20 @@ impl Message<DecreaseMountLoyalty> for PlayerActor {
                 return;
             }
             // C# DamageItem(mount, amount)：NoDuraLoss 免疫、Strong 减免
-            let no_dura_loss = mount.info.as_ref()
-                .map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::NO_DURA_LOSS))
+            let no_dura_loss = mount
+                .info
+                .as_ref()
+                .map(|i| {
+                    i.unique
+                        .contains(mir2_shared::enums::SpecialItemMode::NO_DURA_LOSS)
+                })
                 .unwrap_or(false);
             if no_dura_loss {
                 return;
             }
-            let strong = mount.info.as_ref()
+            let strong = mount
+                .info
+                .as_ref()
                 .map(|i| i.stats.get(mir2_shared::enums::Stat::Strong))
                 .unwrap_or(0)
                 .max(0) as u16;
@@ -5026,10 +6002,16 @@ impl Message<DecreaseMountLoyalty> for PlayerActor {
             };
             let mut body = Vec::new();
             if dc.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DuraChanged as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::DuraChanged as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
             if mount.current_dura == 0 {
                 // C# RefreshMount：耐久归零自动下坐骑
@@ -5037,7 +6019,11 @@ impl Message<DecreaseMountLoyalty> for PlayerActor {
                 self.state.is_mounted = false;
                 self.state.mount_type = 0;
                 self.send_equipment_changed();
-                crate::actors::world::send_system_message(&self.gate_ref, self.state.session_id, "坐骑忠诚度耗尽，已自动下马");
+                crate::actors::world::send_system_message(
+                    &self.gate_ref,
+                    self.state.session_id,
+                    "坐骑忠诚度耗尽，已自动下马",
+                );
             }
         }
     }
@@ -5080,7 +6066,11 @@ pub struct TickCreatureHunger {
 impl Message<TickCreatureHunger> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: TickCreatureHunger, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: TickCreatureHunger,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.creature_log.tick(msg.dt_seconds);
         // #2330：C# ProcessBlackStoneProduction（IntelligentCreatureObject.cs:735-750）
         if let Some(c) = &mut self.state.creature_log.active_creature {
@@ -5103,7 +6093,11 @@ pub struct RestoreCreatureHunger {
 impl Message<RestoreCreatureHunger> for PlayerActor {
     type Reply = bool; // true = restored, false = no active pet
 
-    async fn handle(&mut self, msg: RestoreCreatureHunger, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RestoreCreatureHunger,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if let Some(ref mut creature) = self.state.creature_log.active_creature {
             if creature.enabled {
                 creature.restore_hunger(msg.amount);
@@ -5123,12 +6117,19 @@ pub struct SetMountState {
 impl Message<SetMountState> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SetMountState, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SetMountState,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.is_mounted = msg.mounted;
         if msg.mounted {
             self.state.mount_type = msg.mount_type;
         }
-        debug!("Player {} mounted={} type={}", self.state.name, msg.mounted, msg.mount_type);
+        debug!(
+            "Player {} mounted={} type={}",
+            self.state.name, msg.mounted, msg.mount_type
+        );
     }
 }
 
@@ -5183,7 +6184,10 @@ impl Message<SetSpellKey> for PlayerActor {
             }
         }
         if target_found {
-            debug!("Player {} spell {} key -> {}", self.state.name, spell_cs, msg.key);
+            debug!(
+                "Player {} spell {} key -> {}",
+                self.state.name, spell_cs, msg.key
+            );
         }
     }
 }
@@ -5203,7 +6207,10 @@ impl Message<ToggleSpell> for PlayerActor {
         for magic in &mut self.state.magics {
             if magic.spell == spell_cs {
                 magic.toggled = msg.toggled;
-                debug!("Player {} spell {} toggled -> {}", self.state.name, spell_cs, msg.toggled);
+                debug!(
+                    "Player {} spell {} toggled -> {}",
+                    self.state.name, spell_cs, msg.toggled
+                );
                 break;
             }
         }
@@ -5231,7 +6238,10 @@ impl Message<GainSpellExp> for PlayerActor {
                 break;
             }
         }
-        if let Some((spell, level, experience)) = self.state.gain_spell_exp(msg.spell, msg.amount, msg.info.as_ref()) {
+        if let Some((spell, level, experience)) =
+            self.state
+                .gain_spell_exp(msg.spell, msg.amount, msg.info.as_ref())
+        {
             // #1230：C# LevelMagic——升级时补发 S.MagicDelay（新等级延迟 DelayBase - level*DelayReduction）
             if let Some(info) = msg.info.as_ref() {
                 let delay = crate::combat::magic::magic_delay(info, level) as i64;
@@ -5242,12 +6252,16 @@ impl Message<GainSpellExp> for PlayerActor {
                 };
                 let mut md_body = Vec::new();
                 if md.write_body(&mut md_body).is_ok() {
-                    let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                        session_id: self.state.session_id,
-                        data: crate::util::wire::build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::MagicDelay as i16, &md_body,
-                        ),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(crate::gate::actor::SendToClient {
+                            session_id: self.state.session_id,
+                            data: crate::util::wire::build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::MagicDelay as i16,
+                                &md_body,
+                            ),
+                        })
+                        .await;
                 }
             }
             // Send MagicLeveled packet (C# S.MagicLeveled: ObjectID u32 + Spell byte + Level byte + Experience u16)
@@ -5262,13 +6276,20 @@ impl Message<GainSpellExp> for PlayerActor {
                 warn!("Failed to serialize MagicLeveled: {}", e);
                 return;
             }
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id: self.state.session_id,
-                data: crate::util::wire::build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body,
-                ),
-            }).await;
-            debug!("GainSpellExp: {} leveled spell={:?} -> {}", self.state.name, spell, level);
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id: self.state.session_id,
+                    data: crate::util::wire::build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::MagicLeveled as i16,
+                        &body,
+                    ),
+                })
+                .await;
+            debug!(
+                "GainSpellExp: {} leveled spell={:?} -> {}",
+                self.state.name, spell, level
+            );
         }
     }
 }
@@ -5309,7 +6330,10 @@ impl Message<SetHeroBehaviour> for PlayerActor {
 
     async fn handle(&mut self, msg: SetHeroBehaviour, _ctx: &mut Context<Self, Self::Reply>) {
         self.state.hero_behaviour = msg.behaviour;
-        debug!("Player {} hero behaviour -> {}", self.state.name, msg.behaviour);
+        debug!(
+            "Player {} hero behaviour -> {}",
+            self.state.name, msg.behaviour
+        );
     }
 }
 
@@ -5330,8 +6354,14 @@ impl Message<SetAutoPotValue> for PlayerActor {
         // C# SetAutoPotValue：value = Math.Min(99, value)（英雄自动喝药阈值）
         let value = msg.value.min(99);
         match msg.stat {
-            STAT_HP => { self.state.auto_pot_hp = value; debug!("Player {} auto_pot_hp -> {}", self.state.name, value); }
-            STAT_MP => { self.state.auto_pot_mp = value; debug!("Player {} auto_pot_mp -> {}", self.state.name, value); }
+            STAT_HP => {
+                self.state.auto_pot_hp = value;
+                debug!("Player {} auto_pot_hp -> {}", self.state.name, value);
+            }
+            STAT_MP => {
+                self.state.auto_pot_mp = value;
+                debug!("Player {} auto_pot_mp -> {}", self.state.name, value);
+            }
             _ => {}
         }
     }
@@ -5353,8 +6383,20 @@ impl Message<SetAutoPotItem> for PlayerActor {
 
     async fn handle(&mut self, msg: SetAutoPotItem, _ctx: &mut Context<Self, Self::Reply>) {
         match msg.grid {
-            GRID_HERO_HP_ITEM => { self.state.auto_pot_hp_item = msg.item_index; debug!("Player {} auto_pot_hp_item -> {}", self.state.name, msg.item_index); }
-            GRID_HERO_MP_ITEM => { self.state.auto_pot_mp_item = msg.item_index; debug!("Player {} auto_pot_mp_item -> {}", self.state.name, msg.item_index); }
+            GRID_HERO_HP_ITEM => {
+                self.state.auto_pot_hp_item = msg.item_index;
+                debug!(
+                    "Player {} auto_pot_hp_item -> {}",
+                    self.state.name, msg.item_index
+                );
+            }
+            GRID_HERO_MP_ITEM => {
+                self.state.auto_pot_mp_item = msg.item_index;
+                debug!(
+                    "Player {} auto_pot_mp_item -> {}",
+                    self.state.name, msg.item_index
+                );
+            }
             _ => {}
         }
     }
@@ -5385,7 +6427,11 @@ const GRID_INVENTORY: u8 = 1;
 impl Message<EquipFishingGear> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: EquipFishingGear, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: EquipFishingGear,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         if crate::actors::inventory::equip_fishing_gear(
             &mut self.state.inventory,
             msg.rod_uid,
@@ -5403,7 +6449,6 @@ impl Message<EquipFishingGear> for PlayerActor {
     }
 }
 
-
 /// #1313：抛竿消耗鱼饵（C# ConsumeItem Bait）
 pub struct FishingConsumeBait {
     pub amount: u16,
@@ -5412,7 +6457,11 @@ pub struct FishingConsumeBait {
 impl Message<FishingConsumeBait> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: FishingConsumeBait, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: FishingConsumeBait,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let ok = self.state.inventory.fishing_consume_bait(msg.amount);
         if ok {
             self.send_equipment_changed();
@@ -5430,9 +6479,17 @@ pub struct FishingGearDamageMsg {
 impl Message<FishingGearDamageMsg> for PlayerActor {
     type Reply = u8; // 0=无钓具 1=正常 2=损坏移除
 
-    async fn handle(&mut self, msg: FishingGearDamageMsg, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        use crate::actors::inventory::FishingGearDamageResult;{
-            let r = self.state.inventory.fishing_gear_damage(msg.slot, msg.amount);
+    async fn handle(
+        &mut self,
+        msg: FishingGearDamageMsg,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        use crate::actors::inventory::FishingGearDamageResult;
+        {
+            let r = self
+                .state
+                .inventory
+                .fishing_gear_damage(msg.slot, msg.amount);
             if r != FishingGearDamageResult::NoGear {
                 self.send_equipment_changed();
             }
@@ -5453,7 +6510,11 @@ pub struct FishingRodDurability {
 impl Message<FishingRodDurability> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: FishingRodDurability, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: FishingRodDurability,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.fishing_rod_durability_loss(msg.amount);
         self.send_equipment_changed();
     }
@@ -5464,15 +6525,19 @@ const GRID_STORAGE: u8 = 4;
 impl Message<RemoveSlotItemMsg> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RemoveSlotItemMsg, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RemoveSlotItemMsg,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         // Find the parent equipment item based on grid type
         let equip_index = match msg.grid {
             GRID_MOUNT => Some(EquipmentSlot::Mount as usize),
             GRID_FISHING => Some(EquipmentSlot::Weapon as usize),
-            GRID_SOCKET => {
-                self.state.inventory.equipment.iter()
-                    .position(|e| e.as_ref().map_or(false, |i| i.unique_id == msg.from_unique_id))
-            }
+            GRID_SOCKET => self.state.inventory.equipment.iter().position(|e| {
+                e.as_ref()
+                    .map_or(false, |i| i.unique_id == msg.from_unique_id)
+            }),
             _ => None,
         };
 
@@ -5482,26 +6547,35 @@ impl Message<RemoveSlotItemMsg> for PlayerActor {
         };
 
         // Find and extract the slotted item from parent's slots array
-        let removed = if msg.grid == GRID_SOCKET {
-            // For Socket, parent might be in equipment or backpack
-            if let Some(Some(item)) = self.state.inventory.equipment.get_mut(equip_idx) {
-                let pos = item.slots.iter().position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
-                pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
-            } else if let Some(Some(slot)) = self.state.inventory.backpack.get_mut(equip_idx) {
-                let pos = slot.item.slots.iter().position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
-                pos.and_then(|p| slot.item.slots.get_mut(p).and_then(|s| s.take()))
-            } else {
-                None
-            }
-        } else {
-            match self.state.inventory.equipment.get_mut(equip_idx) {
-                Some(Some(item)) => {
-                    let pos = item.slots.iter().position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
+        let removed =
+            if msg.grid == GRID_SOCKET {
+                // For Socket, parent might be in equipment or backpack
+                if let Some(Some(item)) = self.state.inventory.equipment.get_mut(equip_idx) {
+                    let pos = item
+                        .slots
+                        .iter()
+                        .position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
                     pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
+                } else if let Some(Some(slot)) = self.state.inventory.backpack.get_mut(equip_idx) {
+                    let pos =
+                        slot.item.slots.iter().position(|s| {
+                            s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id)
+                        });
+                    pos.and_then(|p| slot.item.slots.get_mut(p).and_then(|s| s.take()))
+                } else {
+                    None
                 }
-                _ => None,
-            }
-        };
+            } else {
+                match self.state.inventory.equipment.get_mut(equip_idx) {
+                    Some(Some(item)) => {
+                        let pos = item.slots.iter().position(|s| {
+                            s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id)
+                        });
+                        pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
+                    }
+                    _ => None,
+                }
+            };
 
         let removed_item = match removed {
             Some(item) => item,
@@ -5528,7 +6602,10 @@ impl Message<RemoveSlotItemMsg> for PlayerActor {
             if was_cursed {
                 self.state.unlock_curse = false;
             }
-            debug!("Player {} removed slot item uid={} -> grid_to={} to={}", self.state.name, msg.unique_id, msg.grid_to, msg.to);
+            debug!(
+                "Player {} removed slot item uid={} -> grid_to={} to={}",
+                self.state.name, msg.unique_id, msg.grid_to, msg.to
+            );
         }
         success
     }
@@ -5557,7 +6634,8 @@ impl Message<SetPlayerPosition> for PlayerActor {
             self.state.is_mounted = mounted;
         }
         // C# HumanObject.Teleport：落点与阻挡物（NPC/怪物/存活玩家）同格 → 1s 后推开（CheckStacked/Stacking）
-        let _ = self.world_ref
+        let _ = self
+            .world_ref
             .tell(crate::actors::world::CheckPlayerStacking {
                 session_id: self.state.session_id,
             })
@@ -5610,7 +6688,11 @@ pub struct CanGainItems;
 impl Message<CanGainItems> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, _msg: CanGainItems, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: CanGainItems,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.can_gain_items()
     }
 }
@@ -5623,7 +6705,11 @@ pub struct CanGainItemsFor {
 impl Message<CanGainItemsFor> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: CanGainItemsFor, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: CanGainItemsFor,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.can_gain_items_for(&msg.items)
     }
 }
@@ -5636,7 +6722,11 @@ pub struct CanGainGold {
 impl Message<CanGainGold> for PlayerActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: CanGainGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: CanGainGold,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         (msg.amount as u64) + self.state.inventory.gold <= u32::MAX as u64
     }
 }
@@ -5672,7 +6762,10 @@ impl PlayerState {
         let Some(info) = item.info.as_ref() else {
             return false;
         };
-        if info.item_type != mir2_shared::enums::ItemType::Amulet || info.shape != 0 || item.count < amount {
+        if info.item_type != mir2_shared::enums::ItemType::Amulet
+            || info.shape != 0
+            || item.count < amount
+        {
             return false;
         }
         item.count -= amount;
@@ -5685,7 +6778,11 @@ impl PlayerState {
     /// 装备毒护符 shape（#1453：C# GetPoison(1,1)=绿 / (1,2)=红；Pendant 槽 Amulet shape 1/2；0=无）
     pub fn equipped_poison_shape(&self) -> i32 {
         use crate::actors::inventory::EquipmentSlot;
-        let Some(Some(item)) = self.inventory.equipment.get(EquipmentSlot::Pendant as usize) else {
+        let Some(Some(item)) = self
+            .inventory
+            .equipment
+            .get(EquipmentSlot::Pendant as usize)
+        else {
             return 0;
         };
         let Some(info) = item.info.as_ref() else {
@@ -5694,7 +6791,11 @@ impl PlayerState {
         if info.item_type != mir2_shared::enums::ItemType::Amulet {
             return 0;
         }
-        if info.shape == 1i16 || info.shape == 2i16 { info.shape as i32 } else { 0 }
+        if info.shape == 1i16 || info.shape == 2i16 {
+            info.shape as i32
+        } else {
+            0
+        }
     }
 
     /// C# HumanObject.GetPoison + ConsumeItem：消耗 1 个指定 shape 的毒护符（shape 1=绿/2=红）
@@ -5710,7 +6811,10 @@ impl PlayerState {
         let Some(info) = item.info.as_ref() else {
             return false;
         };
-        if info.item_type != mir2_shared::enums::ItemType::Amulet || info.shape != shape as i16 || item.count < 1 {
+        if info.item_type != mir2_shared::enums::ItemType::Amulet
+            || info.shape != shape as i16
+            || item.count < 1
+        {
             return false;
         }
         item.count -= 1;
@@ -5810,7 +6914,10 @@ impl PlayerState {
         // #1246：破损装备特殊模式失效（C# RefreshStats continue）；#2308 槽位宝石 Skill 也计入（C# RefreshSocketStats :1973）
         let skill_multiplier = if self.skill_gain_multiplier > 0 {
             self.skill_gain_multiplier as u16
-        } else if crate::actors::world::has_special_equipped(self, mir2_shared::enums::SpecialItemMode::SKILL) {
+        } else if crate::actors::world::has_special_equipped(
+            self,
+            mir2_shared::enums::SpecialItemMode::SKILL,
+        ) {
             3
         } else {
             1
@@ -5832,7 +6939,11 @@ impl PlayerState {
             }
         }
         let mut amount = amount;
-        if skill_multiplier == 1 && self.is_mentor && self.mentor_damage_bonus && self.mentor_skill_boost {
+        if skill_multiplier == 1
+            && self.is_mentor
+            && self.mentor_damage_bonus
+            && self.mentor_skill_boost
+        {
             // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2（仅当 multiplier==1，C# :6915）
             amount = amount.saturating_mul(2);
         }
@@ -5972,7 +7083,8 @@ impl Message<GainHeroSpellExp> for PlayerActor {
         msg: GainHeroSpellExp,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.gain_hero_spell_exp(msg.spell_shared, msg.amount, msg.info.as_ref())
+        self.state
+            .gain_hero_spell_exp(msg.spell_shared, msg.amount, msg.info.as_ref())
     }
 }
 
@@ -6197,7 +7309,11 @@ pub struct StoreItemTo {
 impl Message<StoreItemTo> for PlayerActor {
     type Reply = Option<(mir2_shared::data::item::UserItem, usize)>;
 
-    async fn handle(&mut self, msg: StoreItemTo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: StoreItemTo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.store_item_to(msg.from, msg.to)
     }
 }
@@ -6211,7 +7327,11 @@ pub struct TakeBackItemTo {
 impl Message<TakeBackItemTo> for PlayerActor {
     type Reply = Option<(mir2_shared::data::item::UserItem, u8)>;
 
-    async fn handle(&mut self, msg: TakeBackItemTo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: TakeBackItemTo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.state.inventory.take_back_item_to(msg.from, msg.to)
     }
 }
@@ -6254,7 +7374,11 @@ pub struct ClearReincarnationHost;
 impl Message<ClearReincarnationHost> for PlayerActor {
     type Reply = ();
 
-    async fn handle(&mut self, _msg: ClearReincarnationHost, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        _msg: ClearReincarnationHost,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         self.state.reincarnation_ready = false;
         self.state.reincarnation_expire_time = 0;
     }
@@ -6273,12 +7397,21 @@ impl Message<ReviveAtHalfHp> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
         body.extend_from_slice(&self.state.mp.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                    &body,
+                ),
+            })
+            .await;
 
-        debug!("ReviveAtHalfHp: {} hp={}/{}", self.state.name, self.state.hp, self.state.max_hp);
+        debug!(
+            "ReviveAtHalfHp: {} hp={}/{}",
+            self.state.name, self.state.hp, self.state.max_hp
+        );
     }
 }
 
@@ -6299,7 +7432,9 @@ impl PlayerActor {
             let mut map: Vec<(i32, u32)> = Vec::new();
             for quest in &self.state.quest_log.quests {
                 for p in &quest.progress {
-                    if p.current >= p.target { continue; }
+                    if p.current >= p.target {
+                        continue;
+                    }
                     if let Some(e) = map.iter_mut().find(|(idx, _)| *idx == p.progress_id) {
                         e.1 += (p.target - p.current) as u32;
                     } else {
@@ -6307,7 +7442,9 @@ impl PlayerActor {
                     }
                 }
             }
-            map.into_iter().map(|(idx, need)| (idx, need.min(u16::MAX as u32) as u16)).collect()
+            map.into_iter()
+                .map(|(idx, need)| (idx, need.min(u16::MAX as u32) as u16))
+                .collect()
         };
         // 每个任务物品保留 needed 数量，移除超出部分（复用 remove_quest_item_by_index）
         let mut deletions: Vec<(u64, u16)> = Vec::new();
@@ -6323,7 +7460,11 @@ impl PlayerActor {
             m
         };
         for (idx, current) in present {
-            let need = needed.iter().find(|(nidx, _)| *nidx == idx).map(|(_, n)| *n).unwrap_or(0);
+            let need = needed
+                .iter()
+                .find(|(nidx, _)| *nidx == idx)
+                .map(|(_, n)| *n)
+                .unwrap_or(0);
             let keep = need.min(current);
             let excess = current - keep;
             if excess > 0 {
@@ -6331,13 +7472,20 @@ impl PlayerActor {
             }
         }
         for (unique_id, count) in deletions {
-            let pkt = mir2_shared::packets::server::miscellaneous::DeleteQuestItem { unique_id, count };
+            let pkt =
+                mir2_shared::packets::server::miscellaneous::DeleteQuestItem { unique_id, count };
             let mut body = Vec::new();
             if pkt.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteQuestItem as i16, &body),
-                }).try_send();
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::DeleteQuestItem as i16,
+                            &body,
+                        ),
+                    })
+                    .try_send();
             }
         }
     }
@@ -6352,10 +7500,16 @@ impl PlayerActor {
         let pkt = mir2_shared::packets::server::item::RefreshItem { item: item.clone() };
         let mut body = Vec::new();
         if pkt.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RefreshItem as i16, &body),
-            }).try_send();
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::RefreshItem as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
         }
     }
 
@@ -6369,57 +7523,86 @@ impl PlayerActor {
         use mir2_shared::enums::ServerPacketIds;
         let mut body = Vec::new();
 
-        body.extend_from_slice(&self.state.object_id.to_le_bytes());   // object_id
-        body.extend_from_slice(&1u32.to_le_bytes());                    // real_id
-        write_dotnet_string(&mut body, &self.state.name);               // name
+        body.extend_from_slice(&self.state.object_id.to_le_bytes()); // object_id
+        body.extend_from_slice(&1u32.to_le_bytes()); // real_id
+        write_dotnet_string(&mut body, &self.state.name); // name
         write_dotnet_string(&mut body, self.state.guild_name.as_deref().unwrap_or("")); // guild_name
-        write_dotnet_string(&mut body, match self.state.guild_rank {
-            crate::actors::guild::GuildRank::Leader => "掌门",
-            crate::actors::guild::GuildRank::Officer => "副掌门",
-            crate::actors::guild::GuildRank::Member => "成员",
-        }); // guild_rank
-        body.extend_from_slice(&0i32.to_le_bytes());                    // name_colour
-        body.push(self.state.class as u8);                              // class
-        body.push(self.state.gender as u8);                             // gender
-        body.extend_from_slice(&self.state.level.to_le_bytes());        // level
-        body.extend_from_slice(&self.state.x.to_le_bytes());            // location_x
-        body.extend_from_slice(&self.state.y.to_le_bytes());            // location_y
-        body.push(self.state.direction);                                // direction
-        body.push(self.state.hair);                                     // hair
-        body.extend_from_slice(&self.state.hp.to_le_bytes());  // hp
-        body.extend_from_slice(&self.state.mp.to_le_bytes());  // mp
+        write_dotnet_string(
+            &mut body,
+            match self.state.guild_rank {
+                crate::actors::guild::GuildRank::Leader => "掌门",
+                crate::actors::guild::GuildRank::Officer => "副掌门",
+                crate::actors::guild::GuildRank::Member => "成员",
+            },
+        ); // guild_rank
+        body.extend_from_slice(&0i32.to_le_bytes()); // name_colour
+        body.push(self.state.class as u8); // class
+        body.push(self.state.gender as u8); // gender
+        body.extend_from_slice(&self.state.level.to_le_bytes()); // level
+        body.extend_from_slice(&self.state.x.to_le_bytes()); // location_x
+        body.extend_from_slice(&self.state.y.to_le_bytes()); // location_y
+        body.push(self.state.direction); // direction
+        body.push(self.state.hair); // hair
+        body.extend_from_slice(&self.state.hp.to_le_bytes()); // hp
+        body.extend_from_slice(&self.state.mp.to_le_bytes()); // mp
         body.extend_from_slice(&self.state.experience.to_le_bytes()); // experience
         body.extend_from_slice(&self.state.max_experience.to_le_bytes()); // max_experience
-        body.extend_from_slice(&0u16.to_le_bytes());                    // level_effects
-        body.push(if self.state.hero_index > 0 { 1u8 } else { 0u8 });  // has_hero
-        // hero_behaviour（C# 值 0..3，与 SharedRust HeroBehaviour 一致）
-        body.push(self.state.hero_behaviour);                     // hero_behaviour (C# 0..3)
+        body.extend_from_slice(&0u16.to_le_bytes()); // level_effects
+        body.push(if self.state.hero_index > 0 { 1u8 } else { 0u8 }); // has_hero
+                                                                      // hero_behaviour（C# 值 0..3，与 SharedRust HeroBehaviour 一致）
+        body.push(self.state.hero_behaviour); // hero_behaviour (C# 0..3)
 
         // 背包/装备数据（简化版：不发送完整物品，客户端通过 ItemChanged 等增量包更新）
-        body.push(0u8);                                                 // has_inventory=false
-        body.push(0u8);                                                 // has_equipment=false
-        body.push(0u8);                                                 // has_quest_inventory=false
+        body.push(0u8); // has_inventory=false
+        body.push(0u8); // has_equipment=false
+        body.push(0u8); // has_quest_inventory=false
         body.extend_from_slice(&(self.state.inventory.gold as u32).to_le_bytes()); // gold
-        body.extend_from_slice(&0u32.to_le_bytes());                    // credit=0
-        // 仓库扩容/仓库密码（C# UserInformation：HasExpandedStorage/HasStoragePassword/
-        // RequireStoragePassword/StoragePasswordLastSet/ExpandedStorageExpiryTime）
-        body.push(if self.state.has_expanded_storage { 1u8 } else { 0u8 }); // has_expanded_storage
-        body.push(if self.state.has_storage_password { 1u8 } else { 0u8 }); // has_storage_password
-        body.push(if self.state.require_storage_password { 1u8 } else { 0u8 }); // require_storage_password
+        body.extend_from_slice(&0u32.to_le_bytes()); // credit=0
+                                                     // 仓库扩容/仓库密码（C# UserInformation：HasExpandedStorage/HasStoragePassword/
+                                                     // RequireStoragePassword/StoragePasswordLastSet/ExpandedStorageExpiryTime）
+        body.push(if self.state.has_expanded_storage {
+            1u8
+        } else {
+            0u8
+        }); // has_expanded_storage
+        body.push(if self.state.has_storage_password {
+            1u8
+        } else {
+            0u8
+        }); // has_storage_password
+        body.push(if self.state.require_storage_password {
+            1u8
+        } else {
+            0u8
+        }); // require_storage_password
         body.extend_from_slice(&self.state.storage_password_last_set.to_le_bytes()); // storage_password_last_set
         body.extend_from_slice(&self.state.expanded_storage_expiry_date.to_le_bytes()); // expanded_storage_expiry_time
-        body.extend_from_slice(&0i32.to_le_bytes());                    // magic_count=0
-        body.extend_from_slice(&0i32.to_le_bytes());                    // creature_count=0
-        body.push(0u8);                                                 // summoned_creature_type
-        body.push(0u8);                                                 // creature_summoned=false
+        body.extend_from_slice(&0i32.to_le_bytes()); // magic_count=0
+        body.extend_from_slice(&0i32.to_le_bytes()); // creature_count=0
+        body.push(0u8); // summoned_creature_type
+        body.push(0u8); // creature_summoned=false
         body.push(if self.state.allow_observe { 1u8 } else { 0u8 }); // allow_observe
-        body.push(0u8);                                                 // observer=false
+        body.push(0u8); // observer=false
 
         // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
-        body.extend_from_slice(&(self.state.max_hp + self.state.bonus_max_hp
-            + crate::combat::buff::get_stat_bonus(&self.state.buffs, &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 })).to_le_bytes());
-        body.extend_from_slice(&(self.state.max_mp + self.state.bonus_max_mp
-            + crate::combat::buff::get_stat_bonus(&self.state.buffs, &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 })).to_le_bytes());
+        body.extend_from_slice(
+            &(self.state.max_hp
+                + self.state.bonus_max_hp
+                + crate::combat::buff::get_stat_bonus(
+                    &self.state.buffs,
+                    &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 },
+                ))
+            .to_le_bytes(),
+        );
+        body.extend_from_slice(
+            &(self.state.max_mp
+                + self.state.bonus_max_mp
+                + crate::combat::buff::get_stat_bonus(
+                    &self.state.buffs,
+                    &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 },
+                ))
+            .to_le_bytes(),
+        );
         for v in [
             self.state.min_ac + self.state.bonus_min_ac,
             self.state.max_ac + self.state.bonus_max_ac,
@@ -6474,10 +7657,13 @@ impl PlayerActor {
             body.extend_from_slice(&v.to_le_bytes());
         }
 
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: self.state.session_id,
-            data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),
+            })
+            .try_send();
     }
 }
 
@@ -6517,35 +7703,54 @@ mod tests {
     fn buff_removed_on_death_matches_csharp_die() {
         use crate::combat::buff::{BuffType, ShieldKind};
         // C# Die：RemoveOnDeath（Curse）+ 显式盾 + PoisonList.Clear 毒镜像 → true
-        assert!(super::buff_removed_on_death(&BuffType::Curse { percent: 10 }));
-        assert!(super::buff_removed_on_death(&BuffType::DamageReduction { percent: 30, kind: ShieldKind::MagicShield }));
-        assert!(super::buff_removed_on_death(&BuffType::DamageReduction { percent: 30, kind: ShieldKind::ElementalBarrier }));
+        assert!(super::buff_removed_on_death(&BuffType::Curse {
+            percent: 10
+        }));
+        assert!(super::buff_removed_on_death(&BuffType::DamageReduction {
+            percent: 30,
+            kind: ShieldKind::MagicShield
+        }));
+        assert!(super::buff_removed_on_death(&BuffType::DamageReduction {
+            percent: 30,
+            kind: ShieldKind::ElementalBarrier
+        }));
         assert!(super::buff_removed_on_death(&BuffType::Stun));
         assert!(super::buff_removed_on_death(&BuffType::Frozen));
-        assert!(super::buff_removed_on_death(&BuffType::Slow { percent: 10 }));
+        assert!(super::buff_removed_on_death(&BuffType::Slow {
+            percent: 10
+        }));
         assert!(super::buff_removed_on_death(&BuffType::Silence));
         // C# BuffInfo Properties=None → 保留
-        assert!(!super::buff_removed_on_death(&BuffType::AttackBoost { bonus: 10 }));
+        assert!(!super::buff_removed_on_death(&BuffType::AttackBoost {
+            bonus: 10
+        }));
         assert!(!super::buff_removed_on_death(&BuffType::Invisibility));
-        assert!(!super::buff_removed_on_death(&BuffType::DamageReduction { percent: 30, kind: ShieldKind::Other })); // EnergyShield
+        assert!(!super::buff_removed_on_death(&BuffType::DamageReduction {
+            percent: 30,
+            kind: ShieldKind::Other
+        })); // EnergyShield
     }
 
     #[test]
     fn shield_down_effect_matches_csharp_processbuffs() {
         // C# ProcessBuffs：MagicShield → MagicShieldDown / ElementalBarrier → ElementalBarrierDown / 其他无
         use crate::combat::buff::ShieldKind;
-        assert_eq!(super::shield_down_effect(ShieldKind::MagicShield),
-                   Some(mir2_shared::enums::SpellEffect::MagicShieldDown));
-        assert_eq!(super::shield_down_effect(ShieldKind::ElementalBarrier),
-                   Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown));
+        assert_eq!(
+            super::shield_down_effect(ShieldKind::MagicShield),
+            Some(mir2_shared::enums::SpellEffect::MagicShieldDown)
+        );
+        assert_eq!(
+            super::shield_down_effect(ShieldKind::ElementalBarrier),
+            Some(mir2_shared::enums::SpellEffect::ElementalBarrierDown)
+        );
         assert_eq!(super::shield_down_effect(ShieldKind::Other), None);
     }
 
     #[test]
     fn movement_blocked_by_poison_matches_csharp_canwalk() {
         // #1614：C# HumanObject.CanWalk——Paralysis/LRParalysis/Frozen 禁止移动
-        use mir2_shared::enums::PoisonType;
         use crate::combat::poison::Poison;
+        use mir2_shared::enums::PoisonType;
         let list = |t: PoisonType| vec![Poison::new(t, 5, 0, 1000)];
         assert!(movement_blocked_by_poison(&list(PoisonType::PARALYSIS)));
         assert!(movement_blocked_by_poison(&list(PoisonType::LR_PARALYSIS)));
@@ -6568,7 +7773,6 @@ mod tests {
             "英雄自动药 MP 格常量与协议错位"
         );
     }
-
 
     use super::*;
     #[test]
@@ -6626,7 +7830,6 @@ mod tests {
         assert_eq!(s, 0);
     }
 
-
     #[test]
     fn effective_ac_mac_includes_defense_buffs() {
         // C# buff Stats：AcDefenseBoost/MacDefenseBoost 加 Min+Max（SoulShield/BlessedArmour/CounterAttack）
@@ -6636,9 +7839,15 @@ mod tests {
         st.min_mac = 3;
         st.max_mac = 8;
         st.buffs.push(crate::combat::buff::BuffInstance::new(
-            crate::combat::buff::BuffType::AcDefenseBoost { bonus: 7 }, 70, 5));
+            crate::combat::buff::BuffType::AcDefenseBoost { bonus: 7 },
+            70,
+            5,
+        ));
         st.buffs.push(crate::combat::buff::BuffInstance::new(
-            crate::combat::buff::BuffType::MacDefenseBoost { bonus: 6 }, 70, 5));
+            crate::combat::buff::BuffType::MacDefenseBoost { bonus: 6 },
+            70,
+            5,
+        ));
         assert_eq!(st.effective_min_ac(), 12);
         assert_eq!(st.effective_max_ac(), 17);
         assert_eq!(st.effective_min_mac(), 9);
@@ -6652,9 +7861,15 @@ mod tests {
         st.max_hp = 120;
         st.max_mp = 60;
         st.buffs.push(crate::combat::buff::BuffInstance::new(
-            crate::combat::buff::BuffType::MaxHpBoost { bonus: 30 }, 600, 1));
+            crate::combat::buff::BuffType::MaxHpBoost { bonus: 30 },
+            600,
+            1,
+        ));
         st.buffs.push(crate::combat::buff::BuffInstance::new(
-            crate::combat::buff::BuffType::MaxMpBoost { bonus: 20 }, 600, 1));
+            crate::combat::buff::BuffType::MaxMpBoost { bonus: 20 },
+            600,
+            1,
+        ));
         assert_eq!(st.effective_max_hp(), 150);
         assert_eq!(st.effective_max_mp(), 80);
     }
@@ -6663,9 +7878,9 @@ mod tests {
     fn test_cap_player_stats() {
         // #2322：C# RefreshStatCaps——Stats[key] = min(cap, Stats[key])
         let mut st = make_state();
-        st.magic_resist = 10;   // cap 2
-        st.critical_rate = 30;  // cap 18
-        st.poison_resist = 3;   // cap 6，低于上限不变
+        st.magic_resist = 10; // cap 2
+        st.critical_rate = 30; // cap 18
+        st.poison_resist = 3; // cap 6，低于上限不变
         cap_player_stats(mir2_shared::enums::MirClass::Warrior, &mut st);
         assert_eq!(st.magic_resist, 2);
         assert_eq!(st.critical_rate, 18);
@@ -6725,13 +7940,13 @@ mod tests {
             level: 1,
             experience: 0,
             max_experience: 100,
-        can_gain_exp: true,
-        pearl_count: 0,
-        maximum_hero_count: 1,
-        step_counter: 0,
-        run_counter: 0,
-        run_time_ms: 0,
-        cell_time_ms: 0,
+            can_gain_exp: true,
+            pearl_count: 0,
+            maximum_hero_count: 1,
+            step_counter: 0,
+            run_counter: 0,
+            run_time_ms: 0,
+            cell_time_ms: 0,
             hp: 120,
             max_hp: 120,
             mp: 60,
@@ -6810,7 +8025,7 @@ mod tests {
             last_recall_time: 0,
             allow_lover_recall: false,
             is_gm: false,
-            gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+            gm_never_die: false,   // #1480：GM 无敌模式（C# GMNeverDie）
             special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
             has_expanded_storage: false,
             expanded_storage_expiry_date: 0,
@@ -6819,9 +8034,9 @@ mod tests {
             storage_password_last_set: 0,
             allow_observe: false,
             enable_guild_invite: false,
-allow_trade: false,
+            allow_trade: false,
 
-allow_group: false,
+            allow_group: false,
             is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,
@@ -6976,7 +8191,10 @@ allow_group: false,
         assert!(s.take_back_hero_item(3, 5));
         assert!(s.hero_inventory.backpack[3].is_none());
         assert!(s.inventory.backpack[5].is_some());
-        assert_eq!(s.inventory.backpack[5].as_ref().unwrap().item.unique_id, 9001);
+        assert_eq!(
+            s.inventory.backpack[5].as_ref().unwrap().item.unique_id,
+            9001
+        );
         assert_eq!(s.inventory.backpack[5].as_ref().unwrap().grid, 5);
     }
 
@@ -6987,7 +8205,14 @@ allow_group: false,
         assert!(s.transfer_hero_item(2, 7));
         assert!(s.inventory.backpack[2].is_none());
         assert!(s.hero_inventory.backpack[7].is_some());
-        assert_eq!(s.hero_inventory.backpack[7].as_ref().unwrap().item.unique_id, 9002);
+        assert_eq!(
+            s.hero_inventory.backpack[7]
+                .as_ref()
+                .unwrap()
+                .item
+                .unique_id,
+            9002
+        );
     }
 
     #[test]
@@ -7160,7 +8385,7 @@ allow_group: false,
         // SpiritSword C# 编号 = 62（SharedRust 65）
         s.magics.push(PlayerMagic::new(62));
         assert_eq!(spirit_sword_accuracy(&s.magics), 0); // 未学
-        // SpiritSword C# 编号 = 62（SharedRust 65）；spiritSwordLvPlus = {0,3,5,8}
+                                                         // SpiritSword C# 编号 = 62（SharedRust 65）；spiritSwordLvPlus = {0,3,5,8}
         s.magics.push(PlayerMagic::new(62));
         assert_eq!(spirit_sword_accuracy(&s.magics), 0); // Lv0 -> 0
         s.magics[0].level = 1;
@@ -7181,7 +8406,10 @@ allow_group: false,
         assert!(s.learn_magic(31));
         // 无 Skill 特殊：经验 100
         let _ = s.gain_spell_exp(34, 100, None);
-        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 100);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            100
+        );
         // 装备 Skill 特殊装备：经验 ×3
         let mut info = mir2_shared::data::item::ItemInfo::default();
         info.unique = mir2_shared::enums::SpecialItemMode::SKILL;
@@ -7190,7 +8418,10 @@ allow_group: false,
             ..Default::default()
         });
         let _ = s.gain_spell_exp(34, 100, None);
-        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 400); // 100 + 300
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            400
+        ); // 100 + 300
     }
 
     // ---- #1230 技能经验对齐 C# LevelMagic：DB 阈值（need1/2/3）+ 玩家等级门控（Level1/2/3） ----
@@ -7222,12 +8453,18 @@ allow_group: false,
         };
         // 等级 1 < Level1(7)：等级门控拦截，不加经验
         assert!(s.gain_spell_exp(34, 500, Some(&info)).is_none());
-        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 0);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            0
+        );
         // 升到 7 级后：need1=100，500 经验升级并结转 400（C# case 0）
         s.level = 7;
         let r = s.gain_spell_exp(34, 500, Some(&info)).unwrap();
         assert_eq!(r.1, 1);
-        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 400);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            400
+        );
         // 1 级阈值 need2=300 且门控 Level2=12：当前等级 7 < 12 被拦
         assert!(s.gain_spell_exp(34, 200, Some(&info)).is_none());
         assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().level, 1);
@@ -7235,7 +8472,10 @@ allow_group: false,
         // 已有结转 400 >= need2(300)，+200 → 升 2 级并结转 600-300=300（C# case 1）
         let r2 = s.gain_spell_exp(34, 200, Some(&info)).unwrap();
         assert_eq!(r2.1, 2);
-        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 300);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            300
+        );
         // 2 级门控 Level3=17：当前等级 12 < 17 被拦（C# case 2 需 Level >= Level3）
         assert!(s.gain_spell_exp(34, 1000, Some(&info)).is_none());
     }
@@ -7355,14 +8595,24 @@ allow_group: false,
             let mut info = mir2_shared::data::item::ItemInfo::default();
             info.item_type = mir2_shared::enums::ItemType::Amulet;
             info.shape = shape;
-            Some(UserItem { info: Some(info), count, ..Default::default() })
+            Some(UserItem {
+                info: Some(info),
+                count,
+                ..Default::default()
+            })
         };
 
         // 正常消耗：count 5 扣 2 → 剩 3
         let mut s = make_state();
         s.inventory.equipment[EquipmentSlot::Pendant as usize] = amulet(0, 5);
         assert!(s.consume_amulet_for_summon(2));
-        assert_eq!(s.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref().unwrap().count, 3);
+        assert_eq!(
+            s.inventory.equipment[EquipmentSlot::Pendant as usize]
+                .as_ref()
+                .unwrap()
+                .count,
+            3
+        );
 
         // 扣到 0 → 移除装备
         assert!(s.consume_amulet_for_summon(3));
@@ -7403,7 +8653,11 @@ allow_group: false,
             let mut info = mir2_shared::data::item::ItemInfo::default();
             info.item_type = mir2_shared::enums::ItemType::Amulet;
             info.shape = shape;
-            Some(UserItem { info: Some(info), count, ..Default::default() })
+            Some(UserItem {
+                info: Some(info),
+                count,
+                ..Default::default()
+            })
         };
 
         // 绿毒护符：detect=1，消耗 1 后 count-1
@@ -7411,7 +8665,13 @@ allow_group: false,
         s.inventory.equipment[EquipmentSlot::Pendant as usize] = poison_amulet(1, 3);
         assert_eq!(s.equipped_poison_shape(), 1);
         assert!(s.consume_poison_amulet(1));
-        assert_eq!(s.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref().unwrap().count, 2);
+        assert_eq!(
+            s.inventory.equipment[EquipmentSlot::Pendant as usize]
+                .as_ref()
+                .unwrap()
+                .count,
+            2
+        );
 
         // 红毒护符：detect=2；错误 shape 消耗失败
         let mut s = make_state();
@@ -7425,7 +8685,6 @@ allow_group: false,
         assert_eq!(s.equipped_poison_shape(), 0);
         assert!(!s.consume_poison_amulet(1));
 
-
         // 未装备：detect=0
         let s = make_state();
         assert_eq!(s.equipped_poison_shape(), 0);
@@ -7436,7 +8695,10 @@ allow_group: false,
     fn remove_one_awake_level_matches_csharp() {
         use mir2_shared::data::item::Awake;
         use mir2_shared::enums::AwakeType;
-        let mut a = Awake { awake_type: AwakeType::Dc, levels: vec![1, 2, 3] };
+        let mut a = Awake {
+            awake_type: AwakeType::Dc,
+            levels: vec![1, 2, 3],
+        };
         assert_eq!(super::remove_one_awake_level(&mut a), 2);
         assert_eq!(a.levels, vec![1, 2]);
         assert_eq!(a.awake_type, AwakeType::Dc); // 未清空时保留类型
@@ -7444,11 +8706,12 @@ allow_group: false,
         assert_eq!(super::remove_one_awake_level(&mut a), 0);
         assert!(a.levels.is_empty());
         assert_eq!(a.awake_type, AwakeType::None); // 清空后置 None
-        // 空列表：返回 0 且 Type=None
-        let mut b = Awake { awake_type: AwakeType::Mc, levels: vec![] };
+                                                   // 空列表：返回 0 且 Type=None
+        let mut b = Awake {
+            awake_type: AwakeType::Mc,
+            levels: vec![],
+        };
         assert_eq!(super::remove_one_awake_level(&mut b), 0);
         assert_eq!(b.awake_type, AwakeType::None);
     }
 }
-
-

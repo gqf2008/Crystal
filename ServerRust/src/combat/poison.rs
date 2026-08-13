@@ -9,8 +9,7 @@
 use mir2_shared::enums::PoisonType;
 
 /// 一条中毒/负面状态实例
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Poison {
     pub p_type: PoisonType,
     /// 持续时间（秒）
@@ -30,7 +29,10 @@ pub struct Poison {
 impl Poison {
     pub fn new(p_type: PoisonType, duration_s: u32, value: i32, tick_ms: u64) -> Self {
         Self {
-            p_type, duration_s, value, tick_ms,
+            p_type,
+            duration_s,
+            value,
+            tick_ms,
             owner_session: 0,
             delayed_stage: 0,
             delayed_next_tick: 0,
@@ -46,7 +48,8 @@ impl Poison {
 
     /// 是否为"减速"状态（影响移动间隔）
     pub fn is_slowing(&self) -> bool {
-        self.p_type.intersects(PoisonType::SLOW | PoisonType::FROZEN)
+        self.p_type
+            .intersects(PoisonType::SLOW | PoisonType::FROZEN)
     }
 }
 
@@ -89,7 +92,9 @@ pub fn tick_poisons(poison_list: &mut Vec<Poison>, dt_s: u32) -> i32 {
     let mut total_damage = 0i32;
     for p in poison_list.iter_mut() {
         p.duration_s = p.duration_s.saturating_sub(dt_s);
-        if p.p_type.intersects(PoisonType::GREEN | PoisonType::RED | PoisonType::BLEEDING) {
+        if p.p_type
+            .intersects(PoisonType::GREEN | PoisonType::RED | PoisonType::BLEEDING)
+        {
             total_damage = total_damage.saturating_add(p.value.max(0) * dt_s as i32);
         }
     }
@@ -144,7 +149,10 @@ mod tests {
         assert_eq!(list[0].delayed_stage, 1);
         assert_eq!(list[0].delayed_next_tick, 123);
         // 同类型替换会重置为新毒（C# 重复施放同类型毒时直接 return，不会走到这里）
-        apply_poison(&mut list, Poison::new(PoisonType::DELAYED_EXPLOSION, 10, 50, 2000));
+        apply_poison(
+            &mut list,
+            Poison::new(PoisonType::DELAYED_EXPLOSION, 10, 50, 2000),
+        );
         assert_eq!(list[0].delayed_stage, 0);
         assert_eq!(list[0].owner_session, 0);
         assert_eq!(list[0].delayed_next_tick, 0);

@@ -7,10 +7,10 @@
 //!   - 1/5 BladeAvalanche：前方 3 列 × 3 行刀山（j<=1 全额 / j>=2 0.6x，C# DefenceType.MAC）
 //!   - 2/5 普攻（base.Attack）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -49,76 +49,98 @@ impl MonsterBehavior for SepHighWarriorBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             match fastrand::i32(0..5) {
                 0 => {
                     // C# TwinDrakeBlade：0.8x 近战 + 0.8x 投射 + 眩晕
                     let dmg = ((damage as f32 * 0.8) as i32).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: dmg,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage: dmg,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage: dmg,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage: dmg,
+                            spell_id: 0,
+                        });
                     // C#：目标<=怪+8 且 Random(20)<=5 → Stun 5s + 目标特效
                     if target.level as i32 <= monster.level + 8 && fastrand::i32(0..20) <= 5 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::STUN, 5, 0, 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(PoisonType::STUN, 5, 0, 1000),
+                            });
                         // C# TwinDrakeBlade（SepHighWarrior.cs:103）：眩晕时对目标广播特效
-                        ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::TwinDrakeBlade, 0, 0));
+                        ctx.out_effects.push((
+                            target.object_id,
+                            mir2_shared::enums::SpellEffect::TwinDrakeBlade,
+                            0,
+                            0,
+                        ));
                     }
                 }
                 1 => {
                     // C# CrossHalfMoon（SepHighWarrior.cs:107）：HalfmoonAttack 4 格弧
                     let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                     monster.direction = dir;
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        direction: dir,
-                        count: 4,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Arc {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            direction: dir,
+                            count: 4,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                 }
                 2 => {
                     // C# BladeAvalanche：前方 3 列 × 3 行刀山（j<=1 全额 / j>=2 0.6x）
-                    let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                    let dir =
+                        direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
                     for (cx, cy, j) in blade_avalanche_cells(monster.x, monster.y, dir) {
-                        let dmg = if j <= 1 { damage } else { ((damage as f32 * 0.6) as i32).max(1) };
-                        for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0
-                            && p.x == cx && p.y == cy) {
-                            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                                attacker_oid: monster.object_id,
-                                target_session: p.session_id,
-                                damage: dmg,
-                                spell_id: 0,
-                                attack_type: 2,
-                            });
+                        let dmg = if j <= 1 {
+                            damage
+                        } else {
+                            ((damage as f32 * 0.6) as i32).max(1)
+                        };
+                        for p in ctx.players.iter().filter(|p| {
+                            p.map_index == monster.map_index && p.hp > 0 && p.x == cx && p.y == cy
+                        }) {
+                            ctx.out_attacks
+                                .push(crate::actors::world::ai::AttackAction::Melee {
+                                    attacker_oid: monster.object_id,
+                                    target_session: p.session_id,
+                                    damage: dmg,
+                                    spell_id: 0,
+                                    attack_type: 2,
+                                });
                         }
                     }
                 }
                 _ => {
                     // C# base.Attack：普攻
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             }
             return;

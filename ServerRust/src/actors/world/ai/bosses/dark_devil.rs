@@ -10,10 +10,10 @@
 //! Attack（C# :23-46）：_areaTime 到期→ObjectRangeAttack + DelayedAction RangeDamage。
 //! CompleteRangeAttack（C# :48-60）：DC*3，FindAllTargets(1, PointMove(self, dir, 2))。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 /// AOE 模式射程（C# Envir.Time > _areaTime ? 3 : 1）
@@ -64,29 +64,34 @@ impl MonsterBehavior for DarkDevilBehavior {
         if in_area_mode {
             // AOE 模式：DC*3，朝向 2 格前方 1 格范围（C# PointMove(self,dir,2)）
             self.area_tick = ctx.tick_count + 20 + fastrand::i32(0..3) as u64 * 10; // 2~4s
-            let dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1) * 3;
+            let dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                .max(1)
+                * 3;
             // 命中中心 = 朝目标方向走 2 格
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             let cx = monster.x + crate::actors::world::ai::helpers::DIR_DX[dir as usize] * 2;
             let cy = monster.y + crate::actors::world::ai::helpers::DIR_DY[dir as usize] * 2;
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                attacker_oid: monster.object_id,
-                center_x: cx,
-                center_y: cy,
-                radius: AREA_RADIUS,
-                damage: dmg,
-                spell_id: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Aoe {
+                    attacker_oid: monster.object_id,
+                    center_x: cx,
+                    center_y: cy,
+                    radius: AREA_RADIUS,
+                    damage: dmg,
+                    spell_id: 0,
+                });
         } else {
             // 普通近战（C# base.Attack）
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
         }
     }
 }

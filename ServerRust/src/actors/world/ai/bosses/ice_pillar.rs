@@ -6,9 +6,9 @@
 //!      1/3 CloseAttack（AOE1 承伤值 + IcePillar 特效 + 1/5 冰冻，值=MC）；
 //!      Die：FindAllTargets(7) AOE 伤害 + 每目标 1/5 冰冻（tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -22,7 +22,9 @@ pub struct IcePillarBehavior {
 
 impl IcePillarBehavior {
     pub fn new() -> Self {
-        Self { last_incoming_damage: 0 }
+        Self {
+            last_incoming_damage: 0,
+        }
     }
 }
 
@@ -68,31 +70,50 @@ impl MonsterBehavior for IcePillarBehavior {
                 let damage = if self.last_incoming_damage > 0 {
                     self.last_incoming_damage
                 } else {
-                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1)
                 };
                 self.last_incoming_damage = 0;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: AOE_RADIUS,
-                    damage: damage.max(1),
-                    spell_id: 0,
-                });
-                let nearby: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
-                        .into_iter().copied().collect();
-                let mc_power = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: AOE_RADIUS,
+                        damage: damage.max(1),
+                        spell_id: 0,
+                    });
+                let nearby: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
+                let mc_power =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                let sc_power =
+                    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0)
+                        .max(1);
                 for p in nearby {
                     // C# CloseAttack（IcePillar.cs:158）：每个命中目标广播 IcePillar 特效
-                    ctx.out_effects.push((p.object_id, mir2_shared::enums::SpellEffect::IcePillar, 0, 0));
+                    ctx.out_effects.push((
+                        p.object_id,
+                        mir2_shared::enums::SpellEffect::IcePillar,
+                        0,
+                        0,
+                    ));
                     // C# PoisonTarget(5, MC, Frozen, 1000)：1/5、时长=MC 攻秒数、值=SC
                     if fastrand::i32(0..5) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: p.session_id,
-                            poison: Poison::new(PoisonType::FROZEN, mc_power as u32, sc_power, 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: p.session_id,
+                                poison: Poison::new(
+                                    PoisonType::FROZEN,
+                                    mc_power as u32,
+                                    sc_power,
+                                    1000,
+                                ),
+                            });
                     }
                 }
             }
@@ -101,23 +122,34 @@ impl MonsterBehavior for IcePillarBehavior {
 
     /// C# Die + CompleteDeath：7 格 AOE 伤害 + 每目标 1/5 冰冻
     fn on_die(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-            attacker_oid: monster.object_id,
-            center_x: monster.x,
-            center_y: monster.y,
-            radius: DEATH_RADIUS,
-            damage,
-            spell_id: 0,
-        });
-        let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, DEATH_RADIUS, monster.map_index)
-            .iter().map(|p| p.session_id).collect();
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Aoe {
+                attacker_oid: monster.object_id,
+                center_x: monster.x,
+                center_y: monster.y,
+                radius: DEATH_RADIUS,
+                damage,
+                spell_id: 0,
+            });
+        let nearby: Vec<u64> = ctx
+            .find_targets_in_range(monster.x, monster.y, DEATH_RADIUS, monster.map_index)
+            .iter()
+            .map(|p| p.session_id)
+            .collect();
         for sid in nearby {
             if fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: sid,
-                    poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: sid,
+                        poison: Poison::new(
+                            PoisonType::FROZEN,
+                            5,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            1000,
+                        ),
+                    });
             }
         }
     }

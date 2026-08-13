@@ -3,18 +3,18 @@
 
 use std::path::Path;
 
-use sqlx::{SqlitePool, Row};
+use sqlx::{Row, SqlitePool};
 use tracing::info;
 
 use crate::actors::account::AccountInfo;
-use crate::actors::player::PlayerState;
-use crate::actors::inventory::PlayerInventory;
-use crate::actors::friend::{FriendList, FriendEntry, BlockedEntry};
-use crate::actors::mail::{Mailbox, MailMessage};
-use crate::actors::quest::{QuestLog, QuestInstance, QuestProgress, QuestStatus};
+use crate::actors::creature::{CreatureLog, CreatureType, IntelligentCreature, PickupMode};
+use crate::actors::friend::{BlockedEntry, FriendEntry, FriendList};
 use crate::actors::guild::{Guild, GuildMember, GuildRank};
-use crate::actors::creature::{CreatureLog, IntelligentCreature, CreatureType, PickupMode};
-use crate::actors::refine::{RefineLog, RefiningItem, RefineStatus};
+use crate::actors::inventory::PlayerInventory;
+use crate::actors::mail::{MailMessage, Mailbox};
+use crate::actors::player::PlayerState;
+use crate::actors::quest::{QuestInstance, QuestLog, QuestProgress, QuestStatus};
+use crate::actors::refine::{RefineLog, RefineStatus, RefiningItem};
 
 pub type DbPool = SqlitePool;
 
@@ -26,13 +26,21 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     //   WAL = Write-Ahead Logging,允许并发读不阻塞写,显著提升高负载性能
     //   synchronous=NORMAL = 在 WAL 模式下是安全的,比 FULL 快 2-10 倍
     //   busy_timeout = 写锁竞争时等 5 秒而不是立刻报错
-    sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await?;
-    sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await?;
-    sqlx::query("PRAGMA busy_timeout=5000").execute(&pool).await?;
+    sqlx::query("PRAGMA journal_mode=WAL")
+        .execute(&pool)
+        .await?;
+    sqlx::query("PRAGMA synchronous=NORMAL")
+        .execute(&pool)
+        .await?;
+    sqlx::query("PRAGMA busy_timeout=5000")
+        .execute(&pool)
+        .await?;
     // FK 禁用：INSERT OR REPLACE 在 characters 表会触发子表级联删除+重插，
     // 中间状态（character 行被删、子表引用悬空）导致 FK constraint failed。
     // 游戏服务器的数据完整性由应用层保证（save_character 用事务）。
-    sqlx::query("PRAGMA foreign_keys=OFF").execute(&pool).await?;
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&pool)
+        .await?;
 
     // Create tables if not exists
     // Phase A fix: sqlx::query() 不支持多语句;改用 raw_sql() 执行整个 schema 批次
@@ -643,275 +651,474 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             FOREIGN KEY (recipe_id) REFERENCES recipes(recipe_id)
         );
         CREATE INDEX IF NOT EXISTS idx_recipe_tools_recipe ON recipe_tools(recipe_id);
-        "#
-    ).execute(&pool).await?;
+        "#,
+    )
+    .execute(&pool)
+    .await?;
 
     // #995/#996：旧库补 monster_drops 列（safe to re-run；新库 CREATE 已含）
-    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN gold INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN quest_required INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_parent_id INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_random INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_first INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN gold INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE monster_drops ADD COLUMN quest_required INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE monster_drops ADD COLUMN group_parent_id INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ =
+        sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_random INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ =
+        sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_first INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     // refinefix：精炼日志持久化完整物品（safe to re-run；新库 CREATE 已含）
-    let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN active_item_json TEXT").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN active_item_json TEXT")
+        .execute(&pool)
+        .await;
     // #2304：精炼材料槽持久化（safe to re-run；新库 CREATE 已含）
-    let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN materials_json TEXT").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE refine_log ADD COLUMN materials_json TEXT")
+        .execute(&pool)
+        .await;
     // #2432：怪物可召回标记（C# MonsterInfo.CanRecall；safe to re-run——旧库缺列导致 load_monster_infos r.get panic）
-    let _ = sqlx::query("ALTER TABLE monster_infos ADD COLUMN can_recall INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE monster_infos ADD COLUMN can_recall INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
 
     // Migration: add quest timer columns (safe to re-run)
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN start_time INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE quests ADD COLUMN time_limit_seconds INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE quests ADD COLUMN time_limit_seconds INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN quest_type INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: add GM flag to accounts (safe to re-run)
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN credit INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN admin_account INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // PR #1169: Warehouse password columns (safe to re-run; NULL = no password set)
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_hash TEXT")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // #887: 仓库扩容字段（C# AccountInfo.HasExpandedStorage / ExpandedStorageExpiryDate，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN has_expanded_storage INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN expanded_storage_expiry_date INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE accounts ADD COLUMN has_expanded_storage INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE accounts ADD COLUMN expanded_storage_expiry_date INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     // #493: 地图进入规则列（C# MapInfo NoGroup/NoPets/NoIntelligentCreatures/NoHero，safe to re-run）
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_group INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_pets INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_intelligent_creatures INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE map_infos ADD COLUMN no_intelligent_creatures INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_hero INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // #491: 角色最后上线时间（C# LastLogoutDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN last_access INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // #516: 强制改密标记（C# AccountInfo.RequirePasswordChange，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN require_password_change INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE accounts ADD COLUMN require_password_change INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     // #899: 背包格数（C# CharacterInfo.Inventory.Length，扩容后重登不丢，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 46")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 46")
+            .execute(&pool)
+            .await;
     // #2166：C# Inventory 基础 46 格——既有 40 格角色迁移到 46（幂等）
     let _ = sqlx::query("UPDATE characters SET backpack_size = 46 WHERE backpack_size < 46")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // #1395: 行会职务定义/职务索引（C# GuildObject.Ranks，safe to re-run）
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN rank_defs_json TEXT NOT NULL DEFAULT '[]'")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE guild_members ADD COLUMN rank_index INTEGER NOT NULL DEFAULT 2")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE guild_members ADD COLUMN rank_index INTEGER NOT NULL DEFAULT 2")
+            .execute(&pool)
+            .await;
     // #932: 无经验地图（C# MapInfo.NoExperience，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_experience INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE map_infos ADD COLUMN no_experience INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     // #935: 必须组队地图（C# MapInfo.RequiredGroup/RequiredGroupSize，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN required_group INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN required_group_size INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE map_infos ADD COLUMN required_group INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ = sqlx::query(
+        "ALTER TABLE map_infos ADD COLUMN required_group_size INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN banned_until INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: add key column to player_magics (safe to re-run)
     let _ = sqlx::query("ALTER TABLE player_magics ADD COLUMN key INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: add toggled column to player_magics (safe to re-run)
     let _ = sqlx::query("ALTER TABLE player_magics ADD COLUMN toggled INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: add hero_behaviour column to characters (safe to re-run)
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN hero_behaviour INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_lover_recall INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_marriage INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN hero_behaviour INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN allow_lover_recall INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN allow_marriage INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     // #1329: 结婚日期（unix 秒，C# CharacterInfo.MarriedDate，safe to re-run）
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN married_date INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN married_date INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_trade INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_observe INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN allow_observe INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_group INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_mounted INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mount_type INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reincarnation_host TEXT")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reincarnation_ready INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reincarnation_expire_time INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN enable_group_recall INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN last_recall_time INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN exp_multiplier REAL NOT NULL DEFAULT 1.0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN exp_multiplier_end_tick INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN reincarnation_ready INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN reincarnation_expire_time INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN enable_group_recall INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN last_recall_time INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN exp_multiplier REAL NOT NULL DEFAULT 1.0")
+            .execute(&pool)
+            .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN exp_multiplier_end_tick INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_gm INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: add auto_pot columns to characters (safe to re-run)
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_hp INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_mp INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_hp_item INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_mp_item INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN auto_pot_hp_item INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN auto_pot_mp_item INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     // Migration: add magic stats to characters
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_mc INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_mc INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_sc INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_sc INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN freezing INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN poison_attack INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN poison_recovery INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN poison_attack INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN poison_recovery INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN holy INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN accuracy INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN agility INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // 战斗公式扩展字段（AC/MAC/Luck/Crit/MagicResist/Reflect/DamageReduction 等）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_ac INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_ac INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_mac INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_mac INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN pearl_count INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // heroslots：英雄槽位上限（safe to re-run）
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN maximum_hero_count INTEGER NOT NULL DEFAULT 1")
-        .execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN maximum_hero_count INTEGER NOT NULL DEFAULT 1",
+    )
+    .execute(&pool)
+    .await;
     // #2336：角色封禁（C# CharacterInfo.Banned/BanReason/ExpiryDate；外部工具设置，StartGame 拦截）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN ban_expiry_ticks INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN ban_expiry_ticks INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN dead INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE creatures ADD COLUMN active_level INTEGER NOT NULL DEFAULT 1")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // #2330：智能宠物黑曜石产出计时（C# CreatureInfo.BlackstoneTime）
-    let _ = sqlx::query("ALTER TABLE creatures ADD COLUMN active_blackstone_time INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE creatures ADD COLUMN active_blackstone_time INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN autopot INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN experience INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN max_experience INTEGER NOT NULL DEFAULT 100")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN can_gain_exp INTEGER NOT NULL DEFAULT 1")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE heroes ADD COLUMN max_experience INTEGER NOT NULL DEFAULT 100")
+            .execute(&pool)
+            .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN can_gain_exp INTEGER NOT NULL DEFAULT 1")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN luck INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN critical_rate INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN critical_damage INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN magic_resist INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN critical_rate INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN critical_damage INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN magic_resist INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reflect INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN damage_reduction_percent INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN attack_bonus INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN hp_drain_rate_percent INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN energy_shield_percent INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN energy_shield_hp_gain INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_map_index INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN damage_reduction_percent INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN attack_bonus INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN hp_drain_rate_percent INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN energy_shield_percent INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE characters ADD COLUMN energy_shield_hp_gain INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
+    let _ =
+        sqlx::query("ALTER TABLE characters ADD COLUMN bind_map_index INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_mentor INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mentor_exp INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // #2374：师徒期限（C# CharacterInfo.MentorDate，unix 秒；到期/冷却判定）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mentor_date INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: quests（角色任务）信用奖励列（#1161 任务奖励对齐）
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN credit_reward INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: quest_infos 信用奖励列（#1161 任务奖励对齐）
-    let _ = sqlx::query("ALTER TABLE quest_infos ADD COLUMN credit_reward INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ =
+        sqlx::query("ALTER TABLE quest_infos ADD COLUMN credit_reward INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     // Migration: guilds 行会经验/等级列（#1161）
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN experience INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN max_experience INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN spare_points INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN member_cap INTEGER NOT NULL DEFAULT 50")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN flag_image INTEGER NOT NULL DEFAULT 1000")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN flag_colour INTEGER NOT NULL DEFAULT -1")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
-    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     // Fix potentially broken gt column (TEXT→INTEGER from old migration).
     // 只在 gt 列类型为 TEXT 时才 DROP+ADD（避免每次重启丢数据）。
     // SQLite 的 ALTER TABLE DROP COLUMN 在 3.35+ 支持。若版本旧或列已是 INTEGER，跳过。
     let need_gt_fix = sqlx::query("SELECT typeof(gt) FROM map_infos LIMIT 1")
-        .fetch_optional(&pool).await
-        .ok().flatten()
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
         .and_then(|row| row.try_get::<String, _>("typeof(gt)").ok())
         .map(|t| t == "text")
         .unwrap_or(false);
     if need_gt_fix {
-        let _ = sqlx::query("ALTER TABLE map_infos DROP COLUMN gt").execute(&pool).await;
+        let _ = sqlx::query("ALTER TABLE map_infos DROP COLUMN gt")
+            .execute(&pool)
+            .await;
         let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt INTEGER NOT NULL DEFAULT 0")
-            .execute(&pool).await;
+            .execute(&pool)
+            .await;
     } else {
         // 确保列存在（首次运行时可能没 gt 列）
         let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt INTEGER NOT NULL DEFAULT 0")
-            .execute(&pool).await;
+            .execute(&pool)
+            .await;
     }
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt_index INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE item_infos ADD COLUMN tool_tip TEXT NOT NULL DEFAULT ''")
-        .execute(&pool).await;
+        .execute(&pool)
+        .await;
 
     // Report logs
     sqlx::query(
@@ -921,8 +1128,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             issue_type INTEGER NOT NULL DEFAULT 0,
             description TEXT NOT NULL DEFAULT '',
             created_at INTEGER NOT NULL DEFAULT 0
-        )"#
-    ).execute(&pool).await?;
+        )"#,
+    )
+    .execute(&pool)
+    .await?;
 
     // Rental persistence
     sqlx::query(
@@ -938,19 +1147,25 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             expires_at INTEGER NOT NULL DEFAULT 0,
             returned INTEGER NOT NULL DEFAULT 0,
             item_json TEXT NOT NULL DEFAULT ''
-        )"#
-    ).execute(&pool).await?;
+        )"#,
+    )
+    .execute(&pool)
+    .await?;
 
     // 老库迁移：rentals 补 item_json（用于重建 UserItem 到期归还）
-    let _ = sqlx::query("ALTER TABLE rentals ADD COLUMN item_json TEXT NOT NULL DEFAULT ''").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE rentals ADD COLUMN item_json TEXT NOT NULL DEFAULT ''")
+        .execute(&pool)
+        .await;
 
     // Buff 持久化（C# CharacterInfo.Buffs；SavedBuff JSON，墙钟到期）
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS player_buffs (
             character_name TEXT NOT NULL,
             buff_json TEXT NOT NULL
-        )"#
-    ).execute(&pool).await?;
+        )"#,
+    )
+    .execute(&pool)
+    .await?;
 
     // 驯服宠物持久化（C# CharacterInfo.Pets）
     sqlx::query(
@@ -962,8 +1177,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             experience INTEGER NOT NULL DEFAULT 0,
             level INTEGER NOT NULL DEFAULT 1,
             max_pet_level INTEGER NOT NULL DEFAULT 0
-        )"#
-    ).execute(&pool).await?;
+        )"#,
+    )
+    .execute(&pool)
+    .await?;
 
     // GM 角色存档（C# Envir.SaveArchivedCharacter；PlayerState JSON 快照）
     sqlx::query(
@@ -972,20 +1189,28 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             account_username TEXT NOT NULL DEFAULT '',
             archived_json TEXT NOT NULL,
             created_at INTEGER NOT NULL DEFAULT 0
-        )"#
-    ).execute(&pool).await?;
+        )"#,
+    )
+    .execute(&pool)
+    .await?;
     // 老库迁移：player_archives 补 account_username（恢复回原账号用）
-    let _ = sqlx::query("ALTER TABLE player_archives ADD COLUMN account_username TEXT NOT NULL DEFAULT ''").execute(&pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE player_archives ADD COLUMN account_username TEXT NOT NULL DEFAULT ''",
+    )
+    .execute(&pool)
+    .await;
 
     info!("SQLite database initialized: {}", db_url);
     Ok(pool)
 }
 
-    #[tokio::test]
-    async fn test_rentals_persistence_roundtrip() {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS rentals (
+#[tokio::test]
+async fn test_rentals_persistence_roundtrip() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS rentals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item_unique_id INTEGER NOT NULL,
                 item_index INTEGER NOT NULL,
@@ -997,18 +1222,25 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
                 expires_at INTEGER NOT NULL DEFAULT 0,
                 returned INTEGER NOT NULL DEFAULT 0,
                 item_json TEXT NOT NULL DEFAULT ''
-            )"
-        ).execute(&pool).await.unwrap();
-        sqlx::query("CREATE TABLE IF NOT EXISTS inventory_backpack (character_name TEXT NOT NULL, grid INTEGER NOT NULL, item_json TEXT NOT NULL)")
+            )",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE IF NOT EXISTS inventory_backpack (character_name TEXT NOT NULL, grid INTEGER NOT NULL, item_json TEXT NOT NULL)")
             .execute(&pool).await.unwrap();
-        sqlx::query("CREATE TABLE IF NOT EXISTS inventory_equipment (character_name TEXT NOT NULL, slot INTEGER NOT NULL, item_json TEXT NOT NULL)")
+    sqlx::query("CREATE TABLE IF NOT EXISTS inventory_equipment (character_name TEXT NOT NULL, slot INTEGER NOT NULL, item_json TEXT NOT NULL)")
             .execute(&pool).await.unwrap();
 
-        let item = mir2_shared::data::item::UserItem { unique_id: 999, item_index: 1001, ..Default::default() };
-        let item_json = serde_json::to_string(&item).unwrap();
+    let item = mir2_shared::data::item::UserItem {
+        unique_id: 999,
+        item_index: 1001,
+        ..Default::default()
+    };
+    let item_json = serde_json::to_string(&item).unwrap();
 
-        // 写入一条租赁（等价 ConfirmItemRental INSERT）
-        sqlx::query("INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at, item_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    // 写入一条租赁（等价 ConfirmItemRental INSERT）
+    sqlx::query("INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at, item_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(item.unique_id as i64)
             .bind(item.item_index)
             .bind("owner")
@@ -1020,173 +1252,224 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             .bind(&item_json)
             .execute(&pool).await.unwrap();
 
-        // load_all_rentals 恢复
-        let rows = load_all_rentals(&pool).await.unwrap();
-        assert_eq!(rows.len(), 1);
-        let (json, owner, renter, fee, _period_days, _started_at, expires) = &rows[0];
-        assert_eq!(owner, "owner");
-        assert_eq!(renter, "renter");
-        assert_eq!(*fee, 100);
-        assert_eq!(*expires, 9_999_999_999);
-        let loaded: mir2_shared::data::item::UserItem = serde_json::from_str(json).unwrap();
-        assert_eq!(loaded.unique_id, 999);
-        assert_eq!(loaded.item_index, 1001);
+    // load_all_rentals 恢复
+    let rows = load_all_rentals(&pool).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let (json, owner, renter, fee, _period_days, _started_at, expires) = &rows[0];
+    assert_eq!(owner, "owner");
+    assert_eq!(renter, "renter");
+    assert_eq!(*fee, 100);
+    assert_eq!(*expires, 9_999_999_999);
+    let loaded: mir2_shared::data::item::UserItem = serde_json::from_str(json).unwrap();
+    assert_eq!(loaded.unique_id, 999);
+    assert_eq!(loaded.item_index, 1001);
 
-        // mark_rental_returned：首次成功，二次幂等
-        assert!(mark_rental_returned(&pool, 999).await.unwrap());
-        assert!(!mark_rental_returned(&pool, 999).await.unwrap());
-        assert!(load_all_rentals(&pool).await.unwrap().is_empty());
+    // mark_rental_returned：首次成功，二次幂等
+    assert!(mark_rental_returned(&pool, 999).await.unwrap());
+    assert!(!mark_rental_returned(&pool, 999).await.unwrap());
+    assert!(load_all_rentals(&pool).await.unwrap().is_empty());
 
-        // remove_rented_item_from_character：背包扫描删除
-        sqlx::query("INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES ('renter', 0, ?)")
-            .bind(&item_json)
-            .execute(&pool).await.unwrap();
-        let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
-        assert!(removed.is_some());
-        assert_eq!(removed.unwrap().unique_id, 999);
-        let count: i64 = sqlx::query("SELECT COUNT(*) FROM inventory_backpack WHERE character_name = 'renter'")
-            .fetch_one(&pool).await.unwrap().get(0);
-        assert_eq!(count, 0);
-        assert!(remove_rented_item_from_character(&pool, "renter", 999).await.unwrap().is_none());
+    // remove_rented_item_from_character：背包扫描删除
+    sqlx::query(
+        "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES ('renter', 0, ?)",
+    )
+    .bind(&item_json)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let removed = remove_rented_item_from_character(&pool, "renter", 999)
+        .await
+        .unwrap();
+    assert!(removed.is_some());
+    assert_eq!(removed.unwrap().unique_id, 999);
+    let count: i64 =
+        sqlx::query("SELECT COUNT(*) FROM inventory_backpack WHERE character_name = 'renter'")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(count, 0);
+    assert!(remove_rented_item_from_character(&pool, "renter", 999)
+        .await
+        .unwrap()
+        .is_none());
 
-        // 装备槽扫描删除
-        sqlx::query("INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES ('renter', 1, ?)")
-            .bind(&item_json)
-            .execute(&pool).await.unwrap();
-        let removed = remove_rented_item_from_character(&pool, "renter", 999).await.unwrap();
-        assert!(removed.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_player_archives_roundtrip() {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query("CREATE TABLE IF NOT EXISTS player_archives (character_name TEXT PRIMARY KEY, account_username TEXT NOT NULL DEFAULT '', archived_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0)")
-            .execute(&pool).await.unwrap();
-
-        archive_player_json(&pool, "Hero", "acc1", r#"{"level":30}"#).await.unwrap();
-        let loaded = load_archived_player(&pool, "Hero").await.unwrap();
-        assert!(loaded.is_some());
-        let (acc, json) = loaded.unwrap();
-        assert_eq!(acc, "acc1");
-        assert_eq!(json, r#"{"level":30}"#);
-
-        // 同名覆盖（账号同步更新）
-        archive_player_json(&pool, "Hero", "acc2", r#"{"level":31}"#).await.unwrap();
-        let loaded = load_archived_player(&pool, "Hero").await.unwrap();
-        let (acc, json) = loaded.unwrap();
-        assert_eq!(acc, "acc2");
-        assert_eq!(json, r#"{"level":31}"#);
-
-        assert!(load_archived_player(&pool, "None").await.unwrap().is_none());
-
-        // get_character_account：无 characters 表时返回 None（不建表，避免依赖）
-        // get_character_account：需要 characters 表
-        sqlx::query("CREATE TABLE IF NOT EXISTS characters (name TEXT PRIMARY KEY, account_username TEXT)")
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO characters (name, account_username) VALUES ('Hero', 'acc_live')")
-            .execute(&pool).await.unwrap();
-        assert_eq!(get_character_account(&pool, "Hero").await.unwrap().as_deref(), Some("acc_live"));
-        assert!(get_character_account(&pool, "None").await.unwrap().is_none());
-    }
-
-    
-    /// #2384：list_all_characters 返回 (name, account, last_access)
-    #[tokio::test]
-    async fn test_list_all_characters() {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query("CREATE TABLE characters (name TEXT PRIMARY KEY, account_username TEXT NOT NULL, last_access INTEGER NOT NULL DEFAULT 0)")
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO characters (name, account_username, last_access) VALUES ('A','acc1',100),('B','acc2',200)")
-            .execute(&pool).await.unwrap();
-        let rows = list_all_characters(&pool).await.unwrap();
-        assert_eq!(rows.len(), 2);
-        assert!(rows.contains(&("A".to_string(), "acc1".to_string(), 100)));
-        assert!(rows.contains(&("B".to_string(), "acc2".to_string(), 200)));
-    }
+    // 装备槽扫描删除
+    sqlx::query(
+        "INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES ('renter', 1, ?)",
+    )
+    .bind(&item_json)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let removed = remove_rented_item_from_character(&pool, "renter", 999)
+        .await
+        .unwrap();
+    assert!(removed.is_some());
+}
 
 #[tokio::test]
-    async fn test_player_pets_roundtrip() {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query("CREATE TABLE IF NOT EXISTS player_pets (character_name TEXT NOT NULL, monster_index INTEGER NOT NULL, name TEXT NOT NULL, hp INTEGER NOT NULL DEFAULT 1, experience INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1, max_pet_level INTEGER NOT NULL DEFAULT 0)")
+async fn test_player_archives_roundtrip() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE IF NOT EXISTS player_archives (character_name TEXT PRIMARY KEY, account_username TEXT NOT NULL DEFAULT '', archived_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0)")
             .execute(&pool).await.unwrap();
 
-        let pets = vec![
-            crate::actors::world::TamedPetInfo {
-                object_id: 999, // 运行时字段不持久化
-                monster_index: 271,
-                name: "TamedWolf".into(),
-                hp: 120,
-                experience: 50u64,
-                level: 3u8,
-                max_pet_level: 7u8,
-            },
-        ];
-        save_player_pets(&pool, "Hero", &pets).await.unwrap();
-        let loaded = load_player_pets(&pool, "Hero").await.unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].monster_index, 271);
-        assert_eq!(loaded[0].name, "TamedWolf");
-        assert_eq!(loaded[0].hp, 120);
-        assert_eq!(loaded[0].experience, 50);
-        assert_eq!(loaded[0].level, 3);
-        assert_eq!(loaded[0].max_pet_level, 7);
-        assert_eq!(loaded[0].object_id, 0);
+    archive_player_json(&pool, "Hero", "acc1", r#"{"level":30}"#)
+        .await
+        .unwrap();
+    let loaded = load_archived_player(&pool, "Hero").await.unwrap();
+    assert!(loaded.is_some());
+    let (acc, json) = loaded.unwrap();
+    assert_eq!(acc, "acc1");
+    assert_eq!(json, r#"{"level":30}"#);
 
-        // 覆盖写：再次保存只保留新列表
-        save_player_pets(&pool, "Hero", &[]).await.unwrap();
-        assert!(load_player_pets(&pool, "Hero").await.unwrap().is_empty());
-    }
+    // 同名覆盖（账号同步更新）
+    archive_player_json(&pool, "Hero", "acc2", r#"{"level":31}"#)
+        .await
+        .unwrap();
+    let loaded = load_archived_player(&pool, "Hero").await.unwrap();
+    let (acc, json) = loaded.unwrap();
+    assert_eq!(acc, "acc2");
+    assert_eq!(json, r#"{"level":31}"#);
 
-    #[tokio::test]
-    async fn test_buffs_persistence_roundtrip() {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query("CREATE TABLE IF NOT EXISTS player_buffs (character_name TEXT NOT NULL, buff_json TEXT NOT NULL)")
+    assert!(load_archived_player(&pool, "None").await.unwrap().is_none());
+
+    // get_character_account：无 characters 表时返回 None（不建表，避免依赖）
+    // get_character_account：需要 characters 表
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS characters (name TEXT PRIMARY KEY, account_username TEXT)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO characters (name, account_username) VALUES ('Hero', 'acc_live')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_character_account(&pool, "Hero")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("acc_live")
+    );
+    assert!(get_character_account(&pool, "None")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+/// #2384：list_all_characters 返回 (name, account, last_access)
+#[tokio::test]
+async fn test_list_all_characters() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE characters (name TEXT PRIMARY KEY, account_username TEXT NOT NULL, last_access INTEGER NOT NULL DEFAULT 0)")
             .execute(&pool).await.unwrap();
-        let mut conn = pool.acquire().await.unwrap();
+    sqlx::query("INSERT INTO characters (name, account_username, last_access) VALUES ('A','acc1',100),('B','acc2',200)")
+            .execute(&pool).await.unwrap();
+    let rows = list_all_characters(&pool).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.contains(&("A".to_string(), "acc1".to_string(), 100)));
+    assert!(rows.contains(&("B".to_string(), "acc2".to_string(), 200)));
+}
 
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+#[tokio::test]
+async fn test_player_pets_roundtrip() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE IF NOT EXISTS player_pets (character_name TEXT NOT NULL, monster_index INTEGER NOT NULL, name TEXT NOT NULL, hp INTEGER NOT NULL DEFAULT 1, experience INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1, max_pet_level INTEGER NOT NULL DEFAULT 0)")
+            .execute(&pool).await.unwrap();
 
-        let buffs = vec![
-            crate::combat::buff::BuffInstance::new(
-                crate::combat::buff::BuffType::AttackBoost { bonus: 5 }, 300, 10,
-            ),
-            crate::combat::buff::BuffInstance::new(
-                crate::combat::buff::BuffType::Invisibility, 120, 1,
-            ),
-        ];
-        save_buffs(&mut conn, "Hero", &buffs).await.unwrap();
+    let pets = vec![crate::actors::world::TamedPetInfo {
+        object_id: 999, // 运行时字段不持久化
+        monster_index: 271,
+        name: "TamedWolf".into(),
+        hp: 120,
+        experience: 50u64,
+        level: 3u8,
+        max_pet_level: 7u8,
+    }];
+    save_player_pets(&pool, "Hero", &pets).await.unwrap();
+    let loaded = load_player_pets(&pool, "Hero").await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].monster_index, 271);
+    assert_eq!(loaded[0].name, "TamedWolf");
+    assert_eq!(loaded[0].hp, 120);
+    assert_eq!(loaded[0].experience, 50);
+    assert_eq!(loaded[0].level, 3);
+    assert_eq!(loaded[0].max_pet_level, 7);
+    assert_eq!(loaded[0].object_id, 0);
 
-        // 立即加载：数量/时长保持
-        let loaded = load_player_buffs(&pool, "Hero").await.unwrap();
-        assert_eq!(loaded.len(), 2);
-        // save/load 之间可能有毫秒级流逝：remaining_ticks 在 299..=300 范围（30000ms/100ms）
-        assert!((299..=300).contains(&loaded[0].remaining_ticks));
-        assert_eq!(loaded[1].buff_type, crate::combat::buff::BuffType::Invisibility);
+    // 覆盖写：再次保存只保留新列表
+    save_player_pets(&pool, "Hero", &[]).await.unwrap();
+    assert!(load_player_pets(&pool, "Hero").await.unwrap().is_empty());
+}
 
-        // 已过期记录：手动插入过去到期 → 加载时丢弃
-        let expired = crate::combat::buff::SavedBuff {
-            buff_type: crate::combat::buff::BuffType::Stun,
-            tick_interval: 1,
-            tick_counter: 0,
-            source_id: None,
-            paused: false,
-            expire_at_ms: now_ms - 1000,
-        };
-        let json = serde_json::to_string(&expired).unwrap();
-        sqlx::query("INSERT INTO player_buffs (character_name, buff_json) VALUES ('Hero', ?)")
-            .bind(&json).execute(&pool).await.unwrap();
-        let loaded2 = load_player_buffs(&pool, "Hero").await.unwrap();
-        assert_eq!(loaded2.len(), 2, "过期 buff 应被丢弃");
-    }
+#[tokio::test]
+async fn test_buffs_persistence_roundtrip() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE IF NOT EXISTS player_buffs (character_name TEXT NOT NULL, buff_json TEXT NOT NULL)")
+            .execute(&pool).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
 
-    #[tokio::test]
-    async fn test_save_load_heroes_roundtrip() {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
-        sqlx::query(
-            "CREATE TABLE heroes (
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let buffs = vec![
+        crate::combat::buff::BuffInstance::new(
+            crate::combat::buff::BuffType::AttackBoost { bonus: 5 },
+            300,
+            10,
+        ),
+        crate::combat::buff::BuffInstance::new(crate::combat::buff::BuffType::Invisibility, 120, 1),
+    ];
+    save_buffs(&mut conn, "Hero", &buffs).await.unwrap();
+
+    // 立即加载：数量/时长保持
+    let loaded = load_player_buffs(&pool, "Hero").await.unwrap();
+    assert_eq!(loaded.len(), 2);
+    // save/load 之间可能有毫秒级流逝：remaining_ticks 在 299..=300 范围（30000ms/100ms）
+    assert!((299..=300).contains(&loaded[0].remaining_ticks));
+    assert_eq!(
+        loaded[1].buff_type,
+        crate::combat::buff::BuffType::Invisibility
+    );
+
+    // 已过期记录：手动插入过去到期 → 加载时丢弃
+    let expired = crate::combat::buff::SavedBuff {
+        buff_type: crate::combat::buff::BuffType::Stun,
+        tick_interval: 1,
+        tick_counter: 0,
+        source_id: None,
+        paused: false,
+        expire_at_ms: now_ms - 1000,
+    };
+    let json = serde_json::to_string(&expired).unwrap();
+    sqlx::query("INSERT INTO player_buffs (character_name, buff_json) VALUES ('Hero', ?)")
+        .bind(&json)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let loaded2 = load_player_buffs(&pool, "Hero").await.unwrap();
+    assert_eq!(loaded2.len(), 2, "过期 buff 应被丢弃");
+}
+
+#[tokio::test]
+async fn test_save_load_heroes_roundtrip() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE heroes (
                 character_name TEXT NOT NULL,
                 hero_index INTEGER NOT NULL,
                 name TEXT NOT NULL,
@@ -1199,24 +1482,36 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
                 experience INTEGER NOT NULL DEFAULT 0,
                 max_experience INTEGER NOT NULL DEFAULT 100,
                 PRIMARY KEY (character_name, hero_index)
-            )"
-        ).execute(&pool).await.unwrap();
-        let heroes = vec![
-            DbHero { index: 1, name: "HeroOne".to_string(), level: 3, class: 1, gender: 0, dead: false, sealed: false, autopot: true, experience: 150, max_experience: 100 },
-        ];
-        save_heroes(&pool, "TestChar", &heroes).await.unwrap();
-        let loaded = load_heroes(&pool, "TestChar").await.unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].name, "HeroOne");
-        assert_eq!(loaded[0].level, 3);
-        assert_eq!(loaded[0].class, 1);
-        assert!(loaded[0].autopot);
-        assert_eq!(loaded[0].experience, 150);
-        assert_eq!(loaded[0].max_experience, 100);
-        // 覆盖保存（清空）
-        save_heroes(&pool, "TestChar", &[]).await.unwrap();
-        assert!(load_heroes(&pool, "TestChar").await.unwrap().is_empty());
-    }
+            )",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let heroes = vec![DbHero {
+        index: 1,
+        name: "HeroOne".to_string(),
+        level: 3,
+        class: 1,
+        gender: 0,
+        dead: false,
+        sealed: false,
+        autopot: true,
+        experience: 150,
+        max_experience: 100,
+    }];
+    save_heroes(&pool, "TestChar", &heroes).await.unwrap();
+    let loaded = load_heroes(&pool, "TestChar").await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].name, "HeroOne");
+    assert_eq!(loaded[0].level, 3);
+    assert_eq!(loaded[0].class, 1);
+    assert!(loaded[0].autopot);
+    assert_eq!(loaded[0].experience, 150);
+    assert_eq!(loaded[0].max_experience, 100);
+    // 覆盖保存（清空）
+    save_heroes(&pool, "TestChar", &[]).await.unwrap();
+    assert!(load_heroes(&pool, "TestChar").await.unwrap().is_empty());
+}
 
 /// Initialize the SQLite database from a file path and run migrations
 pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
@@ -1235,7 +1530,7 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
            (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
             wrong_password_count, banned_until, require_password_change,
             has_expanded_storage, expanded_storage_expiry_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&account.username)
     .bind(&account.password_hash)
@@ -1244,7 +1539,11 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     .bind(account.storage_password_last_set)
     .bind(account.wrong_password_count as i64)
     .bind(account.banned_until)
-    .bind(if account.require_password_change { 1 } else { 0 })
+    .bind(if account.require_password_change {
+        1
+    } else {
+        0
+    })
     .bind(if account.has_expanded_storage { 1 } else { 0 })
     .bind(account.expanded_storage_expiry_date)
     .execute(pool)
@@ -1262,24 +1561,34 @@ pub struct CharacterSummary {
     pub last_access: i64,
 }
 
-pub async fn list_characters_by_account(pool: &DbPool, account_username: &str) -> anyhow::Result<Vec<(String, u16, i32, i32)>> {
-    let rows = sqlx::query(
-        "SELECT name, map_index, x, y FROM characters WHERE account_username = ?"
-    )
-    .bind(account_username)
-    .fetch_all(pool)
-    .await?;
+pub async fn list_characters_by_account(
+    pool: &DbPool,
+    account_username: &str,
+) -> anyhow::Result<Vec<(String, u16, i32, i32)>> {
+    let rows =
+        sqlx::query("SELECT name, map_index, x, y FROM characters WHERE account_username = ?")
+            .bind(account_username)
+            .fetch_all(pool)
+            .await?;
 
-    Ok(rows.into_iter().map(|r| (
-        r.get::<String, _>("name"),
-        r.get::<i32, _>("map_index") as u16,
-        r.get::<i32, _>("x"),
-        r.get::<i32, _>("y"),
-    )).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            (
+                r.get::<String, _>("name"),
+                r.get::<i32, _>("map_index") as u16,
+                r.get::<i32, _>("x"),
+                r.get::<i32, _>("y"),
+            )
+        })
+        .collect())
 }
 
 /// 角色摘要列表（含 class/gender/level，登录选角用）
-pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> anyhow::Result<Vec<CharacterSummary>> {
+pub async fn list_character_summaries(
+    pool: &DbPool,
+    account_username: &str,
+) -> anyhow::Result<Vec<CharacterSummary>> {
     let rows = sqlx::query(
         "SELECT name, class, gender, level, last_access FROM characters WHERE account_username = ? ORDER BY name"
     )
@@ -1287,13 +1596,16 @@ pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> 
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|r| CharacterSummary {
-        name: r.get::<String, _>("name"),
-        class: r.get::<i32, _>("class") as u8,
-        gender: r.get::<i32, _>("gender") as u8,
-        level: r.get::<i32, _>("level") as u16,
-        last_access: r.try_get::<i64, _>("last_access").unwrap_or(0),
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| CharacterSummary {
+            name: r.get::<String, _>("name"),
+            class: r.get::<i32, _>("class") as u8,
+            gender: r.get::<i32, _>("gender") as u8,
+            level: r.get::<i32, _>("level") as u16,
+            last_access: r.try_get::<i64, _>("last_access").unwrap_or(0),
+        })
+        .collect())
 }
 
 /// 读取角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
@@ -1307,25 +1619,34 @@ pub async fn get_character_last_access(pool: &DbPool, character_name: &str) -> a
 
 /// 判断角色名是否存在（C# Envir.GetCharacterInfo(name) != null；邮件收件人校验用）
 pub async fn character_exists_by_name(pool: &DbPool, character_name: &str) -> anyhow::Result<bool> {
-    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM characters WHERE name = ? COLLATE NOCASE")
-        .bind(character_name)
-        .fetch_optional(pool)
-        .await?;
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM characters WHERE name = ? COLLATE NOCASE")
+            .bind(character_name)
+            .fetch_optional(pool)
+            .await?;
     Ok(row.is_some())
 }
 
 /// 按名称查找角色规范名（不区分大小写；C# Envir.GetCharacterInfo 语义，
 /// 离线加好友时取 DB 里的真实名字大小写）
-pub async fn find_character_name(pool: &DbPool, character_name: &str) -> anyhow::Result<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT name FROM characters WHERE name = ? COLLATE NOCASE")
-        .bind(character_name)
-        .fetch_optional(pool)
-        .await?;
+pub async fn find_character_name(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM characters WHERE name = ? COLLATE NOCASE")
+            .bind(character_name)
+            .fetch_optional(pool)
+            .await?;
     Ok(row.map(|r| r.0))
 }
 
 /// 更新角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
-pub async fn update_last_access(pool: &DbPool, character_name: &str, now_unix: i64) -> anyhow::Result<()> {
+pub async fn update_last_access(
+    pool: &DbPool,
+    character_name: &str,
+    now_unix: i64,
+) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET last_access = ? WHERE name = ?")
         .bind(now_unix)
         .bind(character_name)
@@ -1335,7 +1656,11 @@ pub async fn update_last_access(pool: &DbPool, character_name: &str, now_unix: i
 }
 
 /// 导师经验银行增加（C# LogoutMentor：mentor.MentorExp += MenteeEXP；导师离线也直接写库）
-pub async fn add_mentor_exp(pool: &DbPool, character_name: &str, amount: i64) -> anyhow::Result<()> {
+pub async fn add_mentor_exp(
+    pool: &DbPool,
+    character_name: &str,
+    amount: i64,
+) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET mentor_exp = mentor_exp + ? WHERE name = ?")
         .bind(amount)
         .bind(character_name)
@@ -1354,7 +1679,11 @@ pub async fn reset_mentor_exp(pool: &DbPool, character_name: &str) -> anyhow::Re
 }
 
 /// 离线角色直接加经验（C# MentorBreak 离线导师：partner.Experience += partner.MentorExp）
-pub async fn add_character_experience(pool: &DbPool, character_name: &str, amount: i64) -> anyhow::Result<()> {
+pub async fn add_character_experience(
+    pool: &DbPool,
+    character_name: &str,
+    amount: i64,
+) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET experience = experience + ? WHERE name = ?")
         .bind(amount)
         .bind(character_name)
@@ -1397,7 +1726,7 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
                 storage_password_hash, storage_password_last_set, credit,
                 wrong_password_count, banned_until, require_password_change,
                 has_expanded_storage, expanded_storage_expiry_date
-         FROM accounts WHERE username = ?"
+         FROM accounts WHERE username = ?",
     )
     .bind(username)
     .fetch_optional(pool)
@@ -1407,14 +1736,24 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
         username: r.get::<String, _>("username"),
         password_hash: r.get::<String, _>("password_hash"),
         is_online: r.get::<i32, _>("is_online") != 0,
-        storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
-        storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
+        storage_password_hash: r
+            .try_get::<Option<String>, _>("storage_password_hash")
+            .ok()
+            .flatten(),
+        storage_password_last_set: r
+            .try_get::<i64, _>("storage_password_last_set")
+            .unwrap_or(0),
         credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
-        wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
+        wrong_password_count: r
+            .try_get::<i64, _>("wrong_password_count")
+            .unwrap_or(0)
+            .max(0) as u32,
         banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
         require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0) != 0,
         has_expanded_storage: r.try_get::<i64, _>("has_expanded_storage").unwrap_or(0) != 0,
-        expanded_storage_expiry_date: r.try_get::<i64, _>("expanded_storage_expiry_date").unwrap_or(0),
+        expanded_storage_expiry_date: r
+            .try_get::<i64, _>("expanded_storage_expiry_date")
+            .unwrap_or(0),
     }))
 }
 
@@ -1424,24 +1763,38 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
                 storage_password_hash, storage_password_last_set, credit,
                 wrong_password_count, banned_until, require_password_change,
                 has_expanded_storage, expanded_storage_expiry_date
-         FROM accounts"
+         FROM accounts",
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|r| AccountInfo {
-        username: r.get::<String, _>("username"),
-        password_hash: r.get::<String, _>("password_hash"),
-        is_online: r.get::<i32, _>("is_online") != 0,
-        storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
-        storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
-        credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
-        wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
-        banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
-        require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0) != 0,
-        has_expanded_storage: r.try_get::<i64, _>("has_expanded_storage").unwrap_or(0) != 0,
-        expanded_storage_expiry_date: r.try_get::<i64, _>("expanded_storage_expiry_date").unwrap_or(0),
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| AccountInfo {
+            username: r.get::<String, _>("username"),
+            password_hash: r.get::<String, _>("password_hash"),
+            is_online: r.get::<i32, _>("is_online") != 0,
+            storage_password_hash: r
+                .try_get::<Option<String>, _>("storage_password_hash")
+                .ok()
+                .flatten(),
+            storage_password_last_set: r
+                .try_get::<i64, _>("storage_password_last_set")
+                .unwrap_or(0),
+            credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
+            wrong_password_count: r
+                .try_get::<i64, _>("wrong_password_count")
+                .unwrap_or(0)
+                .max(0) as u32,
+            banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
+            require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0)
+                != 0,
+            has_expanded_storage: r.try_get::<i64, _>("has_expanded_storage").unwrap_or(0) != 0,
+            expanded_storage_expiry_date: r
+                .try_get::<i64, _>("expanded_storage_expiry_date")
+                .unwrap_or(0),
+        })
+        .collect())
 }
 
 pub async fn set_account_offline(pool: &DbPool, username: &str) -> anyhow::Result<()> {
@@ -1464,31 +1817,57 @@ pub async fn change_password(pool: &DbPool, username: &str, new_hash: &str) -> a
 pub async fn delete_character(pool: &DbPool, character_name: &str) -> anyhow::Result<()> {
     // Delete all related data
     sqlx::query("DELETE FROM inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM inventory_equipment WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM inventory_storage WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM hero_inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM friends WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM blocked_list WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM mail WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM quests WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM completed_quests WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM creatures WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM refine_log WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM guild_members WHERE member_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM characters WHERE name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -1496,7 +1875,11 @@ pub async fn delete_character(pool: &DbPool, character_name: &str) -> anyhow::Re
 // Character save/load
 // ============================================================
 
-pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username: &str) -> anyhow::Result<()> {
+pub async fn save_character(
+    pool: &DbPool,
+    state: &PlayerState,
+    account_username: &str,
+) -> anyhow::Result<()> {
     // Phase 1.2: 全量事务 — characters + inventory + friends + mail + quests
     // + creatures + refine + magics + flags 原子写入。
     // 如果任何步骤失败,整个事务回滚,不会出现半保存状态。
@@ -1505,10 +1888,22 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // 先删子表行：INSERT OR REPLACE 会先删旧角色行再插入，
     // 若子表仍有引用会触发立即 FK 冲突（尤其是有背包物品的角色）。
     for tbl in [
-        "inventory_backpack", "inventory_equipment", "inventory_storage", "quest_inventory_backpack",
-        "hero_inventory_backpack", "heroes", "friends", "blocked_list", "mail",
-        "quests", "completed_quests", "player_magics", "player_flags",
-        "creatures", "refine_log", "player_buffs",
+        "inventory_backpack",
+        "inventory_equipment",
+        "inventory_storage",
+        "quest_inventory_backpack",
+        "hero_inventory_backpack",
+        "heroes",
+        "friends",
+        "blocked_list",
+        "mail",
+        "quests",
+        "completed_quests",
+        "player_magics",
+        "player_flags",
+        "creatures",
+        "refine_log",
+        "player_buffs",
     ] {
         sqlx::query(&format!("DELETE FROM {tbl} WHERE character_name = ?"))
             .bind(&state.name)
@@ -1643,7 +2038,10 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     Ok(())
 }
 
-pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Result<Option<PlayerState>> {
+pub async fn load_character(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Option<PlayerState>> {
     let row = sqlx::query(
         "SELECT c.*, a.admin_account FROM characters c JOIN accounts a ON c.account_username = a.username WHERE c.name = ?"
     )
@@ -1679,9 +2077,11 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     let guild_rank = GuildRank::from_u8(row.get::<i32, _>("guild_rank") as u8);
 
     let class_val = row.get::<i32, _>("class") as u8;
-    let class = mir2_shared::enums::MirClass::try_from(class_val).unwrap_or(mir2_shared::enums::MirClass::Warrior);
+    let class = mir2_shared::enums::MirClass::try_from(class_val)
+        .unwrap_or(mir2_shared::enums::MirClass::Warrior);
     let gender_val = row.get::<i32, _>("gender") as u8;
-    let gender = mir2_shared::enums::MirGender::try_from(gender_val).unwrap_or(mir2_shared::enums::MirGender::Male);
+    let gender = mir2_shared::enums::MirGender::try_from(gender_val)
+        .unwrap_or(mir2_shared::enums::MirGender::Male);
 
     let state = PlayerState {
         object_id: 0, // Will be assigned by WorldActor
@@ -1786,7 +2186,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         is_mounted: false,
         mount_type: 0,
         is_dead: row.get::<i32, _>("is_dead") != 0,
-        unlock_curse: false, // C# UnlockCurse 运行时状态，不持久化
+        unlock_curse: false,  // C# UnlockCurse 运行时状态，不持久化
         last_revival_time: 0, // C# LastRevivalTime 运行时状态，不持久化
         last_access: row.try_get::<i64, _>("last_access").unwrap_or(0),
         // C# 登录时 _restedCounter = (int)((Now - LastLogoutDate).TotalMinutes * 60)
@@ -1805,28 +2205,40 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         },
         rested_exp_percent: 0,
         rested_exp_end_tick: 0,
-            has_map_shout: false,
-            has_server_shout: false,
-            last_shout_time: 0,
+        has_map_shout: false,
+        has_server_shout: false,
+        last_shout_time: 0,
         fishing_autocast: row.get::<i32, _>("fishing_autocast") != 0,
         reincarnation_host: None,
         reincarnation_ready: false,
         reincarnation_expire_time: 0,
         enable_group_recall: false,
         last_recall_time: 0,
-        allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
+        allow_lover_recall: row
+            .get::<Option<i32>, _>("allow_lover_recall")
+            .map(|v| v != 0)
+            .unwrap_or(false),
         is_gm: row.get::<i32, _>("admin_account") != 0,
-        gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+        gm_never_die: false,   // #1480：GM 无敌模式（C# GMNeverDie）
         special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
         has_expanded_storage: false,
         expanded_storage_expiry_date: 0,
         has_storage_password: false,
         require_storage_password: false,
         storage_password_last_set: 0,
-        allow_observe: row.get::<Option<i32>, _>("allow_observe").map(|v| v != 0).unwrap_or(false),
+        allow_observe: row
+            .get::<Option<i32>, _>("allow_observe")
+            .map(|v| v != 0)
+            .unwrap_or(false),
         enable_guild_invite: false,
-        allow_trade: row.get::<Option<i32>, _>("allow_trade").map(|v| v != 0).unwrap_or(false),
-        allow_group: row.get::<Option<i32>, _>("allow_group").map(|v| v != 0).unwrap_or(false),
+        allow_trade: row
+            .get::<Option<i32>, _>("allow_trade")
+            .map(|v| v != 0)
+            .unwrap_or(false),
+        allow_group: row
+            .get::<Option<i32>, _>("allow_group")
+            .map(|v| v != 0)
+            .unwrap_or(false),
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: load_player_buffs(pool, character_name).await?,
@@ -1835,64 +2247,64 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         exp_multiplier: 1.0,
         exp_rate: 1.0,
         exp_multiplier_end_tick: 0,
-            drop_multiplier: 1.0,
-            drop_multiplier_end_tick: 0,
-            exp_multiplier_pause_in_safe: false,
-            drop_multiplier_pause_in_safe: false,
-            item_drop_rate_percent: 0,
-            gold_drop_rate_percent: 0,
-            elements_level: 0,
-            has_elemental: false,
-            concentration_interrupted: false,
-            concentration_interrupt_time: 0,
+        drop_multiplier: 1.0,
+        drop_multiplier_end_tick: 0,
+        exp_multiplier_pause_in_safe: false,
+        drop_multiplier_pause_in_safe: false,
+        item_drop_rate_percent: 0,
+        gold_drop_rate_percent: 0,
+        elements_level: 0,
+        has_elemental: false,
+        concentration_interrupted: false,
+        concentration_interrupt_time: 0,
 
-            bind_map_index: row.try_get("bind_map_index").unwrap_or(0),
+        bind_map_index: row.try_get("bind_map_index").unwrap_or(0),
 
-            bind_x: row.try_get("bind_x").unwrap_or(0),
+        bind_x: row.try_get("bind_x").unwrap_or(0),
 
-            bind_y: row.try_get("bind_y").unwrap_or(0),
-            level_effects: row.try_get("level_effects").unwrap_or(0) as u16,
-            is_mentor: row.try_get("is_mentor").unwrap_or(0) != 0,
-            mentor_exp: row.try_get("mentor_exp").unwrap_or(0),
-            mentee_exp: 0,
-            mentor_damage_bonus: false,
+        bind_y: row.try_get("bind_y").unwrap_or(0),
+        level_effects: row.try_get("level_effects").unwrap_or(0) as u16,
+        is_mentor: row.try_get("is_mentor").unwrap_or(0) != 0,
+        mentor_exp: row.try_get("mentor_exp").unwrap_or(0),
+        mentee_exp: 0,
+        mentor_damage_bonus: false,
         mentor_damage_rate_percent: 0,
         mentor_skill_boost: true,
         mentee_exp_bank: 1,
-            newbie_exp_bonus: false,
-            exp_bonus_lover_percent: 0,
-            exp_bonus_mentee_percent: 0,
-            exp_bonus_newbie_percent: 0,
-            guild_buff_exp_percent: 0,
-            guild_buff_fish_rate_percent: 0,
-            mine_rate_percent: 0,
-            gem_rate_percent: 0,
-            craft_rate_percent: 0,
-            hp_rate_percent: 0,
-            mp_rate_percent: 0,
-            max_ac_rate_percent: 0,
-            max_mac_rate_percent: 0,
-            max_dc_rate_percent: 0,
-            max_mc_rate_percent: 0,
-            max_sc_rate_percent: 0,
-            attack_speed_rate_percent: 0,
-            chat_banned_until_ms: 0,
-            chat_window_start_ms: 0,
-            chat_tick: 0,
-            char_ban_expiry_ticks: row.try_get("ban_expiry_ticks").unwrap_or(0),
-            char_ban_reason: row.try_get("ban_reason").unwrap_or_default(),
-            skill_gain_multiplier: 0,
-            guild_buff_mine_rate_percent: 0,
-            guild_buff_stats: mir2_shared::data::stats::Stats::new(),
-            no_experience_map: false,
-            brown_until_ms: 0,
-            mount_loyalty_decrease_time: 0,
-            mount_loyalty_increase_time: 0,
-            torch_burn_time: 0,
-            last_damage_ms: 0,
-            pot_hp_amount: 0,
-            pot_mp_amount: 0,
-            pot_time_ms: 0,
+        newbie_exp_bonus: false,
+        exp_bonus_lover_percent: 0,
+        exp_bonus_mentee_percent: 0,
+        exp_bonus_newbie_percent: 0,
+        guild_buff_exp_percent: 0,
+        guild_buff_fish_rate_percent: 0,
+        mine_rate_percent: 0,
+        gem_rate_percent: 0,
+        craft_rate_percent: 0,
+        hp_rate_percent: 0,
+        mp_rate_percent: 0,
+        max_ac_rate_percent: 0,
+        max_mac_rate_percent: 0,
+        max_dc_rate_percent: 0,
+        max_mc_rate_percent: 0,
+        max_sc_rate_percent: 0,
+        attack_speed_rate_percent: 0,
+        chat_banned_until_ms: 0,
+        chat_window_start_ms: 0,
+        chat_tick: 0,
+        char_ban_expiry_ticks: row.try_get("ban_expiry_ticks").unwrap_or(0),
+        char_ban_reason: row.try_get("ban_reason").unwrap_or_default(),
+        skill_gain_multiplier: 0,
+        guild_buff_mine_rate_percent: 0,
+        guild_buff_stats: mir2_shared::data::stats::Stats::new(),
+        no_experience_map: false,
+        brown_until_ms: 0,
+        mount_loyalty_decrease_time: 0,
+        mount_loyalty_increase_time: 0,
+        torch_burn_time: 0,
+        last_damage_ms: 0,
+        pot_hp_amount: 0,
+        pot_mp_amount: 0,
+        pot_time_ms: 0,
     };
 
     Ok(Some(state))
@@ -1923,24 +2335,41 @@ fn parse_pet_mode(s: &str) -> mir2_shared::enums::PetMode {
 // Inventory save/load
 // ============================================================
 
-async fn save_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, inv: &PlayerInventory) -> anyhow::Result<()> {
+async fn save_inventory(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    inv: &PlayerInventory,
+) -> anyhow::Result<()> {
     // Clear existing
     sqlx::query("DELETE FROM inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("DELETE FROM inventory_equipment WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("DELETE FROM inventory_storage WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("DELETE FROM quest_inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
 
     // Backpack
     for (grid, slot) in inv.backpack.iter().enumerate() {
         if let Some(s) = slot {
             let item_json = serde_json::to_string(&s.item)?;
-            sqlx::query("INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)")
-                .bind(character_name).bind(grid as i32).bind(&item_json)
-                .execute(&mut *conn).await?;
+            sqlx::query(
+                "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(character_name)
+            .bind(grid as i32)
+            .bind(&item_json)
+            .execute(&mut *conn)
+            .await?;
         }
     }
 
@@ -1958,9 +2387,14 @@ async fn save_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_nam
     for (grid, slot) in inv.storage.iter().enumerate() {
         if let Some(s) = slot {
             let item_json = serde_json::to_string(&s.item)?;
-            sqlx::query("INSERT INTO inventory_storage (character_name, grid, item_json) VALUES (?, ?, ?)")
-                .bind(character_name).bind(grid as i32).bind(&item_json)
-                .execute(&mut *conn).await?;
+            sqlx::query(
+                "INSERT INTO inventory_storage (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(character_name)
+            .bind(grid as i32)
+            .bind(&item_json)
+            .execute(&mut *conn)
+            .await?;
         }
     }
 
@@ -1981,12 +2415,11 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
     let mut inv = PlayerInventory::new();
 
     // Backpack
-    let backpack_rows = sqlx::query(
-        "SELECT grid, item_json FROM inventory_backpack WHERE character_name = ?"
-    )
-    .bind(character_name)
-    .fetch_all(pool)
-    .await?;
+    let backpack_rows =
+        sqlx::query("SELECT grid, item_json FROM inventory_backpack WHERE character_name = ?")
+            .bind(character_name)
+            .fetch_all(pool)
+            .await?;
 
     for row in backpack_rows {
         let grid: i32 = row.get("grid");
@@ -2000,12 +2433,11 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
     }
 
     // Equipment
-    let equip_rows = sqlx::query(
-        "SELECT slot, item_json FROM inventory_equipment WHERE character_name = ?"
-    )
-    .bind(character_name)
-    .fetch_all(pool)
-    .await?;
+    let equip_rows =
+        sqlx::query("SELECT slot, item_json FROM inventory_equipment WHERE character_name = ?")
+            .bind(character_name)
+            .fetch_all(pool)
+            .await?;
 
     for row in equip_rows {
         let slot: i32 = row.get("slot");
@@ -2016,12 +2448,11 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
     }
 
     // Storage
-    let storage_rows = sqlx::query(
-        "SELECT grid, item_json FROM inventory_storage WHERE character_name = ?"
-    )
-    .bind(character_name)
-    .fetch_all(pool)
-    .await?;
+    let storage_rows =
+        sqlx::query("SELECT grid, item_json FROM inventory_storage WHERE character_name = ?")
+            .bind(character_name)
+            .fetch_all(pool)
+            .await?;
 
     for row in storage_rows {
         let grid: i32 = row.get("grid");
@@ -2036,7 +2467,7 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
 
     // Quest inventory（C# QuestInventory 40 格）
     let quest_rows = sqlx::query(
-        "SELECT grid, item_json FROM quest_inventory_backpack WHERE character_name = ?"
+        "SELECT grid, item_json FROM quest_inventory_backpack WHERE character_name = ?",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2059,9 +2490,15 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
 // Hero inventory save/load
 // ============================================================
 
-async fn save_hero_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, inv: &PlayerInventory) -> anyhow::Result<()> {
+async fn save_hero_inventory(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    inv: &PlayerInventory,
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM hero_inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
 
     for (grid, slot) in inv.backpack.iter().enumerate() {
         if let Some(s) = slot {
@@ -2074,7 +2511,9 @@ async fn save_hero_inventory(conn: &mut sqlx::sqlite::SqliteConnection, characte
 
     // #1180：英雄装备持久化（C# Hero 装备随角色保存；此前仅存背包，换线丢失）
     sqlx::query("DELETE FROM hero_inventory_equipment WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
     for (slot, eq) in inv.equipment.iter().enumerate() {
         if let Some(item) = eq {
             let item_json = serde_json::to_string(item)?;
@@ -2087,15 +2526,17 @@ async fn save_hero_inventory(conn: &mut sqlx::sqlite::SqliteConnection, characte
     Ok(())
 }
 
-async fn load_hero_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<PlayerInventory> {
+async fn load_hero_inventory(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<PlayerInventory> {
     let mut inv = PlayerInventory::new();
 
-    let rows = sqlx::query(
-        "SELECT grid, item_json FROM hero_inventory_backpack WHERE character_name = ?"
-    )
-    .bind(character_name)
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query("SELECT grid, item_json FROM hero_inventory_backpack WHERE character_name = ?")
+            .bind(character_name)
+            .fetch_all(pool)
+            .await?;
 
     for row in rows {
         let grid: i32 = row.get("grid");
@@ -2110,7 +2551,7 @@ async fn load_hero_inventory(pool: &DbPool, character_name: &str) -> anyhow::Res
 
     // #1180：英雄装备加载
     let eq_rows = sqlx::query(
-        "SELECT slot, item_json FROM hero_inventory_equipment WHERE character_name = ?"
+        "SELECT slot, item_json FROM hero_inventory_equipment WHERE character_name = ?",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2119,7 +2560,8 @@ async fn load_hero_inventory(pool: &DbPool, character_name: &str) -> anyhow::Res
         let slot: i32 = row.get("slot");
         let item_json: String = row.get("item_json");
         if slot >= 0 && (slot as usize) < inv.equipment.len() {
-            if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) {
+            if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json)
+            {
                 inv.equipment[slot as usize] = Some(item);
             }
         }
@@ -2132,11 +2574,19 @@ async fn load_hero_inventory(pool: &DbPool, character_name: &str) -> anyhow::Res
 // Friends save/load
 // ============================================================
 
-async fn save_friends(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, list: &FriendList) -> anyhow::Result<()> {
+async fn save_friends(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    list: &FriendList,
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM friends WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("DELETE FROM blocked_list WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
 
     for f in &list.friends {
         sqlx::query(
@@ -2161,7 +2611,7 @@ pub async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result
     let mut list = FriendList::new();
 
     let friend_rows = sqlx::query(
-        "SELECT friend_object_id, friend_name, memo FROM friends WHERE character_name = ?"
+        "SELECT friend_object_id, friend_name, memo FROM friends WHERE character_name = ?",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2176,7 +2626,7 @@ pub async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result
     }
 
     let blocked_rows = sqlx::query(
-        "SELECT blocked_object_id, blocked_name FROM blocked_list WHERE character_name = ?"
+        "SELECT blocked_object_id, blocked_name FROM blocked_list WHERE character_name = ?",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2196,16 +2646,22 @@ pub async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result
 // Mail save/load
 // ============================================================
 
-async fn save_mail(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, mailbox: &Mailbox) -> anyhow::Result<()> {
+async fn save_mail(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    mailbox: &Mailbox,
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM mail WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
 
     for m in &mailbox.inbox {
         let items_json = serde_json::to_string(&m.items)?;
         sqlx::query(
             r#"INSERT INTO mail (character_name, mail_id, sender_name, subject, body, timestamp,
                 read_flag, collected, locked, gold, items_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(character_name)
         .bind(m.mail_id as i64)
@@ -2218,7 +2674,8 @@ async fn save_mail(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &s
         .bind(if m.locked { 1 } else { 0 })
         .bind(m.gold as i64)
         .bind(&items_json)
-        .execute(&mut *conn).await?;
+        .execute(&mut *conn)
+        .await?;
     }
 
     Ok(())
@@ -2264,10 +2721,15 @@ pub async fn list_all_characters(pool: &DbPool) -> anyhow::Result<Vec<(String, S
         .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get("name"), r.get("account_username"), r.get::<i64, _>("last_access")))
+        .map(|r| {
+            (
+                r.get("name"),
+                r.get("account_username"),
+                r.get::<i64, _>("last_access"),
+            )
+        })
         .collect())
 }
-
 
 /// 英雄持久化记录（#194：原始 class/gender，转换由调用方完成）
 #[derive(Debug, Clone)]
@@ -2288,7 +2750,11 @@ pub struct DbHero {
 }
 
 /// 保存角色英雄列表（DELETE + INSERT，事务内）
-pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero]) -> anyhow::Result<()> {
+pub async fn save_heroes(
+    pool: &DbPool,
+    character_name: &str,
+    heroes: &[DbHero],
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM heroes WHERE character_name = ?")
         .bind(character_name)
@@ -2324,27 +2790,34 @@ pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<
     .bind(character_name)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(|r| DbHero {
-        index: r.get::<i32, _>("hero_index"),
-        name: r.get::<String, _>("name"),
-        level: r.get::<i32, _>("level") as u16,
-        class: r.get::<i32, _>("class") as u8,
-        gender: r.get::<i32, _>("gender") as u8,
-        dead: r.try_get::<i32, _>("dead").unwrap_or(0) != 0,
-        sealed: r.try_get::<i32, _>("sealed").unwrap_or(0) != 0,
-        autopot: r.try_get::<i32, _>("autopot").unwrap_or(0) != 0,
-        experience: r.try_get::<i32, _>("experience").unwrap_or(0).max(0) as u32,
-        max_experience: r.try_get::<i32, _>("max_experience").unwrap_or(100).max(0) as u32,
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| DbHero {
+            index: r.get::<i32, _>("hero_index"),
+            name: r.get::<String, _>("name"),
+            level: r.get::<i32, _>("level") as u16,
+            class: r.get::<i32, _>("class") as u8,
+            gender: r.get::<i32, _>("gender") as u8,
+            dead: r.try_get::<i32, _>("dead").unwrap_or(0) != 0,
+            sealed: r.try_get::<i32, _>("sealed").unwrap_or(0) != 0,
+            autopot: r.try_get::<i32, _>("autopot").unwrap_or(0) != 0,
+            experience: r.try_get::<i32, _>("experience").unwrap_or(0).max(0) as u32,
+            max_experience: r.try_get::<i32, _>("max_experience").unwrap_or(100).max(0) as u32,
+        })
+        .collect())
 }
 
 /// 插入单封邮件（用于离线玩家收邮件）
-pub async fn insert_mail(pool: &DbPool, character_name: &str, mail: &MailMessage) -> anyhow::Result<()> {
+pub async fn insert_mail(
+    pool: &DbPool,
+    character_name: &str,
+    mail: &MailMessage,
+) -> anyhow::Result<()> {
     let items_json = serde_json::to_string(&mail.items)?;
     sqlx::query(
         r#"INSERT INTO mail (character_name, mail_id, sender_name, subject, body, timestamp,
             read_flag, collected, locked, gold, items_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(character_name)
     .bind(mail.mail_id as i64)
@@ -2366,11 +2839,19 @@ pub async fn insert_mail(pool: &DbPool, character_name: &str, mail: &MailMessage
 // Quests save/load
 // ============================================================
 
-async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &QuestLog) -> anyhow::Result<()> {
+async fn save_quests(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    log: &QuestLog,
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM quests WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("DELETE FROM completed_quests WHERE character_name = ?")
-        .bind(character_name).execute(&mut *conn).await?;
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
 
     for q in &log.quests {
         let progress_json = serde_json::to_string(&q.progress)?;
@@ -2400,8 +2881,10 @@ async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
 
     for qi in &log.completed_indices {
         sqlx::query("INSERT INTO completed_quests (character_name, quest_index) VALUES (?, ?)")
-            .bind(character_name).bind(qi)
-            .execute(&mut *conn).await?;
+            .bind(character_name)
+            .bind(qi)
+            .execute(&mut *conn)
+            .await?;
     }
 
     Ok(())
@@ -2444,12 +2927,11 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
         });
     }
 
-    let completed_rows = sqlx::query(
-        "SELECT quest_index FROM completed_quests WHERE character_name = ?"
-    )
-    .bind(character_name)
-    .fetch_all(pool)
-    .await?;
+    let completed_rows =
+        sqlx::query("SELECT quest_index FROM completed_quests WHERE character_name = ?")
+            .bind(character_name)
+            .fetch_all(pool)
+            .await?;
 
     for row in completed_rows {
         log.completed_indices.push(row.get("quest_index"));
@@ -2484,7 +2966,9 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
 
     // Clear existing members
     sqlx::query("DELETE FROM guild_members WHERE guild_name = ?")
-        .bind(&guild.name).execute(pool).await?;
+        .bind(&guild.name)
+        .execute(pool)
+        .await?;
 
     for m in &guild.members {
         sqlx::query("INSERT INTO guild_members (guild_name, member_name, rank, rank_index) VALUES (?, ?, ?, ?)")
@@ -2501,11 +2985,17 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
 /// 删除行会（C# Envir.DeleteGuild）：清成员角色 guild_name + 删 guild_members + 删 guilds 行
 pub async fn delete_guild(pool: &DbPool, guild_name: &str) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET guild_name = NULL WHERE guild_name = ?")
-        .bind(guild_name).execute(pool).await?;
+        .bind(guild_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM guild_members WHERE guild_name = ?")
-        .bind(guild_name).execute(pool).await?;
+        .bind(guild_name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM guilds WHERE name = ?")
-        .bind(guild_name).execute(pool).await?;
+        .bind(guild_name)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -2518,51 +3008,61 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
 
     for row in guild_rows {
         let name: String = row.get("name");
-        let notice: Vec<String> = serde_json::from_str(&row.get::<String, _>("notice_json")).unwrap_or_default();
+        let notice: Vec<String> =
+            serde_json::from_str(&row.get::<String, _>("notice_json")).unwrap_or_default();
         let gold: i64 = row.get("gold");
         let storage_items: Vec<Option<(mir2_shared::data::item::UserItem, u32)>> =
-            serde_json::from_str(&row.get::<String, _>("storage_items_json")).unwrap_or_else(|_| vec![None; 100]);
+            serde_json::from_str(&row.get::<String, _>("storage_items_json"))
+                .unwrap_or_else(|_| vec![None; 100]);
         let experience: i64 = row.get("experience");
         let level: i32 = row.get("level");
         let max_experience: i64 = row.get("max_experience");
         let spare_points: i32 = row.get("spare_points");
         let member_cap: i32 = row.get("member_cap");
-        let rank_defs: Vec<crate::actors::guild::GuildRankDef> = serde_json::from_str(&row.get::<String, _>("rank_defs_json")).unwrap_or_else(|_| crate::actors::guild::default_rank_defs());
+        let rank_defs: Vec<crate::actors::guild::GuildRankDef> =
+            serde_json::from_str(&row.get::<String, _>("rank_defs_json"))
+                .unwrap_or_else(|_| crate::actors::guild::default_rank_defs());
 
         let member_rows = sqlx::query(
-            "SELECT member_name, rank, rank_index FROM guild_members WHERE guild_name = ?"
+            "SELECT member_name, rank, rank_index FROM guild_members WHERE guild_name = ?",
         )
         .bind(&name)
         .fetch_all(pool)
         .await?;
 
-        let members: Vec<GuildMember> = member_rows.into_iter().map(|r| GuildMember {
-            name: r.get("member_name"),
-            session_id: None, // Loaded as offline
-            rank: GuildRank::from_u8(r.get::<i32, _>("rank") as u8),
-            rank_index: r.get::<i32, _>("rank_index").clamp(0, 255) as u8,
-        }).collect();
+        let members: Vec<GuildMember> = member_rows
+            .into_iter()
+            .map(|r| GuildMember {
+                name: r.get("member_name"),
+                session_id: None, // Loaded as offline
+                rank: GuildRank::from_u8(r.get::<i32, _>("rank") as u8),
+                rank_index: r.get::<i32, _>("rank_index").clamp(0, 255) as u8,
+            })
+            .collect();
 
         let flag_image: i32 = row.get("flag_image");
         let flag_colour: i32 = row.get("flag_colour");
 
-        guilds.insert(name.clone(), Guild {
-            name,
-            notice,
-            members,
-            rank_defs,
-            gold: gold as u64,
-            storage_items,
-            buffs: Vec::new(),
-            experience,
-            level: level.clamp(1, 255) as u8,
-            max_experience,
-            spare_points: spare_points.clamp(0, 255) as u8,
-            member_cap,
-            flag_image: flag_image.clamp(0, u16::MAX as i32) as u16,
-            flag_colour,
-            next_exp_update: 0,
-        });
+        guilds.insert(
+            name.clone(),
+            Guild {
+                name,
+                notice,
+                members,
+                rank_defs,
+                gold: gold as u64,
+                storage_items,
+                buffs: Vec::new(),
+                experience,
+                level: level.clamp(1, 255) as u8,
+                max_experience,
+                spare_points: spare_points.clamp(0, 255) as u8,
+                member_cap,
+                flag_image: flag_image.clamp(0, u16::MAX as i32) as u16,
+                flag_colour,
+                next_exp_update: 0,
+            },
+        );
     }
 
     Ok(guilds)
@@ -2572,15 +3072,34 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
 // Creatures save/load
 // ============================================================
 
-async fn save_creatures(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &CreatureLog) -> anyhow::Result<()> {
+async fn save_creatures(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    log: &CreatureLog,
+) -> anyhow::Result<()> {
     let owned_json = serde_json::to_string(&log.owned_creatures)?;
 
-    let (active_type, active_custom_name, active_pickup_mode, active_hunger, active_enabled, active_level, active_blackstone_time) =
-        if let Some(c) = &log.active_creature {
-            (c.creature_type as i32, c.custom_name.clone(), c.pickup_mode as i32, c.hunger as i32, if c.enabled { 1 } else { 0 }, c.level as i32, c.blackstone_time as i32)
-        } else {
-            (0, None, 0, 100, 0, 1, 0)
-        };
+    let (
+        active_type,
+        active_custom_name,
+        active_pickup_mode,
+        active_hunger,
+        active_enabled,
+        active_level,
+        active_blackstone_time,
+    ) = if let Some(c) = &log.active_creature {
+        (
+            c.creature_type as i32,
+            c.custom_name.clone(),
+            c.pickup_mode as i32,
+            c.hunger as i32,
+            if c.enabled { 1 } else { 0 },
+            c.level as i32,
+            c.blackstone_time as i32,
+        )
+    } else {
+        (0, None, 0, 100, 0, 1, 0)
+    };
 
     sqlx::query(
         r#"INSERT OR REPLACE INTO creatures (
@@ -2607,7 +3126,7 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
     let row = sqlx::query(
         "SELECT active_type, active_custom_name, active_pickup_mode, active_hunger,
                 active_enabled, active_level, active_blackstone_time, owned_json, request_updates
-         FROM creatures WHERE character_name = ?"
+         FROM creatures WHERE character_name = ?",
     )
     .bind(character_name)
     .fetch_optional(pool)
@@ -2626,7 +3145,10 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
                     hunger: r.get::<i32, _>("active_hunger") as u8,
                     enabled: active_enabled != 0,
                     level: r.try_get::<i32, _>("active_level").unwrap_or(1).max(1) as u8,
-                    blackstone_time: r.try_get::<i32, _>("active_blackstone_time").unwrap_or(0).max(0) as u32,
+                    blackstone_time: r
+                        .try_get::<i32, _>("active_blackstone_time")
+                        .unwrap_or(0)
+                        .max(0) as u32,
                     pearl_ticker: 0, // C# PearlTicker 瞬态（登录重置）
                     filter: crate::actors::creature::CreatureFilter::default(),
                 })
@@ -2651,7 +3173,11 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
 // Refine save/load
 // ============================================================
 
-async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &RefineLog) -> anyhow::Result<()> {
+async fn save_refine(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    log: &RefineLog,
+) -> anyhow::Result<()> {
     let (uid, item_index, start_time, finish_time, status, success_chance) =
         if let Some(item) = &log.active_refine {
             (
@@ -2666,7 +3192,9 @@ async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
             (None, 0, 0, 0, 0, 0)
         };
 
-    let item_json = log.active_refine.as_ref()
+    let item_json = log
+        .active_refine
+        .as_ref()
         .and_then(|i| i.item.as_ref())
         .map(|it| serde_json::to_string(it).unwrap_or_default());
     let materials_json = serde_json::to_string(&log.materials).unwrap_or_default();
@@ -2677,7 +3205,7 @@ async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
             active_start_time, active_finish_time, active_status, active_success_chance,
             active_item_json, materials_json,
             total_refines, successful_refines
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(character_name)
     .bind(uid)
@@ -2690,7 +3218,8 @@ async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
     .bind(materials_json)
     .bind(log.total_refines as i32)
     .bind(log.successful_refines as i32)
-    .execute(&mut *conn).await?;
+    .execute(&mut *conn)
+    .await?;
 
     Ok(())
 }
@@ -2718,9 +3247,13 @@ async fn load_refine(pool: &DbPool, character_name: &str) -> anyhow::Result<Refi
                     finish_time: r.get::<i64, _>("active_finish_time") as u64,
                     status: RefineStatus::from_i32(status).unwrap_or(RefineStatus::None),
                     success_chance: r.get::<i32, _>("active_success_chance") as u8,
-                    item: r.try_get::<Option<String>, _>("active_item_json").unwrap_or(None)
+                    item: r
+                        .try_get::<Option<String>, _>("active_item_json")
+                        .unwrap_or(None)
                         .as_deref()
-                        .and_then(|s| serde_json::from_str::<mir2_shared::data::item::UserItem>(s).ok()),
+                        .and_then(|s| {
+                            serde_json::from_str::<mir2_shared::data::item::UserItem>(s).ok()
+                        }),
                 })
             } else {
                 None
@@ -2729,7 +3262,9 @@ async fn load_refine(pool: &DbPool, character_name: &str) -> anyhow::Result<Refi
             let materials_json: Option<String> = r.try_get("materials_json").unwrap_or(None);
             let materials = materials_json
                 .as_deref()
-                .and_then(|s| serde_json::from_str::<Vec<Option<mir2_shared::data::item::UserItem>>>(s).ok())
+                .and_then(|s| {
+                    serde_json::from_str::<Vec<Option<mir2_shared::data::item::UserItem>>>(s).ok()
+                })
                 .unwrap_or_else(|| vec![None; crate::actors::refine::REFINE_MATERIAL_SLOTS]);
 
             Ok(RefineLog {
@@ -2756,11 +3291,16 @@ impl RefineStatus {
     }
 }
 
-async fn save_magics(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, magics: &[crate::actors::player::PlayerMagic]) -> anyhow::Result<()> {
+async fn save_magics(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    magics: &[crate::actors::player::PlayerMagic],
+) -> anyhow::Result<()> {
     // Delete existing magics for this character
     sqlx::query("DELETE FROM player_magics WHERE character_name = ?")
         .bind(character_name)
-        .execute(&mut *conn).await?;
+        .execute(&mut *conn)
+        .await?;
     // Insert current magics（#937：临时技能不持久化，C# IsTempSpell）
     for magic in magics.iter().filter(|m| !m.temp_skill) {
         sqlx::query(
@@ -2777,10 +3317,16 @@ async fn save_magics(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
     Ok(())
 }
 
-async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<crate::actors::player::PlayerMagic>> {
-    let rows = sqlx::query("SELECT spell, level, experience, key, toggled FROM player_magics WHERE character_name = ?")
-        .bind(character_name)
-        .fetch_all(pool).await?;
+async fn load_magics(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Vec<crate::actors::player::PlayerMagic>> {
+    let rows = sqlx::query(
+        "SELECT spell, level, experience, key, toggled FROM player_magics WHERE character_name = ?",
+    )
+    .bind(character_name)
+    .fetch_all(pool)
+    .await?;
     let mut magics = Vec::new();
     for r in rows {
         magics.push(crate::actors::player::PlayerMagic {
@@ -2846,7 +3392,11 @@ async fn load_hero_magics(
     }
     Ok(magics)
 }
-async fn save_buffs(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, buffs: &[crate::combat::buff::BuffInstance]) -> anyhow::Result<()> {
+async fn save_buffs(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    buffs: &[crate::combat::buff::BuffInstance],
+) -> anyhow::Result<()> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -2864,7 +3414,10 @@ async fn save_buffs(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &
 }
 
 /// 加载角色 Buff（C# CharacterInfo.Buffs 恢复；离线时间计入衰减，已过期丢弃）
-async fn load_player_buffs(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<crate::combat::buff::BuffInstance>> {
+async fn load_player_buffs(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Vec<crate::combat::buff::BuffInstance>> {
     let rows = sqlx::query("SELECT buff_json FROM player_buffs WHERE character_name = ?")
         .bind(character_name)
         .fetch_all(pool)
@@ -2965,12 +3518,17 @@ pub(crate) async fn load_archived_player(
     pool: &DbPool,
     character_name: &str,
 ) -> anyhow::Result<Option<(String, String)>> {
-    let row = sqlx::query("SELECT account_username, archived_json FROM player_archives WHERE character_name = ?")
-        .bind(character_name)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(
+        "SELECT account_username, archived_json FROM player_archives WHERE character_name = ?",
+    )
+    .bind(character_name)
+    .fetch_optional(pool)
+    .await?;
     let Some(row) = row else { return Ok(None) };
-    Ok(Some((row.get("account_username"), row.get("archived_json"))))
+    Ok(Some((
+        row.get("account_username"),
+        row.get("archived_json"),
+    )))
 }
 
 /// 查询角色所属账号（RESTOREPLAYER 回原账号用）
@@ -2986,24 +3544,37 @@ pub(crate) async fn get_character_account(
     Ok(Some(row.get("account_username")))
 }
 
-async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {
+async fn save_flags(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    flags: &std::collections::HashMap<String, i32>,
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM player_flags WHERE character_name = ?")
         .bind(character_name)
-        .execute(&mut *conn).await?;
+        .execute(&mut *conn)
+        .await?;
     for (key, value) in flags {
-        sqlx::query("INSERT INTO player_flags (character_name, flag_key, flag_value) VALUES (?, ?, ?)")
-            .bind(character_name)
-            .bind(key)
-            .bind(*value)
-            .execute(&mut *conn).await?;
+        sqlx::query(
+            "INSERT INTO player_flags (character_name, flag_key, flag_value) VALUES (?, ?, ?)",
+        )
+        .bind(character_name)
+        .bind(key)
+        .bind(*value)
+        .execute(&mut *conn)
+        .await?;
     }
     Ok(())
 }
 
-async fn load_flags(pool: &DbPool, character_name: &str) -> anyhow::Result<std::collections::HashMap<String, i32>> {
-    let rows = sqlx::query("SELECT flag_key, flag_value FROM player_flags WHERE character_name = ?")
-        .bind(character_name)
-        .fetch_all(pool).await?;
+async fn load_flags(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<std::collections::HashMap<String, i32>> {
+    let rows =
+        sqlx::query("SELECT flag_key, flag_value FROM player_flags WHERE character_name = ?")
+            .bind(character_name)
+            .fetch_all(pool)
+            .await?;
     let mut flags = std::collections::HashMap::new();
     for r in rows {
         let key: String = r.get("flag_key");
@@ -3436,11 +4007,21 @@ pub struct RecipeInfo {
 /// Load all map infos from DB with nested safe_zones, respawns, movements
 pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
     // 4 queries total instead of 1 + N*3
-    let rows = sqlx::query("SELECT * FROM map_infos").fetch_all(pool).await?;
-    let sz_rows = sqlx::query("SELECT * FROM safe_zones").fetch_all(pool).await?;
-    let rs_rows = sqlx::query("SELECT * FROM map_respawns").fetch_all(pool).await?;
-    let mv_rows = sqlx::query("SELECT * FROM map_movements").fetch_all(pool).await?;
-    let mz_rows = sqlx::query("SELECT * FROM mine_zones").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM map_infos")
+        .fetch_all(pool)
+        .await?;
+    let sz_rows = sqlx::query("SELECT * FROM safe_zones")
+        .fetch_all(pool)
+        .await?;
+    let rs_rows = sqlx::query("SELECT * FROM map_respawns")
+        .fetch_all(pool)
+        .await?;
+    let mv_rows = sqlx::query("SELECT * FROM map_movements")
+        .fetch_all(pool)
+        .await?;
+    let mz_rows = sqlx::query("SELECT * FROM mine_zones")
+        .fetch_all(pool)
+        .await?;
 
     // Index child rows by map_index
     let mut sz_by_map: HashMap<i32, Vec<SafeZoneInfo>> = HashMap::new();
@@ -3516,7 +4097,9 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             big_map: row.get::<i32, _>("big_map") as u16,
             no_teleport: row.get::<i32, _>("no_teleport") != 0,
             no_reconnect: row.get::<i32, _>("no_reconnect") != 0,
-            no_reconnect_map: row.get::<Option<String>, _>("no_reconnect_map").unwrap_or_default(),
+            no_reconnect_map: row
+                .get::<Option<String>, _>("no_reconnect_map")
+                .unwrap_or_default(),
             no_random: row.get::<i32, _>("no_random") != 0,
             no_escape: row.get::<i32, _>("no_escape") != 0,
             no_recall: row.get::<i32, _>("no_recall") != 0,
@@ -3538,7 +4121,10 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             no_fight: row.get::<i32, _>("no_fight") != 0,
             no_group: row.try_get::<i32, _>("no_group").unwrap_or(0) != 0,
             no_pets: row.try_get::<i32, _>("no_pets").unwrap_or(0) != 0,
-            no_intelligent_creatures: row.try_get::<i32, _>("no_intelligent_creatures").unwrap_or(0) != 0,
+            no_intelligent_creatures: row
+                .try_get::<i32, _>("no_intelligent_creatures")
+                .unwrap_or(0)
+                != 0,
             no_hero: row.try_get::<i32, _>("no_hero").unwrap_or(0) != 0,
             no_experience: row.try_get::<i32, _>("no_experience").unwrap_or(0) != 0,
             required_group: row.try_get::<i32, _>("required_group").unwrap_or(0) != 0,
@@ -3547,7 +4133,10 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             no_town_teleport: row.get::<Option<i32>, _>("no_town_teleport").unwrap_or(0) != 0,
             no_reincarnation: row.get::<Option<i32>, _>("no_reincarnation").unwrap_or(0) != 0,
             weather_particles: row.try_get::<i32, _>("weather_particles").unwrap_or(0) != 0,
-            gt: row.try_get::<String, _>("gt").map(|s| s == "1").unwrap_or(false),
+            gt: row
+                .try_get::<String, _>("gt")
+                .map(|s| s == "1")
+                .unwrap_or(false),
             gt_index: row.try_get::<i32, _>("gt_index").unwrap_or(0),
             safe_zones: sz_by_map.remove(&index).unwrap_or_default(),
             respawns: rs_by_map.remove(&index).unwrap_or_default(),
@@ -3616,61 +4205,83 @@ pub struct ConquestInfoRow {
 
 /// 加载全部征服领地配置（含守卫坐标；C# ConquestInfo.ConquestGuards）
 pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestInfoRow>> {
-    let rows = sqlx::query("SELECT * FROM conquest_infos ORDER BY idx").fetch_all(pool).await?;
-    let guard_rows = sqlx::query("SELECT * FROM conquest_guards ORDER BY conquest_idx, idx").fetch_all(pool).await?;
-    let gate_rows = sqlx::query("SELECT * FROM conquest_gates ORDER BY conquest_idx, idx").fetch_all(pool).await?;
-    let wall_rows = sqlx::query("SELECT * FROM conquest_walls ORDER BY conquest_idx, idx").fetch_all(pool).await?;
-    let flag_rows = sqlx::query("SELECT * FROM conquest_flags ORDER BY conquest_idx, idx").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM conquest_infos ORDER BY idx")
+        .fetch_all(pool)
+        .await?;
+    let guard_rows = sqlx::query("SELECT * FROM conquest_guards ORDER BY conquest_idx, idx")
+        .fetch_all(pool)
+        .await?;
+    let gate_rows = sqlx::query("SELECT * FROM conquest_gates ORDER BY conquest_idx, idx")
+        .fetch_all(pool)
+        .await?;
+    let wall_rows = sqlx::query("SELECT * FROM conquest_walls ORDER BY conquest_idx, idx")
+        .fetch_all(pool)
+        .await?;
+    let flag_rows = sqlx::query("SELECT * FROM conquest_flags ORDER BY conquest_idx, idx")
+        .fetch_all(pool)
+        .await?;
     let mut guards_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
     for r in guard_rows {
         let cidx: i32 = r.get("conquest_idx");
-        guards_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
-            conquest_idx: cidx,
-            index: r.get("idx"),
-            x: r.get("x"),
-            y: r.get("y"),
-            mob_index: r.get("mob_index"),
-            name: r.get("name"),
-            repair_cost: r.get("repair_cost"),
-        });
+        guards_by_conquest
+            .entry(cidx)
+            .or_default()
+            .push(ConquestGuardRow {
+                conquest_idx: cidx,
+                index: r.get("idx"),
+                x: r.get("x"),
+                y: r.get("y"),
+                mob_index: r.get("mob_index"),
+                name: r.get("name"),
+                repair_cost: r.get("repair_cost"),
+            });
     }
     let mut gates_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
     for r in gate_rows {
         let cidx: i32 = r.get("conquest_idx");
-        gates_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
-            conquest_idx: cidx,
-            index: r.get("idx"),
-            x: r.get("x"),
-            y: r.get("y"),
-            mob_index: r.get("mob_index"),
-            name: r.get("name"),
-            repair_cost: r.get("repair_cost"),
-        });
+        gates_by_conquest
+            .entry(cidx)
+            .or_default()
+            .push(ConquestGuardRow {
+                conquest_idx: cidx,
+                index: r.get("idx"),
+                x: r.get("x"),
+                y: r.get("y"),
+                mob_index: r.get("mob_index"),
+                name: r.get("name"),
+                repair_cost: r.get("repair_cost"),
+            });
     }
     let mut walls_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
     for r in wall_rows {
         let cidx: i32 = r.get("conquest_idx");
-        walls_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
-            conquest_idx: cidx,
-            index: r.get("idx"),
-            x: r.get("x"),
-            y: r.get("y"),
-            mob_index: r.get("mob_index"),
-            name: r.get("name"),
-            repair_cost: r.get("repair_cost"),
-        });
+        walls_by_conquest
+            .entry(cidx)
+            .or_default()
+            .push(ConquestGuardRow {
+                conquest_idx: cidx,
+                index: r.get("idx"),
+                x: r.get("x"),
+                y: r.get("y"),
+                mob_index: r.get("mob_index"),
+                name: r.get("name"),
+                repair_cost: r.get("repair_cost"),
+            });
     }
     let mut flags_by_conquest: HashMap<i32, Vec<ConquestFlagRow>> = HashMap::new();
     for r in flag_rows {
         let cidx: i32 = r.get("conquest_idx");
-        flags_by_conquest.entry(cidx).or_default().push(ConquestFlagRow {
-            conquest_idx: cidx,
-            index: r.get("idx"),
-            x: r.get("x"),
-            y: r.get("y"),
-            name: r.get("name"),
-            file_name: r.get("file_name"),
-        });
+        flags_by_conquest
+            .entry(cidx)
+            .or_default()
+            .push(ConquestFlagRow {
+                conquest_idx: cidx,
+                index: r.get("idx"),
+                x: r.get("x"),
+                y: r.get("y"),
+                name: r.get("name"),
+                file_name: r.get("file_name"),
+            });
     }
     let mut out = Vec::new();
     for r in rows {
@@ -3718,90 +4329,118 @@ pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestIn
 
 /// Load all item infos from DB
 pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
-    let rows = sqlx::query("SELECT * FROM item_infos ORDER BY idx").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| {
-        let stats_json: String = r.get("stats_json");
-        let stats_raw: HashMap<u8, i32> = serde_json::from_str(&stats_json)
-            .unwrap_or_else(|e| {
-                tracing::warn!("Failed to parse item stats JSON for index {}: {}", r.get::<i32, _>("idx"), e);
-                HashMap::new()
-            });
-        // DB stats_json 使用 C# Stat 枚举值（SharedRust Stat = C# + 3），统一 +3 转换供内部读取
-        let stats: HashMap<u8, i32> = stats_raw.into_iter().map(|(k, v)| (k.saturating_add(3), v)).collect();
-        ItemInfo {
-            index: r.get("idx"),
-            name: r.get("name"),
-            item_type: r.get("type"),
-            grade: r.get("grade"),
-            required_type: r.get("required_type"),
-            required_class: r.get("required_class"),
-            required_gender: r.get("required_gender"),
-            set_type: r.get("set_type"),
-            shape: r.get("shape"),
-            weight: r.get("weight"),
-            light: r.get("light"),
-            required_amount: r.get("required_amount"),
-            image: r.get("image"),
-            durability: r.get("durability"),
-            stack_size: r.get("stack_size"),
-            price: r.get::<i64, _>("price") as u32,
-            start_item: r.get::<i32, _>("start_item") != 0,
-            effect: r.get("effect"),
-            bool_flags: r.get("bool_flags"),
-            bind_mode: r.get("bind_mode"),
-            special_mode: r.get("special_mode"),
-            random_stats_id: r.get("random_stats_id"),
-            can_fast_run: r.get::<i32, _>("can_fast_run") != 0,
-            can_awakening: r.get::<i32, _>("can_awakening") != 0,
-            slots: r.get("slots"),
-            stats_json,
-            stats,
-            has_tool_tip: r.get::<i32, _>("has_tool_tip") != 0,
-            tool_tip: r.get::<Option<String>, _>("tool_tip"),
-        }
-    }).collect())
+    let rows = sqlx::query("SELECT * FROM item_infos ORDER BY idx")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let stats_json: String = r.get("stats_json");
+            let stats_raw: HashMap<u8, i32> =
+                serde_json::from_str(&stats_json).unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "Failed to parse item stats JSON for index {}: {}",
+                        r.get::<i32, _>("idx"),
+                        e
+                    );
+                    HashMap::new()
+                });
+            // DB stats_json 使用 C# Stat 枚举值（SharedRust Stat = C# + 3），统一 +3 转换供内部读取
+            let stats: HashMap<u8, i32> = stats_raw
+                .into_iter()
+                .map(|(k, v)| (k.saturating_add(3), v))
+                .collect();
+            ItemInfo {
+                index: r.get("idx"),
+                name: r.get("name"),
+                item_type: r.get("type"),
+                grade: r.get("grade"),
+                required_type: r.get("required_type"),
+                required_class: r.get("required_class"),
+                required_gender: r.get("required_gender"),
+                set_type: r.get("set_type"),
+                shape: r.get("shape"),
+                weight: r.get("weight"),
+                light: r.get("light"),
+                required_amount: r.get("required_amount"),
+                image: r.get("image"),
+                durability: r.get("durability"),
+                stack_size: r.get("stack_size"),
+                price: r.get::<i64, _>("price") as u32,
+                start_item: r.get::<i32, _>("start_item") != 0,
+                effect: r.get("effect"),
+                bool_flags: r.get("bool_flags"),
+                bind_mode: r.get("bind_mode"),
+                special_mode: r.get("special_mode"),
+                random_stats_id: r.get("random_stats_id"),
+                can_fast_run: r.get::<i32, _>("can_fast_run") != 0,
+                can_awakening: r.get::<i32, _>("can_awakening") != 0,
+                slots: r.get("slots"),
+                stats_json,
+                stats,
+                has_tool_tip: r.get::<i32, _>("has_tool_tip") != 0,
+                tool_tip: r.get::<Option<String>, _>("tool_tip"),
+            }
+        })
+        .collect())
 }
 
 /// Load all monster infos from DB
 pub async fn load_monster_infos(pool: &DbPool) -> anyhow::Result<Vec<MonsterInfo>> {
-    let rows = sqlx::query("SELECT * FROM monster_infos ORDER BY idx").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| {
-        let stats_json: String = r.get("stats_json");
-        let stats_raw: HashMap<u8, i32> = serde_json::from_str(&stats_json)
-            .unwrap_or_else(|e| {
-                tracing::warn!("Failed to parse monster stats JSON for index {}: {}", r.get::<i32, _>("idx"), e);
-                HashMap::new()
-            });
-        // DB stats_json 使用 C# Stat 枚举值（SharedRust Stat = C# + 3），统一 +3 转换供内部读取
-        let stats: HashMap<u8, i32> = stats_raw.into_iter().map(|(k, v)| (k.saturating_add(3), v)).collect();
-        MonsterInfo {
-            index: r.get("idx"),
-            name: r.get("name"),
-            image: r.get("image"),
-            ai: r.get("ai"),
-            effect: r.get("effect"),
-            level: r.get("level"),
-            view_range: r.get("view_range"),
-            cool_eye: r.get("cool_eye"),
-            stats_json,
-            stats,
-            light: r.get("light"),
-            attack_speed: r.get("attack_speed"),
-            move_speed: r.get("move_speed"),
-            experience: r.get("experience"),
-            can_push: r.get::<i32, _>("can_push") != 0,
-            can_tame: r.get::<i32, _>("can_tame") != 0,
-            auto_rev: r.get::<i32, _>("auto_rev") != 0,
-            undead: r.get::<i32, _>("undead") != 0,
-            can_recall: r.get::<i32, _>("can_recall") != 0,
-            drop_path: r.get::<Option<String>, _>("drop_path"),
-        }
-    }).collect())
+    let rows = sqlx::query("SELECT * FROM monster_infos ORDER BY idx")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let stats_json: String = r.get("stats_json");
+            let stats_raw: HashMap<u8, i32> =
+                serde_json::from_str(&stats_json).unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "Failed to parse monster stats JSON for index {}: {}",
+                        r.get::<i32, _>("idx"),
+                        e
+                    );
+                    HashMap::new()
+                });
+            // DB stats_json 使用 C# Stat 枚举值（SharedRust Stat = C# + 3），统一 +3 转换供内部读取
+            let stats: HashMap<u8, i32> = stats_raw
+                .into_iter()
+                .map(|(k, v)| (k.saturating_add(3), v))
+                .collect();
+            MonsterInfo {
+                index: r.get("idx"),
+                name: r.get("name"),
+                image: r.get("image"),
+                ai: r.get("ai"),
+                effect: r.get("effect"),
+                level: r.get("level"),
+                view_range: r.get("view_range"),
+                cool_eye: r.get("cool_eye"),
+                stats_json,
+                stats,
+                light: r.get("light"),
+                attack_speed: r.get("attack_speed"),
+                move_speed: r.get("move_speed"),
+                experience: r.get("experience"),
+                can_push: r.get::<i32, _>("can_push") != 0,
+                can_tame: r.get::<i32, _>("can_tame") != 0,
+                auto_rev: r.get::<i32, _>("auto_rev") != 0,
+                undead: r.get::<i32, _>("undead") != 0,
+                can_recall: r.get::<i32, _>("can_recall") != 0,
+                drop_path: r.get::<Option<String>, _>("drop_path"),
+            }
+        })
+        .collect())
 }
 
 /// Load monster drops grouped by monster_index
-pub async fn load_monster_drops(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<MonsterDropInfo>>> {
-    let rows = sqlx::query("SELECT * FROM monster_drops ORDER BY monster_index").fetch_all(pool).await?;
+pub async fn load_monster_drops(
+    pool: &DbPool,
+) -> anyhow::Result<HashMap<i32, Vec<MonsterDropInfo>>> {
+    let rows = sqlx::query("SELECT * FROM monster_drops ORDER BY monster_index")
+        .fetch_all(pool)
+        .await?;
     let mut map: HashMap<i32, Vec<MonsterDropInfo>> = HashMap::new();
     for r in rows {
         let monster_index: i32 = r.get("monster_index");
@@ -3842,15 +4481,20 @@ pub async fn import_drops_from_dir(
 ) -> anyhow::Result<usize> {
     // 先检查是否已导入（避免重复）
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM monster_drops")
-        .fetch_one(pool).await?
+        .fetch_one(pool)
+        .await?
         .get::<i32, _>("cnt");
     if existing > 100 {
-        tracing::info!("monster_drops already has {} rows, skipping import", existing);
+        tracing::info!(
+            "monster_drops already has {} rows, skipping import",
+            existing
+        );
         return Ok(existing as usize);
     }
 
     // 建怪物名(小写) → index 的反向索引
-    let monster_name_index: HashMap<String, i32> = monster_infos.iter()
+    let monster_name_index: HashMap<String, i32> = monster_infos
+        .iter()
         .map(|(idx, m)| (m.name.to_lowercase(), *idx))
         .collect();
 
@@ -3862,18 +4506,23 @@ pub async fn import_drops_from_dir(
     let entries = std::fs::read_dir(drop_dir)?;
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
-        if !file_name.ends_with(".txt") { continue; }
+        if !file_name.ends_with(".txt") {
+            continue;
+        }
 
         // 文件名 → 怪物名候选（去 .txt + 去常见前缀/后缀）
         let base = file_name.trim_end_matches(".txt");
         let candidates = [
-            base.to_lowercase(),                                      // ancient_axeskeleton
+            base.to_lowercase(), // ancient_axeskeleton
             base.strip_prefix("Ancient_").unwrap_or(base).to_lowercase(), // axeskeleton
-            base.trim_end_matches('0').trim_end_matches('_').to_lowercase(), // 去尾部 _0
+            base.trim_end_matches('0')
+                .trim_end_matches('_')
+                .to_lowercase(), // 去尾部 _0
         ];
 
         // 查找匹配的 monster_index
-        let m_idx = candidates.iter()
+        let m_idx = candidates
+            .iter()
             .find_map(|c| monster_name_index.get(c).copied())
             .or_else(|| monster_name_index.get(&base.to_lowercase()).copied());
 
@@ -3896,13 +4545,21 @@ pub async fn import_drops_from_dir(
             for line in &drop_lines {
                 let t = line.trim();
                 if let Some(rest) = t.strip_prefix("#INSERT") {
-                    let sub = rest.trim().trim_start_matches('[').trim_end_matches(']').trim();
+                    let sub = rest
+                        .trim()
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .trim();
                     if !sub.is_empty() {
                         let sub_path = drop_dir.join(sub);
                         if let Ok(sub_content) = std::fs::read_to_string(&sub_path) {
                             next.extend(sub_content.lines().map(|l| l.to_string()));
                             appended = true;
-                            tracing::debug!("Drop #INSERT expanded: {} -> {}", drop_dir.display(), sub);
+                            tracing::debug!(
+                                "Drop #INSERT expanded: {} -> {}",
+                                drop_dir.display(),
+                                sub
+                            );
                         } else {
                             tracing::warn!("Drop #INSERT file not found: {}", sub_path.display());
                         }
@@ -3922,10 +4579,19 @@ pub async fn import_drops_from_dir(
         while li < raw_lines.len() {
             let line = raw_lines[li];
             li += 1;
-            if line.is_empty() || line.starts_with(';') || line.starts_with("//") || line == "{" || line == "}" { continue; }
+            if line.is_empty()
+                || line.starts_with(';')
+                || line.starts_with("//")
+                || line == "{"
+                || line == "}"
+            {
+                continue;
+            }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() < 2 { continue; }
+            if parts.len() < 2 {
+                continue;
+            }
 
             // chance/total
             let chance_str = parts[0];
@@ -3934,14 +4600,26 @@ pub async fn import_drops_from_dir(
                 if frac.len() == 2 {
                     let n: f64 = frac[0].parse().unwrap_or(0.0);
                     let d: f64 = frac[1].parse().unwrap_or(1.0);
-                    if d > 0.0 { n / d } else { 0.0 }
-                } else { 0.0 }
+                    if d > 0.0 {
+                        n / d
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
             } else if chance_str.parse::<f64>().is_ok() {
                 chance_str.parse::<f64>().unwrap_or(0.0)
-            } else { 0.01 };
+            } else {
+                0.01
+            };
 
             // #995：金币条目（C# DropInfo：`1/10 Gold 1000`）
-            if parts.get(1).map(|s| s.eq_ignore_ascii_case("gold")).unwrap_or(false) {
+            if parts
+                .get(1)
+                .map(|s| s.eq_ignore_ascii_case("gold"))
+                .unwrap_or(false)
+            {
                 let gold: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 if gold > 0 {
                     let _ = sqlx::query(
@@ -3957,7 +4635,11 @@ pub async fn import_drops_from_dir(
             }
 
             // #1002：组合掉落（C# `GROUP`/`GROUP*`/`GROUP^` + `{ ... }` 子表）
-            if parts.get(1).map(|s| s.to_uppercase().starts_with("GROUP")).unwrap_or(false) {
+            if parts
+                .get(1)
+                .map(|s| s.to_uppercase().starts_with("GROUP"))
+                .unwrap_or(false)
+            {
                 let group_random = parts[1].ends_with('*');
                 let group_first = parts[1].ends_with('^');
                 let res = sqlx::query(
@@ -3974,20 +4656,38 @@ pub async fn import_drops_from_dir(
                 while li < raw_lines.len() {
                     let st = raw_lines[li];
                     li += 1;
-                    if st == "}" { break; }
-                    if st.is_empty() || st.starts_with(';') || st.starts_with("//") { continue; }
+                    if st == "}" {
+                        break;
+                    }
+                    if st.is_empty() || st.starts_with(';') || st.starts_with("//") {
+                        continue;
+                    }
                     let sub_parts: Vec<&str> = st.split_whitespace().collect();
-                    if sub_parts.len() < 2 { continue; }
+                    if sub_parts.len() < 2 {
+                        continue;
+                    }
                     let sub_chance = if sub_parts[0].contains('/') {
                         let frac: Vec<&str> = sub_parts[0].split('/').collect();
                         if frac.len() == 2 {
                             let n: f64 = frac[0].parse().unwrap_or(0.0);
                             let d: f64 = frac[1].parse().unwrap_or(1.0);
-                            if d > 0.0 { n / d } else { 0.0 }
-                        } else { 0.0 }
-                    } else { 0.01 };
+                            if d > 0.0 {
+                                n / d
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.01
+                    };
                     // 子条目金币
-                    if sub_parts.get(1).map(|s| s.eq_ignore_ascii_case("gold")).unwrap_or(false) {
+                    if sub_parts
+                        .get(1)
+                        .map(|s| s.eq_ignore_ascii_case("gold"))
+                        .unwrap_or(false)
+                    {
                         let gold: u64 = sub_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                         if gold > 0 {
                             let _ = sqlx::query(
@@ -4004,18 +4704,33 @@ pub async fn import_drops_from_dir(
                     }
                     // 子条目物品
                     let mut sp = sub_parts.to_vec();
-                    let sub_quest = sp.last().map(|s| s.eq_ignore_ascii_case("q")).unwrap_or(false);
-                    if sub_quest { sp.pop(); }
-                    let sub_item_name = if sp.len() >= 3 && sp[sp.len()-1].parse::<u16>().is_ok() {
-                        sp[1..sp.len()-1].join(" ")
+                    let sub_quest = sp
+                        .last()
+                        .map(|s| s.eq_ignore_ascii_case("q"))
+                        .unwrap_or(false);
+                    if sub_quest {
+                        sp.pop();
+                    }
+                    let sub_item_name = if sp.len() >= 3 && sp[sp.len() - 1].parse::<u16>().is_ok()
+                    {
+                        sp[1..sp.len() - 1].join(" ")
                     } else {
                         sp[1..].join(" ")
                     };
-                    let sub_count: u16 = if sp.len() >= 3 && sp[sp.len()-1].parse::<u16>().is_ok() {
-                        sp[sp.len()-1].parse().unwrap_or(1)
-                    } else { 1 };
-                    let sub_idx = item_name_index.get(&sub_item_name.to_lowercase()).copied()
-                        .or_else(|| item_name_index.get(&sub_item_name.to_lowercase().replace(' ', "")).copied());
+                    let sub_count: u16 = if sp.len() >= 3 && sp[sp.len() - 1].parse::<u16>().is_ok()
+                    {
+                        sp[sp.len() - 1].parse().unwrap_or(1)
+                    } else {
+                        1
+                    };
+                    let sub_idx = item_name_index
+                        .get(&sub_item_name.to_lowercase())
+                        .copied()
+                        .or_else(|| {
+                            item_name_index
+                                .get(&sub_item_name.to_lowercase().replace(' ', ""))
+                                .copied()
+                        });
                     if let Some(sidx) = sub_idx {
                         let _ = sqlx::query(
                             "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, 0)"
@@ -4034,7 +4749,8 @@ pub async fn import_drops_from_dir(
 
             // #996：QuestRequired 标记（C# `1/10 ItemName Q`，行尾 Q）
             let mut parts_vec = parts.to_vec();
-            let quest_required = parts_vec.last()
+            let quest_required = parts_vec
+                .last()
                 .map(|s| s.eq_ignore_ascii_case("q"))
                 .unwrap_or(false);
             if quest_required {
@@ -4042,18 +4758,28 @@ pub async fn import_drops_from_dir(
             }
 
             // 物品名（可能含空格，取最后一个数字为 count）
-            let item_name = if parts_vec.len() >= 3 && parts_vec[parts_vec.len()-1].parse::<u16>().is_ok() {
-                parts_vec[1..parts_vec.len()-1].join(" ")
-            } else {
-                parts_vec[1..].join(" ")
-            };
-            let count: u16 = if parts_vec.len() >= 3 && parts_vec[parts_vec.len()-1].parse::<u16>().is_ok() {
-                parts_vec[parts_vec.len()-1].parse().unwrap_or(1)
-            } else { 1 };
+            let item_name =
+                if parts_vec.len() >= 3 && parts_vec[parts_vec.len() - 1].parse::<u16>().is_ok() {
+                    parts_vec[1..parts_vec.len() - 1].join(" ")
+                } else {
+                    parts_vec[1..].join(" ")
+                };
+            let count: u16 =
+                if parts_vec.len() >= 3 && parts_vec[parts_vec.len() - 1].parse::<u16>().is_ok() {
+                    parts_vec[parts_vec.len() - 1].parse().unwrap_or(1)
+                } else {
+                    1
+                };
 
             // 物品名 → item_index（精确 + 去空格模糊）
-            let i_idx = item_name_index.get(&item_name.to_lowercase()).copied()
-                .or_else(|| item_name_index.get(&item_name.to_lowercase().replace(' ', "")).copied());
+            let i_idx = item_name_index
+                .get(&item_name.to_lowercase())
+                .copied()
+                .or_else(|| {
+                    item_name_index
+                        .get(&item_name.to_lowercase().replace(' ', ""))
+                        .copied()
+                });
             let i_idx = match i_idx {
                 Some(idx) => idx,
                 None => continue,
@@ -4070,13 +4796,20 @@ pub async fn import_drops_from_dir(
             total += 1;
         }
     }
-    tracing::info!("Imported {} drop entries for {} monsters from {}", total, matched_monsters, drop_dir.display());
+    tracing::info!(
+        "Imported {} drop entries for {} monsters from {}",
+        total,
+        matched_monsters,
+        drop_dir.display()
+    );
     Ok(total)
 }
 
 /// Load NPC goods grouped by npc_index
 pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<NpcGoodsInfo>>> {
-    let rows = sqlx::query("SELECT * FROM npc_goods ORDER BY npc_index").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM npc_goods ORDER BY npc_index")
+        .fetch_all(pool)
+        .await?;
     let mut map: HashMap<i32, Vec<NpcGoodsInfo>> = HashMap::new();
     for r in rows {
         let npc_index: i32 = r.get("npc_index");
@@ -4098,8 +4831,12 @@ pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<Np
 }
 
 /// Load NPC scripts grouped by (npc_index, page_name)
-pub async fn load_npc_scripts(pool: &DbPool) -> anyhow::Result<HashMap<(i32, String), Vec<String>>> {
-    let rows = sqlx::query("SELECT * FROM npc_scripts").fetch_all(pool).await?;
+pub async fn load_npc_scripts(
+    pool: &DbPool,
+) -> anyhow::Result<HashMap<(i32, String), Vec<String>>> {
+    let rows = sqlx::query("SELECT * FROM npc_scripts")
+        .fetch_all(pool)
+        .await?;
     let mut map: HashMap<(i32, String), Vec<String>> = HashMap::new();
     for r in rows {
         let npc_index: i32 = r.get("npc_index");
@@ -4122,7 +4859,8 @@ pub async fn import_npc_scripts_from_dir(
 ) -> anyhow::Result<usize> {
     // 检查是否已导入
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM npc_scripts")
-        .fetch_one(pool).await?
+        .fetch_one(pool)
+        .await?
         .get::<i32, _>("cnt");
     if existing > 100 {
         tracing::info!("npc_scripts already has {} rows, skipping import", existing);
@@ -4133,7 +4871,9 @@ pub async fn import_npc_scripts_from_dir(
     let mut matched = 0usize;
 
     for info in npc_infos {
-        if info.file_name.is_empty() { continue; }
+        if info.file_name.is_empty() {
+            continue;
+        }
 
         // C# file_name 是相对 NPCPath 的路径（如 BichonProvince\BichonWall\Blacksmith-0103）
         // 转换为实际文件路径
@@ -4158,7 +4898,8 @@ pub async fn import_npc_scripts_from_dir(
                 if let Some(ref section) = current_section {
                     if !current_lines.is_empty() {
                         let key = format!("[{}]", section.to_uppercase());
-                        let json = serde_json::to_string(&current_lines).unwrap_or_else(|_| "[]".to_string());
+                        let json = serde_json::to_string(&current_lines)
+                            .unwrap_or_else(|_| "[]".to_string());
                         let _ = sqlx::query(
                             "INSERT OR REPLACE INTO npc_scripts (npc_index, page_name, lines_json) VALUES (?, ?, ?)"
                         )
@@ -4168,7 +4909,7 @@ pub async fn import_npc_scripts_from_dir(
                     }
                 }
                 // 开始新 section（提取 @name 或大写标签名）
-                let inner = &trimmed[1..trimmed.len()-1];
+                let inner = &trimmed[1..trimmed.len() - 1];
                 current_section = Some(inner.to_string());
                 current_lines = Vec::new();
                 continue;
@@ -4180,16 +4921,19 @@ pub async fn import_npc_scripts_from_dir(
                 // 取方括号内的路径
                 if let (Some(open), Some(close)) = (trimmed.find('['), trimmed.find(']')) {
                     if close > open {
-                        let rel_path = &trimmed[open+1..close];
+                        let rel_path = &trimmed[open + 1..close];
                         // 路径相对于 Envir/ 目录
-                        let insert_path = npc_dir.parent() // Envir/
+                        let insert_path = npc_dir
+                            .parent() // Envir/
                             .map(|p| p.join(rel_path.replace('\\', "/")))
                             .unwrap_or_else(|| std::path::PathBuf::from(rel_path));
                         if let Ok(inserted) = std::fs::read_to_string(&insert_path) {
                             // 把引用文件的内容追加到当前 lines（跳过它自己的 #INSERT 避免递归）
                             for ins_line in inserted.lines() {
                                 let ins_trim = ins_line.trim();
-                                if ins_trim.starts_with("#INSERT") { continue; }
+                                if ins_trim.starts_with("#INSERT") {
+                                    continue;
+                                }
                                 current_lines.push(ins_line.to_string());
                             }
                         }
@@ -4206,7 +4950,8 @@ pub async fn import_npc_scripts_from_dir(
         if let Some(ref section) = current_section {
             if !current_lines.is_empty() {
                 let key = format!("[{}]", section.to_uppercase());
-                let json = serde_json::to_string(&current_lines).unwrap_or_else(|_| "[]".to_string());
+                let json =
+                    serde_json::to_string(&current_lines).unwrap_or_else(|_| "[]".to_string());
                 let _ = sqlx::query(
                     "INSERT OR REPLACE INTO npc_scripts (npc_index, page_name, lines_json) VALUES (?, ?, ?)"
                 )
@@ -4218,75 +4963,92 @@ pub async fn import_npc_scripts_from_dir(
         matched += 1;
     }
 
-    tracing::info!("Imported {} NPC script pages for {} NPCs from {}", total, matched, npc_dir.display());
+    tracing::info!(
+        "Imported {} NPC script pages for {} NPCs from {}",
+        total,
+        matched,
+        npc_dir.display()
+    );
     Ok(total)
 }
 pub async fn load_npc_infos(pool: &DbPool) -> anyhow::Result<Vec<NPCInfo>> {
-    let rows = sqlx::query("SELECT * FROM npc_infos ORDER BY idx").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| {
-        let collect_quest_indexes: Vec<i32> =
-            serde_json::from_str(&r.get::<String, _>("collect_quest_indexes")).unwrap_or_default();
-        let finish_quest_indexes: Vec<i32> =
-            serde_json::from_str(&r.get::<String, _>("finish_quest_indexes")).unwrap_or_default();
+    let rows = sqlx::query("SELECT * FROM npc_infos ORDER BY idx")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let collect_quest_indexes: Vec<i32> =
+                serde_json::from_str(&r.get::<String, _>("collect_quest_indexes"))
+                    .unwrap_or_default();
+            let finish_quest_indexes: Vec<i32> =
+                serde_json::from_str(&r.get::<String, _>("finish_quest_indexes"))
+                    .unwrap_or_default();
 
-        NPCInfo {
-            index: r.get("idx"),
-            map_index: r.get("map_index"),
-            file_name: r.get("file_name"),
-            name: r.get("name"),
-            x: r.get("x"),
-            y: r.get("y"),
-            image: r.get("image"),
-            rate: r.get("rate"),
-            time_visible: r.get("time_visible"),
-            hour_start: r.get("hour_start"),
-            minute_start: r.get("minute_start"),
-            hour_end: r.get("hour_end"),
-            minute_end: r.get("minute_end"),
-            min_lev: r.get("min_lev"),
-            max_lev: r.get("max_lev"),
-            day_of_week: r.get::<Option<String>, _>("day_of_week"),
-            class_required: r.get::<Option<String>, _>("class_required"),
-            conquest: r.get("conquest"),
-            flag_needed: r.get("flag_needed"),
-            show_on_big_map: r.get::<i32, _>("show_on_big_map") != 0,
-            big_map_icon: r.get("big_map_icon"),
-            can_teleport_to: r.get::<i32, _>("can_teleport_to") != 0,
-            conquest_visible: r.get::<i32, _>("conquest_visible") != 0,
-            collect_quest_indexes,
-            finish_quest_indexes,
-        }
-    }).collect())
+            NPCInfo {
+                index: r.get("idx"),
+                map_index: r.get("map_index"),
+                file_name: r.get("file_name"),
+                name: r.get("name"),
+                x: r.get("x"),
+                y: r.get("y"),
+                image: r.get("image"),
+                rate: r.get("rate"),
+                time_visible: r.get("time_visible"),
+                hour_start: r.get("hour_start"),
+                minute_start: r.get("minute_start"),
+                hour_end: r.get("hour_end"),
+                minute_end: r.get("minute_end"),
+                min_lev: r.get("min_lev"),
+                max_lev: r.get("max_lev"),
+                day_of_week: r.get::<Option<String>, _>("day_of_week"),
+                class_required: r.get::<Option<String>, _>("class_required"),
+                conquest: r.get("conquest"),
+                flag_needed: r.get("flag_needed"),
+                show_on_big_map: r.get::<i32, _>("show_on_big_map") != 0,
+                big_map_icon: r.get("big_map_icon"),
+                can_teleport_to: r.get::<i32, _>("can_teleport_to") != 0,
+                conquest_visible: r.get::<i32, _>("conquest_visible") != 0,
+                collect_quest_indexes,
+                finish_quest_indexes,
+            }
+        })
+        .collect())
 }
 
 /// Load all quest infos from DB
 pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
-    let rows = sqlx::query("SELECT * FROM quest_infos ORDER BY idx").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| QuestInfo {
-        index: r.get("idx"),
-        name: r.get("name"),
-        group_name: r.get("group_name"),
-        file_name: r.get("file_name"),
-        required_min_level: r.get("required_min_level"),
-        required_max_level: r.get("required_max_level"),
-        required_quest: r.get("required_quest"),
-        required_class: r.get("required_class"),
-        quest_type: r.get("quest_type"),
-        exp_reward: r.get("exp_reward"),
-        gold_reward: r.get("gold_reward"),
-        credit_reward: r.get("credit_reward"),
-        goto_message: r.get::<Option<String>, _>("goto_message"),
-        kill_message: r.get::<Option<String>, _>("kill_message"),
-        item_message: r.get::<Option<String>, _>("item_message"),
-        flag_message: r.get::<Option<String>, _>("flag_message"),
-        time_limit_seconds: r.get("time_limit_seconds"),
-        kill_tasks: Vec::new(),
-        item_tasks: Vec::new(),
-        flag_tasks: Vec::new(),
-        carry_items: Vec::new(),
-        fixed_rewards: Vec::new(),
-        select_rewards: Vec::new(),
-    }).collect())
+    let rows = sqlx::query("SELECT * FROM quest_infos ORDER BY idx")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| QuestInfo {
+            index: r.get("idx"),
+            name: r.get("name"),
+            group_name: r.get("group_name"),
+            file_name: r.get("file_name"),
+            required_min_level: r.get("required_min_level"),
+            required_max_level: r.get("required_max_level"),
+            required_quest: r.get("required_quest"),
+            required_class: r.get("required_class"),
+            quest_type: r.get("quest_type"),
+            exp_reward: r.get("exp_reward"),
+            gold_reward: r.get("gold_reward"),
+            credit_reward: r.get("credit_reward"),
+            goto_message: r.get::<Option<String>, _>("goto_message"),
+            kill_message: r.get::<Option<String>, _>("kill_message"),
+            item_message: r.get::<Option<String>, _>("item_message"),
+            flag_message: r.get::<Option<String>, _>("flag_message"),
+            time_limit_seconds: r.get("time_limit_seconds"),
+            kill_tasks: Vec::new(),
+            item_tasks: Vec::new(),
+            flag_tasks: Vec::new(),
+            carry_items: Vec::new(),
+            fixed_rewards: Vec::new(),
+            select_rewards: Vec::new(),
+        })
+        .collect())
 }
 
 /// Parse quest .txt files and resolve monster/item names to indices.
@@ -4391,7 +5153,10 @@ fn parse_reward(line: &str, item_by_name: &HashMap<String, i32>) -> Option<Quest
         return None;
     }
     let name = parts[0];
-    let count = parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+    let count = parts
+        .get(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(1);
 
     let name_lower = name.to_lowercase();
     let item_index = item_by_name
@@ -4423,7 +5188,10 @@ fn parse_kill_task(line: &str, monster_by_name: &HashMap<String, i32>) -> Option
         return None;
     }
     let name = parts[0];
-    let count = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+    let count = parts
+        .get(1)
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
 
     let name_lower = name.to_lowercase();
     let monster_index = monster_by_name
@@ -4450,7 +5218,10 @@ fn parse_item_task(line: &str, item_by_name: &HashMap<String, i32>) -> Option<Qu
         return None;
     }
     let name = parts[0];
-    let count = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+    let count = parts
+        .get(1)
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
 
     let name_lower = name.to_lowercase();
     let item_index = item_by_name
@@ -4481,50 +5252,60 @@ fn parse_flag_task(line: &str) -> Option<QuestFlagTask> {
 
 /// Load all magic infos from DB
 pub async fn load_magic_infos(pool: &DbPool) -> anyhow::Result<Vec<MagicInfo>> {
-    let rows = sqlx::query("SELECT * FROM magic_infos ORDER BY name").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| MagicInfo {
-        name: r.get("name"),
-        spell: r.get("spell"),
-        base_cost: r.get("base_cost"),
-        level_cost: r.get("level_cost"),
-        icon: r.get("icon"),
-        level1: r.get("level1"),
-        level2: r.get("level2"),
-        level3: r.get("level3"),
-        need1: r.get("need1"),
-        need2: r.get("need2"),
-        need3: r.get("need3"),
-        delay_base: r.get("delay_base"),
-        delay_reduction: r.get("delay_reduction"),
-        power_base: r.get("power_base"),
-        power_bonus: r.get("power_bonus"),
-        mpower_base: r.get("mpower_base"),
-        mpower_bonus: r.get("mpower_bonus"),
-        range: r.get("range"),
-        multiplier_base: r.get("multiplier_base"),
-        multiplier_bonus: r.get("multiplier_bonus"),
-    }).collect())
+    let rows = sqlx::query("SELECT * FROM magic_infos ORDER BY name")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| MagicInfo {
+            name: r.get("name"),
+            spell: r.get("spell"),
+            base_cost: r.get("base_cost"),
+            level_cost: r.get("level_cost"),
+            icon: r.get("icon"),
+            level1: r.get("level1"),
+            level2: r.get("level2"),
+            level3: r.get("level3"),
+            need1: r.get("need1"),
+            need2: r.get("need2"),
+            need3: r.get("need3"),
+            delay_base: r.get("delay_base"),
+            delay_reduction: r.get("delay_reduction"),
+            power_base: r.get("power_base"),
+            power_bonus: r.get("power_bonus"),
+            mpower_base: r.get("mpower_base"),
+            mpower_bonus: r.get("mpower_bonus"),
+            range: r.get("range"),
+            multiplier_base: r.get("multiplier_base"),
+            multiplier_bonus: r.get("multiplier_bonus"),
+        })
+        .collect())
 }
 
 /// Load all game shop items from DB
 pub async fn load_game_shop_items(pool: &DbPool) -> anyhow::Result<Vec<GameShopItem>> {
-    let rows = sqlx::query("SELECT * FROM game_shop_items ORDER BY gindex").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| GameShopItem {
-        item_index: r.get("item_index"),
-        gindex: r.get("gindex"),
-        gold_price: r.get("gold_price"),
-        credit_price: r.get("credit_price"),
-        count: r.get("count"),
-        class_name: r.get("class"),
-        category: r.get("category"),
-        stock: r.get("stock"),
-        infinite_stock: r.get::<i32, _>("infinite_stock") != 0,
-        deal: r.get::<i32, _>("deal") != 0,
-        top_item: r.get::<i32, _>("top_item") != 0,
-        date: r.get("date"),
-        can_buy_credit: r.get::<i32, _>("can_buy_credit") != 0,
-        can_buy_gold: r.get::<i32, _>("can_buy_gold") != 0,
-    }).collect())
+    let rows = sqlx::query("SELECT * FROM game_shop_items ORDER BY gindex")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| GameShopItem {
+            item_index: r.get("item_index"),
+            gindex: r.get("gindex"),
+            gold_price: r.get("gold_price"),
+            credit_price: r.get("credit_price"),
+            count: r.get("count"),
+            class_name: r.get("class"),
+            category: r.get("category"),
+            stock: r.get("stock"),
+            infinite_stock: r.get::<i32, _>("infinite_stock") != 0,
+            deal: r.get::<i32, _>("deal") != 0,
+            top_item: r.get::<i32, _>("top_item") != 0,
+            date: r.get("date"),
+            can_buy_credit: r.get::<i32, _>("can_buy_credit") != 0,
+            can_buy_gold: r.get::<i32, _>("can_buy_gold") != 0,
+        })
+        .collect())
 }
 
 /// Load dragon info from DB (single row). Resolves monster_index from monster_name.
@@ -4532,13 +5313,20 @@ pub async fn load_dragon_info(
     pool: &DbPool,
     monster_infos: &HashMap<i32, MonsterInfo>,
 ) -> anyhow::Result<Option<DragonInfo>> {
-    let row = sqlx::query("SELECT * FROM dragon_info LIMIT 1").fetch_optional(pool).await?;
+    let row = sqlx::query("SELECT * FROM dragon_info LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
     match row {
         Some(r) => {
-            let exps: Vec<i64> = serde_json::from_str(&r.get::<String, _>("exps_json")).unwrap_or_default();
+            let exps: Vec<i64> =
+                serde_json::from_str(&r.get::<String, _>("exps_json")).unwrap_or_default();
             let monster_name: String = r.get("monster_name");
-            let monster_index = monster_infos.values()
-                .find(|m| crate::util::normalized_monster_name(&m.name) == crate::util::normalized_monster_name(&monster_name))
+            let monster_index = monster_infos
+                .values()
+                .find(|m| {
+                    crate::util::normalized_monster_name(&m.name)
+                        == crate::util::normalized_monster_name(&monster_name)
+                })
                 .map(|m| m.index);
             if monster_index.is_none() {
                 tracing::warn!("Dragon references unknown monster_name='{}'", monster_name);
@@ -4573,48 +5361,62 @@ pub async fn load_dragon_info(
 /// `recipes` table is empty, the caller should fall back to hardcoded defaults.
 pub async fn load_recipe_infos(pool: &DbPool) -> anyhow::Result<Vec<RecipeInfo>> {
     let rows = sqlx::query("SELECT * FROM recipes ORDER BY recipe_id")
-        .fetch_all(pool).await?;
-    let ing_rows = sqlx::query("SELECT * FROM recipe_ingredients").fetch_all(pool).await?;
-    let tool_rows = sqlx::query("SELECT * FROM recipe_tools").fetch_all(pool).await?;
+        .fetch_all(pool)
+        .await?;
+    let ing_rows = sqlx::query("SELECT * FROM recipe_ingredients")
+        .fetch_all(pool)
+        .await?;
+    let tool_rows = sqlx::query("SELECT * FROM recipe_tools")
+        .fetch_all(pool)
+        .await?;
 
     // Index children by recipe_id
     let mut ing_by_recipe: HashMap<i32, Vec<RecipeIngredient>> = HashMap::new();
     for r in ing_rows {
         let rid: i32 = r.get("recipe_id");
-        ing_by_recipe.entry(rid).or_default().push(RecipeIngredient {
-            item_index: r.get("item_index"),
-            count: r.get::<i32, _>("count") as u16,
-        });
+        ing_by_recipe
+            .entry(rid)
+            .or_default()
+            .push(RecipeIngredient {
+                item_index: r.get("item_index"),
+                count: r.get::<i32, _>("count") as u16,
+            });
     }
     let mut tools_by_recipe: HashMap<i32, Vec<i32>> = HashMap::new();
     for r in tool_rows {
         let rid: i32 = r.get("recipe_id");
-        tools_by_recipe.entry(rid).or_default().push(r.get("item_index"));
+        tools_by_recipe
+            .entry(rid)
+            .or_default()
+            .push(r.get("item_index"));
     }
 
-    Ok(rows.into_iter().map(|r| {
-        let recipe_id: i32 = r.get("recipe_id");
-        let required_quests: Vec<i32> =
-            serde_json::from_str(&r.get::<String, _>("required_quests")).unwrap_or_default();
-        let required_flags: Vec<i32> =
-            serde_json::from_str(&r.get::<String, _>("required_flags")).unwrap_or_default();
-        let required_classes: Vec<u8> =
-            serde_json::from_str(&r.get::<String, _>("required_classes")).unwrap_or_default();
-        RecipeInfo {
-            recipe_id,
-            product_item_index: r.get("product_item_index"),
-            product_count: r.get::<i32, _>("product_count") as u16,
-            gold_cost: r.get::<i64, _>("gold_cost") as u32,
-            chance: r.get::<i32, _>("chance") as u8,
-            ingredients: ing_by_recipe.remove(&recipe_id).unwrap_or_default(),
-            tools: tools_by_recipe.remove(&recipe_id).unwrap_or_default(),
-            required_level: r.get::<Option<i64>, _>("required_level").map(|v| v as u16),
-            required_gender: r.get::<Option<i64>, _>("required_gender").map(|v| v as u8),
-            required_quests,
-            required_flags,
-            required_classes,
-        }
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let recipe_id: i32 = r.get("recipe_id");
+            let required_quests: Vec<i32> =
+                serde_json::from_str(&r.get::<String, _>("required_quests")).unwrap_or_default();
+            let required_flags: Vec<i32> =
+                serde_json::from_str(&r.get::<String, _>("required_flags")).unwrap_or_default();
+            let required_classes: Vec<u8> =
+                serde_json::from_str(&r.get::<String, _>("required_classes")).unwrap_or_default();
+            RecipeInfo {
+                recipe_id,
+                product_item_index: r.get("product_item_index"),
+                product_count: r.get::<i32, _>("product_count") as u16,
+                gold_cost: r.get::<i64, _>("gold_cost") as u32,
+                chance: r.get::<i32, _>("chance") as u8,
+                ingredients: ing_by_recipe.remove(&recipe_id).unwrap_or_default(),
+                tools: tools_by_recipe.remove(&recipe_id).unwrap_or_default(),
+                required_level: r.get::<Option<i64>, _>("required_level").map(|v| v as u16),
+                required_gender: r.get::<Option<i64>, _>("required_gender").map(|v| v as u8),
+                required_quests,
+                required_flags,
+                required_classes,
+            }
+        })
+        .collect())
 }
 
 /// 从 C# Recipe/*.txt 导入合成配方到 DB。
@@ -4640,7 +5442,9 @@ pub async fn import_recipes_from_dir(
     pool: &DbPool,
 ) -> anyhow::Result<usize> {
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM recipes")
-        .fetch_one(pool).await?.get::<i32, _>("cnt");
+        .fetch_one(pool)
+        .await?
+        .get::<i32, _>("cnt");
     if existing > 100 {
         tracing::info!("recipes already has {} rows, skipping import", existing);
         return Ok(existing as usize);
@@ -4650,16 +5454,21 @@ pub async fn import_recipes_from_dir(
     let entries = std::fs::read_dir(recipe_dir)?;
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
-        if !file_name.ends_with(".txt") { continue; }
+        if !file_name.ends_with(".txt") {
+            continue;
+        }
         let content = match std::fs::read_to_string(entry.path()) {
             Ok(c) => c,
             Err(_) => continue,
         };
 
         // 从文件名推断产物物品名
-        let product_name = file_name.trim_end_matches(".txt")
-            .trim_start_matches('(').trim_end_matches(')');
-        let product_index = item_name_index.get(&product_name.to_lowercase())
+        let product_name = file_name
+            .trim_end_matches(".txt")
+            .trim_start_matches('(')
+            .trim_end_matches(')');
+        let product_index = item_name_index
+            .get(&product_name.to_lowercase())
             .or_else(|| item_name_index.get(&product_name.to_lowercase().replace(' ', "")))
             .copied()
             .unwrap_or(0);
@@ -4674,10 +5483,14 @@ pub async fn import_recipes_from_dir(
         for line in content.lines() {
             let trimmed = line.trim();
             if trimmed.starts_with('[') && trimmed.ends_with(']') {
-                section = trimmed.trim_matches(|c| c == '[' || c == ']').to_lowercase();
+                section = trimmed
+                    .trim_matches(|c| c == '[' || c == ']')
+                    .to_lowercase();
                 continue;
             }
-            if trimmed.is_empty() || trimmed.starts_with(';') { continue; }
+            if trimmed.is_empty() || trimmed.starts_with(';') {
+                continue;
+            }
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             match section.as_str() {
                 "recipe" => {
@@ -4698,13 +5511,17 @@ pub async fn import_recipes_from_dir(
                     }
                 }
                 "tools" => {
-                    if !parts.is_empty() { tools.push(parts[0].to_string()); }
+                    if !parts.is_empty() {
+                        tools.push(parts[0].to_string());
+                    }
                 }
                 _ => {}
             }
         }
 
-        if product_index == 0 && ingredients.is_empty() { continue; }
+        if product_index == 0 && ingredients.is_empty() {
+            continue;
+        }
 
         // 插入 recipe
         let recipe_id = product_index; // 用产物 index 作为 recipe_id
@@ -4717,9 +5534,11 @@ pub async fn import_recipes_from_dir(
 
         // 插入 ingredients
         for (name, count) in &ingredients {
-            let idx = item_name_index.get(&name.to_lowercase())
+            let idx = item_name_index
+                .get(&name.to_lowercase())
                 .or_else(|| item_name_index.get(&name.to_lowercase().replace(' ', "")))
-                .copied().unwrap_or(0);
+                .copied()
+                .unwrap_or(0);
             if idx > 0 {
                 let _ = sqlx::query("INSERT INTO recipe_ingredients (recipe_id, item_index, count) VALUES (?, ?, ?)")
                     .bind(recipe_id).bind(idx).bind(*count as i32)
@@ -4728,13 +5547,18 @@ pub async fn import_recipes_from_dir(
         }
         // 插入 tools
         for name in &tools {
-            let idx = item_name_index.get(&name.to_lowercase())
+            let idx = item_name_index
+                .get(&name.to_lowercase())
                 .or_else(|| item_name_index.get(&name.to_lowercase().replace(' ', "")))
-                .copied().unwrap_or(0);
+                .copied()
+                .unwrap_or(0);
             if idx > 0 {
-                let _ = sqlx::query("INSERT INTO recipe_tools (recipe_id, item_index) VALUES (?, ?)")
-                    .bind(recipe_id).bind(idx)
-                    .execute(pool).await;
+                let _ =
+                    sqlx::query("INSERT INTO recipe_tools (recipe_id, item_index) VALUES (?, ?)")
+                        .bind(recipe_id)
+                        .bind(idx)
+                        .execute(pool)
+                        .await;
             }
         }
         total += 1;
@@ -4753,7 +5577,9 @@ pub async fn import_npc_goods_from_scripts(
     item_name_index: &HashMap<String, i32>,
 ) -> anyhow::Result<usize> {
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM npc_goods")
-        .fetch_one(pool).await?.get::<i32, _>("cnt");
+        .fetch_one(pool)
+        .await?
+        .get::<i32, _>("cnt");
     if existing > 100 {
         tracing::info!("npc_goods already has {} rows, skipping import", existing);
         return Ok(existing as usize);
@@ -4763,18 +5589,26 @@ pub async fn import_npc_goods_from_scripts(
     // npc_scripts 按 section 分段存储，[TRADE] 段的 page_name = "[TRADE]"
     for ((npc_index, page), lines) in npc_scripts {
         // 只处理 [TRADE] 页
-        if !page.eq_ignore_ascii_case("[TRADE]") { continue; }
+        if !page.eq_ignore_ascii_case("[TRADE]") {
+            continue;
+        }
 
         for line in lines {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('[') { continue; }
+            if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('[') {
+                continue;
+            }
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.is_empty() { continue; }
+            if parts.is_empty() {
+                continue;
+            }
             let item_name = parts[0].to_string();
             let count: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
-            let idx = item_name_index.get(&item_name.to_lowercase())
+            let idx = item_name_index
+                .get(&item_name.to_lowercase())
                 .or_else(|| item_name_index.get(&item_name.to_lowercase().replace(' ', "")))
-                .copied().unwrap_or(0);
+                .copied()
+                .unwrap_or(0);
             if idx > 0 {
                 let _ = sqlx::query(
                     "INSERT INTO npc_goods (npc_index, item_index, count, price) VALUES (?, ?, ?, 0)"
@@ -4819,18 +5653,21 @@ pub async fn load_all_auctions(
     let rows = sqlx::query("SELECT auction_id, seller_name, item_json, price, consignment_date, sold, item_type, buyer_name FROM auctions ORDER BY consignment_date DESC")
         .fetch_all(pool)
         .await?;
-    Ok(rows.into_iter().map(|r| {
-        (
-            r.get::<i64, _>("auction_id"),
-            r.get::<String, _>("seller_name"),
-            r.get::<String, _>("item_json"),
-            r.get::<i64, _>("price"),
-            r.get::<i64, _>("consignment_date"),
-            r.get::<i64, _>("sold"),
-            r.get::<i64, _>("item_type"),
-            r.get::<Option<String>, _>("buyer_name"),
-        )
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            (
+                r.get::<i64, _>("auction_id"),
+                r.get::<String, _>("seller_name"),
+                r.get::<String, _>("item_json"),
+                r.get::<i64, _>("price"),
+                r.get::<i64, _>("consignment_date"),
+                r.get::<i64, _>("sold"),
+                r.get::<i64, _>("item_type"),
+                r.get::<Option<String>, _>("buyer_name"),
+            )
+        })
+        .collect())
 }
 
 /// 加载未归还的租赁记录（重启后恢复 C# CharacterInfo.RentedItems 语义）
@@ -4842,28 +5679,29 @@ pub async fn load_all_rentals(
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(|r| {
-        (
-            r.get::<String, _>("item_json"),
-            r.get::<String, _>("owner_name"),
-            r.get::<String, _>("renter_name"),
-            r.get::<i64, _>("fee"),
-            r.get::<i64, _>("period_days"),
-            r.get::<i64, _>("started_at"),
-            r.get::<i64, _>("expires_at"),
-        )
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            (
+                r.get::<String, _>("item_json"),
+                r.get::<String, _>("owner_name"),
+                r.get::<String, _>("renter_name"),
+                r.get::<i64, _>("fee"),
+                r.get::<i64, _>("period_days"),
+                r.get::<i64, _>("started_at"),
+                r.get::<i64, _>("expires_at"),
+            )
+        })
+        .collect())
 }
 
 /// 标记租赁已归还（到期处理/归还后调用，防止重启后重复归还）
-pub async fn mark_rental_returned(
-    pool: &DbPool,
-    item_unique_id: u64,
-) -> anyhow::Result<bool> {
-    let result = sqlx::query("UPDATE rentals SET returned = 1 WHERE item_unique_id = ? AND returned = 0")
-        .bind(item_unique_id as i64)
-        .execute(pool)
-        .await?;
+pub async fn mark_rental_returned(pool: &DbPool, item_unique_id: u64) -> anyhow::Result<bool> {
+    let result =
+        sqlx::query("UPDATE rentals SET returned = 1 WHERE item_unique_id = ? AND returned = 0")
+            .bind(item_unique_id as i64)
+            .execute(pool)
+            .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -4873,7 +5711,10 @@ pub async fn remove_rented_item_from_character(
     character_name: &str,
     unique_id: u64,
 ) -> anyhow::Result<Option<mir2_shared::data::item::UserItem>> {
-    for (table, col) in [("inventory_backpack", "grid"), ("inventory_equipment", "slot")] {
+    for (table, col) in [
+        ("inventory_backpack", "grid"),
+        ("inventory_equipment", "slot"),
+    ] {
         let rows = sqlx::query(&format!(
             "SELECT {col}, item_json FROM {table} WHERE character_name = ?"
         ))
@@ -4883,7 +5724,8 @@ pub async fn remove_rented_item_from_character(
         for row in rows {
             let slot: i32 = row.get(col);
             let item_json: String = row.get("item_json");
-            if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) {
+            if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json)
+            {
                 if item.unique_id == unique_id {
                     sqlx::query(&format!(
                         "DELETE FROM {table} WHERE character_name = ? AND {col} = ?"
@@ -4906,7 +5748,7 @@ pub async fn mark_auction_sold(
     buyer_name: &str,
 ) -> anyhow::Result<bool> {
     let result = sqlx::query(
-        "UPDATE auctions SET sold = 1, buyer_name = ? WHERE auction_id = ? AND sold = 0"
+        "UPDATE auctions SET sold = 1, buyer_name = ? WHERE auction_id = ? AND sold = 0",
     )
     .bind(buyer_name)
     .bind(auction_id)
@@ -4915,10 +5757,7 @@ pub async fn mark_auction_sold(
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn delete_auction(
-    pool: &DbPool,
-    auction_id: i64,
-) -> anyhow::Result<bool> {
+pub async fn delete_auction(pool: &DbPool, auction_id: i64) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM auctions WHERE auction_id = ?")
         .bind(auction_id)
         .execute(pool)
@@ -4932,15 +5771,20 @@ mod tests {
     use std::collections::HashMap;
 
     async fn temp_pool() -> DbPool {
-        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+            .await
+            .unwrap();
         sqlx::query(
             "CREATE TABLE player_flags (
                 character_name TEXT NOT NULL,
                 flag_key TEXT NOT NULL,
                 flag_value INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (character_name, flag_key)
-            )"
-        ).execute(&pool).await.unwrap();
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -4953,11 +5797,28 @@ mod tests {
         std::fs::write(dir.join("1.txt"), content).unwrap();
 
         let mut item_infos = HashMap::new();
-        item_infos.insert(1, ItemInfo { index: 1, name: "CannibalLeaves".to_string(), ..Default::default() });
+        item_infos.insert(
+            1,
+            ItemInfo {
+                index: 1,
+                name: "CannibalLeaves".to_string(),
+                ..Default::default()
+            },
+        );
         let monster_infos = HashMap::new();
 
-        let mut quest = QuestInfo { index: 1, name: "Test".to_string(), file_name: "1".to_string(), ..Default::default() };
-        resolve_quest_tasks(std::slice::from_mut(&mut quest), &dir, &monster_infos, &item_infos);
+        let mut quest = QuestInfo {
+            index: 1,
+            name: "Test".to_string(),
+            file_name: "1".to_string(),
+            ..Default::default()
+        };
+        resolve_quest_tasks(
+            std::slice::from_mut(&mut quest),
+            &dir,
+            &monster_infos,
+            &item_infos,
+        );
 
         assert_eq!(quest.exp_reward, 10);
         assert_eq!(quest.gold_reward, 60);
@@ -4975,7 +5836,8 @@ mod tests {
         flags.insert("quest_started".to_string(), 1);
         flags.insert("npc_talk_count".to_string(), 5);
 
-        let mut conn = pool.acquire().await.unwrap(); save_flags(&mut *conn, "Hero", &flags).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        save_flags(&mut *conn, "Hero", &flags).await.unwrap();
         let loaded = load_flags(&pool, "Hero").await.unwrap();
 
         assert_eq!(loaded.len(), 2);
@@ -4988,12 +5850,14 @@ mod tests {
         let pool = temp_pool().await;
         let mut flags = HashMap::new();
         flags.insert("key".to_string(), 10);
-        let mut conn = pool.acquire().await.unwrap(); save_flags(&mut *conn, "Hero", &flags).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        save_flags(&mut *conn, "Hero", &flags).await.unwrap();
 
         let mut flags2 = HashMap::new();
         flags2.insert("key".to_string(), 20);
         flags2.insert("new_key".to_string(), 30);
-        let mut conn = pool.acquire().await.unwrap(); save_flags(&mut *conn, "Hero", &flags2).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        save_flags(&mut *conn, "Hero", &flags2).await.unwrap();
 
         let loaded = load_flags(&pool, "Hero").await.unwrap();
         assert_eq!(loaded.len(), 2);
@@ -5039,13 +5903,21 @@ mod tests {
             expanded_storage_expiry_date: 1_800_000_000,
         };
         save_account(&pool, &account).await.unwrap();
-        let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
+        let loaded = load_account(&pool, "storagetest")
+            .await
+            .unwrap()
+            .expect("account exists");
         assert!(loaded.has_expanded_storage);
         assert_eq!(loaded.expanded_storage_expiry_date, 1_800_000_000);
 
         // 过期降级：update → 重新加载应读到 false / 0
-        update_account_storage_expansion(&pool, "storagetest", false, 0).await.unwrap();
-        let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
+        update_account_storage_expansion(&pool, "storagetest", false, 0)
+            .await
+            .unwrap();
+        let loaded = load_account(&pool, "storagetest")
+            .await
+            .unwrap()
+            .expect("account exists");
         assert!(!loaded.has_expanded_storage);
         assert_eq!(loaded.expanded_storage_expiry_date, 0);
 
@@ -5053,7 +5925,10 @@ mod tests {
         account.has_expanded_storage = true;
         account.expanded_storage_expiry_date = 1_800_864_000;
         save_account(&pool, &account).await.unwrap();
-        let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
+        let loaded = load_account(&pool, "storagetest")
+            .await
+            .unwrap()
+            .expect("account exists");
         assert!(loaded.has_expanded_storage);
         assert_eq!(loaded.expanded_storage_expiry_date, 1_800_864_000);
     }
@@ -5101,7 +5976,9 @@ pub async fn get_account_credit(pool: &DbPool, username: &str) -> anyhow::Result
         .bind(username)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| r.get::<i64, _>("credit").max(0) as u64).unwrap_or(0))
+    Ok(row
+        .map(|r| r.get::<i64, _>("credit").max(0) as u64)
+        .unwrap_or(0))
 }
 
 /// 增加/减少账户积分（delta 为负数表示减少，下限 0；NPC 脚本 GIVECREDIT/TAKECREDIT）

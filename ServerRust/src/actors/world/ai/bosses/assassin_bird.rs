@@ -4,10 +4,10 @@
 //! 机制：近战（dist<=1）：8/9：3/4 普攻 DC / 1/4 魔法 MC（Type=1，防御 ACAgility）；
 //!       1/9：Type=2 SinglePushAttack（DC + 推挤 3，等级门控同时门控伤害与推挤，防御 AC）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 
@@ -36,27 +36,44 @@ impl MonsterBehavior for AssassinBirdBehavior {
                 // C# Random.Next(4) > 0：3/4 普攻 DC / 1/4 魔法 MC（Type=1）
                 let magic = fastrand::i32(0..4) == 0;
                 let damage = if magic {
-                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
+                    crate::combat::attack::get_attack_power(
+                        monster.min_mc,
+                        monster.max_mc,
+                        monster.luck,
+                    )
+                    .max(1)
                 } else {
-                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1)
+                    crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg,
+                        monster.luck,
+                    )
+                    .max(1)
                 };
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: if magic { 1 } else { 0 },
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: if magic { 1 } else { 0 },
+                    });
             } else if (target.level as i32) <= monster.level + 5 {
                 // C# SinglePushAttack（MonsterObject.cs:3842）：等级门控同时门控伤害+推挤
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 2,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 2,
+                    });
                 ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                     session_id: target.session_id,
                     dir,

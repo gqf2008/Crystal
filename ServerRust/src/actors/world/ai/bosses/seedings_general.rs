@@ -10,12 +10,12 @@
 //! Attack（C# :27-93）：近战/远程分支 + 4 种攻击类型。
 //! CompleteRangeAttack（C# :96-122）：echo→Slow；stomp→AOE+Frozen。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const ATTACK_RANGE: i32 = 2;
@@ -47,65 +47,99 @@ impl MonsterBehavior for SeedingsGeneralBehavior {
                 // 近战 4/5：3/4 DC 血攻 / 1/4 MC 绿溅
                 if fastrand::i32(0..4) > 0 {
                     // Type0 DC 血攻
-                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    let damage = crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg,
+                        0,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else {
                     // Type1 MC 绿色溅射（MACAgility）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                 }
             } else {
                 // 远程 4/5：MC 回声喊 / 1/5：MC 践踏
                 if fastrand::i32(0..5) > 0 {
                     // Type0 echo 单体 + Slow
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
-                    // C# PoisonTarget 1/5
-                        if fastrand::i32(0..5) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                        });
-                        }
-                } else {
-                    // Type1 stomp AOE 2 格 + Frozen
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                        ctx.find_targets_in_range(monster.x, monster.y, STOMP_RADIUS, monster.map_index)
-                            .into_iter().copied().collect();
-                    for h in hits {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
                             attacker_oid: monster.object_id,
-                            target_session: h.session_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
                             damage,
                             spell_id: 0,
-                            attack_type: 1,
                         });
-                        // C# PoisonTarget 1/5
-                            if fastrand::i32(0..5) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: h.session_id,
-                                poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                    // C# PoisonTarget 1/5
+                    if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::SLOW,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
                             });
-                            }
+                    }
+                } else {
+                    // Type1 stomp AOE 2 格 + Frozen
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                        .find_targets_in_range(
+                            monster.x,
+                            monster.y,
+                            STOMP_RADIUS,
+                            monster.map_index,
+                        )
+                        .into_iter()
+                        .copied()
+                        .collect();
+                    for h in hits {
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: h.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 1,
+                            });
+                        // C# PoisonTarget 1/5
+                        if fastrand::i32(0..5) == 0 {
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: h.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::FROZEN,
+                                        5,
+                                        crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
+                        }
                     }
                 }
             }

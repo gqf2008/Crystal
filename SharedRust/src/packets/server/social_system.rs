@@ -47,7 +47,7 @@ pub struct FriendInfo {
     pub memo: String,   // 备注
     /// 是否黑名单（C# ClientFriend.Blocked）
     pub blocked: bool,
-    pub online: bool,   // 是否在线
+    pub online: bool, // 是否在线
 }
 
 impl Packet for FriendUpdate {
@@ -103,9 +103,9 @@ impl Packet for FriendUpdate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoverUpdate {
     pub lover_name: String, // 恋人名称（未结婚/离婚后为空串）
-    pub date: i64,          // 结婚日期（C# DateTime.ToBinary；Rust 存 unix 秒，客户端仅用于计算天数）
-    pub map_name: String,   // 配偶当前地图标题（离线为空串）
-    pub married_days: i16,  // 结婚天数
+    pub date: i64, // 结婚日期（C# DateTime.ToBinary；Rust 存 unix 秒，客户端仅用于计算天数）
+    pub map_name: String, // 配偶当前地图标题（离线为空串）
+    pub married_days: i16, // 结婚天数
 }
 
 impl Packet for LoverUpdate {

@@ -6,10 +6,10 @@
 //!   - 近战且 2/3：Halfmoon 弧形（DC，4 格弧）
 //!   - 否则：远程 MC + CompleteRangeAttack：FindAllTargets(2, 目标位置) AOE（以目标为中心半径 2）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const RANGE_AOE_RADIUS: i32 = 2;
@@ -43,34 +43,46 @@ impl MonsterBehavior for FrozenKnightBehavior {
 
         if in_knight_range(dx, dy) && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 远程伤害用 MinMC/MaxMC（FrozenKnight.cs）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             // C# !range && Random.Next(3) > 0：近战 2/3 Halfmoon / 1/3 远程
             let melee = dist <= 1 && fastrand::i32(0..3) > 0;
             if melee {
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    direction: dir,
-                    count: 4,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Arc {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        direction: dir,
+                        count: 4,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // C# 远程：RangeDamage(MC) + CompleteRangeAttack FindAllTargets(2, target)
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: target.x,
-                    center_y: target.y,
-                    radius: RANGE_AOE_RADIUS,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: target.x,
+                        center_y: target.y,
+                        radius: RANGE_AOE_RADIUS,
+                        damage: mc_damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

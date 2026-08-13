@@ -10,12 +10,12 @@
 //! Attack（C# :14-63）：Random(7)>0 走 Type0/2，否则 Type1 毒雾。
 //! CompleteAttack（C# :65-96）：poison→AOE+绿毒；slam→麻痹。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 12;
 const MELEE_RANGE: i32 = 1;
@@ -40,48 +40,67 @@ impl MonsterBehavior for GasToadBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 let roll = fastrand::i32(0..7);
                 if roll == 0 {
                     // Type1 毒雾：1 格全体 + 绿毒
-                    let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                        ctx.find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
-                            .into_iter().copied().collect();
+                    let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                        .find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
+                        .into_iter()
+                        .copied()
+                        .collect();
                     for h in hits {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: h.session_id,
-                            damage,
-                            spell_id: 0,
-                            attack_type: 1,
-                        });
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                        });
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: h.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 1,
+                            });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(
+                                    PoisonType::GREEN,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    2000,
+                                ),
+                            });
                     }
                 } else if fastrand::i32(0..2) == 0 {
                     // Type2 重击 + 麻痹
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 2,
-                    });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 2,
+                        });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::PARALYSIS,
+                                5,
+                                crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                2000,
+                            ),
+                        });
                 } else {
                     // Type0 普通近战
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             }
         } else if ctx.tick_count >= monster.next_move_tick {

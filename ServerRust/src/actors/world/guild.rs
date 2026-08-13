@@ -21,10 +21,16 @@ impl Message<RequestUserNameMsg> for WorldActor {
                         let mut body = Vec::new();
                         body.extend_from_slice(&msg.object_id.to_le_bytes());
                         crate::util::wire::write_dotnet_string(&mut body, &state.name);
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserName as i16, &body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::UserName as i16,
+                                    &body,
+                                ),
+                            })
+                            .await;
                         return;
                     }
                 }
@@ -36,10 +42,16 @@ impl Message<RequestUserNameMsg> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.object_id.to_le_bytes());
             crate::util::wire::write_dotnet_string(&mut body, &name);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserName as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::UserName as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 }
@@ -54,11 +66,17 @@ impl Message<RequestChatItemMsg> for WorldActor {
 
     async fn handle(&mut self, msg: RequestChatItemMsg, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r.clone(), None => return,
+            Some(r) => r.clone(),
+            None => return,
         };
-        let item_info = record.actor_ref.ask(crate::actors::player::GetItemInfo {
-            unique_id: msg.unique_id,
-        }).await.ok().flatten();
+        let item_info = record
+            .actor_ref
+            .ask(crate::actors::player::GetItemInfo {
+                unique_id: msg.unique_id,
+            })
+            .await
+            .ok()
+            .flatten();
 
         if let Some(item) = item_info {
             let mut stats_parts = Vec::new();
@@ -79,10 +97,16 @@ impl Message<RequestChatItemMsg> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.unique_id.to_le_bytes());
             crate::util::wire::write_dotnet_string(&mut body, &stats_str);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChatItemStats as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ChatItemStats as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 }
@@ -97,11 +121,21 @@ pub struct AcceptReincarnationRequest {
 
 impl Message<AcceptReincarnationRequest> for WorldActor {
     type Reply = ();
-    async fn handle(&mut self, msg: AcceptReincarnationRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: AcceptReincarnationRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         // AcceptReincarnation: dead player accepts reincarnation from host.
         // C#: if ReincarnationHost != null && ReincarnationHost.ReincarnationReady -> Revive(HP/2)
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         // Check if this player has a valid reincarnation host
         if state.reincarnation_host.is_none() {
@@ -117,7 +151,10 @@ impl Message<AcceptReincarnationRequest> for WorldActor {
             return;
         }
 
-        debug!("AcceptReincarnation: {} accepted from host session={}", state.name, host_session);
+        debug!(
+            "AcceptReincarnation: {} accepted from host session={}",
+            state.name, host_session
+        );
 
         // Revive the dead player at half HP
         let _ = record.actor_ref.ask(ReviveAtHalfHp).await;
@@ -162,11 +199,21 @@ pub struct CancelReincarnationRequest {
 
 impl Message<CancelReincarnationRequest> for WorldActor {
     type Reply = ();
-    async fn handle(&mut self, msg: CancelReincarnationRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: CancelReincarnationRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         // CancelReincarnation: dead player cancels reincarnation.
         // C#: ReincarnationExpireTime = Envir.Time (immediate expiry triggers cleanup)
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         debug!("CancelReincarnation: {}", state.name);
 
@@ -203,7 +250,8 @@ pub struct GuildWarReturnRequest {
 impl Message<GuildWarReturnRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildWarReturnRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        self.declare_guild_war(msg.session_id, msg.guild_name.clone()).await;
+        self.declare_guild_war(msg.session_id, msg.guild_name.clone())
+            .await;
     }
 }
 
@@ -211,10 +259,19 @@ impl WorldActor {
     /// 行会宣战（C# PlayerObject STARTWAR / GuildWarReturn：会长校验、费用、新手行会禁止；@startwar 复用）
     pub(crate) async fn declare_guild_war(&mut self, session_id: u64, guild_name: String) {
         // GuildWarReturn: query if a guild exists and return its war status
-        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
-        debug!("GuildWarReturn: {} querying guild={}", state.name, guild_name);
+        debug!(
+            "GuildWarReturn: {} querying guild={}",
+            state.name, guild_name
+        );
 
         if state.guild_name.is_none() {
             send_system_message(&self.gate_ref, session_id, "你还没有加入行会");
@@ -240,23 +297,31 @@ impl WorldActor {
         }
 
         // C# GoToWar：目标行会必须存在
-        let exists = self.social_ref.ask(crate::actors::social::NpcGuildExists {
-            guild_name: guild_name.clone(),
-        }).await.unwrap_or(false);
+        let exists = self
+            .social_ref
+            .ask(crate::actors::social::NpcGuildExists {
+                guild_name: guild_name.clone(),
+            })
+            .await
+            .unwrap_or(false);
         if !exists {
             send_system_message(&self.gate_ref, session_id, "目标行会不存在");
             return;
         }
         // C# GuildObject.GoToWar / PlayerObject.GuildWarReturn：不能向新手行会宣战（Settings.NewbieGuild）
-        let (newbie_guild, _, _) = self.social_ref
-            .ask(crate::actors::social::NpcGetNewbieGuildConfig).await
+        let (newbie_guild, _, _) = self
+            .social_ref
+            .ask(crate::actors::social::NpcGetNewbieGuildConfig)
+            .await
             .unwrap_or(("NewbieGuild".to_string(), true, 5i32));
         if guild_name.eq_ignore_ascii_case(&newbie_guild) {
             send_system_message(&self.gate_ref, session_id, "不能向新手行会宣战");
             return;
         }
         // C#：已在战争中不可重复宣战
-        if self.guild_wars.get(sender_guild)
+        if self
+            .guild_wars
+            .get(sender_guild)
             .map(|s| s.contains(&guild_name))
             .unwrap_or(false)
         {
@@ -264,42 +329,64 @@ impl WorldActor {
             return;
         }
         // C# 宣战费用（Settings.Guild_WarCost=3000）：行会金币不足拒绝
-        let (war_cost, war_time) = self.social_ref
-            .ask(crate::actors::social::NpcGetGuildWarSettings).await
+        let (war_cost, war_time) = self
+            .social_ref
+            .ask(crate::actors::social::NpcGetGuildWarSettings)
+            .await
             .unwrap_or((3000u32, 180i64));
-        let deducted = self.social_ref.ask(crate::actors::social::GuildDeductGold {
-            guild_name: sender_guild.clone(),
-            amount: war_cost as u64,
-        }).await.unwrap_or(false);
+        let deducted = self
+            .social_ref
+            .ask(crate::actors::social::GuildDeductGold {
+                guild_name: sender_guild.clone(),
+                amount: war_cost as u64,
+            })
+            .await
+            .unwrap_or(false);
         if !deducted {
-            send_system_message(&self.gate_ref, session_id,
-                &format!("行会金币不足，宣战需要 {} 金币", war_cost));
+            send_system_message(
+                &self.gate_ref,
+                session_id,
+                &format!("行会金币不足，宣战需要 {} 金币", war_cost),
+            );
             return;
         }
 
         // C#：扣费成功后 MyGuild.SendServerPacket(GuildStorageGoldChange{Type=2, Name=宣战者, Amount=费用})
-        self.send_guild_storage_gold_change_to_guild(sender_guild, &state.name, war_cost, 2).await;
+        self.send_guild_storage_gold_change_to_guild(sender_guild, &state.name, war_cost, 2)
+            .await;
 
         // Record the war declaration
-        self.guild_wars.entry(sender_guild.clone()).or_default().insert(guild_name.clone());
-        self.guild_wars.entry(guild_name.clone()).or_default().insert(sender_guild.clone());
+        self.guild_wars
+            .entry(sender_guild.clone())
+            .or_default()
+            .insert(guild_name.clone());
+        self.guild_wars
+            .entry(guild_name.clone())
+            .or_default()
+            .insert(sender_guild.clone());
         // #2138：宣战后同步战争状态镜像到 SocialActor（LeaveGuildRequest 退会/解散校验）
-        let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildWar {
-            guild_name: sender_guild.clone(),
-            other: guild_name.clone(),
-            at_war: true,
-        }).await;
+        let _ = self
+            .social_ref
+            .ask(crate::actors::social::NpcSetGuildWar {
+                guild_name: sender_guild.clone(),
+                other: guild_name.clone(),
+                at_war: true,
+            })
+            .await;
         // C# GuildAtWar.TimeRemaining = Settings.Minute * Guild_WarTime（单位分钟）
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        self.guild_war_ends.insert(war_key(sender_guild, &guild_name), now + war_time * 60);
+        self.guild_war_ends
+            .insert(war_key(sender_guild, &guild_name), now + war_time * 60);
 
         // Notify all online members of the declaring guild
         let war_msg = format!("行会 {} 已向 {} 宣战！", sender_guild, guild_name);
         for (sid, rec) in &self.players {
-            if *sid == session_id { continue; }
+            if *sid == session_id {
+                continue;
+            }
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                 if s.guild_name.as_deref() == Some(sender_guild.as_str()) {
                     send_system_message(&self.gate_ref, *sid, &war_msg);
@@ -318,20 +405,33 @@ impl WorldActor {
         }
 
         // C# GoToWar：双方 UpdatePlayersColours（在线成员即时刷新名字颜色）
-        self.refresh_guild_war_colours(sender_guild, &guild_name).await;
+        self.refresh_guild_war_colours(sender_guild, &guild_name)
+            .await;
 
         // Send GuildRequestWar packet back to the declarer
         use mir2_shared::packets::server::miscellaneous::GuildRequestWar;
-        let war_packet = GuildRequestWar { guild_name: guild_name.clone() };
+        let war_packet = GuildRequestWar {
+            guild_name: guild_name.clone(),
+        };
         let mut war_body = Vec::new();
         if let Ok(()) = mir2_shared::packets::Packet::write_body(&war_packet, &mut war_body) {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16, &war_body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16,
+                        &war_body,
+                    ),
+                })
+                .await;
         }
 
-        send_system_message(&self.gate_ref, session_id, &format!("已向 {} 行会宣战", guild_name));
+        send_system_message(
+            &self.gate_ref,
+            session_id,
+            &format!("已向 {} 行会宣战", guild_name),
+        );
     }
 }
 
@@ -346,8 +446,14 @@ pub struct GuildBuffUpdateRequest {
 impl Message<GuildBuffUpdateRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildBuffUpdateRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         debug!("GuildBuffUpdate: {} buff_id={}", state.name, msg.buff_id);
 
@@ -378,24 +484,38 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
             if let Some(exp) = self.guild_buff_expiries.get_mut(guild_name) {
                 exp.remove(&msg.buff_id);
             }
-            send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已停用", msg.buff_id));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("行会 Buff #{} 已停用", msg.buff_id),
+            );
         } else {
             // C# PlayerObject.GuildBuffUpdate（:10375-10408）：购买校验
             let Some(info) = self.guild_buff_infos.get(&msg.buff_id).cloned() else {
                 send_system_message(&self.gate_ref, msg.session_id, "行会 Buff 不存在");
                 return;
             };
-            let (level, spare) = self.social_ref
-                .ask(crate::actors::social::NpcGetGuildLevelSparePoints { session_id: msg.session_id })
-                .await.unwrap_or((0, 0));
+            let (level, spare) = self
+                .social_ref
+                .ask(crate::actors::social::NpcGetGuildLevelSparePoints {
+                    session_id: msg.session_id,
+                })
+                .await
+                .unwrap_or((0, 0));
             if (level as u32) < info.level_req {
-                send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("行会等级不足（需要 {} 级）", info.level_req));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("行会等级不足（需要 {} 级）", info.level_req),
+                );
                 return;
             }
             if (spare as u32) < info.points_req {
-                send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("行会剩余点数不足（需要 {}）", info.points_req));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("行会剩余点数不足（需要 {}）", info.points_req),
+                );
                 return;
             }
             let gold_cost = if info.time_limit_minutes > 0 && info.activation_cost > 0 {
@@ -404,25 +524,41 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
                 0
             };
             if gold_cost > 0 {
-                let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id: msg.session_id }).await.unwrap_or(0);
+                let gold = self
+                    .social_ref
+                    .ask(crate::actors::social::NpcGetGuildGold {
+                        session_id: msg.session_id,
+                    })
+                    .await
+                    .unwrap_or(0);
                 if gold < gold_cost {
                     send_system_message(&self.gate_ref, msg.session_id, "行会资金不足");
                     return;
                 }
             }
             // C# NewBuff charge（:948-958）：扣点数 + 金币
-            let _ = self.social_ref.ask(crate::actors::social::NpcGuildBuffCharge {
-                session_id: msg.session_id,
-                points: info.points_req,
-                gold: gold_cost as u32,
-            }).await;
+            let _ = self
+                .social_ref
+                .ask(crate::actors::social::NpcGuildBuffCharge {
+                    session_id: msg.session_id,
+                    points: info.points_req,
+                    gold: gold_cost as u32,
+                })
+                .await;
             // #2136：C# GuildObject.Process 时限——激活时记录到期 tick（TimeLimit 分钟 × 600，100ms/tick）
             if info.time_limit_minutes > 0 {
                 let expires = self.tick_count + info.time_limit_minutes as u64 * 600;
-                self.guild_buff_expiries.entry(guild_name.clone()).or_default().insert(msg.buff_id, expires);
+                self.guild_buff_expiries
+                    .entry(guild_name.clone())
+                    .or_default()
+                    .insert(msg.buff_id, expires);
             }
             buffs.push(msg.buff_id);
-            send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已激活", msg.buff_id));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("行会 Buff #{} 已激活", msg.buff_id),
+            );
         }
         self.set_guild_buffs(guild_name, &buffs).await;
 
@@ -437,7 +573,10 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
                 }
             }
         }
-        debug!("GuildBuffUpdate: {} toggled buff {} (active={:?})", state.name, msg.buff_id, buffs);
+        debug!(
+            "GuildBuffUpdate: {} toggled buff {} (active={:?})",
+            state.name, msg.buff_id, buffs
+        );
     }
 }
 
@@ -458,10 +597,13 @@ impl WorldActor {
         for (sid, rec) in &self.players {
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                 if s.guild_name.as_deref() == Some(guild_name) {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: data.clone(),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: *sid,
+                            data: data.clone(),
+                        })
+                        .await;
                 }
             }
         }
@@ -472,9 +614,14 @@ impl WorldActor {
     pub(crate) async fn refresh_guild_war_colours(&mut self, guild_a: &str, guild_b: &str) {
         let members: Vec<u64> = self.players.keys().copied().collect();
         for sid in members {
-            let Some(rec) = self.players.get(&sid).cloned() else { continue };
-            let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await else { continue };
-            if s.guild_name.as_deref() == Some(guild_a) || s.guild_name.as_deref() == Some(guild_b) {
+            let Some(rec) = self.players.get(&sid).cloned() else {
+                continue;
+            };
+            let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await else {
+                continue;
+            };
+            if s.guild_name.as_deref() == Some(guild_a) || s.guild_name.as_deref() == Some(guild_b)
+            {
                 self.broadcast_viewer_colours(sid).await;
             }
         }
@@ -482,15 +629,23 @@ impl WorldActor {
 
     /// 读取行会激活的 Buff 列表
     pub(crate) async fn guild_buffs(&self, guild_name: &str) -> Vec<u32> {
-        self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs { guild_name: guild_name.to_string() }).await.unwrap_or_default()
+        self.social_ref
+            .ask(crate::actors::social::NpcGetGuildBuffs {
+                guild_name: guild_name.to_string(),
+            })
+            .await
+            .unwrap_or_default()
     }
 
     /// 写入行会激活的 Buff 列表
     pub(crate) async fn set_guild_buffs(&self, guild_name: &str, buffs: &[u32]) {
-        let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildBuffs {
-            guild_name: guild_name.to_string(),
-            buffs: buffs.to_vec(),
-        }).await;
+        let _ = self
+            .social_ref
+            .ask(crate::actors::social::NpcSetGuildBuffs {
+                guild_name: guild_name.to_string(),
+                buffs: buffs.to_vec(),
+            })
+            .await;
 
         // #2174：C# 激活/停用后 RefreshStats 即时生效——立即刷新该行会在线成员加成缓存
         //（原由 tick_partner_bonuses 每 50 tick 刷新，最长延迟 ~5s；此处幂等，tick 兜底保留）
@@ -506,7 +661,9 @@ impl WorldActor {
         let stats = super::sum_active_guild_buff_stats(&self.guild_buff_infos, buffs);
         for (sid, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                if state.guild_name.as_deref() != Some(guild_name) { continue; }
+                if state.guild_name.as_deref() != Some(guild_name) {
+                    continue;
+                }
                 if state.guild_buff_exp_percent == exp
                     && state.guild_buff_fish_rate_percent == fish
                     && state.guild_buff_mine_rate_percent == mine
@@ -519,7 +676,10 @@ impl WorldActor {
                 new_state.guild_buff_fish_rate_percent = fish;
                 new_state.guild_buff_mine_rate_percent = mine;
                 new_state.guild_buff_stats = stats.clone();
-                let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(SetPlayerState { state: new_state })
+                    .await;
                 // C# RefreshStats：Buff 变化后立即重算玩家属性
                 self.recalculate_and_set_stat_bonuses(*sid).await;
             }
@@ -532,11 +692,20 @@ impl WorldActor {
             active_buffs: buffs.iter().map(|b| *b as i32).collect(),
         };
         let mut body = Vec::new();
-        if packet.write_body(&mut std::io::Cursor::new(&mut body)).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildBuffList as i16, &body),
-            }).await;
+        if packet
+            .write_body(&mut std::io::Cursor::new(&mut body))
+            .is_ok()
+        {
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::GuildBuffList as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 }
@@ -548,7 +717,11 @@ pub struct GuildTerritoryPageRequest {
 
 impl Message<GuildTerritoryPageRequest> for WorldActor {
     type Reply = ();
-    async fn handle(&mut self, msg: GuildTerritoryPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: GuildTerritoryPageRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         self.send_guild_territory_page_packet(msg.session_id, msg.page);
     }
 }
@@ -566,10 +739,16 @@ impl WorldActor {
             crate::util::wire::write_dotnet_string(&mut body, owner);
             body.push(instance.state.clone() as u8);
         }
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16, &body),
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16,
+                    &body,
+                ),
+            })
+            .try_send();
     }
 }
 
@@ -580,11 +759,24 @@ pub struct PurchaseGuildTerritoryRequest {
 
 impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
     type Reply = ();
-    async fn handle(&mut self, msg: PurchaseGuildTerritoryRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+    async fn handle(
+        &mut self,
+        msg: PurchaseGuildTerritoryRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
-        debug!("PurchaseGuildTerritory: {} territory={}", state.name, msg.territory_id);
+        debug!(
+            "PurchaseGuildTerritory: {} territory={}",
+            state.name, msg.territory_id
+        );
 
         let Some(guild_name) = state.guild_name.clone() else {
             send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
@@ -595,12 +787,20 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             return;
         }
         // C# AlreadyOwnATerritory（:10483）：已有领地禁止再买
-        if self.conquest_instances.iter().any(|c| c.owner_guild.as_deref() == Some(guild_name.as_str())) {
+        if self
+            .conquest_instances
+            .iter()
+            .any(|c| c.owner_guild.as_deref() == Some(guild_name.as_str()))
+        {
             send_system_message(&self.gate_ref, msg.session_id, "行会已拥有领地");
             return;
         }
 
-        let Some(idx) = self.conquest_instances.iter().position(|i| i.id == msg.territory_id as i32) else {
+        let Some(idx) = self
+            .conquest_instances
+            .iter()
+            .position(|i| i.id == msg.territory_id as i32)
+        else {
             send_system_message(&self.gate_ref, msg.session_id, "领地不存在");
             return;
         };
@@ -614,15 +814,28 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             if owner.is_none() {
                 // 无主领地 → 回退 BUYGT 近似（固定 1M 玩家金币），并补租期（C# BUYGT GTDays）
                 let cost = 1000000u64;
-                if record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false) {
+                if record
+                    .actor_ref
+                    .ask(crate::actors::player::DeductGold { amount: cost })
+                    .await
+                    .unwrap_or(false)
+                {
                     let inst = &mut self.conquest_instances[idx];
                     inst.owner_guild = Some(guild_name.clone());
                     inst.rent_expire_tick = self.tick_count
-                        + self.conquest_cfg.gt_days as u64 * crate::actors::world::conquest::TICKS_PER_DAY;
-                    send_system_message(&self.gate_ref, msg.session_id,
-                        &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id));
+                        + self.conquest_cfg.gt_days as u64
+                            * crate::actors::world::conquest::TICKS_PER_DAY;
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id),
+                    );
                 } else {
-                    send_system_message(&self.gate_ref, msg.session_id, "金币不足，购买领地需要 1,000,000 金币");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "金币不足，购买领地需要 1,000,000 金币",
+                    );
                 }
             } else {
                 send_system_message(&self.gate_ref, msg.session_id, "该领地未在挂售");
@@ -635,20 +848,35 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             return;
         }
         // C# 行会资金（:10489-10493）
-        let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id: msg.session_id }).await.unwrap_or(0);
+        let gold = self
+            .social_ref
+            .ask(crate::actors::social::NpcGetGuildGold {
+                session_id: msg.session_id,
+            })
+            .await
+            .unwrap_or(0);
         if gold < sale_price {
             send_system_message(&self.gate_ref, msg.session_id, "行会资金不足");
             return;
         }
         // C# :10495-10496 扣买家行会资金（GuildStorageGoldChange Type=2）
-        let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
-            session_id: msg.session_id, amount: sale_price as u32, change_type: 2,
-        }).await;
+        let _ = self
+            .social_ref
+            .ask(crate::actors::social::NpcGuildGoldChange {
+                session_id: msg.session_id,
+                amount: sale_price as u32,
+                change_type: 2,
+            })
+            .await;
         // C# :10499-10510 卖家行会收款 + EndGT + 提示
         if let Some(seller) = owner {
-            let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldGive {
-                guild_name: seller.clone(), amount: sale_price as u32,
-            }).await;
+            let _ = self
+                .social_ref
+                .ask(crate::actors::social::NpcGuildGoldGive {
+                    guild_name: seller.clone(),
+                    amount: sale_price as u32,
+                })
+                .await;
             // 通知卖家在线成员「领地已出售」（C# TerritorySold）
             for (sid, rec) in &self.players {
                 if let Ok(Some(os)) = rec.actor_ref.ask(GetPlayerState).await {
@@ -665,9 +893,13 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
         inst.for_sale = false;
         inst.sale_price = 0;
         inst.rent_expire_tick = self.tick_count
-            + (self.conquest_cfg.gt_days as u64 + 1) * crate::actors::world::conquest::TICKS_PER_DAY;
-        send_system_message(&self.gate_ref, msg.session_id,
-            &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id));
+            + (self.conquest_cfg.gt_days as u64 + 1)
+                * crate::actors::world::conquest::TICKS_PER_DAY;
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id),
+        );
         // C# 卖家 EndGT（:10504）：踢出领地地图玩家（传送回绑定点）
         self.evict_gt_map_players(gt_map_index).await;
     }

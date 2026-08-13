@@ -9,11 +9,11 @@
 //!   - 远程 (>3)：1/3 概率弹道远程攻击（MAC）
 //! 死亡：清理 SlaveList（PowerBead）
 
-use crate::actors::world::MonsterState;
-use mir2_shared::enums::Spell;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use mir2_shared::enums::Spell;
 
 /// 攻击视野范围（C# AttackRange=6，但 ProcessTarget 用 ViewRange 寻敌）
 const VIEW_RANGE: i32 = 20;
@@ -87,9 +87,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
                     let sx = monster.x + dx;
                     let sy = monster.y + dy;
                     // 避开自身和目标（C# location == CurrentLocation || == Target 则 continue）
-                    if (sx == monster.x && sy == monster.y)
-                        || (sx == target.x && sy == target.y)
-                    {
+                    if (sx == monster.x && sy == monster.y) || (sx == target.x && sy == target.y) {
                         continue;
                     }
                     ctx.out_summons.push(crate::actors::world::ai::BossSummon {
@@ -111,15 +109,21 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             self.next_thunder_tick = ctx.tick_count + MASS_THUNDER_BASE_TICKS + jitter;
 
             // MAC 伤害 AOE（C# GetAttackPower(MinMC, MaxMC)）
-            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                attacker_oid: monster.object_id,
-                center_x: monster.x,
-                center_y: monster.y,
-                radius: MASS_THUNDER_RADIUS,
-                damage,
-                spell_id: 0,
-            });
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Aoe {
+                    attacker_oid: monster.object_id,
+                    center_x: monster.x,
+                    center_y: monster.y,
+                    radius: MASS_THUNDER_RADIUS,
+                    damage,
+                    spell_id: 0,
+                });
             return; // C# MassThunder 分支后直接 return（ActionTime 已推迟）
         }
 
@@ -133,36 +137,51 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             // C# DarkOmaKing.cs:87-133：ranged=false 时
             if fastrand::i32(0..4) > 0 {
                 // 3/4：普攻 DC（Type=0）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // 1/4：FullmoonAttack 三连击 + DarkOmaKingNuke 法术场（Type=1）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
                 // C# FullmoonAttack(damage, delay, ACAgility, pushDistance=1, distance=2)：16 格（8 方向 × 2 圈）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
                 let cells = eight_dir_rings(monster.x, monster.y, 2);
                 // C#：延迟 500/1700/2500ms 分 3 次结算（DelayedAction DelayedType.Damage）
                 for delay_ms in [500u64, 1700, 2500] {
-                    ctx.out_delayed_attacks.push(crate::actors::world::ai::DelayedAttack {
-                        delay_ticks: delay_ms / 100,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        cells: cells.clone(),
-                        damage,
-                        attacker_oid: monster.object_id,
-                        map_index: monster.map_index,
-                    });
+                    ctx.out_delayed_attacks
+                        .push(crate::actors::world::ai::DelayedAttack {
+                            delay_ticks: delay_ms / 100,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            cells: cells.clone(),
+                            damage,
+                            attacker_oid: monster.object_id,
+                            map_index: monster.map_index,
+                        });
                 }
                 // C# FullmoonAttack 每次调用 pushDistance=1 → 3 次各推首个命中目标 1 格
-                let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
-                    .iter().map(|p| p.session_id).collect();
+                let hit: Vec<u64> = ctx
+                    .find_targets_in_cells(&cells, monster.map_index)
+                    .iter()
+                    .map(|p| p.session_id)
+                    .collect();
                 if let Some(&first) = hit.first() {
                     for _ in 0..3 {
                         ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
@@ -176,16 +195,17 @@ impl MonsterBehavior for DarkOmaKingBehavior {
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize;
                 let nuke_x = monster.x + DIR_DX[dir % 8] * 3;
                 let nuke_y = monster.y + DIR_DY[dir % 8] * 3;
-                ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                    spell: Spell::DarkOmaKingNuke,
-                    x: nuke_x,
-                    y: nuke_y,
-                    value: monster.max_dmg, // C# Value = Stats[Stat.MaxDC]
-                    duration_ms: 900,
-                    tick_ms: 1000,
-                    caster_oid: monster.object_id,
-                    caster_session: 0,
-                });
+                ctx.out_spell_fields
+                    .push(crate::actors::world::ai::SpellFieldSpawn {
+                        spell: Spell::DarkOmaKingNuke,
+                        x: nuke_x,
+                        y: nuke_y,
+                        value: monster.max_dmg, // C# Value = Stats[Stat.MaxDC]
+                        duration_ms: 900,
+                        tick_ms: 1000,
+                        caster_oid: monster.object_id,
+                        caster_session: 0,
+                    });
                 // Nuke 模式冷却更长（C# ActionTime + 3400）
                 monster.next_attack_tick = ctx.tick_count + 34;
             }
@@ -196,14 +216,20 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if fastrand::i32(0..3) == 0 {
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             // 追击（C# 标准 MoveTo）

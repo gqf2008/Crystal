@@ -2,8 +2,7 @@
 // 纯数据结构，由 WorldActor 调用
 
 /// 任务状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QuestStatus {
     Accepted,
     InProgress,
@@ -23,8 +22,7 @@ pub struct QuestProgress {
 }
 
 /// 任务实例
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestInstance {
     /// 任务索引/ID
     pub quest_index: i32,
@@ -52,7 +50,11 @@ pub struct QuestInstance {
 impl QuestInstance {
     /// 更新进度
     pub fn update_progress(&mut self, progress_id: i32, amount: i32) {
-        if let Some(p) = self.progress.iter_mut().find(|p| p.progress_id == progress_id) {
+        if let Some(p) = self
+            .progress
+            .iter_mut()
+            .find(|p| p.progress_id == progress_id)
+        {
             p.current = (p.current + amount).min(p.target);
         }
     }
@@ -64,8 +66,7 @@ impl QuestInstance {
 }
 
 /// 玩家任务列表
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct QuestLog {
     pub quests: Vec<QuestInstance>,
     /// 已完成的任务索引（用于追踪）
@@ -92,7 +93,11 @@ impl QuestLog {
             return false;
         }
         // 检查是否已接受相同任务
-        if self.quests.iter().any(|q| q.quest_index == quest.quest_index) {
+        if self
+            .quests
+            .iter()
+            .any(|q| q.quest_index == quest.quest_index)
+        {
             return false;
         }
         self.quests.push(quest);
@@ -101,7 +106,11 @@ impl QuestLog {
 
     /// 完成任务（C# FinishQuest：`quest.Completed` 门控——进度未满不可交）
     pub fn complete_quest(&mut self, quest_index: i32) -> Option<QuestInstance> {
-        if let Some(idx) = self.quests.iter().position(|q| q.quest_index == quest_index) {
+        if let Some(idx) = self
+            .quests
+            .iter()
+            .position(|q| q.quest_index == quest_index)
+        {
             if !self.quests[idx].is_progress_complete() {
                 return None;
             }
@@ -120,12 +129,17 @@ impl QuestLog {
 
     /// 清理每日任务（C# ProcessNewDay → ClearDailyQuests：从已完成记录移除，次日可重接）
     pub fn clear_daily_quests(&mut self, daily_indices: &[i32]) {
-        self.completed_indices.retain(|i| !daily_indices.contains(i));
+        self.completed_indices
+            .retain(|i| !daily_indices.contains(i));
     }
 
     /// 放弃任务
     pub fn abandon_quest(&mut self, quest_index: i32) -> bool {
-        if let Some(idx) = self.quests.iter().position(|q| q.quest_index == quest_index) {
+        if let Some(idx) = self
+            .quests
+            .iter()
+            .position(|q| q.quest_index == quest_index)
+        {
             self.quests.remove(idx);
             true
         } else {
@@ -140,7 +154,9 @@ impl QuestLog {
 
     /// 获取任务（可变）
     pub fn get_quest_mut(&mut self, quest_index: i32) -> Option<&mut QuestInstance> {
-        self.quests.iter_mut().find(|q| q.quest_index == quest_index)
+        self.quests
+            .iter_mut()
+            .find(|q| q.quest_index == quest_index)
     }
 
     /// 更新任务进度
@@ -202,9 +218,11 @@ mod tests {
             quest_index: index,
             title: format!("Quest {}", index),
             status: QuestStatus::InProgress,
-            progress: vec![
-                QuestProgress { progress_id: 1, current: 0, target: 10 },
-            ],
+            progress: vec![QuestProgress {
+                progress_id: 1,
+                current: 0,
+                target: 10,
+            }],
             exp_reward: 1000,
             gold_reward: 500,
             credit_reward: 0,
@@ -279,9 +297,11 @@ mod tests {
     fn test_process_flag() {
         // 旗标任务：progress_id=flag 号，SETFLAG 后置满（C# QuestFlagTask）
         let mut quest = make_quest(1);
-        quest.progress = vec![
-            QuestProgress { progress_id: 5, current: 0, target: 1 },
-        ];
+        quest.progress = vec![QuestProgress {
+            progress_id: 5,
+            current: 0,
+            target: 1,
+        }];
         let mut log = QuestLog::new();
         log.accept_quest(quest);
         // 无关旗标号不推进

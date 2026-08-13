@@ -8,10 +8,10 @@
 //!
 //! Attack（C# :25-49）：SlaveList>=20 跳过；否则 GetMonster(BugBat) 延迟 Spawn。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 /// 视野（C# InAttackRange 用 Globals.DataRange）
 const VIEW_RANGE: i32 = 16;
@@ -29,7 +29,9 @@ impl BugBagMaggotBehavior {
 }
 
 impl MonsterBehavior for BugBagMaggotBehavior {
-    fn can_move(&self) -> bool { false }
+    fn can_move(&self) -> bool {
+        false
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if ctx.tick_count < monster.next_summon_tick {

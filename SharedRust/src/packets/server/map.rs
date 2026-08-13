@@ -476,7 +476,10 @@ mod tests {
     #[test]
     fn search_map_result_roundtrip() {
         // C# ServerPackets.cs SearchMapResult：MapIndex(int) + NPCIndex(uint)
-        let pkt = SearchMapResult { map_index: 5, npc_index: 12345 };
+        let pkt = SearchMapResult {
+            map_index: 5,
+            npc_index: 12345,
+        };
         let mut buf = Vec::new();
         pkt.write_body(&mut buf).unwrap();
         // i32 + u32 = 8 bytes
@@ -486,7 +489,10 @@ mod tests {
         assert_eq!(read.map_index, 5);
         assert_eq!(read.npc_index, 12345);
         // 未找到：MapIndex=-1
-        let pkt2 = SearchMapResult { map_index: -1, npc_index: 0 };
+        let pkt2 = SearchMapResult {
+            map_index: -1,
+            npc_index: 0,
+        };
         let mut buf2 = Vec::new();
         pkt2.write_body(&mut buf2).unwrap();
         let mut cur2 = Cursor::new(&buf2);

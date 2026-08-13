@@ -4,8 +4,7 @@
 use mir2_shared::data::item::UserItem;
 
 /// 邮件条目
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MailMessage {
     /// 全局唯一邮件 ID
     pub mail_id: u64,
@@ -32,8 +31,7 @@ pub struct MailMessage {
 }
 
 /// 玩家收件箱
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Mailbox {
     pub inbox: Vec<MailMessage>,
 }

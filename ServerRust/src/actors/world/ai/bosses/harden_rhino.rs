@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/HardenRhino.cs
 //! 机制：近战（dist<=1）DC；目标>3 格且 1/3 → Dash 冲刺（无伤害，2 格步进多步移动），冷却 1500ms
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const DASH_RANGE: i32 = 3;
@@ -43,7 +43,9 @@ impl MonsterBehavior for HardenRhinoBehavior {
                 let dir = (direction_towards(cx, cy, target.x, target.y) as usize) % 8;
                 let nx = cx + DIR_DX[dir] * 2;
                 let ny = cy + DIR_DY[dir] * 2;
-                if !(ctx.is_walkable)(nx, ny) { break; }
+                if !(ctx.is_walkable)(nx, ny) {
+                    break;
+                }
                 ctx.out_moves.push((monster.object_id, nx, ny, dir as u8));
                 cx = nx;
                 cy = ny;
@@ -54,14 +56,20 @@ impl MonsterBehavior for HardenRhinoBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
             return;
         }
 

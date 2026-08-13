@@ -13,15 +13,26 @@ impl WorldActor {
     }
 
     /// #2014：C# AcceptQuest/FinishQuest——同图 + DataRange(16) 内存在可接/可交该任务的 NPC
-    pub(crate) fn quest_npc_in_range(&self, player_map: u16, px: i32, py: i32, quest_index: i32, finish: bool) -> bool {
+    pub(crate) fn quest_npc_in_range(
+        &self,
+        player_map: u16,
+        px: i32,
+        py: i32,
+        quest_index: i32,
+        finish: bool,
+    ) -> bool {
         self.npcs.values().any(|npc| {
             npc.map_index == player_map
                 && crate::actors::world::ai::max_distance(px, py, npc.x, npc.y) <= 16
-                && self.npc_infos.get(&npc.db_index)
-                    .map(|info| if finish {
-                        info.finish_quest_indexes.contains(&quest_index)
-                    } else {
-                        info.collect_quest_indexes.contains(&quest_index)
+                && self
+                    .npc_infos
+                    .get(&npc.db_index)
+                    .map(|info| {
+                        if finish {
+                            info.finish_quest_indexes.contains(&quest_index)
+                        } else {
+                            info.collect_quest_indexes.contains(&quest_index)
+                        }
                     })
                     .unwrap_or(false)
         })
@@ -29,24 +40,41 @@ impl WorldActor {
 
     /// #2022：C# FinishQuest（11432-11434）——交任务扣除携带物品（TakeQuestItem）
     pub(crate) async fn take_quest_carry_items(&self, session_id: u64, quest_index: i32) {
-        let Some(quest_db) = self.quest_infos.get(&quest_index) else { return };
-        if quest_db.carry_items.is_empty() { return; }
-        let Some(record) = self.players.get(&session_id) else { return };
+        let Some(quest_db) = self.quest_infos.get(&quest_index) else {
+            return;
+        };
+        if quest_db.carry_items.is_empty() {
+            return;
+        }
+        let Some(record) = self.players.get(&session_id) else {
+            return;
+        };
         for task in &quest_db.carry_items {
-            if task.count <= 0 { continue; }
-            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
-                item_index: task.item_index,
-                count: task.count.min(u16::MAX as i32) as u16,
-            }).await;
+            if task.count <= 0 {
+                continue;
+            }
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveItemByIndex {
+                    item_index: task.item_index,
+                    count: task.count.min(u16::MAX as i32) as u16,
+                })
+                .await;
         }
     }
 
     /// #2024：C# FinishQuest——GainCredit(CreditReward)（账户积分，上限 uint.MaxValue + S.GainedCredit）
     pub(crate) async fn grant_quest_credit(&self, session_id: u64, credit_reward: i64) {
-        if credit_reward <= 0 { return; }
-        let Some(record) = self.players.get(&session_id) else { return };
+        if credit_reward <= 0 {
+            return;
+        }
+        let Some(record) = self.players.get(&session_id) else {
+            return;
+        };
         let username = record.account_username.clone();
-        let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+        let current = db::get_account_credit(&self.db_pool, &username)
+            .await
+            .unwrap_or(0);
         let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
         let delta = (credit_reward as u64).min(remaining) as i64;
         if delta > 0 {
@@ -54,13 +82,21 @@ impl WorldActor {
                 warn!("Quest CreditReward failed for {}: {}", username, e);
             } else {
                 // C# GainCredit：S.GainedCredit（客户端积分浮字）
-                let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
+                let packet = mir2_shared::packets::server::drops::GainedCredit {
+                    credit: delta as u32,
+                };
                 let mut body = Vec::new();
                 if packet.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::GainedCredit as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
             }
         }
@@ -92,7 +128,8 @@ impl Message<AcceptQuestRequest> for WorldActor {
 
     async fn handle(&mut self, msg: AcceptQuestRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
         // Validate quest exists in DB
@@ -104,7 +141,9 @@ impl Message<AcceptQuestRequest> for WorldActor {
 
         // #2014：C# AcceptQuest（11251-11264）——同图 DataRange(16) 内存在可接该任务的 NPC（数据驱动）
         if self.quest_has_npc_link(msg.quest_index, false) {
-            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else {
+                return;
+            };
             if !self.quest_npc_in_range(state.map_index, state.x, state.y, msg.quest_index, false) {
                 send_system_message(&self.gate_ref, msg.session_id, "请到对应 NPC 处接取任务");
                 return;
@@ -146,20 +185,38 @@ impl Message<AcceptQuestRequest> for WorldActor {
         }
         // #2004：C# QuestInfo.CanAccept——RequiredQuest 前置任务（需已完成）
         if quest_db.required_quest > 0 {
-            if let Ok(false) = record.actor_ref.ask(HasCompletedQuest { quest_index: quest_db.required_quest }).await {
+            if let Ok(false) = record
+                .actor_ref
+                .ask(HasCompletedQuest {
+                    quest_index: quest_db.required_quest,
+                })
+                .await
+            {
                 send_system_message(&self.gate_ref, msg.session_id, "需要先完成前置任务");
                 return;
             }
         }
 
         // 检查是否已接受该任务
-        if let Ok(Some(_quest)) = record.actor_ref.ask(GetQuest { quest_index: msg.quest_index }).await {
+        if let Ok(Some(_quest)) = record
+            .actor_ref
+            .ask(GetQuest {
+                quest_index: msg.quest_index,
+            })
+            .await
+        {
             send_system_message(&self.gate_ref, msg.session_id, "该任务已接受");
             return;
         }
 
         // 检查是否已完成过该任务
-        if let Ok(true) = record.actor_ref.ask(HasCompletedQuest { quest_index: msg.quest_index }).await {
+        if let Ok(true) = record
+            .actor_ref
+            .ask(HasCompletedQuest {
+                quest_index: msg.quest_index,
+            })
+            .await
+        {
             send_system_message(&self.gate_ref, msg.session_id, "该任务已完成");
             return;
         }
@@ -171,18 +228,35 @@ impl Message<AcceptQuestRequest> for WorldActor {
             .unwrap_or(0);
         let quest = make_quest_instance(&quest_db, now);
         let accepted = match record.actor_ref.ask(AcceptQuest { quest }).await {
-            Ok(s) => s, _ => return,
+            Ok(s) => s,
+            _ => return,
         };
 
         if accepted {
             send_system_message(&self.gate_ref, msg.session_id, "任务已接受");
             // M43：推送任务进度到客户端任务日志（C# S.ChangeQuest 语义）
-            if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: msg.quest_index }).await {
-                crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, msg.session_id, &q);
+            if let Ok(Some(q)) = record
+                .actor_ref
+                .ask(GetQuest {
+                    quest_index: msg.quest_index,
+                })
+                .await
+            {
+                crate::actors::social_packets::send_quest_change_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &q,
+                );
             }
-            debug!("Quest accepted: {} ({}) by session {}", quest_db.name, msg.quest_index, msg.session_id);
+            debug!(
+                "Quest accepted: {} ({}) by session {}",
+                quest_db.name, msg.quest_index, msg.session_id
+            );
             // C# PlayerObject.cs:11347：接受任务成功触发默认 NPC [@_OnAcceptQuest(index)]
-            self.queue_default_npc(msg.session_id, &format!("_onacceptquest({})", msg.quest_index));
+            self.queue_default_npc(
+                msg.session_id,
+                &format!("_onacceptquest({})", msg.quest_index),
+            );
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "任务接受失败");
         }
@@ -194,12 +268,15 @@ impl Message<FinishQuestRequest> for WorldActor {
 
     async fn handle(&mut self, msg: FinishQuestRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
         // #2014：C# FinishQuest（11350-11363）——同图 DataRange(16) 内存在可交该任务的 NPC（数据驱动）
         if self.quest_has_npc_link(msg.quest_index, true) {
-            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else {
+                return;
+            };
             if !self.quest_npc_in_range(state.map_index, state.x, state.y, msg.quest_index, true) {
                 send_system_message(&self.gate_ref, msg.session_id, "请到对应 NPC 处交付任务");
                 return;
@@ -210,9 +287,14 @@ impl Message<FinishQuestRequest> for WorldActor {
         if let Some(quest_db) = self.quest_infos.get(&msg.quest_index) {
             let has_item_reward = !quest_db.fixed_rewards.is_empty()
                 || (msg.selected_item_index >= 0
-                    && quest_db.select_rewards.get(msg.selected_item_index as usize).is_some());
+                    && quest_db
+                        .select_rewards
+                        .get(msg.selected_item_index as usize)
+                        .is_some());
             if has_item_reward {
-                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return };
+                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else {
+                    return;
+                };
                 // #2178：C# CanGainItems(奖励数组)——按发放逻辑构建奖励并做堆叠感知检查
                 let mut rewards: Vec<mir2_shared::data::item::UserItem> = Vec::new();
                 for r in &quest_db.fixed_rewards {
@@ -228,7 +310,10 @@ impl Message<FinishQuestRequest> for WorldActor {
                     rewards.push(item);
                 }
                 if msg.selected_item_index >= 0 {
-                    if let Some(r) = quest_db.select_rewards.get(msg.selected_item_index as usize) {
+                    if let Some(r) = quest_db
+                        .select_rewards
+                        .get(msg.selected_item_index as usize)
+                    {
                         let mut item = mir2_shared::data::item::UserItem {
                             item_index: r.item_index,
                             count: r.count,
@@ -242,13 +327,23 @@ impl Message<FinishQuestRequest> for WorldActor {
                     }
                 }
                 if !st.inventory.can_gain_items_for(&rewards) {
-                    send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法领取任务奖励");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "背包已满，无法领取任务奖励",
+                    );
                     return;
                 }
             }
         }
 
-        let completed_quest = match record.actor_ref.ask(CompleteQuest { quest_index: msg.quest_index }).await {
+        let completed_quest = match record
+            .actor_ref
+            .ask(CompleteQuest {
+                quest_index: msg.quest_index,
+            })
+            .await
+        {
             Ok(Some(q)) => q,
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "任务不存在");
@@ -257,14 +352,18 @@ impl Message<FinishQuestRequest> for WorldActor {
         };
 
         // #2022：C# FinishQuest——交任务扣除携带物品
-        self.take_quest_carry_items(msg.session_id, msg.quest_index).await;
+        self.take_quest_carry_items(msg.session_id, msg.quest_index)
+            .await;
 
         // 发放奖励
         if completed_quest.exp_reward > 0 {
-            let _ = record.actor_ref.ask(AddExperience {
-                amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32),
-                experience_list: self.experience_list.clone(),
-            }).await;
+            let _ = record
+                .actor_ref
+                .ask(AddExperience {
+                    amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32),
+                    experience_list: self.experience_list.clone(),
+                })
+                .await;
         }
         if completed_quest.gold_reward > 0 {
             // #2000：C# FinishQuest——GoldReward * Settings.DropRate（与 NPC 脚本 COMPLETEQUEST 一致）
@@ -272,7 +371,8 @@ impl Message<FinishQuestRequest> for WorldActor {
             let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
         }
         // #2000/#2024：C# FinishQuest——GainCredit(CreditReward)（统一 helper）
-        self.grant_quest_credit(msg.session_id, completed_quest.credit_reward).await;
+        self.grant_quest_credit(msg.session_id, completed_quest.credit_reward)
+            .await;
 
         // 发放固定物品奖励
         if let Some(quest_db) = self.quest_infos.get(&msg.quest_index) {
@@ -286,15 +386,24 @@ impl Message<FinishQuestRequest> for WorldActor {
                     item.max_dura = info.durability as u16;
                     item.current_dura = info.durability as u16;
                 }
-                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::AddItemToInventory { item })
+                    .await;
             }
             if !quest_db.fixed_rewards.is_empty() {
-                let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::CheckQuestItemProgress)
+                    .await;
             }
             // #1998：C# PlayerObject.FinishQuest（11394-11414）——selectedItemIndex>=0 时
             // 按 SelectRewards 列表下标发放可选奖励（越界/负数不发放）
             if msg.selected_item_index >= 0 {
-                if let Some(reward) = quest_db.select_rewards.get(msg.selected_item_index as usize) {
+                if let Some(reward) = quest_db
+                    .select_rewards
+                    .get(msg.selected_item_index as usize)
+                {
                     let mut item = mir2_shared::data::item::UserItem {
                         item_index: reward.item_index,
                         count: reward.count,
@@ -304,23 +413,42 @@ impl Message<FinishQuestRequest> for WorldActor {
                         item.max_dura = info.durability as u16;
                         item.current_dura = info.durability as u16;
                     }
-                    let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
-                    debug!("Quest {} select reward #{} (item {}) granted to session {}",
-                           msg.quest_index, msg.selected_item_index, reward.item_index, msg.session_id);
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::AddItemToInventory { item })
+                        .await;
+                    debug!(
+                        "Quest {} select reward #{} (item {}) granted to session {}",
+                        msg.quest_index, msg.selected_item_index, reward.item_index, msg.session_id
+                    );
                 }
             }
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!(
-            "任务完成！获得 {} 经验，{} 金币{}",
-            completed_quest.exp_reward,
-            completed_quest.gold_reward,
-            if completed_quest.credit_reward > 0 { format!("，{} 信用", completed_quest.credit_reward) } else { String::new() },
-        ));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!(
+                "任务完成！获得 {} 经验，{} 金币{}",
+                completed_quest.exp_reward,
+                completed_quest.gold_reward,
+                if completed_quest.credit_reward > 0 {
+                    format!("，{} 信用", completed_quest.credit_reward)
+                } else {
+                    String::new()
+                },
+            ),
+        );
         send_quest_complete_packet(&self.gate_ref, msg.session_id, completed_quest.quest_index);
-        debug!("Quest completed: {} by session {}", msg.quest_index, msg.session_id);
+        debug!(
+            "Quest completed: {} by session {}",
+            msg.quest_index, msg.session_id
+        );
         // C# PlayerObject.cs:11460：完成任务触发默认 NPC [@_OnFinishQuest(questIndex)]
-        self.queue_default_npc(msg.session_id, &format!("_onfinishquest({})", msg.quest_index));
+        self.queue_default_npc(
+            msg.session_id,
+            &format!("_onfinishquest({})", msg.quest_index),
+        );
     }
 }
 
@@ -329,16 +457,27 @@ impl Message<AbandonQuestRequest> for WorldActor {
 
     async fn handle(&mut self, msg: AbandonQuestRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r, None => return,
+            Some(r) => r,
+            None => return,
         };
 
-        let abandoned = match record.actor_ref.ask(AbandonQuest { quest_index: msg.quest_index }).await {
-            Ok(s) => s, _ => return,
+        let abandoned = match record
+            .actor_ref
+            .ask(AbandonQuest {
+                quest_index: msg.quest_index,
+            })
+            .await
+        {
+            Ok(s) => s,
+            _ => return,
         };
 
         if abandoned {
             send_system_message(&self.gate_ref, msg.session_id, "任务已放弃");
-            debug!("Quest abandoned: {} by session {}", msg.quest_index, msg.session_id);
+            debug!(
+                "Quest abandoned: {} by session {}",
+                msg.quest_index, msg.session_id
+            );
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "任务不存在");
         }
@@ -357,8 +496,14 @@ pub struct ShareQuestRequest {
 impl Message<ShareQuestRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ShareQuestRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         // Must be in a group to share
         let group_id = match state.group_id {
@@ -370,7 +515,13 @@ impl Message<ShareQuestRequest> for WorldActor {
         };
 
         // Verify the player has the quest
-        let has_quest = match record.actor_ref.ask(GetQuest { quest_index: msg.quest_id as i32 }).await {
+        let has_quest = match record
+            .actor_ref
+            .ask(GetQuest {
+                quest_index: msg.quest_id as i32,
+            })
+            .await
+        {
             Ok(Some(_)) => true,
             _ => false,
         };
@@ -381,24 +532,38 @@ impl Message<ShareQuestRequest> for WorldActor {
 
         // Send ShareQuest packet to all group members (except self)
         use mir2_shared::packets::server::miscellaneous::ShareQuest as ShareQuestPacket;
-        let packet = ShareQuestPacket { quest_id: msg.quest_id as i32 };
+        let packet = ShareQuestPacket {
+            quest_id: msg.quest_id as i32,
+        };
         let mut body = Vec::new();
         if let Ok(()) = mir2_shared::packets::Packet::write_body(&packet, &mut body) {
-            let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ShareQuest as i16, &body);
+            let data = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ShareQuest as i16,
+                &body,
+            );
             for (sid, rec) in &self.players {
-                if *sid == msg.session_id { continue; }
+                if *sid == msg.session_id {
+                    continue;
+                }
                 if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                     if s.group_id == Some(group_id) {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid,
-                            data: data.clone(),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: data.clone(),
+                            })
+                            .await;
                     }
                 }
             }
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("已分享任务 #{}", msg.quest_id));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!("已分享任务 #{}", msg.quest_id),
+        );
         debug!("ShareQuest: {} quest_id={}", state.name, msg.quest_id);
     }
 }

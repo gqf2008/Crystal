@@ -1,8 +1,7 @@
+use crate::gate::actor::GateActor;
 /// 龙系统，对应 C# MirEnvir/Dragon.cs
 /// 龙身多部件Boss，经验累积→升级→掉落→定时降级
-
 use kameo::actor::ActorRef;
-use crate::gate::actor::GateActor;
 
 /// 龙等级掉落条目（C# DragonInfo.DropInfo：DragonItem.txt）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,20 +19,38 @@ pub struct DragonDropEntry {
 /// C# DragonInfo.DropInfo.FromLine：`1/3 Gold 30000 1` / `1/10 ItemName 3`
 pub fn parse_dragon_drop_line(line: &str) -> Option<DragonDropEntry> {
     let line = line.trim();
-    if line.is_empty() || line.starts_with(';') { return None; }
+    if line.is_empty() || line.starts_with(';') {
+        return None;
+    }
     let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() < 3 { return None; }
+    if parts.len() < 3 {
+        return None;
+    }
     // 机会格式 "1/3" → 3（C# parts[0].Substring(2)）
     let chance: i32 = parts[0].strip_prefix("1/")?.parse().ok()?;
-    if chance <= 0 { return None; }
+    if chance <= 0 {
+        return None;
+    }
     if parts[1].eq_ignore_ascii_case("gold") {
-        if parts.len() < 4 { return None; }
+        if parts.len() < 4 {
+            return None;
+        }
         let gold: u64 = parts[2].parse().ok()?;
         let level: u8 = parts[3].parse().ok()?;
-        Some(DragonDropEntry { level, chance, item_name: None, gold })
+        Some(DragonDropEntry {
+            level,
+            chance,
+            item_name: None,
+            gold,
+        })
     } else {
         let level: u8 = parts[2].parse().ok()?;
-        Some(DragonDropEntry { level, chance, item_name: Some(parts[1].to_string()), gold: 0 })
+        Some(DragonDropEntry {
+            level,
+            chance,
+            item_name: Some(parts[1].to_string()),
+            gold: 0,
+        })
     }
 }
 
@@ -101,9 +118,13 @@ impl DragonState {
         }
         self.experience += amount;
         loop {
-            if self.level >= 12 { break; }
+            if self.level >= 12 {
+                break;
+            }
             let needed = Self::xp_for_level(self.level);
-            if needed == 0 || self.experience < needed { break; }
+            if needed == 0 || self.experience < needed {
+                break;
+            }
             self.experience -= needed;
             self.level += 1;
             levelled += 1;
@@ -118,11 +139,38 @@ impl DragonState {
     /// 生成龙身 24 个部件的位置偏移（C# BodyLocations）
     pub fn body_part_offsets() -> Vec<(i32, i32)> {
         vec![
-            (0, -2), (1, -1), (2, 0), (1, 1), (0, 2), (-1, 1), (-2, 0), (-1, -1), // 外圈8个
-            (0, -1), (1, 0), (0, 1), (-1, 0), // 内圈4个
-            (0, -3), (2, -2), (3, 0), (2, 2), (0, 3), (-2, 2), (-3, 0), (-2, -2), // 更外圈8个
-            (1, -2), (2, -1), (2, 1), (1, 2), (-1, 2), (-2, 1), (-2, -1), (-1, -2), // 交错8个
-        ].into_iter().take(24).collect()
+            (0, -2),
+            (1, -1),
+            (2, 0),
+            (1, 1),
+            (0, 2),
+            (-1, 1),
+            (-2, 0),
+            (-1, -1), // 外圈8个
+            (0, -1),
+            (1, 0),
+            (0, 1),
+            (-1, 0), // 内圈4个
+            (0, -3),
+            (2, -2),
+            (3, 0),
+            (2, 2),
+            (0, 3),
+            (-2, 2),
+            (-3, 0),
+            (-2, -2), // 更外圈8个
+            (1, -2),
+            (2, -1),
+            (2, 1),
+            (1, 2),
+            (-1, 2),
+            (-2, 1),
+            (-2, -1),
+            (-1, -2), // 交错8个
+        ]
+        .into_iter()
+        .take(24)
+        .collect()
     }
 }
 
@@ -134,7 +182,9 @@ pub async fn tick_dragon_delevel(
     tick_count: u64,
     _gate_ref: &ActorRef<GateActor>,
 ) {
-    if !dragon.active { return; }
+    if !dragon.active {
+        return;
+    }
 
     // C# Dragon.Process：满级保持 6*DeLevelDelay（6 小时）后重置 1 级
     if dragon.level >= 12 && dragon.max_level_time != 0 {
@@ -173,11 +223,21 @@ mod tests {
     fn test_parse_dragon_drop_line() {
         assert_eq!(
             parse_dragon_drop_line("1/3 Gold 30000 1"),
-            Some(DragonDropEntry { level: 1, chance: 3, item_name: None, gold: 30000 })
+            Some(DragonDropEntry {
+                level: 1,
+                chance: 3,
+                item_name: None,
+                gold: 30000
+            })
         );
         assert_eq!(
             parse_dragon_drop_line("1/10 BlackStone 3"),
-            Some(DragonDropEntry { level: 3, chance: 10, item_name: Some("BlackStone".to_string()), gold: 0 })
+            Some(DragonDropEntry {
+                level: 3,
+                chance: 10,
+                item_name: Some("BlackStone".to_string()),
+                gold: 0
+            })
         );
         assert_eq!(parse_dragon_drop_line(";comment"), None);
         assert_eq!(parse_dragon_drop_line(""), None);

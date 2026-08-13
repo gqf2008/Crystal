@@ -10,10 +10,10 @@
 //! Retreat（C# :115-145）：ReverseDirection 退 2 格 + 延迟 RangeDamage。
 //! ProcessTarget（C# :166-199）：_runAway 时朝远离方向 Walk。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const APPEAR_RANGE: i32 = 3;
 const VIEW_RANGE: i32 = 14;
@@ -34,20 +34,35 @@ pub struct ArmadilloBehavior {
 
 impl ArmadilloBehavior {
     pub fn new() -> Self {
-        Self { visible: false, next_check_tick: 0, spawned: false, dig_out_tick: 0, hole_done: false, run_away: false }
+        Self {
+            visible: false,
+            next_check_tick: 0,
+            spawned: false,
+            dig_out_tick: 0,
+            hole_done: false,
+            run_away: false,
+        }
     }
 }
 
 impl MonsterBehavior for ArmadilloBehavior {
-    fn can_move(&self) -> bool { self.visible }
-    fn is_attackable(&self) -> bool { self.visible }
+    fn can_move(&self) -> bool {
+        self.visible
+    }
+    fn is_attackable(&self) -> bool {
+        self.visible
+    }
 
     fn on_attacked(&mut self, damage: i32) -> i32 {
         // C# 被攻击 1/4 概率解除逃跑
         if self.run_away && fastrand::i32(0..4) == 0 {
             self.run_away = false;
         }
-        if self.visible { damage } else { 0 }
+        if self.visible {
+            damage
+        } else {
+            0
+        }
     }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
@@ -60,7 +75,9 @@ impl MonsterBehavior for ArmadilloBehavior {
         if ctx.tick_count >= self.next_check_tick {
             self.next_check_tick = ctx.tick_count + CHECK_TICKS;
             if !self.visible {
-                let has_near = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).is_some();
+                let has_near = ctx
+                    .nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index)
+                    .is_some();
                 if has_near {
                     self.visible = true;
                     self.dig_out_tick = ctx.tick_count;
@@ -75,16 +92,17 @@ impl MonsterBehavior for ArmadilloBehavior {
         // C# DigOutZombie.SpawnDigOutEffect（继承）：钻出 1s 后生成洞口 SpellObject（5 分钟）
         if !self.hole_done && ctx.tick_count >= self.dig_out_tick + 10 {
             self.hole_done = true;
-            ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                spell: mir2_shared::enums::Spell::DigOutArmadillo,
-                x: monster.x,
-                y: monster.y,
-                value: 1,
-                duration_ms: 300_000,
-                tick_ms: 2000,
-                caster_oid: monster.object_id,
-                caster_session: 0,
-            });
+            ctx.out_spell_fields
+                .push(crate::actors::world::ai::SpellFieldSpawn {
+                    spell: mir2_shared::enums::Spell::DigOutArmadillo,
+                    x: monster.x,
+                    y: monster.y,
+                    value: 1,
+                    duration_ms: 300_000,
+                    tick_ms: 2000,
+                    caster_oid: monster.object_id,
+                    caster_session: 0,
+                });
         }
 
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
@@ -107,7 +125,8 @@ impl MonsterBehavior for ArmadilloBehavior {
         if dist <= MELEE_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let roll = fastrand::i32(0..6);
-            let dmg_full = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let dmg_full =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             match roll {
                 0 => {
                     // Retreat：后跳 + 反向射程伤害
@@ -116,43 +135,48 @@ impl MonsterBehavior for ArmadilloBehavior {
                         ctx.out_moves.push((monster.object_id, nx, ny, dir));
                         monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                     }
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage: dmg_full,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage: dmg_full,
+                            spell_id: 0,
+                        });
                 }
                 1 => {
                     // 三连击（半伤×3；C# DelayedAction 400/600/800ms——首段动画+立即，后两段延迟 2/4 ticks）
                     let half = (dmg_full / 2).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: half,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
-                    for delay in [2u64, 4] {
-                        ctx.out_delayed_single_damage.push(crate::actors::world::ai::DelayedSingleDamage {
-                            delay_ticks: delay,
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
                             attacker_oid: monster.object_id,
                             target_session: target.session_id,
                             damage: half,
-                            defence: mir2_shared::enums::DefenceType::AcAgility,
+                            spell_id: 0,
+                            attack_type: 1,
                         });
+                    for delay in [2u64, 4] {
+                        ctx.out_delayed_single_damage.push(
+                            crate::actors::world::ai::DelayedSingleDamage {
+                                delay_ticks: delay,
+                                attacker_oid: monster.object_id,
+                                target_session: target.session_id,
+                                damage: half,
+                                defence: mir2_shared::enums::DefenceType::AcAgility,
+                            },
+                        );
                     }
                 }
                 _ => {
                     // 普通近战
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: dmg_full,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage: dmg_full,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             }
         } else if dist > MELEE_RANGE && ctx.tick_count >= monster.next_move_tick {

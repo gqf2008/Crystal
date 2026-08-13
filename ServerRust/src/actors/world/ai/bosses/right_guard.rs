@@ -9,10 +9,10 @@
 //!
 //! Attack（C# :26-60）：!ranged→DC MACAgility；ranged→DC MAC（AttackTime+500）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 8;
 const VIEW_RANGE: i32 = 15;
@@ -21,7 +21,9 @@ const MELEE_RANGE: i32 = 1;
 pub struct RightGuardBehavior;
 
 impl RightGuardBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for RightGuardBehavior {
@@ -34,27 +36,34 @@ impl MonsterBehavior for RightGuardBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             if dist <= MELEE_RANGE {
                 // 近战：MACAgility
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // 远程弹道：MAC，冷却 +500ms（C# AttackTime + AttackSpeed + 500）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

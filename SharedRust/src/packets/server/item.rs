@@ -143,7 +143,12 @@ impl Packet for SplitItem1 {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
         let success = reader.read_u8()? != 0;
-        Ok(Self { grid, unique_id, count, success })
+        Ok(Self {
+            grid,
+            unique_id,
+            count,
+            success,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

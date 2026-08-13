@@ -9,10 +9,10 @@
 //! Attack（C# :15-63）：!ranged(<=3)→MC AOE；ranged→4/5 弹道 / 1/5 TeleportTarget。
 //! CompleteAttack（C# :96-111）：FindAllTargets(3) 全体。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 6;
 const VIEW_RANGE: i32 = 15;
@@ -39,30 +39,41 @@ impl MonsterBehavior for HornedMageBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if dist <= CLOSE_RANGE {
                 // 近距 MC AOE（FindAllTargets(3)）
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, 3, monster.map_index)
-                        .into_iter().copied().collect();
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, 3, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             } else {
                 // 远距：4/5 弹道 / 1/5 传送目标（C# HornedMage.cs:61-66 TeleportTarget(4,4)）
                 if fastrand::i32(0..5) > 0 {
-                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
+                    let damage = crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg,
+                        0,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage,
+                            spell_id: 0,
+                        });
                 } else {
                     // 把目标玩家传送到自身 ±4 随机点（尝试 4 次；推候选，tick 端校验 walkable）
                     for _ in 0..4 {

@@ -8,10 +8,10 @@
 //!   3 刺客卷：远程伤害
 //!   默认：base.Attack（近战）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -37,39 +37,55 @@ impl MonsterBehavior for HoodedSummonerScrollsBehavior {
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             match monster.effect {
                 1 => {
                     // C# 道士卷：RangeDamage(毒标记) → AOE1 + 1/7 绿毒
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: target.x,
-                        center_y: target.y,
-                        radius: AOE_RADIUS,
-                        damage,
-                        spell_id: 0,
-                    });
-                    let nearby: Vec<u64> = ctx.find_targets_in_range(target.x, target.y, AOE_RADIUS, monster.map_index)
-                        .iter().map(|p| p.session_id).collect();
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: target.x,
+                            center_y: target.y,
+                            radius: AOE_RADIUS,
+                            damage,
+                            spell_id: 0,
+                        });
+                    let nearby: Vec<u64> = ctx
+                        .find_targets_in_range(target.x, target.y, AOE_RADIUS, monster.map_index)
+                        .iter()
+                        .map(|p| p.session_id)
+                        .collect();
                     for sid in nearby {
                         // C# PoisonTarget(7, 5, Green)：1/7、5s
                         if fastrand::i32(0..7) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: sid,
-                                poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                            });
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: sid,
+                                    poison: Poison::new(
+                                        PoisonType::GREEN,
+                                        5,
+                                        crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
                         }
                     }
                 }
                 _ => {
                     // C# 0/2/3/default：远程伤害（MACAgility）
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage,
+                            spell_id: 0,
+                        });
                 }
             }
             return;
@@ -93,23 +109,34 @@ impl MonsterBehavior for HoodedSummonerScrollsBehavior {
         if monster.effect != 1 {
             return;
         }
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-            attacker_oid: monster.object_id,
-            center_x: monster.x,
-            center_y: monster.y,
-            radius: AOE_RADIUS,
-            damage,
-            spell_id: 0,
-        });
-        let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
-            .iter().map(|p| p.session_id).collect();
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Aoe {
+                attacker_oid: monster.object_id,
+                center_x: monster.x,
+                center_y: monster.y,
+                radius: AOE_RADIUS,
+                damage,
+                spell_id: 0,
+            });
+        let nearby: Vec<u64> = ctx
+            .find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+            .iter()
+            .map(|p| p.session_id)
+            .collect();
         for sid in nearby {
             if fastrand::i32(0..7) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: sid,
-                    poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: sid,
+                        poison: Poison::new(
+                            PoisonType::GREEN,
+                            5,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            1000,
+                        ),
+                    });
             }
         }
     }

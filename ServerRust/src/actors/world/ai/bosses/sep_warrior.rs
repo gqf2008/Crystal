@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/SepWarrior.cs
 //! 机制：近战；1/3 双龙刃：0.8x 近战 + 0.8x 投射 +（目标<=怪+8 且 6/20）眩晕 5s；否则普攻
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -31,41 +31,55 @@ impl MonsterBehavior for SepWarriorBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 1/3 双龙刃
             if fastrand::i32(0..3) == 0 {
                 let dmg = ((damage as f32 * 0.8) as i32).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage: dmg,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage: dmg,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage: dmg,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage: dmg,
+                        spell_id: 0,
+                    });
                 // C# 目标<=怪+8 且 6/20 → 眩晕 5s
                 if target.level as i32 <= monster.level + 8 && fastrand::i32(0..20) <= 5 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::STUN, 5, 0, 1000),
-                    });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::STUN, 5, 0, 1000),
+                        });
                     // C# Attack（SepWarrior.cs:81）：眩晕时对目标广播 TwinDrakeBlade 特效
-                    ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::TwinDrakeBlade, 0, 0));
+                    ctx.out_effects.push((
+                        target.object_id,
+                        mir2_shared::enums::SpellEffect::TwinDrakeBlade,
+                        0,
+                        0,
+                    ));
                 }
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
             return;
         }

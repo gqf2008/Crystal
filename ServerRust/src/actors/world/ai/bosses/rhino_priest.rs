@@ -11,12 +11,12 @@
 //! Attack（C# :13-63）：!range→DC ACAgility；range→2/3 MACAgility(Debuff) / 1/3 MAC(Slow/Frozen)。
 //! CompleteRangeAttack（C# :65-98）：poison→Slow/Frozen；else RhinoPriestDebuff。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const ATTACK_RANGE: i32 = 6;
 const VIEW_RANGE: i32 = 15;
@@ -43,40 +43,58 @@ impl MonsterBehavior for RhinoPriestBehavior {
             if dist <= MELEE_RANGE {
                 // 近战 DC ACAgility
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // 远程 MC：2/3 普通(MACAgility,Debuff) / 1/3 蓝圈(MAC,Slow/Frozen)
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
                 let blue_circle = fastrand::i32(0..3) == 0;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: if blue_circle { 1 } else { 0 },
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: if blue_circle { 1 } else { 0 },
+                    });
                 if blue_circle {
                     // C# CompleteRangeAttack：3/4 Slow 分支（内层 1/2，5s）/ 1/4 Frozen 分支（内层 1/4，5s）
                     if fastrand::i32(0..4) > 0 {
                         if fastrand::i32(0..2) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: target.session_id,
-                                poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                            });
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: target.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::SLOW,
+                                        5,
+                                        crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
                         }
                     } else if fastrand::i32(0..4) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::FROZEN,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
                     }
                 }
                 // 普通：RhinoPriestDebuff（C# RhinoPriest.cs:91：MaxDC/MC/SC = -damage，时长 5+damage 秒）
@@ -86,9 +104,12 @@ impl MonsterBehavior for RhinoPriestBehavior {
                         target.session_id,
                         crate::combat::buff::BuffInstance::new(
                             crate::combat::buff::BuffType::RhinoPriestDebuff {
-                                max_dc: -damage, max_mc: -damage, max_sc: -damage,
+                                max_dc: -damage,
+                                max_mc: -damage,
+                                max_sc: -damage,
                             },
-                            debuff_ticks, 10,
+                            debuff_ticks,
+                            10,
                         ),
                     ));
                 }

@@ -9,10 +9,10 @@
 //! Attack（C# :16-54）：SlaveList>=20 跳过；否则 Spawn BombSpider。
 //! 注意：与 BugBagMaggot 区别仅在召唤物名（BombSpider vs BugBat）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 16;
 const SUMMON_COOLDOWN: u64 = 30;
@@ -26,7 +26,9 @@ impl RootSpiderBehavior {
 }
 
 impl MonsterBehavior for RootSpiderBehavior {
-    fn can_move(&self) -> bool { false }
+    fn can_move(&self) -> bool {
+        false
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if ctx.tick_count < monster.next_summon_tick {

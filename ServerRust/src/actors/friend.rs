@@ -2,8 +2,7 @@
 // 纯数据结构，由 WorldActor 调用
 
 /// 好友条目
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FriendEntry {
     /// 角色 ID（object_id）
     pub object_id: u32,
@@ -14,16 +13,14 @@ pub struct FriendEntry {
 }
 
 /// 黑名单条目
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockedEntry {
     pub object_id: u32,
     pub name: String,
 }
 
 /// 玩家好友列表
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FriendList {
     pub friends: Vec<FriendEntry>,
     pub blocked: Vec<BlockedEntry>,
@@ -37,7 +34,11 @@ impl FriendList {
     /// 添加好友
     pub fn add_friend(&mut self, object_id: u32, name: String) {
         if !self.friends.iter().any(|f| f.object_id == object_id) {
-            self.friends.push(FriendEntry { object_id, name, memo: String::new() });
+            self.friends.push(FriendEntry {
+                object_id,
+                name,
+                memo: String::new(),
+            });
         }
     }
 
@@ -110,7 +111,11 @@ pub fn friend_id_from_name(name: &str) -> u32 {
         hash ^= b as u32;
         hash = hash.wrapping_mul(0x0100_0193);
     }
-    if hash == 0 { 1 } else { hash }
+    if hash == 0 {
+        1
+    } else {
+        hash
+    }
 }
 
 /// 好友在线判定：object_id 命中在线列表，或名字忽略大小写命中在线名字列表
@@ -180,11 +185,20 @@ mod tests {
     #[test]
     fn test_friend_id_from_name_stable_and_case_insensitive() {
         // 大小写不同 → 同一稳定 id；非零
-        assert_eq!(super::friend_id_from_name("Alice"), super::friend_id_from_name("alice"));
-        assert_eq!(super::friend_id_from_name("Alice"), super::friend_id_from_name("ALICE"));
+        assert_eq!(
+            super::friend_id_from_name("Alice"),
+            super::friend_id_from_name("alice")
+        );
+        assert_eq!(
+            super::friend_id_from_name("Alice"),
+            super::friend_id_from_name("ALICE")
+        );
         assert_ne!(super::friend_id_from_name("Alice"), 0);
         // 不同名字大概率不同
-        assert_ne!(super::friend_id_from_name("Alice"), super::friend_id_from_name("Bob"));
+        assert_ne!(
+            super::friend_id_from_name("Alice"),
+            super::friend_id_from_name("Bob")
+        );
     }
 
     #[test]

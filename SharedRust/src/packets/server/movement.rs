@@ -246,7 +246,7 @@ pub struct ObjectDeco {
     pub object_id: u32, // 对象 ID
     pub location_x: i32,
     pub location_y: i32,
-    pub image: i32,     // 装饰图像（C# DecoObject.Image）
+    pub image: i32, // 装饰图像（C# DecoObject.Image）
 }
 
 impl Packet for ObjectDeco {

@@ -2,8 +2,9 @@
 // 纯数据结构，由 WorldActor 调用
 
 /// 行会成员 rank
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum GuildRank {
     Leader = 0,
     Officer = 1,
@@ -33,9 +34,23 @@ impl GuildRank {
     /// 默认行会权限（C# GuildRankOptions：Leader 全权限，Officer 部分，Member 无）
     pub fn default_options(&self) -> u8 {
         match self {
-            Self::Leader => Self::CAN_CHANGE_RANK | Self::CAN_RECRUIT | Self::CAN_KICK | Self::CAN_STORE_ITEM
-                | Self::CAN_RETRIEVE_ITEM | Self::CAN_ALTER_ALLIANCE | Self::CAN_CHANGE_NOTICE | Self::CAN_ACTIVATE_BUFF,
-            Self::Officer => Self::CAN_RECRUIT | Self::CAN_KICK | Self::CAN_STORE_ITEM | Self::CAN_RETRIEVE_ITEM | Self::CAN_CHANGE_NOTICE,
+            Self::Leader => {
+                Self::CAN_CHANGE_RANK
+                    | Self::CAN_RECRUIT
+                    | Self::CAN_KICK
+                    | Self::CAN_STORE_ITEM
+                    | Self::CAN_RETRIEVE_ITEM
+                    | Self::CAN_ALTER_ALLIANCE
+                    | Self::CAN_CHANGE_NOTICE
+                    | Self::CAN_ACTIVATE_BUFF
+            }
+            Self::Officer => {
+                Self::CAN_RECRUIT
+                    | Self::CAN_KICK
+                    | Self::CAN_STORE_ITEM
+                    | Self::CAN_RETRIEVE_ITEM
+                    | Self::CAN_CHANGE_NOTICE
+            }
             Self::Member => 0,
         }
     }
@@ -53,9 +68,21 @@ pub struct GuildRankDef {
 /// 默认 3 档职务（0=会长 1=副会长 2=成员，权限取自 GuildRank::default_options）
 pub fn default_rank_defs() -> Vec<GuildRankDef> {
     vec![
-        GuildRankDef { index: 0, name: "会长".to_string(), options: GuildRank::Leader.default_options() },
-        GuildRankDef { index: 1, name: "副会长".to_string(), options: GuildRank::Officer.default_options() },
-        GuildRankDef { index: 2, name: "成员".to_string(), options: GuildRank::Member.default_options() },
+        GuildRankDef {
+            index: 0,
+            name: "会长".to_string(),
+            options: GuildRank::Leader.default_options(),
+        },
+        GuildRankDef {
+            index: 1,
+            name: "副会长".to_string(),
+            options: GuildRank::Officer.default_options(),
+        },
+        GuildRankDef {
+            index: 2,
+            name: "成员".to_string(),
+            options: GuildRank::Member.default_options(),
+        },
     ]
 }
 
@@ -168,7 +195,11 @@ impl Guild {
             self.spare_points = (self.spare_points as u16 + point_per_level as u16).min(255) as u8;
             self.experience -= self.max_experience;
             let li = self.level as usize;
-            self.max_experience = if li < experience_list.len() { experience_list[li] } else { 0 };
+            self.max_experience = if li < experience_list.len() {
+                experience_list[li]
+            } else {
+                0
+            };
             if self.max_experience == 0 || self.level == 255 {
                 break;
             }
@@ -258,8 +289,18 @@ impl Guild {
 
     /// #1395：添加职务（C# EditGuildMember ChangeType=4），返回新 index
     pub fn add_rank(&mut self, name: &str) -> u8 {
-        let next = self.rank_defs.iter().map(|d| d.index).max().unwrap_or(0).saturating_add(1);
-        self.rank_defs.push(GuildRankDef { index: next, name: name.to_string(), options: 0 });
+        let next = self
+            .rank_defs
+            .iter()
+            .map(|d| d.index)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.rank_defs.push(GuildRankDef {
+            index: next,
+            name: name.to_string(),
+            options: 0,
+        });
         next
     }
 
@@ -292,7 +333,8 @@ impl Guild {
 
     /// 获取会长名称
     pub fn leader_name(&self) -> &str {
-        self.members.iter()
+        self.members
+            .iter()
             .find(|m| m.rank == GuildRank::Leader)
             .map(|m| m.name.as_str())
             .unwrap_or("Unknown")
@@ -300,21 +342,31 @@ impl Guild {
 
     /// 在线成员 session 列表
     pub fn online_sessions(&self, exclude: u64) -> Vec<u64> {
-        self.members.iter()
+        self.members
+            .iter()
             .filter_map(|m| m.session_id.filter(|s| *s != exclude))
             .collect()
     }
 
     /// 存入物品到行会仓库
     /// 返回 (物品, 仓库格子) 或 None
-    pub fn deposit_item(&mut self, item: mir2_shared::data::item::UserItem, quantity: u32) -> Option<usize> {
+    pub fn deposit_item(
+        &mut self,
+        item: mir2_shared::data::item::UserItem,
+        quantity: u32,
+    ) -> Option<usize> {
         let slot = self.storage_items.iter_mut().position(|s| s.is_none())?;
         self.storage_items[slot] = Some((item, quantity));
         Some(slot)
     }
 
     /// 存入物品到指定仓库格子（C# GuildStorageItemChange type=0：存入 to 槽；越界/目标格非空失败）
-    pub fn deposit_item_at(&mut self, item: mir2_shared::data::item::UserItem, quantity: u32, slot: usize) -> bool {
+    pub fn deposit_item_at(
+        &mut self,
+        item: mir2_shared::data::item::UserItem,
+        quantity: u32,
+        slot: usize,
+    ) -> bool {
         if slot >= self.storage_items.len() || self.storage_items[slot].is_some() {
             return false;
         }
@@ -324,19 +376,23 @@ impl Guild {
 
     /// 从行会仓库取出物品
     /// 返回 Some((物品, 数量, 格子)) 或 None
-    pub fn withdraw_item(&mut self, storage_grid: u8) -> Option<(mir2_shared::data::item::UserItem, u32, u8)> {
+    pub fn withdraw_item(
+        &mut self,
+        storage_grid: u8,
+    ) -> Option<(mir2_shared::data::item::UserItem, u32, u8)> {
         let idx = storage_grid as usize;
         if idx >= self.storage_items.len() {
             return None;
         }
-        self.storage_items[idx].take().map(|(item, qty)| (item, qty, storage_grid))
+        self.storage_items[idx]
+            .take()
+            .map(|(item, qty)| (item, qty, storage_grid))
     }
 
     /// 仓库是否有空位
     pub fn storage_has_space(&self) -> bool {
         self.storage_items.iter().any(|s| s.is_none())
     }
-
 }
 #[cfg(test)]
 mod tests {
@@ -423,8 +479,6 @@ mod tests {
         assert_eq!(g.member_count(), 2);
     }
 
-
-
     /// #1161：C# GuildObject.GainExp——经验按 ExpRate 积累、升级、点/上限列表
     #[test]
     fn test_apply_gain_exp_levels_up() {
@@ -471,7 +525,10 @@ mod tests {
             m.rank_index = 2;
         }
         g.set_rank_options(2, crate::actors::guild::GuildRank::CAN_RECRUIT);
-        assert_eq!(g.member_options("A"), crate::actors::guild::GuildRank::CAN_RECRUIT);
+        assert_eq!(
+            g.member_options("A"),
+            crate::actors::guild::GuildRank::CAN_RECRUIT
+        );
         // 未找到成员 → 0
         assert_eq!(g.member_options("Nobody"), 0);
     }

@@ -4,10 +4,10 @@
 //! 机制：80% 物理近战（DC）/ 20% 魔法近战（MC，Type=1）；
 //!      命中后若 Info.Effect==1：1/5 概率 出血毒（5s，值=SP，tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -35,23 +35,40 @@ impl MonsterBehavior for DarkBeastBehavior {
             // C# Envir.Random.Next(5) > 0：80% 物理 DC / 20% 魔法 MC（Type=1）
             let magic = fastrand::i32(0..5) == 0;
             let damage = if magic {
-                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1)
             } else {
-                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1)
             };
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: if magic { 1 } else { 0 },
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: if magic { 1 } else { 0 },
+                });
             // C# CompleteAttack：poison && Info.Effect==1 → PoisonTarget(5, 5, Bleeding)
             if magic && monster.effect == 1 && fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::BLEEDING, 5, poison_sc_value(monster), 1000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(
+                            PoisonType::BLEEDING,
+                            5,
+                            poison_sc_value(monster),
+                            1000,
+                        ),
+                    });
             }
             return;
         }

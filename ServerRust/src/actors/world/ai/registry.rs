@@ -4,15 +4,18 @@
 //! Rust 端 Boss 本体用名称匹配注册 behavior。
 
 use super::behavior::MonsterBehavior;
-use super::default::DefaultBehavior;
 use super::bosses;
+use super::default::DefaultBehavior;
 
 /// 根据怪物名称构建 behavior（Boss 返回专属 impl，其他返回 DefaultBehavior）
 pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Sync> {
     let name = monster_name.to_lowercase();
     // #2338：PurpleFaeFlower（紫妖花）——CanMove=false 但 CanAttack=true 的不可移动远程怪，
     // 曾误归为静态物导致永不攻击（#1089 RestlessJar 同类）；现走专属 behavior
-    if name.contains("purplefaeflower") || name.contains("purple fae flower") || name.contains("紫妖花") {
+    if name.contains("purplefaeflower")
+        || name.contains("purple fae flower")
+        || name.contains("紫妖花")
+    {
         return Box::new(bosses::purple_fae_flower::PurpleFaeFlowerBehavior::new());
     }
     // 环境物体（静态/被动）不走 Boss behavior，优先判断
@@ -32,14 +35,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
         return Box::new(bosses::trainer::TrainerBehavior::new());
     }
     // #2430：C# GetMonster AI 8——AxeSkeleton 家族（远程掷斧 + Fear 风筝）
-    if name.contains("bonearcher") || name.contains("crossbowoma") || name.contains("elitearcher")
-        || name.contains("zumaarcher") || name == "dark" || name == "dark0"
+    if name.contains("bonearcher")
+        || name.contains("crossbowoma")
+        || name.contains("elitearcher")
+        || name.contains("zumaarcher")
+        || name == "dark"
+        || name == "dark0"
     {
         return Box::new(bosses::axe_skeleton::AxeSkeletonBehavior::new());
     }
     // #2358：C# Deer.cs（AI 1/2）：Hen/Pig/Bull/Deer/Deer1/Sheep 均可采集（HarvestMonster 子类），AI2 有逃跑分支
-    if name == "hen" || name == "pig" || name == "bull" || name.contains("sheep") || name.contains("羊")
-        || name.contains("deer") || name.contains("doe") || name.contains("鹿")
+    if name == "hen"
+        || name == "pig"
+        || name == "bull"
+        || name.contains("sheep")
+        || name.contains("羊")
+        || name.contains("deer")
+        || name.contains("doe")
+        || name.contains("鹿")
     {
         return Box::new(bosses::deer::DeerBehavior::new());
     }
@@ -54,7 +67,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     {
         return Box::new(bosses::evil_mir::EvilMirBehavior::new());
     }
-    if name.contains("hornedcommander") || name.contains("horned commander") || name.contains("角魔统帅") {
+    if name.contains("hornedcommander")
+        || name.contains("horned commander")
+        || name.contains("角魔统帅")
+    {
         return Box::new(bosses::horned_commander::HornedCommanderBehavior::new());
     }
     if name.contains("helllord") || name.contains("hell lord") || name.contains("地狱领主") {
@@ -66,32 +82,64 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("yimoogi") || name.contains("异魔蛇") || name.contains("蛇母") {
         return Box::new(bosses::yimoogi::YimoogiBehavior::new());
     }
-    if name.contains("darkomaking") || name.contains("dark oma king") || name.contains("暗黑奥玛") || name.contains("奥玛之王") {
+    if name.contains("darkomaking")
+        || name.contains("dark oma king")
+        || name.contains("暗黑奥玛")
+        || name.contains("奥玛之王")
+    {
         return Box::new(bosses::dark_oma_king::DarkOmaKingBehavior::new());
     }
-    if name.contains("generalmeowmeow") || name.contains("general meow meow") || name.contains("喵喵将军") {
+    if name.contains("generalmeowmeow")
+        || name.contains("general meow meow")
+        || name.contains("喵喵将军")
+    {
         return Box::new(bosses::general_meow_meow::GeneralMeowMeowBehavior::new());
     }
-    if name.contains("zumataurus") || name.contains("zuma taurus") || name.contains("祖玛教主") || name.contains("祖玛金牛") {
+    if name.contains("zumataurus")
+        || name.contains("zuma taurus")
+        || name.contains("祖玛教主")
+        || name.contains("祖玛金牛")
+    {
         return Box::new(bosses::zuma_taurus::ZumaTaurusBehavior::new());
     }
     // ===== 额外 Boss（10 个）=====
-    if name.contains("evilcentipede") || name.contains("evil centipede") || name.contains("地蜈蚣") || name.contains("触角恶魔") {
+    if name.contains("evilcentipede")
+        || name.contains("evil centipede")
+        || name.contains("地蜈蚣")
+        || name.contains("触角恶魔")
+    {
         return Box::new(bosses::evil_centipede::EvilCentipedeBehavior::new());
     }
-    if name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花") {
+    if name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花")
+    {
         return Box::new(bosses::cannibal_plant::CannibalPlantBehavior::new());
     }
-    if name.contains("cavemaggot") || name.contains("cave maggot") || name.contains("洞穴蛆") || name == "dung" || name == "dung0" || name == "wedgemoth" || name == "spiderbat" {
+    if name.contains("cavemaggot")
+        || name.contains("cave maggot")
+        || name.contains("洞穴蛆")
+        || name == "dung"
+        || name == "dung0"
+        || name == "wedgemoth"
+        || name == "spiderbat"
+    {
         return Box::new(bosses::cave_maggot::CaveMaggotBehavior::new());
     }
-    if name.contains("bonespearman") || name.contains("bone spearman") || name.contains("骷髅枪兵") {
+    if name.contains("bonespearman") || name.contains("bone spearman") || name.contains("骷髅枪兵")
+    {
         return Box::new(bosses::bone_spearman::BoneSpearmanBehavior::new());
     }
     if name.contains("sandworm") || name.contains("sand worm") || name.contains("沙虫") {
         return Box::new(bosses::sand_worm::SandWormBehavior::new());
     }
-    if name.contains("shamanzombie") || name.contains("shaman zombie") || name.contains("巫师僵尸") || name.contains("萨满僵尸") || name.contains("cursedshaman") || name == "zombie1" || name == "zombie10" || name == "zombie51" {
+    if name.contains("shamanzombie")
+        || name.contains("shaman zombie")
+        || name.contains("巫师僵尸")
+        || name.contains("萨满僵尸")
+        || name.contains("cursedshaman")
+        || name == "zombie1"
+        || name == "zombie10"
+        || name == "zombie51"
+    {
         return Box::new(bosses::shaman_zombie::ShamanZombieBehavior::new());
     }
     if name.contains("straycat") || name.contains("stray cat") || name.contains("流浪猫") {
@@ -104,13 +152,21 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("snowwolf") || name.contains("snow wolf") || name.contains("雪狼") {
         return Box::new(bosses::snow_wolf::SnowWolfBehavior::new());
     }
-    if name.contains("mudzombie") || name.contains("mud zombie") || name.contains("泥僵尸") || name.contains("泥沼僵尸") {
+    if name.contains("mudzombie")
+        || name.contains("mud zombie")
+        || name.contains("泥僵尸")
+        || name.contains("泥沼僵尸")
+    {
         return Box::new(bosses::mud_zombie::MudZombieBehavior::new());
     }
-    if name.contains("incarnatedghoul") || name.contains("incarnated ghoul") || name.contains("附身尸") {
+    if name.contains("incarnatedghoul")
+        || name.contains("incarnated ghoul")
+        || name.contains("附身尸")
+    {
         return Box::new(bosses::incarnated_ghoul::IncarnatedGhoulBehavior::new());
     }
-    if name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛") {
+    if name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛")
+    {
         return Box::new(bosses::incarnated_zt::IncarnatedZTBehavior::new());
     }
     if name.contains("mantis") || name.contains("螳螂") {
@@ -125,31 +181,49 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("lightturtle") || name.contains("light turtle") || name.contains("光龟") {
         return Box::new(bosses::light_turtle::LightTurtleBehavior::new());
     }
-    if name.contains("hellcannibal") || name.contains("hell cannibal") || name.contains("地狱食人花") {
+    if name.contains("hellcannibal")
+        || name.contains("hell cannibal")
+        || name.contains("地狱食人花")
+    {
         return Box::new(bosses::hell_cannibal::HellCannibalBehavior::new());
     }
     if name == "nadz" || name.contains("纳兹") {
         return Box::new(bosses::nadz::NadzBehavior::new());
     }
-    if name.contains("omawitchdoctor") || name.contains("oma witch doctor") || name.contains("奥玛巫医") {
+    if name.contains("omawitchdoctor")
+        || name.contains("oma witch doctor")
+        || name.contains("奥玛巫医")
+    {
         return Box::new(bosses::oma_witch_doctor::OmaWitchDoctorBehavior::new());
     }
-    if name.contains("swampwarrior") || name.contains("swamp warrior") || name.contains("沼泽战士") {
+    if name.contains("swampwarrior") || name.contains("swamp warrior") || name.contains("沼泽战士")
+    {
         return Box::new(bosses::swamp_warrior::SwampWarriorBehavior::new());
     }
-    if name.contains("omacannibal") || name.contains("oma cannibal") || name.contains("奥玛食人花") {
+    if name.contains("omacannibal") || name.contains("oma cannibal") || name.contains("奥玛食人花")
+    {
         return Box::new(bosses::oma_cannibal::OmaCannibalBehavior::new());
     }
-    if name.contains("burningzombie") || name.contains("burning zombie") || name.contains("燃烧僵尸") {
+    if name.contains("burningzombie")
+        || name.contains("burning zombie")
+        || name.contains("燃烧僵尸")
+    {
         return Box::new(bosses::burning_zombie::BurningZombieBehavior::new());
     }
-    if name.contains("antcommander") || name.contains("ant commander") || name.contains("蚁后指挥官") {
+    if name.contains("antcommander")
+        || name.contains("ant commander")
+        || name.contains("蚁后指挥官")
+    {
         return Box::new(bosses::ant_commander::AntCommanderBehavior::new());
     }
-    if name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手") {
+    if name.contains("furbolgarcher")
+        || name.contains("furbolg archer")
+        || name.contains("兽人弓手")
+    {
         return Box::new(bosses::furbolg_archer::FurbolgArcherBehavior::new());
     }
-    if name.contains("hellslasher") || name.contains("hell slasher") || name.contains("地狱斩击者") {
+    if name.contains("hellslasher") || name.contains("hell slasher") || name.contains("地狱斩击者")
+    {
         return Box::new(bosses::hell_slasher::HellSlasherBehavior::new());
     }
     if name.contains("omablest") || name.contains("oma blest") || name.contains("奥玛祝福者") {
@@ -161,10 +235,12 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("treeguardian") || name.contains("tree guardian") || name.contains("树卫") {
         return Box::new(bosses::tree_guardian::TreeGuardianBehavior::new());
     }
-    if name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士") {
+    if name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士")
+    {
         return Box::new(bosses::frozen_knight::FrozenKnightBehavior::new());
     }
-    if name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽") {
+    if name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽")
+    {
         return Box::new(bosses::glacier_beast::GlacierBeastBehavior::new());
     }
     if name.contains("redfoxman") || name.contains("red foxman") || name.contains("红狐人") {
@@ -176,109 +252,168 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("snowyeti") || name.contains("snow yeti") || name.contains("雪猿") {
         return Box::new(bosses::snow_yeti::SnowYetiBehavior::new());
     }
-    if name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫") {
+    if name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫")
+    {
         return Box::new(bosses::furbolg_guard::FurbolgGuardBehavior::new());
     }
-    if name.contains("furbolgcommander") || name.contains("furbolg commander") || name.contains("兽人指挥官") {
+    if name.contains("furbolgcommander")
+        || name.contains("furbolg commander")
+        || name.contains("兽人指挥官")
+    {
         return Box::new(bosses::furbolg_commander::FurbolgCommanderBehavior::new());
     }
-    if name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手") {
+    if name.contains("chieftainarcher")
+        || name.contains("chieftain archer")
+        || name.contains("酋长弓手")
+    {
         return Box::new(bosses::chieftain_archer::ChieftainArcherBehavior::new());
     }
-    if name.contains("redthunderzuma") || name.contains("red thunder zuma") || name.contains("红雷祖玛") {
+    if name.contains("redthunderzuma")
+        || name.contains("red thunder zuma")
+        || name.contains("红雷祖玛")
+    {
         return Box::new(bosses::red_thunder_zuma::RedThunderZumaBehavior::new());
     }
     if name.contains("weretiger") || name.contains("were tiger") || name.contains("虎人") {
         return Box::new(bosses::were_tiger::WereTigerBehavior::new());
     }
-    if name.contains("darkwraith") || name.contains("dark wraith") || name.contains("黑暗幽灵") {
+    if name.contains("darkwraith") || name.contains("dark wraith") || name.contains("黑暗幽灵")
+    {
         return Box::new(bosses::dark_wraith::DarkWraithBehavior::new());
     }
-    if name.contains("peacockspider") || name.contains("peacock spider") || name.contains("孔雀蜘蛛") {
+    if name.contains("peacockspider")
+        || name.contains("peacock spider")
+        || name.contains("孔雀蜘蛛")
+    {
         return Box::new(bosses::peacock_spider::PeacockSpiderBehavior::new());
     }
     if name.contains("mantree") || name.contains("man tree") || name.contains("树人") {
         return Box::new(bosses::man_tree::ManTreeBehavior::new());
     }
-    if name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师") {
+    if name.contains("frozenmagician")
+        || name.contains("frozen magician")
+        || name.contains("冰霜法师")
+    {
         return Box::new(bosses::frozen_magician::FrozenMagicianBehavior::new());
     }
-    if name.contains("frozenzombie") || name.contains("frozen zombie") || name.contains("冰霜僵尸") {
+    if name.contains("frozenzombie") || name.contains("frozen zombie") || name.contains("冰霜僵尸")
+    {
         return Box::new(bosses::frozen_zombie::FrozenZombieBehavior::new());
     }
-    if name.contains("frozenaxeman") || name.contains("frozen axeman") || name.contains("冰霜斧手") {
+    if name.contains("frozenaxeman") || name.contains("frozen axeman") || name.contains("冰霜斧手")
+    {
         return Box::new(bosses::frozen_axeman::FrozenAxemanBehavior::new());
     }
-    if name.contains("icecrystalsoldier") || name.contains("ice crystal soldier") || name.contains("冰晶士兵") {
+    if name.contains("icecrystalsoldier")
+        || name.contains("ice crystal soldier")
+        || name.contains("冰晶士兵")
+    {
         return Box::new(bosses::ice_crystal_soldier::IceCrystalSoldierBehavior::new());
     }
     if name.contains("blackfoxman") || name.contains("black foxman") || name.contains("黑狐人") {
         return Box::new(bosses::black_foxman::BlackFoxmanBehavior::new());
     }
-    if name.contains("blackhammercat") || name.contains("black hammer cat") || name.contains("黑锤猫") {
+    if name.contains("blackhammercat")
+        || name.contains("black hammer cat")
+        || name.contains("黑锤猫")
+    {
         return Box::new(bosses::black_hammer_cat::BlackHammerCatBehavior::new());
     }
-    if name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗") {
+    if name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗")
+    {
         return Box::new(bosses::hell_pirate::HellPirateBehavior::new());
     }
-    if name.contains("cannibaltentacles") || name.contains("cannibal tentacles") || name.contains("食人触手") {
+    if name.contains("cannibaltentacles")
+        || name.contains("cannibal tentacles")
+        || name.contains("食人触手")
+    {
         return Box::new(bosses::cannibal_tentacles::CannibalTentaclesBehavior::new());
     }
-    if name.contains("tucsonwarrior") || name.contains("tucson warrior") || name.contains("图森战士") {
+    if name.contains("tucsonwarrior")
+        || name.contains("tucson warrior")
+        || name.contains("图森战士")
+    {
         return Box::new(bosses::tucson_warrior::TucsonWarriorBehavior::new());
     }
     if name.contains("turtlegrass") || name.contains("turtle grass") || name.contains("龟草") {
         return Box::new(bosses::turtlegrass::TurtlegrassBehavior::new());
     }
-    if name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟") {
+    if name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟")
+    {
         return Box::new(bosses::finial_turtle::FinialTurtleBehavior::new());
     }
-    if name.contains("avengingspirit") || name.contains("avenging spirit") || name.contains("复仇之魂") {
+    if name.contains("avengingspirit")
+        || name.contains("avenging spirit")
+        || name.contains("复仇之魂")
+    {
         return Box::new(bosses::avenging_spirit::AvengingSpiritBehavior::new());
     }
     if name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂") {
         return Box::new(bosses::blue_soul::BlueSoulBehavior::new());
     }
-    if name.contains("flamescythe") || name.contains("flame scythe") || name.contains("火焰镰刀") {
+    if name.contains("flamescythe") || name.contains("flame scythe") || name.contains("火焰镰刀")
+    {
         return Box::new(bosses::flame_scythe::FlameScytheBehavior::new());
     }
-    if name.contains("flamespear") || name.contains("flame spear") || name.contains("火焰长矛") {
+    if name.contains("flamespear") || name.contains("flame spear") || name.contains("火焰长矛")
+    {
         return Box::new(bosses::flame_spear::FlameSpearBehavior::new());
     }
-    if name.contains("avengingwarrior") || name.contains("avenging warrior") || name.contains("复仇战士") {
+    if name.contains("avengingwarrior")
+        || name.contains("avenging warrior")
+        || name.contains("复仇战士")
+    {
         return Box::new(bosses::avenging_warrior::AvengingWarriorBehavior::new());
     }
-    if name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟") {
+    if name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟")
+    {
         return Box::new(bosses::black_tortoise::BlackTortoiseBehavior::new());
     }
-    if name.contains("manectricclaw") || name.contains("manectric claw") || name.contains("雷兽之爪") {
+    if name.contains("manectricclaw")
+        || name.contains("manectric claw")
+        || name.contains("雷兽之爪")
+    {
         return Box::new(bosses::manectric_claw::ManectricClawBehavior::new());
     }
-    if name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛") {
+    if name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛")
+    {
         return Box::new(bosses::harden_rhino::HardenRhinoBehavior::new());
     }
-    if name.contains("creeperplant") || name.contains("creeper plant") || name.contains("爬行植物") {
+    if name.contains("creeperplant") || name.contains("creeper plant") || name.contains("爬行植物")
+    {
         return Box::new(bosses::creeper_plant::CreeperPlantBehavior::new());
     }
     if name.contains("hellbomb") || name.contains("hell bomb") || name.contains("地狱炸弹") {
         return Box::new(bosses::hell_bomb::HellBombBehavior::new());
     }
-    if name.contains("frozenminer") || name.contains("frozen miner") || name.contains("冰霜矿工") {
+    if name.contains("frozenminer") || name.contains("frozen miner") || name.contains("冰霜矿工")
+    {
         return Box::new(bosses::frozen_miner::FrozenMinerBehavior::new());
     }
-    if name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛") {
+    if name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛")
+    {
         return Box::new(bosses::glacier_snail::GlacierSnailBehavior::new());
     }
-    if name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者") {
+    if name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者")
+    {
         return Box::new(bosses::oma_slasher::OmaSlasherBehavior::new());
     }
-    if name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福") {
+    if name.contains("manectricblest")
+        || name.contains("manectric blest")
+        || name.contains("雷兽祝福")
+    {
         return Box::new(bosses::manectric_blest::ManectricBlestBehavior::new());
     }
-    if name.contains("glacierwarrior") || name.contains("glacier warrior") || name.contains("冰川战士") {
+    if name.contains("glacierwarrior")
+        || name.contains("glacier warrior")
+        || name.contains("冰川战士")
+    {
         return Box::new(bosses::glacier_warrior::GlacierWarriorBehavior::new());
     }
-    if name.contains("mutatedmanworm") || name.contains("mutated manworm") || name.contains("变异蠕虫") {
+    if name.contains("mutatedmanworm")
+        || name.contains("mutated manworm")
+        || name.contains("变异蠕虫")
+    {
         return Box::new(bosses::mutated_manworm::MutatedManwormBehavior::new());
     }
     if name.contains("mandrill") || name.contains("山魈") {
@@ -287,16 +422,20 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎") {
         return Box::new(bosses::frost_tiger::FrostTigerBehavior::new());
     }
-    if name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛") {
+    if name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛")
+    {
         return Box::new(bosses::restless_jar::RestlessJarBehavior::new());
     }
-    if name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍") {
+    if name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍")
+    {
         return Box::new(bosses::spitting_toad::SpittingToadBehavior::new());
     }
-    if name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇") {
+    if name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇")
+    {
         return Box::new(bosses::charmed_snake::CharmedSnakeBehavior::new());
     }
-    if name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像") {
+    if name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像")
+    {
         return Box::new(bosses::flying_statue::FlyingStatueBehavior::new());
     }
     if name.contains("demonwolf") || name.contains("demon wolf") || name.contains("恶魔狼") {
@@ -305,7 +444,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("tucsonegg") || name.contains("tucson egg") || name.contains("图森之蛋") {
         return Box::new(bosses::tucson_egg::TucsonEggBehavior::new());
     }
-    if name.contains("deathcrawler") || name.contains("death crawler") || name.contains("死亡爬行者") {
+    if name.contains("deathcrawler")
+        || name.contains("death crawler")
+        || name.contains("死亡爬行者")
+    {
         return Box::new(bosses::death_crawler::DeathCrawlerBehavior::new());
     }
     if name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾") {
@@ -314,37 +456,51 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("jar2") || name.contains("坛子2") {
         return Box::new(bosses::jar2::Jar2Behavior::new());
     }
-    if name.contains("assassinbird") || name.contains("assassin bird") || name.contains("刺客鸟") {
+    if name.contains("assassinbird") || name.contains("assassin bird") || name.contains("刺客鸟")
+    {
         return Box::new(bosses::assassin_bird::AssassinBirdBehavior::new());
     }
-    if name.contains("armadilloelder") || name.contains("armadillo elder") || name.contains("犰狳长老") {
+    if name.contains("armadilloelder")
+        || name.contains("armadillo elder")
+        || name.contains("犰狳长老")
+    {
         return Box::new(bosses::armadillo_elder::ArmadilloElderBehavior::new());
     }
     if name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物") {
         return Box::new(bosses::axe_plant::AxePlantBehavior::new());
     }
-    if name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔") {
+    if name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔")
+    {
         return Box::new(bosses::hedge_kek_tal::HedgeKekTalBehavior::new());
     }
-    if name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客") {
+    if name.contains("flameassassin")
+        || name.contains("flame assassin")
+        || name.contains("火焰刺客")
+    {
         return Box::new(bosses::flame_assassin::FlameAssassinBehavior::new());
     }
     // #2354：C# AI 41/42 均创建 YinDevilNode（YinDevilNode.cs）——DB YangDevilNode 同样注册
-    if name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔")
-        || name.contains("yangdevil") || name.contains("yang devil") || name.contains("阳魔")
+    if name.contains("yindevi")
+        || name.contains("yin devil")
+        || name.contains("阴魔")
+        || name.contains("yangdevil")
+        || name.contains("yang devil")
+        || name.contains("阳魔")
     {
         return Box::new(bosses::yin_devil_node::YinDevilNodeBehavior::new());
     }
     if name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠") {
         return Box::new(bosses::power_bead::PowerBeadBehavior::new());
     }
-    if name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫") {
+    if name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫")
+    {
         return Box::new(bosses::demon_guard::DemonGuardBehavior::new());
     }
     if name.contains("traprock") || name.contains("trap rock") || name.contains("陷阱岩") {
         return Box::new(bosses::trap_rock::TrapRockBehavior::new());
     }
-    if name.contains("sepwarrior") || name.contains("sep warrior") || name.contains("圣战战士") {
+    if name.contains("sepwarrior") || name.contains("sep warrior") || name.contains("圣战战士")
+    {
         return Box::new(bosses::sep_warrior::SepWarriorBehavior::new());
     }
     if name.contains("separcher") || name.contains("sep archer") || name.contains("圣战弓手") {
@@ -356,7 +512,8 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("sepwizard") || name.contains("sep wizard") || name.contains("圣战法师") {
         return Box::new(bosses::sep_wizard::SepWizardBehavior::new());
     }
-    if name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客") {
+    if name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客")
+    {
         return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
     }
     // SepHigh* 高级变体：SepHighWarrior 专属行为（C# SepHighWarrior.cs 3 技能），其余复用对应基础行为
@@ -375,31 +532,45 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("sephighassassin") || name.contains("sep high assassin") {
         return Box::new(bosses::sep_high_assassin::SepHighAssassinBehavior::new());
     }
-    if name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士") {
+    if name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士")
+    {
         return Box::new(bosses::dragon_warrior::DragonWarriorBehavior::new());
     }
-    if name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士") {
+    if name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士")
+    {
         return Box::new(bosses::sack_warrior::SackWarriorBehavior::new());
     }
-    if name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫") {
+    if name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫")
+    {
         return Box::new(bosses::archer_guard::ArcherGuardBehavior::new());
     }
-    if name.contains("guardianrock") || name.contains("guardian rock") || name.contains("守护之石") {
+    if name.contains("guardianrock") || name.contains("guardian rock") || name.contains("守护之石")
+    {
         return Box::new(bosses::guardian_rock::GuardianRockBehavior::new());
     }
     if name.contains("trainer") || name.contains("训练师") {
         return Box::new(bosses::trainer::TrainerBehavior::new());
     }
-    if name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手") {
+    if name.contains("conquestarcher")
+        || name.contains("conquest archer")
+        || name.contains("征服弓手")
+    {
         return Box::new(bosses::town_archer::TownArcherBehavior::new());
     }
-    if name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像") || name.contains("mirstatue") {
+    if name.contains("dragonstatue")
+        || name.contains("dragon statue")
+        || name.contains("龙雕像")
+        || name.contains("mirstatue")
+    {
         return Box::new(bosses::dragon_statue::DragonStatueBehavior::new());
     }
     if name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石") {
         return Box::new(bosses::floating_rock::FloatingRockBehavior::new());
     }
-    if name.contains("hoodedsummonerscroll") || name.contains("hooded summoner scroll") || name.contains("兜帽召唤卷轴") {
+    if name.contains("hoodedsummonerscroll")
+        || name.contains("hooded summoner scroll")
+        || name.contains("兜帽召唤卷轴")
+    {
         return Box::new(bosses::hooded_summoner_scrolls::HoodedSummonerScrollsBehavior::new());
     }
     if name.contains("siege") || name.contains("攻城") {
@@ -411,22 +582,39 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("icepillar") || name.contains("ice pillar") || name.contains("冰柱") {
         return Box::new(bosses::ice_pillar::IcePillarBehavior::new());
     }
-    if name.contains("boulderspirit") || name.contains("boulder spirit") || name.contains("巨石之灵") || name.contains("巨石") {
+    if name.contains("boulderspirit")
+        || name.contains("boulder spirit")
+        || name.contains("巨石之灵")
+        || name.contains("巨石")
+    {
         return Box::new(bosses::boulder_spirit::BoulderSpiritBehavior::new());
     }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
-    if name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主") || name.contains("incarnatedwt") {
+    if name.contains("woomataurus")
+        || name.contains("wooma taurus")
+        || name.contains("沃玛教主")
+        || name.contains("incarnatedwt")
+    {
         return Box::new(bosses::wooma_taurus::WoomaTaurusBehavior::new());
     }
-    if name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王") {
+    if name.contains("flamequeen")
+        || name.contains("flame queen")
+        || name.contains("火焰女王")
+        || name.contains("烈焰女王")
+    {
         return Box::new(bosses::flame_queen::FlameQueenBehavior::new());
     }
-    if name.contains("snowwolfking") || name.contains("snow wolf king") || name.contains("雪狼王") {
+    if name.contains("snowwolfking") || name.contains("snow wolf king") || name.contains("雪狼王")
+    {
         return Box::new(bosses::snow_wolf_king::SnowWolfKingBehavior::new());
     }
-    if name.contains("turtleking") || name.contains("turtle king") || name.contains("龟丞相") || name.contains("龟王") {
+    if name.contains("turtleking")
+        || name.contains("turtle king")
+        || name.contains("龟丞相")
+        || name.contains("龟王")
+    {
         return Box::new(bosses::turtle_king::TurtleKingBehavior::new());
     }
     if name.contains("behemoth") || name.contains("巨兽") {
@@ -435,39 +623,61 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("leftguard") || name.contains("left guard") || name.contains("左护卫") {
         return Box::new(bosses::left_guard::LeftGuardBehavior::new());
     }
-    if name.contains("hellkeeper") || name.contains("hell keeper") || name.contains("地狱守门人") {
+    if name.contains("hellkeeper") || name.contains("hell keeper") || name.contains("地狱守门人")
+    {
         return Box::new(bosses::hell_keeper::HellKeeperBehavior::new());
     }
 
     // ===== 普通怪物专属 behavior（25 个，独特机制）=====
     // #2354：C# AI 15 ZumaMonster——DB 名 ZumaStatue/ZumaGuardian/EliteStatue/EliteGuardian（含 0/3/20/21/00 变体）
-    if name.contains("zumamonster") || name.contains("zuma monster") || name.contains("祖玛怪")
-        || name.contains("zumastatue") || name.contains("zuma statue")
-        || name.contains("zumaguardian") || name.contains("zuma guardian")
-        || name.contains("elitestatue") || name.contains("elite statue")
-        || name.contains("eliteguardian") || name.contains("elite guardian")
+    if name.contains("zumamonster")
+        || name.contains("zuma monster")
+        || name.contains("祖玛怪")
+        || name.contains("zumastatue")
+        || name.contains("zuma statue")
+        || name.contains("zumaguardian")
+        || name.contains("zuma guardian")
+        || name.contains("elitestatue")
+        || name.contains("elite statue")
+        || name.contains("eliteguardian")
+        || name.contains("elite guardian")
     {
         return Box::new(bosses::zuma_monster::ZumaMonsterBehavior::new());
     }
-    if name.contains("axeskeleton") || name.contains("axe skeleton") || name.contains("掷斧骷髅") || name.contains("斧骷髅") {
+    if name.contains("axeskeleton")
+        || name.contains("axe skeleton")
+        || name.contains("掷斧骷髅")
+        || name.contains("斧骷髅")
+    {
         return Box::new(bosses::axe_skeleton::AxeSkeletonBehavior::new());
     }
-    if name.contains("spittingspider") || name.contains("spitting spider") || name.contains("吐丝蜘蛛") || name.contains("lurespider") || name.contains("lure spider") {
+    if name.contains("spittingspider")
+        || name.contains("spitting spider")
+        || name.contains("吐丝蜘蛛")
+        || name.contains("lurespider")
+        || name.contains("lure spider")
+    {
         return Box::new(bosses::spitting_spider::SpittingSpiderBehavior::new());
     }
     if name.contains("stonetrap") || name.contains("stone trap") || name.contains("石阵") {
         return Box::new(bosses::stone_trap::StoneTrapBehavior::new());
     }
-    if name.contains("redmoonevil") || name.contains("red moon evil") || name.contains("红月恶魔") {
+    if name.contains("redmoonevil") || name.contains("red moon evil") || name.contains("红月恶魔")
+    {
         return Box::new(bosses::red_moon_evil::RedMoonEvilBehavior::new());
     }
     if name.contains("toxicghoul") || name.contains("toxic ghoul") || name.contains("毒尸") {
         return Box::new(bosses::toxic_ghoul::ToxicGhoulBehavior::new());
     }
-    if name.contains("bugbagmaggot") || name.contains("bugbag maggot") || name.contains("虫袋蛆") || name.contains("bugbatmaggot") {
+    if name.contains("bugbagmaggot")
+        || name.contains("bugbag maggot")
+        || name.contains("虫袋蛆")
+        || name.contains("bugbatmaggot")
+    {
         return Box::new(bosses::bug_bag_maggot::BugBagMaggotBehavior::new());
     }
-    if name.contains("bombspider") || name.contains("bomb spider") || name.contains("炸弹蜘蛛") {
+    if name.contains("bombspider") || name.contains("bomb spider") || name.contains("炸弹蜘蛛")
+    {
         return Box::new(bosses::bomb_spider::BombSpiderBehavior::new());
     }
     if name == "hugger" || name.contains("hugger") {
@@ -480,7 +690,8 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("rightguard") || name.contains("right guard") || name.contains("右护卫") {
         return Box::new(bosses::right_guard::RightGuardBehavior::new());
     }
-    if name.contains("minotaurking") || name.contains("minotaur king") || name.contains("牛头王") {
+    if name.contains("minotaurking") || name.contains("minotaur king") || name.contains("牛头王")
+    {
         return Box::new(bosses::minotaur_king::MinotaurKingBehavior::new());
     }
     if name.contains("trollking") || name.contains("troll king") || name.contains("巨魔王") {
@@ -489,70 +700,121 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name == "darkdevil" || name.contains("dark devil") || name.contains("暗黑恶魔") {
         return Box::new(bosses::dark_devil::DarkDevilBehavior::new());
     }
-    if name.contains("darkdevourer") || name.contains("dark devourer") || name.contains("暗黑吞噬者") {
+    if name.contains("darkdevourer")
+        || name.contains("dark devourer")
+        || name.contains("暗黑吞噬者")
+    {
         return Box::new(bosses::dark_devourer::DarkDevourerBehavior::new());
     }
-    if name.contains("hellknight") || name.contains("hell knight") || name.contains("地狱骑士") {
+    if name.contains("hellknight") || name.contains("hell knight") || name.contains("地狱骑士")
+    {
         return Box::new(bosses::hell_knight::HellKnightBehavior::new());
     }
-    if name.contains("holydeva") || name.contains("holy deva") || name.contains("圣兽") || name.contains("pkspirit") {
+    if name.contains("holydeva")
+        || name.contains("holy deva")
+        || name.contains("圣兽")
+        || name.contains("pkspirit")
+    {
         return Box::new(bosses::holy_deva::HolyDevaBehavior::new());
     }
     if name == "shinsu" || name.contains("shinsu") || name.contains("神兽") {
         return Box::new(bosses::shinsu::ShinsuBehavior::new());
     }
-    if name.contains("harvestmonster") || name.contains("harvest monster") || name.contains("可采集") || name == "wolf" || name == "scorpion" || name == "currish" {
+    if name.contains("harvestmonster")
+        || name.contains("harvest monster")
+        || name.contains("可采集")
+        || name == "wolf"
+        || name == "scorpion"
+        || name == "currish"
+    {
         return Box::new(bosses::harvest_monster::HarvestMonsterBehavior::new());
     }
-    if name.contains("hoodedsummoner") || name.contains("hooded summoner") || name.contains("兜帽召唤师") {
+    if name.contains("hoodedsummoner")
+        || name.contains("hooded summoner")
+        || name.contains("兜帽召唤师")
+    {
         return Box::new(bosses::hooded_summoner::HoodedSummonerBehavior::new());
     }
-    if name.contains("hornedsorceror") || name.contains("horned sorceror") || name.contains("horned sorcerer") || name.contains("角法师") {
+    if name.contains("hornedsorceror")
+        || name.contains("horned sorceror")
+        || name.contains("horned sorcerer")
+        || name.contains("角法师")
+    {
         return Box::new(bosses::horned_sorceror::HornedSorcerorBehavior::new());
     }
     if name.contains("earthgolem") || name.contains("earth golem") || name.contains("地魔像") {
         return Box::new(bosses::earth_golem::EarthGolemBehavior::new());
     }
-    if name.contains("vampirespider") || name.contains("vampire spider") || name.contains("吸血蜘蛛") {
+    if name.contains("vampirespider")
+        || name.contains("vampire spider")
+        || name.contains("吸血蜘蛛")
+    {
         return Box::new(bosses::vampire_spider::VampireSpiderBehavior::new());
     }
-    if name.contains("venomspider") || name.contains("venom spider") || name.contains("毒液蜘蛛") {
+    if name.contains("venomspider") || name.contains("venom spider") || name.contains("毒液蜘蛛")
+    {
         return Box::new(bosses::venom_spider::VenomSpiderBehavior::new());
     }
-    if name.contains("thunderelement") || name.contains("thunder element") || name.contains("雷元素") || name.contains("cloudelement") || name.contains("electricelement") {
+    if name.contains("thunderelement")
+        || name.contains("thunder element")
+        || name.contains("雷元素")
+        || name.contains("cloudelement")
+        || name.contains("electricelement")
+    {
         return Box::new(bosses::thunder_element::ThunderElementBehavior::new());
     }
     if name == "kirin" || name.contains("kirin") || name.contains("麒麟") {
         return Box::new(bosses::kirin::KirinBehavior::new());
     }
-    if name.contains("trollbomber") || name.contains("troll bomber") || name.contains("巨魔投弹手") {
+    if name.contains("trollbomber") || name.contains("troll bomber") || name.contains("巨魔投弹手")
+    {
         return Box::new(bosses::troll_bomber::TrollBomberBehavior::new());
     }
-    if name.contains("plaguecrab") || name.contains("plague crab") || name.contains("瘟疫螃蟹") {
+    if name.contains("plaguecrab") || name.contains("plague crab") || name.contains("瘟疫螃蟹")
+    {
         return Box::new(bosses::plague_crab::PlagueCrabBehavior::new());
     }
-    if name.contains("humanwizard") || name.contains("human wizard") || name.contains("人形法师") {
+    if name.contains("humanwizard") || name.contains("human wizard") || name.contains("人形法师")
+    {
         return Box::new(bosses::human_wizard::HumanWizardBehavior::new());
     }
-    if name.contains("humanassassin") || name.contains("human assassin") || name.contains("人形刺客") {
+    if name.contains("humanassassin")
+        || name.contains("human assassin")
+        || name.contains("人形刺客")
+    {
         return Box::new(bosses::human_assassin::HumanAssassinBehavior::new());
     }
     if name.contains("kingguard") || name.contains("king guard") || name.contains("王城护卫") {
         return Box::new(bosses::king_guard::KingGuardBehavior::new());
     }
-    if name.contains("rhinopriest") || name.contains("rhino priest") || name.contains("犀牛祭司") {
+    if name.contains("rhinopriest") || name.contains("rhino priest") || name.contains("犀牛祭司")
+    {
         return Box::new(bosses::rhino_priest::RhinoPriestBehavior::new());
     }
     if name.contains("icephantom") || name.contains("ice phantom") || name.contains("冰幻影") {
         return Box::new(bosses::ice_phantom::IcePhantomBehavior::new());
     }
-    if name.contains("ancientbringer") || name.contains("ancient bringer") || name.contains("远古召唤者") {
+    if name.contains("ancientbringer")
+        || name.contains("ancient bringer")
+        || name.contains("远古召唤者")
+    {
         return Box::new(bosses::ancient_bringer::AncientBringerBehavior::new());
     }
-    if name == "guard" || (name.starts_with("guard") && !name.contains("town") && !name.contains("guardian") && !name.contains("vanguard") && !name.contains("bodyguard")) {
+    if name == "guard"
+        || (name.starts_with("guard")
+            && !name.contains("town")
+            && !name.contains("guardian")
+            && !name.contains("vanguard")
+            && !name.contains("bodyguard"))
+    {
         return Box::new(bosses::guard::GuardBehavior::new());
     }
-    if name.contains("townarcher") || name.contains("town archer") || name.contains("城镇弓箭手") || name.contains("royal_archer") || name.contains("royal archer") {
+    if name.contains("townarcher")
+        || name.contains("town archer")
+        || name.contains("城镇弓箭手")
+        || name.contains("royal_archer")
+        || name.contains("royal archer")
+    {
         return Box::new(bosses::town_archer::TownArcherBehavior::new());
     }
     if name.contains("castlegate") || name.contains("castle gate") || name.contains("城门") {
@@ -562,10 +824,33 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
         // C# Gate.cs：CastleGate 子类（仅覆写 GetDamageLevel），复用城门行为
         return Box::new(bosses::castle_gate::CastleGateBehavior::new());
     }
-    if name.contains("digoutzombie") || name.contains("digout zombie") || name.contains("钻地僵尸") || name.contains("priestzombie") || name.contains("bloodpriest") || name.contains("cursedpriest") || name.contains("darkpriest") || name == "zombie2" || name == "zombie20" {
+    if name.contains("digoutzombie")
+        || name.contains("digout zombie")
+        || name.contains("钻地僵尸")
+        || name.contains("priestzombie")
+        || name.contains("bloodpriest")
+        || name.contains("cursedpriest")
+        || name.contains("darkpriest")
+        || name == "zombie2"
+        || name == "zombie20"
+    {
         return Box::new(bosses::dig_out_zombie::DigOutZombieBehavior::new());
     }
-    if name.contains("revivingzombie") || name.contains("reviving zombie") || name.contains("复活僵尸") || name.contains("clzombie") || name.contains("crawlerzombie") || name.contains("ghostzombie") || name.contains("ndzombie") || name.contains("rotndzombie") || name == "zombie3" || name == "zombie30" || name == "zombie4" || name == "zombie40" || name == "zombie5" || name == "zombie50" {
+    if name.contains("revivingzombie")
+        || name.contains("reviving zombie")
+        || name.contains("复活僵尸")
+        || name.contains("clzombie")
+        || name.contains("crawlerzombie")
+        || name.contains("ghostzombie")
+        || name.contains("ndzombie")
+        || name.contains("rotndzombie")
+        || name == "zombie3"
+        || name == "zombie30"
+        || name == "zombie4"
+        || name == "zombie40"
+        || name == "zombie5"
+        || name == "zombie50"
+    {
         return Box::new(bosses::reviving_zombie::RevivingZombieBehavior::new());
     }
     if name == "jar1" || name.contains("jar1") || name.contains("坛子") {
@@ -577,7 +862,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("gastoad") || name.contains("gas toad") || name.contains("毒气蟾蜍") {
         return Box::new(bosses::gas_toad::GasToadBehavior::new());
     }
-    if name.contains("stoningstatue") || name.contains("stoning statue") || name.contains("石化雕像") {
+    if name.contains("stoningstatue")
+        || name.contains("stoning statue")
+        || name.contains("石化雕像")
+    {
         return Box::new(bosses::stoning_statue::StoningStatueBehavior::new());
     }
     if name.contains("bonelord") || name.contains("bone lord") || name.contains("骨魔领主") {
@@ -586,7 +874,8 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("catshaman") || name.contains("cat shaman") || name.contains("猫巫师") {
         return Box::new(bosses::cat_shaman::CatShamanBehavior::new());
     }
-    if name.contains("rootspider") || name.contains("root spider") || name.contains("根须蜘蛛") {
+    if name.contains("rootspider") || name.contains("root spider") || name.contains("根须蜘蛛")
+    {
         return Box::new(bosses::root_spider::RootSpiderBehavior::new());
     }
     if name.contains("flamemage") || name.contains("flame mage") || name.contains("火焰法师") {
@@ -595,80 +884,119 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name == "tornado" || name.contains("tornado") || name.contains("龙卷风") {
         return Box::new(bosses::tornado::TornadoBehavior::new());
     }
-    if name.contains("poisonhugger") || name.contains("poison hugger") || name.contains("毒抱怪") {
+    if name.contains("poisonhugger") || name.contains("poison hugger") || name.contains("毒抱怪")
+    {
         return Box::new(bosses::poison_hugger::PoisonHuggerBehavior::new());
     }
-    if name.contains("hornedmage") || name.contains("horned mage") || name.contains("角魔法师") {
+    if name.contains("hornedmage") || name.contains("horned mage") || name.contains("角魔法师")
+    {
         return Box::new(bosses::horned_mage::HornedMageBehavior::new());
     }
     if name.contains("witchdoctor") || name.contains("witch doctor") || name.contains("巫医") {
         return Box::new(bosses::witch_doctor::WitchDoctorBehavior::new());
     }
-    if name.contains("kingscorpion") || name.contains("king scorpion") || name.contains("蝎子王") {
+    if name.contains("kingscorpion") || name.contains("king scorpion") || name.contains("蝎子王")
+    {
         return Box::new(bosses::king_scorpion::KingScorpionBehavior::new());
     }
-    if name.contains("furbolgwarrior") || name.contains("furbolg warrior") || name.contains("熊人战士") {
+    if name.contains("furbolgwarrior")
+        || name.contains("furbolg warrior")
+        || name.contains("熊人战士")
+    {
         return Box::new(bosses::furbolg_warrior::FurbolgWarriorBehavior::new());
     }
-    if name.contains("crazymanworm") || name.contains("crazy manworm") || name.contains("狂化人面虫") {
+    if name.contains("crazymanworm")
+        || name.contains("crazy manworm")
+        || name.contains("狂化人面虫")
+    {
         return Box::new(bosses::crazy_manworm::CrazyManwormBehavior::new());
     }
-    if name.contains("flamingwooma") || name.contains("flaming wooma") || name.contains("烈焰沃玛") {
+    if name.contains("flamingwooma") || name.contains("flaming wooma") || name.contains("烈焰沃玛")
+    {
         return Box::new(bosses::flaming_wooma::FlamingWoomaBehavior::new());
     }
     if name.contains("iceguard") || name.contains("ice guard") || name.contains("冰守卫") {
         return Box::new(bosses::ice_guard::IceGuardBehavior::new());
     }
     // ===== 第二批：17 个独特机制怪物 =====
-    if name.contains("hornedwarrior") || name.contains("horned warrior") || name.contains("角魔战士") {
+    if name.contains("hornedwarrior")
+        || name.contains("horned warrior")
+        || name.contains("角魔战士")
+    {
         return Box::new(bosses::horned_warrior::HornedWarriorBehavior::new());
     }
-    if name.contains("manectricking") || name.contains("manectric king") || name.contains("雷电王") {
+    if name.contains("manectricking") || name.contains("manectric king") || name.contains("雷电王")
+    {
         return Box::new(bosses::manectric_king::ManectricKingBehavior::new());
     }
-    if name.contains("seedingsgeneral") || name.contains("seedings general") || name.contains("幼苗将军") {
+    if name.contains("seedingsgeneral")
+        || name.contains("seedings general")
+        || name.contains("幼苗将军")
+    {
         return Box::new(bosses::seedings_general::SeedingsGeneralBehavior::new());
     }
-    if name.contains("tucsongeneral") || name.contains("tucson general") || name.contains("图森将军") {
+    if name.contains("tucsongeneral")
+        || name.contains("tucson general")
+        || name.contains("图森将军")
+    {
         return Box::new(bosses::tucson_general::TucsonGeneralBehavior::new());
     }
-    if name.contains("whitemammoth") || name.contains("white mammoth") || name.contains("白色猛犸") {
+    if name.contains("whitemammoth") || name.contains("white mammoth") || name.contains("白色猛犸")
+    {
         return Box::new(bosses::white_mammoth::WhiteMammothBehavior::new());
     }
-    if name.contains("hornedarcher") || name.contains("horned archer") || name.contains("角魔弓手") {
+    if name.contains("hornedarcher") || name.contains("horned archer") || name.contains("角魔弓手")
+    {
         return Box::new(bosses::horned_archer::HornedArcherBehavior::new());
     }
     if name == "khazard" || name.contains("khazard") || name.contains("卡扎德") {
         return Box::new(bosses::khazard::KhazardBehavior::new());
     }
-    if name.contains("kinghydrax") || name.contains("king hydrax") || name.contains("海德拉王") {
+    if name.contains("kinghydrax") || name.contains("king hydrax") || name.contains("海德拉王")
+    {
         return Box::new(bosses::king_hydrax::KingHydraxBehavior::new());
     }
-    if name.contains("crystalspider") || name.contains("crystal spider") || name.contains("水晶蜘蛛") {
+    if name.contains("crystalspider")
+        || name.contains("crystal spider")
+        || name.contains("水晶蜘蛛")
+    {
         return Box::new(bosses::crystal_spider::CrystalSpiderBehavior::new());
     }
-    if name.contains("elementguard") || name.contains("element guard") || name.contains("元素守卫") {
+    if name.contains("elementguard") || name.contains("element guard") || name.contains("元素守卫")
+    {
         return Box::new(bosses::element_guard::ElementGuardBehavior::new());
     }
-    if name.contains("wingedtigerlord") || name.contains("winged tiger lord") || name.contains("飞虎王") {
+    if name.contains("wingedtigerlord")
+        || name.contains("winged tiger lord")
+        || name.contains("飞虎王")
+    {
         return Box::new(bosses::winged_tiger_lord::WingedTigerLordBehavior::new());
     }
-    if name.contains("greatfoxspirit") || name.contains("great fox spirit") || name.contains("巨狐之灵") {
+    if name.contains("greatfoxspirit")
+        || name.contains("great fox spirit")
+        || name.contains("巨狐之灵")
+    {
         return Box::new(bosses::great_fox_spirit::GreatFoxSpiritBehavior::new());
     }
-    if name.contains("stonegolem") || name.contains("stone golem") || name.contains("石头傀儡") {
+    if name.contains("stonegolem") || name.contains("stone golem") || name.contains("石头傀儡")
+    {
         return Box::new(bosses::stone_golem::StoneGolemBehavior::new());
     }
-    if name.contains("tucsonmage") || name.contains("tucson mage") || name.contains("图森法师") {
+    if name.contains("tucsonmage") || name.contains("tucson mage") || name.contains("图森法师")
+    {
         return Box::new(bosses::tucson_mage::TucsonMageBehavior::new());
     }
     if name.contains("omamage") || name.contains("oma mage") || name.contains("奥玛法师") {
         return Box::new(bosses::oma_mage::OmaMageBehavior::new());
     }
-    if name.contains("flamingmutant") || name.contains("flaming mutant") || name.contains("燃烧突变体") {
+    if name.contains("flamingmutant")
+        || name.contains("flaming mutant")
+        || name.contains("燃烧突变体")
+    {
         return Box::new(bosses::flaming_mutant::FlamingMutantBehavior::new());
     }
-    if name.contains("darkcaptain") || name.contains("dark captain") || name.contains("黑暗队长") {
+    if name.contains("darkcaptain") || name.contains("dark captain") || name.contains("黑暗队长")
+    {
         return Box::new(bosses::dark_captain::DarkCaptainBehavior::new());
     }
     Box::new(DefaultBehavior::new())
@@ -962,7 +1290,13 @@ mod tests {
     /// #2430：C# GetMonster AI 8——AxeSkeleton 家族弓手
     #[test]
     fn axe_skeleton_family_registered() {
-        for name in ["BoneArcher", "CrossbowOma", "EliteArcher", "ZumaArcher", "Dark"] {
+        for name in [
+            "BoneArcher",
+            "CrossbowOma",
+            "EliteArcher",
+            "ZumaArcher",
+            "Dark",
+        ] {
             assert!(is_registered_boss(name), "{} should be registered", name);
             let _b = make_behavior(name);
         }
@@ -973,26 +1307,62 @@ mod tests {
     fn ai_family_variants_registered() {
         // (名称, 初始不可攻击[DigOut 钻地系])
         for (name, hidden) in [
-            ("LureSpider", false), ("LureSpider0", false), ("LureSpider3", false), ("BloodyLureSpider", false),
-            ("Dung", false), ("Dung0", false), ("WedgeMoth", false), ("SpiderBat", false),
-            ("Wolf", false), ("Scorpion", false), ("Currish", false),
+            ("LureSpider", false),
+            ("LureSpider0", false),
+            ("LureSpider3", false),
+            ("BloodyLureSpider", false),
+            ("Dung", false),
+            ("Dung0", false),
+            ("WedgeMoth", false),
+            ("SpiderBat", false),
+            ("Wolf", false),
+            ("Scorpion", false),
+            ("Currish", false),
             ("IncarnatedWT", false),
             ("BugBatMaggot", false),
-            ("BloodPriest", true), ("BloodPriest0", true), ("CursedPriest", true), ("CursedPriest0", true),
-            ("DarkPriestZombie", true), ("PriestZombie", true), ("PriestZombie0", true), ("Zombie2", true), ("Zombie20", true),
-            ("ClZombie", false), ("ClZombie0", false), ("CrawlerZombie", false), ("CrawlerZombie0", false),
-            ("GhostZombie", false), ("NdZombie", false), ("NdZombie0", false), ("RotNdZombie", false),
-            ("Zombie3", false), ("Zombie30", false), ("Zombie4", false), ("Zombie40", false),
-            ("Zombie5", false), ("Zombie50", false),
-            ("CursedShaman", false), ("CursedShaman0", false), ("Zombie1", false), ("Zombie10", false), ("Zombie51", false),
+            ("BloodPriest", true),
+            ("BloodPriest0", true),
+            ("CursedPriest", true),
+            ("CursedPriest0", true),
+            ("DarkPriestZombie", true),
+            ("PriestZombie", true),
+            ("PriestZombie0", true),
+            ("Zombie2", true),
+            ("Zombie20", true),
+            ("ClZombie", false),
+            ("ClZombie0", false),
+            ("CrawlerZombie", false),
+            ("CrawlerZombie0", false),
+            ("GhostZombie", false),
+            ("NdZombie", false),
+            ("NdZombie0", false),
+            ("RotNdZombie", false),
+            ("Zombie3", false),
+            ("Zombie30", false),
+            ("Zombie4", false),
+            ("Zombie40", false),
+            ("Zombie5", false),
+            ("Zombie50", false),
+            ("CursedShaman", false),
+            ("CursedShaman0", false),
+            ("Zombie1", false),
+            ("Zombie10", false),
+            ("Zombie51", false),
             ("PKSpirit", false),
-            ("CloudElement", false), ("ElectricElement", false),
+            ("CloudElement", false),
+            ("ElectricElement", false),
             ("MirStatue", false),
             ("Royal_Archer", false),
         ] {
             assert!(is_registered_boss(name), "{} should be registered", name);
             let b = make_behavior(name);
-            assert_eq!(b.is_attackable(), !hidden, "{} attackable should be {}", name, !hidden);
+            assert_eq!(
+                b.is_attackable(),
+                !hidden,
+                "{} attackable should be {}",
+                name,
+                !hidden
+            );
         }
     }
 
@@ -1000,9 +1370,18 @@ mod tests {
     #[test]
     fn zuma_statue_family_registered() {
         for name in [
-            "ZumaStatue", "ZumaStatue0", "ZumaStatue3", "ZumaStatue21",
-            "ZumaGuardian", "ZumaGuardian0", "ZumaGuardian00", "ZumaGuardian3",
-            "ZumaGuardian20", "ZumaGuardian21", "EliteStatue", "EliteGuardian",
+            "ZumaStatue",
+            "ZumaStatue0",
+            "ZumaStatue3",
+            "ZumaStatue21",
+            "ZumaGuardian",
+            "ZumaGuardian0",
+            "ZumaGuardian00",
+            "ZumaGuardian3",
+            "ZumaGuardian20",
+            "ZumaGuardian21",
+            "EliteStatue",
+            "EliteGuardian",
             "ZumaMonster",
         ] {
             assert!(is_registered_boss(name), "{} should be registered", name);
@@ -1013,13 +1392,21 @@ mod tests {
         // 非祖玛雕像系不受影响（EliteArcher/ZumaArcher 是 AI 8 远程，走 AxeSkeleton 注册，#2430；不应石化）
         assert!(is_registered_boss("EliteArcher"));
         assert!(is_registered_boss("ZumaArcher20"));
-        assert!(make_behavior("EliteArcher").is_attackable(), "EliteArcher 不应石化");
+        assert!(
+            make_behavior("EliteArcher").is_attackable(),
+            "EliteArcher 不应石化"
+        );
     }
 
     /// #2354：C# AI 41/42 均创建 YinDevilNode——DB YangDevilNode 也须命中注册
     #[test]
     fn yin_yang_devil_node_registered() {
-        for name in ["YinDevilNode", "YangDevilNode", "yindevilnode", "yangdevilnode"] {
+        for name in [
+            "YinDevilNode",
+            "YangDevilNode",
+            "yindevilnode",
+            "yangdevilnode",
+        ] {
             assert!(is_registered_boss(name), "{} should be registered", name);
         }
         // 被动环境物体（Football）不受阴/阳魔条件影响
@@ -1054,25 +1441,109 @@ mod tests {
     fn monster_ai_batch_registered() {
         // #1022-#1120 批次的特殊怪全部注册（覆盖 40+ 新怪抽查）
         for name in [
-            "SandWorm", "ShamanZombie", "StrayCat", "DarkBeast", "SnowWolf", "MudZombie",
-            "IncarnatedGhoul", "IncarnatedZT", "Mantis", "SandSnail", "ScalyBeast", "LightTurtle",
-            "HellCannibal", "Nadz", "OmaWitchDoctor", "SwampWarrior", "OmaCannibal", "BurningZombie",
-            "AntCommander", "FurbolgArcher", "HellSlasher", "OmaBlest", "ElephantMan", "TreeGuardian",
-            "FrozenKnight", "GlacierBeast", "RedFoxman", "WhiteFoxman", "SnowYeti", "FurbolgGuard",
-            "FurbolgCommander", "ChieftainArcher", "RedThunderZuma", "WereTiger", "DarkWraith",
-            "PeacockSpider", "ManTree", "FrozenMagician", "FrozenZombie", "FrozenAxeman",
-            "IceCrystalSoldier", "BlackFoxman", "BlackHammerCat", "HellPirate", "CannibalTentacles",
-            "TucsonWarrior", "Turtlegrass", "FinialTurtle", "AvengingSpirit", "BlueSoul",
-            "FlameScythe", "FlameSpear", "AvengingWarrior", "BlackTortoise", "ManectricClaw",
-            "HardenRhino", "CreeperPlant", "HellBomb", "FrozenMiner", "GlacierSnail", "OmaSlasher",
-            "ManectricBlest", "GlacierWarrior", "MutatedManworm", "Mandrill", "FrostTiger",
-            "RestlessJar", "SpittingToad", "CharmedSnake", "FlyingStatue", "DemonWolf",
-            "TucsonEgg", "DeathCrawler", "SnakeTotem", "Jar2", "AssassinBird", "ArmadilloElder",
-            "AxePlant", "HedgeKekTal", "FlameAssassin", "YinDevilNode", "PowerBead", "DemonGuard",
-            "TrapRock", "SepWarrior", "SepArcher", "SepTaoist", "SepWizard", "SepAssassin",
-            "SepHighWarrior", "SepHighArcher", "SepHighTaoist", "SepHighWizard", "SepHighAssassin",
-            "DragonWarrior", "SackWarrior", "ArcherGuard", "ConquestArcher", "DragonStatue",
-            "FloatingRock", "HoodedSummonerScrolls", "Siege", "PurpleFaeFlower",
+            "SandWorm",
+            "ShamanZombie",
+            "StrayCat",
+            "DarkBeast",
+            "SnowWolf",
+            "MudZombie",
+            "IncarnatedGhoul",
+            "IncarnatedZT",
+            "Mantis",
+            "SandSnail",
+            "ScalyBeast",
+            "LightTurtle",
+            "HellCannibal",
+            "Nadz",
+            "OmaWitchDoctor",
+            "SwampWarrior",
+            "OmaCannibal",
+            "BurningZombie",
+            "AntCommander",
+            "FurbolgArcher",
+            "HellSlasher",
+            "OmaBlest",
+            "ElephantMan",
+            "TreeGuardian",
+            "FrozenKnight",
+            "GlacierBeast",
+            "RedFoxman",
+            "WhiteFoxman",
+            "SnowYeti",
+            "FurbolgGuard",
+            "FurbolgCommander",
+            "ChieftainArcher",
+            "RedThunderZuma",
+            "WereTiger",
+            "DarkWraith",
+            "PeacockSpider",
+            "ManTree",
+            "FrozenMagician",
+            "FrozenZombie",
+            "FrozenAxeman",
+            "IceCrystalSoldier",
+            "BlackFoxman",
+            "BlackHammerCat",
+            "HellPirate",
+            "CannibalTentacles",
+            "TucsonWarrior",
+            "Turtlegrass",
+            "FinialTurtle",
+            "AvengingSpirit",
+            "BlueSoul",
+            "FlameScythe",
+            "FlameSpear",
+            "AvengingWarrior",
+            "BlackTortoise",
+            "ManectricClaw",
+            "HardenRhino",
+            "CreeperPlant",
+            "HellBomb",
+            "FrozenMiner",
+            "GlacierSnail",
+            "OmaSlasher",
+            "ManectricBlest",
+            "GlacierWarrior",
+            "MutatedManworm",
+            "Mandrill",
+            "FrostTiger",
+            "RestlessJar",
+            "SpittingToad",
+            "CharmedSnake",
+            "FlyingStatue",
+            "DemonWolf",
+            "TucsonEgg",
+            "DeathCrawler",
+            "SnakeTotem",
+            "Jar2",
+            "AssassinBird",
+            "ArmadilloElder",
+            "AxePlant",
+            "HedgeKekTal",
+            "FlameAssassin",
+            "YinDevilNode",
+            "PowerBead",
+            "DemonGuard",
+            "TrapRock",
+            "SepWarrior",
+            "SepArcher",
+            "SepTaoist",
+            "SepWizard",
+            "SepAssassin",
+            "SepHighWarrior",
+            "SepHighArcher",
+            "SepHighTaoist",
+            "SepHighWizard",
+            "SepHighAssassin",
+            "DragonWarrior",
+            "SackWarrior",
+            "ArcherGuard",
+            "ConquestArcher",
+            "DragonStatue",
+            "FloatingRock",
+            "HoodedSummonerScrolls",
+            "Siege",
+            "PurpleFaeFlower",
         ] {
             assert!(is_registered_boss(name), "{} should be registered", name);
             // make_behavior 注册命中（DefaultBehavior 无 as_any_mut 区分，仅验证注册 + 可构建）
@@ -1082,10 +1553,20 @@ mod tests {
 
     #[test]
     fn static_and_passive_stay_default() {
-        for name in ["Tree", "Wall", "CaveStatue",
-                      "CargoBox", "BlockingObject", "EvilMirBody",
-                      "Football"] {
-            assert!(!is_registered_boss(name), "{} should not be registered", name);
+        for name in [
+            "Tree",
+            "Wall",
+            "CaveStatue",
+            "CargoBox",
+            "BlockingObject",
+            "EvilMirBody",
+            "Football",
+        ] {
+            assert!(
+                !is_registered_boss(name),
+                "{} should not be registered",
+                name
+            );
         }
         // WoodBox/IcePillar/BoulderSpirit 现注册专属行为（#1130-#1132 死亡/受击机制），不再走静态拦截
         assert!(is_registered_boss("WoodBox"));

@@ -4,9 +4,9 @@
 //! 机制：CanMove=false、不可攻击、不回血；10s 后自动 Die →
 //!       CompleteDeath：FindAllTargets(4) AOE + 按 image 毒（1=冰冻/2=眩晕/3=出血，5s，tick 2000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -42,30 +42,38 @@ impl MonsterBehavior for HellBombBehavior {
 
     /// C# CompleteDeath：AOE 4 + 按 image 毒
     fn on_die(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-            attacker_oid: monster.object_id,
-            center_x: monster.x,
-            center_y: monster.y,
-            radius: EXPLODE_RADIUS,
-            damage,
-            spell_id: 0,
-        });
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck)
+                .max(1);
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Aoe {
+                attacker_oid: monster.object_id,
+                center_x: monster.x,
+                center_y: monster.y,
+                radius: EXPLODE_RADIUS,
+                damage,
+                spell_id: 0,
+            });
         // C# switch(Info.Image)：HellBomb1=903→Frozen / HellBomb2=904→Dazed / HellBomb3=905→Bleeding（Shared/Enums.cs:702-704）
         let ptype = match monster.image {
             903 => PoisonType::FROZEN,
             904 => PoisonType::DAZED,
             _ => PoisonType::BLEEDING,
         };
-        let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, EXPLODE_RADIUS, monster.map_index)
-            .iter().map(|p| p.session_id).collect();
+        let nearby: Vec<u64> = ctx
+            .find_targets_in_range(monster.x, monster.y, EXPLODE_RADIUS, monster.map_index)
+            .iter()
+            .map(|p| p.session_id)
+            .collect();
         for sid in nearby {
             // PoisonTarget(1, 5, type, 2000)：100%、值=SC（C# PoisonTarget 固定 Value=SC）
-            let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: sid,
-                poison: Poison::new(ptype, 5, sc_value, 2000),
-            });
+            let sc_value =
+                crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
+            ctx.out_poisons
+                .push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: sid,
+                    poison: Poison::new(ptype, 5, sc_value, 2000),
+                });
         }
     }
 }

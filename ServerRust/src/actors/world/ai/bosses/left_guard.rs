@@ -9,10 +9,10 @@
 //!
 //! Attack（C# LeftGuard.cs:13-49）：ranged 分支 + 弹道延迟。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 /// 视野范围
 const VIEW_RANGE: i32 = 20;
@@ -55,28 +55,32 @@ impl MonsterBehavior for LeftGuardBehavior {
             return;
         }
 
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck)
+                .max(1);
 
         if in_melee {
             // 近战：MACAgility
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
         } else {
             // 远程弹道：MAC（C# AttackTime + AttackSpeed + 500，冷却更长）
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
         }
     }
 }

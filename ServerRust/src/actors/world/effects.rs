@@ -34,13 +34,20 @@ impl WorldActor {
             // #1503：兼容两种键格式——@setflag 写入 NPC_FLAG_<n>，旧数据/脚本可能用纯数字键
             let plain = flag.to_string();
             let prefixed = format!("NPC_FLAG_{}", flag);
-            let v = state.flags.get(&plain).copied().unwrap_or(0)
+            let v = state
+                .flags
+                .get(&plain)
+                .copied()
+                .unwrap_or(0)
                 .max(state.flags.get(&prefixed).copied().unwrap_or(0));
             if v != 0 {
                 effects |= bit;
             }
         }
-        let _ = record.actor_ref.ask(crate::actors::player::SetLevelEffects { effects }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetLevelEffects { effects })
+            .await;
         debug!("LevelEffects: {} -> {:04x}", state.name, effects);
     }
 
@@ -51,7 +58,8 @@ impl WorldActor {
         if self.tick_count % 50 != 0 {
             return;
         }
-        let (newbie_guild, enabled, _exp) = self.social_ref
+        let (newbie_guild, enabled, _exp) = self
+            .social_ref
             .ask(crate::actors::social::NpcGetNewbieGuildConfig)
             .await
             .unwrap_or(("NewbieGuild".to_string(), true, 5));
@@ -66,7 +74,10 @@ impl WorldActor {
         }
         for (sid, active) in updates {
             if let Some(record) = self.players.get(&sid) {
-                let _ = record.actor_ref.ask(crate::actors::player::SetNewbieExpBonus { active }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::SetNewbieExpBonus { active })
+                    .await;
             }
         }
     }
@@ -88,13 +99,19 @@ impl WorldActor {
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let pkt = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ObjectLevelEffects as i16, &body);
+                mir2_shared::enums::ServerPacketIds::ObjectLevelEffects as i16,
+                &body,
+            );
             for (sid, r) in &self.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == state.map_index {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid, data: pkt.clone(),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: pkt.clone(),
+                            })
+                            .await;
                     }
                 }
             }
@@ -110,7 +127,11 @@ pub struct RefreshLevelEffects {
 impl Message<RefreshLevelEffects> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: RefreshLevelEffects, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RefreshLevelEffects,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.refresh_level_effects(msg.session_id).await;
     }
 }

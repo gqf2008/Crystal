@@ -32,9 +32,9 @@ impl Packet for ResizeInventory {
 /// C# S.ResizeStorage：Size + HasExpandedStorage + ExpiryTime（DateTime.ToBinary）
 #[derive(Debug, Clone)]
 pub struct ResizeStorage {
-    pub size: i32, // 新大小
+    pub size: i32,                  // 新大小
     pub has_expanded_storage: bool, // 是否仍处于扩容状态
-    pub expiry_time: i64, // 扩容到期时间（C# DateTime.ToBinary；0 = 无）
+    pub expiry_time: i64,           // 扩容到期时间（C# DateTime.ToBinary；0 = 无）
 }
 
 impl Packet for ResizeStorage {
@@ -56,7 +56,11 @@ impl Packet for ResizeStorage {
         let size = reader.read_i32::<LittleEndian>()?;
         let has_expanded_storage = reader.read_u8()? != 0;
         let expiry_time = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { size, has_expanded_storage, expiry_time })
+        Ok(Self {
+            size,
+            has_expanded_storage,
+            expiry_time,
+        })
     }
 }
 
@@ -351,7 +355,11 @@ impl Packet for SetBindingShot {
         let object_id = reader.read_u32::<LittleEndian>()?;
         let enabled = reader.read_u8()? != 0;
         let value = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { object_id, enabled, value })
+        Ok(Self {
+            object_id,
+            enabled,
+            value,
+        })
     }
 }
 
@@ -416,7 +424,11 @@ mod tests {
     #[test]
     fn set_binding_shot_roundtrip() {
         // C# ServerPackets.cs SetBindingShot：ObjectID + Enabled + Value(Int64)
-        let pkt = SetBindingShot { object_id: 42, enabled: true, value: 3000 };
+        let pkt = SetBindingShot {
+            object_id: 42,
+            enabled: true,
+            value: 3000,
+        };
         let mut buf = Vec::new();
         pkt.write_body(&mut buf).unwrap();
         // u32 + u8 + i64 = 13 bytes

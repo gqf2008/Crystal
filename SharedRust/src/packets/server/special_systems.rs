@@ -194,7 +194,11 @@ impl Packet for NPCPearlGoods {
         }
         let rate = reader.read_f32::<LittleEndian>()?;
         let panel_type = crate::enums::PanelType::try_from(reader.read_u8()?)?;
-        Ok(Self { list, rate, panel_type })
+        Ok(Self {
+            list,
+            rate,
+            panel_type,
+        })
     }
 }
 

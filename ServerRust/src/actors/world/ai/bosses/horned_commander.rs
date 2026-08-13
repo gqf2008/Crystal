@@ -4,11 +4,11 @@
 //! 机制：3阶段（HP<80%召唤8 Boulder / HP∈[10%,50%)周期RockSpike / HP<10%开20s盾+召唤Slave）
 //! + 高级模式解锁6种攻击 + 免疫期 + 传送
 
-use crate::actors::world::MonsterState;
-use mir2_shared::enums::Spell;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use mir2_shared::enums::Spell;
 
 pub struct HornedCommanderBehavior {
     start_advanced: bool,
@@ -25,7 +25,11 @@ pub struct HornedCommanderBehavior {
 }
 
 /// C# HornedCommander.TeleportRandom(10, 10)：最多 10 次尝试返回 ±10 内可走点（None=失败留在原地）
-fn teleport_random_point(x: i32, y: i32, is_walkable: impl Fn(i32, i32) -> bool) -> Option<(i32, i32)> {
+fn teleport_random_point(
+    x: i32,
+    y: i32,
+    is_walkable: impl Fn(i32, i32) -> bool,
+) -> Option<(i32, i32)> {
     for _ in 0..10 {
         let tx = x + fastrand::i32(-10..=10);
         let ty = y + fastrand::i32(-10..=10);
@@ -97,7 +101,8 @@ impl MonsterBehavior for HornedCommanderBehavior {
             const MAP_CENTRE_X: i32 = 26;
             const MAP_CENTRE_Y: i32 = 32;
             let (bx, by) = if max_distance(monster.x, monster.y, MAP_CENTRE_X, MAP_CENTRE_Y) <= 20 {
-                ctx.out_monster_teleports.push((monster.object_id, MAP_CENTRE_X, MAP_CENTRE_Y));
+                ctx.out_monster_teleports
+                    .push((monster.object_id, MAP_CENTRE_X, MAP_CENTRE_Y));
                 (MAP_CENTRE_X, MAP_CENTRE_Y)
             } else {
                 (monster.x, monster.y)
@@ -146,7 +151,8 @@ impl MonsterBehavior for HornedCommanderBehavior {
                 self.rock_spike_anchors.clear();
                 for ax in 0..7i32 {
                     for ay in 0..7i32 {
-                        self.rock_spike_anchors.push((cx + (ax - 3) * 5, cy + (ay - 3) * 5));
+                        self.rock_spike_anchors
+                            .push((cx + (ax - 3) * 5, cy + (ay - 3) * 5));
                     }
                 }
                 self.rock_spike_index = 0;
@@ -157,19 +163,22 @@ impl MonsterBehavior for HornedCommanderBehavior {
                     let (anchor_x, anchor_y) = self.rock_spike_anchors[self.rock_spike_index];
                     self.rock_spike_index += 1;
                     // C# SpawnRockSpikes 值=MC（HornedCommander.cs:391/398）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
                     for dy in -2..=2i32 {
                         for dx in -2..=2i32 {
-                            ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                                spell: Spell::HornedCommanderRockSpike,
-                                x: anchor_x + dx,
-                                y: anchor_y + dy,
-                                value: damage,
-                                duration_ms: 10 * 60 * 1000, // 10 分钟
-                                tick_ms: 1000,
-                                caster_oid: monster.object_id,
-                                caster_session: 0,
-                            });
+                            ctx.out_spell_fields
+                                .push(crate::actors::world::ai::SpellFieldSpawn {
+                                    spell: Spell::HornedCommanderRockSpike,
+                                    x: anchor_x + dx,
+                                    y: anchor_y + dy,
+                                    value: damage,
+                                    duration_ms: 10 * 60 * 1000, // 10 分钟
+                                    tick_ms: 1000,
+                                    caster_oid: monster.object_id,
+                                    caster_session: 0,
+                                });
                         }
                     }
                 }
@@ -189,11 +198,15 @@ impl MonsterBehavior for HornedCommanderBehavior {
 
         if dist <= attack_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             monster.direction = dir;
             // 前方 2 格（C# Attack：front = PointMove(CurrentLocation, Direction, 2)）
-            let (fx, fy) = (monster.x + DIR_DX[dir as usize] * 2, monster.y + DIR_DY[dir as usize] * 2);
+            let (fx, fy) = (
+                monster.x + DIR_DX[dir as usize] * 2,
+                monster.y + DIR_DY[dir as usize] * 2,
+            );
 
             if self.start_advanced {
                 // 1/20 RockFall（C# :188-209）：蓄力期免疫，DC×loops(5-10)，前方 AOE5
@@ -202,11 +215,15 @@ impl MonsterBehavior for HornedCommanderBehavior {
                     self.immune = true;
                     // C# ActionTime = Time + loops*500 + 500（10ms/tick）
                     self.shield_end_tick = ctx.tick_count + (loops as u64 * 5) + 5;
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: fx, center_y: fy, radius: 5,
-                        damage: damage.saturating_mul(loops), spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: fx,
+                            center_y: fy,
+                            radius: 5,
+                            damage: damage.saturating_mul(loops),
+                            spell_id: 0,
+                        });
                     return;
                 }
                 // 1/15 SpinHit（C# :211-232）：蓄力期免疫，DC×loops(5-10)，自身 AOE3
@@ -215,25 +232,35 @@ impl MonsterBehavior for HornedCommanderBehavior {
                     self.immune = true;
                     // C# spinDuration = loops*700 + 1500（10ms/tick）
                     self.shield_end_tick = ctx.tick_count + (loops as u64 * 7) + 15;
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x, center_y: monster.y, radius: 3,
-                        damage: damage.saturating_mul(loops), spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            radius: 3,
+                            damage: damage.saturating_mul(loops),
+                            spell_id: 0,
+                        });
                     return;
                 }
                 // 1/10 HammerSmash（C# :234-245）：DC，前方 AOE3（CompleteRangeAttack aoeSize=3 at front）
                 if fastrand::i32(0..10) == 0 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: fx, center_y: fy, radius: 3,
-                        damage, spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: fx,
+                            center_y: fy,
+                            radius: 3,
+                            damage,
+                            spell_id: 0,
+                        });
                     return;
                 }
                 // 1/10 Teleport（C# :247-256）：空 RangeDamage → CompleteRangeAttack → TeleportRandom(10,10) + Target=null
                 if fastrand::i32(0..10) == 0 {
-                    if let Some((tx, ty)) = teleport_random_point(monster.x, monster.y, |x, y| (ctx.is_walkable)(x, y)) {
+                    if let Some((tx, ty)) =
+                        teleport_random_point(monster.x, monster.y, |x, y| (ctx.is_walkable)(x, y))
+                    {
                         ctx.out_monster_teleports.push((monster.object_id, tx, ty));
                     }
                     monster.target_session = None;
@@ -241,11 +268,14 @@ impl MonsterBehavior for HornedCommanderBehavior {
                 }
             }
             // 普攻（C# :258-278）：50/50 Type0/1（同为 ACAgility，仅表现类型不同）
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id, damage, spell_id: 0,
-                attack_type: if fastrand::i32(0..2) == 0 { 0 } else { 1 },
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: if fastrand::i32(0..2) == 0 { 0 } else { 1 },
+                });
         } else if dist > attack_range && ctx.tick_count >= monster.next_move_tick {
             // 追击（C# 标准 MoveTo）
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
@@ -269,7 +299,11 @@ mod tests {
         // C# TeleportRandom(10,10)：返回点必须在 ±10 内
         for _ in 0..500 {
             let pt = teleport_random_point(100, 100, |_, _| true).expect("always walkable");
-            assert!((pt.0 - 100).abs() <= 10 && (pt.1 - 100).abs() <= 10, "out of range: {:?}", pt);
+            assert!(
+                (pt.0 - 100).abs() <= 10 && (pt.1 - 100).abs() <= 10,
+                "out of range: {:?}",
+                pt
+            );
         }
     }
 

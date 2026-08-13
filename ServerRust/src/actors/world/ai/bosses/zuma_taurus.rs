@@ -9,10 +9,10 @@
 //! SpawnSlaves（C# ZumaTaurus.cs:55-96）：
 //!   count = min(8, 40 - SlaveList.Count)，从 Zuma1..Zuma7 中随机选取。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 /// 视野范围（C# ViewRange 用于寻敌）
 const VIEW_RANGE: i32 = 20;
@@ -40,7 +40,9 @@ pub struct ZumaTaurusBehavior {
 
 impl ZumaTaurusBehavior {
     pub fn new() -> Self {
-        Self { stage: TOTAL_STAGES }
+        Self {
+            stage: TOTAL_STAGES,
+        }
     }
 
     /// 根据当前 HP 计算阶段（对齐 C# stage = HP / (Stats[HP] / 7)）
@@ -83,14 +85,20 @@ impl MonsterBehavior for ZumaTaurusBehavior {
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# DefenceType.MACAgility：伤害用 DC（magic defence 判定由 attack 应用层处理）
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
         } else if ctx.tick_count >= monster.next_move_tick {
             // 追击（C# 标准 MoveTo；AvoidFireWall=false 表示不绕火墙）
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

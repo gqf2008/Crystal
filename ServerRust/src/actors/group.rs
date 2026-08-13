@@ -5,8 +5,7 @@
 pub const MAX_GROUP_SIZE: usize = 15;
 
 /// 组队模式（掉落分配）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GroupMode {
     /// 各自拾取
     #[default]
@@ -16,7 +15,6 @@ pub enum GroupMode {
     /// 按队伍分配
     Hunter,
 }
-
 
 /// 组队成员
 #[derive(Debug, Clone)]
@@ -212,6 +210,13 @@ mod tests {
 
         // 踢出队长，应该转移给在线的成员 3
         group.remove_member(1);
-        assert!(group.members.iter().find(|m| m.session_id == 3).unwrap().is_leader);
+        assert!(
+            group
+                .members
+                .iter()
+                .find(|m| m.session_id == 3)
+                .unwrap()
+                .is_leader
+        );
     }
 }

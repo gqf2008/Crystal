@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/FlameSpear.cs
 //! 机制：InAttackRange 4 格十字/对角；dist<=1 base.Attack / 否则 LineAttack(4, 300, MACAgility)
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const ATTACK_RANGE: i32 = 4;
@@ -34,28 +34,40 @@ impl MonsterBehavior for FlameSpearBehavior {
 
         if in_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 远程/魔法攻击用 MC（#2328）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             if dist <= 1 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                    attacker_oid: monster.object_id,
-                    origin_x: monster.x,
-                    origin_y: monster.y,
-                    direction: dir,
-                    range: ATTACK_RANGE,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Line {
+                        attacker_oid: monster.object_id,
+                        origin_x: monster.x,
+                        origin_y: monster.y,
+                        direction: dir,
+                        range: ATTACK_RANGE,
+                        damage: mc_damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

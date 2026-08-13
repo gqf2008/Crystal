@@ -4,10 +4,10 @@
 //! 机制：4/5 物理近战（DC）/ 1/5 魔法（MC，Type=1）；
 //!      魔法分支 FindAllTargets(1, 自身) 半径 1 AOE
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const AOE_RADIUS: i32 = 1;
@@ -33,25 +33,37 @@ impl MonsterBehavior for ElephantManBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# Envir.Random.Next(5) > 0：4/5 物理 DC / 1/5 魔法 MC AOE
             if fastrand::i32(0..5) > 0 {
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // C# 魔法分支：GetAttackPower(MinMC, MaxMC) + FindAllTargets(1, CurrentLocation)
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: AOE_RADIUS,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: AOE_RADIUS,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

@@ -9,10 +9,10 @@
 //!   - 远程（dist>1）：MC（攻速+500ms）+ 1/5 绿毒（7s，tick 1000）
 //! 说明：C# CompleteAttack 里 target.Attacked 调两次（疑似 bug），按意图实现单次命中
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -36,82 +36,123 @@ impl MonsterBehavior for AntCommanderBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 远程伤害用 MinMC/MaxMC（AntCommander.cs:69/86）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             if dist <= 1 {
                 let roll = fastrand::i32(0..6);
                 match roll {
                     // 3/6 普通近战（C# case 0/3/4，毒标记 false）
                     0 | 3 | 4 => {
-                        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: target.session_id,
-                            damage,
-                            spell_id: 0,
-                            attack_type: 0,
-                        });
+                        monster.next_attack_tick =
+                            ctx.tick_count + monster.ai_profile.attack_cooldown;
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: target.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 0,
+                            });
                     }
                     // 2/6 Type=1 双倍伤害 + Slow/Dazed 毒
                     1 | 5 => {
-                        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: target.session_id,
-                            damage: damage.saturating_mul(2),
-                            spell_id: 0,
-                            attack_type: 1,
-                        });
+                        monster.next_attack_tick =
+                            ctx.tick_count + monster.ai_profile.attack_cooldown;
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: target.session_id,
+                                damage: damage.saturating_mul(2),
+                                spell_id: 0,
+                                attack_type: 1,
+                            });
                         // PoisonTarget(4, 5, Slow, 1000)：1/4
                         if fastrand::i32(0..4) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: target.session_id,
-                                poison: Poison::new(PoisonType::SLOW, 5, poison_sc_value(monster), 1000),
-                            });
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: target.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::SLOW,
+                                        5,
+                                        poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
                         }
                         // PoisonTarget(2, 5, Dazed, 1000)：1/2
                         if fastrand::i32(0..2) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: target.session_id,
-                                poison: Poison::new(PoisonType::DAZED, 5, poison_sc_value(monster), 1000),
-                            });
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: target.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::DAZED,
+                                        5,
+                                        poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
                         }
                     }
                     // 1/6 远程（C# case 2，MC：AntCommander.cs:69）
                     _ => {
-                        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                            attacker_oid: monster.object_id,
-                            target_session: target.session_id,
-                            target_object_id: target.object_id,
-                            damage: mc_damage,
-                            spell_id: 0,
-                        });
+                        monster.next_attack_tick =
+                            ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Range {
+                                attacker_oid: monster.object_id,
+                                target_session: target.session_id,
+                                target_object_id: target.object_id,
+                                damage: mc_damage,
+                                spell_id: 0,
+                            });
                         // PoisonTarget(5, 7, Green, 1000)：1/5、7s
                         if fastrand::i32(0..5) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: target.session_id,
-                                poison: Poison::new(PoisonType::GREEN, 7, poison_sc_value(monster), 1000),
-                            });
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: target.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::GREEN,
+                                        7,
+                                        poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
                         }
                     }
                 }
             } else {
                 // 出近战范围远程（C# :84-91 用 MC）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
-                if fastrand::i32(0..5) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 7, poison_sc_value(monster), 1000),
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage: mc_damage,
+                        spell_id: 0,
                     });
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::GREEN,
+                                7,
+                                poison_sc_value(monster),
+                                1000,
+                            ),
+                        });
                 }
             }
             return;

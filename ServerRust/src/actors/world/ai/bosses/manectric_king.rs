@@ -11,10 +11,10 @@
 //! Attack（C# :31-91）：HP<20&&MassAttackTime<Time→全体弹道；贴身1/3 DC线；else MC线。
 //! MassAttackTime = Time + 2000 + Random(5)*1000。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 const ATTACK_RANGE: i32 = 3;
@@ -40,24 +40,32 @@ impl MonsterBehavior for ManectricKingBehavior {
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
-        let hp_pct = if monster.max_hp > 0 { monster.hp * 100 / monster.max_hp } else { 100 };
+        let hp_pct = if monster.max_hp > 0 {
+            monster.hp * 100 / monster.max_hp
+        } else {
+            100
+        };
 
         // ---- HP<20% MassAttack：全体 MC 弹道 ----
         if hp_pct < 20 && ctx.tick_count >= self.next_mass_tick {
             // C# MassAttackTime = Time + 2000 + Random(5)*1000
             self.next_mass_tick = ctx.tick_count + 20 + fastrand::u64(0..5) * 10;
-            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-            let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(monster.x, monster.y, MASS_RADIUS, monster.map_index)
-                    .into_iter().copied().collect();
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+            let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(monster.x, monster.y, MASS_RADIUS, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
             for t in targets {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: t.session_id,
-                    target_object_id: t.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: t.session_id,
+                        target_object_id: t.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             return;
@@ -69,19 +77,22 @@ impl MonsterBehavior for ManectricKingBehavior {
             let close = dist <= ATTACK_RANGE - 1;
             if close && fastrand::i32(0..3) == 0 {
                 // Type1 DC LineAttack（C# LineAttack(damage, AttackRange-dist+1, 500, ACAgility, push=true)）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
                 let range = ATTACK_RANGE - dist + 1;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                    attacker_oid: monster.object_id,
-                    origin_x: monster.x,
-                    origin_y: monster.y,
-                    direction: dir,
-                    range,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Line {
+                        attacker_oid: monster.object_id,
+                        origin_x: monster.x,
+                        origin_y: monster.y,
+                        direction: dir,
+                        range,
+                        damage,
+                        spell_id: 0,
+                    });
                 // C# LineAttack push：距离 = range-1
                 ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                     session_id: target.session_id,
@@ -90,21 +101,26 @@ impl MonsterBehavior for ManectricKingBehavior {
                 });
             } else {
                 // Type0 MC LineAttack(3)
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
-                        .into_iter().copied().collect();
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
                     let hd = direction_towards(monster.x, monster.y, h.x, h.y);
                     if hd == dir {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: h.session_id,
-                            damage,
-                            spell_id: 0,
-                            attack_type: 0,
-                        });
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: h.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 0,
+                            });
                     }
                 }
             }

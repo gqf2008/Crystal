@@ -10,10 +10,10 @@
 //! ProcessAI（C# WoomaTaurus.cs:18-80）：tele/狂暴/阶段。
 //! FlamingWooma 基类：近战 Type=0/1 火焰 MAC 攻击。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 /// 视野范围
 const VIEW_RANGE: i32 = 20;
@@ -138,14 +138,16 @@ impl MonsterBehavior for WoomaTaurusBehavior {
             // 狂暴期攻击冷却减半
             let cooldown = if self.rage_end_tick > 0 { 3 } else { 5 };
             monster.next_attack_tick = ctx.tick_count + cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
         } else if dist > MELEE_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             // 狂暴期移动加速
@@ -174,11 +176,17 @@ fn wooma_taurus_blocked_count(
             blocked += 1;
             continue;
         }
-        if players.iter().any(|p| p.map_index == map_index && p.x == nx && p.y == ny) {
+        if players
+            .iter()
+            .any(|p| p.map_index == map_index && p.x == nx && p.y == ny)
+        {
             blocked += 1;
             continue;
         }
-        if monsters.iter().any(|m| m.map_index == map_index && m.x == nx && m.y == ny) {
+        if monsters
+            .iter()
+            .any(|m| m.map_index == map_index && m.x == nx && m.y == ny)
+        {
             blocked += 1;
         }
     }
@@ -191,17 +199,40 @@ mod tests {
     use crate::actors::world::ai::ctx::{MonsterSnap, PlayerSnap};
 
     fn player(sid: u64, x: i32, y: i32) -> PlayerSnap {
-        PlayerSnap { session_id: sid, x, y, hp: 100, map_index: 1, object_id: sid as u32, level: 30, pk_points: 0, min_dc: 10, poison_flags: mir2_shared::enums::PoisonType::NONE }
+        PlayerSnap {
+            session_id: sid,
+            x,
+            y,
+            hp: 100,
+            map_index: 1,
+            object_id: sid as u32,
+            level: 30,
+            pk_points: 0,
+            min_dc: 10,
+            poison_flags: mir2_shared::enums::PoisonType::NONE,
+        }
     }
     fn monster(oid: u32, x: i32, y: i32) -> MonsterSnap {
-        MonsterSnap { object_id: oid, x, y, hp: 10, max_hp: 10, map_index: 1, monster_index: 1, level: 0 }
+        MonsterSnap {
+            object_id: oid,
+            x,
+            y,
+            hp: 10,
+            max_hp: 10,
+            map_index: 1,
+            monster_index: 1,
+            level: 0,
+        }
     }
 
     #[test]
     fn test_wooma_blocked_count_open_area() {
         // 开阔地无阻挡：8 格全部可走且无人 → 0
         let walkable = |_: i32, _: i32| true;
-        assert_eq!(wooma_taurus_blocked_count(&walkable, &[], &[], 10, 10, 1), 0);
+        assert_eq!(
+            wooma_taurus_blocked_count(&walkable, &[], &[], 10, 10, 1),
+            0
+        );
     }
 
     #[test]
@@ -212,7 +243,10 @@ mod tests {
         let monsters = [monster(1, 10, 11)];
         // (10,10) 的 8 邻：(9,9)(10,9)(11,9)(9,10)(11,10)(9,11)(10,11)(11,11)
         // 墙：x==9 的 3 格(9,9)(9,10)(9,11) + x==11 的(11,9)(11,10)(11,11) + y==9 的(10,9) + y==11 的(10,11) → 8 全墙
-        assert_eq!(wooma_taurus_blocked_count(&walkable, &players, &monsters, 10, 10, 1), 8);
+        assert_eq!(
+            wooma_taurus_blocked_count(&walkable, &players, &monsters, 10, 10, 1),
+            8
+        );
     }
 
     #[test]
@@ -221,10 +255,16 @@ mod tests {
         let walkable = |_: i32, _: i32| true;
         let players = [player(1, 11, 10), player(2, 10, 11)];
         let monsters = [monster(1, 9, 10)];
-        assert_eq!(wooma_taurus_blocked_count(&walkable, &players, &monsters, 10, 10, 1), 3);
+        assert_eq!(
+            wooma_taurus_blocked_count(&walkable, &players, &monsters, 10, 10, 1),
+            3
+        );
         // 跨图对象不计
         let mut p = player(1, 11, 10);
         p.map_index = 2;
-        assert_eq!(wooma_taurus_blocked_count(&walkable, &[p], &[], 10, 10, 1), 0);
+        assert_eq!(
+            wooma_taurus_blocked_count(&walkable, &[p], &[], 10, 10, 1),
+            0
+        );
     }
 }

@@ -5,9 +5,9 @@
 //! DefaultBehavior 的 process_tick 为空 —— tick_monsters 对非 Boss 怪物
 //! 不调用 behavior.process_tick，而是直接走原有内联逻辑。
 
-use crate::actors::world::MonsterState;
 use super::behavior::MonsterBehavior;
 use super::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 /// 默认行为（普通怪物）
 pub struct DefaultBehavior;

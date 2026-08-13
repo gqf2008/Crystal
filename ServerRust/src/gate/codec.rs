@@ -39,10 +39,7 @@ pub fn decode(buf: &[u8]) -> Option<(Vec<u8>, usize)> {
     }
 
     // XOR 解密
-    let payload = buf[2..total]
-        .iter()
-        .map(|b| b ^ DEFAULT_XOR_KEY)
-        .collect();
+    let payload = buf[2..total].iter().map(|b| b ^ DEFAULT_XOR_KEY).collect();
 
     Some((payload, total))
 }

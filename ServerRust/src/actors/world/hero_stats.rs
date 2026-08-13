@@ -70,7 +70,9 @@ fn calc_health(class: MirClass, base: i32, gain: f32, gain_rate: f32, level: i32
         return base;
     }
     let v = match class {
-        MirClass::Warrior => base as f32 + (level as f32 / gain + gain_rate + level as f32 / 20.0) * level as f32,
+        MirClass::Warrior => {
+            base as f32 + (level as f32 / gain + gain_rate + level as f32 / 20.0) * level as f32
+        }
         _ => base as f32 + (level as f32 / gain + gain_rate) * level as f32,
     };
     v as i32
@@ -82,8 +84,14 @@ fn calc_mana(class: MirClass, base: i32, gain: f32, gain_rate: f32, level: i32) 
         return base;
     }
     let v = match class {
-        MirClass::Wizard => base as f32 + ((level as f32 / gain + 2.0) * 2.2 * level as f32) + (level as f32 * gain_rate),
-        MirClass::Taoist => (base as f32 + level as f32 / gain * 2.2 * level as f32) + (level as f32 * gain_rate),
+        MirClass::Wizard => {
+            base as f32
+                + ((level as f32 / gain + 2.0) * 2.2 * level as f32)
+                + (level as f32 * gain_rate)
+        }
+        MirClass::Taoist => {
+            (base as f32 + level as f32 / gain * 2.2 * level as f32) + (level as f32 * gain_rate)
+        }
         _ => base as f32 + (level as f32 * gain) + (level as f32 * gain_rate),
     };
     v as i32
@@ -107,15 +115,52 @@ fn calc_stat(base: i32, gain: f32, level: i32) -> i32 {
 /// 英雄基础属性（C# BaseStats 构造器默认值，五职业）
 pub fn hero_base_stats(class: MirClass, level: i32) -> HeroStats {
     use MirClass::*;
-    let (hp_b, hp_g, hp_gr, mp_b, mp_g, mp_gr, bag_g, wear_g, hand_g,
-         min_dc_g, max_dc_g, min_mc_g, max_mc_g, min_sc_g, max_sc_g,
-         max_ac_g, min_mac_g, max_mac_g, acc_b, agi_b) = match class {
-        Warrior => (14, 4.0, 4.5, 11, 3.5, 0.0, 3.0, 20.0, 13.0, 5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0, 5, 15),
-        Wizard => (14, 15.0, 1.8, 13, 5.0, 0.0, 5.0, 100.0, 90.0, 7.0, 7.0, 7.0, 7.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5, 15),
-        Taoist => (14, 6.0, 2.5, 13, 8.0, 0.0, 4.0, 50.0, 42.0, 7.0, 7.0, 0.0, 0.0, 7.0, 7.0, 0.0, 12.0, 6.0, 5, 18),
-        Assassin => (14, 4.0, 3.25, 11, 5.0, 0.0, 3.5, 33.0, 30.0, 8.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5, 20),
-        Archer => (14, 4.0, 3.25, 11, 4.0, 0.0, 4.0, 33.0, 30.0, 8.0, 8.0, 8.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8, 15),
-        _ => (14, 4.0, 4.5, 11, 3.5, 0.0, 3.0, 20.0, 13.0, 5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0, 5, 15),
+    let (
+        hp_b,
+        hp_g,
+        hp_gr,
+        mp_b,
+        mp_g,
+        mp_gr,
+        bag_g,
+        wear_g,
+        hand_g,
+        min_dc_g,
+        max_dc_g,
+        min_mc_g,
+        max_mc_g,
+        min_sc_g,
+        max_sc_g,
+        max_ac_g,
+        min_mac_g,
+        max_mac_g,
+        acc_b,
+        agi_b,
+    ) = match class {
+        Warrior => (
+            14, 4.0, 4.5, 11, 3.5, 0.0, 3.0, 20.0, 13.0, 5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0,
+            0.0, 5, 15,
+        ),
+        Wizard => (
+            14, 15.0, 1.8, 13, 5.0, 0.0, 5.0, 100.0, 90.0, 7.0, 7.0, 7.0, 7.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 5, 15,
+        ),
+        Taoist => (
+            14, 6.0, 2.5, 13, 8.0, 0.0, 4.0, 50.0, 42.0, 7.0, 7.0, 0.0, 0.0, 7.0, 7.0, 0.0, 12.0,
+            6.0, 5, 18,
+        ),
+        Assassin => (
+            14, 4.0, 3.25, 11, 5.0, 0.0, 3.5, 33.0, 30.0, 8.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 5, 20,
+        ),
+        Archer => (
+            14, 4.0, 3.25, 11, 4.0, 0.0, 4.0, 33.0, 30.0, 8.0, 8.0, 8.0, 8.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 8, 15,
+        ),
+        _ => (
+            14, 4.0, 4.5, 11, 3.5, 0.0, 3.0, 20.0, 13.0, 5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0,
+            0.0, 5, 15,
+        ),
     };
     HeroStats {
         max_hp: calc_health(class, hp_b, hp_g, hp_gr, level),
@@ -202,18 +247,30 @@ mod tests {
     fn warrior_hp_formula_matches_csharp() {
         // C#：HP = 14 + (level/4 + 4.5 + level/20) * level
         let lv1 = hero_base_stats(MirClass::Warrior, 1);
-        assert_eq!(lv1.max_hp, (14.0 + (1.0 / 4.0 + 4.5 + 1.0 / 20.0) * 1.0) as i32); // 18
+        assert_eq!(
+            lv1.max_hp,
+            (14.0 + (1.0 / 4.0 + 4.5 + 1.0 / 20.0) * 1.0) as i32
+        ); // 18
         let lv30 = hero_base_stats(MirClass::Warrior, 30);
-        assert_eq!(lv30.max_hp, (14.0 + (30.0 / 4.0 + 4.5 + 30.0 / 20.0) * 30.0) as i32); // 419
+        assert_eq!(
+            lv30.max_hp,
+            (14.0 + (30.0 / 4.0 + 4.5 + 30.0 / 20.0) * 30.0) as i32
+        ); // 419
         let lv50 = hero_base_stats(MirClass::Warrior, 50);
-        assert_eq!(lv50.max_hp, (14.0 + (50.0 / 4.0 + 4.5 + 50.0 / 20.0) * 50.0) as i32);
+        assert_eq!(
+            lv50.max_hp,
+            (14.0 + (50.0 / 4.0 + 4.5 + 50.0 / 20.0) * 50.0) as i32
+        );
     }
 
     #[test]
     fn wizard_mana_formula_matches_csharp() {
         // C#：MP = 13 + ((level/5 + 2) * 2.2 * level) + level*0
         let lv10 = hero_base_stats(MirClass::Wizard, 10);
-        assert_eq!(lv10.max_mp, (13.0 + ((10.0 / 5.0 + 2.0) * 2.2 * 10.0)) as i32); // 13+88=101
+        assert_eq!(
+            lv10.max_mp,
+            (13.0 + ((10.0 / 5.0 + 2.0) * 2.2 * 10.0)) as i32
+        ); // 13+88=101
         assert!(lv10.max_mp > 0);
     }
 
@@ -259,11 +316,17 @@ mod tests {
         assert_eq!(with.max_dc, base.max_dc + 7);
         assert_eq!(with.accuracy, base.accuracy + 2);
         // 未学 → 无加成
-        assert_eq!(base.max_dc, compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[]).max_dc);
+        assert_eq!(
+            base.max_dc,
+            compute_hero_stats(MirClass::Warrior, 30, &empty, &map, &[]).max_dc
+        );
         // 非战士不生效
         let tao_magics = vec![(slaying_cs, 5u8)];
         let tao = compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &tao_magics);
-        assert_eq!(tao.max_dc, compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[]).max_dc);
+        assert_eq!(
+            tao.max_dc,
+            compute_hero_stats(MirClass::Taoist, 30, &empty, &map, &[]).max_dc
+        );
     }
 
     #[test]
@@ -324,7 +387,8 @@ mod tests {
             has_tool_tip: false,
             tool_tip: None,
         };
-        info.stats.insert(mir2_shared::enums::Stat::PoisonAttack as u8, 6);
+        info.stats
+            .insert(mir2_shared::enums::Stat::PoisonAttack as u8, 6);
         let mut infos = std::collections::HashMap::new();
         infos.insert(1, info);
 

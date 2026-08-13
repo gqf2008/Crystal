@@ -9,10 +9,10 @@
 //! ProcessTarget（C# :16-29）：Target==null||InAttackRange||超时 → Die。
 //! CompleteDeath（C# :37-57）：FindAllTargets(1) 逐个 Attacked + 1/5 绿毒。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -28,7 +28,10 @@ pub struct BombSpiderBehavior {
 
 impl BombSpiderBehavior {
     pub fn new() -> Self {
-        Self { spawned: false, explosion_tick: 0 }
+        Self {
+            spawned: false,
+            explosion_tick: 0,
+        }
     }
 }
 
@@ -70,26 +73,32 @@ impl MonsterBehavior for BombSpiderBehavior {
 impl BombSpiderBehavior {
     /// 自爆：1 格 AOE + 绿毒，然后自身死亡
     fn explode(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-        let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-        let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-            ctx.find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
-                .into_iter().copied().collect();
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        let sc_power =
+            crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
+        let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+            .find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
+            .into_iter()
+            .copied()
+            .collect();
         for h in hits {
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: h.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: h.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
             // 1/5 绿毒（C# Random(5)==0）
             if fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: h.session_id,
-                    // C# 毒值 = SP 攻
-                    poison: Poison::new(PoisonType::GREEN, 5, sc_power, 2000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: h.session_id,
+                        // C# 毒值 = SP 攻
+                        poison: Poison::new(PoisonType::GREEN, 5, sc_power, 2000),
+                    });
             }
         }
         monster.hp = 0;

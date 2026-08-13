@@ -4,10 +4,10 @@
 //! 机制：80% 物理近战（DC）/ 20% 魔法近战（MC，Type=1）；
 //!      魔法分支命中后 1/8 眩晕毒（6s，tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -32,27 +32,44 @@ impl MonsterBehavior for MantisBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Envir.Random.Next(5) > 0：80% 物理 / 20% 魔法（Type=1，Mantis.cs:39-41 用 MC）
             let magic = fastrand::i32(0..5) == 0;
             let dmg = if magic {
-                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1)
+                crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1)
             } else {
                 damage
             };
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage: dmg,
-                spell_id: 0,
-                attack_type: if magic { 1 } else { 0 },
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage: dmg,
+                    spell_id: 0,
+                    attack_type: if magic { 1 } else { 0 },
+                });
             // C# 魔法分支：PoisonTarget(8, 6, Dazed, 1000)：1/8 概率、6s
             if magic && fastrand::i32(0..8) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::DAZED, 6, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(
+                            PoisonType::DAZED,
+                            6,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            1000,
+                        ),
+                    });
             }
             return;
         }

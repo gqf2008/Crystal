@@ -10,10 +10,10 @@
 //! Attack（C# :23-66）：Random(5)==0→传送；hp<50&&Random(3)==0→治疗；否则弹道。
 //! TeleportRandom（C# :122-137）：目标附近 ±AttackRange 随机点。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 6;
 const VIEW_RANGE: i32 = 15;
@@ -38,7 +38,11 @@ impl MonsterBehavior for WitchDoctorBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let roll = fastrand::i32(0..5);
-            let hp_pct = if monster.max_hp > 0 { monster.hp * 100 / monster.max_hp } else { 100 };
+            let hp_pct = if monster.max_hp > 0 {
+                monster.hp * 100 / monster.max_hp
+            } else {
+                100
+            };
 
             if roll == 0 {
                 // 传送（C# TeleportRandom(10, AttackRange)：目标附近 ±AttackRange 随机点）
@@ -57,14 +61,17 @@ impl MonsterBehavior for WitchDoctorBehavior {
                 monster.hp = (monster.hp + heal).min(monster.max_hp);
             } else {
                 // 远程弹道
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

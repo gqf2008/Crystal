@@ -7,9 +7,9 @@
 //!   - 可被玩家攻击摧毁（hp 由伤害扣减）
 //! 注意：C# 的"嘲讽附近怪物攻击自己"需要怪物互伤引擎（当前未支持，见 #1008）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 pub struct StoneTrapBehavior;
 
@@ -31,7 +31,8 @@ impl MonsterBehavior for StoneTrapBehavior {
             let near = ctx.players.iter().any(|p| {
                 p.session_id == master
                     && p.map_index == monster.map_index
-                    && (p.x - monster.x).abs().max((p.y - monster.y).abs()) <= 15 // C# InRange=切比雪夫
+                    && (p.x - monster.x).abs().max((p.y - monster.y).abs()) <= 15
+                // C# InRange=切比雪夫
             });
             if !near {
                 monster.hp = 0;
@@ -49,7 +50,8 @@ impl MonsterBehavior for StoneTrapBehavior {
             }
             let d = (snap.x - monster.x).abs() + (snap.y - monster.y).abs();
             if d <= view_range {
-                ctx.out_monster_taunts.push((monster.object_id, snap.object_id));
+                ctx.out_monster_taunts
+                    .push((monster.object_id, snap.object_id));
             }
         }
     }

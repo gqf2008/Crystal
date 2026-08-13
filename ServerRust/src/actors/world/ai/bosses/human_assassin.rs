@@ -11,10 +11,10 @@
 //! Die/ExplosionDie（C# :268-329）：16 方向 AC 爆炸。
 //! ProcessAI（C# :138-149）：Master 且 Envir.Time>ExplosionTime → Die。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
@@ -33,7 +33,11 @@ pub struct HumanAssassinBehavior {
 
 impl HumanAssassinBehavior {
     pub fn new() -> Self {
-        Self { attack_damage: 0, explosion_tick: 0, spawned: false }
+        Self {
+            attack_damage: 0,
+            explosion_tick: 0,
+            spawned: false,
+        }
     }
 }
 
@@ -74,15 +78,18 @@ impl MonsterBehavior for HumanAssassinBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 self.attack_damage += damage; // C# AttackDamage += damage
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
             return;
         }
@@ -92,7 +99,11 @@ impl MonsterBehavior for HumanAssassinBehavior {
             let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as usize) % 8;
             let two = (monster.x + DIR_DX[dir] * 2, monster.y + DIR_DY[dir] * 2);
             let one = (monster.x + DIR_DX[dir], monster.y + DIR_DY[dir]);
-            let (nx, ny) = if (ctx.is_walkable)(two.0, two.1) { two } else { one };
+            let (nx, ny) = if (ctx.is_walkable)(two.0, two.1) {
+                two
+            } else {
+                one
+            };
             ctx.out_moves.push((monster.object_id, nx, ny, dir as u8));
             monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
@@ -109,20 +120,25 @@ impl HumanAssassinBehavior {
     /// 16 方向范围爆炸（C# ExplosionDie：i<16，PointMove(dir, i/8+1)）
     fn explode(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let crit = fastrand::i32(0..100) <= monster.accuracy;
-        let base = if crit { monster.max_dmg * 2 } else { monster.min_dmg * 2 };
+        let base = if crit {
+            monster.max_dmg * 2
+        } else {
+            monster.min_dmg * 2
+        };
         // C# ExplosionDie（HumanAssassin.cs:299）：4 * (Level / 20)
         let damage = (monster.min_dmg / 5 + 4 * (monster.level / 20)) * base / 20 + monster.max_dmg;
         // C# ExplosionDie：16 格（8 方向 × 2 圈：i%8 方向、i/8+1 距离）
         let cells = eight_dir_rings(monster.x, monster.y, 2);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
-            attacker_oid: monster.object_id,
-            center_x: monster.x,
-            center_y: monster.y,
-            cells,
-            damage: damage.max(1),
-            spell_id: 0,
-            attack_type: 0,
-        });
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Cells {
+                attacker_oid: monster.object_id,
+                center_x: monster.x,
+                center_y: monster.y,
+                cells,
+                damage: damage.max(1),
+                spell_id: 0,
+                attack_type: 0,
+            });
         monster.hp = 0;
         if self.explosion_tick == 0 {
             self.explosion_tick = u64::MAX; // 防止重复触发

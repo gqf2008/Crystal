@@ -12,11 +12,11 @@
 //! ProcessTarget（C# :34-59）：1/3 概率 MoveTo Target±1；Attack。
 //! Attacked（C# :79-90）：type != Repulsion → return 0（免疫）。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 2;
@@ -24,17 +24,23 @@ const MELEE_RANGE: i32 = 2;
 pub struct ThunderElementBehavior;
 
 impl ThunderElementBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for ThunderElementBehavior {
     /// 免疫毒（C# PoisonDamage 直接 return）
-    fn on_poison(&mut self, _poison: Poison) -> bool { false }
+    fn on_poison(&mut self, _poison: Poison) -> bool {
+        false
+    }
 
     /// C# Attacked：type != Repulsion → return 0（雷元素仅受击退伤害）
     /// 此处 behavior 层无法区分 DefenceType，统一按"免疫常规伤害"近似：
     /// 实际 Repulsion 推挤伤害由 Pushed 路径处理（上层），这里 on_attacked 返 0。
-    fn on_attacked(&mut self, _damage: i32) -> i32 { 0 }
+    fn on_attacked(&mut self, _damage: i32) -> i32 {
+        0
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
@@ -48,21 +54,25 @@ impl MonsterBehavior for ThunderElementBehavior {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 // 闪电链：自身 2 格范围全体 MAC（C# CompleteAttack FindAllTargets(2)）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: MELEE_RANGE,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: MELEE_RANGE,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             // 1/3 概率闪现到目标 ±1 格（C# ProcessTarget Random(3)==1）
             if fastrand::i32(0..3) == 1 && ctx.tick_count >= monster.next_move_tick {
                 let nx = target.x + fastrand::i32(-1..=1);
                 let ny = target.y + fastrand::i32(-1..=1);
-                ctx.out_moves.push((monster.object_id, nx, ny, monster.direction));
+                ctx.out_moves
+                    .push((monster.object_id, nx, ny, monster.direction));
                 monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             }
             return;

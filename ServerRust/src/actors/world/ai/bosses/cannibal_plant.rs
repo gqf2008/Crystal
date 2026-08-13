@@ -10,10 +10,10 @@
 //! 追加一个周期性"吞噬"动作：把攻击范围内最远玩家拉到身边并束缚（麻痹），
 //! 对齐任务描述的束缚控制效果（POC 简化版，原版无此段）。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
 
 /// 现身检测间隔（C# VisibleTime = Envir.Time + 2000）
 const VISIBILITY_CHECK_TICKS: u64 = 20;
@@ -47,17 +47,25 @@ impl MonsterBehavior for CannibalPlantBehavior {
         true
     }
 
-    fn can_move(&self) -> bool { false }
+    fn can_move(&self) -> bool {
+        false
+    }
 
     fn is_attackable(&self) -> bool {
         self.visible
     }
 
     fn on_attacked(&mut self, damage: i32) -> i32 {
-        if self.visible { damage } else { 0 }
+        if self.visible {
+            damage
+        } else {
+            0
+        }
     }
 
-    fn on_poison(&mut self, _poison: Poison) -> bool { false }
+    fn on_poison(&mut self, _poison: Poison) -> bool {
+        false
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if !self.spawned {
@@ -70,7 +78,9 @@ impl MonsterBehavior for CannibalPlantBehavior {
         // ---- 可见性切换（C# ProcessAI 每 2s 检测）----
         if ctx.tick_count >= self.next_visibility_tick {
             self.next_visibility_tick = ctx.tick_count + VISIBILITY_CHECK_TICKS;
-            let has_near = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).is_some();
+            let has_near = ctx
+                .nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index)
+                .is_some();
             if !self.visible && has_near {
                 self.visible = true;
                 monster.hidden = false;
@@ -96,16 +106,22 @@ impl MonsterBehavior for CannibalPlantBehavior {
         if ctx.tick_count >= self.next_devour_tick {
             self.next_devour_tick = ctx.tick_count + DEVOUR_INTERVAL_TICKS;
             // 找攻击范围内最远的玩家"吞噬"（简化：单体拉拽 + 束缚）
-            if let Some(t) = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).copied() {
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            if let Some(t) = ctx
+                .nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index)
+                .copied()
+            {
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 // C# CannibalPlant 无毒（原实现凭空加的束缚麻痹，移除）
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: t.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 1,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: t.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
             }
         }
 
@@ -113,16 +129,21 @@ impl MonsterBehavior for CannibalPlantBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        if let Some(t) = ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index).copied() {
+        if let Some(t) = ctx
+            .nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+            .copied()
+        {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: t.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: t.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
         }
     }
 }

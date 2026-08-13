@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/BlackFoxman.cs
 //! 机制：InAttackRange 2 格十字/对角；dist<=1 且 2/3 普攻 / 否则 LineAttack(2, 250, ACAgility)
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const LINE_RANGE: i32 = 2;
@@ -30,31 +30,39 @@ impl MonsterBehavior for BlackFoxmanBehavior {
         let dy = (target.y - monster.y).abs();
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
         // C# InAttackRange：2 格十字/对角
-        let in_range = dx <= 2 && dy <= 2 && ((dx <= 1 && dy <= 1) || (dx == dy || dx % 2 == dy % 2));
+        let in_range =
+            dx <= 2 && dy <= 2 && ((dx <= 1 && dy <= 1) || (dx == dy || dx % 2 == dy % 2));
 
         if in_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             // C# !range && Random.Next(3) > 0：近战 2/3
             if dist <= 1 && fastrand::i32(0..3) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                    attacker_oid: monster.object_id,
-                    origin_x: monster.x,
-                    origin_y: monster.y,
-                    direction: dir,
-                    range: LINE_RANGE,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Line {
+                        attacker_oid: monster.object_id,
+                        origin_x: monster.x,
+                        origin_y: monster.y,
+                        direction: dir,
+                        range: LINE_RANGE,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

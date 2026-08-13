@@ -52,12 +52,23 @@ impl TradeSide {
     }
 
     /// 添加物品
-    pub fn add_item(&mut self, uid: u64, grid: u8, count: u16, item_data: Option<mir2_shared::data::item::UserItem>) {
+    pub fn add_item(
+        &mut self,
+        uid: u64,
+        grid: u8,
+        count: u16,
+        item_data: Option<mir2_shared::data::item::UserItem>,
+    ) {
         if let Some(idx) = self.items.iter().position(|i| i.uid == uid) {
             self.items[idx].count = count;
             self.items[idx].item_data = item_data;
         } else {
-            self.items.push(TradeItem { uid, grid, count, item_data });
+            self.items.push(TradeItem {
+                uid,
+                grid,
+                count,
+                item_data,
+            });
         }
     }
 
@@ -94,7 +105,12 @@ pub struct TradeSession {
 
 impl TradeSession {
     /// 创建新交易会话
-    pub fn new(initiator_session: u64, initiator_name: String, target_session: u64, target_name: String) -> Self {
+    pub fn new(
+        initiator_session: u64,
+        initiator_name: String,
+        target_session: u64,
+        target_name: String,
+    ) -> Self {
         Self {
             side_a: TradeSide::new(initiator_session, initiator_name),
             side_b: TradeSide::new(target_session, target_name),

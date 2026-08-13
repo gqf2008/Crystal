@@ -4,10 +4,10 @@
 //! 机制：2/3 物理近战 / 1/3 魔法近战（Type=1）；
 //!      所有攻击命中后 1/4 绿毒（毒值=SP，tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -32,25 +32,34 @@ impl MonsterBehavior for LightTurtleBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Envir.Random.Next(3) > 0：2/3 base.Attack / 1/3 魔法（Type=1）
             let magic = fastrand::i32(0..3) == 0;
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: if magic { 1 } else { 0 },
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: if magic { 1 } else { 0 },
+                });
             // C# CompleteAttack（所有攻击）：PoisonTarget(4, SP, Green, 1000)
             // 第二参=时长（SP 攻秒数），值=SP 攻
             if fastrand::i32(0..4) == 0 {
                 // C# PoisonTarget(4, SC, Green, 1000)：时长=SC 攻秒数、值=SC
-                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, sc_power as u32, sc_power, 1000),
-                });
+                let sc_power =
+                    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0)
+                        .max(1);
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::GREEN, sc_power as u32, sc_power, 1000),
+                    });
             }
             return;
         }

@@ -5,9 +5,9 @@
 //!      ProcessAI：视野内有目标 → Die；
 //!      CompleteDeath：FindAllTargets(Info.ViewRange) AOE 伤害（ACAgility）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 
@@ -38,14 +38,16 @@ impl MonsterBehavior for BoulderSpiritBehavior {
 
     /// C# CompleteDeath：视野 AOE 伤害
     fn on_die(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-            attacker_oid: monster.object_id,
-            center_x: monster.x,
-            center_y: monster.y,
-            radius: VIEW_RANGE,
-            damage,
-            spell_id: 0,
-        });
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Aoe {
+                attacker_oid: monster.object_id,
+                center_x: monster.x,
+                center_y: monster.y,
+                radius: VIEW_RANGE,
+                damage,
+                spell_id: 0,
+            });
     }
 }

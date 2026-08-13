@@ -6,10 +6,10 @@
 //! Show（C# :147-168）：父岩在其余三角生成 3 只 ChildRock（立即可见、同目标、近战）；
 //!      父岩死亡 → 子岩级联清理（#1434 SlaveList）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -35,12 +35,22 @@ pub struct TrapRockBehavior {
 
 impl TrapRockBehavior {
     pub fn new() -> Self {
-        Self { shown: false, target_loc: (0, 0), child: false, parent_oid: None }
+        Self {
+            shown: false,
+            target_loc: (0, 0),
+            child: false,
+            parent_oid: None,
+        }
     }
 
     /// #1437：构造已可见的子岩（tick.rs 生成 ChildRock 时用；C# ChildRock.Show 预设）
     pub(crate) fn child(shown: bool, target_loc: (i32, i32), parent_oid: u32) -> Self {
-        Self { shown, target_loc, child: true, parent_oid: Some(parent_oid) }
+        Self {
+            shown,
+            target_loc,
+            child: true,
+            parent_oid: Some(parent_oid),
+        }
     }
 }
 
@@ -77,14 +87,20 @@ impl MonsterBehavior for TrapRockBehavior {
             }
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
             return;
         }
@@ -97,23 +113,25 @@ impl MonsterBehavior for TrapRockBehavior {
             self.shown = true;
             self.target_loc = (target.x, target.y);
             ctx.out_monster_teleports.push((monster.object_id, tx, ty));
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: target.session_id,
-                poison: Poison::new(PoisonType::PARALYSIS, 3, 0, 1000),
-            });
+            ctx.out_poisons
+                .push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: target.session_id,
+                    poison: Poison::new(PoisonType::PARALYSIS, 3, 0, 1000),
+                });
             // C# Show（TrapRock.cs:200）：Target.InTrapRock = true（S.InTrapRock，服务端禁走）
             ctx.out_trap_state.push((target.session_id, true));
             // #1437：C# Show——其余三角生成 ChildRock（立即可见、同目标、slave 归属父岩）
             for c in trap_rock_child_corners(corner as u8) {
-                ctx.out_child_rocks.push(crate::actors::world::ai::ChildRockSpawn {
-                    monster_name: monster.name.clone(),
-                    x: target.x + DIR_DX[c as usize],
-                    y: target.y + DIR_DY[c as usize],
-                    target_session: target.session_id,
-                    target_x: target.x,
-                    target_y: target.y,
-                    parent_oid: monster.object_id,
-                });
+                ctx.out_child_rocks
+                    .push(crate::actors::world::ai::ChildRockSpawn {
+                        monster_name: monster.name.clone(),
+                        x: target.x + DIR_DX[c as usize],
+                        y: target.y + DIR_DY[c as usize],
+                        target_session: target.session_id,
+                        target_x: target.x,
+                        target_y: target.y,
+                        parent_oid: monster.object_id,
+                    });
             }
             return;
         }
@@ -126,19 +144,26 @@ impl MonsterBehavior for TrapRockBehavior {
         // C# Attack：远程 + 1/8 麻痹
         if ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
-            if fastrand::i32(0..8) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::PARALYSIS, 3, 0, 1000),
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
                 });
+            if fastrand::i32(0..8) == 0 {
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::PARALYSIS, 3, 0, 1000),
+                    });
             }
         }
     }

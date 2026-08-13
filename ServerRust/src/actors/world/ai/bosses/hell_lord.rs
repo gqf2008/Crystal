@@ -4,16 +4,16 @@
 //! 机制：不能移动、5阶段(stage 0..4，靠 Knight 被杀推进)、stage<4 完全无敌、
 //! 自身不直接攻击（空 Attack），纯靠召唤 Knight + 撒 Bomb + Quake 法术场
 
+use crate::actors::world::ai::behavior::MonsterBehavior;
+use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::Spell;
-use crate::actors::world::ai::behavior::MonsterBehavior;
-use crate::actors::world::ai::ctx::AiCtx;
 
 const RAGE_DURATION_TICKS: u64 = 1200; // 2 分钟狂暴
 
 pub struct HellLordBehavior {
-    stage: u8,        // 0..4
+    stage: u8, // 0..4
     begin: bool,
     raged: bool,
     rage_end_tick: u64,
@@ -38,9 +38,15 @@ impl HellLordBehavior {
 }
 
 impl MonsterBehavior for HellLordBehavior {
-    fn can_move(&self) -> bool { false }
-    fn can_regen(&self) -> bool { false }
-    fn on_poison(&mut self, _poison: Poison) -> bool { false } // 完全免疫毒
+    fn can_move(&self) -> bool {
+        false
+    }
+    fn can_regen(&self) -> bool {
+        false
+    }
+    fn on_poison(&mut self, _poison: Poison) -> bool {
+        false
+    } // 完全免疫毒
 
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
@@ -57,7 +63,9 @@ impl MonsterBehavior for HellLordBehavior {
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // C# Process：玩家全部离开则复位
-        let players_on_map = ctx.players.iter()
+        let players_on_map = ctx
+            .players
+            .iter()
             .filter(|p| p.map_index == monster.map_index && p.hp > 0)
             .count();
         if players_on_map == 0 && self.stage > 0 {
@@ -98,7 +106,12 @@ impl MonsterBehavior for HellLordBehavior {
         if self.raged || fastrand::i32(0..3) == 0 {
             let bombs = ["HellBomb1", "HellBomb2", "HellBomb3"];
             let bomb = bombs[fastrand::usize(0..3)];
-            for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0).take(1) {
+            for p in ctx
+                .players
+                .iter()
+                .filter(|p| p.map_index == monster.map_index && p.hp > 0)
+                .take(1)
+            {
                 ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                     monster_name: bomb.to_string(),
                     x: p.x + fastrand::i32(-5..=15),
@@ -111,22 +124,32 @@ impl MonsterBehavior for HellLordBehavior {
 
         // 每次撒 Quake 法术场（C# SpawnQuakes）
         let quake_count = if self.raged { 10 } else { 5 };
-        for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0).take(1) {
+        for p in ctx
+            .players
+            .iter()
+            .filter(|p| p.map_index == monster.map_index && p.hp > 0)
+            .take(1)
+        {
             for _ in 0..quake_count {
                 let dx = fastrand::i32(-15..=15);
                 let dy = fastrand::i32(-15..=15);
-                let spell = if fastrand::i32(0..2) == 0 { Spell::MapQuake1 } else { Spell::MapQuake2 };
+                let spell = if fastrand::i32(0..2) == 0 {
+                    Spell::MapQuake1
+                } else {
+                    Spell::MapQuake2
+                };
                 let damage = fastrand::i32(monster.min_dmg..=monster.max_dmg).max(1);
-                ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                    spell,
-                    x: p.x + dx,
-                    y: p.y + dy,
-                    value: damage,
-                    duration_ms: 2000,
-                    tick_ms: 500,
-                    caster_oid: monster.object_id,
-                    caster_session: 0,
-                });
+                ctx.out_spell_fields
+                    .push(crate::actors::world::ai::SpellFieldSpawn {
+                        spell,
+                        x: p.x + dx,
+                        y: p.y + dy,
+                        value: damage,
+                        duration_ms: 2000,
+                        tick_ms: 500,
+                        caster_oid: monster.object_id,
+                        caster_session: 0,
+                    });
             }
         }
     }

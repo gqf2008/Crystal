@@ -9,10 +9,10 @@
 //! CompleteRangeAttack（C# :12-28）：FindAllTargets(2, target.loc)；
 //!   主目标 damage，其他 damage/2。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 /// 继承 AxeSkeleton AttackRange=6
 const ATTACK_RANGE: i32 = 6;
@@ -23,7 +23,9 @@ const SPLASH_RADIUS: i32 = 2;
 pub struct TrollBomberBehavior;
 
 impl TrollBomberBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for TrollBomberBehavior {
@@ -38,20 +40,28 @@ impl MonsterBehavior for TrollBomberBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             // 投弹：目标点 2 格 AOE——主目标全额、其他目标半额（C# CompleteRangeAttack，主目标不二次受击）
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let full = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let full =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             let half = (full / 2).max(1);
-            let splash: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(target.x, target.y, SPLASH_RADIUS, monster.map_index)
-                    .into_iter().copied().collect();
+            let splash: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(target.x, target.y, SPLASH_RADIUS, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
             for p in splash {
-                let dmg = if p.session_id == target.session_id { full } else { half };
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: p.session_id,
-                    target_object_id: p.object_id,
-                    damage: dmg,
-                    spell_id: 0,
-                });
+                let dmg = if p.session_id == target.session_id {
+                    full
+                } else {
+                    half
+                };
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: p.session_id,
+                        target_object_id: p.object_id,
+                        damage: dmg,
+                        spell_id: 0,
+                    });
             }
             return;
         }
