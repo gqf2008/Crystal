@@ -722,10 +722,8 @@ impl UserItem {
                             None
                         };
                     }
-                    ItemType::Weapon => {
-                        if info.shape == 49 || info.shape == 50 {
-                            target = Some(5);
-                        }
+                    ItemType::Weapon if info.shape == 49 || info.shape == 50 => {
+                        target = Some(5);
                     }
                     _ => {}
                 }

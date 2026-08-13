@@ -77,7 +77,7 @@ impl Packet for UpdateIntelligentCreatureList {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
         let _rank_type = reader.read_u8()?;
-        let my_rank = reader.read_i32::<LittleEndian>()?;
+        let _my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut creatures = Vec::with_capacity(count as usize);
 
@@ -296,7 +296,7 @@ impl Packet for GameShopInfo {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
         let _rank_type = reader.read_u8()?;
-        let my_rank = reader.read_i32::<LittleEndian>()?;
+        let _my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut items = Vec::with_capacity(count as usize);
 
@@ -486,7 +486,7 @@ impl Packet for GuildTerritoryPage {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
         let _rank_type = reader.read_u8()?;
-        let my_rank = reader.read_i32::<LittleEndian>()?;
+        let _my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut territories = Vec::with_capacity(count as usize);
 

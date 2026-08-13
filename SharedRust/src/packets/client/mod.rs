@@ -1,6 +1,7 @@
 //! Client Packets Module
 //!
 //! Packets sent from client to server.
+#![allow(ambiguous_glob_reexports)] // refine/trade 同定义 DepositTradeItem/RetrieveTradeItem
 
 pub mod account;
 pub mod character;

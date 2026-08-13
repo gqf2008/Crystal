@@ -4,8 +4,8 @@ use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::Read;
 
 /// GetRentedItems - 获取租赁物品 (252)
 #[derive(Debug, Clone)]
