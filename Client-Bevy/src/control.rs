@@ -14,7 +14,9 @@ use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use serde_json::{json, Value};
 
-use crate::actor::{ActorAnim, LocalPlayer, NetObjectId};
+use crate::actor::{
+    ActorAnim, LocalPlayer, Monster, MonsterName, NetObjectId, Npc, NpcName, Player, PlayerName,
+};
 use crate::game::movement::{world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::map_renderer::{GameData, GameLibraries};
@@ -25,6 +27,7 @@ enum ControlCommand {
     Move { dx: i32, dy: i32, run: bool },
     Screenshot { path: String },
     GetState { reply: Sender<String> },
+    Nearby { reply: Sender<String> },
 }
 
 #[derive(Resource)]
@@ -37,7 +40,10 @@ impl Plugin for ControlPlugin {
         let (tx, rx) = bounded::<ControlCommand>(64);
         app.insert_resource(ControlRx(rx));
         std::thread::spawn(move || control_listener(tx));
-        app.add_systems(Update, apply_control_commands.run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            apply_control_commands.run_if(in_state(AppState::Game)),
+        );
     }
 }
 
@@ -58,7 +64,10 @@ fn control_listener(tx: Sender<ControlCommand>) {
 }
 
 fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
-    let reader = BufReader::new(match stream.try_clone() { Ok(s) => s, Err(_) => return });
+    let reader = BufReader::new(match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    });
     for line in reader.lines() {
         let Ok(line) = line else { break };
         let line = line.trim();
@@ -90,9 +99,23 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let _ = tx.send(ControlCommand::Screenshot { path });
                 json!({"ok": true})
             }
+            "nearby" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::Nearby { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             "state" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::GetState { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::GetState { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -116,11 +139,16 @@ fn apply_control_commands(
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
     players: Query<(Entity, &Transform, &ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
+    monsters: Query<(&Transform, &MonsterName), (With<Monster>, Without<LocalPlayer>)>,
+    npcs: Query<(&Transform, &NpcName), (With<Npc>, Without<LocalPlayer>)>,
+    others: Query<(&Transform, &PlayerName), (With<Player>, Without<LocalPlayer>)>,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
             ControlCommand::Move { dx, dy, run } => {
-                let Ok((pe, ptf, _)) = players.single() else { continue };
+                let Ok((pe, ptf, _)) = players.single() else {
+                    continue;
+                };
                 let Some(map) = &game_data.map else { continue };
                 let from = world_to_tile(ptf.translation.x, ptf.translation.y);
                 let target = (from.0 + dx, from.1 + dy);
@@ -138,14 +166,60 @@ fn apply_control_commands(
                             step_origin: None,
                             turn_acc: 0.0,
                         });
-                        tracing::info!("🎮 control move: ({},{}) -> ({},{}) run={run}", from.0, from.1, target.0, target.1);
+                        tracing::info!(
+                            "🎮 control move: ({},{}) -> ({},{}) run={run}",
+                            from.0,
+                            from.1,
+                            target.0,
+                            target.1
+                        );
                     }
-                    _ => tracing::debug!("🎮 control move unreachable: ({},{}) -> ({},{})", from.0, from.1, target.0, target.1),
+                    _ => tracing::debug!(
+                        "🎮 control move unreachable: ({},{}) -> ({},{})",
+                        from.0,
+                        from.1,
+                        target.0,
+                        target.1
+                    ),
                 }
             }
             ControlCommand::Screenshot { path } => {
                 tracing::info!("🎮 control screenshot: {path}");
-                commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+                commands
+                    .spawn(Screenshot::primary_window())
+                    .observe(save_to_disk(path));
+            }
+            ControlCommand::Nearby { reply } => {
+                let Ok((_, ptf, _)) = players.single() else {
+                    let _ = reply.send("{}".to_string());
+                    continue;
+                };
+                let px = ptf.translation.x;
+                let py = ptf.translation.y;
+                let mut arr = Vec::new();
+                for (tf, name) in monsters.iter() {
+                    let d =
+                        ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
+                    if d < 600.0 {
+                        arr.push(json!({"kind": "monster", "name": name.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                    }
+                }
+                for (tf, name) in npcs.iter() {
+                    let d =
+                        ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
+                    if d < 600.0 {
+                        arr.push(json!({"kind": "npc", "name": name.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                    }
+                }
+                for (tf, name) in others.iter() {
+                    let d =
+                        ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
+                    if d < 600.0 {
+                        arr.push(json!({"kind": "player", "name": name.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                    }
+                }
+                arr.sort_by_key(|v| v.get("dist").and_then(|d| d.as_i64()).unwrap_or(0));
+                let _ = reply.send(json!({"count": arr.len(), "entities": arr}).to_string());
             }
             ControlCommand::GetState { reply } => {
                 let Ok((_, ptf, anim)) = players.single() else {
