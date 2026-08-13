@@ -4,6 +4,9 @@
 //   move {dx,dy,run}     相对玩家瓦片偏移移动（dx/dy 为瓦片数）
 //   screenshot {path}    保存当前帧截图
 //   state {}             返回玩家位置/朝向
+//   nearby {}            返回周围实体（含 object_id）
+//   attack {object_id}   攻击指定对象
+//   interact {object_id} 与指定 NPC 对话
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -19,7 +22,9 @@ use crate::actor::{
 };
 use crate::game::movement::{world_to_tile, LocalMove};
 use crate::game::pathfinding;
+use crate::game::player_control::ControlState;
 use crate::map_renderer::{GameData, GameLibraries};
+use crate::network::NetConnection;
 use crate::scenes::AppState;
 
 /// 控制命令（控制线程 → Bevy 主循环）
@@ -28,6 +33,8 @@ enum ControlCommand {
     Screenshot { path: String },
     GetState { reply: Sender<String> },
     Nearby { reply: Sender<String> },
+    Attack { object_id: u32 },
+    Interact { object_id: u32 },
 }
 
 #[derive(Resource)]
@@ -124,6 +131,30 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            "attack" => {
+                let object_id = params
+                    .get("object_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                if object_id > 0 {
+                    let _ = tx.send(ControlCommand::Attack { object_id });
+                    json!({"ok": true})
+                } else {
+                    json!({"error": "missing object_id"})
+                }
+            }
+            "interact" => {
+                let object_id = params
+                    .get("object_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                if object_id > 0 {
+                    let _ = tx.send(ControlCommand::Interact { object_id });
+                    json!({"ok": true})
+                } else {
+                    json!({"error": "missing object_id"})
+                }
+            }
             _ => json!({"error": format!("unknown method: {method}")}),
         };
 
@@ -136,12 +167,18 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
 fn apply_control_commands(
     mut commands: Commands,
     control: Res<ControlRx>,
+    mut control_state: ResMut<ControlState>,
+    net: Res<NetConnection>,
+    time: Res<Time>,
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
     players: Query<(Entity, &Transform, &ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
-    monsters: Query<(&Transform, &MonsterName), (With<Monster>, Without<LocalPlayer>)>,
-    npcs: Query<(&Transform, &NpcName), (With<Npc>, Without<LocalPlayer>)>,
-    others: Query<(&Transform, &PlayerName), (With<Player>, Without<LocalPlayer>)>,
+    monsters: Query<
+        (&Transform, &MonsterName, &NetObjectId),
+        (With<Monster>, Without<LocalPlayer>),
+    >,
+    npcs: Query<(&Transform, &NpcName, &NetObjectId), (With<Npc>, Without<LocalPlayer>)>,
+    others: Query<(&Transform, &PlayerName, &NetObjectId), (With<Player>, Without<LocalPlayer>)>,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
@@ -197,25 +234,25 @@ fn apply_control_commands(
                 let px = ptf.translation.x;
                 let py = ptf.translation.y;
                 let mut arr = Vec::new();
-                for (tf, name) in monsters.iter() {
+                for (tf, name, oid) in monsters.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "monster", "name": name.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        arr.push(json!({"kind": "monster", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
                     }
                 }
-                for (tf, name) in npcs.iter() {
+                for (tf, name, oid) in npcs.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "npc", "name": name.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        arr.push(json!({"kind": "npc", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
                     }
                 }
-                for (tf, name) in others.iter() {
+                for (tf, name, oid) in others.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "player", "name": name.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        arr.push(json!({"kind": "player", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
                     }
                 }
                 arr.sort_by_key(|v| v.get("dist").and_then(|d| d.as_i64()).unwrap_or(0));
@@ -236,6 +273,23 @@ fn apply_control_commands(
                 })
                 .to_string();
                 let _ = reply.send(s);
+            }
+            ControlCommand::Attack { object_id } => {
+                control_state.attack_target = Some(object_id);
+                control_state.last_attack = 0.0;
+                if let Ok((pe, _, _)) = players.single() {
+                    commands.entity(pe).remove::<LocalMove>();
+                }
+                tracing::info!("🎮 control attack: {object_id}");
+            }
+            ControlCommand::Interact { object_id } => {
+                control_state.npc_id = Some(object_id);
+                control_state.last_npc_call = time.elapsed_secs();
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id,
+                    key: "[@Main]".to_string(),
+                });
+                tracing::info!("🎮 control interact: {object_id}");
             }
         }
     }
