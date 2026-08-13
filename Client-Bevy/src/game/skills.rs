@@ -659,14 +659,8 @@ fn skills_window_system(
 // ============================================================================
 
 const SKILL_BAR_Y: f32 = 768.0 - 42.0;
-// C# SkillBarDialog：背景 Prguse[2190]=216x28；技能格 24x22，步进 25，首格 x=15,y=3；切换绑定按钮 16x28 @(0,0)。
-const SKILL_BAR_W: f32 = 216.0;
-const SKILL_BAR_H: f32 = 28.0;
-const SKILL_SLOT_W: f32 = 24.0;
-const SKILL_SLOT_H: f32 = 22.0;
-const SKILL_SLOT_STEP: f32 = 25.0;
-const SKILL_SLOT_OFFSET_X: f32 = 15.0;
-const SKILL_SLOT_OFFSET_Y: f32 = 3.0;
+const SKILL_SLOT_W: f32 = 34.0;
+const SKILL_SLOT_H: f32 = 28.0;
 
 fn spawn_skill_bar(
     mut commands: Commands,
@@ -689,13 +683,9 @@ if !crate::ui::sprite_ui::ui_enabled("skill") {
     if let Some(h) = crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, crate::resources::libraries::LibraryName::Prguse, 2190) {
         crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, bar.pos.0, bar.pos.1, 2.4, 1.0);
     }
-    // C# SkillBarDialog 左侧切换绑定按钮（16x28）
-    if let Some(h) = crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, crate::resources::libraries::LibraryName::Prguse, 2247) {
-        crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, bar.pos.0, bar.pos.1, 2.45, 1.0);
-    }
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     for i in 0..8usize {
-        let x = bar.pos.0 + SKILL_SLOT_OFFSET_X + i as f32 * SKILL_SLOT_STEP;
+        let x = bar.pos.0 + i as f32 * (SKILL_SLOT_W + 4.0);
         let slot = commands
             .spawn((
                 UiEntity,
@@ -707,21 +697,21 @@ if !crate::ui::sprite_ui::ui_enabled("skill") {
                     ..default()
                 },
                 bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(x, -(bar.pos.1 + SKILL_SLOT_OFFSET_Y), 2.5),
+                Transform::from_xyz(x, -bar.pos.1, 2.5),
                 Visibility::Visible,
             ))
             .id();
         commands.entity(slot).with_children(|p| {
-            // 技能图标（MagIcon[m.icon]；C# 单元格与图标同尺寸，无需额外缩边）
+            // 技能图标（MagIcon[m.icon]）
             p.spawn((
                 SkillBarIcon(i),
                 Sprite {
                     image: white.clone(),
-                    custom_size: Some(Vec2::new(SKILL_SLOT_W, SKILL_SLOT_H)),
+                    custom_size: Some(Vec2::new(SKILL_SLOT_W - 4.0, SKILL_SLOT_H - 4.0)),
                     ..default()
                 },
                 bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(0.0, 0.0, 2.6),
+                Transform::from_xyz(2.0, -2.0, 2.6),
                 Visibility::Hidden,
             ));
             // F 键标签
@@ -735,7 +725,7 @@ if !crate::ui::sprite_ui::ui_enabled("skill") {
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.9, 0.4)),
-                Transform::from_xyz(-2.0, 3.0, 2.7),
+                Transform::from_xyz(1.0, -1.0, 2.7),
             ));
         });
     }
@@ -750,11 +740,11 @@ fn skill_bar_drag_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
-    let bar_w = SKILL_BAR_W;
+    let bar_w = 8.0 * (SKILL_SLOT_W + 4.0) - 4.0;
     let in_bar = cursor.x >= bar.pos.0
         && cursor.x <= bar.pos.0 + bar_w
         && cursor.y >= bar.pos.1
-        && cursor.y <= bar.pos.1 + SKILL_BAR_H;
+        && cursor.y <= bar.pos.1 + SKILL_SLOT_H;
     if mouse.just_pressed(MouseButton::Left) && in_bar {
         bar.drag_offset = Some((cursor.x - bar.pos.0, cursor.y - bar.pos.1));
         tracing::debug!("⚙️ 技能栏开始拖动");
@@ -770,8 +760,8 @@ fn skill_bar_drag_system(
     }
     // 实时应用位置到各槽位（含拖动中）
     for (mut tf, slot) in &mut slots {
-        tf.translation.x = bar.pos.0 + SKILL_SLOT_OFFSET_X + slot.0 as f32 * SKILL_SLOT_STEP;
-        tf.translation.y = -(bar.pos.1 + SKILL_SLOT_OFFSET_Y);
+        tf.translation.x = bar.pos.0 + slot.0 as f32 * (SKILL_SLOT_W + 4.0);
+        tf.translation.y = -bar.pos.1;
     }
 }
 
