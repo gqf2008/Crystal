@@ -131,12 +131,14 @@ enum ParseMode {
 // 解析器
 // =============================================================================
 
-/// 读取 00Default.txt 并展开 #INSERT（C# NPCScript.ParseInsert：加载外部文件全部行）。
+/// 读取 00Default.txt 并展开 #INSERT 与 #INCLUDE（C# NPCScript.LoadInfo：ParseInsert → ParseInclude）。
 pub fn load_default_content(script_dir: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(script_dir.join("00Default.txt")).ok()?;
     let envir_dir = script_dir.parent().unwrap_or(std::path::Path::new(""));
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-    Some(expand_inserts(&lines, envir_dir).join("\n"))
+    let inserted = expand_inserts(&lines, envir_dir);
+    let included = expand_includes(&inserted, envir_dir);
+    Some(included.join("\n"))
 }
 
 /// 加载默认 NPC 脚本（C# Settings.DefaultNPCFilename="00Default"，位于 NPC 脚本目录；文件不存在 → None）
@@ -204,8 +206,7 @@ impl ParsedScript {
     /// - 识别 `#IF/#ACT/#SAY/#ELSEACT/#ELSESAY/#OR/#ELSE/#ENDIF` 等指令行。
     /// - `;` 开头的行视为注释，整行忽略。
     /// - 其余非空行按当前模式分发为 check/action/say。
-    /// - `#INSERT [path] @section`：仅记录日志，不真正加载外部文件
-    ///   （文件包含需要 IO，调用方在需要时单独处理）。
+    /// - `#INSERT`/`#INCLUDE` 行由 `load_default_content` 在解析前展开，本函数跳过。
 pub fn parse(content: &str) -> ParsedScript {
         let mut script = ParsedScript::default();
         let mut cur_sec: Option<usize> = None;
