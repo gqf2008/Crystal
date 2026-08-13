@@ -1,8 +1,9 @@
 // ============================================================================
 // 游戏菜单对话框（M9 第 1 批）
 // 布局参考：C# GameScene MenuDialog（macroquad menu_dialog.rs）
-//   - 背景 Title[567]，位置 (ScreenWidth-44, MainDialog.top - 224 + 15)
-//   - 按钮（x=3，y=12..202 每 19px）：退出/下线/帮助/键盘/排名/宠物/坐骑/钓鱼/好友/师徒
+//   - 背景 Title[567]（实测 36x282），位置 (ScreenWidth-36, MainDialog.Y-282+15)
+//     MainDialog.Y = 768 - Prguse[1]高152 = 616 → 背景绝对原点 (988, 349)
+//   - 按钮（x=3，y=12..259 共 13 个）：退出/下线/帮助/键盘/排名/宠物/坐骑/钓鱼/好友/师徒/夫妻/队伍/行会
 // ============================================================================
 
 use bevy::prelude::*;
@@ -48,6 +49,21 @@ pub struct MenuExitYes;
 
 #[derive(Component)]
 pub struct MenuExitNo;
+
+// C# MenuDialog（MainDialogs.cs:3024-3029）：Index=567 Library=Title，
+//   Location = (ScreenWidth - Size.Width, MainDialog.Y - Size.Height + 15)。
+//   Title[567] 实测 36x282；MainDialog 背景 Prguse[1] 实测 1024x152 → MainDialog.Y = 768-152 = 616。
+/// 菜单背景宽/高 = Title[567] 实测
+pub const MENU_W: f32 = 36.0;
+pub const MENU_H: f32 = 282.0;
+/// 主底栏高 = Prguse[1] 实测（决定 MainDialog.Y = 768-152）
+pub const MAIN_DIALOG_H: f32 = 152.0;
+/// 菜单背景绝对原点 X = ScreenWidth - Width（C#）
+pub const MENU_X: f32 = 1024.0 - MENU_W; // 988
+/// 菜单背景绝对原点 Y = MainDialog.Y - Height + 15（C#）
+pub const MENU_Y: f32 = 768.0 - MAIN_DIALOG_H - MENU_H + 15.0; // 349
+/// 按钮相对菜单的 x（C# 所有按钮 Location.X = 3）
+pub const MENU_BTN_DX: f32 = 3.0;
 
 /// 菜单按钮定义（纹理索引 + y 偏移）
 const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
@@ -101,9 +117,9 @@ fn spawn_menu_dialog(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Title[567]（位置：主对话框上方右侧）
+    // 背景 Title[567]（C# Location=(ScreenWidth-Width, MainDialog.Y-Height+15) → (988,349)）
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 567) {
-        let e = spawn_ui_sprite(&mut commands, h, 1024.0 - 44.0, 768.0 - 150.0 - 224.0 + 15.0, 6.0, 1.0);
+        let e = spawn_ui_sprite(&mut commands, h, MENU_X, MENU_Y, 6.0, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::Menu),
             MenuWidget,
@@ -116,7 +132,7 @@ fn spawn_menu_dialog(
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
             &mut commands, &mut libs, &mut images, &mut cache,
             *lib, *n, *h, *p,
-            1024.0 - 44.0 + 3.0, 768.0 - 150.0 - 224.0 + 15.0 + y, 7.0, 38.0, 19.0,
+            MENU_X + MENU_BTN_DX, MENU_Y + y, 7.0, 38.0, 19.0,
         ) {
             commands.entity(e).insert((
                 MenuBtn(*action),
