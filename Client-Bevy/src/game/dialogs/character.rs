@@ -951,8 +951,8 @@ mod tests {
     }
 
     /// 页门控护栏（#2505）：跑真实 spawn，断言状态/State 数值标签挂在正确页背景组件上。
-    /// C# 证据：StatusPage=Title[506]=页1、StatePage=Title[507]=页2（CharacterDialog.cs:86-113），
-    /// 13 个状态标签 Parent=StatusPage（:351-449）、12 个 State 标签 Parent=StatePage（:457-545）。
+    /// C# 证据：StatusPage=Title[506]=页1（:86-93）、StatePage=Title[507]=页2（:111-118），
+    /// 13 个状态标签 Parent=StatusPage（:351-452）、12 个 State 标签 Parent=StatePage（:454-548）。
     #[test]
     fn stat_labels_ride_correct_page_bg() {
         use crate::resources::libraries::Libraries;
