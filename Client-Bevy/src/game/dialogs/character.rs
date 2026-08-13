@@ -120,7 +120,7 @@ pub const EQUIP_SLOTS: [(f32, f32); 14] = [
     (128.0, 242.0), // Stone
     (203.0, 62.0),  // Mount
 ];
-/// C# MirItemCell 装备格 Size(36,32)（MirItemCell.cs:186；纵向步进 33=32+1 间隙）
+/// C# MirItemCell 装备格 Size(36,32)（MirItemCell.cs:186；纵向步进 36=32+4 间隙，如 BraceletL(8,170)→RingL(8,206)）
 pub const SLOT_W: f32 = 36.0;
 pub const SLOT_H: f32 = 32.0;
 /// C# NameLabel (0,12) 264x20 / GuildLabel (0,33) 264x30，HCenter|VCenter 框心（对话框相对）：
