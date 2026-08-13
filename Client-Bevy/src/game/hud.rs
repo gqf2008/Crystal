@@ -11,8 +11,11 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::game::dialogs::character::CharPage;
+use crate::game::dialogs::dura_status::{MINIMAP_H_BIG, MINIMAP_H_SMALL};
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
+use crate::game::dialogs::minimap::MiniMapMode;
+use crate::game::dialogs::option::OptionState;
 use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -352,6 +355,23 @@ pub const HUD_MP_ORB_Y: f32 = 42.0;
 pub const HUD_EXP_LABEL_DX: f32 = 20.0;
 pub const HUD_EXP_LABEL_DY: f32 = 10.0;
 
+/// 模式标签 X（C# MiniMapDialog.Process :2082-2087：MiniMapDialog.X - 3 = 898 - 3）
+pub const MODE_LABEL_X: f32 = 895.0;
+/// 三标签 y 偏移（C# Process: S=H+150 / A=H+165 / P=H+180；
+/// 绝对 y = 小地图高 + offset - 152，其中 152 = ScreenHeight(768) - MainDialog.Y(616)）
+pub const S_MODE_DY: f32 = -2.0;
+pub const A_MODE_DY: f32 = 13.0;
+pub const P_MODE_DY: f32 = 28.0;
+
+/// 模式标签绝对 y（随小地图大/小模式，C# Process 每帧重定位）
+pub fn mode_label_y(minimap_big: bool, dy: f32) -> f32 {
+    (if minimap_big {
+        MINIMAP_H_BIG
+    } else {
+        MINIMAP_H_SMALL
+    }) + dy
+}
+
 /// 攻击模式指示（右下角）
 #[derive(Component)]
 pub struct AttackModeText;
@@ -412,6 +432,8 @@ fn spawn_hud(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    opt: Res<OptionState>,
+    mmap: Res<MiniMapMode>,
 ) {
 if !crate::ui::sprite_ui::ui_enabled("hud") {
     return;
@@ -736,14 +758,49 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         commands.entity(e).insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
     }
 
-    // 攻击模式指示（#156，右下角）
-    let am = spawn_ui_text(&mut commands, &font, "模式:和平", 1024.0 - 110.0, 768.0 - 24.0, 12.0, Color::srgb(1.0, 0.9, 0.3), 4.0);
-    commands.entity(am).insert(AttackModeText);
-    // #1388：宠物/技能模式指示（C# PModeLabel/SModeLabel，右下堆叠）
-    let pm = spawn_ui_text(&mut commands, &font, "宠物:跟随", 1024.0 - 110.0, 768.0 - 40.0, 12.0, Color::srgb(0.6, 0.9, 0.6), 4.0);
-    commands.entity(pm).insert(PModeText);
-    let sm = spawn_ui_text(&mut commands, &font, "技能:Ctrl", 1024.0 - 110.0, 768.0 - 56.0, 12.0, Color::srgb(0.6, 0.8, 1.0), 4.0);
-    commands.entity(sm).insert(SModeText);
+    // 模式标签（C# AMode/PMode/SModeLabel）：右上小地图正下方，顶→底 S/A/P。
+    // X = MiniMap.X-3 = 895；y 随小地图大/小模式（C# Process 每帧重定位，attack_mode_text_system 跟随）。
+    // 颜色对齐 C# 命名色：AMode=Yellow、SMode=LimeGreen、PMode=Orange。
+    // 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 Visible=Settings.ModeView）。
+    let mode_vis = if opt.mode_view {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    let big = mmap.big;
+    let sm = spawn_ui_text(
+        &mut commands,
+        &font,
+        "技能:Ctrl",
+        MODE_LABEL_X,
+        mode_label_y(big, S_MODE_DY),
+        12.0,
+        Color::srgb(0.196, 0.804, 0.196),
+        4.0,
+    );
+    commands.entity(sm).insert((SModeText, mode_vis));
+    let am = spawn_ui_text(
+        &mut commands,
+        &font,
+        "模式:和平",
+        MODE_LABEL_X,
+        mode_label_y(big, A_MODE_DY),
+        12.0,
+        Color::srgb(1.0, 1.0, 0.0),
+        4.0,
+    );
+    commands.entity(am).insert((AttackModeText, mode_vis));
+    let pm = spawn_ui_text(
+        &mut commands,
+        &font,
+        "宠物:跟随",
+        MODE_LABEL_X,
+        mode_label_y(big, P_MODE_DY),
+        12.0,
+        Color::srgb(1.0, 0.647, 0.0),
+        4.0,
+    );
+    commands.entity(pm).insert((PModeText, mode_vis));
     // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
     let wt = spawn_ui_text(&mut commands, &font, "0/0", main_x + bg_w - 105.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
     commands.entity(wt).insert(HudWeightText);
@@ -834,15 +891,29 @@ fn auto_potion_system(
 fn attack_mode_text_system(
     mode: Res<crate::game::combat::AttackModeState>,
     hud: Res<HudState>,
-    opt: Res<crate::game::dialogs::option::OptionState>,
-    mut am: Query<&mut Text2d, (With<AttackModeText>, Without<PModeText>, Without<SModeText>)>,
-    mut pm: Query<&mut Text2d, (With<PModeText>, Without<AttackModeText>, Without<SModeText>)>,
-    mut sm: Query<&mut Text2d, (With<SModeText>, Without<AttackModeText>, Without<PModeText>)>,
+    opt: Res<OptionState>,
+    mmap: Res<MiniMapMode>,
+    mut am: Query<
+        (&mut Text2d, &mut Transform),
+        (With<AttackModeText>, Without<PModeText>, Without<SModeText>),
+    >,
+    mut pm: Query<
+        (&mut Text2d, &mut Transform),
+        (With<PModeText>, Without<AttackModeText>, Without<SModeText>),
+    >,
+    mut sm: Query<
+        (&mut Text2d, &mut Transform),
+        (With<SModeText>, Without<AttackModeText>, Without<PModeText>),
+    >,
 ) {
     let a = format!("模式:{}", crate::game::combat::attack_mode_name(mode.mode));
-    for mut t in &mut am {
+    let ay = -mode_label_y(mmap.big, A_MODE_DY);
+    for (mut t, mut tf) in &mut am {
         if t.0 != a {
             t.0 = a.clone();
+        }
+        if (tf.translation.y - ay).abs() > 0.5 {
+            tf.translation.y = ay;
         }
     }
     let p = match hud.pet_mode {
@@ -853,15 +924,23 @@ fn attack_mode_text_system(
         mir2_shared::enums::PetMode::FocusMasterTarget => "宠物:跟随目标".to_string(),
         _ => "宠物:未知".to_string(),
     };
-    for mut t in &mut pm {
+    let py = -mode_label_y(mmap.big, P_MODE_DY);
+    for (mut t, mut tf) in &mut pm {
         if t.0 != p {
             t.0 = p.clone();
         }
+        if (tf.translation.y - py).abs() > 0.5 {
+            tf.translation.y = py;
+        }
     }
     let s = if opt.skill_mode_ctrl { "技能:Ctrl".to_string() } else { "技能:~".to_string() };
-    for mut t in &mut sm {
+    let sy = -mode_label_y(mmap.big, S_MODE_DY);
+    for (mut t, mut tf) in &mut sm {
         if t.0 != s {
             t.0 = s.clone();
+        }
+        if (tf.translation.y - sy).abs() > 0.5 {
+            tf.translation.y = sy;
         }
     }
 }
@@ -1597,5 +1676,102 @@ mod tests {
         assert_eq!(format_exp_percent(0.255), "25.5%");
         assert_eq!(format_exp_percent(0.1234), "12.34%");
         assert_eq!(format_exp_percent(1.0), "100%");
+    }
+
+    /// 模式标签可见性门控：C# 构造 `Visible=Settings.ModeView`（仅 INI，默认 false）。
+    /// 真实 spawn_hud：mode_view=false → 三标签 Hidden；true → Visible。
+    #[test]
+    fn mode_labels_gated_by_mode_view() {
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn mode_vis(mode_view: bool) -> [Visibility; 3] {
+            let mut world = World::new();
+            world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+            world.insert_resource(Assets::<Image>::default());
+            world.insert_resource(UiImageCache::default());
+            world.insert_resource(Assets::<Font>::default());
+            world.insert_resource(UiFont::default());
+            let mut opt = OptionState::default();
+            opt.mode_view = mode_view;
+            world.insert_resource(opt);
+            world.insert_resource(MiniMapMode::default());
+            world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
+            let mut sq = world.query_filtered::<&Visibility, With<SModeText>>();
+            let s = sq.iter(&world).copied().next().expect("应有 SModeText");
+            let mut aq = world.query_filtered::<&Visibility, With<AttackModeText>>();
+            let a = aq
+                .iter(&world)
+                .copied()
+                .next()
+                .expect("应有 AttackModeText");
+            let mut pq = world.query_filtered::<&Visibility, With<PModeText>>();
+            let p = pq.iter(&world).copied().next().expect("应有 PModeText");
+            [s, a, p]
+        }
+
+        assert_eq!(
+            mode_vis(false),
+            [Visibility::Hidden; 3],
+            "默认 mode_view=false 三标签应隐藏（对齐 C# Settings.ModeView 默认 false）"
+        );
+        assert_eq!(
+            mode_vis(true),
+            [Visibility::Visible; 3],
+            "mode_view=true 三标签应可见"
+        );
+    }
+
+    /// 模式标签随小地图大/小模式重定位（C# MiniMapDialog.Process :2082-2087 每帧定位）。
+    /// X=MiniMap.X-3=895；大模式 y=152/167/182、小模式 y=43/58/73（S/A/P 顶→底），Bevy Transform.y 取负。
+    #[test]
+    fn mode_labels_follow_minimap_mode() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn ty(world: &World, e: Entity) -> f32 {
+            world.get::<Transform>(e).unwrap().translation.y
+        }
+
+        let mut world = World::new();
+        world.insert_resource(crate::game::combat::AttackModeState::default());
+        world.insert_resource(HudState::default());
+        world.insert_resource(OptionState::default());
+        world.insert_resource(MiniMapMode::default()); // 默认大模式
+        let sm = world
+            .spawn((
+                SModeText,
+                Text2d::new("技能:Ctrl"),
+                Transform::from_xyz(MODE_LABEL_X, 0.0, 4.0),
+            ))
+            .id();
+        let am = world
+            .spawn((
+                AttackModeText,
+                Text2d::new("模式:和平"),
+                Transform::from_xyz(MODE_LABEL_X, 0.0, 4.0),
+            ))
+            .id();
+        let pm = world
+            .spawn((
+                PModeText,
+                Text2d::new("宠物:跟随"),
+                Transform::from_xyz(MODE_LABEL_X, 0.0, 4.0),
+            ))
+            .id();
+
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("系统应成功");
+        assert_eq!(ty(&world, sm), -152.0, "大模式 SMode y");
+        assert_eq!(ty(&world, am), -167.0, "大模式 AMode y");
+        assert_eq!(ty(&world, pm), -182.0, "大模式 PMode y");
+
+        world.resource_mut::<MiniMapMode>().big = false;
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("系统应成功");
+        assert_eq!(ty(&world, sm), -43.0, "小模式 SMode y");
+        assert_eq!(ty(&world, am), -58.0, "小模式 AMode y");
+        assert_eq!(ty(&world, pm), -73.0, "小模式 PMode y");
     }
 }
