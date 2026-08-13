@@ -680,7 +680,7 @@ impl Message<AwakeningRequest> for WorldActor {
                 2 => self.awakening_cfg.armor_rate,  // Armour
                 _ => 1,
             };
-            let value = (fastrand::u8(1..=chance_max) as i32 * rate as i32).max(1) as u8;
+            let value = awake_roll_value(chance_max, self.awakening_cfg.hit_rate, rate);
 
             let mut awake = item.awake.clone();
             awake.awake_type = awake_type;
@@ -809,6 +809,26 @@ pub fn awake_type_name(t: mir2_shared::enums::AwakeType) -> &'static str {
     }
 }
 
+/// C# Awake.MakeHit：给定命中次数 / chance_max / itemRate，确定性计算觉醒值。
+/// stepValue = chance_max / 5；makeValue = total <= 1 ? 1 : floor(total)；value = max(1, makeValue * rate)。
+pub(crate) fn awake_value_from_hits(hit_count: u8, chance_max: u8, rate: u8) -> u8 {
+    let step = chance_max as f32 / 5.0;
+    let total = step * hit_count as f32;
+    let make = if total <= 1.0 { 1 } else { total as i32 };
+    (make * rate as i32).max(1) as u8
+}
+
+/// C# Awake.MakeHit：5 次 Bernoulli(hit_rate) 命中累加，返回最终觉醒值。
+pub(crate) fn awake_roll_value(chance_max: u8, hit_rate: u8, rate: u8) -> u8 {
+    let mut hits = 0u8;
+    for _ in 0..5 {
+        if fastrand::u8(0..100) < hit_rate {
+            hits += 1;
+        }
+    }
+    awake_value_from_hits(hits, chance_max, rate)
+}
+
 pub struct ResetAddedItemRequest {
     pub session_id: u64,
     pub unique_id: u64,
@@ -870,7 +890,7 @@ impl WorldActor {
                 mir2_shared::enums::ItemType::Armour => self.awakening_cfg.armor_rate,
                 _ => 1,
             };
-            let value = (fastrand::u8(1..=chance_max) as i32 * rate as i32).max(1) as u8;
+            let value = awake_roll_value(chance_max, self.awakening_cfg.hit_rate, rate);
 
             let mut new_awake = item.awake.clone();
             new_awake.awake_type = awake_type;
@@ -986,5 +1006,25 @@ mod tests {
         assert_eq!(refine_cost(1, 125), 1250);
         assert_eq!(refine_cost(10, 125), 12500);
         assert_eq!(refine_cost(-5, 125), 0); // RequiredAmount 负数按 0
+    }
+
+    #[test]
+    fn awake_value_from_hits_matches_csharp_makehit() {
+        // 0 命中：total=0 → makeValue=1 → value=rate
+        assert_eq!(awake_value_from_hits(0, 5, 1), 1);
+        assert_eq!(awake_value_from_hits(0, 5, 5), 5);
+        // 1 命中（step=1.0）：total=1.0 → makeValue=1 → value=rate
+        assert_eq!(awake_value_from_hits(1, 5, 1), 1);
+        // 2 命中：total=2.0 → makeValue=2
+        assert_eq!(awake_value_from_hits(2, 5, 1), 2);
+        // 5 命中：total=5.0 → makeValue=5；rate=5 → 25
+        assert_eq!(awake_value_from_hits(5, 5, 1), 5);
+        assert_eq!(awake_value_from_hits(5, 5, 5), 25);
+        // chance_max=1（step=0.2）：全命中 total=1.0 → makeValue=1
+        assert_eq!(awake_value_from_hits(5, 1, 5), 5);
+        // chance_max=3（step=0.6）：3 命中 total=1.8 → floor=1
+        assert_eq!(awake_value_from_hits(3, 3, 1), 1);
+        // chance_max=3（step=0.6）：4 命中 total=2.4 → floor=2
+        assert_eq!(awake_value_from_hits(4, 3, 1), 2);
     }
 }
