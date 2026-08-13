@@ -181,7 +181,14 @@ impl Message<SendMailRequest> for WorldActor {
         }
 
         // C# PlayerObject.GetMailCost：金币费用 floor(gold/1000)*CostPer1K + 物品保险 floor(price/100*Insurance)
-        let (mail_cost_per_1k, mail_insurance_pct, mail_free_with_stamp, _mail_capacity, auto_send_gold, auto_send_items) = self.social_ref
+        let (
+            mail_cost_per_1k,
+            mail_insurance_pct,
+            mail_free_with_stamp,
+            _mail_capacity,
+            auto_send_gold,
+            auto_send_items,
+        ) = self.social_ref
             .ask(crate::actors::social::NpcGetMailSettings)
             .await
             .unwrap_or((100, 5, true, 100, false, false));

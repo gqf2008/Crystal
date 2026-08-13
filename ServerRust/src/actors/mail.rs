@@ -145,7 +145,12 @@ impl Mailbox {
 /// - 有金币有物品 → MailAutoSendGold && MailAutoSendItems
 /// - 仅物品 → MailAutoSendItems
 /// - 仅金币 → MailAutoSendGold
-pub fn initial_collected(has_gold: bool, has_items: bool, auto_send_gold: bool, auto_send_items: bool) -> bool {
+pub fn initial_collected(
+    has_gold: bool,
+    has_items: bool,
+    auto_send_gold: bool,
+    auto_send_items: bool,
+) -> bool {
     if !has_gold && !has_items {
         return true;
     }
