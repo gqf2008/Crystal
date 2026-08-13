@@ -257,6 +257,40 @@ fn select_screen_aligned() {
     println!("  ✓ 选角界面 标题/4 角色槽/预览/5 底部按钮 全部对齐（预览 @({},{})）", pvx, pvy);
 }
 
+#[test]
+fn game_chat_death_aligned() {
+    let mut libs = Libs::new();
+
+    // C# ChatDialog：面板背景 Prguse[2221] 632x68 @(230,671)
+    let (cw, ch) = libs.size(LibraryName::Prguse, 2221);
+    assert_eq!((cw, ch), (632.0, 68.0), "[尺寸] 聊天面板背景应为 632x68");
+    assert_in_canvas("聊天面板背景", 230.0, 671.0, cw, ch);
+
+    // 输入行 C# ChatTextBox @(1,54)，即绝对 (231,725)，627x13
+    assert_inside(
+        "聊天输入背景",
+        231.0, 725.0, 627.0, 13.0,
+        230.0, 671.0, cw, ch,
+    );
+
+    // 滚动按钮 C# @x=618, y=1/9/39/45，必须在面板内
+    for (y, h) in [(1.0f32, 8.0f32), (9.0, 6.0), (39.0, 6.0), (45.0, 8.0)] {
+        assert_inside(
+            "聊天滚动按钮",
+            230.0 + 618.0, 671.0 + y, 12.0, h,
+            230.0, 671.0, cw, ch,
+        );
+    }
+
+    // C# ShowReviveMessage → MirMessageBox(YesNo)：背景 Prguse[360] 居中
+    assert_centered("死亡弹窗", 284.0, 289.0, LibraryName::Prguse, 360, &mut libs);
+    let (dw, dh) = libs.size(LibraryName::Prguse, 360);
+    assert_inside("死亡弹窗-是", 544.0, 446.0, 76.0, 25.0, 284.0, 289.0, dw, dh);
+    assert_inside("死亡弹窗-否", 644.0, 446.0, 76.0, 25.0, 284.0, 289.0, dw, dh);
+
+    println!("  ✓ 游戏内聊天面板 + 死亡弹窗 布局对齐");
+}
+
 /// 两个 [x, x+w) 区间是否重叠（同行 y 假设一致）。
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
