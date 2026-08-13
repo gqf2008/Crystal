@@ -24,8 +24,14 @@ use crate::ui::sprite_ui::{
 };
 
 /// 面板尺寸（Title[820] 实测 760x500）
-const PANEL_W: f32 = 760.0;
-const PANEL_H: f32 = 500.0;
+pub const PANEL_W: f32 = 760.0;
+pub const PANEL_H: f32 = 500.0;
+/// 搜索输入框（C# BigMapDialog.cs:204,207 SearchTextBox Location(59, Size.Height-27) Size(130,10)；
+/// C# 无独立"搜索:"label，仅 SearchButton 带 Hint）。SEARCH_Y 为相对面板底部的偏移（H-27）。
+pub const SEARCH_X: f32 = 59.0;
+pub const SEARCH_Y_FROM_BOTTOM: f32 = 27.0;
+pub const SEARCH_W: f32 = 130.0;
+pub const SEARCH_H: f32 = 10.0;
 /// 视口区域（C# BigMapViewPort 568x380 @ (14,52)）
 const VIEW_X: f32 = 14.0;
 const VIEW_Y: f32 = 52.0;
@@ -367,28 +373,40 @@ fn spawn_big_map(
             BigMapWidget,
         ));
     }
-    // 搜索输入框（C# SearchTextBox；TextInputField id=10 供大地图专用）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let label = spawn_ui_text(&mut commands, &font, "搜索:", px + 23.0, py + ph - 70.0, 11.0, Color::WHITE, 8.1);
-    commands.entity(label).insert((DialogRoot(DialogKind::BigMap), BigMapWidget));
-    commands
-        .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::BigMap),
-            BigMapWidget,
-            TextInputField(10),
-            TextInputRect(px + 60.0, py + ph - 70.0, 150.0, 20.0),
-            Sprite {
-                image: white,
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(150.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(px + 60.0, -(py + ph - 70.0), 8.1),
-            Visibility::Visible,
-        ));
-    let disp = spawn_ui_text(&mut commands, &font, "", px + 63.0, py + ph - 67.0, 11.0, Color::WHITE, 8.2);
+    // 搜索输入框（C# SearchTextBox (59, H-27) 130x10；TextInputField id=10 供大地图专用）。
+    // C# 无独立"搜索:"前缀 label（仅 SearchButton 带 Hint），故不绘制该文本。
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
+    let box_y = py + ph - SEARCH_Y_FROM_BOTTOM;
+    commands.spawn((
+        UiEntity,
+        DialogRoot(DialogKind::BigMap),
+        BigMapWidget,
+        TextInputField(10),
+        TextInputRect(px + SEARCH_X, box_y, SEARCH_W, SEARCH_H),
+        Sprite {
+            image: white,
+            color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+            custom_size: Some(Vec2::new(SEARCH_W, SEARCH_H)),
+            ..default()
+        },
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(px + SEARCH_X, -box_y, 8.1),
+        Visibility::Visible,
+    ));
+    let disp = spawn_ui_text(
+        &mut commands,
+        &font,
+        "",
+        px + SEARCH_X + 2.0,
+        box_y,
+        10.0,
+        Color::WHITE,
+        8.2,
+    );
     commands.entity(disp).insert((
         TextInputDisplay(10),
         DialogRoot(DialogKind::BigMap),
