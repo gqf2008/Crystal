@@ -139,6 +139,14 @@ fn over_chat_panel(screen: Vec2) -> bool {
     screen.x <= 380.0 && screen.y >= 768.0 - 150.0 - 190.0
 }
 
+/// 技能快捷栏区域（C# SkillBarDialog 是对话框控件：落在其上的鼠标事件被控件吃掉，不透传地图）
+fn over_skill_bar(screen: Vec2, bar: &crate::game::skills::SkillBarState) -> bool {
+    screen.x >= bar.pos.0
+        && screen.x <= bar.pos.0 + crate::game::skills::SKILL_BAR_W
+        && screen.y >= bar.pos.1
+        && screen.y <= bar.pos.1 + crate::game::skills::SKILL_BAR_H
+}
+
 /// 打包 UI 锁定资源（数量框/确认框/选中物品），避免系统参数超 Bevy 16 上限
 #[derive(SystemParam)]
 struct UiLockState<'w> {
@@ -146,6 +154,8 @@ struct UiLockState<'w> {
     amount: Res<'w, crate::game::dialogs::amount_box::AmountBoxState>,
     confirm: Res<'w, crate::game::dialogs::inventory::InvDropConfirm>,
     dialog: Res<'w, crate::game::dialogs::DialogManager>,
+    skill_bar: Res<'w, crate::game::skills::SkillBarState>,
+    skill_bar_opt: Res<'w, crate::game::dialogs::option::OptionState>,
 }
 
 impl UiLockState<'_> {
@@ -156,6 +166,11 @@ impl UiLockState<'_> {
     /// #1830：窗口类对话框打开（小地图除外）
     fn blocks_world_click(&self) -> bool {
         self.dialog.blocks_world_click()
+    }
+
+    /// 技能栏可见且光标落在栏体上（C# 对话框 Hidden 时不吃事件）
+    fn over_visible_skill_bar(&self, screen: Vec2) -> bool {
+        self.skill_bar_opt.skill_bar && over_skill_bar(screen, &self.skill_bar)
     }
 }
 
@@ -218,6 +233,8 @@ fn right_click_move_system(
     buttons: Query<&UiButton>,
     hud: Res<HudState>,
     dialog: Res<crate::game::dialogs::DialogManager>,
+    skill_bar: Res<crate::game::skills::SkillBarState>,
+    skill_bar_opt: Res<crate::game::dialogs::option::OptionState>,
 ) {
     if hud.dead || hud.fishing || hud.paralysis {
         return;
@@ -231,7 +248,14 @@ fn right_click_move_system(
         cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
     });
     // #1830：窗口类对话框打开时不寻路移动（小地图除外）
-    if !mouse.just_pressed(MouseButton::Right) || over_ui || over_main_dialog(cursor_logical) || over_chat_panel(cursor_logical) || dialog.blocks_world_click() {
+    // #2487：技能栏控件吃掉落在其上的右键（C# 对话框 Hidden 时不吃）
+    if !mouse.just_pressed(MouseButton::Right)
+        || over_ui
+        || over_main_dialog(cursor_logical)
+        || over_chat_panel(cursor_logical)
+        || (skill_bar_opt.skill_bar && over_skill_bar(cursor_logical, &skill_bar))
+        || dialog.blocks_world_click()
+    {
         return;
     }
     let Some(map) = &game_data.map else { return };
@@ -309,12 +333,14 @@ fn left_click_interact_system(
     let world = screen_to_world(cursor, cam_tf, window);
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
     // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管；
-    //  #1830：窗口类对话框打开时也不处理世界点击，小地图除外）
+    //  #1830：窗口类对话框打开时也不处理世界点击，小地图除外；
+    //  #2487：技能栏控件吃掉落在其上的点击，不透传地图）
     if !mouse.just_pressed(MouseButton::Left)
         || ui.locked()
         || over_ui
         || over_main_dialog(cursor_logical)
         || over_chat_panel(cursor_logical)
+        || ui.over_visible_skill_bar(cursor_logical)
         || ui.blocks_world_click()
     {
         return;
