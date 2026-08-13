@@ -131,10 +131,17 @@ enum ParseMode {
 // 解析器
 // =============================================================================
 
+/// 读取 00Default.txt 并展开 #INSERT（C# NPCScript.ParseInsert：加载外部文件全部行）。
+pub fn load_default_content(script_dir: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(script_dir.join("00Default.txt")).ok()?;
+    let envir_dir = script_dir.parent().unwrap_or(std::path::Path::new(""));
+    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    Some(expand_inserts(&lines, envir_dir).join("\n"))
+}
+
 /// 加载默认 NPC 脚本（C# Settings.DefaultNPCFilename="00Default"，位于 NPC 脚本目录；文件不存在 → None）
 pub fn load_default_npc(script_dir: &std::path::Path) -> Option<ParsedScript> {
-    let path = script_dir.join("00Default.txt");
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = load_default_content(script_dir)?;
     Some(ParsedScript::parse(&content))
 }
 
@@ -159,10 +166,9 @@ pub fn extract_custom_commands(content: &str) -> Vec<String> {
 
 /// 加载默认 NPC 脚本中的自定义命令列表（文件不存在 → 空）
 pub fn load_custom_commands(script_dir: &std::path::Path) -> Vec<String> {
-    match std::fs::read_to_string(script_dir.join("00Default.txt")) {
-        Ok(content) => extract_custom_commands(&content),
-        Err(_) => Vec::new(),
-    }
+    load_default_content(script_dir)
+        .map(|content| extract_custom_commands(&content))
+        .unwrap_or_default()
 }
 
 /// 从默认 NPC 脚本提取活动坐标（C# NPCScript.cs:227-244：`[@_MapCoord(map,x,y)]` 段头 → map.Info.ActiveCoords，去重）
@@ -3375,6 +3381,35 @@ pub fn expand_includes(lines: &[String], envir_dir: &std::path::Path) -> Vec<Str
     out
 }
 
+/// C# NPCScript.ParseInsert：展开 #INSERT [path]（加载外部文件全部行，忽略 @section）。
+/// 路径相对于 Envir 根目录（quest_dir 的父目录）。
+pub fn expand_inserts(lines: &[String], envir_dir: &std::path::Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let t = line.trim();
+        if !t.to_uppercase().starts_with("#INSERT") {
+            out.push(line.clone());
+            continue;
+        }
+        let open = match t.find('[') { Some(i) => i, None => { warn!("NPC script #INSERT missing '[': {}", t); out.push(line.clone()); continue; } };
+        let close = match t.find(']') { Some(i) => i, None => { warn!("NPC script #INSERT missing ']': {}", t); out.push(line.clone()); continue; } };
+        if close <= open { out.push(line.clone()); continue; }
+        let rel_path = &t[open + 1..close];
+        let full = envir_dir.join(rel_path.replace('\\', "/"));
+        match std::fs::read_to_string(&full) {
+            Ok(content) => {
+                for ext in content.lines() {
+                    out.push(ext.to_string());
+                }
+            }
+            Err(_) => {
+                warn!("NPC script #INSERT file not found: {}", full.display());
+            }
+        }
+    }
+    out
+}
+
 /// 用于 npc.rs 选择走新引擎还是旧的 `<CMD>` 解析。
 pub fn is_csharp_format(script_text: &str) -> bool {
     for line in script_text.lines() {
@@ -3619,6 +3654,33 @@ You don't have enough Gold!
         assert!(main.segments[0].say.iter().any(|l| l.contains("hi")));
         // INSERT 不应产生任何 section
         assert!(script.find("INSERT").is_none());
+    }
+
+    #[test]
+    fn expand_inserts_inlines_whole_file() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("npcinsert_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sub = dir.join("Sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let inc = sub.join("Login.txt");
+        let mut f = std::fs::File::create(&inc).unwrap();
+        writeln!(f, "[@Main]").unwrap();
+        writeln!(f, "#SAY").unwrap();
+        writeln!(f, "hello").unwrap();
+        drop(f);
+
+        let lines = vec![
+            "#INSERT [Sub/Login.txt] @Main".to_string(),
+            "[@Other]".to_string(),
+            "#SAY".to_string(),
+            "bye".to_string(),
+        ];
+        let out = expand_inserts(&lines, &dir);
+        let joined = out.join("\n");
+        assert!(joined.contains("hello"));
+        assert!(joined.contains("bye"));
+        assert!(!joined.contains("#INSERT"));
     }
 
     #[test]

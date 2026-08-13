@@ -5916,7 +5916,7 @@ impl Actor for WorldActor {
                 // 默认 NPC 脚本 [@_MapCoord(map,x,y)] 段头 → 地图活动坐标（C# MapInfo.ActiveCoords）
         let active_coords: HashMap<i32, Vec<(i32, i32)>> = {
             let mut ac: HashMap<i32, Vec<(i32, i32)>> = HashMap::new();
-            let default_content = std::fs::read_to_string(args.quest_dir.join("00Default.txt")).unwrap_or_default();
+            let default_content = npc_script::load_default_content(&args.quest_dir).unwrap_or_default();
             for (file, x, y) in npc_script::extract_map_coords(&default_content) {
                 if let Some(mi) = map_infos.values().find(|mi| mi.file_name.eq_ignore_ascii_case(&file)) {
                     let entry = ac.entry(mi.index).or_default();
