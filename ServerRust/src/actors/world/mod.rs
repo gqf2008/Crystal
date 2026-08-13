@@ -1032,6 +1032,23 @@ const SPELL_PLAGUE: u8 = mir2_shared::enums::Spell::Plague as u8;               
 // 刺客系
 const SPELL_POISON_SWORD: u8 = mir2_shared::enums::Spell::PoisonSword as u8;      // 99 刺客·武器涂毒 buff
 
+/// C# MonsterObject.ScaleStat：Math.Round(v*m)（银行家舍入，.5 取偶）。
+fn scale_monster_stat(value: i32, multiplier: f64) -> i32 {
+    let scaled = value as f64 * multiplier;
+    let floor = scaled.floor();
+    let frac = scaled - floor;
+    let rounded = if frac < 0.5 {
+        floor
+    } else if frac > 0.5 {
+        floor + 1.0
+    } else if (floor as i64) % 2 == 0 {
+        floor
+    } else {
+        floor + 1.0
+    };
+    rounded as i32
+}
+
 impl MonsterState {
     /// #1874：记录最后攻击者（C# LastHitter）；若本怪为他人宠物，暂存攻击者供灰名排水
     pub fn set_last_hitter(&mut self, session: u64) {
@@ -1090,6 +1107,18 @@ impl MonsterState {
         self.luck = get(Stat::Luck);
         self.reflect = get(Stat::Reflect);
         self.damage_reduction_percent = get(Stat::DamageReductionPercent);
+    }
+
+    /// C# MonsterObject.ApplyMonsterTypeBonuses：稀有怪 AC/MAC × DefenseMultiplier，MC/SC × DamageMultiplier。
+    pub fn apply_rarity_combat_scaling(&mut self, def_m: f64, dmg_m: f64) {
+        self.min_ac = scale_monster_stat(self.min_ac, def_m);
+        self.max_ac = scale_monster_stat(self.max_ac, def_m);
+        self.min_mac = scale_monster_stat(self.min_mac, def_m);
+        self.max_mac = scale_monster_stat(self.max_mac, def_m);
+        self.min_mc = scale_monster_stat(self.min_mc, dmg_m);
+        self.max_mc = scale_monster_stat(self.max_mc, dmg_m);
+        self.min_sc = scale_monster_stat(self.min_sc, dmg_m);
+        self.max_sc = scale_monster_stat(self.max_sc, dmg_m);
     }
 
     /// 中毒：经 behavior.on_poison 过滤。
@@ -9155,16 +9184,16 @@ async fn spawn_npcs_and_monsters(
                   ctx.rarity.uncommon_exp_multiplier, ctx.rarity.uncommon_defense_multiplier),
             _ => (1.0, 1.0, 1.0, 1.0),
         };
-        let _def_m = def_m;
         let prefix = rarity_prefix(rarity);
         let (name, hp, max_hp, min_dmg, max_dmg, xp) = if rarity > 0 {
             (
                 format!("{}{}", prefix, monster.name),
-                (monster.hp as f64 * hp_m).max(1.0) as i32,
-                (monster.hp as f64 * hp_m).max(1.0) as i32,
-                (monster.min_dmg as f64 * dmg_m) as i32,
-                (monster.max_dmg as f64 * dmg_m) as i32,
-                (monster.xp as f64 * xp_m).max(1.0) as i32,
+                // C# ScaleStat：HP = max(1, Math.Round(v*m))，DC/XP = Math.Round(v*m)
+                scale_monster_stat(monster.hp, hp_m).max(1),
+                scale_monster_stat(monster.hp, hp_m).max(1),
+                scale_monster_stat(monster.min_dmg, dmg_m),
+                scale_monster_stat(monster.max_dmg, dmg_m),
+                scale_monster_stat(monster.xp, xp_m),
             )
         } else {
             (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
@@ -9265,6 +9294,10 @@ async fn spawn_npcs_and_monsters(
         if let Some(m) = monsters.last_mut() {
             if let Some(info) = ctx.monster_infos.get(&monster.monster_index) {
                 m.fill_combat_stats(info);
+                // C# ApplyMonsterTypeBonuses：稀有怪 AC/MAC × DefenseMultiplier，MC/SC × DamageMultiplier
+                if rarity > 0 {
+                    m.apply_rarity_combat_scaling(def_m, dmg_m);
+                }
             }
         }
         if is_elite {
@@ -10151,6 +10184,40 @@ mod tests {
         assert_eq!(m.min_mac, 30);
         assert_eq!(m.max_mac, 40);
         assert_eq!(m.min_dmg, 50); // 不受影响（test_monster_state 默认 50）
+    }
+
+    #[test]
+    fn test_scale_monster_stat_matches_csharp_math_round() {
+        // C# ScaleStat：Math.Round（银行家舍入，.5 取偶）
+        assert_eq!(scale_monster_stat(100, 2.25), 225);
+        assert_eq!(scale_monster_stat(101, 1.55), 157); // 156.55 → 157
+        assert_eq!(scale_monster_stat(5, 1.5), 8); // 7.5 → 8（偶）
+        assert_eq!(scale_monster_stat(4, 1.5), 6); // 6.0 → 6
+        assert_eq!(scale_monster_stat(3, 1.0), 3); // 倍率 1 不变
+        assert_eq!(scale_monster_stat(0, 2.0), 0);
+    }
+
+    #[test]
+    fn test_rarity_combat_scaling_applies_def_and_dmg() {
+        let mut m = test_monster_state();
+        m.min_ac = 10;
+        m.max_ac = 21;
+        m.min_mac = 3;
+        m.max_mac = 7;
+        m.min_mc = 12;
+        m.max_mc = 24;
+        m.min_sc = 5;
+        m.max_sc = 9;
+        // def_m=2.0，dmg_m=1.5
+        m.apply_rarity_combat_scaling(2.0, 1.5);
+        assert_eq!(m.min_ac, 20);
+        assert_eq!(m.max_ac, 42);
+        assert_eq!(m.min_mac, 6);
+        assert_eq!(m.max_mac, 14);
+        assert_eq!(m.min_mc, 18);
+        assert_eq!(m.max_mc, 36);
+        assert_eq!(m.min_sc, 8); // 7.5 → 银行家舍入 8
+        assert_eq!(m.max_sc, 14); // 13.5 → 14
     }
 
     #[test]
