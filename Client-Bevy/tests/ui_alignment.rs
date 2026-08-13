@@ -441,6 +441,104 @@ fn hud_labels_aligned() {
     println!("  ✓ HUD 底栏 Level/Name/Gold/Exp/HP/MP 标签位置对齐 C# MainDialog");
 }
 
+/// 角色对话框（#2503 对齐 C# CharacterDialog，CharacterDialog.cs / MirItemCell.cs）。
+/// 装备格屏坐标 = 对话框(760,0) + CharacterPage(8,90) + 页内偏移；格子 C# 36x32。
+/// 全部坐标引用 `client_bevy::game::dialogs::character` 的 pub 常量（防漂移），尺寸用真实精灵实测。
+#[test]
+fn character_dialog_aligned() {
+    use client_bevy::game::dialogs::character as ch;
+    let mut libs = Libs::new();
+
+    // C# 源码字面值（CharacterDialog.cs / MirItemCell.cs）——独立于被测代码的真源，漂移即红：
+    assert_eq!(
+        ch::DIALOG_X,
+        1024.0 - 264.0,
+        "对话框原点 x = C# ScreenWidth-264"
+    );
+    assert_eq!(ch::DIALOG_Y, 0.0, "对话框原点 y = C# 0");
+    assert_eq!(ch::PAGE_X, 8.0, "CharacterPage.x = C# (8,90)");
+    assert_eq!(ch::PAGE_Y, 90.0, "CharacterPage.y = C# (8,90)");
+    assert_eq!(ch::SLOT_W, 36.0, "装备格宽 = C# MirItemCell 36");
+    assert_eq!(ch::SLOT_H, 32.0, "装备格高 = C# MirItemCell 32");
+    assert_eq!(ch::NAME_CX, 132.0, "名字/行会框心 x = C# 264/2");
+    assert_eq!(ch::NAME_CY, 22.0, "名字框心 y = C# 12+20/2");
+    assert_eq!(ch::GUILD_CY, 48.0, "行会框心 y = C# 33+30/2");
+    assert_eq!(ch::CLASS_IMG_X, 15.0, "ClassImage.x = C# (15,33)");
+    assert_eq!(ch::CLASS_IMG_Y, 33.0, "ClassImage.y = C# (15,33)");
+    // 装备格页内坐标抽查（C# 字面值，漂移即红）：Weapon/Stone/Mount
+    assert_eq!(ch::EQUIP_SLOTS[0], (123.0, 7.0), "Weapon 页内 = C# (123,7)");
+    assert_eq!(
+        ch::EQUIP_SLOTS[12],
+        (128.0, 242.0),
+        "Stone 页内 = C# (128,242)"
+    );
+    assert_eq!(
+        ch::EQUIP_SLOTS[13],
+        (203.0, 62.0),
+        "Mount 页内 = C# (203,62)"
+    );
+
+    // 对话框真实尺寸（Title[504]）
+    let (dw, dh) = libs.size(LibraryName::Title, 504);
+
+    // 14 装备格：屏坐标 = DIALOG+PAGE+页内偏移，36x32 落在对话框内
+    for (ox, oy) in ch::EQUIP_SLOTS {
+        let sx = ch::DIALOG_X + ch::PAGE_X + ox;
+        let sy = ch::DIALOG_Y + ch::PAGE_Y + oy;
+        assert_inside(
+            "装备格",
+            sx,
+            sy,
+            ch::SLOT_W,
+            ch::SLOT_H,
+            ch::DIALOG_X,
+            ch::DIALOG_Y,
+            dw,
+            dh,
+        );
+    }
+
+    // ClassImage Prguse[100] @ (15,33) 对话框相对，落在对话框内
+    let (cw, chh) = libs.size(LibraryName::Prguse, 100);
+    assert_inside(
+        "ClassImage",
+        ch::DIALOG_X + ch::CLASS_IMG_X,
+        ch::DIALOG_Y + ch::CLASS_IMG_Y,
+        cw,
+        chh,
+        ch::DIALOG_X,
+        ch::DIALOG_Y,
+        dw,
+        dh,
+    );
+
+    // 名字/行会框心锚点（对话框相对）落在对话框内
+    assert_inside(
+        "名字框心",
+        ch::DIALOG_X + ch::NAME_CX,
+        ch::DIALOG_Y + ch::NAME_CY,
+        1.0,
+        1.0,
+        ch::DIALOG_X,
+        ch::DIALOG_Y,
+        dw,
+        dh,
+    );
+    assert_inside(
+        "行会框心",
+        ch::DIALOG_X + ch::NAME_CX,
+        ch::DIALOG_Y + ch::GUILD_CY,
+        1.0,
+        1.0,
+        ch::DIALOG_X,
+        ch::DIALOG_Y,
+        dw,
+        dh,
+    );
+
+    println!("  ✓ 角色对话框 14 装备格(36x32)/ClassImage/名字/行会 布局对齐 C# CharacterDialog");
+}
+
 #[test]
 fn login_select_meta_aligned() {
     let mut libs = Libs::new();

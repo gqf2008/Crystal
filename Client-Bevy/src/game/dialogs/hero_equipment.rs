@@ -11,7 +11,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::character::{EQUIP_SLOTS, SERVER_SLOT_TO_POS, SLOT_SIZE};
+use crate::game::dialogs::character::{EQUIP_SLOTS, SERVER_SLOT_TO_POS, SLOT_H, SLOT_W};
 use crate::game::dialogs::hero::HeroState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -131,8 +131,8 @@ fn spawn_hero_equipment(
             DIALOG_X + PAGE_X + rx,
             DIALOG_Y + PAGE_Y + ry,
             6.5,
-            SLOT_SIZE,
-            SLOT_SIZE - 4.0,
+            SLOT_W,
+            SLOT_H,
             pos,
         );
         commands.entity(cell).insert((
@@ -214,11 +214,7 @@ fn hero_equip_ui_system(
         let (rx, ry) = EQUIP_SLOTS[slot.0];
         let sx = DIALOG_X + PAGE_X + rx;
         let sy = DIALOG_Y + PAGE_Y + ry;
-        if cursor.x >= sx
-            && cursor.x <= sx + SLOT_SIZE
-            && cursor.y >= sy
-            && cursor.y <= sy + SLOT_SIZE
-        {
+        if cursor.x >= sx && cursor.x <= sx + SLOT_W && cursor.y >= sy && cursor.y <= sy + SLOT_H {
             let server_idx = SERVER_SLOT_TO_POS.iter().position(|p| *p == slot.0);
             if let Some(item) = server_idx
                 .and_then(|i| hero.equipment.get(i))
