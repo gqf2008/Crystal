@@ -137,11 +137,12 @@ fn spawn_dura_status(
         LibraryName::Prguse, 2113, 2111, 2112,
         BTN_X, dura_btn_y(true), 6.0, 20.0, 19.0,
     ) {
+        // C# DuraStatusDialog 恒可见（不随面板显隐）：不挂 DuraWidget、显式 Visible，
+        // 使 widgets 查询（With<DuraWidget>）不再匹配本钮——否则面板关闭时钮被隐藏、无法正常点开
         commands.entity(e).insert((
             DuraToggleBtn,
             DialogRoot(DialogKind::DuraStatus),
-            DuraWidget,
-            Visibility::Hidden,
+            Visibility::Visible,
         ));
     }
 
@@ -332,5 +333,47 @@ mod tests {
         // C#：Stone 仅在耐久为 0 时显示 2137（破损帧），健康时隐藏
         assert_eq!(dura_index(&item(0, 100), DuraPieceKind::Stone), 2137);
         assert_eq!(dura_index(&item(50, 100), DuraPieceKind::Stone), -1);
+    }
+
+    /// 可见性行为护栏：C# DuraStatusDialog 切换钮**恒可见**（不随面板显隐），仅面板/部位随 open 门控。
+    /// 真实 spawn + 跑 dura_status_ui_system（默认 DialogManager → DuraStatus 关闭），断言：
+    /// 切换钮 Visible（修复前因挂 DuraWidget 被 widgets 查询隐藏 → 本测试变红 = 阳性对照）、面板 bg Hidden。
+    #[test]
+    fn toggle_always_visible_panel_gated() {
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(UiImageCache::default());
+        world.insert_resource(HudState::default());
+        world.insert_resource(DialogManager::default()); // DuraStatus 默认关闭
+        world.insert_resource(MiniMapMode::default()); // 默认大模式
+        world
+            .run_system_once(spawn_dura_status)
+            .expect("spawn_dura_status 应成功");
+        world
+            .run_system_once(dura_status_ui_system)
+            .expect("dura_status_ui_system 应成功");
+
+        // 切换钮：面板关闭也应 Visible（C# 恒可见）
+        let mut tq = world.query_filtered::<&Visibility, With<DuraToggleBtn>>();
+        let toggles: Vec<Visibility> = tq.iter(&world).copied().collect();
+        assert_eq!(toggles.len(), 1, "应恰好 1 个切换钮");
+        assert_eq!(
+            toggles[0],
+            Visibility::Visible,
+            "切换钮应恒可见（C# DuraStatusDialog 不随面板显隐）"
+        );
+
+        // 面板 bg（DuraWidget 且非切换钮/非部位）：关闭时仍 Hidden（门控不变）
+        let mut pq = world.query_filtered::<
+            &Visibility,
+            (With<DuraWidget>, Without<DuraToggleBtn>, Without<DuraPiece>),
+        >();
+        let panels: Vec<Visibility> = pq.iter(&world).copied().collect();
+        assert_eq!(panels.len(), 1, "应恰好 1 个面板 bg");
+        assert_eq!(panels[0], Visibility::Hidden, "面板关闭时 bg 应隐藏");
     }
 }
