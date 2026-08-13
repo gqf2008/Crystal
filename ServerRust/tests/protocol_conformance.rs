@@ -133,6 +133,7 @@ async fn start_server_with_world_url(db_url: &str) -> u16 {
         map_dir: PathBuf::from("Daneo1989"),
         spawn_dir: Some(PathBuf::from("Data/spawn")),
         quest_dir: PathBuf::from("Daneo1989/Envir/Quests"),
+        npc_script_dir: PathBuf::from("."),
         db_pool: db_pool.clone(),
         social_ref: social_ref.clone(),
         conquest_cfg: Default::default(),
