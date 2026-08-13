@@ -8,6 +8,7 @@
 //   attack {object_id}   攻击指定对象
 //   interact {object_id} 与指定 NPC 对话
 //   pickup {object_id}  拾取指定地面物品
+//   chat {message}    发送聊天/GM 命令（@MAKE 等）
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -38,6 +39,7 @@ enum ControlCommand {
     Attack { object_id: u32 },
     Interact { object_id: u32 },
     Pickup { object_id: u32 },
+    Chat { message: String },
 }
 
 #[derive(Resource)]
@@ -132,6 +134,19 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
+                }
+            }
+            "chat" => {
+                let message = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !message.is_empty() {
+                    let _ = tx.send(ControlCommand::Chat { message });
+                    json!({"ok": true})
+                } else {
+                    json!({"error": "missing message"})
                 }
             }
             "pickup" => {
@@ -351,6 +366,13 @@ fn apply_control_commands(
                         }
                     }
                 }
+            }
+            ControlCommand::Chat { message } => {
+                tracing::info!("🎮 control chat: {}", message);
+                net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                    message,
+                    linked_items: Vec::new(),
+                });
             }
         }
     }
