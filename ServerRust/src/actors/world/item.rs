@@ -122,7 +122,8 @@ pub(crate) fn compute_item_price_per_unit(item: &mir2_shared::data::item::UserIt
     if info.durability > 0 {
         let r = (info.price as f64 / 2.0) / info.durability as f64;
         let max_dura = item.max_dura as f64;
-        let p_base = max_dura * r;
+        // C# Price()：p = (uint)(MaxDura * r) 先截断，再参与后续 floor
+        let p_base = (max_dura * r).trunc();
         let ratio = if item.max_dura > 0 { item.current_dura as f64 / max_dura } else { 0.0 };
         p = (p_base / 2.0 + (p_base / 2.0) * ratio + info.price as f64 / 2.0).floor();
     }
@@ -4497,6 +4498,21 @@ mod tests {
         // 半耐久单件：修复基价 100 - 当前残值 87 = 13
         let damaged = UserItem { item_index: 1, count: 1, max_dura: 50, current_dura: 25, ..Default::default() };
         assert_eq!(compute_repair_cost(&damaged, &info, false), 13);
+    }
+
+    #[test]
+    fn price_truncates_max_dura_r_like_csharp() {
+        use mir2_shared::data::item::UserItem;
+        // price=101/durability=50 → r=1.01；C# p=(uint)(50*1.01)=50
+        let info = crate::db::ItemInfo {
+            index: 1,
+            price: 101,
+            durability: 50,
+            ..Default::default()
+        };
+        let full = UserItem { item_index: 1, count: 1, max_dura: 50, current_dura: 50, ..Default::default() };
+        // C#：floor(50/2 + 50/2*1 + 101/2) = floor(100.5) = 100
+        assert_eq!(compute_item_price_per_unit(&full, &info), 100);
     }
 
 }
