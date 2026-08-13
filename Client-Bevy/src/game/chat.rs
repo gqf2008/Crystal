@@ -1225,6 +1225,27 @@ mod tests {
         assert_eq!(first_item_uid("前文 %a#1% 后文 %b#2%"), Some(1));
     }
 
+    /// 物品链接命中区对照 C# ChatPanel（行 (231,672+i*13)、行高 13、4 行；行区间 [行顶, 行顶+13)）。
+    /// 渲染见 chat_display_system（行 spawn 于 panel(230,671)+(1,1+i*13)）。覆盖 4 行中点、行顶/文本
+    /// 左右缘边界、面板上方/末行下方/文本区左右/滚动钮区越界，以及旧残留坐标(y=428 区)全部落空。
+    #[test]
+    fn chat_link_row_at_matches_render() {
+        const VL: usize = 4; // visible_lines（render 固定 4 行）
+        assert_eq!(chat_link_row_at(300.0, 678.5, VL), Some(0)); // 行0 中点
+        assert_eq!(chat_link_row_at(300.0, 691.5, VL), Some(1)); // 行1 中点
+        assert_eq!(chat_link_row_at(300.0, 704.5, VL), Some(2)); // 行2 中点
+        assert_eq!(chat_link_row_at(300.0, 717.5, VL), Some(3)); // 行3 中点
+        assert_eq!(chat_link_row_at(300.0, 672.0, VL), Some(0)); // 首行顶(y=672)
+        assert_eq!(chat_link_row_at(231.0, 700.0, VL), Some(2)); // 文本左缘 x=231
+        assert_eq!(chat_link_row_at(848.0, 700.0, VL), Some(2)); // 文本右缘 x=848(含)
+        assert_eq!(chat_link_row_at(300.0, 671.0, VL), None); // 首行上方越界
+        assert_eq!(chat_link_row_at(300.0, 724.0, VL), None); // 末行下方(=输入框顶725)
+        assert_eq!(chat_link_row_at(230.0, 700.0, VL), None); // 文本区左(x<231)
+        assert_eq!(chat_link_row_at(849.0, 700.0, VL), None); // 滚动钮区(x>848)
+        assert_eq!(chat_link_row_at(300.0, 448.0, VL), None); // 旧残留(panel_y=428)落空
+        assert_eq!(chat_link_row_at(300.0, 460.0, VL), None); // 旧残留落空
+    }
+
     #[test]
     fn filter_get_set() {
         let mut f = ChatFilter::default();
@@ -1276,6 +1297,25 @@ fn chat_item_cache_events(
     }
 }
 
+/// 聊天物品链接命中行（与 chat_display_system 渲染对齐，C# ChatPanel 对照）。
+/// C# 行 MirLabel Location=(1,y)、首行 y=1、每行 y+=13（MainDialogs.cs:952,961,1018）；
+/// 面板屏幕原点 (230,671)（:587 MainDialog.X+230, ScreenHeight-97）→ 行屏幕原点 (231,672+i*13)。
+/// 返回命中的可见行序号（0..visible_lines），未命中返回 None。
+fn chat_link_row_at(cursor_x: f32, cursor_y: f32, visible_lines: usize) -> Option<usize> {
+    const ROW_X: f32 = 231.0; // panel_x 230 + 1（C# 行 Location.X=1）
+    const ROW_Y: f32 = 672.0; // panel_y 671 + 1（C# 首行 y=1）
+    const LINE_H: f32 = 13.0; // C# y += 13（:1018）
+    const ROW_W: f32 = 617.0; // 文本区宽（至滚动钮 panel_x+618=848）
+    if cursor_x < ROW_X
+        || cursor_x > ROW_X + ROW_W
+        || cursor_y < ROW_Y
+        || cursor_y >= ROW_Y + visible_lines as f32 * LINE_H
+    {
+        return None;
+    }
+    Some(((cursor_y - ROW_Y) / LINE_H) as usize)
+}
+
 /// #287：点击聊天行（含物品链接）→ 显示物品 tooltip（C# CreateItemLabel 对齐）；
 /// 未缓存则发 C.RequestChatItem 供下次解析
 fn chat_item_click_system(
@@ -1293,17 +1333,10 @@ fn chat_item_click_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    // 聊天面板区域（panel_x=6, panel_y=428，行高 16，首行 y=panel_y+20）
-    const PANEL_X: f32 = 6.0;
-    const PANEL_Y: f32 = 428.0;
-    const LINE_H: f32 = 16.0;
-    if cursor.x < PANEL_X
-        || cursor.x > PANEL_X + 360.0
-        || cursor.y < PANEL_Y + 20.0
-        || cursor.y > PANEL_Y + 20.0 + chat.visible_lines as f32 * LINE_H
-    {
+    // 命中行（区域/行高与 chat_display_system 渲染一致，见 chat_link_row_at）
+    let Some(row) = chat_link_row_at(cursor.x, cursor.y, chat.visible_lines) else {
         return;
-    }
+    };
     // 可见行 uid 列表（与 chat_display_system 一致）
     let visible: Vec<Option<u64>> = chat
         .lines
@@ -1315,7 +1348,6 @@ fn chat_item_click_system(
         .len()
         .saturating_sub(chat.visible_lines)
         .saturating_sub(chat.scroll_up);
-    let row = ((cursor.y - (PANEL_Y + 20.0)) / LINE_H) as usize;
     let Some(uid) = visible.get(start + row).copied().flatten() else {
         return;
     };
