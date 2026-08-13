@@ -174,6 +174,8 @@ async fn async_main() -> anyhow::Result<()> {
         mail_item_insurance_percentage: cfg.social.mail_item_insurance_percentage,
         mail_free_with_stamp: cfg.social.mail_free_with_stamp,
         mail_capacity: cfg.social.mail_capacity,
+        mail_auto_send_gold: false,
+        mail_auto_send_items: false,
         allow_start_game: cfg.social.allow_start_game,
         allow_change_password: cfg.social.allow_change_password,
         allow_new_account: cfg.social.allow_new_account,
@@ -207,6 +209,8 @@ async fn async_main() -> anyhow::Result<()> {
     social_config.mail_cost_per_1k_gold = mail_ini.cost_per_1k;
     social_config.mail_item_insurance_percentage = mail_ini.insurance_percent;
     social_config.mail_capacity = mail_ini.capacity;
+    social_config.mail_auto_send_gold = mail_ini.auto_send_gold;
+    social_config.mail_auto_send_items = mail_ini.auto_send_items;
     social_config.marriage_cooldown_days = marriage_ini.cooldown_days;
     social_config.wedding_ring_recall_enabled = marriage_ini.wedding_ring_recall;
     social_config.marriage_level_required = marriage_ini.level_required;

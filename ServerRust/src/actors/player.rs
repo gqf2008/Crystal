@@ -4317,6 +4317,17 @@ impl Message<CollectMailAttachment> for PlayerActor {
     }
 }
 
+/// C# NPCScript CollectParcelKey：把所有包裹从邮局取回（collected=true），不转移金币/物品。
+pub struct ReleaseMailParcels;
+
+impl Message<ReleaseMailParcels> for PlayerActor {
+    type Reply = usize;
+
+    async fn handle(&mut self, _msg: ReleaseMailParcels, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.mailbox.release_parcels()
+    }
+}
+
 /// 删除邮件
 pub struct DeleteMail {
     pub mail_id: u64,

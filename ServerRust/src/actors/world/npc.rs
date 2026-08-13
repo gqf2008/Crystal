@@ -407,36 +407,13 @@ impl Message<NPCCallRequest> for WorldActor {
                 }
                 return;
             }
-            // C# CollectParcelKey（NPCScript.cs:1076-1093）：收取全部包裹附件 + S.ParcelCollected + GetMail 刷新
+            // C# CollectParcelKey（NPCScript.cs:1081-1093）：只把包裹从邮局取回（collected=true），不转移金币/物品
             Some(EngineNpcAction::CollectParcel) => {
-                let mail_ids: Vec<u64> = player_state.mailbox.inbox.iter()
-                    .filter(|m| !m.collected && (!m.items.is_empty() || m.gold > 0))
-                    .map(|m| m.mail_id)
-                    .collect();
-                if mail_ids.is_empty() {
-                    let pkt = mir2_shared::packets::server::mail_system::ParcelCollected { result: -1 };
-                    let mut body = Vec::new();
-                    if mir2_shared::packets::Packet::write_body(&pkt, &mut body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ParcelCollected as i16, &body),
-                        }).await;
-                    }
-                    return;
-                }
-                let mut any = false;
-                for mid in mail_ids {
-                    if let Ok(Some((gold, items))) = record.actor_ref.ask(crate::actors::player::CollectMailAttachment { mail_id: mid }).await {
-                        if gold > 0 {
-                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
-                        }
-                        for item in items {
-                            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
-                        }
-                        any = true;
-                    }
-                }
-                let pkt = mir2_shared::packets::server::mail_system::ParcelCollected { result: if any { 1 } else { -1 } };
+                let released = record.actor_ref.ask(crate::actors::player::ReleaseMailParcels).await
+                    .unwrap_or(0usize);
+                // C# 结果码：0=已取回，-1=无可取回
+                let result: i8 = if released > 0 { 0 } else { -1 };
+                let pkt = mir2_shared::packets::server::mail_system::ParcelCollected { result };
                 let mut body = Vec::new();
                 if mir2_shared::packets::Packet::write_body(&pkt, &mut body).is_ok() {
                     let _ = self.gate_ref.tell(SendToClient {

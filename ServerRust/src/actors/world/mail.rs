@@ -181,10 +181,10 @@ impl Message<SendMailRequest> for WorldActor {
         }
 
         // C# PlayerObject.GetMailCost：金币费用 floor(gold/1000)*CostPer1K + 物品保险 floor(price/100*Insurance)
-        let (mail_cost_per_1k, mail_insurance_pct, mail_free_with_stamp, _mail_capacity) = self.social_ref
+        let (mail_cost_per_1k, mail_insurance_pct, mail_free_with_stamp, _mail_capacity, auto_send_gold, auto_send_items) = self.social_ref
             .ask(crate::actors::social::NpcGetMailSettings)
             .await
-            .unwrap_or((100, 5, true, 100));
+            .unwrap_or((100, 5, true, 100, false, false));
         // Rust 暂无邮票系统：无邮票 → 不免费（对齐 C# 无 stamp 时收费）
         let mail_cost: u64 = if mail_free_with_stamp {
             0
@@ -228,6 +228,14 @@ impl Message<SendMailRequest> for WorldActor {
             let _ = record.actor_ref.ask(RemoveItemFromInventory { unique_id: *uid }).await;
         }
 
+        // C# MailInfo.Send()：发信初始 Collected 计算（无附件恒 true，包裹按 MailAutoSendGold/Items）
+        let collected = crate::actors::mail::initial_collected(
+            total_gold > 0,
+            !items.is_empty(),
+            auto_send_gold,
+            auto_send_items,
+        );
+
         // 创建邮件
         let mail = MailMessage {
             mail_id: generate_mail_id(),
@@ -240,7 +248,7 @@ impl Message<SendMailRequest> for WorldActor {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0),
             read: false,
-            collected: false,
+            collected,
             locked: false,
             gold: total_gold,
             items,
