@@ -204,6 +204,16 @@ impl InventoryState {
 
 const DIALOG_X: f32 = 182.0;
 const DIALOG_Y: f32 = 217.0;
+/// 金币文本对话框相对坐标（C# InventoryDialog.cs:137 GoldLabel (40,212) 111x14）
+pub const GOLD_TEXT_X: f32 = 40.0;
+pub const GOLD_TEXT_Y: f32 = 212.0;
+/// 负重文本对话框相对坐标（C# InventoryDialog.cs:190 WeightLabel (268,212) 26x14）
+pub const WEIGHT_TEXT_X: f32 = 268.0;
+pub const WEIGHT_TEXT_Y: f32 = 212.0;
+/// 扩容按钮命中区尺寸（C# InventoryDialog.cs:84 AddButton Size(72,23)；精灵 Title[483] 自然
+/// 48x25 绘于 (235,5) 不受影响，此处仅对齐可点击矩形——原 23x23 小于可见按钮，右半点了无反应）
+pub const ADD_BTN_W: f32 = 72.0;
+pub const ADD_BTN_H: f32 = 23.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
 const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory）
@@ -388,8 +398,8 @@ fn spawn_inventory_dialog(
         &mut commands,
         &font,
         "0",
-        DIALOG_X + 40.0,
-        DIALOG_Y + 210.0,
+        DIALOG_X + GOLD_TEXT_X,
+        DIALOG_Y + GOLD_TEXT_Y,
         12.0,
         Color::WHITE,
         8.0,
@@ -401,8 +411,8 @@ fn spawn_inventory_dialog(
         &mut commands,
         &font,
         "0/0",
-        DIALOG_X + 268.0,
-        DIALOG_Y + 210.0,
+        DIALOG_X + WEIGHT_TEXT_X,
+        DIALOG_Y + WEIGHT_TEXT_Y,
         12.0,
         Color::WHITE,
         8.0,
@@ -413,11 +423,11 @@ fn spawn_inventory_dialog(
         DialogWidget,
     ));
 
-    // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)）
+    // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)，Size 72x23）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 483, 484, 485,
-        DIALOG_X + 235.0, DIALOG_Y + 5.0, 7.0, 23.0, 23.0,
+        DIALOG_X + 235.0, DIALOG_Y + 5.0, 7.0, ADD_BTN_W, ADD_BTN_H,
     ) {
         commands.entity(e).insert((InvAddBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
     }

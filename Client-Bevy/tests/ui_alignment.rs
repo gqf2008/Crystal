@@ -540,6 +540,107 @@ fn character_dialog_aligned() {
 }
 
 #[test]
+fn inventory_bigmap_aligned() {
+    use client_bevy::game::dialogs::big_map as bm;
+    use client_bevy::game::dialogs::inventory as inv;
+    let mut libs = Libs::new();
+
+    // ---- 背包（C# InventoryDialog.cs）常量 == C# 字面值（防漂移）----
+    assert_eq!(inv::GOLD_TEXT_X, 40.0, "金币 x = C# GoldLabel (40,212)");
+    assert_eq!(inv::GOLD_TEXT_Y, 212.0, "金币 y = C# GoldLabel (40,212)");
+    assert_eq!(
+        inv::WEIGHT_TEXT_X,
+        268.0,
+        "负重 x = C# WeightLabel (268,212)"
+    );
+    assert_eq!(
+        inv::WEIGHT_TEXT_Y,
+        212.0,
+        "负重 y = C# WeightLabel (268,212)"
+    );
+    assert_eq!(
+        inv::ADD_BTN_W,
+        72.0,
+        "扩容命中宽 = C# AddButton Size(72,23)"
+    );
+    assert_eq!(
+        inv::ADD_BTN_H,
+        23.0,
+        "扩容命中高 = C# AddButton Size(72,23)"
+    );
+
+    // 背包对话框真实尺寸（Title[196]），子控件 bbox ⊆ 对话框
+    let (idw, idh) = libs.size(LibraryName::Title, 196);
+    let (ix, iy) = (182.0, 217.0); // 背包窗口原点（固定，C# Location）
+    assert_inside(
+        "背包扩容按钮",
+        ix + 235.0,
+        iy + 5.0,
+        inv::ADD_BTN_W,
+        inv::ADD_BTN_H,
+        ix,
+        iy,
+        idw,
+        idh,
+    );
+    // 金币/负重文本原点（~13px 字高）⊆ 对话框
+    assert_inside(
+        "金币文本",
+        ix + inv::GOLD_TEXT_X,
+        iy + inv::GOLD_TEXT_Y,
+        60.0,
+        14.0,
+        ix,
+        iy,
+        idw,
+        idh,
+    );
+    assert_inside(
+        "负重文本",
+        ix + inv::WEIGHT_TEXT_X,
+        iy + inv::WEIGHT_TEXT_Y,
+        40.0,
+        14.0,
+        ix,
+        iy,
+        idw,
+        idh,
+    );
+
+    // ---- 大地图（C# BigMapDialog.cs）常量 == C# 字面值（防漂移）----
+    assert_eq!(bm::PANEL_W, 760.0, "大地图面板宽 = Title[820] 实测 760");
+    assert_eq!(bm::PANEL_H, 500.0, "大地图面板高 = Title[820] 实测 500");
+    assert_eq!(bm::SEARCH_X, 59.0, "搜索框 x = C# SearchTextBox (59,H-27)");
+    assert_eq!(bm::SEARCH_Y_FROM_BOTTOM, 27.0, "搜索框底距 = C# H-27");
+    assert_eq!(bm::SEARCH_W, 130.0, "搜索框宽 = C# Size(130,10)");
+    assert_eq!(bm::SEARCH_H, 10.0, "搜索框高 = C# Size(130,10)");
+
+    // 搜索框 ⊆ 大地图面板 + ⊆ 画布
+    let (mx, my) = ((SW - bm::PANEL_W) / 2.0, (SH - bm::PANEL_H) / 2.0);
+    let sb_y = my + bm::PANEL_H - bm::SEARCH_Y_FROM_BOTTOM;
+    assert_inside(
+        "大地图搜索框",
+        mx + bm::SEARCH_X,
+        sb_y,
+        bm::SEARCH_W,
+        bm::SEARCH_H,
+        mx,
+        my,
+        bm::PANEL_W,
+        bm::PANEL_H,
+    );
+    assert_in_canvas(
+        "大地图搜索框",
+        mx + bm::SEARCH_X,
+        sb_y,
+        bm::SEARCH_W,
+        bm::SEARCH_H,
+    );
+
+    println!("  ✓ 背包金币/负重(212)+扩容命中(72x23)、大地图搜索框(59,H-27,130x10) 对齐 C#");
+}
+
+#[test]
 fn login_select_meta_aligned() {
     let mut libs = Libs::new();
 
