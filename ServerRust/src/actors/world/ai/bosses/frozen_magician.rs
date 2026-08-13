@@ -15,6 +15,12 @@ const ATTACK_RANGE: i32 = 9;
 
 pub struct FrozenMagicianBehavior;
 
+impl Default for FrozenMagicianBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrozenMagicianBehavior {
     pub fn new() -> Self {
         Self

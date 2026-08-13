@@ -23,6 +23,12 @@ pub struct PeacockSpiderBehavior {
     next_poison_tick: u64,
 }
 
+impl Default for PeacockSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PeacockSpiderBehavior {
     pub fn new() -> Self {
         Self {

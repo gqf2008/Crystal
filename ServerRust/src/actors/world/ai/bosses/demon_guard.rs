@@ -22,6 +22,12 @@ pub struct DemonGuardBehavior {
     death_announced: bool,
 }
 
+impl Default for DemonGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DemonGuardBehavior {
     pub fn new() -> Self {
         // C#：LifeCount = Envir.Random.Next(3)（0-2 次复活）

@@ -22,6 +22,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct ElementGuardBehavior;
 
+impl Default for ElementGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ElementGuardBehavior {
     pub fn new() -> Self {
         Self

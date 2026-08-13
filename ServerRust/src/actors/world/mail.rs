@@ -168,7 +168,7 @@ impl Message<SendMailRequest> for WorldActor {
         // #2044：C# RecipientsMailboxFull——收件箱 >50 拒绝（在线用 state，离线查 DB）
         let mut recipient_mail_count = 0usize;
         let mut recipient_online = false;
-        for (_, r) in &self.players {
+        for r in self.players.values() {
             if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
                 if st.name == msg.receiver_name {
                     recipient_mail_count = st.mailbox.inbox.len();
@@ -256,7 +256,7 @@ impl Message<SendMailRequest> for WorldActor {
                 if let Some(item) = sender_state.inventory.get_item(*uid) {
                     if let Some(info) = self.item_infos.get(&item.item_index) {
                         // C# GetMailCost：item.Price()（含耐久比例/附加属性）× Count
-                        let price = super::item::compute_item_price_per_unit(&item, info)
+                        let price = super::item::compute_item_price_per_unit(item, info)
                             .saturating_mul(item.count as u64);
                         item_fee += price / 100 * mail_insurance_pct as u64;
                     }

@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct BurningZombieBehavior;
 
+impl Default for BurningZombieBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BurningZombieBehavior {
     pub fn new() -> Self {
         Self

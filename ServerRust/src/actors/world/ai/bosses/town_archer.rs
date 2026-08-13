@@ -20,6 +20,12 @@ const ATTACK_RANGE: i32 = 10;
 
 pub struct TownArcherBehavior;
 
+impl Default for TownArcherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TownArcherBehavior {
     pub fn new() -> Self {
         Self

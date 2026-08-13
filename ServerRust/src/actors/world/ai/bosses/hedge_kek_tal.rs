@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct HedgeKekTalBehavior;
 
+impl Default for HedgeKekTalBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HedgeKekTalBehavior {
     pub fn new() -> Self {
         Self

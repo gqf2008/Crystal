@@ -21,6 +21,12 @@ const VIEW_RANGE: i32 = 15;
 
 pub struct AxeSkeletonBehavior;
 
+impl Default for AxeSkeletonBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AxeSkeletonBehavior {
     pub fn new() -> Self {
         Self

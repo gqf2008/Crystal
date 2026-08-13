@@ -47,6 +47,12 @@ fn maybe_teleport_to_weaker(monster: &mut MonsterState, ctx: &mut AiCtx, view_ra
 
 pub struct MutatedManwormBehavior;
 
+impl Default for MutatedManwormBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MutatedManwormBehavior {
     pub fn new() -> Self {
         Self

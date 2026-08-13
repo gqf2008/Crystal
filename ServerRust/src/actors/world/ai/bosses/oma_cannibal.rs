@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct OmaCannibalBehavior;
 
+impl Default for OmaCannibalBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OmaCannibalBehavior {
     pub fn new() -> Self {
         Self

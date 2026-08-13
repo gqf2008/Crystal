@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct OmaSlasherBehavior;
 
+impl Default for OmaSlasherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OmaSlasherBehavior {
     pub fn new() -> Self {
         Self

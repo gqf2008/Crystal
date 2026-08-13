@@ -743,8 +743,7 @@ impl Message<ClientData> for GateActor {
                     }
                 }
                 if blocked {
-                    let mut body = Vec::new();
-                    body.push(0u8); // S.NewCharacter { Result = 0 }
+                    let body = vec![0u8]; // S.NewCharacter { Result = 0 }
                     let data = build_packet_bytes(ServerPacketIds::NewCharacter as i16, &body);
                     let gate_ref = ctx.actor_ref().clone();
                     let _ = gate_ref
@@ -1253,7 +1252,7 @@ impl Message<LoginResult> for GateActor {
                     gender: mir2_shared::enums::MirGender::try_from(ch.gender)
                         .unwrap_or(mir2_shared::enums::MirGender::Male),
                     last_access: chrono::DateTime::from_timestamp(ch.last_access, 0)
-                        .unwrap_or_else(|| chrono::Utc::now()),
+                        .unwrap_or_else(chrono::Utc::now),
                 })
                 .collect();
             let mut body = Vec::new();
@@ -3744,12 +3743,13 @@ fn handle_update_intelligent_creature(
         return;
     }
     let mut cur = std::io::Cursor::new(payload);
-    let mut next_u8 = |cur: &mut std::io::Cursor<&[u8]>| {
+    let next_u8 = |cur: &mut std::io::Cursor<&[u8]>| {
         let mut b = [0u8; 1];
-        std::io::Read::read_exact(cur, &mut b)
-            .is_ok()
-            .then(|| b[0])
-            .unwrap_or(0)
+        if std::io::Read::read_exact(cur, &mut b).is_ok() {
+            b[0]
+        } else {
+            0
+        }
     };
     let creature_type = next_u8(&mut cur);
     let pet_mode = next_u8(&mut cur);

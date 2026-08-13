@@ -997,7 +997,7 @@ impl Message<UseItemRequest> for WorldActor {
                                 }
                             }
                             let bind_map = player_state.bind_map_index;
-                            if self.map_infos.get(&bind_map).is_some() {
+                            if self.map_infos.contains_key(&bind_map) {
                                 // 确保绑定地图已加载（供 DungeonEscape 随机落点校验）
                                 let _ = self.bind_map_size(bind_map);
                                 // C#：shape 0 在绑定点 ±100 内随机（20 次尝试），shape 1 精确到绑定点
@@ -1429,7 +1429,7 @@ impl Message<UseItemRequest> for WorldActor {
                         }
                         // 7 CreditScroll（C# UseItem Scroll case 7：GainCredit(item.Info.Price)，上限 uint.MaxValue）
                         7 => {
-                            let price = db.price.max(0) as u64;
+                            let price = db.price as u64;
                             if price > 0 {
                                 let username = record.account_username.clone();
                                 let current =
@@ -1771,7 +1771,7 @@ impl Message<UseItemRequest> for WorldActor {
                     }
                 }
                 // Food（喂坐骑：恢复坐骑耐久 + S.ItemRepaired，C# UseItem Food）
-                t if t == 27 => {
+                27 => {
                     // Food（C# ItemType.Food=27；喂坐骑恢复耐久 + S.ItemRepaired）
                     // C#：temp.CurrentDura += item.CurrentDura（食物自身耐久，非 DB durability）
                     let feed_amount = user_item
@@ -1821,7 +1821,7 @@ impl Message<UseItemRequest> for WorldActor {
                     }
                 }
                 // Book（技能书，#212：C# UseItem Book → magic = (Spell)item.Info.Shape）
-                t if t == 20 => {
+                20 => {
                     // Book（C# ItemType.Book=20；SharedRust 枚举 +3 不可用）
                     let spell_cs = db.shape;
                     if self.magic_infos.contains_key(&(spell_cs as u32)) {
@@ -1882,7 +1882,7 @@ impl Message<UseItemRequest> for WorldActor {
                     }
                 }
                 // Pets（C# UseItem Pets：shape<20 宠物蛋，>=20 智能宠物道具；PlayerObject.cs:6118-6248）
-                t if t == 36 => {
+                36 => {
                     use crate::actors::creature::{CreatureType, IntelligentCreature};
                     use crate::combat::buff::{BuffInstance, BuffType};
                     use mir2_shared::enums::Stat;
@@ -1934,7 +1934,7 @@ impl Message<UseItemRequest> for WorldActor {
                         // 22 Nuts（C# :6138-6153）：MaintainfoodTime = Effect*Hour（Rust 无该字段，近似喂满）
                         // 23 FairyMoss 等（C# :6154-6172）：IncreaseFullness(Effect*100)（0-10000 → Rust hunger 0-100 = Effect）
                         // 24 WonderPill（C# :6173-6191）：Fullness==0 时 +100（=1%）
-                        22 | 23 | 24 => {
+                        22..=24 => {
                             let amount: u8 = match db.shape {
                                 22 => 100,
                                 23 => db.effect.max(1) as u8,
@@ -2107,7 +2107,7 @@ impl Message<UseItemRequest> for WorldActor {
                     );
                 }
                 // Transform（C# UseItem Transform：AddBuff(BuffType.Transform, duration=Durability秒, values=shape)）
-                t if t == 37 => {
+                37 => {
                     use crate::combat::buff::{BuffInstance, BuffType};
                     // Rust buff tick 每 0.5s 一次（TickBuff 每 5 world tick），约等于 Durability 秒
                     let ticks = (db.durability.max(1) as u32).saturating_mul(2);
@@ -2137,7 +2137,7 @@ impl Message<UseItemRequest> for WorldActor {
                 }
                 // SealedHero（C# UseItem ItemType.SealedHero=42：使用封印符恢复英雄，
                 // heroInfo = Envir.GetHeroInfo(item.AddedStats[Stat.Hero]) → AddHero）
-                t if t == 42 => {
+                42 => {
                     use mir2_shared::enums::Stat;
                     let hero_idx = player_state
                         .inventory
@@ -2222,7 +2222,7 @@ impl Message<UseItemRequest> for WorldActor {
                     );
                 }
                 // Script（C# UseItem ItemType.Script=21：CallDefaultNPC(UseItem, shape) → [@_UseItem(shape)]）
-                t if t == 21 => {
+                21 => {
                     let section = format!("_useitem({})", db.shape);
                     self.call_default_npc(msg.session_id, &section).await;
                     debug!(
@@ -2352,7 +2352,6 @@ fn can_equip_item(
         EquipmentSlot::Torch => item_info.item_type == 12,
         EquipmentSlot::Belt => item_info.item_type == 9,
         EquipmentSlot::Stone => item_info.item_type == 11,
-        _ => false,
     };
     if !type_ok {
         return false;
@@ -2568,7 +2567,7 @@ impl Message<EquipItemRequest> for WorldActor {
             };
             let Some(storage_idx) = state.inventory.storage.iter().position(|s| {
                 s.as_ref()
-                    .map_or(false, |slot| slot.item.unique_id == msg.unique_id)
+                    .is_some_and(|slot| slot.item.unique_id == msg.unique_id)
             }) else {
                 send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
                 return;
@@ -2646,7 +2645,7 @@ impl Message<EquipItemRequest> for WorldActor {
         };
         let Some(grid_idx) = state.inventory.backpack.iter().position(|s| {
             s.as_ref()
-                .map_or(false, |slot| slot.item.unique_id == msg.unique_id)
+                .is_some_and(|slot| slot.item.unique_id == msg.unique_id)
         }) else {
             send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
             return;
@@ -3199,7 +3198,7 @@ impl Message<MergeItemRequest> for WorldActor {
                 return;
             }
         };
-        let to = match actor_ref
+        let _to = match actor_ref
             .ask(GetItemInfo {
                 unique_id: msg.to_uid,
             })
@@ -3501,7 +3500,6 @@ impl Message<BuyItemRequest> for WorldActor {
             Some(idx) => idx,
             None => {
                 // #2376：普通商店无此物品 → 尝试二手货购买（C# NPCScript.Buy isUsed 分支，按 UniqueID）
-                drop(goods_list);
                 let used_list = match self.used_goods.get_mut(&npc_oid) {
                     Some(l) => l,
                     None => {
@@ -4111,7 +4109,7 @@ impl Message<EquipSlotItemRequest> for WorldActor {
 
         let grid_idx = state.inventory.backpack.iter().position(|s| {
             s.as_ref()
-                .map_or(false, |slot| slot.item.unique_id == msg.unique_id)
+                .is_some_and(|slot| slot.item.unique_id == msg.unique_id)
         });
 
         let Some(grid) = grid_idx else {
@@ -4176,7 +4174,7 @@ impl Message<ReplaceWedRingRequest> for WorldActor {
         };
 
         // #2036：C# ReplaceWeddingRing（13052-13058）——需先与 NPC 对话（ReplaceWedRingKey 页面）
-        if self.session_npc.get(&msg.session_id).is_none() {
+        if !self.session_npc.contains_key(&msg.session_id) {
             send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
             return;
         }
@@ -4917,10 +4915,10 @@ fn current_stat_count(
         return target.added_stats.get(Stat::MaxMAC);
     }
     if gem_info.durability > 0 {
-        return if target_info.durability as i32 > target.max_dura as i32 {
+        return if target_info.durability > target.max_dura as i32 {
             0
         } else {
-            ((target.max_dura as i32 - target_info.durability) / 1000)
+            (target.max_dura as i32 - target_info.durability) / 1000
         };
     }
     if item_get_total(gem, gem_info, Stat::AttackSpeed) > 0 {
@@ -5880,7 +5878,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
             // 武器 -> 铁矿石
             1 => (500, grade as u16, "铁矿石"),
             // 盔甲/饰品 -> 布料/皮革
-            2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => (501, grade as u16, "皮革"),
+            2..=10 => (501, grade as u16, "皮革"),
             _ => (502, (grade / 2).max(1) as u16, "宝石碎片"),
         };
 

@@ -17,6 +17,12 @@ pub struct IceCrystalSoldierBehavior {
     next_area_tick: u64,
 }
 
+impl Default for IceCrystalSoldierBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IceCrystalSoldierBehavior {
     pub fn new() -> Self {
         Self { next_area_tick: 0 }

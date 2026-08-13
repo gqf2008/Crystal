@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct TurtlegrassBehavior;
 
+impl Default for TurtlegrassBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TurtlegrassBehavior {
     pub fn new() -> Self {
         Self

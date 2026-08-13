@@ -25,6 +25,12 @@ const THRUST_RANGE: i32 = 3;
 
 pub struct KirinBehavior;
 
+impl Default for KirinBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KirinBehavior {
     pub fn new() -> Self {
         Self
@@ -52,13 +58,9 @@ impl MonsterBehavior for KirinBehavior {
             if in_melee {
                 // 4/5 基础近战，1/5 AC 强攻（C# Attack Random(5)==0）
                 let strong = fastrand::i32(0..5) == 0;
-                let damage = if strong {
+                let damage =
                     crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
-                        .max(1)
-                } else {
-                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
-                        .max(1)
-                };
+                        .max(1);
                 ctx.out_attacks
                     .push(crate::actors::world::ai::AttackAction::Melee {
                         attacker_oid: monster.object_id,

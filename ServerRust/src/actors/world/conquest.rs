@@ -154,7 +154,7 @@ impl ConquestInstance {
         if self.rent_expire_tick == 0 || now_tick >= self.rent_expire_tick {
             0
         } else {
-            (((self.rent_expire_tick - now_tick) + (TICKS_PER_DAY - 1)) / TICKS_PER_DAY) as u32
+            (self.rent_expire_tick - now_tick).div_ceil(TICKS_PER_DAY) as u32
         }
     }
 
@@ -168,7 +168,7 @@ impl ConquestInstance {
     pub fn should_start_war(&self, now: &chrono::NaiveDateTime) -> bool {
         self.state == WarState::Idle
             && now.weekday().num_days_from_sunday() == self.war_day
-            && now.hour() == self.war_hour as u32
+            && now.hour() == self.war_hour
             && now.minute() == 0
     }
 

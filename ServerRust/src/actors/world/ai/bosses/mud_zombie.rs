@@ -18,6 +18,12 @@ const LINE_RANGE: i32 = 2;
 
 pub struct MudZombieBehavior;
 
+impl Default for MudZombieBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MudZombieBehavior {
     pub fn new() -> Self {
         Self

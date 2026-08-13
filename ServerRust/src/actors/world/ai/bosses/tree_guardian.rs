@@ -15,6 +15,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct TreeGuardianBehavior;
 
+impl Default for TreeGuardianBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TreeGuardianBehavior {
     pub fn new() -> Self {
         Self

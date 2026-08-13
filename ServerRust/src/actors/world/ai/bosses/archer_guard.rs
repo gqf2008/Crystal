@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct ArcherGuardBehavior;
 
+impl Default for ArcherGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArcherGuardBehavior {
     pub fn new() -> Self {
         Self

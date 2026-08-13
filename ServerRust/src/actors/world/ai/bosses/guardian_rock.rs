@@ -10,6 +10,12 @@ use crate::actors::world::MonsterState;
 
 pub struct GuardianRockBehavior;
 
+impl Default for GuardianRockBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GuardianRockBehavior {
     pub fn new() -> Self {
         Self

@@ -32,6 +32,12 @@ const BAT_NAME: &str = "AncientBat";
 
 pub struct AncientBringerBehavior;
 
+impl Default for AncientBringerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AncientBringerBehavior {
     pub fn new() -> Self {
         Self

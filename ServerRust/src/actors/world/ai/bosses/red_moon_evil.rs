@@ -11,6 +11,12 @@ use crate::actors::world::MonsterState;
 
 pub struct RedMoonEvilBehavior;
 
+impl Default for RedMoonEvilBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RedMoonEvilBehavior {
     pub fn new() -> Self {
         Self
@@ -33,7 +39,7 @@ impl MonsterBehavior for RedMoonEvilBehavior {
 
         // C# ProcessTarget：每 AttackSpeed 周期 AoE 攻击视野内所有目标（一次 ObjectAttack）
         if ctx.tick_count >= monster.next_attack_tick {
-            let view_range = monster.ai_profile.aggro_range.max(1) as i32;
+            let view_range = monster.ai_profile.aggro_range.max(1);
             let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
                 .find_targets_in_range(monster.x, monster.y, view_range, monster.map_index)
                 .into_iter()

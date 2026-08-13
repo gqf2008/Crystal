@@ -15,6 +15,12 @@ const ATTACK_RANGE: i32 = 5;
 
 pub struct BlackTortoiseBehavior;
 
+impl Default for BlackTortoiseBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlackTortoiseBehavior {
     pub fn new() -> Self {
         Self

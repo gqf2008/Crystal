@@ -24,6 +24,12 @@ const STOMP_RADIUS: i32 = 2;
 
 pub struct SeedingsGeneralBehavior;
 
+impl Default for SeedingsGeneralBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SeedingsGeneralBehavior {
     pub fn new() -> Self {
         Self

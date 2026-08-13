@@ -17,6 +17,12 @@ use crate::actors::world::MonsterState;
 
 pub struct CastleGateBehavior;
 
+impl Default for CastleGateBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CastleGateBehavior {
     pub fn new() -> Self {
         Self

@@ -20,6 +20,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct WhiteMammothBehavior;
 
+impl Default for WhiteMammothBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WhiteMammothBehavior {
     pub fn new() -> Self {
         Self

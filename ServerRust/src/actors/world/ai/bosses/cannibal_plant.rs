@@ -31,6 +31,12 @@ pub struct CannibalPlantBehavior {
     spawned: bool,
 }
 
+impl Default for CannibalPlantBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CannibalPlantBehavior {
     pub fn new() -> Self {
         Self {

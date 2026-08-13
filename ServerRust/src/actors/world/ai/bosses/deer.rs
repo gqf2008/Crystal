@@ -21,6 +21,12 @@ pub struct DeerBehavior {
     initialized: bool,
 }
 
+impl Default for DeerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeerBehavior {
     pub fn new() -> Self {
         Self {

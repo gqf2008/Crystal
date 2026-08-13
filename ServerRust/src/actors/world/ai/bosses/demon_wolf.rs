@@ -18,6 +18,12 @@ const MAX_PACK_SIZE: usize = 5;
 
 pub struct DemonWolfBehavior;
 
+impl Default for DemonWolfBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DemonWolfBehavior {
     pub fn new() -> Self {
         Self

@@ -19,6 +19,12 @@ const VIEW_RANGE: i32 = 15;
 
 pub struct GuardBehavior;
 
+impl Default for GuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GuardBehavior {
     pub fn new() -> Self {
         Self

@@ -18,6 +18,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct CrazyManwormBehavior;
 
+impl Default for CrazyManwormBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CrazyManwormBehavior {
     pub fn new() -> Self {
         Self

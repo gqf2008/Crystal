@@ -25,6 +25,12 @@ pub struct ManectricKingBehavior {
     next_mass_tick: u64,
 }
 
+impl Default for ManectricKingBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ManectricKingBehavior {
     pub fn new() -> Self {
         Self { next_mass_tick: 0 }
@@ -74,7 +80,7 @@ impl MonsterBehavior for ManectricKingBehavior {
         // ---- 攻击范围判定（十字/对角，AttackRange=3）----
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let close = dist <= ATTACK_RANGE - 1;
+            let close = dist < ATTACK_RANGE;
             if close && fastrand::i32(0..3) == 0 {
                 // Type1 DC LineAttack（C# LineAttack(damage, AttackRange-dist+1, 500, ACAgility, push=true)）
                 let damage =

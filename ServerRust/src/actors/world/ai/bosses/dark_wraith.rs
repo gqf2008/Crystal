@@ -18,6 +18,12 @@ pub struct DarkWraithBehavior {
     next_line_tick: u64,
 }
 
+impl Default for DarkWraithBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DarkWraithBehavior {
     pub fn new() -> Self {
         Self { next_line_tick: 0 }

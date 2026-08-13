@@ -34,6 +34,12 @@ pub struct HornedSorcerorBehavior {
     immune: bool,
 }
 
+impl Default for HornedSorcerorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HornedSorcerorBehavior {
     pub fn new() -> Self {
         Self {

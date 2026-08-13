@@ -30,6 +30,12 @@ pub struct HoodedSummonerBehavior {
     fear_end_tick: u64,
 }
 
+impl Default for HoodedSummonerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HoodedSummonerBehavior {
     pub fn new() -> Self {
         Self {

@@ -13,6 +13,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct OmaBlestBehavior;
 
+impl Default for OmaBlestBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OmaBlestBehavior {
     pub fn new() -> Self {
         Self

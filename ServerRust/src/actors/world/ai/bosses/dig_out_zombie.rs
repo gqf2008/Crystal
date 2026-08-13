@@ -29,6 +29,12 @@ pub struct DigOutZombieBehavior {
     hole_done: bool,
 }
 
+impl Default for DigOutZombieBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DigOutZombieBehavior {
     pub fn new() -> Self {
         Self {

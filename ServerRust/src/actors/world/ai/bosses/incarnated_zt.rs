@@ -14,6 +14,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct IncarnatedZTBehavior;
 
+impl Default for IncarnatedZTBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncarnatedZTBehavior {
     pub fn new() -> Self {
         Self

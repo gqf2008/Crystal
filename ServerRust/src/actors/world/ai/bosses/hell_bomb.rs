@@ -17,6 +17,12 @@ pub struct HellBombBehavior {
     die_at_tick: u64,
 }
 
+impl Default for HellBombBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HellBombBehavior {
     pub fn new() -> Self {
         Self { die_at_tick: 0 }

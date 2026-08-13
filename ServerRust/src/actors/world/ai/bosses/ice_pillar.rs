@@ -20,6 +20,12 @@ pub struct IcePillarBehavior {
     last_incoming_damage: i32,
 }
 
+impl Default for IcePillarBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IcePillarBehavior {
     pub fn new() -> Self {
         Self {

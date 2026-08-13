@@ -32,6 +32,12 @@ fn blade_avalanche_cells(x: i32, y: i32, dir: usize) -> Vec<(i32, i32, i32)> {
 
 pub struct SepHighWarriorBehavior;
 
+impl Default for SepHighWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepHighWarriorBehavior {
     pub fn new() -> Self {
         Self

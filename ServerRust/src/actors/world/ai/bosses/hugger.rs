@@ -25,6 +25,12 @@ pub struct HuggerBehavior {
     explosion_tick: u64,
 }
 
+impl Default for HuggerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HuggerBehavior {
     pub fn new() -> Self {
         Self {

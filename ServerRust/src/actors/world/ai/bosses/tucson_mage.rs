@@ -20,6 +20,12 @@ const WIDE_RANGE: i32 = 3;
 
 pub struct TucsonMageBehavior;
 
+impl Default for TucsonMageBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TucsonMageBehavior {
     pub fn new() -> Self {
         Self

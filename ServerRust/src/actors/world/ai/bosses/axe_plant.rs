@@ -18,6 +18,12 @@ fn in_axe_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct AxePlantBehavior;
 
+impl Default for AxePlantBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AxePlantBehavior {
     pub fn new() -> Self {
         Self

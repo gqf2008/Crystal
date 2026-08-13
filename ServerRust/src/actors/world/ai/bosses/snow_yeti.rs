@@ -18,6 +18,12 @@ const ATTACK_RANGE: i32 = 9;
 
 pub struct SnowYetiBehavior;
 
+impl Default for SnowYetiBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SnowYetiBehavior {
     pub fn new() -> Self {
         Self

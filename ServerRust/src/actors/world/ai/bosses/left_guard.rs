@@ -21,6 +21,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct LeftGuardBehavior;
 
+impl Default for LeftGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LeftGuardBehavior {
     pub fn new() -> Self {
         Self

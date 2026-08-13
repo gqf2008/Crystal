@@ -17,6 +17,12 @@ const AOE_RADIUS: i32 = 2;
 
 pub struct SnowWolfBehavior;
 
+impl Default for SnowWolfBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SnowWolfBehavior {
     pub fn new() -> Self {
         Self

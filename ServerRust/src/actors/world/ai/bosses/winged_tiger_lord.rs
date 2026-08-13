@@ -30,6 +30,12 @@ pub struct WingedTigerLordBehavior {
     pending_tornado: bool,
 }
 
+impl Default for WingedTigerLordBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WingedTigerLordBehavior {
     pub fn new() -> Self {
         Self {

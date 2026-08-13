@@ -24,6 +24,12 @@ fn in_knight_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct FrozenKnightBehavior;
 
+impl Default for FrozenKnightBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrozenKnightBehavior {
     pub fn new() -> Self {
         Self

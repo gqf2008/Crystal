@@ -18,6 +18,12 @@ fn in_shaman_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct ShamanZombieBehavior;
 
+impl Default for ShamanZombieBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShamanZombieBehavior {
     pub fn new() -> Self {
         Self

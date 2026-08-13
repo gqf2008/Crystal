@@ -19,6 +19,12 @@ const LINE_RANGE: i32 = 4;
 
 pub struct PlagueCrabBehavior;
 
+impl Default for PlagueCrabBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlagueCrabBehavior {
     pub fn new() -> Self {
         Self

@@ -17,6 +17,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct ManTreeBehavior;
 
+impl Default for ManTreeBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ManTreeBehavior {
     pub fn new() -> Self {
         Self

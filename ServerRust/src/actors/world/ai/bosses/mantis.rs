@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct MantisBehavior;
 
+impl Default for MantisBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MantisBehavior {
     pub fn new() -> Self {
         Self

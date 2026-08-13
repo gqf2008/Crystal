@@ -13,6 +13,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct ArmadilloElderBehavior;
 
+impl Default for ArmadilloElderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArmadilloElderBehavior {
     pub fn new() -> Self {
         Self

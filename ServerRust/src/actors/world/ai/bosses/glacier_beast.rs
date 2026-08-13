@@ -16,6 +16,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct GlacierBeastBehavior;
 
+impl Default for GlacierBeastBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlacierBeastBehavior {
     pub fn new() -> Self {
         Self

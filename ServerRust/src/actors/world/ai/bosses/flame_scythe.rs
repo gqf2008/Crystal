@@ -13,6 +13,12 @@ const AOE_RADIUS: i32 = 2;
 
 pub struct FlameScytheBehavior;
 
+impl Default for FlameScytheBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlameScytheBehavior {
     pub fn new() -> Self {
         Self

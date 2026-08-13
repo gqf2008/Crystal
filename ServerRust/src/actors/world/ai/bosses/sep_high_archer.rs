@@ -28,6 +28,12 @@ pub struct SepHighArcherBehavior {
     poison_shot_active_until: u64,
 }
 
+impl Default for SepHighArcherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepHighArcherBehavior {
     pub fn new() -> Self {
         Self {

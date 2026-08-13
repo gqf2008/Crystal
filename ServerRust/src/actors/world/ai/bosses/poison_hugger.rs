@@ -26,6 +26,12 @@ pub struct PoisonHuggerBehavior {
     explosion_tick: u64,
 }
 
+impl Default for PoisonHuggerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PoisonHuggerBehavior {
     pub fn new() -> Self {
         Self {

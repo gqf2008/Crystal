@@ -16,6 +16,12 @@ const LINE_RANGE: i32 = 3;
 
 pub struct FurbolgGuardBehavior;
 
+impl Default for FurbolgGuardBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FurbolgGuardBehavior {
     pub fn new() -> Self {
         Self

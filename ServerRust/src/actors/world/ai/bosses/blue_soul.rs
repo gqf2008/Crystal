@@ -12,6 +12,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct BlueSoulBehavior;
 
+impl Default for BlueSoulBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlueSoulBehavior {
     pub fn new() -> Self {
         Self

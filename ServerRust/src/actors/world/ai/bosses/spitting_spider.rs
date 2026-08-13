@@ -29,6 +29,12 @@ fn in_spit_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct SpittingSpiderBehavior;
 
+impl Default for SpittingSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpittingSpiderBehavior {
     pub fn new() -> Self {
         Self

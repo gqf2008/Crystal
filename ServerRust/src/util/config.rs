@@ -66,7 +66,7 @@ impl Default for ConquestConfig {
 }
 
 /// PvP 开关（C# Settings.cs：PvpCanFreeze/PvpCanResistPoison，默认 false）
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct PvpConfig {
     /// PvP 中是否允许冰冻（C# PvpCanFreeze；CatTongue 玩家冰冻门控）
     #[serde(default)]
@@ -74,15 +74,6 @@ pub struct PvpConfig {
     /// PvP 中是否允许毒抗/眩晕（C# PvpCanResistPoison；TwinDrakeBlade 玩家眩晕门控）
     #[serde(default)]
     pub can_resist_poison: bool,
-}
-
-impl Default for PvpConfig {
-    fn default() -> Self {
-        Self {
-            can_freeze: false,
-            can_resist_poison: false,
-        }
-    }
 }
 
 /// 精炼配置（C# Settings.Refine*：Settings.cs:250-260）

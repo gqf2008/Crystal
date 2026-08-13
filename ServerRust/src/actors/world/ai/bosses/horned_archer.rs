@@ -25,6 +25,12 @@ pub struct HornedArcherBehavior {
     next_buff_tick: u64,
 }
 
+impl Default for HornedArcherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HornedArcherBehavior {
     pub fn new() -> Self {
         Self { next_buff_tick: 0 }

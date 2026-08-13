@@ -30,6 +30,12 @@ pub struct EarthGolemBehavior {
     fear_end_tick: u64,
 }
 
+impl Default for EarthGolemBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EarthGolemBehavior {
     pub fn new() -> Self {
         Self {

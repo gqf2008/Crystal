@@ -14,6 +14,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct SackWarriorBehavior;
 
+impl Default for SackWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SackWarriorBehavior {
     pub fn new() -> Self {
         Self

@@ -48,6 +48,12 @@ fn maybe_teleport_to_weaker(monster: &mut MonsterState, ctx: &mut AiCtx, view_ra
 
 pub struct GlacierWarriorBehavior;
 
+impl Default for GlacierWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlacierWarriorBehavior {
     pub fn new() -> Self {
         Self

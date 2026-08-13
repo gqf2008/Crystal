@@ -33,6 +33,12 @@ pub struct TrapRockBehavior {
     parent_oid: Option<u32>,
 }
 
+impl Default for TrapRockBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TrapRockBehavior {
     pub fn new() -> Self {
         Self {

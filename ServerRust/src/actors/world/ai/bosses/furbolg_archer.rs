@@ -15,6 +15,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct FurbolgArcherBehavior;
 
+impl Default for FurbolgArcherBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FurbolgArcherBehavior {
     pub fn new() -> Self {
         Self

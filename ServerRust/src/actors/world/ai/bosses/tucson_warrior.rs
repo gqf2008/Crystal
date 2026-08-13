@@ -14,6 +14,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct TucsonWarriorBehavior;
 
+impl Default for TucsonWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TucsonWarriorBehavior {
     pub fn new() -> Self {
         Self

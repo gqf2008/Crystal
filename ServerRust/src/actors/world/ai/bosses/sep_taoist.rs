@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct SepTaoistBehavior;
 
+impl Default for SepTaoistBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepTaoistBehavior {
     pub fn new() -> Self {
         Self

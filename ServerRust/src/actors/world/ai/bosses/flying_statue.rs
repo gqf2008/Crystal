@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct FlyingStatueBehavior;
 
+impl Default for FlyingStatueBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlyingStatueBehavior {
     pub fn new() -> Self {
         Self

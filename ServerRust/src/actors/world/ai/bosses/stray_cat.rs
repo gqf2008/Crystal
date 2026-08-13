@@ -26,6 +26,12 @@ fn in_cat_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct StrayCatBehavior;
 
+impl Default for StrayCatBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StrayCatBehavior {
     pub fn new() -> Self {
         Self

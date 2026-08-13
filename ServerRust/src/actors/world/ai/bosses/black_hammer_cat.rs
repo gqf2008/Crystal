@@ -13,6 +13,12 @@ const LINE_RANGE: i32 = 2;
 
 pub struct BlackHammerCatBehavior;
 
+impl Default for BlackHammerCatBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlackHammerCatBehavior {
     pub fn new() -> Self {
         Self

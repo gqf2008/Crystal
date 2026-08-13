@@ -29,6 +29,12 @@ pub struct OmaKingBehavior {
     spawned: bool,
 }
 
+impl Default for OmaKingBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OmaKingBehavior {
     pub fn new() -> Self {
         Self {

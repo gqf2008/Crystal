@@ -32,6 +32,12 @@ pub struct StoningStatueBehavior {
     spawned: bool,
 }
 
+impl Default for StoningStatueBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StoningStatueBehavior {
     pub fn new() -> Self {
         Self {

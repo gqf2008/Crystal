@@ -28,6 +28,12 @@ pub struct WaterDragonBehavior {
     spawned: bool,
 }
 
+impl Default for WaterDragonBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WaterDragonBehavior {
     pub fn new() -> Self {
         Self {

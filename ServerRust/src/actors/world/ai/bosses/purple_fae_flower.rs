@@ -13,6 +13,12 @@ use crate::actors::world::MonsterState;
 
 pub struct PurpleFaeFlowerBehavior;
 
+impl Default for PurpleFaeFlowerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PurpleFaeFlowerBehavior {
     pub fn new() -> Self {
         Self

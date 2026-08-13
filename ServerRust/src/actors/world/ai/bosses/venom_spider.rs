@@ -21,6 +21,12 @@ const LINE_RANGE: i32 = 2;
 
 pub struct VenomSpiderBehavior;
 
+impl Default for VenomSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VenomSpiderBehavior {
     pub fn new() -> Self {
         Self

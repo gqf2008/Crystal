@@ -18,6 +18,12 @@ const ATTACK_RANGE: i32 = 3;
 
 pub struct NadzBehavior;
 
+impl Default for NadzBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NadzBehavior {
     pub fn new() -> Self {
         Self

@@ -24,6 +24,12 @@ const QUAKE_RADIUS: i32 = 2;
 
 pub struct StoneGolemBehavior;
 
+impl Default for StoneGolemBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StoneGolemBehavior {
     pub fn new() -> Self {
         Self
