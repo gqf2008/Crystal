@@ -115,7 +115,10 @@ mod tests {
     fn town_archer_and_siege_immune_to_monsters() {
         let archer = crate::actors::world::ai::bosses::town_archer::TownArcherBehavior::new();
         assert!(archer.is_attackable(), "城镇弓箭手对玩家可攻击");
-        assert!(!archer.is_attackable_by_monster(), "城镇弓箭手对怪物不可攻击");
+        assert!(
+            !archer.is_attackable_by_monster(),
+            "城镇弓箭手对怪物不可攻击"
+        );
         let siege = crate::actors::world::ai::bosses::siege::SiegeBehavior::new();
         assert!(siege.is_attackable(), "攻城建筑对玩家可攻击");
         assert!(!siege.is_attackable_by_monster(), "攻城建筑对怪物不可攻击");

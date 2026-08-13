@@ -9,12 +9,12 @@
 //! Attack（C# :18-58）：近战/远程分支。
 //! CompleteRangeAttack（C# :60-72）：命中→Slow 6s + Frozen 9s。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
@@ -40,40 +40,58 @@ impl MonsterBehavior for OmaMageBehavior {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if dist <= MELEE_RANGE {
                 // 近战 Type0 DC
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // 远程 MC 弹道 + Slow + Frozen
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5; // C# AttackSpeed + 500
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
                 // C# PoisonTarget Slow 6s + Frozen 9s
                 // C# PoisonTarget 1/6
-                    if fastrand::i32(0..6) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                    });
-                    }
+                if fastrand::i32(0..6) == 0 {
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::SLOW,
+                                5,
+                                crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                2000,
+                            ),
+                        });
+                }
                 // C# PoisonTarget 1/9
-                    if fastrand::i32(0..9) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                    });
-                    }
+                if fastrand::i32(0..9) == 0 {
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::FROZEN,
+                                5,
+                                crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                2000,
+                            ),
+                        });
+                }
             }
             return;
         }

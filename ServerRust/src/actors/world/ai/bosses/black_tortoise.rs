@@ -4,10 +4,10 @@
 //! 机制：AttackRange=5；近战（dist<=1）4/5 普攻 / 1/5 Halfmoon（4 格弧）；
 //!      远程 MC（MACAgility）+ 命中 1/7 绿毒（5s，tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -23,7 +23,8 @@ impl BlackTortoiseBehavior {
 
 impl MonsterBehavior for BlackTortoiseBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index) {
+        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+        {
             Some(t) => *t,
             None => return,
         };
@@ -32,47 +33,66 @@ impl MonsterBehavior for BlackTortoiseBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 远程/魔法攻击用 MC（#2328）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             if dist <= 1 {
                 // C# Random.Next(5) > 0：4/5 普攻 / 1/5 Halfmoon
                 if fastrand::i32(0..5) > 0 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else {
                     let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                     monster.direction = dir;
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        direction: dir,
-                        count: 4,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Arc {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            direction: dir,
+                            count: 4,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage: mc_damage,
+                        spell_id: 0,
+                    });
                 // C# CompleteRangeAttack：PoisonTarget(7, 5, Green, 1000)：1/7、5s
                 if fastrand::i32(0..7) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 1000),
-                    });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::GREEN,
+                                5,
+                                poison_sc_value(monster),
+                                1000,
+                            ),
+                        });
                 }
             }
             return;

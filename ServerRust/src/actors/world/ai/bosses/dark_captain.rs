@@ -11,10 +11,10 @@
 //! Attack（C# :20-119）：三定时器优先级 > 传送 > 近战。
 //! CompleteRangeAttack（C# :121-136）：FindAllTargets(range) AOE。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 /// C# Settings.PowerBead 召唤物名（近似）
@@ -29,7 +29,12 @@ pub struct DarkCaptainBehavior {
 
 impl DarkCaptainBehavior {
     pub fn new() -> Self {
-        Self { next_thunder_tick: 0, next_mass_thunder_tick: 0, next_orb_tick: 0, spawned: false }
+        Self {
+            next_thunder_tick: 0,
+            next_mass_thunder_tick: 0,
+            next_orb_tick: 0,
+            spawned: false,
+        }
     }
 }
 
@@ -56,18 +61,23 @@ impl MonsterBehavior for DarkCaptainBehavior {
             // ---- Thunder（2 格 AOE）----
             if ctx.tick_count >= self.next_thunder_tick {
                 self.next_thunder_tick = ctx.tick_count + 100 + fastrand::u64(0..100);
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, 2, monster.map_index)
-                        .into_iter().copied().collect();
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, 2, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        target_object_id: h.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            target_object_id: h.object_id,
+                            damage,
+                            spell_id: 0,
+                        });
                 }
                 return;
             }
@@ -75,18 +85,23 @@ impl MonsterBehavior for DarkCaptainBehavior {
             // ---- MassThunder（5 格大 AOE）----
             if ctx.tick_count >= self.next_mass_thunder_tick {
                 self.next_mass_thunder_tick = ctx.tick_count + 200 + fastrand::u64(0..300);
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, 5, monster.map_index)
-                        .into_iter().copied().collect();
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, 5, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        target_object_id: h.object_id,
-                        damage,
-                        spell_id: 1,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            target_object_id: h.object_id,
+                            damage,
+                            spell_id: 1,
+                        });
                 }
                 return;
             }
@@ -136,18 +151,21 @@ impl MonsterBehavior for DarkCaptainBehavior {
 
             if fastrand::i32(0..5) > 0 {
                 // 4/5 DC LineAttack(2)（C# LineAttack(damage, 2, 300, ACAgility, push=Random(5)==0)）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                    attacker_oid: monster.object_id,
-                    origin_x: monster.x,
-                    origin_y: monster.y,
-                    direction: dir,
-                    range: 2,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Line {
+                        attacker_oid: monster.object_id,
+                        origin_x: monster.x,
+                        origin_y: monster.y,
+                        direction: dir,
+                        range: 2,
+                        damage,
+                        spell_id: 0,
+                    });
                 // C# LineAttack push：推挤距离 = distance-1 = 1
                 if fastrand::i32(0..5) == 0 {
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
@@ -158,23 +176,29 @@ impl MonsterBehavior for DarkCaptainBehavior {
                 }
             } else {
                 // 1/5 DC FullmoonAttack（8 格，推首个命中目标 1-2 格）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    direction: dir,
-                    count: 8,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 1,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Arc {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        direction: dir,
+                        count: 8,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
                 // C# FullmoonAttack pushDistance=Random(1,3)：仅首个命中目标，沿朝向推
                 let cells = arc_cells(monster.x, monster.y, dir, 8);
-                let hit: Vec<u64> = ctx.find_targets_in_cells(&cells, monster.map_index)
-                    .iter().map(|p| p.session_id).collect();
+                let hit: Vec<u64> = ctx
+                    .find_targets_in_cells(&cells, monster.map_index)
+                    .iter()
+                    .map(|p| p.session_id)
+                    .collect();
                 if let Some(&first) = hit.first() {
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: first,

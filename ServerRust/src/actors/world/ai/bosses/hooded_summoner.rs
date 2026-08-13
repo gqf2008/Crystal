@@ -9,10 +9,10 @@
 //!
 //! Attack（C# :23-91）：Random(6)；0-3 RangedAttack；4/5 SpawnSlaves（SlaveSpawnTime 冷却）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 /// SlaveSpawn 冷却（C# Settings.Second * 15 = 15s = 150 ticks）
@@ -32,7 +32,10 @@ pub struct HoodedSummonerBehavior {
 
 impl HoodedSummonerBehavior {
     pub fn new() -> Self {
-        Self { slave_spawn_tick: 0, fear_end_tick: 0 }
+        Self {
+            slave_spawn_tick: 0,
+            fear_end_tick: 0,
+        }
     }
 }
 
@@ -45,7 +48,8 @@ impl MonsterBehavior for HoodedSummonerBehavior {
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
-        if dist <= VIEW_RANGE && ctx.tick_count < self.fear_end_tick
+        if dist <= VIEW_RANGE
+            && ctx.tick_count < self.fear_end_tick
             && ctx.tick_count >= monster.next_attack_tick
         {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
@@ -54,21 +58,30 @@ impl MonsterBehavior for HoodedSummonerBehavior {
             match roll {
                 0..=3 => {
                     // 远程 MC 弹道（MAC）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage,
+                            spell_id: 0,
+                        });
                 }
                 4 | 5 => {
                     // #1441：C# count = min(1, 4 - SlaveList.Count)——满员不召
-                    if ctx.tick_count >= self.slave_spawn_tick && slave_spawn_count(1, ctx.slave_count, 4) > 0 {
+                    if ctx.tick_count >= self.slave_spawn_tick
+                        && slave_spawn_count(1, ctx.slave_count, 4) > 0
+                    {
                         // 召唤 Slave（C# SpawnSlaves，1 只）
                         self.slave_spawn_tick = ctx.tick_count + SLAVE_COOLDOWN_TICKS;
-                        let mobs = if roll == 4 { &SCROLL_MOBS_A } else { &SCROLL_MOBS_B };
+                        let mobs = if roll == 4 {
+                            &SCROLL_MOBS_A
+                        } else {
+                            &SCROLL_MOBS_B
+                        };
                         let name = mobs[fastrand::usize(0..2)];
                         ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                             monster_name: name.to_string(),
@@ -79,14 +92,20 @@ impl MonsterBehavior for HoodedSummonerBehavior {
                         });
                     } else {
                         // 冷却中：退化为远程弹道
-                        let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                            attacker_oid: monster.object_id,
-                            target_session: target.session_id,
-                            target_object_id: target.object_id,
-                            damage,
-                            spell_id: 0,
-                        });
+                        let damage = crate::combat::attack::get_attack_power(
+                            monster.min_mc,
+                            monster.max_mc,
+                            0,
+                        )
+                        .max(1);
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Range {
+                                attacker_oid: monster.object_id,
+                                target_session: target.session_id,
+                                target_object_id: target.object_id,
+                                damage,
+                                spell_id: 0,
+                            });
                     }
                 }
                 _ => {}

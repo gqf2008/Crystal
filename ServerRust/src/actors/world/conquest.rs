@@ -1,6 +1,5 @@
 /// 攻城/征服系统，对应 C# ConquestObject.cs + ConquestGuildInfo.cs
 /// 公会争夺城堡领土的每周活动
-
 use chrono::{Datelike, Timelike};
 
 /// 世界 tick 数/天（100ms/tick × 86400s）
@@ -9,19 +8,19 @@ pub(crate) const TICKS_PER_DAY: u64 = 864_000;
 /// 征服游戏模式
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConquestGame {
-    CapturePalace,  // 占领皇宫
-    KingOfHill,     // 占山为王
-    Classic,        // 经典模式
-    ControlPoints,  // 控制点
+    CapturePalace, // 占领皇宫
+    KingOfHill,    // 占山为王
+    Classic,       // 经典模式
+    ControlPoints, // 控制点
 }
 
 /// 战争状态
 #[derive(Debug, Clone, PartialEq)]
 pub enum WarState {
     Idle,
-    Declared,       // 已宣战
-    InProgress,     // 战斗中
-    Ended,          // 已结束
+    Declared,   // 已宣战
+    InProgress, // 战斗中
+    Ended,      // 已结束
 }
 
 /// 单个征服区域的信息
@@ -130,8 +129,8 @@ impl ConquestInstance {
             attacker_guild: None,
             war_start_time: 0,
             war_duration_secs: 3600, // 1 hour default
-            war_day: 6, // Saturday
-            war_hour: 20, // 8 PM
+            war_day: 6,              // Saturday
+            war_hour: 20,            // 8 PM
             scores: std::collections::HashMap::new(),
             king_zone: None,
             control_points: Vec::new(),
@@ -191,7 +190,9 @@ impl ConquestInstance {
     pub fn end_war(&mut self) -> Option<String> {
         self.state = WarState::Ended;
         // Find winner: highest score
-        let winner = self.scores.iter()
+        let winner = self
+            .scores
+            .iter()
             .max_by_key(|(_, score)| **score)
             .map(|(g, _)| g.clone());
         if let Some(ref guild) = winner {
@@ -376,7 +377,14 @@ impl SiegeStructure {
     }
 
     /// 启动时按数据放置城门/城墙（#1523：坐标/索引/修复费来自 ConquestInfo.Gates/Walls）
-    pub fn placed(mut self, index: i32, x: i32, y: i32, repair_cost: u32, conquest_id: i32) -> Self {
+    pub fn placed(
+        mut self,
+        index: i32,
+        x: i32,
+        y: i32,
+        repair_cost: u32,
+        conquest_id: i32,
+    ) -> Self {
         self.index = index;
         self.x = x;
         self.y = y;
@@ -434,8 +442,12 @@ pub fn find_nearest_target(
     let mut best: Option<(u32, i32)> = None;
     for oid in candidate_ids {
         let s = structures.get(oid)?;
-        if s.conquest_id != conquest_id { continue; }
-        if !s.is_blocking() || s.is_destroyed() { continue; }
+        if s.conquest_id != conquest_id {
+            continue;
+        }
+        if !s.is_blocking() || s.is_destroyed() {
+            continue;
+        }
         let dist = (s.x - catapult_x).abs() + (s.y - catapult_y).abs();
         if best.is_none_or(|(_, d)| dist < d) {
             best = Some((*oid, dist));
@@ -487,10 +499,15 @@ mod tests {
     fn test_find_nearest_target() {
         let mut map = std::collections::HashMap::new();
         let mut w1 = SiegeStructure::wall(10);
-        w1.conquest_id = 1; w1.x = 5; w1.y = 5;
+        w1.conquest_id = 1;
+        w1.x = 5;
+        w1.y = 5;
         let mut w2 = SiegeStructure::wall(11);
-        w2.conquest_id = 1; w2.x = 20; w2.y = 20;
-        map.insert(10, w1); map.insert(11, w2);
+        w2.conquest_id = 1;
+        w2.x = 20;
+        w2.y = 20;
+        map.insert(10, w1);
+        map.insert(11, w2);
         let ids = vec![10u32, 11u32];
         let target = find_nearest_target(0, 0, 1, &map, &ids);
         assert_eq!(target, Some(10));
@@ -541,7 +558,10 @@ mod tests {
         assert!(!gate.is_blocking(), "开门不阻挡");
         gate.is_open = false;
         gate.hp = 0;
-        assert!(gate.is_blocking(), "is_blocking 只看开关门；已摧毁由调用方过滤 is_destroyed");
+        assert!(
+            gate.is_blocking(),
+            "is_blocking 只看开关门；已摧毁由调用方过滤 is_destroyed"
+        );
         // 城墙始终阻挡（无开关门）
         let wall = SiegeStructure::wall(2);
         assert!(wall.is_blocking());
@@ -552,10 +572,16 @@ mod tests {
         // #1431：攻城器目标选择跳过已开门城门（is_blocking=false）
         let mut map = std::collections::HashMap::new();
         let mut w1 = SiegeStructure::wall(10);
-        w1.conquest_id = 1; w1.x = 5; w1.y = 5;
+        w1.conquest_id = 1;
+        w1.x = 5;
+        w1.y = 5;
         let mut g2 = SiegeStructure::gate(11);
-        g2.conquest_id = 1; g2.x = 20; g2.y = 20; g2.is_open = true;
-        map.insert(10, w1); map.insert(11, g2);
+        g2.conquest_id = 1;
+        g2.x = 20;
+        g2.y = 20;
+        g2.is_open = true;
+        map.insert(10, w1);
+        map.insert(11, g2);
         let ids = vec![10u32, 11u32];
         assert_eq!(find_nearest_target(0, 0, 1, &map, &ids), Some(10));
         // 若只有开门城门 → 无目标
@@ -567,7 +593,10 @@ mod tests {
     fn test_conquest_flag_appearance() {
         // C# ConquestGuildFlagInfo.Spawn：无归属 (1000, Color.Empty=0)；有归属用行会旗标
         assert_eq!(conquest_flag_appearance(None), (1000, 0));
-        assert_eq!(conquest_flag_appearance(Some((1200, 0xFFFF0000u32 as i32))), (1200, 0xFFFF0000u32 as i32));
+        assert_eq!(
+            conquest_flag_appearance(Some((1200, 0xFFFF0000u32 as i32))),
+            (1200, 0xFFFF0000u32 as i32)
+        );
     }
 }
 
@@ -577,10 +606,16 @@ impl SiegeStructure {
     /// 箭塔：死亡 → 全额 RepairCost；存活 → 0
     pub fn repair_cost(&self) -> u64 {
         if self.structure_type == SiegeStructureType::ArcherTower {
-            return if self.hp <= 0 { self.repair_cost as u64 } else { 0 };
+            return if self.hp <= 0 {
+                self.repair_cost as u64
+            } else {
+                0
+            };
         }
         let missing = (self.max_hp - self.hp).max(0) as u64;
-        if missing == 0 { return 0; }
+        if missing == 0 {
+            return 0;
+        }
         let divisor = (self.max_hp as u64 / missing).max(1);
         self.repair_cost as u64 / divisor
     }

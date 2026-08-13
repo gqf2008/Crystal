@@ -10,8 +10,8 @@
 //! 或用 TCP 纯文本:
 //!   nc localhost 7001 → JSON 状态行
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// 运维统计(线程安全,由各 Actor 通过原子操作更新)。
@@ -63,7 +63,11 @@ pub async fn run_admin_server(stats: Arc<AdminStats>, addr: String) {
             l
         }
         Err(e) => {
-            tracing::error!("Admin server bind {} failed: {} (health check disabled)", addr, e);
+            tracing::error!(
+                "Admin server bind {} failed: {} (health check disabled)",
+                addr,
+                e
+            );
             return;
         }
     };

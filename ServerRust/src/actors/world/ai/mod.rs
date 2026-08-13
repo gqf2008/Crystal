@@ -5,14 +5,17 @@
 //! Boss 通过名称匹配注册（对齐 C# Settings 里的字符串配置）。
 
 pub mod behavior;
+pub mod bosses;
 pub mod ctx;
 pub mod default;
-pub mod registry;
 pub mod helpers;
-pub mod bosses;
+pub mod registry;
 
 pub use behavior::MonsterBehavior;
-pub use ctx::{AiCtx, PlayerSnap, MonsterSnap, AttackAction, SpellFieldSpawn, BossSummon, ChildRockSpawn, PoisonPlayer, PushPlayer, DelayedAttack, DelayedSingleDamage};
-pub use helpers::{direction_towards, max_distance, manhattan};
+pub use ctx::{
+    AiCtx, AttackAction, BossSummon, ChildRockSpawn, DelayedAttack, DelayedSingleDamage,
+    MonsterSnap, PlayerSnap, PoisonPlayer, PushPlayer, SpellFieldSpawn,
+};
 pub use default::DefaultBehavior;
-pub use registry::{make_behavior, is_registered_boss, is_static_object, is_passive_object};
+pub use helpers::{direction_towards, manhattan, max_distance};
+pub use registry::{is_passive_object, is_registered_boss, is_static_object, make_behavior};

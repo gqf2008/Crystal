@@ -66,7 +66,11 @@ impl MonsterBehavior for PowerBeadBehavior {
                     ));
                     ctx.out_player_buffs.push((
                         sid,
-                        BuffInstance::new(BuffType::MacDefenseBoost { bonus: damage }, duration, 10),
+                        BuffInstance::new(
+                            BuffType::MacDefenseBoost { bonus: damage },
+                            duration,
+                            10,
+                        ),
                     ));
                 }
             }

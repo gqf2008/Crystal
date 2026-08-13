@@ -4,10 +4,10 @@
 //! 机制：近战（dist<=1）：
 //!   1/6 撤退（远离）；1/6 Type=1 推挤 2 格（不造成伤害）；4/6 双倍伤害近战（DC*2）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 
@@ -30,7 +30,12 @@ impl MonsterBehavior for ArmadilloElderBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             // C# Random.Next(0,6)：0=撤退 / 1=推挤2 / 2-5=双倍
             match fastrand::i32(0..6) {
@@ -47,13 +52,14 @@ impl MonsterBehavior for ArmadilloElderBehavior {
                     });
                 }
                 _ => {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: damage.saturating_mul(2),
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage: damage.saturating_mul(2),
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             }
             return;

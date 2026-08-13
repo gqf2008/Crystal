@@ -8,10 +8,10 @@
 //!
 //! Attack（C# :13-47）：Random(3)>0→DC Type0；else MC Type1。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const MELEE_RANGE: i32 = 1;
@@ -39,17 +39,20 @@ impl MonsterBehavior for CrazyManwormBehavior {
                 // C# Random(3)>0 → DC（Type0）；else MC（Type1）
                 let use_mc = fastrand::i32(0..3) == 0;
                 let damage = if use_mc {
-                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1)
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1)
                 } else {
-                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1)
                 };
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: if use_mc { 1 } else { 0 },
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: if use_mc { 1 } else { 0 },
+                    });
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

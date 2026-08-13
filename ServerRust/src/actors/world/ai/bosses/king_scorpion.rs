@@ -7,10 +7,10 @@
 //!
 //! Attack（C# :28-78）：range||Random(5)==0→MC 直线；else DC 直线。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 
@@ -57,31 +57,35 @@ impl MonsterBehavior for KingScorpionBehavior {
         let dir = direction_towards(monster.x, monster.y, target.x, target.y);
         let cx = monster.x + DIR_DX[dir as usize] * 2;
         let cy = monster.y + DIR_DY[dir as usize] * 2;
-        let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-            ctx.find_targets_in_range(cx, cy, 2, monster.map_index)
-                .into_iter().copied().collect();
+        let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+            .find_targets_in_range(cx, cy, 2, monster.map_index)
+            .into_iter()
+            .copied()
+            .collect();
         let damage = if use_mc {
             crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1)
         } else {
             crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
         };
         if hits.is_empty() {
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: if use_mc { 1 } else { 0 },
-            });
-        } else {
-            for h in &hits {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
-                    target_session: h.session_id,
+                    target_session: target.session_id,
                     damage,
                     spell_id: 0,
                     attack_type: if use_mc { 1 } else { 0 },
                 });
+        } else {
+            for h in &hits {
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: h.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: if use_mc { 1 } else { 0 },
+                    });
             }
         }
     }

@@ -11,12 +11,12 @@
 //!   ranged→9/10 MC AOE(4) / 1/10 MC*2 AOE(5)+SpawnSlaves。
 //! CompleteRangeAttack（C# :92-107）：FindAllTargets(range, target.loc) 逐个 Attacked。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 /// C# AttackRange = 12
 const ATTACK_RANGE: i32 = 12;
@@ -33,7 +33,9 @@ const BAT_NAME: &str = "AncientBat";
 pub struct AncientBringerBehavior;
 
 impl AncientBringerBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for AncientBringerBehavior {
@@ -50,57 +52,79 @@ impl MonsterBehavior for AncientBringerBehavior {
                 // 近战 PoisonLineAttack(2)：4/5 普通 / 1/5 DC*2 + Paralysis
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let strong = fastrand::i32(0..5) == 0;
-                let max_dc = if strong { monster.max_dmg * 2 } else { monster.max_dmg };
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, max_dc, 0).max(1);
+                let max_dc = if strong {
+                    monster.max_dmg * 2
+                } else {
+                    monster.max_dmg
+                };
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, max_dc, 0).max(1);
                 // 直线 2 格（含主目标）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 let dx = DIR_DX[dir as usize];
                 let dy = DIR_DY[dir as usize];
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
                     .find_targets_in_range(monster.x, monster.y, LINE_RANGE, monster.map_index)
-                    .into_iter().copied()
+                    .into_iter()
+                    .copied()
                     .filter(|p| {
                         let rx = p.x - monster.x;
                         let ry = p.y - monster.y;
-                        (rx == 0 && dy == 0) || (ry == 0 && dx == 0)
-                            || (rx.signum() == dx.signum() && ry.signum() == dy.signum() && rx.abs() == ry.abs())
+                        (rx == 0 && dy == 0)
+                            || (ry == 0 && dx == 0)
+                            || (rx.signum() == dx.signum()
+                                && ry.signum() == dy.signum()
+                                && rx.abs() == ry.abs())
                     })
                     .collect();
                 let targets = if hits.is_empty() { vec![target] } else { hits };
                 for h in targets {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                     // 强攻附加 Paralysis 5s（C# PoisonTarget 5,5,Paralysis,2000）
                     if strong {
                         // C# PoisonTarget 1/5
-                            if fastrand::i32(0..5) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: h.session_id,
-                                poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 2000),
-                            });
-                            }
+                        if fastrand::i32(0..5) == 0 {
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: h.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::PARALYSIS,
+                                        5,
+                                        poison_sc_value(monster),
+                                        2000,
+                                    ),
+                                });
+                        }
                     }
                 }
             } else {
                 // 远程：9/10 MC AOE(4)；1/10 MC*2 AOE(5) + 召唤蝙蝠
                 let rare = fastrand::i32(0..10) == 0;
                 monster.next_attack_tick = ctx.tick_count + if rare { 12 } else { 8 };
-                let max_mc = if rare { monster.max_mc * 2 } else { monster.max_mc };
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, max_mc, 0).max(1);
+                let max_mc = if rare {
+                    monster.max_mc * 2
+                } else {
+                    monster.max_mc
+                };
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, max_mc, 0).max(1);
                 let splash = if rare { 5 } else { 4 };
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: target.x,
-                    center_y: target.y,
-                    radius: splash,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: target.x,
+                        center_y: target.y,
+                        radius: splash,
+                        damage,
+                        spell_id: 0,
+                    });
                 // 1/10 召唤 AncientBat（C# SpawnSlaves）
                 if rare {
                     // #1441：C# SpawnSlaves count = min(6, 40 - SlaveList.Count)

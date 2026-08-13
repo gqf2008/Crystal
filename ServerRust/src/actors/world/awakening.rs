@@ -12,7 +12,11 @@ pub struct DepositRefineItemRequest {
 impl Message<DepositRefineItemRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: DepositRefineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: DepositRefineItemRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -32,14 +36,24 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         }
-        let Some(item) = state.inventory.backpack[from as usize].as_ref().map(|s| s.item.clone()) else {
+        let Some(item) = state.inventory.backpack[from as usize]
+            .as_ref()
+            .map(|s| s.item.clone())
+        else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
 
         // 材料槽（To 1..=10）：C# Info.Refine 材料格（材料可为任意装备/矿，不做 DontUpgrade 限制）
         if msg.to != 0 {
-            let Some(item) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: item.unique_id }).await.unwrap_or(None) else {
+            let Some(item) = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveItemFromInventory {
+                    unique_id: item.unique_id,
+                })
+                .await
+                .unwrap_or(None)
+            else {
                 send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
                 return;
             };
@@ -50,13 +64,23 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             }
             let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
             send_system_message(&self.gate_ref, msg.session_id, "精炼材料已存入");
-            debug!("DepositRefineItem(material): {} from={} to={}", state.name, msg.from, msg.to);
+            debug!(
+                "DepositRefineItem(material): {} from={} to={}",
+                state.name, msg.from, msg.to
+            );
             return;
         }
 
         // #926：C# BindMode.DontUpgrade(0x40)：不可精炼/升级（含租赁绑定，:12678）
-        if self.item_infos.get(&item.item_index)
-            .map(|i| super::has_bind_flag(i.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits()))
+        if self
+            .item_infos
+            .get(&item.item_index)
+            .map(|i| {
+                super::has_bind_flag(
+                    i.bind_mode,
+                    mir2_shared::enums::BindMode::DONT_UPGRADE.bits(),
+                )
+            })
             .unwrap_or(false)
             || super::rental_has_flag(&item, mir2_shared::enums::BindMode::DONT_UPGRADE.bits())
         {
@@ -65,7 +89,14 @@ impl Message<DepositRefineItemRequest> for WorldActor {
         }
 
         // C# RefineItem（:12705）：从背包移除物品并存入精炼日志（含完整物品数据）
-        let Some(item) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory { unique_id: item.unique_id }).await.unwrap_or(None) else {
+        let Some(item) = record
+            .actor_ref
+            .ask(crate::actors::player::RemoveItemFromInventory {
+                unique_id: item.unique_id,
+            })
+            .await
+            .unwrap_or(None)
+        else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         };
@@ -94,7 +125,11 @@ pub struct RetrieveRefineItemRequest {
 impl Message<RetrieveRefineItemRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: RetrieveRefineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: RetrieveRefineItemRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -110,7 +145,10 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
             return;
         }
         let to = msg.to;
-        if to < 0 || to as usize >= state.inventory.backpack.len() || state.inventory.backpack[to as usize].is_some() {
+        if to < 0
+            || to as usize >= state.inventory.backpack.len()
+            || state.inventory.backpack[to as usize].is_some()
+        {
             send_system_message(&self.gate_ref, msg.session_id, "该背包格子已被占用");
             return;
         }
@@ -124,12 +162,22 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
             }
             if let Some(ri) = log.retrieve() {
                 if let Some(item) = ri.item {
-                    let ok = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
+                    let ok = record
+                        .actor_ref
+                        .ask(crate::actors::player::PlaceItemAtSlot {
+                            slot: to,
+                            item: item.clone(),
+                        })
+                        .await
+                        .unwrap_or(false);
                     if !ok {
                         // 放置失败回放精炼栏（避免物品丢失）
                         let mut log2 = state.refine_log.clone();
                         if log2.deposit_item(item) {
-                            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log2 }).await;
+                            let _ = record
+                                .actor_ref
+                                .ask(SetRefineLog { refine_log: log2 })
+                                .await;
                         }
                         send_system_message(&self.gate_ref, msg.session_id, "背包已满");
                         return;
@@ -145,7 +193,14 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "该材料格为空");
                 return;
             };
-            let ok = record.actor_ref.ask(crate::actors::player::PlaceItemAtSlot { slot: to, item: item.clone() }).await.unwrap_or(false);
+            let ok = record
+                .actor_ref
+                .ask(crate::actors::player::PlaceItemAtSlot {
+                    slot: to,
+                    item: item.clone(),
+                })
+                .await
+                .unwrap_or(false);
             if !ok {
                 // 放置失败回放材料格（避免物品丢失）
                 let _ = log.deposit_material((msg.from - 1) as usize, item);
@@ -155,7 +210,10 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
             }
             let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
             send_system_message(&self.gate_ref, msg.session_id, "精炼材料已取回");
-            debug!("RetrieveRefineItem(material): {} from={} to={}", state.name, msg.from, to);
+            debug!(
+                "RetrieveRefineItem(material): {} from={} to={}",
+                state.name, msg.from, to
+            );
         }
     }
 }
@@ -181,12 +239,18 @@ impl Message<RefineCancelRequest> for WorldActor {
         let mut log = state.refine_log;
         // 返还全部材料（C# RefineCancel :12603-12639）
         for m in log.take_all_materials().into_iter().flatten() {
-            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item: m }).await;
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::AddItemToInventory { item: m })
+                .await;
         }
         // 返还武器（如有）
         if let Some(ri) = log.cancel() {
             if let Some(item) = ri.item {
-                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::AddItemToInventory { item })
+                    .await;
             }
         }
         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
@@ -223,7 +287,11 @@ impl Message<RefineItemRequest> for WorldActor {
         };
 
         // C# RefineItem（:12649-12658）：按 unique_id 校验精炼栏物品
-        let deposited = state.refine_log.active_refine.as_ref().and_then(|ri| ri.item.clone());
+        let deposited = state
+            .refine_log
+            .active_refine
+            .as_ref()
+            .and_then(|ri| ri.item.clone());
         let Some(deposited) = deposited else {
             send_system_message(&self.gate_ref, msg.session_id, "没有待精炼的物品");
             return;
@@ -247,9 +315,13 @@ impl Message<RefineItemRequest> for WorldActor {
             return;
         }
         // C# BindMode.DontUpgrade(0x40)：不可精炼（与 DepositRefineItem #926 一致；含租赁绑定 :12678）
-        if super::has_bind_flag(item_db.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits())
-            || super::rental_has_flag(&deposited, mir2_shared::enums::BindMode::DONT_UPGRADE.bits())
-        {
+        if super::has_bind_flag(
+            item_db.bind_mode,
+            mir2_shared::enums::BindMode::DONT_UPGRADE.bits(),
+        ) || super::rental_has_flag(
+            &deposited,
+            mir2_shared::enums::BindMode::DONT_UPGRADE.bits(),
+        ) {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法精炼");
             return;
         }
@@ -258,7 +330,10 @@ impl Message<RefineItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法精炼");
             return;
         }
-        let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::DeductGold { amount: cost })
+            .await;
         super::send_gold_changed_packet(&self.gate_ref, msg.session_id, cost);
 
         // 开始精炼（C# Settings.RefineTime=20 分钟完成；成功率公式待材料系统，暂保持 80%）
@@ -268,17 +343,23 @@ impl Message<RefineItemRequest> for WorldActor {
             .unwrap_or(0);
 
         let duration = self.refine_cfg.time_minutes as u64 * 60; // C# Settings.RefineTime=20 分钟
-        // C# RefineItem 材料聚合（:12710-12751）→ RefinedValue/refineStat（:12790-12806）→ 成功率（:12811-12845）
+                                                                 // C# RefineItem 材料聚合（:12710-12751）→ RefinedValue/refineStat（:12790-12806）→ 成功率（:12811-12845）
         let aggregates = crate::actors::refine::refine_material_aggregates(
             &state.refine_log.materials,
             &self.item_infos,
             &self.refine_cfg.ore_name,
         );
-        let (refined_value, refine_stat) = if aggregates.total_dc > aggregates.total_mc && aggregates.total_dc > aggregates.total_sc {
+        let (refined_value, refine_stat) = if aggregates.total_dc > aggregates.total_mc
+            && aggregates.total_dc > aggregates.total_sc
+        {
             (mir2_shared::enums::RefinedValue::Dc, aggregates.total_dc)
-        } else if aggregates.total_mc > aggregates.total_dc && aggregates.total_mc > aggregates.total_sc {
+        } else if aggregates.total_mc > aggregates.total_dc
+            && aggregates.total_mc > aggregates.total_sc
+        {
             (mir2_shared::enums::RefinedValue::Mc, aggregates.total_mc)
-        } else if aggregates.total_sc > aggregates.total_dc && aggregates.total_sc > aggregates.total_mc {
+        } else if aggregates.total_sc > aggregates.total_dc
+            && aggregates.total_sc > aggregates.total_mc
+        {
             (mir2_shared::enums::RefinedValue::Sc, aggregates.total_sc)
         } else {
             (mir2_shared::enums::RefinedValue::None, 0)
@@ -288,14 +369,24 @@ impl Message<RefineItemRequest> for WorldActor {
         let added_mc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxMC);
         let added_sc = deposited.added_stats.get(mir2_shared::enums::Stat::MaxSC);
         let success_chance = crate::actors::refine::refine_success_chance(
-            refine_stat, item_db.required_amount, aggregates.required_level,
-            aggregates.item_amount, aggregates.durability_count, aggregates.current_dura_count,
-            aggregates.ore_amount, aggregates.ore_purity,
-            luck, added_dc, added_mc, added_sc, true,
+            refine_stat,
+            item_db.required_amount,
+            aggregates.required_level,
+            aggregates.item_amount,
+            aggregates.durability_count,
+            aggregates.current_dura_count,
+            aggregates.ore_amount,
+            aggregates.ore_purity,
+            luck,
+            added_dc,
+            added_mc,
+            added_sc,
+            true,
             self.refine_cfg.base_chance as i32,
             self.refine_cfg.wep_stat_reduce as i32,
             self.refine_cfg.item_stat_reduce as i32,
-        ).clamp(0, 255) as u8;
+        )
+        .clamp(0, 255) as u8;
         let mut log = state.refine_log;
         if !log.begin_refine(current_time, duration, success_chance) {
             send_system_message(&self.gate_ref, msg.session_id, "没有待精炼的物品");
@@ -316,10 +407,16 @@ impl Message<RefineItemRequest> for WorldActor {
         // C# RefineItem（:12703）：开始时发 S.RefineItem { UniqueID }
         let mut rb = Vec::new();
         rb.extend_from_slice(&deposited.unique_id.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RefineItem as i16, &rb),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::RefineItem as i16,
+                    &rb,
+                ),
+            })
+            .await;
 
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
         debug!("RefineItem: {} uid={}", state.name, msg.unique_id);
@@ -355,19 +452,26 @@ impl Message<CheckRefineRequest> for WorldActor {
                 let mut log = state.refine_log;
                 match log.settle_check(self.refine_cfg.crit_chance, self.refine_cfg.crit_increase) {
                     Some(crate::actors::refine::RefineCheckResult::Applied) => {
-                        let refined_item = log.active_refine.as_ref().and_then(|ri| ri.item.clone());
+                        let refined_item =
+                            log.active_refine.as_ref().and_then(|ri| ri.item.clone());
                         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
                         // C# CheckRefine（:12970）：成功发 S.ItemUpgraded { Item }
                         if let Some(item) = refined_item {
                             let pkt = mir2_shared::packets::server::ItemUpgraded { item };
                             let mut body = Vec::new();
                             if mir2_shared::packets::base::serialize_packet(
-                                &mut std::io::Cursor::new(&mut body), &pkt,
-                            ).is_ok() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: msg.session_id,
-                                    data: body,
-                                }).await;
+                                &mut std::io::Cursor::new(&mut body),
+                                &pkt,
+                            )
+                            .is_ok()
+                            {
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: msg.session_id,
+                                        data: body,
+                                    })
+                                    .await;
                             }
                         }
                         send_system_message(&self.gate_ref, msg.session_id, "精炼成功！请取回物品");
@@ -389,7 +493,11 @@ impl Message<CheckRefineRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "精炼已完成，请取回物品");
             } else {
                 let remaining = item.finish_time.saturating_sub(current_time);
-                send_system_message(&self.gate_ref, msg.session_id, &format!("精炼进行中，剩余 {} 秒", remaining));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("精炼进行中，剩余 {} 秒", remaining),
+                );
             }
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "没有精炼进行中");
@@ -406,8 +514,15 @@ pub struct AwakeningNeedMaterialsRequest {
 impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: AwakeningNeedMaterialsRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+    async fn handle(
+        &mut self,
+        msg: AwakeningNeedMaterialsRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
 
         let _awake_type = match mir2_shared::enums::AwakeType::try_from(msg.awake_type) {
             Ok(t) => t,
@@ -417,7 +532,13 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
             }
         };
 
-        let item = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.unique_id }).await {
+        let item = match record
+            .actor_ref
+            .ask(crate::actors::player::GetItemInfo {
+                unique_id: msg.unique_id,
+            })
+            .await
+        {
             Ok(Some(i)) => i,
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
@@ -462,12 +583,16 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
         let type_shape = msg.awake_type.saturating_sub(1) as i32;
         let mut materials = Vec::new();
         for (idx, info) in self.item_infos.iter() {
-            if info.item_type != 35 { continue; } // ItemType::Awakening
+            if info.item_type != 35 {
+                continue;
+            } // ItemType::Awakening
             if info.shape == type_shape || info.shape == 100 {
-                materials.push(mir2_shared::packets::server::awakening_system::MaterialInfo {
-                    item_id: *idx,
-                    count: needed,
-                });
+                materials.push(
+                    mir2_shared::packets::server::awakening_system::MaterialInfo {
+                        item_id: *idx,
+                        count: needed,
+                    },
+                );
             }
         }
 
@@ -480,10 +605,16 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
             warn!("Failed to serialize AwakeningNeedMaterials: {}", e);
             return;
         }
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AwakeningNeedMaterials as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::AwakeningNeedMaterials as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -496,7 +627,11 @@ pub struct AwakeningLockedItemRequest {
 impl Message<AwakeningLockedItemRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: AwakeningLockedItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: AwakeningLockedItemRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let packet = mir2_shared::packets::server::awakening_system::AwakeningLockedItem {
             unique_id: msg.unique_id,
             locked: msg.locked,
@@ -506,10 +641,16 @@ impl Message<AwakeningLockedItemRequest> for WorldActor {
             warn!("Failed to serialize AwakeningLockedItem: {}", e);
             return;
         }
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AwakeningLockedItem as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::AwakeningLockedItem as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -525,8 +666,14 @@ impl Message<AwakeningRequest> for WorldActor {
     async fn handle(&mut self, msg: AwakeningRequest, _ctx: &mut Context<Self, Self::Reply>) {
         use mir2_shared::packets::server::awakening_system::*;
 
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         let awake_type = match mir2_shared::enums::AwakeType::try_from(msg.awake_type) {
             Ok(t) => t,
@@ -536,7 +683,13 @@ impl Message<AwakeningRequest> for WorldActor {
             }
         };
 
-        let item = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.unique_id }).await {
+        let item = match record
+            .actor_ref
+            .ask(crate::actors::player::GetItemInfo {
+                unique_id: msg.unique_id,
+            })
+            .await
+        {
             Ok(Some(i)) => i,
             _ => {
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_FAIL, -1);
@@ -580,8 +733,16 @@ impl Message<AwakeningRequest> for WorldActor {
 
         // 验证物品类型与觉醒类型兼容性 (Weapon=1, Armour=2, Helmet=4)
         let compatible = match item_info.item_type {
-            1 => matches!(awake_type, mir2_shared::enums::AwakeType::Dc | mir2_shared::enums::AwakeType::Mc | mir2_shared::enums::AwakeType::Sc),
-            4 => matches!(awake_type, mir2_shared::enums::AwakeType::Ac | mir2_shared::enums::AwakeType::Mac),
+            1 => matches!(
+                awake_type,
+                mir2_shared::enums::AwakeType::Dc
+                    | mir2_shared::enums::AwakeType::Mc
+                    | mir2_shared::enums::AwakeType::Sc
+            ),
+            4 => matches!(
+                awake_type,
+                mir2_shared::enums::AwakeType::Ac | mir2_shared::enums::AwakeType::Mac
+            ),
             2 => awake_type == mir2_shared::enums::AwakeType::HpMp,
             _ => false,
         };
@@ -602,7 +763,11 @@ impl Message<AwakeningRequest> for WorldActor {
 
         // 检查金币：费用 = 1500 * (1 + awakeLevel * 2) * grade
         let gold_cost = 1500u64 * (1 + awake_level as u64 * 2) * grade as u64;
-        let has_gold = record.actor_ref.ask(crate::actors::player::HasGold { amount: gold_cost }).await.unwrap_or(false);
+        let has_gold = record
+            .actor_ref
+            .ask(crate::actors::player::HasGold { amount: gold_cost })
+            .await
+            .unwrap_or(false);
         if !has_gold {
             self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_GOLD, -1);
             return;
@@ -638,9 +803,13 @@ impl Message<AwakeningRequest> for WorldActor {
 
         // 检查材料数量
         if mat_idx > 0 {
-            let available = record.actor_ref.ask(crate::actors::player::CountItemsByIndex {
-                item_index: mat_idx,
-            }).await.unwrap_or(0);
+            let available = record
+                .actor_ref
+                .ask(crate::actors::player::CountItemsByIndex {
+                    item_index: mat_idx,
+                })
+                .await
+                .unwrap_or(0);
             if available < needed {
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_MATERIALS, -1);
                 return;
@@ -649,10 +818,14 @@ impl Message<AwakeningRequest> for WorldActor {
 
         // 扣除材料
         if mat_idx > 0 {
-            let consumed = record.actor_ref.ask(crate::actors::player::ConsumeItemsByIndex {
-                item_index: mat_idx,
-                count: needed,
-            }).await.unwrap_or(false);
+            let consumed = record
+                .actor_ref
+                .ask(crate::actors::player::ConsumeItemsByIndex {
+                    item_index: mat_idx,
+                    count: needed,
+                })
+                .await
+                .unwrap_or(false);
             if !consumed {
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_MATERIALS, -1);
                 return;
@@ -660,7 +833,10 @@ impl Message<AwakeningRequest> for WorldActor {
         }
 
         // 扣除金币
-        let gold_deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: gold_cost }).await;
+        let gold_deducted = record
+            .actor_ref
+            .ask(crate::actors::player::DeductGold { amount: gold_cost })
+            .await;
         if !gold_deducted.unwrap_or(false) {
             self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_GOLD, -1);
             return;
@@ -670,13 +846,15 @@ impl Message<AwakeningRequest> for WorldActor {
         let roll = fastrand::u8(0..100);
         if roll < self.awakening_cfg.success_rate {
             // 成功：计算觉醒值（#2416：AwakeningSystem.ini 配置化）
-            let chance_max = self.awakening_cfg.chance_max
+            let chance_max = self
+                .awakening_cfg
+                .chance_max
                 .get(grade.saturating_sub(1) as usize)
                 .copied()
                 .unwrap_or(1);
             let rate = match item_info.item_type {
-                1 => self.awakening_cfg.weapon_rate,  // Weapon
-                4 => self.awakening_cfg.helmet_rate,  // Helmet
+                1 => self.awakening_cfg.weapon_rate, // Weapon
+                4 => self.awakening_cfg.helmet_rate, // Helmet
                 2 => self.awakening_cfg.armor_rate,  // Armour
                 _ => 1,
             };
@@ -686,27 +864,49 @@ impl Message<AwakeningRequest> for WorldActor {
             awake.awake_type = awake_type;
             awake.levels.push(value);
 
-            let set = record.actor_ref.ask(crate::actors::player::SetItemAwake {
-                unique_id: msg.unique_id,
-                awake,
-            }).await.unwrap_or(false);
+            let set = record
+                .actor_ref
+                .ask(crate::actors::player::SetItemAwake {
+                    unique_id: msg.unique_id,
+                    awake,
+                })
+                .await
+                .unwrap_or(false);
 
             if set {
-                debug!("Awakening success: {} item={} type={:?} value={}", state.name, msg.unique_id, awake_type, value);
+                debug!(
+                    "Awakening success: {} item={} type={:?} value={}",
+                    state.name, msg.unique_id, awake_type, value
+                );
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_SUCCESS, -1);
-                send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("觉醒成功！{} +{}", awake_type_name(awake_type), value));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("觉醒成功！{} +{}", awake_type_name(awake_type), value),
+                );
             } else {
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_FAIL, -1);
             }
         } else {
             // 失败：物品被摧毁
-            let removed = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory {
-                unique_id: msg.unique_id,
-            }).await.ok().flatten();
+            let removed = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveItemFromInventory {
+                    unique_id: msg.unique_id,
+                })
+                .await
+                .ok()
+                .flatten();
             if removed.is_some() {
-                debug!("Awakening destroy: {} item={} destroyed", state.name, msg.unique_id);
-                self.send_awakening_result(msg.session_id, AWAKE_RESULT_DESTROYED, msg.unique_id as i64);
+                debug!(
+                    "Awakening destroy: {} item={} destroyed",
+                    state.name, msg.unique_id
+                );
+                self.send_awakening_result(
+                    msg.session_id,
+                    AWAKE_RESULT_DESTROYED,
+                    msg.unique_id as i64,
+                );
                 send_system_message(&self.gate_ref, msg.session_id, "觉醒失败，物品已损毁！");
             } else {
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_FAIL, -1);
@@ -723,11 +923,27 @@ pub struct DowngradeAwakeningRequest {
 impl Message<DowngradeAwakeningRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: DowngradeAwakeningRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+    async fn handle(
+        &mut self,
+        msg: DowngradeAwakeningRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
-        let item = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.unique_id }).await {
+        let item = match record
+            .actor_ref
+            .ask(crate::actors::player::GetItemInfo {
+                unique_id: msg.unique_id,
+            })
+            .await
+        {
             Ok(Some(i)) => i,
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
@@ -737,8 +953,16 @@ impl Message<DowngradeAwakeningRequest> for WorldActor {
 
         // C# Downgrade（:8891）：租赁物品不可降级
         if item.rental_information.is_some() {
-            let owner = item.rental_information.as_ref().map(|r| r.owner_name.clone()).unwrap_or_default();
-            send_system_message(&self.gate_ref, msg.session_id, &format!("该物品属于 {}，无法降级", owner));
+            let owner = item
+                .rental_information
+                .as_ref()
+                .map(|r| r.owner_name.clone())
+                .unwrap_or_default();
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("该物品属于 {}，无法降级", owner),
+            );
             return;
         }
 
@@ -764,13 +988,24 @@ impl Message<DowngradeAwakeningRequest> for WorldActor {
         let awake_level = item.awake.awake_level() as u64;
         let gold_cost = 3000u64 * (1 + (awake_level + 1) * 2) * grade as u64;
 
-        let has_gold = record.actor_ref.ask(crate::actors::player::HasGold { amount: gold_cost }).await.unwrap_or(false);
+        let has_gold = record
+            .actor_ref
+            .ask(crate::actors::player::HasGold { amount: gold_cost })
+            .await
+            .unwrap_or(false);
         if !has_gold {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，降级需要 {} 金币", gold_cost));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("金币不足，降级需要 {} 金币", gold_cost),
+            );
             return;
         }
 
-        let gold_deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: gold_cost }).await;
+        let gold_deducted = record
+            .actor_ref
+            .ask(crate::actors::player::DeductGold { amount: gold_cost })
+            .await;
         if !gold_deducted.unwrap_or(false) {
             send_system_message(&self.gate_ref, msg.session_id, "金币扣除失败");
             return;
@@ -783,13 +1018,22 @@ impl Message<DowngradeAwakeningRequest> for WorldActor {
             awake.awake_type = mir2_shared::enums::AwakeType::None;
         }
 
-        let set = record.actor_ref.ask(crate::actors::player::SetItemAwake {
-            unique_id: msg.unique_id,
-            awake,
-        }).await.unwrap_or(false);
+        let set = record
+            .actor_ref
+            .ask(crate::actors::player::SetItemAwake {
+                unique_id: msg.unique_id,
+                awake,
+            })
+            .await
+            .unwrap_or(false);
 
         if set {
-            debug!("DowngradeAwakening: {} item={} new_level={}", state.name, msg.unique_id, item.awake.awake_level().saturating_sub(1));
+            debug!(
+                "DowngradeAwakening: {} item={} new_level={}",
+                state.name,
+                msg.unique_id,
+                item.awake.awake_level().saturating_sub(1)
+            );
             send_system_message(&self.gate_ref, msg.session_id, "觉醒降级成功");
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "降级失败");
@@ -841,49 +1085,92 @@ impl WorldActor {
         item_type: mir2_shared::enums::ItemType,
         awake_type: mir2_shared::enums::AwakeType,
     ) {
-        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         // C#：遍历 Info.Equipment，真实类型匹配则 UpgradeAwake
         for item in state.inventory.equipment.iter().flatten() {
-            let Some(info) = item.info.as_ref() else { continue };
-            if info.item_type != item_type { continue; }
-            let Some(item_info) = self.item_infos.get(&item.item_index) else { continue };
+            let Some(info) = item.info.as_ref() else {
+                continue;
+            };
+            if info.item_type != item_type {
+                continue;
+            }
+            let Some(item_info) = self.item_infos.get(&item.item_index) else {
+                continue;
+            };
 
             // C# CheckAwakening：可觉醒 / 未满级 / 类型兼容 / 品级（#2416：MaxUpgradeLevel 配置化）
-            if !item_info.can_awakening || item.awake.awake_level() >= self.awakening_cfg.max_awake_level {
-                send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
+            if !item_info.can_awakening
+                || item.awake.awake_level() >= self.awakening_cfg.max_awake_level
+            {
+                send_system_message(
+                    &self.gate_ref,
+                    session_id,
+                    &format!("条件不符：{}", item_info.name),
+                );
                 continue;
             }
             if item.awake.awake_type != mir2_shared::enums::AwakeType::None
                 && item.awake.awake_type != awake_type
             {
-                send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
+                send_system_message(
+                    &self.gate_ref,
+                    session_id,
+                    &format!("条件不符：{}", item_info.name),
+                );
                 continue;
             }
             let compatible = match info.item_type {
-                mir2_shared::enums::ItemType::Weapon => matches!(awake_type,
-                    mir2_shared::enums::AwakeType::Dc | mir2_shared::enums::AwakeType::Mc | mir2_shared::enums::AwakeType::Sc),
-                mir2_shared::enums::ItemType::Helmet => matches!(awake_type,
-                    mir2_shared::enums::AwakeType::Ac | mir2_shared::enums::AwakeType::Mac),
-                mir2_shared::enums::ItemType::Armour => awake_type == mir2_shared::enums::AwakeType::HpMp,
+                mir2_shared::enums::ItemType::Weapon => matches!(
+                    awake_type,
+                    mir2_shared::enums::AwakeType::Dc
+                        | mir2_shared::enums::AwakeType::Mc
+                        | mir2_shared::enums::AwakeType::Sc
+                ),
+                mir2_shared::enums::ItemType::Helmet => matches!(
+                    awake_type,
+                    mir2_shared::enums::AwakeType::Ac | mir2_shared::enums::AwakeType::Mac
+                ),
+                mir2_shared::enums::ItemType::Armour => {
+                    awake_type == mir2_shared::enums::AwakeType::HpMp
+                }
                 _ => false,
             };
             let grade = item_info.grade;
             if !compatible || !(1..=4).contains(&grade) {
-                send_system_message(&self.gate_ref, session_id, &format!("条件不符：{}", item_info.name));
+                send_system_message(
+                    &self.gate_ref,
+                    session_id,
+                    &format!("条件不符：{}", item_info.name),
+                );
                 continue;
             }
 
             // C# UpgradeAwake：70% 成功；失败仅提示（GM 语义不销毁物品，#2416 配置化）
             let roll = fastrand::u8(0..100);
             if roll >= self.awakening_cfg.success_rate {
-                send_system_message(&self.gate_ref, session_id, &format!("觉醒失败：{}", item_info.name));
+                send_system_message(
+                    &self.gate_ref,
+                    session_id,
+                    &format!("觉醒失败：{}", item_info.name),
+                );
                 continue;
             }
 
             // 成功：计算觉醒值（与 NPC 觉醒一致：grade→chance_max，item_type→rate）
-            let chance_max = self.awakening_cfg.chance_max.get(grade.saturating_sub(1) as usize).copied().unwrap_or(1);
+            let chance_max = self
+                .awakening_cfg
+                .chance_max
+                .get(grade.saturating_sub(1) as usize)
+                .copied()
+                .unwrap_or(1);
             let rate = match info.item_type {
                 mir2_shared::enums::ItemType::Weapon => self.awakening_cfg.weapon_rate,
                 mir2_shared::enums::ItemType::Helmet => self.awakening_cfg.helmet_rate,
@@ -897,27 +1184,39 @@ impl WorldActor {
             new_awake.levels.push(value);
             let mut snapshot = item.clone();
             snapshot.awake = new_awake.clone();
-            let ok = record.actor_ref.ask(crate::actors::player::SetItemAwake {
-                unique_id: item.unique_id,
-                awake: new_awake,
-            }).await.unwrap_or(false);
+            let ok = record
+                .actor_ref
+                .ask(crate::actors::player::SetItemAwake {
+                    unique_id: item.unique_id,
+                    awake: new_awake,
+                })
+                .await
+                .unwrap_or(false);
             if ok {
                 // C#：Enqueue(new S.RefreshItem { Item = temp })
                 let pkt = mir2_shared::packets::server::item::RefreshItem { item: snapshot };
                 let mut body = Vec::new();
                 if pkt.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RefreshItem as i16, &body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::RefreshItem as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
-                send_system_message(&self.gate_ref, session_id,
-                    &format!("觉醒成功！{} +{}", awake_type_name(awake_type), value));
+                send_system_message(
+                    &self.gate_ref,
+                    session_id,
+                    &format!("觉醒成功！{} +{}", awake_type_name(awake_type), value),
+                );
             }
         }
     }
 }
-
 
 /// #2058：C# ResetPrice（ItemData.cs:605-611）——3000*Grade*(AddedStats.Count*0.2+1)
 fn reset_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
@@ -929,11 +1228,23 @@ fn reset_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) ->
 impl Message<ResetAddedItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ResetAddedItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
-        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
 
         // #2058：C# ResetPrice——费用 3000*Grade*(AddedStats.Count*0.2+1)
-        let item = match record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await {
+        let item = match record
+            .actor_ref
+            .ask(GetItemInfo {
+                unique_id: msg.unique_id,
+            })
+            .await
+        {
             Ok(Some(i)) => i,
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
@@ -943,8 +1254,16 @@ impl Message<ResetAddedItemRequest> for WorldActor {
 
         // C# Reset（:9001）：租赁物品不可重置
         if item.rental_information.is_some() {
-            let owner = item.rental_information.as_ref().map(|r| r.owner_name.clone()).unwrap_or_default();
-            send_system_message(&self.gate_ref, msg.session_id, &format!("该物品属于 {}，无法重置", owner));
+            let owner = item
+                .rental_information
+                .as_ref()
+                .map(|r| r.owner_name.clone())
+                .unwrap_or_default();
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("该物品属于 {}，无法重置", owner),
+            );
             return;
         }
 
@@ -954,21 +1273,38 @@ impl Message<ResetAddedItemRequest> for WorldActor {
         };
         let gold_cost = reset_price(&item, &item_info);
         if state.inventory.gold < gold_cost {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，重置需要 {} 金币", gold_cost));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("金币不足，重置需要 {} 金币", gold_cost),
+            );
             return;
         }
-        let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: gold_cost }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::DeductGold { amount: gold_cost })
+            .await;
         super::send_gold_changed_packet(&self.gate_ref, msg.session_id, gold_cost);
 
-        let success = record.actor_ref.ask(crate::actors::player::ResetItemAddedStats {
-            unique_id: msg.unique_id,
-        }).await.unwrap_or(false);
+        let success = record
+            .actor_ref
+            .ask(crate::actors::player::ResetItemAddedStats {
+                unique_id: msg.unique_id,
+            })
+            .await
+            .unwrap_or(false);
         if success {
             send_system_message(&self.gate_ref, msg.session_id, "物品附加属性已重置");
-            debug!("ResetAddedItem: {} uid={} - success", state.name, msg.unique_id);
+            debug!(
+                "ResetAddedItem: {} uid={} - success",
+                state.name, msg.unique_id
+            );
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "找不到该物品或无法重置");
-            debug!("ResetAddedItem: {} uid={} - failed", state.name, msg.unique_id);
+            debug!(
+                "ResetAddedItem: {} uid={} - failed",
+                state.name, msg.unique_id
+            );
         }
     }
 }
@@ -991,11 +1327,18 @@ mod tests {
             added_stats: added,
             ..Default::default()
         };
-        let info = crate::db::ItemInfo { index: 1, grade: 2, ..Default::default() };
+        let info = crate::db::ItemInfo {
+            index: 1,
+            grade: 2,
+            ..Default::default()
+        };
         // 3000*2 * (2*0.2+1) = 6000 * 1.4 = 8400
         assert_eq!(reset_price(&item, &info), 8400);
         // 无附加：3000*2*1.0 = 6000
-        let plain = UserItem { item_index: 1, ..Default::default() };
+        let plain = UserItem {
+            item_index: 1,
+            ..Default::default()
+        };
         assert_eq!(reset_price(&plain, &info), 6000);
     }
 

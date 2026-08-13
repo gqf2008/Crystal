@@ -3,9 +3,9 @@
 //! C# 参考：Server/MirObjects/Monsters/Trainer.cs
 //! 机制：CanMove=false、Blocking、可被攻击；不移动、不反击（Die() 空）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 pub struct TrainerBehavior;
 

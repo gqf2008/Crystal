@@ -8,11 +8,11 @@
 //!   - 近战 (<=2)：8/9 普攻 DC / 1/9 Slam (DC*3)
 //!   - 远程 (>2)：弹道 MAC 攻击
 
-use crate::actors::world::MonsterState;
-use mir2_shared::enums::Spell;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use mir2_shared::enums::Spell;
 
 /// 视野范围（C# ViewRange 用于寻敌）
 const VIEW_RANGE: i32 = 20;
@@ -29,12 +29,7 @@ const THUNDER_MAX_TICKS: u64 = 40;
 /// Energy Shield 持续时间：30s = 300 ticks（C# ShieldUpDuration = Settings.Second * 30）
 const SHIELD_DURATION_TICKS: u64 = 300;
 /// 召唤池（C# Settings.GeneralMeowMeowMob1..4）
-const SLAVE_NAMES: [&str; 4] = [
-    "StainHammerCat",
-    "BlackHammerCat",
-    "StrayCat",
-    "CatShaman",
-];
+const SLAVE_NAMES: [&str; 4] = ["StainHammerCat", "BlackHammerCat", "StrayCat", "CatShaman"];
 
 pub struct GeneralMeowMeowBehavior {
     /// 下次召唤 Slave 的 tick（对齐 C# SlaveSpawnTime）
@@ -107,9 +102,8 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
         } else {
             0
         };
-        let in_bubble_stage = (hp_pct >= 70 && hp_pct <= 80)
-            || (hp_pct >= 40 && hp_pct <= 50)
-            || hp_pct <= 20;
+        let in_bubble_stage =
+            (hp_pct >= 70 && hp_pct <= 80) || (hp_pct >= 40 && hp_pct <= 50) || hp_pct <= 20;
 
         if in_bubble_stage && self.shield_end_tick == 0 {
             // 激活护盾（C# AddBuff(GeneralMeowMeowShield, 30s)）
@@ -123,23 +117,26 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
                 + fastrand::u64(0..THUNDER_MIN_TICKS).max(fastrand::u64(0..THUNDER_MAX_TICKS));
             // 对攻击范围内每个玩家投放 GeneralMeowMeowThunder 法术场
             // C# MassThunderAttack：FindAllTargets(AttackRange, Target.CurrentLocation)
-            let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(target.x, target.y, ATTACK_RANGE, monster.map_index)
-                    .into_iter()
-                    .copied()
-                    .collect();
+            let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(target.x, target.y, ATTACK_RANGE, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
             for t in targets {
-                let value = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                    spell: Spell::GeneralMeowMeowThunder,
-                    x: t.x,
-                    y: t.y,
-                    value,
-                    duration_ms: 1000,
-                    tick_ms: 500,
-                    caster_oid: monster.object_id,
-                    caster_session: 0,
-                });
+                let value =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                ctx.out_spell_fields
+                    .push(crate::actors::world::ai::SpellFieldSpawn {
+                        spell: Spell::GeneralMeowMeowThunder,
+                        x: t.x,
+                        y: t.y,
+                        value,
+                        duration_ms: 1000,
+                        tick_ms: 500,
+                        caster_oid: monster.object_id,
+                        caster_session: 0,
+                    });
             }
         }
 
@@ -154,24 +151,36 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
 
             // C# GeneralMeowMeow.cs:93-110：8/9 普攻 / 1/9 Slam(DC*3)
             if fastrand::i32(0..9) != 0 {
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // Slam：DC*3（C# GetAttackPower(MinDC, MaxDC) * 3）
-                let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage: base * 3,
-                    spell_id: 0,
-                    attack_type: 1,
-                });
+                let base = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage: base * 3,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
             }
         } else if dist <= ATTACK_RANGE {
             // 远程弹道 MAC（C# GeneralMeowMeow.cs:112-120 + CompleteRangeAttack:198：目标 2 格 AOE）
@@ -179,15 +188,21 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
                 return;
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                attacker_oid: monster.object_id,
-                center_x: target.x,
-                center_y: target.y,
-                radius: 2,
-                damage,
-                spell_id: 0,
-            });
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Aoe {
+                    attacker_oid: monster.object_id,
+                    center_x: target.x,
+                    center_y: target.y,
+                    radius: 2,
+                    damage,
+                    spell_id: 0,
+                });
         } else if ctx.tick_count >= monster.next_move_tick {
             // 追击（C# 标准 MoveTo）
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

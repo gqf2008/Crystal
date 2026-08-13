@@ -12,10 +12,10 @@
 
 use mir2_shared::enums::PetMode;
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 /// Mode 持续（C# ModeTime = Envir.Time + 30000，30s）
@@ -35,7 +35,12 @@ pub struct ShinsuBehavior {
 
 impl ShinsuBehavior {
     pub fn new() -> Self {
-        Self { mode: false, mode_end_tick: 0, spawned: false, base_image: 0 }
+        Self {
+            mode: false,
+            mode_end_tick: 0,
+            spawned: false,
+            base_image: 0,
+        }
     }
 }
 
@@ -59,7 +64,7 @@ impl MonsterBehavior for ShinsuBehavior {
             self.mode_end_tick = ctx.tick_count + MODE_TICKS;
             if !self.mode {
                 self.mode = true; // C# Mode=true + ObjectShow
-                // 攻击形态贴图 Shinsu1（C# GetInfo：Image = Mode ? Shinsu1 : Shinsu）
+                                  // 攻击形态贴图 Shinsu1（C# GetInfo：Image = Mode ? Shinsu1 : Shinsu）
                 monster.image = self.base_image.saturating_add(1);
                 ctx.out_show_hide.push((monster.object_id, true));
             }
@@ -88,7 +93,9 @@ impl MonsterBehavior for ShinsuBehavior {
         if dist <= LINE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 // 直线 2 格：对朝目标方向前 2 格内的玩家施放（近似 LineAttack）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 let dx = DIR_DX[dir as usize];
@@ -96,32 +103,39 @@ impl MonsterBehavior for ShinsuBehavior {
                 // 收集直线格上的目标
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
                     .find_targets_in_range(monster.x, monster.y, LINE_RANGE, monster.map_index)
-                    .into_iter().copied()
+                    .into_iter()
+                    .copied()
                     .filter(|p| {
                         // 仅命中朝目标方向的直线格
                         let rx = p.x - monster.x;
                         let ry = p.y - monster.y;
-                        (rx == 0 && dy == 0) || (ry == 0 && dx == 0) || (rx.signum() == dx.signum() && ry.signum() == dy.signum() && rx.abs() == ry.abs())
+                        (rx == 0 && dy == 0)
+                            || (ry == 0 && dx == 0)
+                            || (rx.signum() == dx.signum()
+                                && ry.signum() == dy.signum()
+                                && rx.abs() == ry.abs())
                     })
                     .collect();
                 if hits.is_empty() {
                     // 退化为对主目标单体
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
-                } else {
-                    for h in hits {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
                             attacker_oid: monster.object_id,
-                            target_session: h.session_id,
+                            target_session: target.session_id,
                             damage,
                             spell_id: 0,
                             attack_type: 0,
                         });
+                } else {
+                    for h in hits {
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: h.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 0,
+                            });
                     }
                 }
             }

@@ -8,11 +8,11 @@
 //!
 //! Attack（C# :30-138）：ranged→方向上 2 格；else 半圆 6 方向。
 
-use crate::actors::world::MonsterState;
-use mir2_shared::enums::SpellEffect;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use mir2_shared::enums::SpellEffect;
 
 const VIEW_RANGE: i32 = 12;
 
@@ -54,7 +54,8 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
         }
         monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
-        let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        let base =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
         let ranged = dx > 1 || dy > 1;
 
         if ranged {
@@ -63,25 +64,33 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
             for i in 1..=2 {
                 let cx = monster.x + DIR_DX[dir as usize] * i;
                 let cy = monster.y + DIR_DY[dir as usize] * i;
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(cx, cy, 0, monster.map_index)
-                        .into_iter().copied().collect();
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(cx, cy, 0, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 let mut dmg = base;
                 let crit = fastrand::i32(0..10) == 0;
                 if crit {
                     dmg += base / 2; // 暴击 +50%（C# critBonus = Round(damage*0.5)）
                 }
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage: dmg,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage: dmg,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                     if crit {
                         // C# DelayedType.SpellEffect：暴击目标显示 FurbolgWarriorCritical
-                        ctx.out_effects.push((h.object_id, SpellEffect::FurbolgWarriorCritical, 0, 0));
+                        ctx.out_effects.push((
+                            h.object_id,
+                            SpellEffect::FurbolgWarriorCritical,
+                            0,
+                            0,
+                        ));
                     }
                 }
             }
@@ -92,25 +101,33 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
             for _ in 0..6 {
                 let cx = monster.x + DIR_DX[d as usize];
                 let cy = monster.y + DIR_DY[d as usize];
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(cx, cy, 0, monster.map_index)
-                        .into_iter().copied().collect();
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(cx, cy, 0, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 let mut dmg = base;
                 let crit = fastrand::i32(0..10) == 0;
                 if crit {
                     dmg += base / 2;
                 }
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage: dmg,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage: dmg,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                     if crit {
                         // C# DelayedType.SpellEffect：暴击目标显示 FurbolgWarriorCritical
-                        ctx.out_effects.push((h.object_id, SpellEffect::FurbolgWarriorCritical, 0, 0));
+                        ctx.out_effects.push((
+                            h.object_id,
+                            SpellEffect::FurbolgWarriorCritical,
+                            0,
+                            0,
+                        ));
                     }
                 }
                 d = (d + 1) % 8; // NextDir

@@ -9,10 +9,10 @@
 //! ProcessTarget（C# :16-47）：Target==null||超时→Die；InAttackRange→Attack（目标死→Die）。
 //! CompleteDeath（C# :55-69）：FindAllTargets(1) Attacked + PoisonTarget(5,5,Green,2000)。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -27,7 +27,10 @@ pub struct HuggerBehavior {
 
 impl HuggerBehavior {
     pub fn new() -> Self {
-        Self { spawned: false, explosion_tick: 0 }
+        Self {
+            spawned: false,
+            explosion_tick: 0,
+        }
     }
 }
 
@@ -63,24 +66,34 @@ impl MonsterBehavior for HuggerBehavior {
 
 impl HuggerBehavior {
     fn explode(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-        let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-            ctx.find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
-                .into_iter().copied().collect();
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+            .find_targets_in_range(monster.x, monster.y, 1, monster.map_index)
+            .into_iter()
+            .copied()
+            .collect();
         for h in hits {
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: h.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: h.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
             // C# PoisonTarget(5,5,Green,2000)：1/5
             if fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: h.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: h.session_id,
+                        poison: Poison::new(
+                            PoisonType::GREEN,
+                            5,
+                            crate::actors::world::ai::helpers::poison_sc_value(monster),
+                            2000,
+                        ),
+                    });
             }
         }
         monster.hp = 0;

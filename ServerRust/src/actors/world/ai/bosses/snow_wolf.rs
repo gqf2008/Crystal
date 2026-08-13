@@ -5,10 +5,10 @@
 //!      魔法命中时对周围 2 格 AOE，且每个目标 1/4 减速毒 + 1/8 冰冻毒（5s，tick 2000）
 //! #1876：宠物（SnowWolfKing 死亡驯化后）：用 pet_target 选目标（避免攻击主人），通用宠物跟随在 tick 处理
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -29,7 +29,8 @@ impl MonsterBehavior for SnowWolfBehavior {
         let target = match if monster.master_session.is_some() {
             ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index)
         } else {
-            ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index).copied()
+            ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+                .copied()
         } {
             Some(t) => t,
             None => return,
@@ -39,44 +40,71 @@ impl MonsterBehavior for SnowWolfBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Envir.Random.Next(5) > 0：80% 物理 / 20% 魔法（Type=1）
             let magic = fastrand::i32(0..5) == 0;
             if !magic {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // C# 魔法近战 Type1 = MC（SnowWolf.cs:40-41），命中后 FindAllTargets(2) AOE
-                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: AOE_RADIUS,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
-                let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
-                    .iter().map(|p| p.session_id).collect();
+                let mc_damage = crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: AOE_RADIUS,
+                        damage: mc_damage,
+                        spell_id: 0,
+                    });
+                let nearby: Vec<u64> = ctx
+                    .find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+                    .iter()
+                    .map(|p| p.session_id)
+                    .collect();
                 for sid in nearby {
                     // PoisonTarget(4, 5, Slow, 2000)：1/4 概率
                     if fastrand::i32(0..4) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::SLOW, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(
+                                    PoisonType::SLOW,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    2000,
+                                ),
+                            });
                     }
                     // PoisonTarget(8, 5, Frozen, 2000)：1/8 概率
                     if fastrand::i32(0..8) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::FROZEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(
+                                    PoisonType::FROZEN,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    2000,
+                                ),
+                            });
                     }
                 }
             }

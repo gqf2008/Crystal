@@ -8,8 +8,8 @@
 //
 // 全部为纯函数，由 WorldActor 调用。随机性来自 fastrand（已在线程局部播种）。
 
-use mir2_shared::enums::{DefenceType, PoisonType};
 use crate::combat::poison::Poison;
+use mir2_shared::enums::{DefenceType, PoisonType};
 
 // ============================================================
 // Settings 权重常量（对齐 C# Server/Settings.cs:296-304）
@@ -169,7 +169,11 @@ pub fn get_defence_power(min: i32, max: i32) -> i32 {
 // ============================================================
 
 /// 返回 (armour, hit)。对齐 C# DefenceType 七态。
-pub fn get_armour(defender: &CombatStats, defence_type: DefenceType, attacker_accuracy: i32) -> (i32, bool) {
+pub fn get_armour(
+    defender: &CombatStats,
+    defence_type: DefenceType,
+    attacker_accuracy: i32,
+) -> (i32, bool) {
     let mut armour = 0i32;
     let mut hit = true;
 
@@ -225,7 +229,10 @@ pub fn check_critical(critical_rate: i32) -> bool {
 /// 暴击伤害加成：damage += floor(damage * (CriticalDamage / CriticalDamageWeight) * 10)
 /// 完全按 C# 浮点顺序实现（HumanObject.cs:7159）
 pub fn apply_critical(damage: i32, critical_damage: i32) -> i32 {
-    let bonus = (damage as f64 * (critical_damage as f64 / combat_weight(CombatWeight::CriticalDamage) as f64) * 10.0).floor() as i64;
+    let bonus = (damage as f64
+        * (critical_damage as f64 / combat_weight(CombatWeight::CriticalDamage) as f64)
+        * 10.0)
+        .floor() as i64;
     let total = damage as i64 + bonus;
     total.min(i32::MAX as i64) as i32
 }
@@ -257,7 +264,9 @@ pub fn apply_negative_effects(
 
     // Freezing → Slow（level_offset==0 时 C# Random(0) 抛异常被吞，等效不触发）
     if attacker.freezing > 0 && level_offset > 0 {
-        if rand_below(combat_weight(CombatWeight::FreezingAttack)) < attacker.freezing && rand_below(level_offset as i32) == 0 {
+        if rand_below(combat_weight(CombatWeight::FreezingAttack)) < attacker.freezing
+            && rand_below(level_offset as i32) == 0
+        {
             let duration = (3 + rand_below(attacker.freezing)).min(10) as u32;
             poisons.push(Poison::new(PoisonType::SLOW, duration, 0, 1000));
         }
@@ -265,7 +274,9 @@ pub fn apply_negative_effects(
 
     // PoisonAttack → Green
     if attacker.poison_attack > 0 && level_offset > 0 {
-        if rand_below(combat_weight(CombatWeight::PoisonAttack)) < attacker.poison_attack && rand_below(level_offset as i32) == 0 {
+        if rand_below(combat_weight(CombatWeight::PoisonAttack)) < attacker.poison_attack
+            && rand_below(level_offset as i32) == 0
+        {
             let value = (3 + rand_below(attacker.poison_attack)).min(10);
             poisons.push(Poison::new(PoisonType::GREEN, 5, value, 1000));
         }
@@ -337,8 +348,15 @@ pub fn resolve_attack(
 
     // [2] ArmourRate / DamageRate 倍率（clamp i32，对齐 C# decimal 钳位）
     let armour = clamp_i32((armour as f32 * defender.armour_rate) as i64);
-    let mut damage = clamp_i32((raw_damage as f32 * defender.damage_rate
-        * if attacker.attacker_damage_rate > 0.0 { attacker.attacker_damage_rate } else { 1.0 }) as i64);
+    let mut damage = clamp_i32(
+        (raw_damage as f32
+            * defender.damage_rate
+            * if attacker.attacker_damage_rate > 0.0 {
+                attacker.attacker_damage_rate
+            } else {
+                1.0
+            }) as i64,
+    );
 
     // [3] AttackBonus
     damage = clamp_i32(damage as i64 + attacker.attack_bonus as i64);
@@ -358,7 +376,9 @@ pub fn resolve_attack(
 
     // [5] DamageReductionPercent（MagicShield / ElementalBarrier）
     if defender.damage_reduction_percent > 0 {
-        damage = clamp_i32(damage as i64 - (damage as i64 * defender.damage_reduction_percent as i64) / 100);
+        damage = clamp_i32(
+            damage as i64 - (damage as i64 * defender.damage_reduction_percent as i64) / 100,
+        );
     }
 
     // [6] armour >= damage → miss（护甲完全抵消）
@@ -491,7 +511,11 @@ mod tests {
                 hit_max += 1;
             }
         }
-        assert!(hit_max >= 95, "expected lucky to hit max ~always, got {}/100", hit_max);
+        assert!(
+            hit_max >= 95,
+            "expected lucky to hit max ~always, got {}/100",
+            hit_max
+        );
     }
 
     #[test]
@@ -518,7 +542,10 @@ mod tests {
     #[test]
     fn test_get_armour_agility_can_miss() {
         // 高 Agility 防御者 vs 低 Accuracy 攻击者应频繁闪避
-        let defender = CombatStats { agility: 100, ..dummy_defender() };
+        let defender = CombatStats {
+            agility: 100,
+            ..dummy_defender()
+        };
         let mut miss_count = 0;
         for _ in 0..1000 {
             let (_, hit) = get_armour(&defender, DefenceType::AcAgility, 5);
@@ -526,7 +553,11 @@ mod tests {
                 miss_count += 1;
             }
         }
-        assert!(miss_count > 800, "high agility should dodge often, got {} misses/1000", miss_count);
+        assert!(
+            miss_count > 800,
+            "high agility should dodge often, got {} misses/1000",
+            miss_count
+        );
     }
 
     #[test]
@@ -564,7 +595,10 @@ mod tests {
     fn test_resolve_attack_misses_when_not_hit() {
         // 极高 Agility 防御者
         let attacker = dummy_attacker();
-        let defender = CombatStats { agility: 1000, ..dummy_defender() };
+        let defender = CombatStats {
+            agility: 1000,
+            ..dummy_defender()
+        };
         let mut miss_count = 0;
         for _ in 0..100 {
             let r = resolve_attack(&attacker, &defender, 15, DefenceType::AcAgility, 0);
@@ -579,7 +613,10 @@ mod tests {
     fn test_resolve_attack_reflect() {
         // defender.reflect=100 → 必触发反伤
         let attacker = dummy_attacker();
-        let defender = CombatStats { reflect: 100, ..dummy_defender() };
+        let defender = CombatStats {
+            reflect: 100,
+            ..dummy_defender()
+        };
         let result = resolve_attack(&attacker, &defender, 15, DefenceType::Ac, 0);
         assert!(result.reflected > 0, "reflect should trigger");
         assert_eq!(result.damage, 0, "reflected hit deals 0 to defender");
@@ -597,7 +634,11 @@ mod tests {
         };
         let result = resolve_attack(&attacker, &defender, 15, DefenceType::Ac, 0);
         // 无护甲 + 50% 减伤：15 → 7
-        assert!(result.damage <= 8, "damage should be reduced, got {}", result.damage);
+        assert!(
+            result.damage <= 8,
+            "damage should be reduced, got {}",
+            result.damage
+        );
     }
 
     #[test]
@@ -615,18 +656,36 @@ mod tests {
 
     #[test]
     fn test_resolve_attack_hp_drain() {
-        let attacker = CombatStats { hp_drain_rate_percent: 100, ..dummy_attacker() };
-        let defender = CombatStats { min_ac: 0, max_ac: 0, ..dummy_defender() };
+        let attacker = CombatStats {
+            hp_drain_rate_percent: 100,
+            ..dummy_attacker()
+        };
+        let defender = CombatStats {
+            min_ac: 0,
+            max_ac: 0,
+            ..dummy_defender()
+        };
         let result = resolve_attack(&attacker, &defender, 15, DefenceType::Ac, 0);
-        assert!(result.hp_drain > 0, "should drain some HP, got {}", result.hp_drain);
+        assert!(
+            result.hp_drain > 0,
+            "should drain some HP, got {}",
+            result.hp_drain
+        );
     }
 
     #[test]
     fn test_apply_negative_effects_physical_only() {
         // MAC 攻击不应触发负面
-        let attacker = CombatStats { freezing: 100, poison_attack: 100, ..Default::default() };
+        let attacker = CombatStats {
+            freezing: 100,
+            poison_attack: 100,
+            ..Default::default()
+        };
         let poisons = apply_negative_effects(&attacker, DefenceType::Mac, 0);
-        assert!(poisons.is_empty(), "MAC attack should not trigger physical negative effects");
+        assert!(
+            poisons.is_empty(),
+            "MAC attack should not trigger physical negative effects"
+        );
     }
 
     #[test]
@@ -635,14 +694,20 @@ mod tests {
         let attacker = CombatStats::default();
         for _ in 0..100 {
             let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 5);
-            assert!(!poisons.iter().any(|p| p.p_type == PoisonType::PARALYSIS), "no ring should never paralyze");
+            assert!(
+                !poisons.iter().any(|p| p.p_type == PoisonType::PARALYSIS),
+                "no ring should never paralyze"
+            );
         }
     }
 
     #[test]
     fn test_apply_negative_effects_paralize_triggers() {
         // Paralize 戒指：非 MAC 攻击 1/14 概率麻痹 5s（C# Random.Next(1,15)==1）
-        let attacker = CombatStats { paralize: true, ..Default::default() };
+        let attacker = CombatStats {
+            paralize: true,
+            ..Default::default()
+        };
         let mut para_count = 0;
         for _ in 0..500 {
             let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 5);
@@ -651,15 +716,25 @@ mod tests {
                 assert_eq!(p.duration_s, 5, "paralysis duration should be 5s");
             }
         }
-        assert!(para_count > 5, "paralize ring should paralyze ~1/14, got {}/500", para_count);
+        assert!(
+            para_count > 5,
+            "paralize ring should paralyze ~1/14, got {}/500",
+            para_count
+        );
         // MAC 攻击不触发
         let poisons = apply_negative_effects(&attacker, DefenceType::Mac, 5);
-        assert!(!poisons.iter().any(|p| p.p_type == PoisonType::PARALYSIS), "MAC attack should not paralyze");
+        assert!(
+            !poisons.iter().any(|p| p.p_type == PoisonType::PARALYSIS),
+            "MAC attack should not paralyze"
+        );
     }
 
     #[test]
     fn test_apply_negative_effects_freezing_triggers_slow() {
-        let attacker = CombatStats { freezing: 100, ..Default::default() };
+        let attacker = CombatStats {
+            freezing: 100,
+            ..Default::default()
+        };
         let mut slow_count = 0;
         for _ in 0..100 {
             let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 5);
@@ -667,16 +742,20 @@ mod tests {
                 slow_count += 1;
             }
         }
-        assert!(slow_count > 5, "high freezing with level_offset=5 should slow ~20%, got {}/100", slow_count);
+        assert!(
+            slow_count > 5,
+            "high freezing with level_offset=5 should slow ~20%, got {}/100",
+            slow_count
+        );
     }
     #[test]
     fn level_offset_matches_csharp_formula() {
         // #1451：C# Level = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
-        assert_eq!(level_offset(30, 30), 0);   // 同级 0
-        assert_eq!(level_offset(30, 35), 0);   // 防御方更高 0
-        assert_eq!(level_offset(30, 20), 10);  // 差 10 封顶
-        assert_eq!(level_offset(30, 28), 2);   // 差 2
-        assert_eq!(level_offset(30, 18), 10);  // 差 12 → 10
+        assert_eq!(level_offset(30, 30), 0); // 同级 0
+        assert_eq!(level_offset(30, 35), 0); // 防御方更高 0
+        assert_eq!(level_offset(30, 20), 10); // 差 10 封顶
+        assert_eq!(level_offset(30, 28), 2); // 差 2
+        assert_eq!(level_offset(30, 18), 10); // 差 12 → 10
     }
 
     #[test]

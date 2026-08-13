@@ -5,10 +5,10 @@
 //!   - 7/8：3/4 普通近战（DC）/ 1/4 Halfmoon（4 格弧）
 //!   - 1/8：BoulderSmash（MC）：FindAllTargets(1, 目标) AOE + 1/5 眩晕毒（5s）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -34,48 +34,67 @@ impl MonsterBehavior for ManTreeBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Random.Next(8) > 0：7/8 普通分支
             if fastrand::i32(0..8) > 0 {
                 // C# Random.Next(4) > 0：3/4 普通近战 / 1/4 Halfmoon
                 if fastrand::i32(0..4) > 0 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else {
                     let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                     monster.direction = dir;
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        direction: dir,
-                        count: 4,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Arc {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            direction: dir,
+                            count: 4,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             } else {
                 // C# BoulderSmash Type2 = MC（ManTree.cs）：FindAllTargets(1, 目标) + 1/5 眩晕毒（5s）
-                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: target.x,
-                    center_y: target.y,
-                    radius: AOE_RADIUS,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
-                if fastrand::i32(0..5) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::STUN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
+                let mc_damage = crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: target.x,
+                        center_y: target.y,
+                        radius: AOE_RADIUS,
+                        damage: mc_damage,
+                        spell_id: 0,
                     });
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::STUN,
+                                5,
+                                crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                1000,
+                            ),
+                        });
                 }
             }
             return;

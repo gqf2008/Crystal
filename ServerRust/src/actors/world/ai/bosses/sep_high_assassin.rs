@@ -6,10 +6,10 @@
 //!   - 4/5 DoubleSlash：近战全额 + 0.8x 延迟伤害
 //! 远程（出近战范围）：HeavenlySword 直线 LineAttack(3)
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const ATTACK_RANGE: i32 = 3; // C# AttackRange = 3
@@ -47,11 +47,83 @@ impl MonsterBehavior for SepHighAssassinBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# ProcessTarget：近战 4/5 Attack / 1/5 RangeAttack（HeavenlySword）
             if fastrand::i32(0..5) == 0 {
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Line {
+                        attacker_oid: monster.object_id,
+                        origin_x: monster.x,
+                        origin_y: monster.y,
+                        direction: dir,
+                        range: ATTACK_RANGE,
+                        damage,
+                        spell_id: 0,
+                    });
+                return;
+            }
+            if fastrand::i32(0..5) == 0 {
+                // C# CrescentSlash：8 向新月斩（排除背向 3 方向），命中距离 1-2 全额伤害
+                let facing =
+                    direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                let cells = crescent_slash_cells(monster.x, monster.y, facing);
+                for p in ctx.players.iter().filter(|p| {
+                    p.map_index == monster.map_index && p.hp > 0 && cells.contains(&(p.x, p.y))
+                }) {
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: p.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 2,
+                        });
+                }
+            } else {
+                // C# DoubleSlash：近战全额 + 0.8x 延迟伤害
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
+                let dmg = ((damage as f32 * 0.8) as i32).max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage: dmg,
+                        spell_id: 0,
+                    });
+            }
+            return;
+        }
+
+        // C# ProcessTarget：追击中（出近战范围）1/5 RangeAttack（HeavenlySword）
+        if dist <= VIEW_RANGE
+            && ctx.tick_count >= monster.next_attack_tick
+            && fastrand::i32(0..5) == 0
+        {
+            // C# RangeAttack：HeavenlySword 直线 LineAttack(3)
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
+            let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Line {
                     attacker_oid: monster.object_id,
                     origin_x: monster.x,
                     origin_y: monster.y,
@@ -60,58 +132,6 @@ impl MonsterBehavior for SepHighAssassinBehavior {
                     damage,
                     spell_id: 0,
                 });
-                return;
-            }
-            if fastrand::i32(0..5) == 0 {
-                // C# CrescentSlash：8 向新月斩（排除背向 3 方向），命中距离 1-2 全额伤害
-                let facing = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
-                let cells = crescent_slash_cells(monster.x, monster.y, facing);
-                for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0
-                    && cells.contains(&(p.x, p.y))) {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: p.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 2,
-                    });
-                }
-            } else {
-                // C# DoubleSlash：近战全额 + 0.8x 延迟伤害
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
-                let dmg = ((damage as f32 * 0.8) as i32).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage: dmg,
-                    spell_id: 0,
-                });
-            }
-            return;
-        }
-
-        // C# ProcessTarget：追击中（出近战范围）1/5 RangeAttack（HeavenlySword）
-        if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick && fastrand::i32(0..5) == 0 {
-            // C# RangeAttack：HeavenlySword 直线 LineAttack(3)
-            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                attacker_oid: monster.object_id,
-                origin_x: monster.x,
-                origin_y: monster.y,
-                direction: dir,
-                range: ATTACK_RANGE,
-                damage,
-                spell_id: 0,
-            });
             return;
         }
 

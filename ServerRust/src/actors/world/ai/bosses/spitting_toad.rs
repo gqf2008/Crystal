@@ -4,10 +4,10 @@
 //! 机制：召唤物——主人>15 格或离线 → 自毁（Die）；
 //!      攻击：ObjectRangeAttack + RangeDamage（MAC，攻速+500ms），12 格十字/对角
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const MASTER_RANGE: i32 = 15;
@@ -24,7 +24,9 @@ impl MonsterBehavior for SpittingToadBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // C# Process：主人>15 格或离线 → 自毁
         if let Some(master) = monster.master_session {
-            let master_ok = ctx.players.iter()
+            let master_ok = ctx
+                .players
+                .iter()
                 .find(|p| p.session_id == master && p.map_index == monster.map_index)
                 .map(|p| max_distance(p.x, p.y, monster.x, monster.y) <= MASTER_RANGE)
                 .unwrap_or(false);
@@ -44,14 +46,20 @@ impl MonsterBehavior for SpittingToadBehavior {
         }
         if ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
         }
     }
 }

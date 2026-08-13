@@ -157,7 +157,11 @@ impl Packet for DeleteItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
         let hero_inventory = reader.read_u8()? != 0;
-        Ok(Self { unique_id, count, hero_inventory })
+        Ok(Self {
+            unique_id,
+            count,
+            hero_inventory,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

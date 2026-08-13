@@ -19,9 +19,13 @@ pub fn write_dotnet_string(body: &mut Vec<u8>, value: &str) {
     loop {
         let mut b = (v & 0x7F) as u8;
         v >>= 7;
-        if v != 0 { b |= 0x80; }
+        if v != 0 {
+            b |= 0x80;
+        }
         body.push(b);
-        if v == 0 { break; }
+        if v == 0 {
+            break;
+        }
     }
     body.extend_from_slice(bytes);
 }

@@ -1,6 +1,5 @@
 /// 定时机器人，对应 C# MirEnvir/Robot.cs
 /// 定期触发 NPC 脚本页面实现自动化事件
-
 use chrono::{Datelike, Timelike};
 
 #[derive(Debug, Clone)]
@@ -23,7 +22,15 @@ pub struct RobotTask {
 
 impl RobotTask {
     pub fn new(page: String) -> Self {
-        Self { month: None, day: None, hour: None, minute: None, day_of_week: None, page, last_fired: None }
+        Self {
+            month: None,
+            day: None,
+            hour: None,
+            minute: None,
+            day_of_week: None,
+            page,
+            last_fired: None,
+        }
     }
 
     /// 检查当前时间是否匹配
@@ -33,15 +40,33 @@ impl RobotTask {
                 return false; // already fired this minute
             }
         }
-        if let Some(m) = self.month { if m != now.month() { return false; } }
-        if let Some(d) = self.day { if d != now.day() { return false; } }
-        if let Some(h) = self.hour {
-            if h == 24 && now.hour() != 0 { return false; }
-            if h < 24 && h != now.hour() { return false; }
+        if let Some(m) = self.month {
+            if m != now.month() {
+                return false;
+            }
         }
-        if let Some(min) = self.minute { if min != now.minute() { return false; } }
+        if let Some(d) = self.day {
+            if d != now.day() {
+                return false;
+            }
+        }
+        if let Some(h) = self.hour {
+            if h == 24 && now.hour() != 0 {
+                return false;
+            }
+            if h < 24 && h != now.hour() {
+                return false;
+            }
+        }
+        if let Some(min) = self.minute {
+            if min != now.minute() {
+                return false;
+            }
+        }
         if let Some(dow) = self.day_of_week {
-            if dow != now.weekday().num_days_from_sunday() { return false; }
+            if dow != now.weekday().num_days_from_sunday() {
+                return false;
+            }
         }
         true
     }
@@ -63,10 +88,20 @@ pub fn parse_robot(page_name: &str) -> Option<RobotTask> {
         return None;
     }
     let mut task = RobotTask::new(parts[5].to_string());
-    if let Ok(v) = parts[0].parse() { task.month = Some(v); }
-    if let Ok(v) = parts[1].parse() { task.day = Some(v); }
-    if let Ok(v) = parts[2].parse() { task.hour = Some(v); }
-    if let Ok(v) = parts[3].parse() { task.minute = Some(v); }
-    if let Ok(v) = parts[4].parse() { task.day_of_week = Some(v); }
+    if let Ok(v) = parts[0].parse() {
+        task.month = Some(v);
+    }
+    if let Ok(v) = parts[1].parse() {
+        task.day = Some(v);
+    }
+    if let Ok(v) = parts[2].parse() {
+        task.hour = Some(v);
+    }
+    if let Ok(v) = parts[3].parse() {
+        task.minute = Some(v);
+    }
+    if let Ok(v) = parts[4].parse() {
+        task.day_of_week = Some(v);
+    }
     Some(task)
 }

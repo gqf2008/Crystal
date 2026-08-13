@@ -4,10 +4,10 @@
 //! 机制：近战（dist<=1）DC / 远程 MC（MACAgility，攻速+500ms）；
 //!      远程命中后 1/5 绿毒（5s，tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -31,33 +31,51 @@ impl MonsterBehavior for OmaCannibalBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 远程/魔法攻击用 MC（#2328）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             if dist <= 1 {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage: mc_damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage: mc_damage,
+                        spell_id: 0,
+                    });
                 // C# CompleteRangeAttack：PoisonTarget(5, 5, Green, 1000)：1/5、5s
                 if fastrand::i32(0..5) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                    });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::GREEN,
+                                5,
+                                crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                1000,
+                            ),
+                        });
                 }
             }
             return;

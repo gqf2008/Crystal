@@ -5,10 +5,10 @@
 //!      周期召唤 CharmedSnake 小兵（MaxMinions=PetLevel+1，10s 冷却近似）
 //!      （死亡连带小兵清理依赖 slave_list，此处 out_summons 用 is_slave=true）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const MASTER_RANGE: i32 = 15;
 const SUMMON_COOLDOWN: u64 = 100; // 10s
@@ -19,7 +19,9 @@ pub struct SnakeTotemBehavior {
 
 impl SnakeTotemBehavior {
     pub fn new() -> Self {
-        Self { next_summon_tick: 0 }
+        Self {
+            next_summon_tick: 0,
+        }
     }
 }
 
@@ -31,7 +33,9 @@ impl MonsterBehavior for SnakeTotemBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // C# Process：主人>15 格或离线 → 自毁
         if let Some(master) = monster.master_session {
-            let master_ok = ctx.players.iter()
+            let master_ok = ctx
+                .players
+                .iter()
                 .find(|p| p.session_id == master && p.map_index == monster.map_index)
                 .map(|p| max_distance(p.x, p.y, monster.x, monster.y) <= MASTER_RANGE)
                 .unwrap_or(false);

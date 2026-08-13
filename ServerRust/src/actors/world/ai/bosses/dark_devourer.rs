@@ -9,12 +9,12 @@
 //! Attack（C# :18-52）：!ranged→DC AC；ranged→DC MACAgility（+500ms 冷却）。
 //! CompleteRangeAttack（C# :54-68）：Effect==1 且命中 → Green 1s 吞噬毒。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
@@ -22,7 +22,9 @@ const MELEE_RANGE: i32 = 1;
 pub struct DarkDevourerBehavior;
 
 impl DarkDevourerBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for DarkDevourerBehavior {
@@ -35,32 +37,36 @@ impl MonsterBehavior for DarkDevourerBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if ctx.tick_count >= monster.next_attack_tick {
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             if dist <= MELEE_RANGE {
                 // 近战 DC AC
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // 远程 DC MACAgility（+500ms 冷却）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
                 // Effect==1：命中后吞噬绿毒 1s（C# PoisonTarget(1,5,Green,1000)）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 1000),
-                });
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 1000),
+                    });
             }
             return;
         }

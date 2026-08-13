@@ -185,8 +185,7 @@ impl IntelligentCreature {
 }
 
 /// 玩家宠物信息
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct CreatureLog {
     /// 当前激活的宠物
     pub active_creature: Option<IntelligentCreature>,
@@ -299,7 +298,10 @@ mod tests {
         assert!(log.active_creature.is_some());
 
         log.update_pickup_mode(PickupMode::GoldAndItem);
-        assert_eq!(log.active_creature.as_ref().unwrap().pickup_mode, PickupMode::GoldAndItem);
+        assert_eq!(
+            log.active_creature.as_ref().unwrap().pickup_mode,
+            PickupMode::GoldAndItem
+        );
 
         log.restore_hunger(30);
         assert_eq!(log.active_creature.as_ref().unwrap().hunger, 100);

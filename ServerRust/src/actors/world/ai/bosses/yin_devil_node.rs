@@ -5,9 +5,9 @@
 //!      AI==41 → BlessedArmour（MaxAC=目标等级/7+4）；否则 → UltimateEnhancer（MaxDC≈MaxMC，目标等级/7+4）
 //!      持续 5s
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 const BUFF_RADIUS: i32 = 7;
 
@@ -30,7 +30,9 @@ impl MonsterBehavior for YinDevilNodeBehavior {
         }
         monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
         // C# FindFriendsNearby(7)（MonsterObject.cs:2257-2291）：附近有非攻击目标友军（此处=其他存活怪物）才触发
-        let friends: Vec<crate::actors::world::ai::ctx::MonsterSnap> = ctx.monsters.iter()
+        let friends: Vec<crate::actors::world::ai::ctx::MonsterSnap> = ctx
+            .monsters
+            .iter()
             .filter(|m| {
                 m.object_id != monster.object_id
                     && m.hp > 0
@@ -45,19 +47,28 @@ impl MonsterBehavior for YinDevilNodeBehavior {
         }
         // C# CompleteAttack（YinDevilNode.cs:23-43）：给 7 格内友军加 Buff
         //   AI==41 → BlessedArmour（MaxAC = 目标等级/7+4）；否则 → UltimateEnhancer（MaxDC = 目标等级/7+4）；持续 5s
-        let is_blessed = monster.ai_profile.ai_type == crate::actors::world::MonsterAiType::Summoner;
+        let is_blessed =
+            monster.ai_profile.ai_type == crate::actors::world::MonsterAiType::Summoner;
         for f in &friends {
             let bonus = f.level / 7 + 4;
             let buff = if is_blessed {
                 crate::actors::world::MonsterBuff {
-                    dc_min: 0, dc_max: 0,
-                    ac_min: bonus, ac_max: bonus, mac_min: 0, mac_max: 0,
+                    dc_min: 0,
+                    dc_max: 0,
+                    ac_min: bonus,
+                    ac_max: bonus,
+                    mac_min: 0,
+                    mac_max: 0,
                     remaining_ticks: 50, // 5s（10 tick/s）
                 }
             } else {
                 crate::actors::world::MonsterBuff {
-                    dc_min: bonus, dc_max: bonus,
-                    ac_min: 0, ac_max: 0, mac_min: 0, mac_max: 0,
+                    dc_min: bonus,
+                    dc_max: bonus,
+                    ac_min: 0,
+                    ac_max: 0,
+                    mac_min: 0,
+                    mac_max: 0,
                     remaining_ticks: 50,
                 }
             };

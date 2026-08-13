@@ -9,9 +9,9 @@
 //! Die（C# :30-35）：DelayedAction(Die, +1000)。
 //! CompleteDeath/SpawnSlave（C# :37-72）：随机 validMonsters 生成。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 pub struct Jar1Behavior {
     /// 是否已触发死亡召唤
@@ -22,13 +22,20 @@ pub struct Jar1Behavior {
 
 impl Jar1Behavior {
     pub fn new() -> Self {
-        Self { died: false, die_tick: 0 }
+        Self {
+            died: false,
+            die_tick: 0,
+        }
     }
 }
 
 impl MonsterBehavior for Jar1Behavior {
-    fn can_move(&self) -> bool { false }
-    fn can_regen(&self) -> bool { false }
+    fn can_move(&self) -> bool {
+        false
+    }
+    fn can_regen(&self) -> bool {
+        false
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // 死亡检测 → 延迟 1s 召唤
@@ -40,10 +47,15 @@ impl MonsterBehavior for Jar1Behavior {
             // C# DelayedAction(Die, +1000) → 10 ticks 后召唤
             if ctx.tick_count >= self.die_tick + 10 {
                 // C# SpawnSlave（Jar1.cs:45-71）：随机同级怪（Level∈[self-10, self]），非 Boss、排除攻城 AI
-                let candidates: Vec<&(String, i32)> = ctx.monster_spawn_candidates.iter()
+                let candidates: Vec<&(String, i32)> = ctx
+                    .monster_spawn_candidates
+                    .iter()
                     .filter(|(_, lv)| *lv <= monster.level && *lv >= monster.level - 10)
                     .collect();
-                if let Some((name, _)) = candidates.get(fastrand::usize(0..candidates.len())).copied() {
+                if let Some((name, _)) = candidates
+                    .get(fastrand::usize(0..candidates.len()))
+                    .copied()
+                {
                     ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                         monster_name: name.clone(),
                         x: monster.x,

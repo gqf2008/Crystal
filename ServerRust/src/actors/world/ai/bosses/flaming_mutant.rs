@@ -9,12 +9,12 @@
 //! CompleteAttack（C# :58-79）：推开 3 格内目标。
 //! CompleteRangeAttack（C# :81-101）：AOE3 + 1/2 Paralysis。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
@@ -43,18 +43,23 @@ impl MonsterBehavior for FlamingMutantBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
                 // C# CompleteAttack: 拉向 Boss（Pushed 朝自身方向 dist-1 格，落点 Boss 邻格）
-                let push_targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, PUSH_RADIUS, monster.map_index)
-                        .into_iter().copied().collect();
+                let push_targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, PUSH_RADIUS, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for pt in push_targets {
                     let dist = max_distance(monster.x, monster.y, pt.x, pt.y);
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
@@ -67,35 +72,52 @@ impl MonsterBehavior for FlamingMutantBehavior {
         } else if dist <= VIEW_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
-                // C# CompleteRangeAttack: 目标 3 格内 AOE + 1/2 Paralysis
-                let web_targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(target.x, target.y, WEB_RADIUS, monster.map_index)
-                        .into_iter().copied().collect();
-                for wt in web_targets {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
                         attacker_oid: monster.object_id,
-                        target_session: wt.session_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
                         damage,
                         spell_id: 0,
-                        attack_type: 1,
                     });
+                // C# CompleteRangeAttack: 目标 3 格内 AOE + 1/2 Paralysis
+                let web_targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(target.x, target.y, WEB_RADIUS, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
+                for wt in web_targets {
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: wt.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                     // C# Random(2)==0 → PoisonTarget(wt, 1, 5, Paralysis, 1000)：时长 5，值=SC
                     if fastrand::i32(0..2) == 0 {
-                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: wt.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, sc_value, 1000),
-                        });
+                        let sc_value = crate::combat::attack::get_attack_power(
+                            monster.min_sc,
+                            monster.max_sc,
+                            0,
+                        )
+                        .max(1);
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: wt.session_id,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, sc_value, 1000),
+                            });
                         // C# CompleteRangeAttack（FlamingMutant.cs:98）：麻痹命中广播蛛网特效，Time=5000
-                        ctx.out_effects.push((wt.object_id, mir2_shared::enums::SpellEffect::FlamingMutantWeb, 0, 5000));
+                        ctx.out_effects.push((
+                            wt.object_id,
+                            mir2_shared::enums::SpellEffect::FlamingMutantWeb,
+                            0,
+                            5000,
+                        ));
                     }
                 }
             }

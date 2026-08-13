@@ -12,11 +12,11 @@
 //! CompleteAttack（C# :173-201）：ViewRange 全体，Type 0=DC / Type 1=MC+Dazed。
 //! Attacked（C# :31-144）：自定义 armour 减伤（已实现）+ 移除 LRParalysis（已实现，见 on_attacked_with_monster）。
 
+use crate::actors::world::ai::behavior::MonsterBehavior;
+use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
-use crate::actors::world::ai::behavior::MonsterBehavior;
-use crate::actors::world::ai::ctx::AiCtx;
 
 /// 视野范围（C# InAttackRange 用 Info.ViewRange）
 const VIEW_RANGE: i32 = 15;
@@ -32,11 +32,17 @@ impl HellKeeperBehavior {
 }
 
 impl MonsterBehavior for HellKeeperBehavior {
-    fn can_move(&self) -> bool { false }
-    fn can_regen(&self) -> bool { false }
+    fn can_move(&self) -> bool {
+        false
+    }
+    fn can_regen(&self) -> bool {
+        false
+    }
 
     /// 免疫毒（C# ApplyPoison 空实现）
-    fn on_poison(&mut self, _poison: Poison) -> bool { false }
+    fn on_poison(&mut self, _poison: Poison) -> bool {
+        false
+    }
 
     /// C# Attacked 自定义（HellKeeper.cs:31-144）：敏捷闪避 + 护甲减伤
     /// DefenceType 不可得：闪避近似 1/(Agility+1)，护甲取 AC/MAC 均值
@@ -54,7 +60,9 @@ impl MonsterBehavior for HellKeeperBehavior {
         let final_damage = (damage - (armour + mac) / 2).max(0);
         // C# HellKeeper.Attacked（:60-66 / :121-127）：破防受击后移除全部 LRParalysis 毒
         if final_damage > 0 {
-            monster.poison_list.retain(|p| !p.p_type.contains(PoisonType::LR_PARALYSIS));
+            monster
+                .poison_list
+                .retain(|p| !p.p_type.contains(PoisonType::LR_PARALYSIS));
         }
         final_damage
     }
@@ -65,9 +73,11 @@ impl MonsterBehavior for HellKeeperBehavior {
         }
 
         // 全视野全体玩家（C# FindAllTargets(Info.ViewRange)）
-        let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-            ctx.find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index)
-                .into_iter().copied().collect();
+        let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+            .find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+            .into_iter()
+            .copied()
+            .collect();
         if targets.is_empty() {
             return;
         }
@@ -83,22 +93,29 @@ impl MonsterBehavior for HellKeeperBehavior {
                 crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
             };
             // C# Type 0：Target.Attacked(DC)；Type 1：MACAgility + Dazed
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: t.session_id,
-                target_object_id: t.object_id,
-                damage,
-                spell_id: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: t.session_id,
+                    target_object_id: t.object_id,
+                    damage,
+                    spell_id: 0,
+                });
             if is_mc {
                 // C# PoisonTarget(Target, 10, damage, Dazed, 1000)
                 // C# PoisonTarget 1/10
-                    if fastrand::i32(0..10) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: t.session_id,
-                        poison: Poison::new(PoisonType::DAZED, damage.max(1) as u32, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                    });
-                    }
+                if fastrand::i32(0..10) == 0 {
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: t.session_id,
+                            poison: Poison::new(
+                                PoisonType::DAZED,
+                                damage.max(1) as u32,
+                                crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                1000,
+                            ),
+                        });
+                }
             }
         }
     }

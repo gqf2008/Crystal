@@ -8,12 +8,12 @@
 //! Attack（C# :13-54）：Random(8)==0→stomp；else Random(6)==0→重击；else base。
 //! CompleteAttack（C# :56-84）：stomp→AOE1 + Dazed。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const MELEE_RANGE: i32 = 1;
@@ -43,43 +43,61 @@ impl MonsterBehavior for WhiteMammothBehavior {
                 // 7/8 概率普通攻击
                 if fastrand::i32(0..6) > 0 {
                     // 5/6 Type0 base.Attack（DC 单体）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    let damage = crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg,
+                        0,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else {
                     // 1/6 Type1 DC*2 重击
-                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg * 2, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    let damage = crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg * 2,
+                        0,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                 }
             } else {
                 // 1/8 Type2 MC 践踏：AOE 1 格 + Dazed
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, MELEE_RANGE, monster.map_index)
-                        .into_iter().copied().collect();
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, MELEE_RANGE, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 2,
-                    });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: h.session_id,
-                        poison: Poison::new(PoisonType::DAZED, 2, 5, 2000),
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 2,
+                        });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: h.session_id,
+                            poison: Poison::new(PoisonType::DAZED, 2, 5, 2000),
+                        });
                 }
             }
             return;

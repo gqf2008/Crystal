@@ -8,11 +8,11 @@
 //!
 //! ProcessAI（C# :59-73）：Envir.Time>ActionTime 时检测 FindNearby(2) 切换 Stoned。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
 
 /// 石化判定：玩家靠近几格内唤醒（C# FindNearby(2)）
 const WAKE_RANGE: i32 = 2;
@@ -45,7 +45,11 @@ impl MonsterBehavior for ZumaMonsterBehavior {
 
     /// 石化期免疫伤害（C# IsAttackTarget 返 false）
     fn on_attacked(&mut self, damage: i32) -> i32 {
-        if self.stoned { 0 } else { damage }
+        if self.stoned {
+            0
+        } else {
+            damage
+        }
     }
 
     /// 石化期免疫毒（C# ApplyPoison: if(Stoned) return）
@@ -56,7 +60,9 @@ impl MonsterBehavior for ZumaMonsterBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // ---- 石化/唤醒切换（C# ProcessAI：FindNearby(2)）----
         if self.stoned {
-            let has_near = ctx.nearest_target(monster.x, monster.y, WAKE_RANGE, monster.map_index).is_some();
+            let has_near = ctx
+                .nearest_target(monster.x, monster.y, WAKE_RANGE, monster.map_index)
+                .is_some();
             if has_near {
                 // C# Wake() + WakeAll(14)：自身唤醒（同伴唤醒由各怪自身检测完成）
                 self.stoned = false;
@@ -76,14 +82,20 @@ impl MonsterBehavior for ZumaMonsterBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

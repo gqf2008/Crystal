@@ -5,9 +5,9 @@
 //!   - ProcessTarget：FindAllTargets(ViewRange) → 一次 ObjectAttack + 逐个伤害
 //!   - CanMove=false / CanRegen=false
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 pub struct RedMoonEvilBehavior;
 
@@ -34,24 +34,33 @@ impl MonsterBehavior for RedMoonEvilBehavior {
         // C# ProcessTarget：每 AttackSpeed 周期 AoE 攻击视野内所有目标（一次 ObjectAttack）
         if ctx.tick_count >= monster.next_attack_tick {
             let view_range = monster.ai_profile.aggro_range.max(1) as i32;
-            let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(monster.x, monster.y, view_range, monster.map_index)
-                    .into_iter().copied().collect();
+            let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(monster.x, monster.y, view_range, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
             if targets.is_empty() {
                 return;
             }
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                attacker_oid: monster.object_id,
-                center_x: monster.x,
-                center_y: monster.y,
-                radius: view_range,
-                damage,
-                spell_id: 0,
-            });
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Aoe {
+                    attacker_oid: monster.object_id,
+                    center_x: monster.x,
+                    center_y: monster.y,
+                    radius: view_range,
+                    damage,
+                    spell_id: 0,
+                });
             // C# Attack（RedMoonEvil.cs:61）：对每个目标广播 RedMoonEvil 特效
             for t in targets.iter() {
-                ctx.out_effects.push((t.object_id, mir2_shared::enums::SpellEffect::RedMoonEvil, 0, 0));
+                ctx.out_effects.push((
+                    t.object_id,
+                    mir2_shared::enums::SpellEffect::RedMoonEvil,
+                    0,
+                    0,
+                ));
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
         }

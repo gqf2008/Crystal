@@ -4,9 +4,9 @@
 //! 机制：FindTarget/ProcessSearch/ProcessTarget 全空 → 永不攻击；CanRegen=false；Effect 3/4/5 静态
 //! 实现：静态不可攻击结构（can_move=false + can_regen=false + 空行为）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 pub struct SiegeBehavior;
 

@@ -10,10 +10,10 @@
 //! Attack（C# :29-84）：Shield buff→return；2/3 DC；else WideLine。
 //! ProcessTarget（C# :86-134）：!buff→MoveTo；buff→背向 Walk 逃跑。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 const ATTACK_RANGE: i32 = 4;
@@ -33,7 +33,10 @@ pub struct HornedWarriorBehavior {
 
 impl HornedWarriorBehavior {
     pub fn new() -> Self {
-        Self { shield_until: 0, next_shield_available: 0 }
+        Self {
+            shield_until: 0,
+            next_shield_available: 0,
+        }
     }
 
     fn in_shield(&self, tick: u64) -> bool {
@@ -51,17 +54,22 @@ impl MonsterBehavior for HornedWarriorBehavior {
         let dx = (target.x - monster.x).abs();
         let dy = (target.y - monster.y).abs();
         // C# HornedWarrior.cs InAttackRange：x,y<=4 且（贴身 或 对角/同奇偶）
-        let in_attack_range = dx <= ATTACK_RANGE && dy <= ATTACK_RANGE
+        let in_attack_range = dx <= ATTACK_RANGE
+            && dy <= ATTACK_RANGE
             && ((dx <= 1 && dy <= 1) || dx == dy || dx % 2 == dy % 2);
 
-        let hp_pct = if monster.max_hp > 0 { monster.hp * 100 / monster.max_hp } else { 100 };
+        let hp_pct = if monster.max_hp > 0 {
+            monster.hp * 100 / monster.max_hp
+        } else {
+            100
+        };
         let shielded = self.in_shield(ctx.tick_count);
 
         // ---- 进入盾牌态（HP<50% 且冷却结束）----
         if !shielded && hp_pct < 50 && ctx.tick_count >= self.next_shield_available {
             self.shield_until = ctx.tick_count + SHIELD_DURATION_TICKS;
-            self.next_shield_available = ctx.tick_count + SHIELD_COOLDOWN_MIN_TICKS
-                + fastrand::u64(0..50);
+            self.next_shield_available =
+                ctx.tick_count + SHIELD_COOLDOWN_MIN_TICKS + fastrand::u64(0..50);
             // 盾牌期临时加 AC（C# AddBuff MaxAC/MinAC=500）
             monster.max_ac += SHIELD_AC;
             monster.min_ac += SHIELD_AC;
@@ -94,18 +102,23 @@ impl MonsterBehavior for HornedWarriorBehavior {
             // C# 2/3 DC 单体；1/3 WideLineAttack(4)
             if fastrand::i32(0..3) > 0 {
                 // Type0 DC 单体
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // Type1 WideLine(4)：C# WideLineAttack(damage, 4, width=3) —— 3 条平行车道 × 4 格
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 // 起始 3 点：自身 + 左车道 + 右车道（C# Functions.Left/Right）
                 let left = (dir + 7) % 8;
                 let right = (dir + 1) % 8;
@@ -118,16 +131,17 @@ impl MonsterBehavior for HornedWarriorBehavior {
                     for i in 1..=4i32 {
                         let tx = lx + DIR_DX[dir] * i;
                         let ty = ly + DIR_DY[dir] * i;
-                        if let Some(p) = ctx.players.iter()
-                            .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
-                        {
-                            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                                attacker_oid: monster.object_id,
-                                target_session: p.session_id,
-                                damage,
-                                spell_id: 0,
-                                attack_type: 1,
-                            });
+                        if let Some(p) = ctx.players.iter().find(|p| {
+                            p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0
+                        }) {
+                            ctx.out_attacks
+                                .push(crate::actors::world::ai::AttackAction::Melee {
+                                    attacker_oid: monster.object_id,
+                                    target_session: p.session_id,
+                                    damage,
+                                    spell_id: 0,
+                                    attack_type: 1,
+                                });
                         }
                     }
                 }

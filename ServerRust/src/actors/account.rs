@@ -3,18 +3,18 @@
 
 use std::collections::HashMap;
 
-use kameo::actor::{Actor, ActorRef};
-use kameo::prelude::Context;
-use kameo::message::Message;
 use argon2::password_hash::PasswordHash;
 use argon2::password_hash::PasswordVerifier;
 use argon2::password_hash::SaltString;
 use argon2::PasswordHasher;
+use kameo::actor::{Actor, ActorRef};
+use kameo::message::Message;
+use kameo::prelude::Context;
+use mir2_shared::packets::Packet;
 use pbkdf2::pbkdf2_hmac;
 use rand_core::OsRng;
 use sha1::Sha1;
-use tracing::{info, warn, error};
-use mir2_shared::packets::Packet;
+use tracing::{error, info, warn};
 
 use crate::db::{self, DbPool};
 use crate::gate::actor::LoginResult;
@@ -44,7 +44,10 @@ fn verify_password(password: &str, hash: &str) -> (bool, bool) {
         // Format: pbkdf2_sha1$<base64_salt>$<base64_hash>
         let parts: Vec<&str> = rest.splitn(2, '$').collect();
         if parts.len() == 2 {
-            if let (Ok(salt), Ok(expected_hash)) = (data_encoding::BASE64.decode(parts[0].as_bytes()), data_encoding::BASE64.decode(parts[1].as_bytes())) {
+            if let (Ok(salt), Ok(expected_hash)) = (
+                data_encoding::BASE64.decode(parts[0].as_bytes()),
+                data_encoding::BASE64.decode(parts[1].as_bytes()),
+            ) {
                 let mut computed = vec![0u8; 24]; // Crypto.HashSize = 24
                 pbkdf2_hmac::<Sha1>(password.as_bytes(), &salt, 50, &mut computed); // Crypto.Iterations = 50
                 if computed == expected_hash {
@@ -176,7 +179,10 @@ impl AccountActor {
         if let Some(account) = self.accounts.get_mut(username) {
             // C#：封禁期内直接拒绝
             if account.banned_until > now {
-                warn!("Account banned until {}: {}", account.banned_until, username);
+                warn!(
+                    "Account banned until {}: {}",
+                    account.banned_until, username
+                );
                 return (false, false);
             }
             let (ok, needs_migration) = verify_password(password, &account.password_hash);
@@ -185,9 +191,15 @@ impl AccountActor {
                 account.wrong_password_count = account.wrong_password_count.saturating_add(1);
                 if account.wrong_password_count >= 5 {
                     account.banned_until = now + 120;
-                    warn!("Account '{}' banned for 2 minutes (too many wrong passwords)", username);
+                    warn!(
+                        "Account '{}' banned for 2 minutes (too many wrong passwords)",
+                        username
+                    );
                 } else {
-                    warn!("Wrong password for account: {} (attempt {})", username, account.wrong_password_count);
+                    warn!(
+                        "Wrong password for account: {} (attempt {})",
+                        username, account.wrong_password_count
+                    );
                 }
                 return (false, false);
             }
@@ -222,17 +234,18 @@ impl AccountActor {
     /// 当前是否处于封禁期，返回封禁到期 unix 秒
     pub fn banned_until(&self, username: &str) -> Option<i64> {
         let now = Self::unix_now_secs();
-        self.accounts.get(username)
+        self.accounts
+            .get(username)
             .map(|a| a.banned_until)
             .filter(|&until| until > now)
     }
 
-fn unix_now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
+    fn unix_now_secs() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
 
     /// 登出
     pub fn logout(&mut self, username: &str) {
@@ -247,7 +260,10 @@ impl Actor for AccountActor {
     type Args = (ActorRef<crate::gate::actor::GateActor>, DbPool);
     type Error = anyhow::Error;
 
-    async fn on_start((gate_ref, db_pool): (ActorRef<crate::gate::actor::GateActor>, DbPool), _actor_ref: ActorRef<Self>) -> Result<Self, Self::Error> {
+    async fn on_start(
+        (gate_ref, db_pool): (ActorRef<crate::gate::actor::GateActor>, DbPool),
+        _actor_ref: ActorRef<Self>,
+    ) -> Result<Self, Self::Error> {
         let mut actor = Self::new(gate_ref, db_pool);
 
         // 从数据库加载已有账号到内存
@@ -271,7 +287,6 @@ impl Actor for AccountActor {
     }
 }
 
-
 // =============================================================================
 // PR #1169: Warehouse password methods (AccountActor core)
 // =============================================================================
@@ -280,7 +295,11 @@ impl Actor for AccountActor {
 /// `result_code` 见 master `Shared/ServerPackets.cs::StorageUnlockResult` 注释:
 /// 0=Success 1=BadPassword 2=WrongPassword 3=NotAvailable 4=NoPasswordSet
 /// `has_password` 反映 account 当前是否设了密码(用于客户端判断走哪条 UI 分支)。
-pub fn validate_storage_password(actor: &AccountActor, username: &str, raw_password: &str) -> (u8, bool) {
+pub fn validate_storage_password(
+    actor: &AccountActor,
+    username: &str,
+    raw_password: &str,
+) -> (u8, bool) {
     let account = match actor.accounts.get(username) {
         Some(a) => a,
         None => return (3, false), // NotAvailable
@@ -345,7 +364,6 @@ pub fn clear_storage_password(actor: &mut AccountActor, username: &str, current_
     4 // Success
 }
 
-
 // ============================================================
 // 消息定义
 // ============================================================
@@ -359,7 +377,11 @@ pub struct RegisterAccountRequest {
 impl Message<RegisterAccountRequest> for AccountActor {
     type Reply = bool;
 
-    async fn handle(&mut self, msg: RegisterAccountRequest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: RegisterAccountRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.register(&msg.username, &msg.password)
     }
 }
@@ -390,10 +412,19 @@ impl Message<LoginRequest> for AccountActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let (success, _needs_db_save) = self.login(&msg.username, &msg.password);
-        let banned_until = if success { None } else { self.banned_until(&msg.username) };
+        let banned_until = if success {
+            None
+        } else {
+            self.banned_until(&msg.username)
+        };
         // C# RequirePasswordChange：密码正确但需强制改密（login 返回 false 且未封禁）
-        let require_password_change = !success && banned_until.is_none()
-            && self.accounts.get(&msg.username).map(|a| a.require_password_change).unwrap_or(false);
+        let require_password_change = !success
+            && banned_until.is_none()
+            && self
+                .accounts
+                .get(&msg.username)
+                .map(|a| a.require_password_change)
+                .unwrap_or(false);
 
         // 同步到数据库
         if success {
@@ -420,7 +451,8 @@ impl Message<LoginRequest> for AccountActor {
         };
 
         // 将结果发回 GateActor，由 GateActor 发送协议包给客户端
-        let _ = self.gate_ref
+        let _ = self
+            .gate_ref
             .tell(LoginResult {
                 session_id: msg.session_id,
                 success,
@@ -469,20 +501,25 @@ impl Message<ValidateStoragePasswordRequest> for AccountActor {
         msg: ValidateStoragePasswordRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let (result, has_password) = validate_storage_password(self, &msg.username, &msg.raw_password);
+        let (result, has_password) =
+            validate_storage_password(self, &msg.username, &msg.raw_password);
         // Send StorageUnlockResult back to client
         let packet = mir2_shared::packets::server::StorageUnlockResult {
-            result, has_password,
+            result,
+            has_password,
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id: msg.session_id,
-                data: crate::util::wire::build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::StorageUnlockResult as i16,
-                    &body,
-                ),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id: msg.session_id,
+                    data: crate::util::wire::build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::StorageUnlockResult as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
         // #200：校验成功（0=成功 / 4=无密码直接解锁）→ GateActor 通知 WorldActor 下发仓库
         result == 0 || result == 4
@@ -505,12 +542,7 @@ impl Message<SetStoragePasswordRequest> for AccountActor {
         msg: SetStoragePasswordRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let result = set_storage_password(
-            self,
-            &msg.username,
-            &msg.current_raw,
-            &msg.new_raw,
-        );
+        let result = set_storage_password(self, &msg.username, &msg.current_raw, &msg.new_raw);
         // Persist
         if result == 4 {
             if let Some(acc) = self.accounts.get(&msg.username) {
@@ -520,10 +552,14 @@ impl Message<SetStoragePasswordRequest> for AccountActor {
             }
         }
         // Compute LastSetTime (use the freshly-set value, or 0 if removing)
-        let last_set = self.accounts.get(&msg.username)
+        let last_set = self
+            .accounts
+            .get(&msg.username)
             .map(|a| a.storage_password_last_set)
             .unwrap_or(0);
-        let has_password = self.accounts.get(&msg.username)
+        let has_password = self
+            .accounts
+            .get(&msg.username)
             .map(|a| a.has_storage_password())
             .unwrap_or(false);
         let packet = mir2_shared::packets::server::StoragePasswordResult {
@@ -536,13 +572,16 @@ impl Message<SetStoragePasswordRequest> for AccountActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id: msg.session_id,
-                data: crate::util::wire::build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::StoragePasswordResult as i16,
-                    &body,
-                ),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id: msg.session_id,
+                    data: crate::util::wire::build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::StoragePasswordResult as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 }
@@ -578,13 +617,16 @@ impl Message<ClearStoragePasswordRequest> for AccountActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                session_id: msg.session_id,
-                data: crate::util::wire::build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::StoragePasswordResult as i16,
-                    &body,
-                ),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id: msg.session_id,
+                    data: crate::util::wire::build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::StoragePasswordResult as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 }
@@ -612,13 +654,15 @@ impl Message<AccountChangePassword> for AccountActor {
             let packet = mir2_shared::packets::server::login::ChangePassword { result };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = gate_ref.tell(crate::gate::actor::SendToClient {
-                    session_id: msg.session_id,
-                    data: crate::util::wire::build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ChangePassword as i16,
-                        &body,
-                    ),
-                }).await;
+                let _ = gate_ref
+                    .tell(crate::gate::actor::SendToClient {
+                        session_id: msg.session_id,
+                        data: crate::util::wire::build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ChangePassword as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
         };
 
@@ -637,15 +681,20 @@ impl Message<AccountChangePassword> for AccountActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = ban_gate_ref.tell(crate::gate::actor::SendToClient {
-                    session_id: msg.session_id,
-                    data: crate::util::wire::build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ChangePasswordBanned as i16,
-                        &body,
-                    ),
-                }).await;
+                let _ = ban_gate_ref
+                    .tell(crate::gate::actor::SendToClient {
+                        session_id: msg.session_id,
+                        data: crate::util::wire::build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ChangePasswordBanned as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
-            warn!("ChangePassword rejected: account '{}' banned until {}", msg.username, account.banned_until);
+            warn!(
+                "ChangePassword rejected: account '{}' banned until {}",
+                msg.username, account.banned_until
+            );
             return;
         }
         if account.banned_until > 0 {
@@ -662,7 +711,9 @@ impl Message<AccountChangePassword> for AccountActor {
         account.password_hash = hash_password(&msg.new_password);
         // C# ChangePassword：成功后 RequirePasswordChange = false
         account.require_password_change = false;
-        if let Err(e) = db::change_password(&self.db_pool, &msg.username, &account.password_hash).await {
+        if let Err(e) =
+            db::change_password(&self.db_pool, &msg.username, &account.password_hash).await
+        {
             warn!("Failed to change password for '{}': {}", msg.username, e);
         } else {
             info!("Password changed for account: {}", msg.username);

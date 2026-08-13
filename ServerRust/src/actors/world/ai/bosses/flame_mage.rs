@@ -8,10 +8,10 @@
 //! CompleteRangeAttack（C# :14-30）：FindAllTargets(2, target.location) 全体 Attacked。
 //! ProcessTarget（C# :32-83）：标准风筝（dist>=AttackRange 追，否则远离）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 6;
 const VIEW_RANGE: i32 = 15;
@@ -36,18 +36,23 @@ impl MonsterBehavior for FlameMageBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // 命中目标 + 溅射 2 格内全体
-            let splash: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(target.x, target.y, 2, monster.map_index)
-                    .into_iter().copied().collect();
+            let splash: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(target.x, target.y, 2, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
             for h in splash {
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: h.session_id,
-                    target_object_id: h.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: h.session_id,
+                        target_object_id: h.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

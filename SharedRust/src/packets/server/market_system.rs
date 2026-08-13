@@ -69,10 +69,10 @@ pub struct NPCMarketPage {
 
 #[derive(Debug, Clone)]
 pub struct MarketListing {
-    pub auction_id: u64,       // 拍卖ID
-    pub item: UserItem,        // 物品
-    pub seller_name: String,   // 卖家名称
-    pub price: u32,            // 价格（寄售=一口价，拍卖=起始价）
+    pub auction_id: u64,     // 拍卖ID
+    pub item: UserItem,      // 物品
+    pub seller_name: String, // 卖家名称
+    pub price: u32,          // 价格（寄售=一口价，拍卖=起始价）
     /// 0=寄售 1=拍卖（C# MarketItemType）
     pub item_type: u8,
     /// 拍卖当前最高出价（寄售=0）

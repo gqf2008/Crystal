@@ -36,7 +36,10 @@ pub fn validate_chat(msg: &str) -> bool {
         return false;
     }
     // 拒绝连续 null bytes 或纯 control characters
-    let control_count = msg.chars().filter(|c| c.is_control() && *c != '\n' && *c != '\t').count();
+    let control_count = msg
+        .chars()
+        .filter(|c| c.is_control() && *c != '\n' && *c != '\t')
+        .count();
     control_count < msg.chars().count() / 2
 }
 
@@ -63,7 +66,8 @@ pub fn validate_character_name(name: &str) -> bool {
     if len < MIN_CHAR_NAME_LEN || len > MAX_CHAR_NAME_LEN {
         return false;
     }
-    name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c))
+    name.chars()
+        .all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c))
 }
 
 /// 验证 NPC 对话输入:≤64 字符,无 control chars。

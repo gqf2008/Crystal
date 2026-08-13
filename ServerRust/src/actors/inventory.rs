@@ -55,8 +55,7 @@ pub const BACKPACK_SIZE: usize = 46;
 pub const QUEST_INVENTORY_SIZE: usize = 40;
 
 /// 背包中的物品格子
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InventorySlot {
     pub grid: u8,
     pub item: UserItem,
@@ -84,8 +83,7 @@ pub struct GroundItem {
 pub const STORAGE_SIZE: usize = 80;
 
 /// 玩家背包 + 装备 + 仓库
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlayerInventory {
     /// 金币
     pub gold: u64,
@@ -130,7 +128,10 @@ impl PlayerInventory {
                 if s.item.item_index != item.item_index {
                     continue;
                 }
-                let stack_cap = item.info.as_ref().or(s.item.info.as_ref())
+                let stack_cap = item
+                    .info
+                    .as_ref()
+                    .or(s.item.info.as_ref())
                     .map(|i| i.stack_size as u16)
                     .filter(|c| *c > 1)
                     .unwrap_or(1);
@@ -167,8 +168,12 @@ impl PlayerInventory {
 
     /// 尝试将物品放入指定背包格子，如果该格为空则成功
     pub fn try_place_item_at(&mut self, item: UserItem, idx: usize) -> bool {
-        if idx >= self.backpack.len() { return false; }
-        if self.backpack[idx].is_some() { return false; }
+        if idx >= self.backpack.len() {
+            return false;
+        }
+        if self.backpack[idx].is_some() {
+            return false;
+        }
         self.backpack[idx] = Some(InventorySlot {
             grid: idx as u8,
             item,
@@ -209,7 +214,9 @@ pub fn equip_fishing_gear(
         .iter()
         .find(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == gear_uid))
         .and_then(|s| s.as_ref().map(|sl| sl.item.clone()));
-    let Some(gear) = gear else { return Err("背包中找不到钓具") };
+    let Some(gear) = gear else {
+        return Err("背包中找不到钓具");
+    };
     // 类型校验
     let gear_type = gear.info.as_ref().map(|i| i.item_type);
     if !fishing_slot_type_ok(slot, gear_type) {
@@ -223,17 +230,25 @@ pub fn equip_fishing_gear(
             break;
         }
     }
-    let Some(taken) = taken else { return Err("背包中找不到钓具") };
+    let Some(taken) = taken else {
+        return Err("背包中找不到钓具");
+    };
     // 旧钓具回背包（优先原槽，其次空格；无空格则撤销并还原钓具）
     if let Some(old) = rod.slots[slot].take() {
         let old_grid = taken.grid as usize;
         if old_grid < inventory.backpack.len() && inventory.backpack[old_grid].is_none() {
-            inventory.backpack[old_grid] = Some(InventorySlot { grid: old_grid as u8, item: old });
+            inventory.backpack[old_grid] = Some(InventorySlot {
+                grid: old_grid as u8,
+                item: old,
+            });
         } else {
             let mut placed = false;
             for (i, s) in inventory.backpack.iter_mut().enumerate() {
                 if s.is_none() {
-                    *s = Some(InventorySlot { grid: i as u8, item: old });
+                    *s = Some(InventorySlot {
+                        grid: i as u8,
+                        item: old,
+                    });
                     placed = true;
                     break;
                 }
@@ -263,7 +278,9 @@ pub enum FishingGearDamageResult {
 impl PlayerInventory {
     /// 当前鱼竿（Weapon 装备槽）
     pub fn fishing_rod(&self) -> Option<&UserItem> {
-        self.equipment.get(EquipmentSlot::Weapon as usize).and_then(|e| e.as_ref())
+        self.equipment
+            .get(EquipmentSlot::Weapon as usize)
+            .and_then(|e| e.as_ref())
     }
 
     /// 鱼竿 Bait 槽鱼饵数量（C# GetBait）
@@ -276,24 +293,51 @@ impl PlayerInventory {
 
     /// 消耗鱼竿 Bait 槽鱼饵（C# ConsumeItem；数量归零移除）
     pub fn fishing_consume_bait(&mut self, amount: u16) -> bool {
-        let Some(rod) = self.equipment.get_mut(EquipmentSlot::Weapon as usize).and_then(|e| e.as_mut()) else { return false };
-        if rod.slots.len() < 5 { rod.slots.resize(5, None); }
-        let Some(slot) = rod.slots.get_mut(2).and_then(|s| s.as_mut()) else { return false };
-        if slot.count < amount { return false; }
+        let Some(rod) = self
+            .equipment
+            .get_mut(EquipmentSlot::Weapon as usize)
+            .and_then(|e| e.as_mut())
+        else {
+            return false;
+        };
+        if rod.slots.len() < 5 {
+            rod.slots.resize(5, None);
+        }
+        let Some(slot) = rod.slots.get_mut(2).and_then(|s| s.as_mut()) else {
+            return false;
+        };
+        if slot.count < amount {
+            return false;
+        }
         slot.count -= amount;
-        if slot.count == 0 { rod.slots[2] = None; }
+        if slot.count == 0 {
+            rod.slots[2] = None;
+        }
         true
     }
 
     /// 钓具耐久 -amount（C# DamagedFishingItem；归零损坏并移除）
     pub fn fishing_gear_damage(&mut self, slot: usize, amount: u16) -> FishingGearDamageResult {
-        let Some(rod) = self.equipment.get_mut(EquipmentSlot::Weapon as usize).and_then(|e| e.as_mut()) else { return FishingGearDamageResult::NoGear };
-        if rod.slots.len() < 5 { rod.slots.resize(5, None); }
+        let Some(rod) = self
+            .equipment
+            .get_mut(EquipmentSlot::Weapon as usize)
+            .and_then(|e| e.as_mut())
+        else {
+            return FishingGearDamageResult::NoGear;
+        };
+        if rod.slots.len() < 5 {
+            rod.slots.resize(5, None);
+        }
         let dura = {
             let s = rod.slots.get_mut(slot).and_then(|s| s.as_mut());
             match s {
                 Some(s) => {
-                    if s.current_dura <= amount { 0 } else { s.current_dura -= amount; s.current_dura }
+                    if s.current_dura <= amount {
+                        0
+                    } else {
+                        s.current_dura -= amount;
+                        s.current_dura
+                    }
                 }
                 None => return FishingGearDamageResult::NoGear,
             }
@@ -308,7 +352,11 @@ impl PlayerInventory {
 
     /// 鱼竿耐久 -amount（C# DamageItem(rod,1)）
     pub fn fishing_rod_durability_loss(&mut self, amount: u16) {
-        if let Some(rod) = self.equipment.get_mut(EquipmentSlot::Weapon as usize).and_then(|e| e.as_mut()) {
+        if let Some(rod) = self
+            .equipment
+            .get_mut(EquipmentSlot::Weapon as usize)
+            .and_then(|e| e.as_mut())
+        {
             rod.current_dura = rod.current_dura.saturating_sub(amount);
         }
     }
@@ -316,7 +364,10 @@ impl PlayerInventory {
 
 /// 钓具槽类型校验（C# FishingSlot：Hook=0 Float=1 Bait=2 Finder=3 Reel=4；SharedRust ItemType：Hook=31..Reel=35）
 /// gear_item_type=None（信息缺失）时不拦截；slot 非法返回 false
-pub fn fishing_slot_type_ok(slot: usize, gear_item_type: Option<mir2_shared::enums::ItemType>) -> bool {
+pub fn fishing_slot_type_ok(
+    slot: usize,
+    gear_item_type: Option<mir2_shared::enums::ItemType>,
+) -> bool {
     use mir2_shared::enums::ItemType;
     let expected = match slot {
         0 => Some(ItemType::Hook),
@@ -371,7 +422,10 @@ impl PlayerInventory {
         if slot < 0 || idx >= self.backpack.len() || self.backpack[idx].is_some() {
             return false;
         }
-        self.backpack[idx] = Some(InventorySlot { grid: slot as u8, item });
+        self.backpack[idx] = Some(InventorySlot {
+            grid: slot as u8,
+            item,
+        });
         true
     }
 
@@ -381,7 +435,11 @@ impl PlayerInventory {
                 return Some(&s.item);
             }
         }
-        self.equipment.iter().flatten().find(|&e| e.unique_id == uid).map(|e| e as _)
+        self.equipment
+            .iter()
+            .flatten()
+            .find(|&e| e.unique_id == uid)
+            .map(|e| e as _)
     }
 
     /// 查询物品（可变引用，按 unique_id）
@@ -391,7 +449,10 @@ impl PlayerInventory {
                 return Some(&mut s.item);
             }
         }
-        self.equipment.iter_mut().flatten().find(|e| e.unique_id == uid)
+        self.equipment
+            .iter_mut()
+            .flatten()
+            .find(|e| e.unique_id == uid)
     }
 
     /// 查询物品（按格子索引）
@@ -429,7 +490,8 @@ impl PlayerInventory {
     /// 合并物品：将 from_grid 合并到 to_grid
     /// 堆叠上限（C# ItemData.StackSize；info 缺失时回退 max_dura（旧行为））
     fn stack_limit(&self, item: &UserItem) -> u32 {
-        item.info.as_ref()
+        item.info
+            .as_ref()
             .map(|i| i.stack_size as u32)
             .unwrap_or_else(|| item.max_dura.max(1) as u32)
     }
@@ -493,7 +555,9 @@ impl PlayerInventory {
                 break;
             }
         }
-        let Some(new_grid) = new_grid else { return false; };
+        let Some(new_grid) = new_grid else {
+            return false;
+        };
 
         // 从原格扣减
         if let Some(s) = &mut self.backpack[idx] {
@@ -512,20 +576,22 @@ impl PlayerInventory {
         true
     }
 
-
     /// 按 unique_id 拆分物品：从 uid 所在格拆出 count 数量到空位
     /// 拆分物品堆叠，返回拆出的新物品（C# SplitItem：新堆叠 + S.SplitItem{Item}）
     pub fn split_item_by_uid(&mut self, uid: u64, count: u16) -> Option<UserItem> {
         let mut src_idx = None;
         for (i, slot) in self.backpack.iter().enumerate() {
             if let Some(s) = slot {
-                if s.item.unique_id == uid && s.item.count > 1 && count > 0 && count < s.item.count {
+                if s.item.unique_id == uid && s.item.count > 1 && count > 0 && count < s.item.count
+                {
                     src_idx = Some(i);
                     break;
                 }
             }
         }
-        let Some(idx) = src_idx else { return None; };
+        let Some(idx) = src_idx else {
+            return None;
+        };
         let item_data = match &self.backpack[idx] {
             Some(s) => s.item.clone(),
             None => return None,
@@ -537,7 +603,9 @@ impl PlayerInventory {
                 break;
             }
         }
-        let Some(new_grid) = new_grid else { return None; };
+        let Some(new_grid) = new_grid else {
+            return None;
+        };
         if let Some(s) = &mut self.backpack[idx] {
             s.item.count -= count;
         }
@@ -638,7 +706,9 @@ impl PlayerInventory {
             }
         }
         for item in items {
-            if item.count == 0 { continue; }
+            if item.count == 0 {
+                continue;
+            }
             let cap = item.max_dura.max(1) as u32;
             if cap > 1 {
                 let count = item.count as u32;
@@ -650,11 +720,15 @@ impl PlayerInventory {
                 let remaining = count - *r;
                 *r = 0;
                 if remaining > 0 {
-                    if free == 0 { return false; }
+                    if free == 0 {
+                        return false;
+                    }
                     free -= 1; // 与 add_item 一致：剩余整堆放一格
                 }
             } else {
-                if free == 0 { return false; }
+                if free == 0 {
+                    return false;
+                }
                 free -= 1;
             }
         }
@@ -668,7 +742,9 @@ impl PlayerInventory {
 
     /// 按 item_index 统计背包中该物品的总数量（包含堆叠）
     pub fn count_item_by_index(&self, item_index: i32) -> u16 {
-        self.backpack.iter().flatten()
+        self.backpack
+            .iter()
+            .flatten()
             .filter(|s| s.item.item_index == item_index)
             .map(|s| s.item.count)
             .sum()
@@ -709,11 +785,24 @@ impl PlayerInventory {
     /// 按 item_index 从背包中移除物品，仅考虑 current_dura >= min_dura 的物品
     /// （C# TakeItem dura；min_dura 为 None 时不过滤）
     /// C# TakeItem 语义：移除尽可能多（不要求全量）；返回是否移除了至少一个
-    pub fn remove_item_by_index_with_dura(&mut self, item_index: i32, mut count: u16, min_dura: Option<u32>) -> bool {
+    pub fn remove_item_by_index_with_dura(
+        &mut self,
+        item_index: i32,
+        mut count: u16,
+        min_dura: Option<u32>,
+    ) -> bool {
         let mut removed_any = false;
         for s in self.backpack.iter_mut().flatten() {
-            if s.item.item_index != item_index { continue; }
-            if min_dura.map(|d| (s.item.current_dura as u32) >= d).unwrap_or(true) == false { continue; }
+            if s.item.item_index != item_index {
+                continue;
+            }
+            if min_dura
+                .map(|d| (s.item.current_dura as u32) >= d)
+                .unwrap_or(true)
+                == false
+            {
+                continue;
+            }
             if s.item.count > count {
                 s.item.count -= count;
                 removed_any = true;
@@ -740,7 +829,10 @@ impl PlayerInventory {
 
     /// 从背包中随机选择一个物品并移除返回（用于死亡掉落）
     pub fn random_drop_one(&mut self) -> Option<UserItem> {
-        let occupied: Vec<usize> = self.backpack.iter().enumerate()
+        let occupied: Vec<usize> = self
+            .backpack
+            .iter()
+            .enumerate()
             .filter(|(_, s)| s.is_some())
             .map(|(i, _)| i)
             .collect();
@@ -772,7 +864,11 @@ impl PlayerInventory {
 
     /// #1546：从仓库格装备（C# EquipItem Grid=Storage：从 Account.Storage 定位 → 装备；旧装备放回仓库原格）
     /// 返回 (旧装备 Option<UserItem>, 新装备 unique_id) 或 None
-    pub fn equip_from_storage(&mut self, storage_idx: usize, slot: EquipmentSlot) -> Option<(Option<UserItem>, u64)> {
+    pub fn equip_from_storage(
+        &mut self,
+        storage_idx: usize,
+        slot: EquipmentSlot,
+    ) -> Option<(Option<UserItem>, u64)> {
         if storage_idx >= self.storage.len() {
             return None;
         }
@@ -935,7 +1031,10 @@ impl PlayerInventory {
         }
         let item = self.backpack[idx].take()?.item;
         let mut target = to;
-        if target < 0 || target as usize >= self.storage.len() || self.storage[target as usize].is_some() {
+        if target < 0
+            || target as usize >= self.storage.len()
+            || self.storage[target as usize].is_some()
+        {
             target = self.storage.iter().position(|s| s.is_none())? as i32;
         }
         self.storage[target as usize] = Some(InventorySlot {
@@ -953,7 +1052,10 @@ impl PlayerInventory {
         }
         let item = self.storage[sidx].take()?.item;
         let mut target = to;
-        if target < 0 || target as usize >= self.backpack.len() || self.backpack[target as usize].is_some() {
+        if target < 0
+            || target as usize >= self.backpack.len()
+            || self.backpack[target as usize].is_some()
+        {
             target = self.backpack.iter().position(|s| s.is_none())? as i32;
         }
         self.backpack[target as usize] = Some(InventorySlot {
@@ -992,9 +1094,20 @@ impl PlayerInventory {
     }
     /// 镶嵌宝石：将 from_uid 的宝石插入 to_uid 装备的第一个空槽位（C# CombineItem：按 unique_id 查找）
     /// 返回 (source_uid, target_uid) 或 None
-    pub fn socket_gem_by_uid(&mut self, from_uid: u64, to_uid: u64, target_slot_count: usize) -> Option<(u64, u64)> {
-        let fi = self.backpack.iter().position(|s| s.as_ref().map_or(false, |slot| slot.item.unique_id == from_uid))?;
-        let ti = self.backpack.iter().position(|s| s.as_ref().map_or(false, |slot| slot.item.unique_id == to_uid))?;
+    pub fn socket_gem_by_uid(
+        &mut self,
+        from_uid: u64,
+        to_uid: u64,
+        target_slot_count: usize,
+    ) -> Option<(u64, u64)> {
+        let fi = self.backpack.iter().position(|s| {
+            s.as_ref()
+                .map_or(false, |slot| slot.item.unique_id == from_uid)
+        })?;
+        let ti = self.backpack.iter().position(|s| {
+            s.as_ref()
+                .map_or(false, |slot| slot.item.unique_id == to_uid)
+        })?;
         if fi == ti {
             return None;
         }
@@ -1069,18 +1182,26 @@ impl PlayerInventory {
 
     /// 按 item_index 统计任务格中该物品总数量
     pub fn count_quest_item_by_index(&self, item_index: i32) -> u16 {
-        self.quest_inventory.iter().flatten()
+        self.quest_inventory
+            .iter()
+            .flatten()
             .filter(|i| i.item_index == item_index)
             .map(|i| i.count)
             .sum()
     }
 
     /// 从任务格移除指定数量（C# RecalculateQuestBag 逐格删除），返回 (unique_id, removed) 列表供 S.DeleteQuestItem 下发
-    pub fn remove_quest_item_by_index(&mut self, item_index: i32, mut count: u16) -> Vec<(u64, u16)> {
+    pub fn remove_quest_item_by_index(
+        &mut self,
+        item_index: i32,
+        mut count: u16,
+    ) -> Vec<(u64, u16)> {
         let mut removed = Vec::new();
         for slot in self.quest_inventory.iter_mut() {
             if let Some(item) = slot {
-                if item.item_index != item_index { continue; }
+                if item.item_index != item_index {
+                    continue;
+                }
                 if item.count > count {
                     item.count -= count;
                     removed.push((item.unique_id, count));
@@ -1089,7 +1210,9 @@ impl PlayerInventory {
                     count -= item.count;
                     removed.push((item.unique_id, item.count));
                     *slot = None;
-                    if count == 0 { break; }
+                    if count == 0 {
+                        break;
+                    }
                 }
             }
         }
@@ -1250,7 +1373,10 @@ mod tests {
             }
         }
         assert!(!inv.storage_has_space());
-        assert_eq!(inv.storage.iter().filter(|s| s.is_some()).count(), STORAGE_SIZE);
+        assert_eq!(
+            inv.storage.iter().filter(|s| s.is_some()).count(),
+            STORAGE_SIZE
+        );
     }
 
     #[test]
@@ -1265,10 +1391,16 @@ mod tests {
         assert_eq!(inv.expand_storage(), STORAGE_SIZE * 2);
         // 扩容后新格子可用（160 格可全部占用）
         for g in 0..(STORAGE_SIZE * 2) {
-            inv.storage[g] = Some(InventorySlot { grid: g as u8, item: make_item(3, 1) });
+            inv.storage[g] = Some(InventorySlot {
+                grid: g as u8,
+                item: make_item(3, 1),
+            });
         }
         assert!(!inv.storage_has_space());
-        assert_eq!(inv.storage.iter().filter(|s| s.is_some()).count(), STORAGE_SIZE * 2);
+        assert_eq!(
+            inv.storage.iter().filter(|s| s.is_some()).count(),
+            STORAGE_SIZE * 2
+        );
     }
 
     #[test]
@@ -1283,7 +1415,9 @@ mod tests {
         assert_eq!(inv.resize_inventory(), 58);
         assert_eq!(inv.resize_inventory(), 62);
         // 快速扩到上限
-        for _ in 0..20 { inv.resize_inventory(); }
+        for _ in 0..20 {
+            inv.resize_inventory();
+        }
         assert_eq!(inv.backpack.len(), 86);
         // 上限后不再增长
         assert_eq!(inv.resize_inventory(), 86);
@@ -1292,7 +1426,10 @@ mod tests {
         let mut inv2 = PlayerInventory::new();
         inv2.resize_inventory();
         for g in 0..54 {
-            inv2.backpack[g] = Some(InventorySlot { grid: g as u8, item: make_item(9, 1) });
+            inv2.backpack[g] = Some(InventorySlot {
+                grid: g as u8,
+                item: make_item(9, 1),
+            });
         }
         assert_eq!(inv2.backpack.iter().filter(|s| s.is_some()).count(), 54);
         // 越界校验按当前长度
@@ -1312,8 +1449,16 @@ mod tests {
         // 两把同 id 武器，耐久不同
         let (g1, _) = inv.add_item(make_item(7, 1)).unwrap();
         let (g2, _) = inv.add_item(make_item(7, 1)).unwrap();
-        inv.backpack[g1 as usize].as_mut().unwrap().item.current_dura = 50;
-        inv.backpack[g2 as usize].as_mut().unwrap().item.current_dura = 5000;
+        inv.backpack[g1 as usize]
+            .as_mut()
+            .unwrap()
+            .item
+            .current_dura = 50;
+        inv.backpack[g2 as usize]
+            .as_mut()
+            .unwrap()
+            .item
+            .current_dura = 5000;
 
         // 无 dura 过滤：全部可移除
         assert!(inv.remove_item_by_index_with_dura(7, 2, None));
@@ -1322,8 +1467,16 @@ mod tests {
         // 重新放入：一把 50、一把 5000
         let (g1, _) = inv.add_item(make_item(7, 1)).unwrap();
         let (g2, _) = inv.add_item(make_item(7, 1)).unwrap();
-        inv.backpack[g1 as usize].as_mut().unwrap().item.current_dura = 50;
-        inv.backpack[g2 as usize].as_mut().unwrap().item.current_dura = 5000;
+        inv.backpack[g1 as usize]
+            .as_mut()
+            .unwrap()
+            .item
+            .current_dura = 50;
+        inv.backpack[g2 as usize]
+            .as_mut()
+            .unwrap()
+            .item
+            .current_dura = 5000;
 
         // C# TakeItem：移除尽可能多——数量不足也移除能匹配的（5000 那把）
         assert!(inv.remove_item_by_index_with_dura(7, 2, Some(1000)));
@@ -1432,19 +1585,35 @@ mod tests {
             item.unique_id = uid;
             item.max_dura = 0;
             item.count = count;
-            item.info = Some(mir2_shared::data::item::ItemInfo { index: 658, stack_size: 20, ..Default::default() });
+            item.info = Some(mir2_shared::data::item::ItemInfo {
+                index: 658,
+                stack_size: 20,
+                ..Default::default()
+            });
             item
         };
-        inv.backpack[0] = Some(InventorySlot { grid: 0, item: make_potion(1, 5) });
-        inv.backpack[1] = Some(InventorySlot { grid: 1, item: make_potion(2, 3) });
+        inv.backpack[0] = Some(InventorySlot {
+            grid: 0,
+            item: make_potion(1, 5),
+        });
+        inv.backpack[1] = Some(InventorySlot {
+            grid: 1,
+            item: make_potion(2, 3),
+        });
         // 5 + 3 <= 20 → 合并成功
         assert!(inv.merge_item_by_uid(1, 2));
         assert_eq!(inv.backpack[1].as_ref().unwrap().item.count, 8);
         assert!(inv.backpack[0].is_none());
 
         // 15 + 10 > 20 → 超上限失败
-        inv.backpack[0] = Some(InventorySlot { grid: 0, item: make_potion(3, 15) });
-        inv.backpack[1] = Some(InventorySlot { grid: 1, item: make_potion(4, 10) });
+        inv.backpack[0] = Some(InventorySlot {
+            grid: 0,
+            item: make_potion(3, 15),
+        });
+        inv.backpack[1] = Some(InventorySlot {
+            grid: 1,
+            item: make_potion(4, 10),
+        });
         assert!(!inv.merge_item_by_uid(3, 4));
         assert!(inv.backpack[0].is_some() && inv.backpack[1].is_some());
 
@@ -1457,7 +1626,6 @@ mod tests {
         inv.backpack[1] = Some(InventorySlot { grid: 1, item: b });
         assert!(!inv.merge_item_by_uid(5, 6));
     }
-
 
     /// #2190：C# RetrieveRefineItem 目标格放置（空格成功/占用失败/越界失败）
     #[test]
@@ -1486,7 +1654,10 @@ mod tests {
         let mut equip = make_item(200, 1);
         equip.unique_id = 2;
         equip.slots = vec![None, None];
-        inv.backpack[1] = Some(InventorySlot { grid: 1, item: equip });
+        inv.backpack[1] = Some(InventorySlot {
+            grid: 1,
+            item: equip,
+        });
 
         // 镶嵌成功（按 unique_id）
         let result = inv.socket_gem_by_uid(1, 2, 2);
@@ -1516,7 +1687,10 @@ mod tests {
         let mut equip = make_item(200, 1);
         equip.unique_id = 2;
         equip.slots = vec![Some(make_item(300, 1))];
-        inv.backpack[1] = Some(InventorySlot { grid: 1, item: equip });
+        inv.backpack[1] = Some(InventorySlot {
+            grid: 1,
+            item: equip,
+        });
 
         // 镶嵌失败（无空槽）
         assert!(inv.socket_gem_by_uid(1, 2, 1).is_none());
@@ -1532,8 +1706,14 @@ mod tests {
 
         // 同物品（同 uid）镶嵌应失败
         let gem2 = make_item(100, 1);
-        inv.backpack[0] = Some(InventorySlot { grid: 0, item: gem2.clone() });
-        inv.backpack[1] = Some(InventorySlot { grid: 1, item: gem2 });
+        inv.backpack[0] = Some(InventorySlot {
+            grid: 0,
+            item: gem2.clone(),
+        });
+        inv.backpack[1] = Some(InventorySlot {
+            grid: 1,
+            item: gem2,
+        });
         assert!(inv.socket_gem_by_uid(100, 100, 2).is_none());
     }
 
@@ -1556,7 +1736,10 @@ mod tests {
         item2.unique_id = 101;
         item2.max_dura = 1000;
         item2.current_dura = 500;
-        inv.backpack[1] = Some(InventorySlot { grid: 1, item: item2 });
+        inv.backpack[1] = Some(InventorySlot {
+            grid: 1,
+            item: item2,
+        });
         assert!(inv.repair_item(101, true));
         let it2 = inv.backpack[1].as_ref().unwrap().item.clone();
         assert_eq!(it2.max_dura, 1000);
@@ -1594,16 +1777,26 @@ mod tests {
         hook.unique_id = 8001;
         let (_, uid) = inv.add_item(hook.clone()).expect("add hook");
         assert!(equip_fishing_gear(&mut inv, 7001, 0, uid).is_ok());
-        let rod = inv.equipment[EquipmentSlot::Weapon as usize].as_ref().unwrap();
+        let rod = inv.equipment[EquipmentSlot::Weapon as usize]
+            .as_ref()
+            .unwrap();
         assert_eq!(rod.slots[0].as_ref().unwrap().unique_id, uid);
-        assert!(!inv.backpack.iter().any(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == uid)));
+        assert!(!inv
+            .backpack
+            .iter()
+            .any(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == uid)));
         let mut hook2 = make_item(9103, 1);
         hook2.unique_id = 8002;
         let (_, uid2) = inv.add_item(hook2.clone()).expect("add hook2");
         assert!(equip_fishing_gear(&mut inv, 7001, 0, uid2).is_ok());
-        let rod = inv.equipment[EquipmentSlot::Weapon as usize].as_ref().unwrap();
+        let rod = inv.equipment[EquipmentSlot::Weapon as usize]
+            .as_ref()
+            .unwrap();
         assert_eq!(rod.slots[0].as_ref().unwrap().unique_id, uid2);
-        assert!(inv.backpack.iter().any(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == uid)));
+        assert!(inv
+            .backpack
+            .iter()
+            .any(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == uid)));
     }
 
     #[test]
@@ -1613,9 +1806,15 @@ mod tests {
         let mut g = make_item(9102, 1);
         g.unique_id = 8001;
         let (_, uid) = inv.add_item(g).expect("add");
-        assert_eq!(equip_fishing_gear(&mut inv, 7001, 0, uid), Err("不是钓鱼竿"));
+        assert_eq!(
+            equip_fishing_gear(&mut inv, 7001, 0, uid),
+            Err("不是钓鱼竿")
+        );
         inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_item(49));
-        assert_eq!(equip_fishing_gear(&mut inv, 7001, 5, uid), Err("无效钓具槽"));
+        assert_eq!(
+            equip_fishing_gear(&mut inv, 7001, 5, uid),
+            Err("无效钓具槽")
+        );
     }
 
     fn rod_with_gear(rod_dura: u16, slots: Vec<Option<UserItem>>) -> UserItem {
@@ -1666,29 +1865,40 @@ mod tests {
             vec![Some(gear_item(9001, 1, 5)), None, None, None, None],
         ));
         assert_eq!(inv.fishing_gear_damage(0, 1), FishingGearDamageResult::Ok);
-        assert_eq!(inv.fishing_gear_damage(0, 4), FishingGearDamageResult::Broken);
-        assert_eq!(inv.fishing_gear_damage(0, 1), FishingGearDamageResult::NoGear);
-        assert_eq!(inv.fishing_gear_damage(2, 1), FishingGearDamageResult::NoGear);
+        assert_eq!(
+            inv.fishing_gear_damage(0, 4),
+            FishingGearDamageResult::Broken
+        );
+        assert_eq!(
+            inv.fishing_gear_damage(0, 1),
+            FishingGearDamageResult::NoGear
+        );
+        assert_eq!(
+            inv.fishing_gear_damage(2, 1),
+            FishingGearDamageResult::NoGear
+        );
     }
 
     #[test]
     fn fishing_rod_durability_loss() {
         let mut inv = PlayerInventory::default();
-        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_with_gear(2, vec![None, None, None, None, None]));
+        inv.equipment[EquipmentSlot::Weapon as usize] =
+            Some(rod_with_gear(2, vec![None, None, None, None, None]));
         inv.fishing_rod_durability_loss(1);
         assert_eq!(inv.fishing_rod().unwrap().current_dura, 1);
         inv.fishing_rod_durability_loss(5);
         assert_eq!(inv.fishing_rod().unwrap().current_dura, 0);
     }
 
-
-
     #[test]
     fn test_equip_from_storage_puts_old_back_to_storage() {
         // #1546：C# EquipItem Grid=Storage 语义——从仓库格装备，旧装备放回仓库原格
         let mut inv = PlayerInventory::new();
         let sword = make_item(5, 1); // 武器
-        inv.storage[3] = Some(InventorySlot { grid: 3, item: sword.clone() });
+        inv.storage[3] = Some(InventorySlot {
+            grid: 3,
+            item: sword.clone(),
+        });
         // 先通过背包装备一把旧武器到槽 0
         let (grid, _) = inv.add_item(make_item(5, 2)).unwrap();
         assert!(inv.equip_item(grid, EquipmentSlot::Weapon).is_some());
@@ -1699,8 +1909,16 @@ mod tests {
         let (old, new_uid) = r.unwrap();
         assert!(old.is_some(), "旧装备应放回仓库");
         assert_eq!(new_uid, sword.unique_id);
-        assert_eq!(inv.storage[3].as_ref().map(|s| s.item.unique_id), old.as_ref().map(|i| i.unique_id));
-        assert_eq!(inv.equipment[EquipmentSlot::Weapon as usize].as_ref().map(|i| i.unique_id), Some(sword.unique_id));
+        assert_eq!(
+            inv.storage[3].as_ref().map(|s| s.item.unique_id),
+            old.as_ref().map(|i| i.unique_id)
+        );
+        assert_eq!(
+            inv.equipment[EquipmentSlot::Weapon as usize]
+                .as_ref()
+                .map(|i| i.unique_id),
+            Some(sword.unique_id)
+        );
     }
 
     #[test]
@@ -1709,11 +1927,17 @@ mod tests {
         let mut inv = PlayerInventory::new();
         // 填满背包；0 号格放 count=5、max_dura=10（堆叠上限 10）的同类药水
         for g in 1..BACKPACK_SIZE {
-            inv.backpack[g] = Some(InventorySlot { grid: g as u8, item: make_item(1, 1) });
+            inv.backpack[g] = Some(InventorySlot {
+                grid: g as u8,
+                item: make_item(1, 1),
+            });
         }
         let mut potion = make_item(50, 5);
         potion.max_dura = 10;
-        inv.backpack[0] = Some(InventorySlot { grid: 0, item: potion });
+        inv.backpack[0] = Some(InventorySlot {
+            grid: 0,
+            item: potion,
+        });
         // 叠入 3 个（5+3=8 <= 10）→ 可以
         let mut add3 = make_item(50, 3);
         add3.max_dura = 10;

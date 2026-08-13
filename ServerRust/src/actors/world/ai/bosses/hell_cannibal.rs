@@ -4,10 +4,10 @@
 //! 机制：3/4 物理近战（DC）/ 1/4 毒分支（damage=0）：
 //!      毒分支 FindAllTargets(2)，每个目标 100% 红毒（duration=random(0..SP/2)、值=SP、tick 1000）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -33,36 +33,54 @@ impl MonsterBehavior for HellCannibalBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Envir.Random.Next(4) > 0：3/4 物理 / 1/4 毒分支
             if fastrand::i32(0..4) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // C# 毒分支 damage=0：FindAllTargets(2) + 100% 红毒（duration=random(0..SP/2)，值=SP）
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    radius: AOE_RADIUS,
-                    damage: 0,
-                    spell_id: 0,
-                });
-                let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
-                    .iter().map(|p| p.session_id).collect();
-                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: AOE_RADIUS,
+                        damage: 0,
+                        spell_id: 0,
+                    });
+                let nearby: Vec<u64> = ctx
+                    .find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+                    .iter()
+                    .map(|p| p.session_id)
+                    .collect();
+                let sc_power =
+                    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0)
+                        .max(1);
                 for sid in nearby {
                     // C# PoisonTarget(1, random(SC/2), Red, 1000)：时长=random(SC/2)、值=SC
                     let duration = fastrand::i32(0..(sc_power / 2).max(1));
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: sid,
-                        poison: Poison::new(PoisonType::RED, duration.max(0) as u32, sc_power, 1000),
-                    });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: sid,
+                            poison: Poison::new(
+                                PoisonType::RED,
+                                duration.max(0) as u32,
+                                sc_power,
+                                1000,
+                            ),
+                        });
                 }
             }
             return;

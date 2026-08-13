@@ -9,10 +9,10 @@
 //! Attack（C# :27-46）：LineAttack(damage, 2, 300, ACAgility)。
 //! CompleteAttack（C# :48-59）：命中后 PoisonTarget(8, 5, Green, 2000)。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -54,48 +54,67 @@ impl MonsterBehavior for SpittingSpiderBehavior {
         if in_range {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
                 // C# LineAttack(damage, 2, 300, ACAgility)：沿朝向 2 格直线每格首目标
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
                 let mut hits: Vec<crate::actors::world::ai::PlayerSnap> = Vec::new();
                 for i in 1..=2i32 {
                     let tx = monster.x + DIR_DX[dir] * i;
                     let ty = monster.y + DIR_DY[dir] * i;
-                    if let Some(p) = ctx.players.iter()
-                        .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
-                    {
+                    if let Some(p) = ctx.players.iter().find(|p| {
+                        p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0
+                    }) {
                         hits.push(*p);
                     }
                 }
                 if hits.is_empty() {
                     // 至少打主目标
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
-                    if fastrand::i32(0..8) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 2000),
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
                         });
+                    if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::GREEN,
+                                    5,
+                                    poison_sc_value(monster),
+                                    2000,
+                                ),
+                            });
                     }
                 }
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
-                    if fastrand::i32(0..8) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 2000),
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
                         });
+                    if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(
+                                    PoisonType::GREEN,
+                                    5,
+                                    poison_sc_value(monster),
+                                    2000,
+                                ),
+                            });
                     }
                 }
             }

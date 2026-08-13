@@ -8,11 +8,11 @@
 //!
 //! Attack（C# :28-97）：近战/远程分支；远程→前方 3 格 5x5 Quake 法术场。
 
-use mir2_shared::enums::Spell;
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use mir2_shared::enums::Spell;
 
 const VIEW_RANGE: i32 = 15;
 const ATTACK_RANGE: i32 = 4;
@@ -45,34 +45,41 @@ impl MonsterBehavior for StoneGolemBehavior {
 
             if melee {
                 // Type0 DC 单体
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // Type1 前方 3 格处 5x5 Quake 法术场
                 // C# PointMove(CurrentLocation, Direction, 3) 精确 3 格（StoneGolem.cs:73）
-                let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as usize) % 8;
+                let dir =
+                    (direction_towards(monster.x, monster.y, target.x, target.y) as usize) % 8;
                 let center_x = monster.x + DIR_DX[dir] * QUAKE_OFFSET;
                 let center_y = monster.y + DIR_DY[dir] * QUAKE_OFFSET;
-                let value = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+                let value =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
                 // 5x5 法术场：C# 每格一个 SpellObject（全 25 格）
                 for oy in -QUAKE_RADIUS..=QUAKE_RADIUS {
                     for ox in -QUAKE_RADIUS..=QUAKE_RADIUS {
-                        ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                            spell: Spell::StoneGolemQuake,
-                            x: center_x + ox,
-                            y: center_y + oy,
-                            value,
-                            duration_ms: 800,
-                            tick_ms: 1000,
-                            caster_oid: monster.object_id,
-                            caster_session: 0,
-                        });
+                        ctx.out_spell_fields
+                            .push(crate::actors::world::ai::SpellFieldSpawn {
+                                spell: Spell::StoneGolemQuake,
+                                x: center_x + ox,
+                                y: center_y + oy,
+                                value,
+                                duration_ms: 800,
+                                tick_ms: 1000,
+                                caster_oid: monster.object_id,
+                                caster_session: 0,
+                            });
                     }
                 }
             }

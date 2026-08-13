@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/ShamanZombie.cs
 //! 机制：6 格内十字/对角判定（x==0||y==0||x==y），ObjectRangeAttack + LineAttack(damage, 6, MACAgility)
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const LINE_RANGE: i32 = 6;
@@ -36,17 +36,23 @@ impl MonsterBehavior for ShamanZombieBehavior {
 
         if in_shaman_range(dx, dy) && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
-                attacker_oid: monster.object_id,
-                origin_x: monster.x,
-                origin_y: monster.y,
-                direction: dir,
-                range: LINE_RANGE,
-                damage,
-                spell_id: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Line {
+                    attacker_oid: monster.object_id,
+                    origin_x: monster.x,
+                    origin_y: monster.y,
+                    direction: dir,
+                    range: LINE_RANGE,
+                    damage,
+                    spell_id: 0,
+                });
             return;
         }
 

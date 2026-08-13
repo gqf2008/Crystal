@@ -11,12 +11,12 @@
 //! CompleteAttack（C# :92-102）：FindAllTargets(7) 逐个 Attack。
 //! Attack（C# :118-127）：MAC 伤害 + Green 15s + Paralysis 5s。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::poison_sc_value;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 /// 现身检测间隔（C# VisibleTime = Envir.Time + 2000，单位 tick=100ms）
 const VISIBILITY_CHECK_TICKS: u64 = 20;
@@ -46,8 +46,12 @@ impl EvilCentipedeBehavior {
 }
 
 impl MonsterBehavior for EvilCentipedeBehavior {
-    fn can_move(&self) -> bool { false }
-    fn can_regen(&self) -> bool { false } // 隐身即满血，无需自然回血
+    fn can_move(&self) -> bool {
+        false
+    }
+    fn can_regen(&self) -> bool {
+        false
+    } // 隐身即满血，无需自然回血
 
     /// 隐身期不可被攻击（C# IsAttackTarget 返 Visible && ...）
     fn is_attackable(&self) -> bool {
@@ -56,11 +60,17 @@ impl MonsterBehavior for EvilCentipedeBehavior {
 
     /// 隐身期完全免疫伤害（C# IsAttackTarget 返 false → Attacked 不生效）
     fn on_attacked(&mut self, damage: i32) -> i32 {
-        if self.visible { damage } else { 0 }
+        if self.visible {
+            damage
+        } else {
+            0
+        }
     }
 
     /// 免疫毒（钻地隐身期无法被施毒）
-    fn on_poison(&mut self, _poison: Poison) -> bool { false }
+    fn on_poison(&mut self, _poison: Poison) -> bool {
+        false
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if !self.spawned {
@@ -71,8 +81,14 @@ impl MonsterBehavior for EvilCentipedeBehavior {
         // ---- 可见性切换（C# ProcessAI 每 2s 检测）----
         if ctx.tick_count >= self.next_visibility_tick {
             self.next_visibility_tick = ctx.tick_count + VISIBILITY_CHECK_TICKS;
-            let detect_range = if self.visible { DISAPPEAR_RANGE } else { APPEAR_RANGE };
-            let has_near = ctx.nearest_target(monster.x, monster.y, detect_range, monster.map_index).is_some();
+            let detect_range = if self.visible {
+                DISAPPEAR_RANGE
+            } else {
+                APPEAR_RANGE
+            };
+            let has_near = ctx
+                .nearest_target(monster.x, monster.y, detect_range, monster.map_index)
+                .is_some();
             if !self.visible && has_near {
                 // 现身（C# Visible = true + Broadcast ObjectShow + 满血）
                 self.visible = true;
@@ -94,43 +110,56 @@ impl MonsterBehavior for EvilCentipedeBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        let has_target = ctx.nearest_target(monster.x, monster.y, DISAPPEAR_RANGE, monster.map_index).is_some();
+        let has_target = ctx
+            .nearest_target(monster.x, monster.y, DISAPPEAR_RANGE, monster.map_index)
+            .is_some();
         if !has_target {
             return;
         }
         monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         // 先收集目标避免借用冲突
-        let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-            ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
-                .into_iter().copied().collect();
+        let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+            .find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+            .into_iter()
+            .copied()
+            .collect();
 
         for t in targets {
-            let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
             // C# DefenceType.MAC
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                attacker_oid: monster.object_id,
-                target_session: t.session_id,
-                damage,
-                spell_id: 0,
-                attack_type: 0,
-            });
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: t.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
             // Green 15s（C# PoisonTarget(Target, 5, 15, Green, 2000)）
             // C# PoisonTarget 1/5
-                if fastrand::i32(0..5) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: t.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 15, poison_sc_value(monster), 2000),
-                });
-                }
+            if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: t.session_id,
+                        poison: Poison::new(PoisonType::GREEN, 15, poison_sc_value(monster), 2000),
+                    });
+            }
             // Paralysis 5s（C# PoisonTarget(Target, 15, 5, Paralysis, 2000)）
             // C# PoisonTarget 1/15
-                if fastrand::i32(0..15) == 0 {
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: t.session_id,
-                    poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
-                });
-                }
+            if fastrand::i32(0..15) == 0 {
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: t.session_id,
+                        poison: Poison::new(
+                            PoisonType::PARALYSIS,
+                            5,
+                            poison_sc_value(monster),
+                            1000,
+                        ),
+                    });
+            }
         }
     }
 }

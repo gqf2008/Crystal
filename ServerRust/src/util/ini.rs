@@ -29,7 +29,10 @@ pub fn parse_ini(content: &str) -> HashMap<String, HashMap<String, String>> {
         if let Some(eq) = line.find('=') {
             let key = line[..eq].trim().to_lowercase();
             let value = line[eq + 1..].trim().to_string();
-            result.entry(current.clone()).or_default().insert(key, value);
+            result
+                .entry(current.clone())
+                .or_default()
+                .insert(key, value);
         }
     }
     result
@@ -48,14 +51,24 @@ pub fn ini_get<'a>(
 }
 
 /// 从解析结果取整数（找不到/解析失败返回默认值）
-pub fn ini_get_i64(parsed: &HashMap<String, HashMap<String, String>>, section: &str, key: &str, default: i64) -> i64 {
+pub fn ini_get_i64(
+    parsed: &HashMap<String, HashMap<String, String>>,
+    section: &str,
+    key: &str,
+    default: i64,
+) -> i64 {
     ini_get(parsed, section, key)
         .and_then(|v| v.trim().parse::<i64>().ok())
         .unwrap_or(default)
 }
 
 /// 从解析结果取浮点数（找不到/解析失败返回默认值）
-pub fn ini_get_f32(parsed: &HashMap<String, HashMap<String, String>>, section: &str, key: &str, default: f32) -> f32 {
+pub fn ini_get_f32(
+    parsed: &HashMap<String, HashMap<String, String>>,
+    section: &str,
+    key: &str,
+    default: f32,
+) -> f32 {
     ini_get(parsed, section, key)
         .and_then(|v| v.trim().parse::<f32>().ok())
         .unwrap_or(default)
@@ -148,11 +161,22 @@ pub fn load_fishing_config(configs_dir: &Path) -> FishingConfig {
     let parsed = parse_ini(&content);
     let mut cfg = FishingConfig::default();
     cfg.attempts = ini_get_i64(&parsed, "Rates", "Attempts", cfg.attempts as i64).max(1) as u32;
-    cfg.success_start = ini_get_i64(&parsed, "Rates", "SuccessStart", cfg.success_start as i64) as i32;
-    cfg.success_multiplier = ini_get_i64(&parsed, "Rates", "SuccessMultiplier", cfg.success_multiplier as i64) as i32;
+    cfg.success_start =
+        ini_get_i64(&parsed, "Rates", "SuccessStart", cfg.success_start as i64) as i32;
+    cfg.success_multiplier = ini_get_i64(
+        &parsed,
+        "Rates",
+        "SuccessMultiplier",
+        cfg.success_multiplier as i64,
+    ) as i32;
     cfg.delay_ms = ini_get_i64(&parsed, "Rates", "Delay", cfg.delay_ms as i64).max(0) as u32;
-    cfg.monster_spawn_chance =
-        ini_get_i64(&parsed, "Rates", "MonsterSpawnChance", cfg.monster_spawn_chance as i64).clamp(0, 100) as u32;
+    cfg.monster_spawn_chance = ini_get_i64(
+        &parsed,
+        "Rates",
+        "MonsterSpawnChance",
+        cfg.monster_spawn_chance as i64,
+    )
+    .clamp(0, 100) as u32;
     if let Some(m) = ini_get(&parsed, "Game", "Monster") {
         if !m.is_empty() {
             cfg.monster = m.to_string();
@@ -161,7 +185,12 @@ pub fn load_fishing_config(configs_dir: &Path) -> FishingConfig {
     cfg
 }
 
-fn get_i32(parsed: &HashMap<String, HashMap<String, String>>, section: &str, key: &str, default: i32) -> i32 {
+fn get_i32(
+    parsed: &HashMap<String, HashMap<String, String>>,
+    section: &str,
+    key: &str,
+    default: i32,
+) -> i32 {
     ini_get_i64(parsed, section, key, default as i64) as i32
 }
 
@@ -243,19 +272,26 @@ pub fn load_guild_settings(configs_dir: &Path) -> GuildIniSettings {
     };
     let parsed = parse_ini(&content);
     let mut s = GuildIniSettings::default();
-    s.required_level = ini_get_i64(&parsed, "Guilds", "MinimumLevel", s.required_level as i64).clamp(1, 255) as u16;
+    s.required_level = ini_get_i64(&parsed, "Guilds", "MinimumLevel", s.required_level as i64)
+        .clamp(1, 255) as u16;
     if let Some(v) = ini_get(&parsed, "Guilds", "ExpRate") {
         if let Ok(f) = v.parse::<f64>() {
             s.exp_rate = f;
         }
     }
-    s.point_per_level = ini_get_i64(&parsed, "Guilds", "PointPerLevel", s.point_per_level as i64).clamp(0, 255) as u8;
+    s.point_per_level = ini_get_i64(&parsed, "Guilds", "PointPerLevel", s.point_per_level as i64)
+        .clamp(0, 255) as u8;
     s.war_time = ini_get_i64(&parsed, "Guilds", "WarTime", s.war_time);
     s.war_cost = ini_get_i64(&parsed, "Guilds", "WarCost", s.war_cost as i64).max(0) as u32;
     if let Some(v) = ini_get(&parsed, "Guilds", "NewbieGuildBuffEnabled") {
         s.newbie_guild_buff_enabled = v == "1" || v.eq_ignore_ascii_case("true");
     }
-    s.newbie_guild_exp_buff = ini_get_i64(&parsed, "Guilds", "NewbieGuildExpBuff", s.newbie_guild_exp_buff as i64) as i32;
+    s.newbie_guild_exp_buff = ini_get_i64(
+        &parsed,
+        "Guilds",
+        "NewbieGuildExpBuff",
+        s.newbie_guild_exp_buff as i64,
+    ) as i32;
     for i in 0..1000 {
         let v = ini_get_i64(&parsed, "Exp", &format!("Level-{}", i), -1);
         if v < 0 {
@@ -279,7 +315,15 @@ pub fn load_guild_settings(configs_dir: &Path) -> GuildIniSettings {
         }
         let item_name = ini_get(&parsed, &sec, "ItemName").map(|v| v.to_string());
         s.creation_costs.push(GuildCreationCost {
-            item_name: if item_name.as_deref().map(|v| v.trim().is_empty()).unwrap_or(true) { None } else { item_name },
+            item_name: if item_name
+                .as_deref()
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+            {
+                None
+            } else {
+                item_name
+            },
             amount: amount as u32,
         });
     }
@@ -325,8 +369,20 @@ pub fn load_goods_settings(configs_dir: &Path) -> GoodsIniSettings {
         s.on = v == "1" || v.eq_ignore_ascii_case("true");
     }
     s.max_stored = ini_get_i64(&parsed, "Goods", "MaxStored", s.max_stored as i64).max(0) as u32;
-    s.buy_back_time_minutes = ini_get_i64(&parsed, "Goods", "BuyBackTime", s.buy_back_time_minutes as i64).max(0) as u32;
-    s.buy_back_max_stored = ini_get_i64(&parsed, "Goods", "BuyBackMaxStored", s.buy_back_max_stored as i64).max(0) as u32;
+    s.buy_back_time_minutes = ini_get_i64(
+        &parsed,
+        "Goods",
+        "BuyBackTime",
+        s.buy_back_time_minutes as i64,
+    )
+    .max(0) as u32;
+    s.buy_back_max_stored = ini_get_i64(
+        &parsed,
+        "Goods",
+        "BuyBackMaxStored",
+        s.buy_back_max_stored as i64,
+    )
+    .max(0) as u32;
     if let Some(v) = ini_get(&parsed, "Goods", "HideAddedStats") {
         s.hide_added_stats = v == "1" || v.eq_ignore_ascii_case("true");
     }
@@ -381,7 +437,13 @@ pub fn load_mail_settings(configs_dir: &Path) -> MailIniSettings {
         s.free_with_stamp = v == "1" || v.eq_ignore_ascii_case("true");
     }
     s.cost_per_1k = ini_get_i64(&parsed, "Rates", "CostPer1k", s.cost_per_1k as i64).max(0) as u32;
-    s.insurance_percent = ini_get_i64(&parsed, "Rates", "InsurancePerItem", s.insurance_percent as i64).max(0) as u32;
+    s.insurance_percent = ini_get_i64(
+        &parsed,
+        "Rates",
+        "InsurancePerItem",
+        s.insurance_percent as i64,
+    )
+    .max(0) as u32;
     s.capacity = ini_get_i64(&parsed, "General", "MailCapacity", s.capacity as i64).max(0) as u32;
     s
 }
@@ -421,13 +483,21 @@ pub fn load_marriage_settings(configs_dir: &Path) -> MarriageIniSettings {
     };
     let parsed = parse_ini(&content);
     let mut s = MarriageIniSettings::default();
-    s.lover_exp_bonus = ini_get_i64(&parsed, "Config", "EXPBonus", s.lover_exp_bonus as i64).max(0) as u32;
+    s.lover_exp_bonus =
+        ini_get_i64(&parsed, "Config", "EXPBonus", s.lover_exp_bonus as i64).max(0) as u32;
     s.cooldown_days = ini_get_i64(&parsed, "Config", "MarriageCooldown", s.cooldown_days).max(0);
     if let Some(v) = ini_get(&parsed, "Config", "AllowLoverRecall") {
         s.wedding_ring_recall = v == "1" || v.eq_ignore_ascii_case("true");
     }
-    s.level_required = ini_get_i64(&parsed, "Config", "MinimumLevel", s.level_required as i64).clamp(0, 255) as u16;
-    s.replace_wedring_cost = ini_get_i64(&parsed, "Config", "ReplaceRingCost", s.replace_wedring_cost as i64).max(0) as u32;
+    s.level_required = ini_get_i64(&parsed, "Config", "MinimumLevel", s.level_required as i64)
+        .clamp(0, 255) as u16;
+    s.replace_wedring_cost = ini_get_i64(
+        &parsed,
+        "Config",
+        "ReplaceRingCost",
+        s.replace_wedring_cost as i64,
+    )
+    .max(0) as u32;
     s
 }
 
@@ -469,14 +539,24 @@ pub fn load_mentor_settings(configs_dir: &Path) -> MentorIniSettings {
     };
     let parsed = parse_ini(&content);
     let mut s = MentorIniSettings::default();
-    s.level_gap = ini_get_i64(&parsed, "Config", "LevelGap", s.level_gap as i64).clamp(0, 255) as u8;
+    s.level_gap =
+        ini_get_i64(&parsed, "Config", "LevelGap", s.level_gap as i64).clamp(0, 255) as u8;
     if let Some(v) = ini_get(&parsed, "Config", "MenteeSkillBoost") {
         s.skill_boost = v == "1" || v.eq_ignore_ascii_case("true");
     }
-    s.length_days = ini_get_i64(&parsed, "Config", "MentorshipLength", s.length_days as i64).clamp(0, 255) as u8;
-    s.damage_boost = ini_get_i64(&parsed, "Config", "MentorDamageBoost", s.damage_boost as i64).clamp(0, 255) as u8;
-    s.exp_boost = ini_get_i64(&parsed, "Config", "MenteeExpBoost", s.exp_boost as i64).clamp(0, 255) as u8;
-    s.exp_bank = ini_get_i64(&parsed, "Config", "PercentXPtoMentor", s.exp_bank as i64).clamp(0, 255) as u8;
+    s.length_days = ini_get_i64(&parsed, "Config", "MentorshipLength", s.length_days as i64)
+        .clamp(0, 255) as u8;
+    s.damage_boost = ini_get_i64(
+        &parsed,
+        "Config",
+        "MentorDamageBoost",
+        s.damage_boost as i64,
+    )
+    .clamp(0, 255) as u8;
+    s.exp_boost =
+        ini_get_i64(&parsed, "Config", "MenteeExpBoost", s.exp_boost as i64).clamp(0, 255) as u8;
+    s.exp_bank =
+        ini_get_i64(&parsed, "Config", "PercentXPtoMentor", s.exp_bank as i64).clamp(0, 255) as u8;
     s
 }
 
@@ -499,7 +579,11 @@ pub fn load_orbs_settings(configs_dir: &Path) -> OrbsIniSettings {
     };
     let parsed = parse_ini(&content);
     let mut out = OrbsIniSettings::default();
-    for (sec, list) in [("Exp", &mut out.exp_list), ("Def", &mut out.def_list), ("Att", &mut out.dmg_list)] {
+    for (sec, list) in [
+        ("Exp", &mut out.exp_list),
+        ("Def", &mut out.def_list),
+        ("Att", &mut out.dmg_list),
+    ] {
         for i in 1..=100 {
             let v = ini_get_i64(&parsed, sec, &format!("Orb{}", i), -1);
             if v < 0 {
@@ -555,19 +639,48 @@ pub fn load_awakening_settings(configs_dir: &Path) -> AwakeningIniSettings {
     };
     let parsed = parse_ini(&content);
     let mut out = AwakeningIniSettings::default();
-    out.success_rate = ini_get_i64(&parsed, "Attribute", "SuccessRate", out.success_rate as i64) as u8;
+    out.success_rate =
+        ini_get_i64(&parsed, "Attribute", "SuccessRate", out.success_rate as i64) as u8;
     out.hit_rate = ini_get_i64(&parsed, "Attribute", "HitRate", out.hit_rate as i64) as u8;
-    out.max_awake_level = ini_get_i64(&parsed, "Attribute", "MaxUpgradeLevel", out.max_awake_level as i64).max(1) as usize;
-    out.weapon_rate = ini_get_i64(&parsed, "IncreaseValue", "WeaponValue", out.weapon_rate as i64) as u8;
-    out.helmet_rate = ini_get_i64(&parsed, "IncreaseValue", "HelmetValue", out.helmet_rate as i64) as u8;
-    out.armor_rate = ini_get_i64(&parsed, "IncreaseValue", "ArmorValue", out.armor_rate as i64) as u8;
+    out.max_awake_level = ini_get_i64(
+        &parsed,
+        "Attribute",
+        "MaxUpgradeLevel",
+        out.max_awake_level as i64,
+    )
+    .max(1) as usize;
+    out.weapon_rate = ini_get_i64(
+        &parsed,
+        "IncreaseValue",
+        "WeaponValue",
+        out.weapon_rate as i64,
+    ) as u8;
+    out.helmet_rate = ini_get_i64(
+        &parsed,
+        "IncreaseValue",
+        "HelmetValue",
+        out.helmet_rate as i64,
+    ) as u8;
+    out.armor_rate = ini_get_i64(
+        &parsed,
+        "IncreaseValue",
+        "ArmorValue",
+        out.armor_rate as i64,
+    ) as u8;
     const GRADES: [&str; 5] = ["Common", "Rare", "Legendary", "Mythical", "Heroic"];
     for i in 0..5 {
         out.chance_max[i] = ini_get_i64(
-            &parsed, "Value", &format!("ChanceMax_{}", GRADES[i]), out.chance_max[i] as i64,
-        ).max(1) as u8;
+            &parsed,
+            "Value",
+            &format!("ChanceMax_{}", GRADES[i]),
+            out.chance_max[i] as i64,
+        )
+        .max(1) as u8;
         out.material_rate[i] = ini_get_f32(
-            &parsed, "Materials_IncreaseValue", &format!("Materials_{}", GRADES[i]), out.material_rate[i],
+            &parsed,
+            "Materials_IncreaseValue",
+            &format!("Materials_{}", GRADES[i]),
+            out.material_rate[i],
         );
     }
     out
@@ -582,7 +695,9 @@ pub struct GemIniSettings {
 
 impl Default for GemIniSettings {
     fn default() -> Self {
-        Self { stat_independent: true }
+        Self {
+            stat_independent: true,
+        }
     }
 }
 
@@ -697,14 +812,43 @@ pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
     if let Some(v) = ini_get(&parsed, "Optional", "GatherOrbsPerLevel") {
         out.gather_orbs_per_level = v == "1" || v.eq_ignore_ascii_case("true");
     }
-    out.line_message_timer_minutes = ini_get_i64(&parsed, "Optional", "LineMessageTimer", out.line_message_timer_minutes as i64).max(1) as u32;
-    out.item_seal_delay_minutes = ini_get_i64(&parsed, "Items", "SealDelay", out.item_seal_delay_minutes as i64).max(0) as u64;
-    out.pk_delay_seconds = ini_get_i64(&parsed, "Game", "PKDelay", out.pk_delay_seconds as i64).max(1) as u32;
-    out.teleport_to_npc_cost = ini_get_i64(&parsed, "Game", "TeleportToNPCCost", out.teleport_to_npc_cost as i64) as i32;
-    out.group_invite_delay_ms = ini_get_i64(&parsed, "Game", "GroupInviteDelay", out.group_invite_delay_ms);
+    out.line_message_timer_minutes = ini_get_i64(
+        &parsed,
+        "Optional",
+        "LineMessageTimer",
+        out.line_message_timer_minutes as i64,
+    )
+    .max(1) as u32;
+    out.item_seal_delay_minutes = ini_get_i64(
+        &parsed,
+        "Items",
+        "SealDelay",
+        out.item_seal_delay_minutes as i64,
+    )
+    .max(0) as u64;
+    out.pk_delay_seconds =
+        ini_get_i64(&parsed, "Game", "PKDelay", out.pk_delay_seconds as i64).max(1) as u32;
+    out.teleport_to_npc_cost = ini_get_i64(
+        &parsed,
+        "Game",
+        "TeleportToNPCCost",
+        out.teleport_to_npc_cost as i64,
+    ) as i32;
+    out.group_invite_delay_ms = ini_get_i64(
+        &parsed,
+        "Game",
+        "GroupInviteDelay",
+        out.group_invite_delay_ms,
+    );
     out.trade_delay_ms = ini_get_i64(&parsed, "Game", "TradeDelay", out.trade_delay_ms);
-    out.max_boss_tames = ini_get_i64(&parsed, "Game", "MaxBossTames", out.max_boss_tames as i64).max(0) as u32;
-    out.range_accuracy_bonus = ini_get_i64(&parsed, "Bonus", "RangeAccuracyBonus", out.range_accuracy_bonus as i64) as i32;
+    out.max_boss_tames =
+        ini_get_i64(&parsed, "Game", "MaxBossTames", out.max_boss_tames as i64).max(0) as u32;
+    out.range_accuracy_bonus = ini_get_i64(
+        &parsed,
+        "Bonus",
+        "RangeAccuracyBonus",
+        out.range_accuracy_bonus as i64,
+    ) as i32;
     // #2422：PK 城复活点（C# Settings.PKTown*）
     if let Some(v) = ini_get(&parsed, "PKTown", "PKTownMapName") {
         out.pk_town_map_name = v.to_string();
@@ -714,12 +858,48 @@ pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
     // #2424：幸运上限（C# Settings.MaxLuck，最小 1）
     out.max_luck = ini_get_i64(&parsed, "Items", "MaxLuck", out.max_luck as i64).max(1) as i32;
     // #2426：战斗权重（C# Settings.[Items] *Weight，最小 1）
-    out.magic_resist_weight = ini_get_i64(&parsed, "Items", "MagicResistWeight", out.magic_resist_weight as i64).max(1) as u8;
-    out.poison_resist_weight = ini_get_i64(&parsed, "Items", "PoisonResistWeight", out.poison_resist_weight as i64).max(1) as u8;
-    out.critical_rate_weight = ini_get_i64(&parsed, "Items", "CriticalRateWeight", out.critical_rate_weight as i64).max(1) as u8;
-    out.critical_damage_weight = ini_get_i64(&parsed, "Items", "CriticalDamageWeight", out.critical_damage_weight as i64).max(1) as u8;
-    out.freezing_attack_weight = ini_get_i64(&parsed, "Items", "FreezingAttackWeight", out.freezing_attack_weight as i64).max(1) as u8;
-    out.poison_attack_weight = ini_get_i64(&parsed, "Items", "PoisonAttackWeight", out.poison_attack_weight as i64).max(1) as u8;
+    out.magic_resist_weight = ini_get_i64(
+        &parsed,
+        "Items",
+        "MagicResistWeight",
+        out.magic_resist_weight as i64,
+    )
+    .max(1) as u8;
+    out.poison_resist_weight = ini_get_i64(
+        &parsed,
+        "Items",
+        "PoisonResistWeight",
+        out.poison_resist_weight as i64,
+    )
+    .max(1) as u8;
+    out.critical_rate_weight = ini_get_i64(
+        &parsed,
+        "Items",
+        "CriticalRateWeight",
+        out.critical_rate_weight as i64,
+    )
+    .max(1) as u8;
+    out.critical_damage_weight = ini_get_i64(
+        &parsed,
+        "Items",
+        "CriticalDamageWeight",
+        out.critical_damage_weight as i64,
+    )
+    .max(1) as u8;
+    out.freezing_attack_weight = ini_get_i64(
+        &parsed,
+        "Items",
+        "FreezingAttackWeight",
+        out.freezing_attack_weight as i64,
+    )
+    .max(1) as u8;
+    out.poison_attack_weight = ini_get_i64(
+        &parsed,
+        "Items",
+        "PoisonAttackWeight",
+        out.poison_attack_weight as i64,
+    )
+    .max(1) as u8;
     out
 }
 
@@ -843,7 +1023,11 @@ BuffExpRate=0
     fn test_load_exp_list_parsing() {
         let dir = std::env::temp_dir().join("crystal_ini_test_exp");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("ExpList.ini"), "[Exp]\nLevel1=100\nLevel2=200\nLevel3=300\n").unwrap();
+        std::fs::write(
+            dir.join("ExpList.ini"),
+            "[Exp]\nLevel1=100\nLevel2=200\nLevel3=300\n",
+        )
+        .unwrap();
         let list = load_exp_list(&dir);
         assert_eq!(list, vec![100, 200, 300]);
         std::fs::remove_dir_all(&dir).ok();
@@ -855,7 +1039,10 @@ BuffExpRate=0
     /// #2404：真实 Daneo1989/Configs/ExpList.ini 加载（500 级）
     #[test]
     fn test_load_real_exp_list() {
-        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs/ExpList.ini"));
+        let path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/Daneo1989/Configs/ExpList.ini"
+        ));
         if !path.exists() {
             return; // 数据目录缺失时跳过（CI 无数据版本）
         }
@@ -879,13 +1066,18 @@ BuffExpRate=0
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → 空
-        assert!(load_orbs_settings(Path::new("C:/definitely/not/exists")).exp_list.is_empty());
+        assert!(load_orbs_settings(Path::new("C:/definitely/not/exists"))
+            .exp_list
+            .is_empty());
     }
 
     /// #2414：真实 Daneo1989/Configs/OrbsExpList.ini 加载（4 档；数据目录缺失时跳过）
     #[test]
     fn test_load_real_orbs_settings() {
-        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs/OrbsExpList.ini"));
+        let path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/Daneo1989/Configs/OrbsExpList.ini"
+        ));
         if !path.exists() {
             return; // 数据目录缺失时跳过（CI 无数据版本）
         }
@@ -905,7 +1097,11 @@ BuffExpRate=0
             dir.join("AwakeningSystem.ini"),
             "[Attribute]\nSuccessRate=70\nHitRate=70\nMaxUpgradeLevel=5\n\n[IncreaseValue]\nWeaponValue=1\nHelmetValue=1\nArmorValue=5\n\n[Value]\nChanceMax_Common=1\nChanceMax_Rare=2\nChanceMax_Legendary=3\nChanceMax_Mythical=4\n\n[Materials_IncreaseValue]\nMaterials_Common=1\nMaterials_Rare=1\nMaterials_Legendary=1\nMaterials_Mythical=1\n",
         ).unwrap();
-        std::fs::write(dir.join("GemSystem.ini"), "[Config]\nGemStatIndependent=True\n").unwrap();
+        std::fs::write(
+            dir.join("GemSystem.ini"),
+            "[Config]\nGemStatIndependent=True\n",
+        )
+        .unwrap();
         let a = load_awakening_settings(&dir);
         assert_eq!(a.success_rate, 70);
         assert_eq!(a.hit_rate, 70);
@@ -947,7 +1143,11 @@ BuffExpRate=0
         let dir = std::env::temp_dir().join("crystal_ini_test_heroexp");
         std::fs::create_dir_all(&dir).unwrap();
         // Level1=100, Level2=200, Level3 缺失沿用 200, Level4=400
-        std::fs::write(dir.join("HeroExpList.ini"), "[Exp]\nLevel1=100\nLevel2=200\nLevel4=400\n").unwrap();
+        std::fs::write(
+            dir.join("HeroExpList.ini"),
+            "[Exp]\nLevel1=100\nLevel2=200\nLevel4=400\n",
+        )
+        .unwrap();
         let list = load_hero_exp_list(&dir);
         assert_eq!(list.len(), 500);
         assert_eq!(list[0], 100);
@@ -1068,7 +1268,10 @@ BuffExpRate=0
     /// #2406：真实 Daneo1989/Configs/GuildSettings.ini 加载（WarCost=30000/PointPerLevel=1/Exp 21 项/Cap 21 项）
     #[test]
     fn test_load_real_guild_settings() {
-        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs/GuildSettings.ini"));
+        let path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/Daneo1989/Configs/GuildSettings.ini"
+        ));
         if !path.exists() {
             return; // 数据目录缺失时跳过
         }
@@ -1114,10 +1317,22 @@ BuffExpRate=0
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → C# 默认
-        assert_eq!(load_goods_settings(Path::new("C:/definitely/not/exists")).max_stored, 15);
-        assert_eq!(load_mail_settings(Path::new("C:/definitely/not/exists")).capacity, 100);
-        assert_eq!(load_marriage_settings(Path::new("C:/definitely/not/exists")).cooldown_days, 7);
-        assert_eq!(load_mentor_settings(Path::new("C:/definitely/not/exists")).length_days, 7);
+        assert_eq!(
+            load_goods_settings(Path::new("C:/definitely/not/exists")).max_stored,
+            15
+        );
+        assert_eq!(
+            load_mail_settings(Path::new("C:/definitely/not/exists")).capacity,
+            100
+        );
+        assert_eq!(
+            load_marriage_settings(Path::new("C:/definitely/not/exists")).cooldown_days,
+            7
+        );
+        assert_eq!(
+            load_mentor_settings(Path::new("C:/definitely/not/exists")).length_days,
+            7
+        );
 
         // 真实文件集成
         let real = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Daneo1989/Configs"));

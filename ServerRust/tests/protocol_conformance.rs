@@ -11,20 +11,19 @@
 //!   2. ClientVersion 握手(opcode=0→1 accepted)
 //!   3. KeepAlive 往返(opcode=2→3)
 
-use std::time::Duration;
+use kameo::actor::Spawn;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use kameo::actor::Spawn;
 
-use crystal_server::gate::actor::{
-    GateActor, run_gate_listener,
-    SetAccountRef, SetWorldRef, SetMaxConnections,
-};
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::db;
+use crystal_server::gate::actor::{
+    run_gate_listener, GateActor, SetAccountRef, SetMaxConnections, SetWorldRef,
+};
 use crystal_server::gate::codec;
 
 const XOR_KEY: u8 = 0xAA;
@@ -56,7 +55,10 @@ async fn recv_packet(stream: &mut TcpStream) -> (i16, Vec<u8>) {
     let outer_len = u16::from_le_bytes(len_buf) as usize;
 
     let mut enc_payload = vec![0u8; outer_len];
-    stream.read_exact(&mut enc_payload).await.expect("read payload");
+    stream
+        .read_exact(&mut enc_payload)
+        .await
+        .expect("read payload");
 
     let inner = xor(&enc_payload);
     let inner_len = u16::from_le_bytes([inner[0], inner[1]]) as usize;
@@ -236,8 +238,14 @@ async fn test_client_version_handshake() {
     // 3. 收到 ClientVersion 响应 (opcode=1, body=[0x01]=accepted)
     let (resp_opcode, resp_body) = recv_packet(&mut stream).await;
 
-    assert_eq!(resp_opcode, 1, "Expected ServerPacketIds::ClientVersion (opcode=1)");
-    assert!(!resp_body.is_empty(), "ClientVersion response should have body");
+    assert_eq!(
+        resp_opcode, 1,
+        "Expected ServerPacketIds::ClientVersion (opcode=1)"
+    );
+    assert!(
+        !resp_body.is_empty(),
+        "ClientVersion response should have body"
+    );
     assert_eq!(resp_body[0], 1, "Expected accepted=1");
 }
 
@@ -259,9 +267,15 @@ async fn test_keepalive_roundtrip() {
     // 3. 收到 KeepAlive 响应 (opcode=3 = ServerPacketIds::KeepAlive)
     let (resp_opcode, resp_body) = recv_packet(&mut stream).await;
 
-    assert_eq!(resp_opcode, 3, "Expected ServerPacketIds::KeepAlive (opcode=3)");
+    assert_eq!(
+        resp_opcode, 3,
+        "Expected ServerPacketIds::KeepAlive (opcode=3)"
+    );
     // 服务端 KeepAlive 响应 body 为空 (build_packet_bytes(KeepAlive, &[]))
-    assert!(resp_body.is_empty(), "Server KeepAlive response has empty body");
+    assert!(
+        resp_body.is_empty(),
+        "Server KeepAlive response has empty body"
+    );
 }
 
 #[tokio::test]
@@ -280,7 +294,10 @@ async fn test_login_full_flow() {
     let mut cv_body = Vec::new();
     cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
     cv_body.extend_from_slice(hash);
-    stream.write_all(&make_packet(0, &cv_body)).await.expect("send CV");
+    stream
+        .write_all(&make_packet(0, &cv_body))
+        .await
+        .expect("send CV");
     // 消费 ClientVersion 响应
     let _ = recv_packet(&mut stream).await;
 
@@ -293,7 +310,10 @@ async fn test_login_full_flow() {
     mir2_shared::binary::write_dotnet_string(&mut na_body, "question").unwrap();
     mir2_shared::binary::write_dotnet_string(&mut na_body, "answer").unwrap();
     mir2_shared::binary::write_dotnet_string(&mut na_body, "test@example.com").unwrap();
-    stream.write_all(&make_packet(3, &na_body)).await.expect("send NewAccount");
+    stream
+        .write_all(&make_packet(3, &na_body))
+        .await
+        .expect("send NewAccount");
     // 消费 NewAccount 响应
     let _ = recv_packet(&mut stream).await;
 
@@ -301,26 +321,38 @@ async fn test_login_full_flow() {
     let mut login_body = Vec::new();
     mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser").unwrap();
     mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass").unwrap();
-    stream.write_all(&make_packet(5, &login_body)).await.expect("send Login");
+    stream
+        .write_all(&make_packet(5, &login_body))
+        .await
+        .expect("send Login");
 
     // 5. 接收 Login 响应
     //    成功 → ServerPacketIds::LoginSuccess (opcode=9), body=[count=0i32]
     //    失败 → ServerPacketIds::Login (opcode=7), body=[4u8]
-    let (resp_opcode, resp_body) = tokio::time::timeout(
-        Duration::from_secs(5),
-        recv_packet(&mut stream),
-    ).await.expect("Login response timeout");
+    let (resp_opcode, resp_body) =
+        tokio::time::timeout(Duration::from_secs(5), recv_packet(&mut stream))
+            .await
+            .expect("Login response timeout");
 
     if resp_opcode == 9 {
         // LoginSuccess: body starts with character count (i32)
-        assert!(resp_body.len() >= 4, "LoginSuccess body should have count field");
+        assert!(
+            resp_body.len() >= 4,
+            "LoginSuccess body should have count field"
+        );
         let count = i32::from_le_bytes(resp_body[0..4].try_into().unwrap_or([0; 4]));
         assert_eq!(count, 0, "New account should have 0 characters");
         tracing::info!("✅ LoginSuccess: 0 characters");
     } else if resp_opcode == 7 {
-        panic!("Login failed (opcode=7): {}", resp_body.first().unwrap_or(&0));
+        panic!(
+            "Login failed (opcode=7): {}",
+            resp_body.first().unwrap_or(&0)
+        );
     } else {
-        panic!("Unexpected login response opcode={}, expected 9 (LoginSuccess) or 7 (Login fail)", resp_opcode);
+        panic!(
+            "Unexpected login response opcode={}, expected 9 (LoginSuccess) or 7 (Login fail)",
+            resp_opcode
+        );
     }
 }
 
@@ -446,7 +478,6 @@ fn test_startgame_full_flow() {
     });
 }
 
-
 /// #2438：真实库副本启动/登录/建号/进图回归——用 `Data/crystal.db` 的临时副本跑完整服务器，
 /// 防止旧库 schema 漂移（如 monster_infos.can_recall 迁移缺失导致启动 panic）与出生地图解析回归；
 /// 数据目录缺失时跳过（CI 无数据版本）。只读写临时副本，不触碰真实 DB。
@@ -458,13 +489,18 @@ fn test_startgame_real_db_copy() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let db_src = manifest.join("Data/crystal.db");
     if !db_src.exists() || !manifest.join("Daneo1989").exists() {
-        eprintln!("real data missing (Data/crystal.db / Daneo1989), skipping real-db regression test");
+        eprintln!(
+            "real data missing (Data/crystal.db / Daneo1989), skipping real-db regression test"
+        );
         return;
     }
     let db_copy = std::env::temp_dir().join(format!(
         "crystal_real_db_smoke_{}_{}.db",
         std::process::id(),
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
     ));
     std::fs::copy(&db_src, &db_copy).expect("copy Data/crystal.db to temp");
     let _ = std::fs::remove_file(db_copy.with_extension("db-wal"));
@@ -480,7 +516,9 @@ fn test_startgame_real_db_copy() {
         let port = start_server_with_world_url(&url).await;
         // 等待 WorldActor 完成真实库加载（避免连接过早导致请求在启动中途到达）
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).await.map_err(|e| e.to_string())?;
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Connected + ClientVersion
         let _ = recv_packet(&mut stream).await;
@@ -488,13 +526,20 @@ fn test_startgame_real_db_copy() {
         let mut cv_body = Vec::new();
         cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
         cv_body.extend_from_slice(hash);
-        stream.write_all(&make_packet(0, &cv_body)).await.map_err(|e| e.to_string())?;
+        stream
+            .write_all(&make_packet(0, &cv_body))
+            .await
+            .map_err(|e| e.to_string())?;
         let _ = recv_packet(&mut stream).await;
 
         // NewAccount（副本内新建；重跑若已存在则 Login 兜底）
         // 用户名/角色名须 3-15 字符（校验：validate_username/validate_character_name）
         let pid_part = std::process::id() % 100000;
-        let ms_part = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) % 1000;
+        let ms_part = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+            % 1000;
         let suffix = format!("{:05}{:03}", pid_part, ms_part); // 8 位
         let acct = format!("sm{}", suffix); // 10 字符
         let mut na_body = Vec::new();
@@ -505,20 +550,33 @@ fn test_startgame_real_db_copy() {
         mir2_shared::binary::write_dotnet_string(&mut na_body, "q").unwrap();
         mir2_shared::binary::write_dotnet_string(&mut na_body, "a").unwrap();
         mir2_shared::binary::write_dotnet_string(&mut na_body, "smoke@example.com").unwrap();
-        stream.write_all(&make_packet(3, &na_body)).await.map_err(|e| e.to_string())?;
+        stream
+            .write_all(&make_packet(3, &na_body))
+            .await
+            .map_err(|e| e.to_string())?;
         let _ = recv_packet(&mut stream).await;
 
         // Login -> LoginSuccess(9)
         let mut login_body = Vec::new();
         mir2_shared::binary::write_dotnet_string(&mut login_body, &acct).unwrap();
         mir2_shared::binary::write_dotnet_string(&mut login_body, "smokepass").unwrap();
-        stream.write_all(&make_packet(5, &login_body)).await.map_err(|e| e.to_string())?;
+        stream
+            .write_all(&make_packet(5, &login_body))
+            .await
+            .map_err(|e| e.to_string())?;
         let mut login_ok = false;
         for _ in 0..50 {
-            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await.map_err(|_| "login response timeout".to_string())?;
-            if op == 9 { login_ok = true; break; }
+            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream))
+                .await
+                .map_err(|_| "login response timeout".to_string())?;
+            if op == 9 {
+                login_ok = true;
+                break;
+            }
         }
-        if !login_ok { return Err("LoginSuccess not received".to_string()); }
+        if !login_ok {
+            return Err("LoginSuccess not received".to_string());
+        }
 
         // NewCharacter -> NewCharacterSuccess(11)
         let chname = format!("Sm{}", suffix); // 10 字符
@@ -526,22 +584,42 @@ fn test_startgame_real_db_copy() {
         mir2_shared::binary::write_dotnet_string(&mut nc_body, &chname).unwrap();
         nc_body.push(0u8); // Male
         nc_body.push(0u8); // Warrior
-        stream.write_all(&make_packet(6, &nc_body)).await.map_err(|e| e.to_string())?;
+        stream
+            .write_all(&make_packet(6, &nc_body))
+            .await
+            .map_err(|e| e.to_string())?;
         let mut nc_ok = false;
         for _ in 0..50 {
-            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await.map_err(|_| "newchar response timeout".to_string())?;
-            if op == 11 { nc_ok = true; break; }
+            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream))
+                .await
+                .map_err(|_| "newchar response timeout".to_string())?;
+            if op == 11 {
+                nc_ok = true;
+                break;
+            }
         }
-        if !nc_ok { return Err("NewCharacterSuccess not received".to_string()); }
+        if !nc_ok {
+            return Err("NewCharacterSuccess not received".to_string());
+        }
 
         // StartGame(8) -> 收到 StartGame(14)（出生地图解析/数据加载正常才会下发）
-        stream.write_all(&make_packet(8, &0i32.to_le_bytes())).await.map_err(|e| e.to_string())?;
+        stream
+            .write_all(&make_packet(8, &0i32.to_le_bytes()))
+            .await
+            .map_err(|e| e.to_string())?;
         let mut got_startgame = false;
         for _ in 0..60 {
-            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await.map_err(|_| "startgame response timeout".to_string())?;
-            if op == 14 { got_startgame = true; break; }
+            let (op, _) = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream))
+                .await
+                .map_err(|_| "startgame response timeout".to_string())?;
+            if op == 14 {
+                got_startgame = true;
+                break;
+            }
         }
-        if !got_startgame { return Err("StartGame response not received".to_string()); }
+        if !got_startgame {
+            return Err("StartGame response not received".to_string());
+        }
         Ok(())
     });
 
@@ -552,4 +630,3 @@ fn test_startgame_real_db_copy() {
 
     result.expect("real-db startgame regression failed");
 }
-

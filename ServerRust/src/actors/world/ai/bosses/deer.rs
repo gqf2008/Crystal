@@ -7,10 +7,10 @@
 //!
 //! 注：AI 1/2 由 from_db_ai 映射为 Passive；此处仅补可采集 + AI 2 逃跑分支（#2358）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 8;
 
@@ -23,7 +23,10 @@ pub struct DeerBehavior {
 
 impl DeerBehavior {
     pub fn new() -> Self {
-        Self { run_away: false, initialized: false }
+        Self {
+            run_away: false,
+            initialized: false,
+        }
     }
 }
 
@@ -36,7 +39,11 @@ impl MonsterBehavior for DeerBehavior {
     /// C# Deer.cs：AI 2（Deer/Deer1/Sheep）→ RemainingSkinCount=5；AI 1（Hen/Pig/Bull）→ 默认 2
     fn harvest_skin_count(&self, monster: &MonsterState) -> u8 {
         let nm = monster.name.to_lowercase();
-        if nm.contains("deer") || nm.contains("sheep") { 5 } else { 2 }
+        if nm.contains("deer") || nm.contains("sheep") {
+            5
+        } else {
+            2
+        }
     }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
@@ -52,7 +59,9 @@ impl MonsterBehavior for DeerBehavior {
             return; // 被动：不索敌不攻击（C# 非逃跑 Deer FindTarget 不触发）
         }
         // C# ProcessTarget：朝远离目标方向移动（MoveSpeed-300 更快）
-        if let Some(target) = ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
+        if let Some(target) =
+            ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+        {
             if ctx.tick_count >= monster.next_move_tick {
                 let (nx, ny, dir) = step_away(monster.x, monster.y, target.x, target.y);
                 monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;

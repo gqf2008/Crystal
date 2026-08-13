@@ -7,10 +7,10 @@
 //!     + 每命中 1/5 减速（4s）+ 1/5 冰冻（2s，tick 1000）
 //!   - 否则：base.Attack 近战
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -23,7 +23,9 @@ pub struct ManectricClawBehavior {
 
 impl ManectricClawBehavior {
     pub fn new() -> Self {
-        Self { next_thrust_tick: 0 }
+        Self {
+            next_thrust_tick: 0,
+        }
     }
 }
 
@@ -38,7 +40,12 @@ impl MonsterBehavior for ManectricClawBehavior {
 
         if ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# ranged || 冷却到 → IceThrust
             if dist > 1 || ctx.tick_count >= self.next_thrust_tick {
                 self.next_thrust_tick = ctx.tick_count + THRUST_COOLDOWN;
@@ -47,53 +54,89 @@ impl MonsterBehavior for ManectricClawBehavior {
                 monster.direction = dir;
                 let cells3 = ice_thrust_cells(monster.x, monster.y, dir, 3);
                 let all: Vec<(i32, i32)> = cells3.iter().map(|&(x, y, _)| (x, y)).collect();
-                let near: Vec<(i32, i32)> = cells3.iter().filter(|&&(_, _, j)| j <= 1).map(|&(x, y, _)| (x, y)).collect();
-                let far: Vec<(i32, i32)> = cells3.iter().filter(|&&(_, _, j)| j == 2).map(|&(x, y, _)| (x, y)).collect();
-                let near_dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                let far_dmg = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    cells: near,
-                    damage: near_dmg,
-                    spell_id: 0,
-                    attack_type: 2,
-                });
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    cells: far,
-                    damage: far_dmg,
-                    spell_id: 0,
-                    attack_type: 2,
-                });
+                let near: Vec<(i32, i32)> = cells3
+                    .iter()
+                    .filter(|&&(_, _, j)| j <= 1)
+                    .map(|&(x, y, _)| (x, y))
+                    .collect();
+                let far: Vec<(i32, i32)> = cells3
+                    .iter()
+                    .filter(|&&(_, _, j)| j == 2)
+                    .map(|&(x, y, _)| (x, y))
+                    .collect();
+                let near_dmg = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                let far_dmg = crate::combat::attack::get_attack_power(
+                    monster.min_mc,
+                    monster.max_mc,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Cells {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        cells: near,
+                        damage: near_dmg,
+                        spell_id: 0,
+                        attack_type: 2,
+                    });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Cells {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        cells: far,
+                        damage: far_dmg,
+                        spell_id: 0,
+                        attack_type: 2,
+                    });
                 // C# PoisonTarget(5, 4, Slow, 1000) / (5, 2, Frozen, 1000)：每命中 1/5
-                let hit: Vec<u64> = ctx.find_targets_in_cells(&all, monster.map_index)
-                    .iter().map(|p| p.session_id).collect();
+                let hit: Vec<u64> = ctx
+                    .find_targets_in_cells(&all, monster.map_index)
+                    .iter()
+                    .map(|p| p.session_id)
+                    .collect();
                 for sid in hit {
                     if fastrand::i32(0..5) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::SLOW, 4, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(
+                                    PoisonType::SLOW,
+                                    4,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
                     }
                     if fastrand::i32(0..5) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::FROZEN, 2, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(
+                                    PoisonType::FROZEN,
+                                    2,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
                     }
                 }
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
             return;
         }

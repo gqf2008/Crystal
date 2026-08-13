@@ -10,10 +10,10 @@
 //! Attack（C# :48-72）：Type0 DC 远程弹道。
 //! CompleteAttack（C# :74-111）：友军目标→AddBuff；敌对→Attacked。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 /// buff 冷却（C# BuffTime = Time + 20000；无友军时 Time + 10000）
@@ -36,10 +36,12 @@ impl MonsterBehavior for HornedArcherBehavior {
         // ---- 周期性给友军上 buff（C# HornedArcher.ProcessTarget：BuffTime 到 → 随机友军增益弹道）----
         if ctx.tick_count >= self.next_buff_tick {
             // 查找视野内友军（C# FindAllFriends(ViewRange)，随机选 1 个）
-            let friends: Vec<_> = ctx.monsters.iter()
-                .filter(|m| m.object_id != monster.object_id
-                    && m.map_index == monster.map_index
-                    && m.hp > 0)
+            let friends: Vec<_> = ctx
+                .monsters
+                .iter()
+                .filter(|m| {
+                    m.object_id != monster.object_id && m.map_index == monster.map_index && m.hp > 0
+                })
                 .filter(|m| {
                     let dx = (m.x - monster.x).abs();
                     let dy = (m.y - monster.y).abs();
@@ -56,18 +58,28 @@ impl MonsterBehavior for HornedArcherBehavior {
                 // C# Info.Effect==0 → HornedArcherBuff（DC/MC）；==1 → ColdArcherBuff（AC/MAC）
                 let buff = if monster.effect == 0 {
                     crate::actors::world::MonsterBuff {
-                        dc_min: min, dc_max: max,
-                        ac_min: 0, ac_max: 0, mac_min: min, mac_max: max,
+                        dc_min: min,
+                        dc_max: max,
+                        ac_min: 0,
+                        ac_max: 0,
+                        mac_min: min,
+                        mac_max: max,
                         remaining_ticks: 100,
                     }
                 } else {
                     crate::actors::world::MonsterBuff {
-                        dc_min: 0, dc_max: 0,
-                        ac_min: min, ac_max: max, mac_min: min, mac_max: max,
+                        dc_min: 0,
+                        dc_max: 0,
+                        ac_min: min,
+                        ac_max: max,
+                        mac_min: min,
+                        mac_max: max,
                         remaining_ticks: 100,
                     }
                 };
-                let buffed: Vec<u32> = ctx.monsters.iter()
+                let buffed: Vec<u32> = ctx
+                    .monsters
+                    .iter()
                     .filter(|m| m.map_index == monster.map_index && m.hp > 0)
                     .filter(|m| {
                         let dx = (m.x - f.x).abs();
@@ -97,14 +109,16 @@ impl MonsterBehavior for HornedArcherBehavior {
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
             return;
         }
 

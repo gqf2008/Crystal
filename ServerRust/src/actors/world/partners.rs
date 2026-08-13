@@ -13,7 +13,11 @@ pub struct GetLoverExpBonus {
 impl Message<GetLoverExpBonus> for WorldActor {
     type Reply = i32;
 
-    async fn handle(&mut self, msg: GetLoverExpBonus, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetLoverExpBonus,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         // C# Settings.LoverEXPBonus 默认 5
         const LOVER_EXP_BONUS: i32 = 5;
         // C# Globals.DataRange = 16
@@ -57,7 +61,11 @@ pub struct GetMenteeExpBonus {
 impl Message<GetMenteeExpBonus> for WorldActor {
     type Reply = i32;
 
-    async fn handle(&mut self, msg: GetMenteeExpBonus, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetMenteeExpBonus,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         // C# Settings.MentorExpBoost 默认 10
         const MENTEE_EXP_BONUS: i32 = 10;
         // C# Globals.DataRange = 16
@@ -108,7 +116,11 @@ pub struct SettleMentorExp {
 impl Message<SettleMentorExp> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: SettleMentorExp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: SettleMentorExp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
             None => return,
@@ -122,12 +134,21 @@ impl Message<SettleMentorExp> for WorldActor {
             return;
         }
         let amount = state.mentor_exp;
-        let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-            amount: self.apply_global_exp_multiplier(amount as i32),
-            experience_list: self.experience_list.clone(),
-        }).await;
-        let _ = record.actor_ref.ask(crate::actors::player::SetMentorExp { amount: 0 }).await;
-        debug!("SettleMentorExp: {} gained {} mentor exp", state.name, amount);
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::AddExperience {
+                amount: self.apply_global_exp_multiplier(amount as i32),
+                experience_list: self.experience_list.clone(),
+            })
+            .await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetMentorExp { amount: 0 })
+            .await;
+        debug!(
+            "SettleMentorExp: {} gained {} mentor exp",
+            state.name, amount
+        );
     }
 }
 
@@ -140,7 +161,11 @@ pub struct MarkBrown {
 impl Message<MarkBrown> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: MarkBrown, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: MarkBrown,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let victim = match self.players.get(&msg.victim_session) {
             Some(r) => r.clone(),
             None => return,
@@ -165,7 +190,9 @@ impl Message<MarkBrown> for WorldActor {
         if let Some(victim_guild) = &victim_state.guild_name {
             if let Ok(Some(attacker_state)) = attacker.actor_ref.ask(GetPlayerState).await {
                 if let Some(attacker_guild) = &attacker_state.guild_name {
-                    if self.guild_wars.get(victim_guild)
+                    if self
+                        .guild_wars
+                        .get(victim_guild)
                         .map(|set| set.contains(attacker_guild))
                         .unwrap_or(false)
                     {
@@ -178,9 +205,12 @@ impl Message<MarkBrown> for WorldActor {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        let _ = attacker.actor_ref.ask(crate::actors::player::SetBrownTime {
-            until_ms: now_ms + 60_000, // C# Settings.Minute
-        }).await;
+        let _ = attacker
+            .actor_ref
+            .ask(crate::actors::player::SetBrownTime {
+                until_ms: now_ms + 60_000, // C# Settings.Minute
+            })
+            .await;
     }
 }
 
@@ -190,7 +220,11 @@ pub struct GetNewbieGuildConfig;
 impl Message<GetNewbieGuildConfig> for WorldActor {
     type Reply = (String, bool, i32);
 
-    async fn handle(&mut self, _msg: GetNewbieGuildConfig, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        _msg: GetNewbieGuildConfig,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         self.social_ref
             .ask(crate::actors::social::NpcGetNewbieGuildConfig)
             .await
@@ -255,7 +289,10 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     }
     for (sid, active) in updates {
         if let Some(record) = world.players.get(&sid) {
-            let _ = record.actor_ref.ask(crate::actors::player::SetMentorDamageBonus { active }).await;
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::SetMentorDamageBonus { active })
+                .await;
         }
     }
 
@@ -266,7 +303,8 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     // AddExperience 只读缓存，不再反向 ask。
     let mentor_exp_boost = world.mentor_exp_boost as i32; // C# Settings.MentorExpBoost（#2396 配置化）
     let lover_exp_bonus = world.lover_exp_bonus as i32; // C# Settings.LoverEXPBonus（#2394 配置化）
-    let newbie_cfg = world.social_ref
+    let newbie_cfg = world
+        .social_ref
         .ask(crate::actors::social::NpcGetNewbieGuildConfig)
         .await
         .unwrap_or(("NewbieGuild".to_string(), true, 5));
@@ -278,7 +316,10 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             if let Some(spouse) = state.spouse_name.clone() {
                 for (_, other) in &world.players {
                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
-                        if os.is_dead || !os.name.eq_ignore_ascii_case(&spouse) || os.map_index != state.map_index {
+                        if os.is_dead
+                            || !os.name.eq_ignore_ascii_case(&spouse)
+                            || os.map_index != state.map_index
+                        {
                             continue;
                         }
                         // C# Functions.InRange = 切比雪夫
@@ -295,12 +336,16 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                 if let Some(mentor_name) = state.mentor_name.clone() {
                     for (_, other) in &world.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
-                            if os.is_dead || !os.name.eq_ignore_ascii_case(&mentor_name) || os.map_index != state.map_index {
+                            if os.is_dead
+                                || !os.name.eq_ignore_ascii_case(&mentor_name)
+                                || os.map_index != state.map_index
+                            {
                                 continue;
                             }
                             // C# Functions.InRange = 切比雪夫
                             if (os.x - state.x).abs().max((os.y - state.y).abs()) <= DATA_RANGE
-                                && os.group_id.is_some() && os.group_id == state.group_id
+                                && os.group_id.is_some()
+                                && os.group_id == state.group_id
                             {
                                 mentee = mentor_exp_boost;
                                 break;
@@ -309,7 +354,11 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                     }
                 }
             }
-            let newbie = if state.newbie_exp_bonus { newbie_cfg.2 } else { 0 };
+            let newbie = if state.newbie_exp_bonus {
+                newbie_cfg.2
+            } else {
+                0
+            };
             if lover != state.exp_bonus_lover_percent
                 || mentee != state.exp_bonus_mentee_percent
                 || newbie != state.exp_bonus_newbie_percent
@@ -324,7 +373,10 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                 st.exp_bonus_lover_percent = lover;
                 st.exp_bonus_mentee_percent = mentee;
                 st.exp_bonus_newbie_percent = newbie;
-                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::SetPlayerState { state: st })
+                    .await;
             }
         }
     }
@@ -340,7 +392,9 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                 if !guild_active.contains_key(g) {
                     let active = world
                         .social_ref
-                        .ask(crate::actors::social::NpcGetGuildBuffs { guild_name: g.clone() })
+                        .ask(crate::actors::social::NpcGetGuildBuffs {
+                            guild_name: g.clone(),
+                        })
                         .await
                         .unwrap_or_default();
                     guild_active.insert(g.clone(), active);
@@ -351,7 +405,9 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
     let mut buff_updates: Vec<(u64, i32, i32, i32, mir2_shared::data::stats::Stats)> = Vec::new();
     for (sid, record) in &world.players {
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            let Some(guild_name) = &state.guild_name else { continue };
+            let Some(guild_name) = &state.guild_name else {
+                continue;
+            };
             let active = guild_active.get(guild_name).cloned().unwrap_or_default();
             let mut exp = 0i32;
             let mut fish = 0i32;
@@ -381,7 +437,10 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                 st.guild_buff_fish_rate_percent = fish;
                 st.guild_buff_mine_rate_percent = mine;
                 st.guild_buff_stats = stats;
-                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::SetPlayerState { state: st })
+                    .await;
                 // C# RefreshStats：Buff 变化后立即重算玩家属性
                 world.recalculate_and_set_stat_bonuses(sid).await;
             }

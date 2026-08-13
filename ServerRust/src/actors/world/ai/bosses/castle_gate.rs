@@ -11,9 +11,9 @@
 //! 注意：公会/攻城系统已存在（conquest.rs）；本怪物版城门保持固定关门阻挡，
 //! 自动门/修复/开关由 siege_structures + NPC 脚本（OPENGATE/REPAIRGATE）处理。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::MonsterState;
 
 pub struct CastleGateBehavior;
 
@@ -24,7 +24,9 @@ impl CastleGateBehavior {
 }
 
 impl MonsterBehavior for CastleGateBehavior {
-    fn can_move(&self) -> bool { false }
+    fn can_move(&self) -> bool {
+        false
+    }
 
     fn process_tick(&mut self, _monster: &mut MonsterState, _ctx: &mut AiCtx) {
         // 城门无主动 AI：不动、不攻击。

@@ -12,12 +12,12 @@
 //! Attack（C# Behemoth.cs:22-100）：近战三形态 / 远程 SpawnSlaves+弹道。
 //! SpawnSlaves（C# :168-202）：count = min(8, targets*5 - SlaveList.Count)。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::{PoisonType, SpellEffect};
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::{PoisonType, SpellEffect};
 
 /// 视野范围
 const VIEW_RANGE: i32 = 20;
@@ -49,39 +49,43 @@ impl MonsterBehavior for BehemothBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let base =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             if dist <= MELEE_RANGE {
                 // ---- 近战三形态（C# Random(5)）----
                 let roll = fastrand::i32(0..5);
                 if roll < 3 {
                     // swipe 普攻
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: base,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage: base,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else if roll == 3 {
                     // FireCircle：自身 1 格 AOE
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        radius: 1,
-                        damage: base,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            radius: 1,
+                            damage: base,
+                            spell_id: 0,
+                        });
                 } else {
                     // Push back 4 格（C# Behemoth.cs:158 t.Pushed(this, Direction, 4)）+ Dazed
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: 1,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage: 1,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: target.session_id,
                         dir: monster.direction,
@@ -89,18 +93,30 @@ impl MonsterBehavior for BehemothBehavior {
                     });
                     // C# PoisonTarget(3, 15, Dazed, 1000)：1/3、15s
                     if fastrand::i32(0..3) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::DAZED, 15, poison_sc_value(monster), 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::DAZED,
+                                    15,
+                                    poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
                     }
                 }
                 // 近战命中后 Bleeding 5s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、5s、值=SP）
                 if fastrand::i32(0..15) == 0 {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::BLEEDING, 5, poison_sc_value(monster), 1000),
-                    });
+                    ctx.out_poisons
+                        .push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(
+                                PoisonType::BLEEDING,
+                                5,
+                                poison_sc_value(monster),
+                                1000,
+                            ),
+                        });
                 }
             } else {
                 // ---- 远程：1/2 追击；1/2 SpawnSlaves / 弹道 ----
@@ -111,7 +127,14 @@ impl MonsterBehavior for BehemothBehavior {
                     monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 } else if fastrand::i32(0..2) == 0 {
                     // SpawnSlaves：投掷 huggers（数量 = min(8, targets*5)）
-                    let targets_count = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index).len();
+                    let targets_count = ctx
+                        .find_targets_in_range(
+                            monster.x,
+                            monster.y,
+                            ATTACK_RANGE,
+                            monster.map_index,
+                        )
+                        .len();
                     // #1443：C# count = min(8, targets*5 - SlaveList.Count)
                     let count = (targets_count * 5).saturating_sub(ctx.slave_count).min(8);
                     for i in 0..count {
@@ -128,25 +151,40 @@ impl MonsterBehavior for BehemothBehavior {
                 } else {
                     // 远程 DC*3 全体 AOE（C# CompleteRangeAttack FindAllTargets(AttackRange=10)）
                     let damage = (base * 3).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        radius: ATTACK_RANGE,
-                        damage,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            radius: ATTACK_RANGE,
+                            damage,
+                            spell_id: 0,
+                        });
                     // C# 每人广播 SpellEffect.Behemoth + 1/15 Paralysis（5s）
-                    let hit: Vec<crate::actors::world::ai::PlayerSnap> =
-                        ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
-                            .into_iter().copied().collect();
+                    let hit: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                        .find_targets_in_range(
+                            monster.x,
+                            monster.y,
+                            ATTACK_RANGE,
+                            monster.map_index,
+                        )
+                        .into_iter()
+                        .copied()
+                        .collect();
                     for h in hit {
-                        ctx.out_effects.push((h.object_id, SpellEffect::Behemoth, 0, 0));
+                        ctx.out_effects
+                            .push((h.object_id, SpellEffect::Behemoth, 0, 0));
                         if fastrand::i32(0..15) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: h.session_id,
-                                poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
-                            });
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: h.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::PARALYSIS,
+                                        5,
+                                        poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
                         }
                     }
                 }

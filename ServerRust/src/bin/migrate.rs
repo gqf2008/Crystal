@@ -4,10 +4,10 @@
 
 #![allow(dead_code)]
 
-use std::io::Read;
 use byteorder::{LittleEndian, ReadBytesExt};
 use data_encoding;
-use tracing::{info, error};
+use std::io::Read;
+use tracing::{error, info};
 
 // ============================================================
 // BinaryReader compatible with C# BinaryReader
@@ -18,15 +18,33 @@ struct BinaryReader<R: Read> {
 }
 
 impl<R: Read> BinaryReader<R> {
-    fn new(inner: R) -> Self { Self { inner } }
-    fn read_raw_i32(&mut self) -> std::io::Result<i32> { self.inner.read_i32::<LittleEndian>() }
-    fn read_raw_u32(&mut self) -> std::io::Result<u32> { self.inner.read_u32::<LittleEndian>() }
-    fn read_raw_i64(&mut self) -> std::io::Result<i64> { self.inner.read_i64::<LittleEndian>() }
-    fn read_raw_u64(&mut self) -> std::io::Result<u64> { self.inner.read_u64::<LittleEndian>() }
-    fn read_raw_u16(&mut self) -> std::io::Result<u16> { self.inner.read_u16::<LittleEndian>() }
-    fn read_raw_u8(&mut self) -> std::io::Result<u8> { self.inner.read_u8() }
-    fn read_raw_i8(&mut self) -> std::io::Result<i8> { self.inner.read_i8() }
-    fn read_boolean(&mut self) -> std::io::Result<bool> { Ok(self.inner.read_u8()? != 0) }
+    fn new(inner: R) -> Self {
+        Self { inner }
+    }
+    fn read_raw_i32(&mut self) -> std::io::Result<i32> {
+        self.inner.read_i32::<LittleEndian>()
+    }
+    fn read_raw_u32(&mut self) -> std::io::Result<u32> {
+        self.inner.read_u32::<LittleEndian>()
+    }
+    fn read_raw_i64(&mut self) -> std::io::Result<i64> {
+        self.inner.read_i64::<LittleEndian>()
+    }
+    fn read_raw_u64(&mut self) -> std::io::Result<u64> {
+        self.inner.read_u64::<LittleEndian>()
+    }
+    fn read_raw_u16(&mut self) -> std::io::Result<u16> {
+        self.inner.read_u16::<LittleEndian>()
+    }
+    fn read_raw_u8(&mut self) -> std::io::Result<u8> {
+        self.inner.read_u8()
+    }
+    fn read_raw_i8(&mut self) -> std::io::Result<i8> {
+        self.inner.read_i8()
+    }
+    fn read_boolean(&mut self) -> std::io::Result<bool> {
+        Ok(self.inner.read_u8()? != 0)
+    }
 
     fn read_string(&mut self) -> std::io::Result<String> {
         let mut len: u32 = 0;
@@ -35,8 +53,15 @@ impl<R: Read> BinaryReader<R> {
             let b = self.inner.read_u8()?;
             len |= ((b & 0x7F) as u32) << shift;
             shift += 7;
-            if b & 0x80 == 0 { break; }
-            if shift > 35 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "String length overflow")); }
+            if b & 0x80 == 0 {
+                break;
+            }
+            if shift > 35 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "String length overflow",
+                ));
+            }
         }
         let mut buf = vec![0u8; len as usize];
         self.inner.read_exact(&mut buf)?;
@@ -140,16 +165,26 @@ struct ParsedCreature {
 // Parsing functions
 // ============================================================
 
-fn read_user_item<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedUserItem> {
+fn read_user_item<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedUserItem> {
     let unique_id = reader.read_raw_u64()?;
     let item_index = reader.read_raw_i32()?;
     let current_dura = reader.read_raw_u16()?;
     let max_dura = reader.read_raw_u16()?;
-    let count = if version <= 84 { reader.read_raw_u32()? as u16 } else { reader.read_raw_u16()? };
+    let count = if version <= 84 {
+        reader.read_raw_u32()? as u16
+    } else {
+        reader.read_raw_u16()?
+    };
 
     if version <= 84 {
-        for _ in 0..12 { reader.read_raw_u8()?; } // old added stats
-        reader.read_raw_i8()?; reader.read_raw_i8()?; // attack speed, luck
+        for _ in 0..12 {
+            reader.read_raw_u8()?;
+        } // old added stats
+        reader.read_raw_i8()?;
+        reader.read_raw_i8()?; // attack speed, luck
     }
 
     reader.read_raw_i32()?; // soul_bound_id
@@ -158,7 +193,9 @@ fn read_user_item<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::i
     let cursed = (bools & 0x02) == 0x02;
 
     if version <= 84 {
-        for _ in 0..8 { reader.read_raw_u8()?; } // more old stats
+        for _ in 0..8 {
+            reader.read_raw_u8()?;
+        } // more old stats
     }
 
     let slot_count = reader.read_raw_i32()?;
@@ -168,49 +205,89 @@ fn read_user_item<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::i
         }
     }
 
-    let gem_count = if version <= 84 { reader.read_raw_u32()? as u16 } else { reader.read_raw_u16()? };
+    let gem_count = if version <= 84 {
+        reader.read_raw_u32()? as u16
+    } else {
+        reader.read_raw_u16()?
+    };
 
     if version > 84 {
         let stats_count = reader.read_raw_i32()?;
-        for _ in 0..stats_count { reader.read_raw_u8()?; reader.read_raw_i32()?; }
+        for _ in 0..stats_count {
+            reader.read_raw_u8()?;
+            reader.read_raw_i32()?;
+        }
     }
 
     let awake_type = reader.read_raw_i32()?;
     let awake_level = reader.read_raw_i32()?;
     let refined_value = reader.read_raw_u8()?;
     let refine_added = reader.read_raw_u8()?;
-    if version > 85 { reader.read_raw_i32()?; } // refine_success_chance
+    if version > 85 {
+        reader.read_raw_i32()?;
+    } // refine_success_chance
     let wedding_ring = reader.read_raw_i32()?;
 
     if version >= 65 {
         if reader.read_boolean()? {
-            reader.read_raw_i32()?; reader.read_raw_i32()?; // expire_info
+            reader.read_raw_i32()?;
+            reader.read_raw_i32()?; // expire_info
         }
     }
     if version >= 76 {
         if reader.read_boolean()? {
-            reader.read_raw_i64()?; reader.read_raw_i64()?; reader.read_raw_u64()?; // rental_info
+            reader.read_raw_i64()?;
+            reader.read_raw_i64()?;
+            reader.read_raw_u64()?; // rental_info
         }
     }
-    let is_shop_item = if version >= 83 { reader.read_boolean()? } else { false };
+    let is_shop_item = if version >= 83 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
     if version >= 92 {
         if reader.read_boolean()? {
-            reader.read_raw_i64()?; reader.read_raw_i32()?; // sealed_info
+            reader.read_raw_i64()?;
+            reader.read_raw_i32()?; // sealed_info
         }
     }
-    let gm_made = if version > 107 { reader.read_boolean()? } else { false };
+    let gm_made = if version > 107 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
 
     Ok(ParsedUserItem {
-        unique_id, item_index, current_dura, max_dura, count,
-        identified, cursed, gem_count, awake_type, awake_level,
-        refined_value, refine_added, wedding_ring, is_shop_item, gm_made,
+        unique_id,
+        item_index,
+        current_dura,
+        max_dura,
+        count,
+        identified,
+        cursed,
+        gem_count,
+        awake_type,
+        awake_level,
+        refined_value,
+        refine_added,
+        wedding_ring,
+        is_shop_item,
+        gm_made,
     })
 }
 
-fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedCharacter> {
+fn read_character_info<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedCharacter> {
     reader.read_raw_i32()?; // index
     let name = reader.read_string()?;
-    let level = if version < 62 { reader.read_raw_u8()? as u16 } else { reader.read_raw_u16()? };
+    let level = if version < 62 {
+        reader.read_raw_u8()? as u16
+    } else {
+        reader.read_raw_u16()?
+    };
     let class_byte = reader.read_raw_u8()?;
     let _gender_byte = reader.read_raw_u8()?;
     let _hair = reader.read_raw_u8()?;
@@ -221,7 +298,9 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     reader.read_datetime()?; // expiry_date
     reader.read_string()?; // last_ip
     reader.read_datetime()?; // last_logout_date
-    if version > 81 { reader.read_datetime()?; } // last_login_date
+    if version > 81 {
+        reader.read_datetime()?;
+    } // last_login_date
     let _deleted = reader.read_boolean()?;
     reader.read_datetime()?; // delete_date
 
@@ -230,7 +309,8 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     let current_y = reader.read_raw_i32()?;
     let direction = reader.read_raw_u8()?;
     reader.read_raw_i32()?; // bind_map_index
-    reader.read_raw_i32()?; reader.read_raw_i32()?; // bind_location
+    reader.read_raw_i32()?;
+    reader.read_raw_i32()?; // bind_location
     let (hp, mp) = if version <= 84 {
         (reader.read_raw_u16()? as i32, reader.read_raw_u16()? as i32)
     } else {
@@ -240,7 +320,9 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     let experience = reader.read_raw_i64()?;
     let attack_mode = reader.read_raw_u8()?;
     let pet_mode = reader.read_raw_u8()?;
-    if version > 34 { reader.read_raw_i32()?; } // pk_points
+    if version > 34 {
+        reader.read_raw_i32()?;
+    } // pk_points
 
     // Inventory
     let inv_count = reader.read_raw_i32()?;
@@ -277,7 +359,11 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     for _ in 0..magic_count {
         reader.read_raw_u32()?; // magic_id
         reader.read_raw_u8()?; // level
-        if version < 62 { reader.read_raw_u32()?; } else { reader.read_raw_u64()?; }
+        if version < 62 {
+            reader.read_raw_u32()?;
+        } else {
+            reader.read_raw_u64()?;
+        }
         reader.read_boolean()?; // is_temp
         reader.read_raw_i32()?; // cast_time
     }
@@ -292,16 +378,26 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     let pet_count = reader.read_raw_i32()?;
     for _ in 0..pet_count {
         reader.read_raw_i32()?; // monster_index
-        if version <= 84 { reader.read_raw_u32()?; } else { reader.read_raw_i32()?; }
-        reader.read_raw_u32()?; reader.read_raw_u8()?; reader.read_raw_u8()?;
+        if version <= 84 {
+            reader.read_raw_u32()?;
+        } else {
+            reader.read_raw_i32()?;
+        }
+        reader.read_raw_u32()?;
+        reader.read_raw_u8()?;
+        reader.read_raw_u8()?;
     }
 
     reader.read_boolean()?; // allow_group
     const FLAG_COUNT: usize = 256;
-    for _ in 0..FLAG_COUNT { reader.read_boolean()?; }
+    for _ in 0..FLAG_COUNT {
+        reader.read_boolean()?;
+    }
     reader.read_raw_i32()?; // guild_index
     reader.read_boolean()?; // allow_trade
-    if version > 104 { reader.read_boolean()?; } // allow_observe
+    if version > 104 {
+        reader.read_boolean()?;
+    } // allow_observe
 
     // CurrentQuests (store indices)
     let quest_count = reader.read_raw_i32()?;
@@ -310,18 +406,33 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
         quests.push(reader.read_raw_i32()?); // index
         reader.read_datetime()?; // start
         reader.read_datetime()?; // end
-        // Consume task details
+                                 // Consume task details
         let kill_count = reader.read_raw_i32()?;
         for _ in 0..kill_count {
-            if version < 90 { reader.read_raw_i32()?; } else { reader.read_raw_i32()?; reader.read_raw_i32()?; }
+            if version < 90 {
+                reader.read_raw_i32()?;
+            } else {
+                reader.read_raw_i32()?;
+                reader.read_raw_i32()?;
+            }
         }
         let item_count = reader.read_raw_i32()?;
         for _ in 0..item_count {
-            if version < 90 { reader.read_raw_i32()?; } else { reader.read_raw_i32()?; reader.read_raw_i32()?; }
+            if version < 90 {
+                reader.read_raw_i32()?;
+            } else {
+                reader.read_raw_i32()?;
+                reader.read_raw_i32()?;
+            }
         }
         let flag_count = reader.read_raw_i32()?;
         for _ in 0..flag_count {
-            if version < 90 { reader.read_boolean()?; } else { reader.read_raw_i32()?; reader.read_boolean()?; }
+            if version < 90 {
+                reader.read_boolean()?;
+            } else {
+                reader.read_raw_i32()?;
+                reader.read_boolean()?;
+            }
         }
     }
 
@@ -329,19 +440,40 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     let buff_count = reader.read_raw_i32()?;
     for _ in 0..buff_count {
         reader.read_raw_u8()?; // type
-        if version < 88 { reader.read_boolean()?; }
-        reader.read_raw_u32()?; reader.read_raw_i64()?;
+        if version < 88 {
+            reader.read_boolean()?;
+        }
+        reader.read_raw_u32()?;
+        reader.read_raw_i64()?;
         if version <= 84 {
             let vc = reader.read_raw_i32()?;
-            for _ in 0..vc { reader.read_raw_i32()?; }
-            if version < 88 { reader.read_boolean()?; }
+            for _ in 0..vc {
+                reader.read_raw_i32()?;
+            }
+            if version < 88 {
+                reader.read_boolean()?;
+            }
         } else {
-            if version < 88 { reader.read_boolean()?; }
+            if version < 88 {
+                reader.read_boolean()?;
+            }
             let sc = reader.read_raw_i32()?;
-            for _ in 0..sc { reader.read_raw_u8()?; reader.read_raw_i32()?; }
+            for _ in 0..sc {
+                reader.read_raw_u8()?;
+                reader.read_raw_i32()?;
+            }
             let dc = reader.read_raw_i32()?;
-            for _ in 0..dc { reader.read_string()?; let l = reader.read_raw_i32()?; reader.read_bytes(l as usize)?; }
-            if version > 86 { let vc = reader.read_raw_i32()?; for _ in 0..vc { reader.read_raw_i32()?; } }
+            for _ in 0..dc {
+                reader.read_string()?;
+                let l = reader.read_raw_i32()?;
+                reader.read_bytes(l as usize)?;
+            }
+            if version > 86 {
+                let vc = reader.read_raw_i32()?;
+                for _ in 0..vc {
+                    reader.read_raw_i32()?;
+                }
+            }
         }
     }
 
@@ -366,7 +498,14 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
         reader.read_boolean()?; // can_reply
 
         mail.push(ParsedMail {
-            mail_id, sender, message, gold: mail_gold, items, date_sent, collected, locked,
+            mail_id,
+            sender,
+            message,
+            gold: mail_gold,
+            items,
+            date_sent,
+            collected,
+            locked,
         });
     }
 
@@ -382,13 +521,34 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
         reader.read_raw_i64()?; // blackstone_time
         let pet_mode = reader.read_raw_u8()?;
         let mut pickup_flags: u16 = 0;
-        for i in 0..9 { if reader.read_boolean()? { pickup_flags |= 1 << i; } }
-        let pickup_grade = if version > 48 { reader.read_raw_u8()? } else { 0 };
-        if version > 48 { reader.read_raw_i64()?; }
-        creatures.push(ParsedCreature { pet_type, custom_name, fullness, slot_index, pet_mode, pickup_flags, pickup_grade });
+        for i in 0..9 {
+            if reader.read_boolean()? {
+                pickup_flags |= 1 << i;
+            }
+        }
+        let pickup_grade = if version > 48 {
+            reader.read_raw_u8()?
+        } else {
+            0
+        };
+        if version > 48 {
+            reader.read_raw_i64()?;
+        }
+        creatures.push(ParsedCreature {
+            pet_type,
+            custom_name,
+            fullness,
+            slot_index,
+            pet_mode,
+            pickup_flags,
+            pickup_grade,
+        });
     }
 
-    if version == 45 { reader.read_raw_u8()?; reader.read_boolean()?; }
+    if version == 45 {
+        reader.read_raw_u8()?;
+        reader.read_boolean()?;
+    }
     reader.read_raw_i32()?; // pearl_count
 
     // CompletedQuests
@@ -418,7 +578,9 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     if version > 75 {
         let ri_count = reader.read_raw_i32()?;
         for _ in 0..ri_count {
-            reader.read_raw_i32()?; reader.read_raw_i32()?; reader.read_raw_u64()?;
+            reader.read_raw_i32()?;
+            reader.read_raw_i32()?;
+            reader.read_raw_u64()?;
         }
         reader.read_boolean()?; // has_rented_item
     }
@@ -433,38 +595,76 @@ fn read_character_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> s
     // GS purchases
     if version >= 63 {
         let gs_count = reader.read_raw_i32()?;
-        for _ in 0..gs_count { reader.read_raw_i32()?; reader.read_raw_i32()?; }
+        for _ in 0..gs_count {
+            reader.read_raw_i32()?;
+            reader.read_raw_i32()?;
+        }
     }
 
     // Heroes
     let _hero_count = if version > 98 {
         let count = reader.read_raw_i32()?;
         if version > 102 {
-            for _ in 0..count { reader.read_raw_i32()?; }
+            for _ in 0..count {
+                reader.read_raw_i32()?;
+            }
         } else {
             for _ in 0..count {
                 read_character_info(reader, version)?; // inline hero
             }
         }
-        if version < 104 { reader.read_raw_i32()?; }
+        if version < 104 {
+            reader.read_raw_i32()?;
+        }
         count
     } else {
         1
     };
-    let current_hero_index = if version > 98 { reader.read_raw_i32()? } else { 0 };
-    if version > 98 { reader.read_boolean()?; } // hero_spawned
-    if version > 100 { reader.read_raw_u8()?; } // hero_behaviour
+    let current_hero_index = if version > 98 {
+        reader.read_raw_i32()?
+    } else {
+        0
+    };
+    if version > 98 {
+        reader.read_boolean()?;
+    } // hero_spawned
+    if version > 100 {
+        reader.read_raw_u8()?;
+    } // hero_behaviour
 
     Ok(ParsedCharacter {
-        name, level, class_byte, _gender_byte, _hair,
-        current_map_index, current_x, current_y, direction,
-        hp, mp, experience, attack_mode, pet_mode,
-        inventory, equipment, friends, mail, quests, completed_quests,
-        creatures, married, mentor, is_mentor, current_hero_index,
+        name,
+        level,
+        class_byte,
+        _gender_byte,
+        _hair,
+        current_map_index,
+        current_x,
+        current_y,
+        direction,
+        hp,
+        mp,
+        experience,
+        attack_mode,
+        pet_mode,
+        inventory,
+        equipment,
+        friends,
+        mail,
+        quests,
+        completed_quests,
+        creatures,
+        married,
+        mentor,
+        is_mentor,
+        current_hero_index,
     })
 }
 
-fn read_account<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io::Result<ParsedAccount> {
+fn read_account<R: Read>(
+    reader: &mut BinaryReader<R>,
+    version: i32,
+) -> std::io::Result<ParsedAccount> {
     reader.read_raw_i32()?; // index
     let account_id = reader.read_string()?;
 
@@ -482,7 +682,9 @@ fn read_account<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io:
     };
 
     let password_hash = salt.clone(); // For now, same as salt (will re-hash on first login)
-    if version > 97 { reader.read_boolean()?; } // require_password_change
+    if version > 97 {
+        reader.read_boolean()?;
+    } // require_password_change
 
     reader.read_string()?; // user_name
     reader.read_datetime()?; // birth_date
@@ -504,11 +706,19 @@ fn read_account<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io:
         characters.push(info);
     }
 
-    let _has_expanded_storage = if version > 75 { reader.read_boolean()? } else { false };
-    if version > 75 { reader.read_datetime()?; } // expanded_storage_expiry
+    let _has_expanded_storage = if version > 75 {
+        reader.read_boolean()?
+    } else {
+        false
+    };
+    if version > 75 {
+        reader.read_datetime()?;
+    } // expanded_storage_expiry
 
     let gold = reader.read_raw_u32()? as u64;
-    if version >= 63 { reader.read_raw_u32()?; } // credit
+    if version >= 63 {
+        reader.read_raw_u32()?;
+    } // credit
 
     let storage_count = reader.read_raw_i32()?;
     let mut storage_items: Vec<Option<ParsedUserItem>> = (0..storage_count).map(|_| None).collect();
@@ -522,10 +732,17 @@ fn read_account<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::io:
         }
     }
 
-    if version >= 10 { reader.read_boolean()?; } // admin_account
+    if version >= 10 {
+        reader.read_boolean()?;
+    } // admin_account
 
     Ok(ParsedAccount {
-        account_id, salt, password_hash, characters, gold, storage_items,
+        account_id,
+        salt,
+        password_hash,
+        characters,
+        gold,
+        storage_items,
     })
 }
 
@@ -550,7 +767,8 @@ fn item_to_json(item: &ParsedUserItem) -> String {
         "WeddingRing": item.wedding_ring,
         "IsShopItem": item.is_shop_item,
         "GMMade": item.gm_made,
-    })).unwrap_or_default()
+    }))
+    .unwrap_or_default()
 }
 
 fn base64_encode(data: &[u8]) -> String {
@@ -559,13 +777,14 @@ fn base64_encode(data: &[u8]) -> String {
 
 async fn migrate_account(pool: &sqlx::SqlitePool, account: &ParsedAccount) -> anyhow::Result<()> {
     // Store password with pbkdf2 prefix - will be migrated to Argon2 on first login
-    let password_hash = format!("pbkdf2_sha1${}${}",
+    let password_hash = format!(
+        "pbkdf2_sha1${}${}",
         base64_encode(&account.salt),
         base64_encode(&account.password_hash)
     );
 
     sqlx::query(
-        r#"INSERT OR REPLACE INTO accounts (username, password_hash, is_online) VALUES (?, ?, 0)"#
+        r#"INSERT OR REPLACE INTO accounts (username, password_hash, is_online) VALUES (?, ?, 0)"#,
     )
     .bind(&account.account_id)
     .bind(&password_hash)
@@ -579,12 +798,24 @@ async fn migrate_account(pool: &sqlx::SqlitePool, account: &ParsedAccount) -> an
     Ok(())
 }
 
-async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, character: &ParsedCharacter) -> anyhow::Result<()> {
+async fn migrate_character(
+    pool: &sqlx::SqlitePool,
+    account: &ParsedAccount,
+    character: &ParsedCharacter,
+) -> anyhow::Result<()> {
     let max_hp = character.hp.max(30);
     let max_mp = character.mp.max(10);
 
-    let spouse = if character.married != 0 { Some(format!("spouse_{}", character.married)) } else { None };
-    let mentor = if character.mentor != 0 { Some(format!("mentor_{}", character.mentor)) } else { None };
+    let spouse = if character.married != 0 {
+        Some(format!("spouse_{}", character.married))
+    } else {
+        None
+    };
+    let mentor = if character.mentor != 0 {
+        Some(format!("mentor_{}", character.mentor))
+    } else {
+        None
+    };
 
     sqlx::query(
         r#"INSERT OR REPLACE INTO characters (
@@ -594,7 +825,7 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, allow_marriage, mentor_name, hero_index,
             is_fishing, fishing_autocast
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
     .bind(&character.name)
     .bind(&account.account_id)
@@ -630,15 +861,33 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
     .await?;
 
     // Backpack
-    save_items(pool, &character.name, "inventory_backpack", &character.inventory, "grid").await?;
+    save_items(
+        pool,
+        &character.name,
+        "inventory_backpack",
+        &character.inventory,
+        "grid",
+    )
+    .await?;
     // Equipment
-    save_items(pool, &character.name, "inventory_equipment", &character.equipment, "slot").await?;
+    save_items(
+        pool,
+        &character.name,
+        "inventory_equipment",
+        &character.equipment,
+        "slot",
+    )
+    .await?;
 
     // Friends
     sqlx::query("DELETE FROM friends WHERE character_name = ?")
-        .bind(&character.name).execute(pool).await?;
+        .bind(&character.name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM blocked_list WHERE character_name = ?")
-        .bind(&character.name).execute(pool).await?;
+        .bind(&character.name)
+        .execute(pool)
+        .await?;
     for (idx, blocked, memo) in &character.friends {
         if *blocked {
             sqlx::query("INSERT INTO blocked_list (character_name, blocked_object_id, blocked_name) VALUES (?,?,?)")
@@ -651,7 +900,9 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
 
     // Mail
     sqlx::query("DELETE FROM mail WHERE character_name = ?")
-        .bind(&character.name).execute(pool).await?;
+        .bind(&character.name)
+        .execute(pool)
+        .await?;
     for m in &character.mail {
         let items_json = serde_json::to_string(&m.items.iter().map(|i| {
             serde_json::json!({"UniqueID": i.unique_id, "ItemIndex": i.item_index, "Count": i.count})
@@ -659,19 +910,32 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
         sqlx::query(
             r#"INSERT INTO mail (character_name, mail_id, sender_name, subject, body, timestamp,
                 read_flag, collected, locked, gold, items_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)"#
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)"#,
         )
-        .bind(&character.name).bind(m.mail_id as i64).bind(&m.sender)
-        .bind("Migrated").bind(&m.message).bind(m.date_sent)
-        .bind(0i32).bind(if m.collected { 1 } else { 0 }).bind(if m.locked { 1 } else { 0 })
-        .bind(m.gold as i64).bind(&items_json).execute(pool).await?;
+        .bind(&character.name)
+        .bind(m.mail_id as i64)
+        .bind(&m.sender)
+        .bind("Migrated")
+        .bind(&m.message)
+        .bind(m.date_sent)
+        .bind(0i32)
+        .bind(if m.collected { 1 } else { 0 })
+        .bind(if m.locked { 1 } else { 0 })
+        .bind(m.gold as i64)
+        .bind(&items_json)
+        .execute(pool)
+        .await?;
     }
 
     // Quests
     sqlx::query("DELETE FROM quests WHERE character_name = ?")
-        .bind(&character.name).execute(pool).await?;
+        .bind(&character.name)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM completed_quests WHERE character_name = ?")
-        .bind(&character.name).execute(pool).await?;
+        .bind(&character.name)
+        .execute(pool)
+        .await?;
     for qi in &character.quests {
         sqlx::query("INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward) VALUES (?,?,?,?,?,?,?)")
             .bind(&character.name).bind(qi).bind(format!("Quest {}", qi)).bind("InProgress")
@@ -679,53 +943,99 @@ async fn migrate_character(pool: &sqlx::SqlitePool, account: &ParsedAccount, cha
     }
     for qi in &character.completed_quests {
         sqlx::query("INSERT INTO completed_quests (character_name, quest_index) VALUES (?,?)")
-            .bind(&character.name).bind(qi).execute(pool).await?;
+            .bind(&character.name)
+            .bind(qi)
+            .execute(pool)
+            .await?;
     }
 
     // Creatures
     if let Some(c) = character.creatures.first() {
-        let owned_json = serde_json::to_string(&character.creatures.iter().map(|c| {
-            serde_json::json!({
-                "creature_type": c.pet_type,
-                "custom_name": c.custom_name,
-                "pickup_mode": c.pickup_grade,
-                "hunger": c.fullness as u8,
-                "enabled": true
-            })
-        }).collect::<Vec<_>>()).unwrap_or_default();
+        let owned_json = serde_json::to_string(
+            &character
+                .creatures
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "creature_type": c.pet_type,
+                        "custom_name": c.custom_name,
+                        "pickup_mode": c.pickup_grade,
+                        "hunger": c.fullness as u8,
+                        "enabled": true
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default();
         sqlx::query(
             r#"INSERT OR REPLACE INTO creatures (
                 character_name, active_type, active_custom_name, active_pickup_mode,
                 active_hunger, active_enabled, owned_json, request_updates
-            ) VALUES (?,?,?,?,?,?,?,?)"#
+            ) VALUES (?,?,?,?,?,?,?,?)"#,
         )
-        .bind(&character.name).bind(c.pet_type as i32).bind(&c.custom_name)
-        .bind(c.pickup_grade as i32).bind(c.fullness as u8).bind(1i32)
-        .bind(&owned_json).bind(0i32).execute(pool).await?;
+        .bind(&character.name)
+        .bind(c.pet_type as i32)
+        .bind(&c.custom_name)
+        .bind(c.pickup_grade as i32)
+        .bind(c.fullness as u8)
+        .bind(1i32)
+        .bind(&owned_json)
+        .bind(0i32)
+        .execute(pool)
+        .await?;
     }
 
-    info!("    Character: {} (Lv{}, class {})", character.name, character.level, character.class_byte);
+    info!(
+        "    Character: {} (Lv{}, class {})",
+        character.name, character.level, character.class_byte
+    );
     Ok(())
 }
 
 fn attack_mode_str(b: u8) -> &'static str {
-    match b { 1 => "Group", 2 => "Guild", 3 => "EnemyGuild", 4 => "RedBrown", 5 => "All", _ => "Peace" }
+    match b {
+        1 => "Group",
+        2 => "Guild",
+        3 => "EnemyGuild",
+        4 => "RedBrown",
+        5 => "All",
+        _ => "Peace",
+    }
 }
 
 fn pet_mode_str(b: u8) -> &'static str {
-    match b { 1 => "MoveOnly", 2 => "AttackOnly", 3 => "None", 4 => "FocusMasterTarget", _ => "Both" }
+    match b {
+        1 => "MoveOnly",
+        2 => "AttackOnly",
+        3 => "None",
+        4 => "FocusMasterTarget",
+        _ => "Both",
+    }
 }
 
-async fn save_items(pool: &sqlx::SqlitePool, char_name: &str, table: &str, items: &[Option<ParsedUserItem>], col: &str) -> anyhow::Result<()> {
+async fn save_items(
+    pool: &sqlx::SqlitePool,
+    char_name: &str,
+    table: &str,
+    items: &[Option<ParsedUserItem>],
+    col: &str,
+) -> anyhow::Result<()> {
     sqlx::query(&format!("DELETE FROM {} WHERE character_name = ?", table))
-        .bind(char_name).execute(pool).await?;
+        .bind(char_name)
+        .execute(pool)
+        .await?;
     for (i, item) in items.iter().enumerate() {
         if let Some(item) = item {
             let item_json = item_to_json(item);
             sqlx::query(&format!(
-                "INSERT INTO {} (character_name, {}, item_json) VALUES (?,?,?)", table, col
+                "INSERT INTO {} (character_name, {}, item_json) VALUES (?,?,?)",
+                table, col
             ))
-            .bind(char_name).bind(i as i32).bind(&item_json).execute(pool).await?;
+            .bind(char_name)
+            .bind(i as i32)
+            .bind(&item_json)
+            .execute(pool)
+            .await?;
         }
     }
     Ok(())
@@ -789,15 +1099,17 @@ async fn main() -> anyhow::Result<()> {
             // Skip HeroInfo: index(i32) + name(string) + ... too complex, just consume
             // Minimal skip: index + name
             reader.read_raw_i32()?; // index
-            reader.read_string()?;  // name
-            // We can't easily skip the rest without full HeroInfo structure,
-            // but for version=83 this branch won't execute anyway
+            reader.read_string()?; // name
+                                   // We can't easily skip the rest without full HeroInfo structure,
+                                   // but for version=83 this branch won't execute anyway
         }
     }
 
     info!("Version: {}.{}", version, custom_version);
-    info!("Next IDs: account={}, character={}, item={}, hero={}",
-        next_account_id, next_character_id, next_user_item_id, next_hero_id);
+    info!(
+        "Next IDs: account={}, character={}, item={}, hero={}",
+        next_account_id, next_character_id, next_user_item_id, next_hero_id
+    );
     info!("Guilds: {}, NextGuildID: {}", guild_count, next_guild_id);
 
     // Account count (comes after optional HeroList)
@@ -807,7 +1119,8 @@ async fn main() -> anyhow::Result<()> {
     // Initialize database
     let db_url = format!("sqlite://{}", sqlite_path);
     info!("DB URL: {}", db_url);
-    let pool = sqlx::SqlitePool::connect(&db_url).await
+    let pool = sqlx::SqlitePool::connect(&db_url)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to {}: {}", sqlite_path, e))?;
 
     // Create tables
@@ -962,8 +1275,10 @@ async fn main() -> anyhow::Result<()> {
             successful_refines INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
-        "#
-    ).execute(&pool).await?;
+        "#,
+    )
+    .execute(&pool)
+    .await?;
 
     // Migrate accounts
     info!("Starting migration...");
@@ -979,7 +1294,10 @@ async fn main() -> anyhow::Result<()> {
                     error!("Failed to migrate account #{}: {}", i, e);
                     error_count += 1;
                 } else {
-                    info!("  Account #{}: {} ({} characters)", i, account.account_id, chars);
+                    info!(
+                        "  Account #{}: {} ({} characters)",
+                        i, account.account_id, chars
+                    );
                     account_count_success += 1;
                     character_count_success += chars;
                 }
@@ -999,14 +1317,19 @@ async fn main() -> anyhow::Result<()> {
 
     // Verify
     let row_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM accounts")
-        .fetch_one(&pool).await?;
+        .fetch_one(&pool)
+        .await?;
     let char_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM characters")
-        .fetch_one(&pool).await?;
+        .fetch_one(&pool)
+        .await?;
     let item_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM inventory_backpack")
-        .fetch_one(&pool).await?;
+        .fetch_one(&pool)
+        .await?;
 
-    info!("Verification: {} accounts, {} characters, {} backpack items in DB",
-        row_count.0, char_count.0, item_count.0);
+    info!(
+        "Verification: {} accounts, {} characters, {} backpack items in DB",
+        row_count.0, char_count.0, item_count.0
+    );
 
     Ok(())
 }

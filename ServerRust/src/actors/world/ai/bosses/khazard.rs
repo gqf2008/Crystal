@@ -10,10 +10,10 @@
 //! Attack（C# :44-66）：Range&&CanPull→PullAttack；!Range→base。
 //! PullAttack（C# :68-81）：沿 Direction 1-4 格找目标，Pushed 朝自身。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
 /// 最大拉扯距离（C# i=1..=4）
@@ -83,14 +83,17 @@ impl MonsterBehavior for KhazardBehavior {
             // 近战：DC 单体
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
         }
     }

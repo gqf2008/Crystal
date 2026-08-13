@@ -41,7 +41,12 @@ impl Message<ChangeHeroRequest> for WorldActor {
             return;
         }
 
-        let _ = record.actor_ref.ask(SetHeroIndex { hero_index: msg.hero_index }).await;
+        let _ = record
+            .actor_ref
+            .ask(SetHeroIndex {
+                hero_index: msg.hero_index,
+            })
+            .await;
         send_hero_update_packet(&self.gate_ref, msg.session_id, msg.hero_index);
         // #198：切换后生成/移除英雄对象
         if msg.hero_index != 0 {
@@ -56,92 +61,101 @@ impl Message<ChangeHeroRequest> for WorldActor {
 }
 
 impl WorldActor {
-/// 下发 S.HeroInformation（C# HeroInformation : UserInformation + autopot，#203）
-/// 数据：英雄身份取 player_heroes，背包/装备/自动药取 PlayerState.hero_inventory
-pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
-    let record = match self.players.get(&session_id) {
-        Some(r) => r,
-        None => return,
-    };
-    let state = match record.actor_ref.ask(GetPlayerState).await {
-        Ok(Some(s)) => s,
-        _ => return,
-    };
-    let hero = self
-        .player_heroes
-        .get(&session_id)
-        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
-        .cloned();
-    let Some(hero) = hero else { return };
+    /// 下发 S.HeroInformation（C# HeroInformation : UserInformation + autopot，#203）
+    /// 数据：英雄身份取 player_heroes，背包/装备/自动药取 PlayerState.hero_inventory
+    pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
+        let record = match self.players.get(&session_id) {
+            Some(r) => r,
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let hero = self
+            .player_heroes
+            .get(&session_id)
+            .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+            .cloned();
+        let Some(hero) = hero else { return };
 
-    let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
-    // 内联 ItemInfo（客户端显示名称/图标/类型，与 build_user_information_packet 一致）
-    let mut enrich = |mut item: mir2_shared::data::item::UserItem| {
-        super::enrich_item_info(&mut item, &self.item_infos);
-        item
-    };
-    let inventory: Vec<Option<mir2_shared::data::item::UserItem>> = state
-        .hero_inventory
-        .backpack
-        .iter()
-        .map(|s| s.as_ref().map(|s| enrich(s.item.clone())))
-        .collect();
-    let equipment: Vec<Option<mir2_shared::data::item::UserItem>> = state
-        .hero_inventory
-        .equipment
-        .iter()
-        .cloned()
-        .map(|s| s.map(|item| enrich(item)))
-        .collect();
-    let ai_hp = self.hero_ai_states.get(&session_id).map(|ai| ai.hp).unwrap_or(0);
-    let ai_mp = self
-        .hero_ai_states
-        .get(&session_id)
-        .map(|ai| ai.mp)
-        .unwrap_or(0);
-
-    let packet = mir2_shared::packets::server::hero::HeroInformation {
-        object_id: hero_oid,
-        name: hero.name.clone(),
-        class: hero.class,
-        gender: hero.gender,
-        level: hero.level,
-        hair: 0,
-        hp: ai_hp,
-        mp: ai_mp,
-        experience: 0,
-        // #2418：英雄信息下发用当前 max_experience（替代硬编码 100）
-        max_experience: hero.max_experience as i64,
-        inventory: Some(inventory),
-        equipment: Some(equipment),
-        // #218：英雄魔法（DB C# 编号 → 客户端 +3）
-        magics: state
-            .hero_magics
+        let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+        // 内联 ItemInfo（客户端显示名称/图标/类型，与 build_user_information_packet 一致）
+        let mut enrich = |mut item: mir2_shared::data::item::UserItem| {
+            super::enrich_item_info(&mut item, &self.item_infos);
+            item
+        };
+        let inventory: Vec<Option<mir2_shared::data::item::UserItem>> = state
+            .hero_inventory
+            .backpack
             .iter()
-            .filter_map(|m| {
-                self.magic_infos
-                    .get(&(m.spell as u32))
-                    .map(|info| super::build_client_magic(info, m))
-            })
-            .collect(),
-        auto_pot: state.auto_pot_hp > 0 || state.auto_pot_mp > 0,
-        auto_hp_percent: state.auto_pot_hp.min(100) as u8,
-        auto_mp_percent: state.auto_pot_mp.min(100) as u8,
-        hp_item_index: state.auto_pot_hp_item,
-        mp_item_index: state.auto_pot_mp_item,
-    };
-    let mut body = Vec::new();
-    if packet.write_body(&mut body).is_err() {
-        warn!("Failed to serialize HeroInformation");
-        return;
-    }
-    let _ = self.gate_ref.tell(SendToClient {
-        session_id,
-        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HeroInformation as i16, &body),
-    }).try_send();
-    info!("🦸 HeroInformation sent: {} (oid={})", hero.name, hero_oid);
-}
+            .map(|s| s.as_ref().map(|s| enrich(s.item.clone())))
+            .collect();
+        let equipment: Vec<Option<mir2_shared::data::item::UserItem>> = state
+            .hero_inventory
+            .equipment
+            .iter()
+            .cloned()
+            .map(|s| s.map(|item| enrich(item)))
+            .collect();
+        let ai_hp = self
+            .hero_ai_states
+            .get(&session_id)
+            .map(|ai| ai.hp)
+            .unwrap_or(0);
+        let ai_mp = self
+            .hero_ai_states
+            .get(&session_id)
+            .map(|ai| ai.mp)
+            .unwrap_or(0);
 
+        let packet = mir2_shared::packets::server::hero::HeroInformation {
+            object_id: hero_oid,
+            name: hero.name.clone(),
+            class: hero.class,
+            gender: hero.gender,
+            level: hero.level,
+            hair: 0,
+            hp: ai_hp,
+            mp: ai_mp,
+            experience: 0,
+            // #2418：英雄信息下发用当前 max_experience（替代硬编码 100）
+            max_experience: hero.max_experience as i64,
+            inventory: Some(inventory),
+            equipment: Some(equipment),
+            // #218：英雄魔法（DB C# 编号 → 客户端 +3）
+            magics: state
+                .hero_magics
+                .iter()
+                .filter_map(|m| {
+                    self.magic_infos
+                        .get(&(m.spell as u32))
+                        .map(|info| super::build_client_magic(info, m))
+                })
+                .collect(),
+            auto_pot: state.auto_pot_hp > 0 || state.auto_pot_mp > 0,
+            auto_hp_percent: state.auto_pot_hp.min(100) as u8,
+            auto_mp_percent: state.auto_pot_mp.min(100) as u8,
+            hp_item_index: state.auto_pot_hp_item,
+            mp_item_index: state.auto_pot_mp_item,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_err() {
+            warn!("Failed to serialize HeroInformation");
+            return;
+        }
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HeroInformation as i16,
+                    &body,
+                ),
+            })
+            .try_send();
+        info!("🦸 HeroInformation sent: {} (oid={})", hero.name, hero_oid);
+    }
 }
 /// 从英雄背包取回物品（C# C.TakeBackHeroItem: From=英雄格 To=主背包格，#203）
 pub struct TakeBackHeroItemRequest {
@@ -153,20 +167,30 @@ pub struct TakeBackHeroItemRequest {
 impl Message<TakeBackHeroItemRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: TakeBackHeroItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: TakeBackHeroItemRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
         };
 
         // 从英雄背包取回指定格子物品到主背包
-        let _ = record.actor_ref.ask(crate::actors::player::TakeBackHeroItem {
-            from: msg.from,
-            to: msg.to,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::TakeBackHeroItem {
+                from: msg.from,
+                to: msg.to,
+            })
+            .await;
         // 刷新双方数据：主背包（全量 UserInformation）+ 英雄（S.HeroInformation）
         self.refresh_hero_item_state(msg.session_id).await;
-        debug!("Hero item taken back: session={} from={} to={}", msg.session_id, msg.from, msg.to);
+        debug!(
+            "Hero item taken back: session={} from={} to={}",
+            msg.session_id, msg.from, msg.to
+        );
     }
 }
 
@@ -180,19 +204,29 @@ pub struct TransferHeroItemRequest {
 impl Message<TransferHeroItemRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: TransferHeroItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: TransferHeroItemRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
         };
 
         // 从主背包转移指定格子物品到英雄背包
-        let _ = record.actor_ref.ask(crate::actors::player::TransferHeroItem {
-            from: msg.from,
-            to: msg.to,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::TransferHeroItem {
+                from: msg.from,
+                to: msg.to,
+            })
+            .await;
         self.refresh_hero_item_state(msg.session_id).await;
-        debug!("Hero item transferred: session={} from={} to={}", msg.session_id, msg.from, msg.to);
+        debug!(
+            "Hero item transferred: session={} from={} to={}",
+            msg.session_id, msg.from, msg.to
+        );
     }
 }
 
@@ -208,10 +242,13 @@ impl WorldActor {
             _ => return,
         };
         let packet = super::build_user_information_packet(&state, &self.item_infos);
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id,
-            data: packet,
-        }).try_send();
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id,
+                data: packet,
+            })
+            .try_send();
         self.send_hero_information_packet(session_id).await;
     }
 }
@@ -243,7 +280,11 @@ pub struct UpdateIntelligentCreature {
 impl Message<UpdateIntelligentCreature> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: UpdateIntelligentCreature, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: UpdateIntelligentCreature,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -271,10 +312,18 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
         }
         // 保存物品过滤（C# OptionsSaveButton → UpdateIntelligentCreature）
         if msg.options_save {
-            let target = if log.active_creature.as_ref().map(|c| c.creature_type).unwrap_or(CreatureType::None) == creature_type {
+            let target = if log
+                .active_creature
+                .as_ref()
+                .map(|c| c.creature_type)
+                .unwrap_or(CreatureType::None)
+                == creature_type
+            {
                 log.active_creature.as_mut()
             } else {
-                log.owned_creatures.iter_mut().find(|c| c.creature_type == creature_type)
+                log.owned_creatures
+                    .iter_mut()
+                    .find(|c| c.creature_type == creature_type)
             };
             if let Some(c) = target {
                 let f = &mut c.filter;
@@ -290,7 +339,10 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                 f.grade = msg.grade;
             }
             send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
-            let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
+            let _ = record
+                .actor_ref
+                .ask(SetCreature { creature_log: log })
+                .await;
             send_system_message(&self.gate_ref, msg.session_id, "宠物拾取设置已保存");
             return;
         }
@@ -324,7 +376,10 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                 log.active_creature = Some(c);
             }
             send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
-            let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
+            let _ = record
+                .actor_ref
+                .ask(SetCreature { creature_log: log })
+                .await;
             send_system_message(&self.gate_ref, msg.session_id, "宠物已改名");
             return;
         }
@@ -348,7 +403,10 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             log.active_creature = None;
         }
         send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
-        let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
+        let _ = record
+            .actor_ref
+            .ask(SetCreature { creature_log: log })
+            .await;
         debug!(
             "UpdateIntelligentCreature: {} type={:?} mode={:?}",
             state.name, creature_type, pet_mode
@@ -367,7 +425,11 @@ pub struct IntelligentCreaturePickup {
 impl Message<IntelligentCreaturePickup> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: IntelligentCreaturePickup, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: IntelligentCreaturePickup,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -402,7 +464,8 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
         };
         // #1586：归属校验（C# IntelligentCreatureObject.FillTargetList 检查 Owner）——
         // 与玩家拾取（#1262 can_pick_drop）一致：掉落者/同组可拾取、过期（60s）后任意
-        let mut player_groups: std::collections::HashMap<u64, Option<u64>> = std::collections::HashMap::new();
+        let mut player_groups: std::collections::HashMap<u64, Option<u64>> =
+            std::collections::HashMap::new();
         for (sid, rec) in &self.players {
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                 player_groups.insert(*sid, s.group_id);
@@ -411,8 +474,12 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
         // 查找附近的地面物品（同地图）
         let distance = 3; // 宠物拾取范围
         let item_idx = self.ground_items.iter().position(|item| {
-            if item.map_index != state.map_index { return false; }
-            if (item.x - cx).abs() > distance || (item.y - cy).abs() > distance { return false; }
+            if item.map_index != state.map_index {
+                return false;
+            }
+            if (item.x - cx).abs() > distance || (item.y - cy).abs() > distance {
+                return false;
+            }
             crate::actors::world::item::can_pick_drop(
                 self.tick_count,
                 item.drop_tick,
@@ -431,9 +498,13 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
             // 将物品添加到玩家背包
             let mut picked_up = false;
             if let Some(rec) = self.players.get(&msg.session_id) {
-                if let Ok(true) = rec.actor_ref.ask(AddItemToInventory {
-                    item: item.item.clone(),
-                }).await {
+                if let Ok(true) = rec
+                    .actor_ref
+                    .ask(AddItemToInventory {
+                        item: item.item.clone(),
+                    })
+                    .await
+                {
                     picked_up = true;
                 }
             }
@@ -441,30 +512,45 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
                 // #2330：C# IntelligentCreatureObject.IncreasePearlProduction（:720-733）——
                 // 每次拾取操作 PearlTicker++，满 1000 → 玩家 PearlCount+1（PearlTicker 瞬态）
                 let mut st = state.clone();
-                let produced_pearl = st.creature_log
+                let produced_pearl = st
+                    .creature_log
                     .active_creature
                     .as_mut()
                     .map(|c| c.increase_pearl_production())
                     .unwrap_or(false);
-                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::SetPlayerState { state: st })
+                    .await;
                 if produced_pearl {
-                    let _ = record.actor_ref.ask(crate::actors::player::GainPearls { amount: 1 }).await;
-                    debug!("Creature produced pearl for session {} (1000 pickups)", msg.session_id);
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::GainPearls { amount: 1 })
+                        .await;
+                    debug!(
+                        "Creature produced pearl for session {} (1000 pickups)",
+                        msg.session_id
+                    );
                 }
                 // 广播 ObjectRemove
                 let remove_packet = Self::build_object_remove_packet(picked_oid);
                 for (sid, rec) in &self.players {
                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                         if s.map_index == state.map_index {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: remove_packet.clone(),
-                            }).await;
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: *sid,
+                                    data: remove_packet.clone(),
+                                })
+                                .await;
                         }
                     }
                 }
-                debug!("Creature pickup: {} picked up item at ({},{}) mouse_mode={}",
-                       state.name, cx, cy, msg.mouse_mode);
+                debug!(
+                    "Creature pickup: {} picked up item at ({},{}) mouse_mode={}",
+                    state.name, cx, cy, msg.mouse_mode
+                );
             } else {
                 // 添加失败，放回去
                 self.ground_items.push(item);
@@ -482,7 +568,11 @@ pub struct RequestIntelligentCreatureUpdates {
 impl Message<RequestIntelligentCreatureUpdates> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: RequestIntelligentCreatureUpdates, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(
+        &mut self,
+        msg: RequestIntelligentCreatureUpdates,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -644,7 +734,8 @@ impl HeroCombatAI {
 
 /// 恢复持久化 AutoPot 解锁（C# HeroInfo.AutoPot；按当前出战英雄索引查找）
 fn hero_autopot_from_heroes(heroes: &[HeroInfo], hero_index: u8) -> bool {
-    heroes.iter()
+    heroes
+        .iter()
         .find(|h| h.index as u8 == hero_index)
         .map(|h| h.autopot)
         .unwrap_or(false)
@@ -728,18 +819,28 @@ impl WorldActor {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 // hero_index > 0 表示有出战英雄
                 // #1134：AI HP<=0 视为阵亡，不再参与战斗（REVIVEHERO 回满后恢复）
-                let hero_dead = self.hero_ai_states.get(session_id).map(|ai| ai.hp <= 0).unwrap_or(false);
+                let hero_dead = self
+                    .hero_ai_states
+                    .get(session_id)
+                    .map(|ai| ai.hp <= 0)
+                    .unwrap_or(false);
                 if state.hero_index == 0 || state.is_dead || state.hero_despawned || hero_dead {
                     continue;
                 }
                 // #1198：hero_behaviour == 2 (Follow) 时英雄纯跟随，不参战
                 // 但仍需移动跟随主人，所以保留快照（AI 内部判断 behaviour；C# 1=CounterAttack）
                 // #1184：英雄自身属性只算一次（基础 + 装备加成）
-                let hero = self.player_heroes.get(session_id)
+                let hero = self
+                    .player_heroes
+                    .get(session_id)
                     .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
                     .cloned();
                 let hero_stats = hero.as_ref().map(|h| {
-                    let magics: Vec<(i32, u8)> = state.hero_magics.iter().map(|m| (m.spell, m.level)).collect();
+                    let magics: Vec<(i32, u8)> = state
+                        .hero_magics
+                        .iter()
+                        .map(|m| (m.spell, m.level))
+                        .collect();
                     super::hero_stats::compute_hero_stats(
                         h.class,
                         h.level as i32,
@@ -785,17 +886,20 @@ impl WorldActor {
                         &state.hero_inventory.equipment,
                         &self.item_infos,
                     ),
-                    hero_amulet: hero_has_amulet(
-                        &state.hero_inventory.equipment,
-                        &self.item_infos,
-                    ),
+                    hero_amulet: hero_has_amulet(&state.hero_inventory.equipment, &self.item_infos),
                     // #1202：主人已有对应护盾 buff（UltimateEnhancer 用 DC/MC/SC Boost 近似）
                     owner_has_shields: [
                         state.buffs.iter().any(|b| {
-                            matches!(b.buff_type, crate::combat::buff::BuffType::MacDefenseBoost { .. })
+                            matches!(
+                                b.buff_type,
+                                crate::combat::buff::BuffType::MacDefenseBoost { .. }
+                            )
                         }),
                         state.buffs.iter().any(|b| {
-                            matches!(b.buff_type, crate::combat::buff::BuffType::AcDefenseBoost { .. })
+                            matches!(
+                                b.buff_type,
+                                crate::combat::buff::BuffType::AcDefenseBoost { .. }
+                            )
                         }),
                         state.buffs.iter().any(|b| {
                             matches!(
@@ -836,7 +940,9 @@ impl WorldActor {
             /// #1533：目标是否 AutoRev（C# TaoistHero Revelation 条件：仅非 AutoRev 目标）
             auto_rev: bool,
         }
-        let monster_snaps: Vec<MonsterSnap> = self.monsters.values()
+        let monster_snaps: Vec<MonsterSnap> = self
+            .monsters
+            .values()
             .filter(|m| m.hp > 0)
             .map(|m| MonsterSnap {
                 oid: m.object_id,
@@ -844,15 +950,34 @@ impl WorldActor {
                 y: m.y,
                 max_hp: m.max_hp,
                 map_index: m.map_index,
-                has_green: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::GREEN)),
-                has_red: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::RED)),
-                has_slow: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW)),
+                has_green: m
+                    .poison_list
+                    .iter()
+                    .any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::GREEN)),
+                has_red: m
+                    .poison_list
+                    .iter()
+                    .any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::RED)),
+                has_slow: m
+                    .poison_list
+                    .iter()
+                    .any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW)),
                 undead: m.undead,
-                level: self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0),
-                rev_active: self.revealed_hp.get(&m.object_id)
-                    .map(|u| *u > self.tick_count).unwrap_or(false),
-                auto_rev: self.monster_infos.get(&m.monster_index)
-                    .map(|i| i.auto_rev).unwrap_or(false),
+                level: self
+                    .monster_infos
+                    .get(&m.monster_index)
+                    .map(|i| i.level)
+                    .unwrap_or(0),
+                rev_active: self
+                    .revealed_hp
+                    .get(&m.object_id)
+                    .map(|u| *u > self.tick_count)
+                    .unwrap_or(false),
+                auto_rev: self
+                    .monster_infos
+                    .get(&m.monster_index)
+                    .map(|i| i.auto_rev)
+                    .unwrap_or(false),
             })
             .collect();
 
@@ -870,7 +995,8 @@ impl WorldActor {
         // 自动喝药意图：(hero_session_id, item_index, is_mp) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
         let mut autopot_intents: Vec<(u64, i32, bool)> = Vec::new();
         // 毒意图：(hero_session_id, target_oid, poison_type, duration_s, value, tick_ms) —— 阶段 3e 应用（#1192/#1196）
-        let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32, u64)> = Vec::new();
+        let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32, u64)> =
+            Vec::new();
         // 法师 AoE 意图：(hero_session_id, spell, target_oid, tx, ty, raw, level) —— 阶段 3f 应用（#1200）
         let mut aoe_intents: Vec<(u64, u8, u32, i32, i32, i32, u8, i32)> = Vec::new();
         // 主人护盾意图：(hero_session_id, kind) —— 阶段 2.4b 应用（#1202）
@@ -905,7 +1031,9 @@ impl WorldActor {
                 });
             // 恢复持久化的 AutoPot 解锁（C# HeroInfo.AutoPot；重召唤/重启不丢）
             if is_new_ai {
-                let autopot = self.player_heroes.get(&snap.session_id)
+                let autopot = self
+                    .player_heroes
+                    .get(&snap.session_id)
                     .map(|hs| hero_autopot_from_heroes(hs, snap.hero_index))
                     .unwrap_or(false);
                 ai.autopot_unlocked = autopot;
@@ -913,14 +1041,23 @@ impl WorldActor {
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
             // #1208：支持类法术 ObjectMagic 广播的目标 oid
-            let owner_oid = self.players.get(&snap.session_id).map(|r| r.object_id).unwrap_or(0);
+            let owner_oid = self
+                .players
+                .get(&snap.session_id)
+                .map(|r| r.object_id)
+                .unwrap_or(0);
             let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
             // #1190：清理过期增益
             ai_local.buffs.retain(|b| b.expire_tick > self.tick_count);
             // #1190：buff 对战斗属性/回蓝/冷却的影响（C# RefreshStats 对应项；hero_combat/hero_stats 为局部加 buff 副本）
             let mut hero_combat = snap.hero_combat;
             let mut hero_stats = snap.hero_stats;
-            let shield_pct = hero_apply_buffs(&ai_local.buffs, snap.class, &mut hero_combat, &mut hero_stats);
+            let shield_pct = hero_apply_buffs(
+                &ai_local.buffs,
+                snap.class,
+                &mut hero_combat,
+                &mut hero_stats,
+            );
             let haste_ticks = ai_local
                 .buffs
                 .iter()
@@ -929,7 +1066,9 @@ impl WorldActor {
                 .unwrap_or(0);
             // #1134：英雄 HP 不再每 tick 强制满血——改为脱战缓慢回血（C# Stats 回血近似）
             // 上一 tick 无锁定目标视为脱战（战斗中不回血，损耗可见）
-            if !snap.owner_dead && ai_local.hp > 0 && ai_local.hp < ai_local.max_hp
+            if !snap.owner_dead
+                && ai_local.hp > 0
+                && ai_local.hp < ai_local.max_hp
                 && ai_local.target_oid.is_none()
             {
                 let regen = natural_regen(ai_local.max_hp);
@@ -966,7 +1105,10 @@ impl WorldActor {
             // HP：HP% < AutoHPPercent && HPItemIndex>0 && PotHealthAmount<=0
             // MP：MP% < AutoMPPercent && MPItemIndex>0 && PotManaAmount<=0
             // C#：自动喝药需 Scroll 13 解锁（HeroInfo.AutoPot；PlayerObject.cs:6051/9641）
-            if ai_local.hp > 0 && ai_local.autopot_unlocked && self.tick_count >= ai_local.next_autopot_tick {
+            if ai_local.hp > 0
+                && ai_local.autopot_unlocked
+                && self.tick_count >= ai_local.next_autopot_tick
+            {
                 ai_local.next_autopot_tick = self.tick_count + HERO_AUTOPOT_INTERVAL_TICKS;
                 let hp_pct = if ai_local.max_hp > 0 {
                     (ai_local.hp * 100 / ai_local.max_hp) as u8
@@ -998,7 +1140,8 @@ impl WorldActor {
             let behaviour_follow = hero_behaviour_is_follow(snap.behaviour);
 
             // ===== 距主人过远：强制召回（C# OwnerRecall） =====
-            let dist_to_owner = (ai_local.x - snap.owner_x).abs() + (ai_local.y - snap.owner_y).abs();
+            let dist_to_owner =
+                (ai_local.x - snap.owner_x).abs() + (ai_local.y - snap.owner_y).abs();
             if dist_to_owner > HERO_RECALL_DISTANCE {
                 ai_local.x = snap.owner_x;
                 ai_local.y = snap.owner_y.saturating_add(1);
@@ -1039,7 +1182,8 @@ impl WorldActor {
 
             // ===== Attack 模式：找目标（C# FindTarget） =====
             // 在主人视野内找最近的活怪
-            let target = monster_snaps.iter()
+            let target = monster_snaps
+                .iter()
                 .filter(|m| m.map_index == snap.owner_map)
                 // #1198：CounterAttack 只锁定正在攻击主人的怪（C# FindTarget：ob.Target != this/Owner 跳过）
                 .filter(|m| {
@@ -1059,7 +1203,9 @@ impl WorldActor {
             if target.is_none() {
                 // 无目标：跟随主人（ProcessRoam）
                 ai_local.target_oid = None;
-                if dist_to_owner > HERO_FOLLOW_DISTANCE && self.tick_count >= ai_local.next_move_tick {
+                if dist_to_owner > HERO_FOLLOW_DISTANCE
+                    && self.tick_count >= ai_local.next_move_tick
+                {
                     if let Some((nx, ny, dir)) = hero_path_step(
                         &mut self.hero_paths,
                         &mut self.hero_path_targets,
@@ -1106,7 +1252,13 @@ impl WorldActor {
                     ai_local.mp -= cost;
                     ai_local.buffs.push(HeroBuff {
                         kind,
-                        expire_tick: self.tick_count + hero_buff_duration(&self.magic_infos, kind, buff_lv, &snap.hero_stats) * 10,
+                        expire_tick: self.tick_count
+                            + hero_buff_duration(
+                                &self.magic_infos,
+                                kind,
+                                buff_lv,
+                                &snap.hero_stats,
+                            ) * 10,
                         level: buff_lv,
                         hero_level: snap.hero_level,
                     });
@@ -1124,21 +1276,33 @@ impl WorldActor {
             if snap.class == MirClass::Taoist && ai_local.hp > 0 && !snap.owner_dead {
                 let hero_hp_pct = if ai_local.max_hp > 0 {
                     ai_local.hp * 100 / ai_local.max_hp
-                } else { 100 };
+                } else {
+                    100
+                };
                 let owner_hp_pct = if snap.owner_max_hp > 0 {
                     snap.owner_hp * 100 / snap.owner_max_hp
-                } else { 100 };
+                } else {
+                    100
+                };
                 let healing_lv = hero_magic_level(&snap.hero_magics, Spell::Healing as u8);
                 // 1) 净化：主人中毒且已学（C# Random(4)<=Lv 成功）
                 let pur_lv = hero_magic_level(&snap.hero_magics, Spell::Purification as u8);
                 if hero_taoist_needs_purify(snap.owner_poisoned, pur_lv) {
-                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Purification as u8);
+                    let cost = hero_spell_cost(
+                        &self.magic_infos,
+                        &snap.hero_magics,
+                        Spell::Purification as u8,
+                    );
                     if ai_local.mp >= cost {
                         ai_local.mp -= cost;
                         if hero_purification_roll(pur_lv) {
                             purify_intents.push(snap.session_id);
                         }
-                        magic_anim_intents.push((snap.session_id, Spell::Purification as u8, owner_oid));
+                        magic_anim_intents.push((
+                            snap.session_id,
+                            Spell::Purification as u8,
+                            owner_oid,
+                        ));
                         ai_local.next_attack_tick = self.tick_count + 4;
                         *ai = ai_local;
                         continue;
@@ -1152,17 +1316,32 @@ impl WorldActor {
                     } else {
                         Spell::Healing
                     };
-                    let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                    let heal_cost =
+                        hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
                     if ai_local.mp >= heal_cost {
                         ai_local.mp -= heal_cost;
                         if mass_lv > 0 {
                             // #1214：C# MassHealing 3x3 友方群疗（自 + 主一次）
-                            let amount = hero_mass_heal_amount(&self.magic_infos, &snap.hero_magics, &hero_stats, snap.class);
+                            let amount = hero_mass_heal_amount(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                &hero_stats,
+                                snap.class,
+                            );
                             if hero_hp_pct < 90 {
                                 ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
                             }
-                            support_intents.push((snap.session_id, snap.session_id, Spell::MassHealing as u8, true));
-                            magic_anim_intents.push((snap.session_id, Spell::MassHealing as u8, hero_oid));
+                            support_intents.push((
+                                snap.session_id,
+                                snap.session_id,
+                                Spell::MassHealing as u8,
+                                true,
+                            ));
+                            magic_anim_intents.push((
+                                snap.session_id,
+                                Spell::MassHealing as u8,
+                                hero_oid,
+                            ));
                         } else if hero_hp_pct < 90 {
                             let amount = hero_heal_amount(
                                 &self.magic_infos,
@@ -1171,10 +1350,23 @@ impl WorldActor {
                                 snap.hero_level,
                             );
                             ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
-                            magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
+                            magic_anim_intents.push((
+                                snap.session_id,
+                                Spell::Healing as u8,
+                                hero_oid,
+                            ));
                         } else {
-                            support_intents.push((snap.session_id, snap.session_id, Spell::Healing as u8, true));
-                            magic_anim_intents.push((snap.session_id, Spell::Healing as u8, owner_oid));
+                            support_intents.push((
+                                snap.session_id,
+                                snap.session_id,
+                                Spell::Healing as u8,
+                                true,
+                            ));
+                            magic_anim_intents.push((
+                                snap.session_id,
+                                Spell::Healing as u8,
+                                owner_oid,
+                            ));
                         }
                         ai_local.next_attack_tick = self.tick_count + 4;
                         *ai = ai_local;
@@ -1192,13 +1384,19 @@ impl WorldActor {
                         .copied();
                     if let Some((spell, kind)) = self_shield {
                         let buff_lv = hero_magic_level(&snap.hero_magics, spell as u8);
-                        let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                        let cost =
+                            hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
                         if ai_local.mp >= cost {
                             ai_local.mp -= cost;
                             ai_local.buffs.push(HeroBuff {
                                 kind,
                                 expire_tick: self.tick_count
-                                    + hero_buff_duration(&self.magic_infos, kind, buff_lv, &snap.hero_stats) * 10,
+                                    + hero_buff_duration(
+                                        &self.magic_infos,
+                                        kind,
+                                        buff_lv,
+                                        &snap.hero_stats,
+                                    ) * 10,
                                 level: buff_lv,
                                 hero_level: snap.hero_level,
                             });
@@ -1217,12 +1415,16 @@ impl WorldActor {
                         .iter()
                         .find(|(kind, idx)| {
                             !snap.owner_has_shields[*idx]
-                                && hero_magic_level(&snap.hero_magics, hero_owner_shield_spell(*kind) as u8) > 0
+                                && hero_magic_level(
+                                    &snap.hero_magics,
+                                    hero_owner_shield_spell(*kind) as u8,
+                                ) > 0
                         })
                         .map(|(kind, _)| *kind);
                         if let Some(kind) = owner_kind {
                             let spell = hero_owner_shield_spell(kind);
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                            let cost =
+                                hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 owner_shield_intents.push((snap.session_id, kind));
@@ -1239,10 +1441,17 @@ impl WorldActor {
             // HP 低于阈值：后撤（对应 ArcherHero ProcessTarget 的远离逻辑 + 自动喝药）
             let hp_pct = if ai_local.max_hp > 0 {
                 ai_local.hp * 100 / ai_local.max_hp
-            } else { 100 };
+            } else {
+                100
+            };
             if hp_pct < HERO_FLEE_HP_PERCENT && can_move {
                 let (nx, ny, dir) = step_away_from(target.x, target.y, ai_local.x, ai_local.y);
-                if self.maps.get(&snap.owner_map).map(|m| m.is_walkable(nx, ny)).unwrap_or(true) {
+                if self
+                    .maps
+                    .get(&snap.owner_map)
+                    .map(|m| m.is_walkable(nx, ny))
+                    .unwrap_or(true)
+                {
                     ai_local.x = nx;
                     ai_local.y = ny;
                     ai_local.direction = dir;
@@ -1269,48 +1478,91 @@ impl WorldActor {
             if can_attack && target_dist == 2 {
                 if let Some(spell) = ranged2_skill {
                     if hero_magic_level(&snap.hero_magics, spell as u8) > 0 {
-                        ai_local.direction = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
+                        ai_local.direction =
+                            direction_towards(ai_local.x, ai_local.y, target.x, target.y);
                         let raw = hero_attack_power(&hero_combat);
-                        let dir_u = direction_towards(ai_local.x, ai_local.y, target.x, target.y) as usize % 8;
+                        let dir_u = direction_towards(ai_local.x, ai_local.y, target.x, target.y)
+                            as usize
+                            % 8;
                         let used = if spell == Spell::Thrusting {
                             // C# Thrusting 命中防御 Agility（HumanObject.cs:3225）+ 倍率 0.25+0.25Lv（Envir.cs）
                             let lv = hero_magic_level(&snap.hero_magics, Spell::Thrusting as u8);
                             let cs = (Spell::Thrusting as i32).saturating_sub(3);
-                            let dmg = self.magic_infos.get(&(cs as u32))
+                            let dmg = self
+                                .magic_infos
+                                .get(&(cs as u32))
                                 .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
                                 .unwrap_or(raw);
-                            attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Agility, true));
-                            support_intents.push((snap.session_id, 0, Spell::Thrusting as u8, false));
+                            attack_intents.push((
+                                snap.session_id,
+                                target.oid,
+                                dmg,
+                                DefenceType::Agility,
+                                true,
+                            ));
+                            support_intents.push((
+                                snap.session_id,
+                                0,
+                                Spell::Thrusting as u8,
+                                false,
+                            ));
                             true
                         } else {
                             // C# HeavenlySword（HumanObject.cs:5239 + Map.cs:1222-1248）：
                             // BeginMagic 扣蓝；弹道 500ms；沿朝向 3 格直线每格首个目标；防御 MAC；伤害 magic.GetDamage(DC)
-                            let lv = hero_magic_level(&snap.hero_magics, Spell::HeavenlySword as u8);
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::HeavenlySword as u8);
+                            let lv =
+                                hero_magic_level(&snap.hero_magics, Spell::HeavenlySword as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::HeavenlySword as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 let cs = (Spell::HeavenlySword as i32).saturating_sub(3);
-                                let dmg = self.magic_infos.get(&(cs as u32))
-                                    .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
+                                let dmg = self
+                                    .magic_infos
+                                    .get(&(cs as u32))
+                                    .map(|info| {
+                                        crate::combat::magic::calc_magic_damage(info, lv, raw)
+                                    })
                                     .unwrap_or(raw);
                                 let mut hit_any = false;
                                 for i in 1..=3i32 {
-                                    let lx = ai_local.x + crate::actors::world::ai::helpers::DIR_DX[dir_u] * i;
-                                    let ly = ai_local.y + crate::actors::world::ai::helpers::DIR_DY[dir_u] * i;
+                                    let lx = ai_local.x
+                                        + crate::actors::world::ai::helpers::DIR_DX[dir_u] * i;
+                                    let ly = ai_local.y
+                                        + crate::actors::world::ai::helpers::DIR_DY[dir_u] * i;
                                     if let Some(m) = monster_snaps.iter().find(|m| {
                                         m.map_index == snap.owner_map && m.x == lx && m.y == ly
                                     }) {
-                                        attack_intents.push((snap.session_id, m.oid, dmg, DefenceType::Mac, true));
+                                        attack_intents.push((
+                                            snap.session_id,
+                                            m.oid,
+                                            dmg,
+                                            DefenceType::Mac,
+                                            true,
+                                        ));
                                         hit_any = true;
                                         break;
                                     }
                                 }
                                 if !hit_any {
                                     // 直线无目标时兜底打主目标（C# 每格取第一个可攻击对象；主目标通常在直线内）
-                                    attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Mac, true));
+                                    attack_intents.push((
+                                        snap.session_id,
+                                        target.oid,
+                                        dmg,
+                                        DefenceType::Mac,
+                                        true,
+                                    ));
                                 }
                                 // C# BeginMagic → ObjectMagic 广播（英雄施法弹道动画）
-                                magic_anim_intents.push((snap.session_id, Spell::HeavenlySword as u8, target.oid));
+                                magic_anim_intents.push((
+                                    snap.session_id,
+                                    Spell::HeavenlySword as u8,
+                                    target.oid,
+                                ));
                                 true
                             } else {
                                 false // 蓝不足 → 不施放，走下方移动/近战（C# HasHeavenlySword=false → MoveTo）
@@ -1347,27 +1599,48 @@ impl WorldActor {
                         let dir_u = dir as usize % 8;
                         let thrust_lv = hero_magic_level(&snap.hero_magics, Spell::Thrusting as u8);
                         if thrust_lv > 0 && target_dist == 1 {
-                            let behind_x = target.x + crate::actors::world::ai::helpers::DIR_DX[dir_u];
-                            let behind_y = target.y + crate::actors::world::ai::helpers::DIR_DY[dir_u];
+                            let behind_x =
+                                target.x + crate::actors::world::ai::helpers::DIR_DX[dir_u];
+                            let behind_y =
+                                target.y + crate::actors::world::ai::helpers::DIR_DY[dir_u];
                             let has_behind = monster_snaps.iter().any(|m| {
                                 m.map_index == snap.owner_map && m.x == behind_x && m.y == behind_y
                             });
                             if has_behind {
                                 let cs = (Spell::Thrusting as i32).saturating_sub(3);
-                                let dmg = self.magic_infos.get(&(cs as u32))
-                                    .map(|info| crate::combat::magic::calc_magic_damage(info, thrust_lv, raw))
+                                let dmg = self
+                                    .magic_infos
+                                    .get(&(cs as u32))
+                                    .map(|info| {
+                                        crate::combat::magic::calc_magic_damage(
+                                            info, thrust_lv, raw,
+                                        )
+                                    })
                                     .unwrap_or(raw);
-                                let tx = ai_local.x + crate::actors::world::ai::helpers::DIR_DX[dir_u] * 2;
-                                let ty = ai_local.y + crate::actors::world::ai::helpers::DIR_DY[dir_u] * 2;
+                                let tx = ai_local.x
+                                    + crate::actors::world::ai::helpers::DIR_DX[dir_u] * 2;
+                                let ty = ai_local.y
+                                    + crate::actors::world::ai::helpers::DIR_DY[dir_u] * 2;
                                 let mut thrusted = false;
-                                for m in monster_snaps.iter()
-                                    .filter(|m| m.map_index == snap.owner_map && m.x == tx && m.y == ty)
-                                {
-                                    attack_intents.push((snap.session_id, m.oid, dmg, DefenceType::Agility, false));
+                                for m in monster_snaps.iter().filter(|m| {
+                                    m.map_index == snap.owner_map && m.x == tx && m.y == ty
+                                }) {
+                                    attack_intents.push((
+                                        snap.session_id,
+                                        m.oid,
+                                        dmg,
+                                        DefenceType::Agility,
+                                        false,
+                                    ));
                                     thrusted = true;
                                 }
                                 if thrusted {
-                                    support_intents.push((snap.session_id, 0, Spell::Thrusting as u8, false));
+                                    support_intents.push((
+                                        snap.session_id,
+                                        0,
+                                        Spell::Thrusting as u8,
+                                        false,
+                                    ));
                                     ai_local.next_attack_tick = self.tick_count + 6;
                                     *ai = ai_local;
                                     continue;
@@ -1378,8 +1651,12 @@ impl WorldActor {
                         // C# HumanObject.cs:2929-2949：HalfMoon/CrossHalfMoon/TwinDrakeBlade 消耗 MP，蓝不足降级普攻；
                         // Thrusting/FlamingSword/Slaying 无 cost 分支（不扣蓝，保持现状）
                         if let Some((s, _)) = skill {
-                            if matches!(s, Spell::HalfMoon | Spell::CrossHalfMoon | Spell::TwinDrakeBlade) {
-                                let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, s as u8);
+                            if matches!(
+                                s,
+                                Spell::HalfMoon | Spell::CrossHalfMoon | Spell::TwinDrakeBlade
+                            ) {
+                                let cost =
+                                    hero_spell_cost(&self.magic_infos, &snap.hero_magics, s as u8);
                                 if ai_local.mp >= cost {
                                     ai_local.mp -= cost;
                                 } else {
@@ -1392,7 +1669,8 @@ impl WorldActor {
                         // Slaying/HalfMoon/CrossHalfMoon/None 主击 = base（C# damageFinal 保持 damageBase）
                         let skill_dmg = |s: Spell, lv: u8| -> i32 {
                             let cs = (s as i32).saturating_sub(3);
-                            self.magic_infos.get(&(cs as u32))
+                            self.magic_infos
+                                .get(&(cs as u32))
                                 .map(|info| crate::combat::magic::calc_magic_damage(info, lv, raw))
                                 .unwrap_or(raw)
                         };
@@ -1407,7 +1685,13 @@ impl WorldActor {
                             }
                             _ => (raw, DefenceType::AcAgility),
                         };
-                        attack_intents.push((snap.session_id, target.oid, main_dmg, main_def, false));
+                        attack_intents.push((
+                            snap.session_id,
+                            target.oid,
+                            main_dmg,
+                            main_def,
+                            false,
+                        ));
                         // 广播带 spell_id 的 ObjectAttack（循环外广播）
                         support_intents.push((snap.session_id, 0, spell_id, false));
                         // 技能附加效果
@@ -1415,7 +1699,13 @@ impl WorldActor {
                             Some((Spell::TwinDrakeBlade, lv)) => {
                                 // C# :3179-3186：第二段同倍率、Agility 防御、最终击概率眩晕（Random(20)<=Lv+1）
                                 let second = skill_dmg(Spell::TwinDrakeBlade, lv);
-                                attack_intents.push((snap.session_id, target.oid, second, DefenceType::Agility, false));
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    second,
+                                    DefenceType::Agility,
+                                    false,
+                                ));
                                 if fastrand::i32(0..20) <= lv as i32 + 1 {
                                     poison_intents.push((
                                         snap.session_id,
@@ -1431,7 +1721,11 @@ impl WorldActor {
                                 // C# HalfMoon :3233-3262：PreviousDir 起 4 向（排除 Front）=3 格弧；
                                 // CrossHalfMoon :3264-3291：8 向排除 Front=7 格弧；防御 Agility
                                 let is_half = matches!(skill, Some((Spell::HalfMoon, _)));
-                                let arc_spell = if is_half { Spell::HalfMoon } else { Spell::CrossHalfMoon };
+                                let arc_spell = if is_half {
+                                    Spell::HalfMoon
+                                } else {
+                                    Spell::CrossHalfMoon
+                                };
                                 let arc_dmg = skill_dmg(arc_spell, lv);
                                 let dirs: Vec<usize> = if is_half {
                                     vec![(dir_u + 7) % 8, (dir_u + 1) % 8, (dir_u + 2) % 8]
@@ -1439,12 +1733,20 @@ impl WorldActor {
                                     (0..8).filter(|d| *d != dir_u).collect()
                                 };
                                 for d in dirs {
-                                    let cx = ai_local.x + crate::actors::world::ai::helpers::DIR_DX[d];
-                                    let cy = ai_local.y + crate::actors::world::ai::helpers::DIR_DY[d];
-                                    for m in monster_snaps.iter()
-                                        .filter(|m| m.map_index == snap.owner_map && m.x == cx && m.y == cy)
-                                    {
-                                        attack_intents.push((snap.session_id, m.oid, arc_dmg, DefenceType::Agility, false));
+                                    let cx =
+                                        ai_local.x + crate::actors::world::ai::helpers::DIR_DX[d];
+                                    let cy =
+                                        ai_local.y + crate::actors::world::ai::helpers::DIR_DY[d];
+                                    for m in monster_snaps.iter().filter(|m| {
+                                        m.map_index == snap.owner_map && m.x == cx && m.y == cy
+                                    }) {
+                                        attack_intents.push((
+                                            snap.session_id,
+                                            m.oid,
+                                            arc_dmg,
+                                            DefenceType::Agility,
+                                            false,
+                                        ));
                                     }
                                 }
                             }
@@ -1459,22 +1761,64 @@ impl WorldActor {
                         let ds_lv = hero_magic_level(&snap.hero_magics, Spell::DoubleSlash as u8);
                         if ds_lv > 0 {
                             // C# HumanObject.cs:2909-2918：DoubleSlash 消耗 MP，蓝不足降级普攻
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::DoubleSlash as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::DoubleSlash as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 let cs = (Spell::DoubleSlash as i32).saturating_sub(3);
-                                let dmg = self.magic_infos.get(&(cs as u32))
-                                    .map(|info| crate::combat::magic::calc_magic_damage(info, ds_lv, raw))
+                                let dmg = self
+                                    .magic_infos
+                                    .get(&(cs as u32))
+                                    .map(|info| {
+                                        crate::combat::magic::calc_magic_damage(info, ds_lv, raw)
+                                    })
                                     .unwrap_or(raw);
-                                attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::MacAgility, false));
-                                attack_intents.push((snap.session_id, target.oid, dmg, DefenceType::Agility, false));
-                                support_intents.push((snap.session_id, 0, Spell::DoubleSlash as u8, false));
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    dmg,
+                                    DefenceType::MacAgility,
+                                    false,
+                                ));
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    dmg,
+                                    DefenceType::Agility,
+                                    false,
+                                ));
+                                support_intents.push((
+                                    snap.session_id,
+                                    0,
+                                    Spell::DoubleSlash as u8,
+                                    false,
+                                ));
                             } else {
-                                attack_intents.push((snap.session_id, target.oid, raw, DefenceType::AcAgility, false));
-                                support_intents.push((snap.session_id, 0, Spell::None as u8, false));
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    raw,
+                                    DefenceType::AcAgility,
+                                    false,
+                                ));
+                                support_intents.push((
+                                    snap.session_id,
+                                    0,
+                                    Spell::None as u8,
+                                    false,
+                                ));
                             }
                         } else {
-                            attack_intents.push((snap.session_id, target.oid, raw, DefenceType::AcAgility, false));
+                            attack_intents.push((
+                                snap.session_id,
+                                target.oid,
+                                raw,
+                                DefenceType::AcAgility,
+                                false,
+                            ));
                             support_intents.push((snap.session_id, 0, Spell::None as u8, false));
                         }
                         ai_local.next_attack_tick = self.tick_count + 5;
@@ -1483,15 +1827,29 @@ impl WorldActor {
                         // #1212：C# WizardHero：距离1 且目标等级<英雄等级 → Repulsion（击退）
                         let rep_lv = hero_magic_level(&snap.hero_magics, Spell::Repulsion as u8);
                         if target_dist == 1 && rep_lv > 0 && target.level < snap.hero_level as i32 {
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Repulsion as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::Repulsion as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
-                                if hero_repulsion_succeeds(rep_lv, snap.hero_level as i32, target.level) {
+                                if hero_repulsion_succeeds(
+                                    rep_lv,
+                                    snap.hero_level as i32,
+                                    target.level,
+                                ) {
                                     let dist = hero_repulsion_distance(rep_lv);
-                                    let dir = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
+                                    let dir = direction_towards(
+                                        ai_local.x, ai_local.y, target.x, target.y,
+                                    );
                                     push_intents.push((target.oid, dir, dist));
                                 }
-                                magic_anim_intents.push((snap.session_id, Spell::Repulsion as u8, target.oid));
+                                magic_anim_intents.push((
+                                    snap.session_id,
+                                    Spell::Repulsion as u8,
+                                    target.oid,
+                                ));
                                 ai_local.next_attack_tick = self.tick_count + 6;
                                 *ai = ai_local;
                                 continue;
@@ -1500,10 +1858,14 @@ impl WorldActor {
                         // #1204：C# WizardHero：自身被围（2 格内怪>1 且目标距离<3）→ FlameField/ThunderStorm（5x5 自身 AoE）
                         let monsters_xy: Vec<(u32, i32, i32)> =
                             monster_snaps.iter().map(|m| (m.oid, m.x, m.y)).collect();
-                        let self_surrounded = hero_surrounded_count(&monsters_xy, ai_local.x, ai_local.y, 2) > 1
-                            && target_dist < 3;
+                        let self_surrounded =
+                            hero_surrounded_count(&monsters_xy, ai_local.x, ai_local.y, 2) > 1
+                                && target_dist < 3;
                         let storm = if self_surrounded {
-                            first_learned_spell(&snap.hero_magics, &[Spell::FlameField, Spell::ThunderStorm])
+                            first_learned_spell(
+                                &snap.hero_magics,
+                                &[Spell::FlameField, Spell::ThunderStorm],
+                            )
                         } else {
                             None
                         };
@@ -1516,7 +1878,8 @@ impl WorldActor {
                                 &hero_stats,
                                 snap.class,
                             );
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                            let cost =
+                                hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 aoe_intents.push((
@@ -1533,9 +1896,15 @@ impl WorldActor {
                             } else {
                                 // 蓝不足：1 格内近战兜底
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
                             }
@@ -1548,7 +1917,10 @@ impl WorldActor {
                                 target.y,
                             );
                             let aoe = if surrounded {
-                                first_learned_spell(&snap.hero_magics, &[Spell::IceStorm, Spell::FireBang])
+                                first_learned_spell(
+                                    &snap.hero_magics,
+                                    &[Spell::IceStorm, Spell::FireBang],
+                                )
                             } else {
                                 None
                             };
@@ -1561,7 +1933,11 @@ impl WorldActor {
                                     &hero_stats,
                                     snap.class,
                                 );
-                                let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                                let cost = hero_spell_cost(
+                                    &self.magic_infos,
+                                    &snap.hero_magics,
+                                    spell as u8,
+                                );
                                 if ai_local.mp >= cost {
                                     ai_local.mp -= cost;
                                     aoe_intents.push((
@@ -1578,25 +1954,45 @@ impl WorldActor {
                                 } else {
                                     // 蓝不足：1 格内近战兜底
                                     let _ = hero_melee_fallback(
-                                        snap.session_id, target.oid, target_dist,
-                                        snap.class, &snap.hero_magics, snap.behaviour,
-                                        &hero_combat, &mut attack_intents, &mut support_intents,
+                                        snap.session_id,
+                                        target.oid,
+                                        target_dist,
+                                        snap.class,
+                                        &snap.hero_magics,
+                                        snap.behaviour,
+                                        &hero_combat,
+                                        &mut attack_intents,
+                                        &mut support_intents,
                                     );
                                     ai_local.next_attack_tick = self.tick_count + 6;
                                 }
                             } else {
                                 // #1535：C# WizardHero 顺序——TurnUndead 在 AoE 之后、单体弹道之前；条件 Target.Level < Level
-                                let turn_lv = hero_magic_level(&snap.hero_magics, Spell::TurnUndead as u8);
-                                if target.undead && turn_lv > 0
+                                let turn_lv =
+                                    hero_magic_level(&snap.hero_magics, Spell::TurnUndead as u8);
+                                if target.undead
+                                    && turn_lv > 0
                                     && target.level < snap.hero_level as i32
                                 {
-                                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::TurnUndead as u8);
+                                    let cost = hero_spell_cost(
+                                        &self.magic_infos,
+                                        &snap.hero_magics,
+                                        Spell::TurnUndead as u8,
+                                    );
                                     if ai_local.mp >= cost {
                                         ai_local.mp -= cost;
-                                        if hero_turn_undead_kills(snap.hero_level as i32, target.level, turn_lv) {
+                                        if hero_turn_undead_kills(
+                                            snap.hero_level as i32,
+                                            target.level,
+                                            turn_lv,
+                                        ) {
                                             turn_undead_intents.push((snap.session_id, target.oid));
                                         }
-                                        magic_anim_intents.push((snap.session_id, Spell::TurnUndead as u8, target.oid));
+                                        magic_anim_intents.push((
+                                            snap.session_id,
+                                            Spell::TurnUndead as u8,
+                                            target.oid,
+                                        ));
                                         ai_local.next_attack_tick = self.tick_count + 8;
                                         *ai = ai_local;
                                         continue;
@@ -1625,7 +2021,11 @@ impl WorldActor {
                                             snap.class,
                                         );
                                         // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
-                                        let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                                        let cost = hero_spell_cost(
+                                            &self.magic_infos,
+                                            &snap.hero_magics,
+                                            spell as u8,
+                                        );
                                         if ai_local.mp >= cost {
                                             ai_local.mp -= cost;
                                             spell_intents.push((
@@ -1642,9 +2042,15 @@ impl WorldActor {
                                         } else {
                                             // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
                                             let _ = hero_melee_fallback(
-                                                snap.session_id, target.oid, target_dist,
-                                                snap.class, &snap.hero_magics, snap.behaviour,
-                                                &hero_combat, &mut attack_intents, &mut support_intents,
+                                                snap.session_id,
+                                                target.oid,
+                                                target_dist,
+                                                snap.class,
+                                                &snap.hero_magics,
+                                                snap.behaviour,
+                                                &hero_combat,
+                                                &mut attack_intents,
+                                                &mut support_intents,
                                             );
                                             ai_local.next_attack_tick = self.tick_count + 6;
                                         }
@@ -1652,9 +2058,15 @@ impl WorldActor {
                                     None => {
                                         // 未学任何弹道技能：近战兜底
                                         let _ = hero_melee_fallback(
-                                            snap.session_id, target.oid, target_dist,
-                                            snap.class, &snap.hero_magics, snap.behaviour,
-                                            &hero_combat, &mut attack_intents, &mut support_intents,
+                                            snap.session_id,
+                                            target.oid,
+                                            target_dist,
+                                            snap.class,
+                                            &snap.hero_magics,
+                                            snap.behaviour,
+                                            &hero_combat,
+                                            &mut attack_intents,
+                                            &mut support_intents,
                                         );
                                         ai_local.next_attack_tick = self.tick_count + 6;
                                     }
@@ -1664,9 +2076,11 @@ impl WorldActor {
                     }
                     MirClass::Taoist => {
                         // #1210：净化/治疗/护盾已由常驻 ProcessFriend 预置块处理；攻击顺序 Poisoning→Curse→SoulFireBall→近战
-                        let soulfire_lv = hero_magic_level(&snap.hero_magics, Spell::SoulFireBall as u8);
+                        let soulfire_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::SoulFireBall as u8);
                         // #1192：Poisoning 可用 = 已学 + 装备毒护符 + 目标无对应毒（C# TaoistHero）
-                        let poisoning_lv = hero_magic_level(&snap.hero_magics, Spell::Poisoning as u8);
+                        let poisoning_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::Poisoning as u8);
                         let can_poison = snap.hero_poison_shape > 0
                             && poisoning_lv > 0
                             && if snap.hero_poison_shape == 1 {
@@ -1678,19 +2092,26 @@ impl WorldActor {
                         let curse_lv = hero_magic_level(&snap.hero_magics, Spell::Curse as u8);
                         let can_curse = curse_lv > 0 && snap.hero_amulet && !target.has_slow;
                         // #1533：Revelation 可用 = 已学 + 普通护符 + 目标非 AutoRev + RevTime 已过（C# TaoistHero）
-                        let revelation_lv = hero_magic_level(&snap.hero_magics, Spell::Revelation as u8);
-                        let can_reveal = revelation_lv > 0 && snap.hero_amulet
-                            && !target.auto_rev && !target.rev_active;
+                        let revelation_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::Revelation as u8);
+                        let can_reveal = revelation_lv > 0
+                            && snap.hero_amulet
+                            && !target.auto_rev
+                            && !target.rev_active;
                         if can_poison {
-
                             // #1192：C# Poisoning：value = GetDamage(SC)；Duration=value*2+(Lv+1)*7、TickSpeed 2000
                             // 绿毒 Value = value/15 + Lv + 1 + Random(PoisonAttack)（#1423：C# HumanObject.cs:6043）
                             // 红毒无伤害值（状态毒）
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Poisoning as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::Poisoning as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 let value = hero_attack_power_sc(&hero_stats).max(1);
-                                let duration = (value * 2 + (poisoning_lv as i32 + 1) * 7).max(1) as u32;
+                                let duration =
+                                    (value * 2 + (poisoning_lv as i32 + 1) * 7).max(1) as u32;
                                 let poison_value = if snap.hero_poison_shape == 1 {
                                     hero_poisoning_green_value(
                                         value,
@@ -1705,7 +2126,14 @@ impl WorldActor {
                                 } else {
                                     mir2_shared::enums::PoisonType::RED
                                 };
-                                poison_intents.push((snap.session_id, target.oid, p_type, duration, poison_value, 2000));
+                                poison_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    p_type,
+                                    duration,
+                                    poison_value,
+                                    2000,
+                                ));
                                 support_intents.push((
                                     snap.session_id,
                                     snap.session_id,
@@ -1713,19 +2141,33 @@ impl WorldActor {
                                     false,
                                 ));
                                 // #1208：施毒广播 ObjectMagic（目标 = 怪物）
-                                magic_anim_intents.push((snap.session_id, Spell::Poisoning as u8, target.oid));
+                                magic_anim_intents.push((
+                                    snap.session_id,
+                                    Spell::Poisoning as u8,
+                                    target.oid,
+                                ));
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
                         } else if can_curse {
                             // #1196：C# TaoistHero Curse：护符 + 目标无 Curse（本服怪物无 buff，实现 Slow 毒部分）
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Curse as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::Curse as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 support_intents.push((
@@ -1735,7 +2177,11 @@ impl WorldActor {
                                     false,
                                 ));
                                 // #1208：诅咒广播 ObjectMagic（目标 = 怪物）
-                                magic_anim_intents.push((snap.session_id, Spell::Curse as u8, target.oid));
+                                magic_anim_intents.push((
+                                    snap.session_id,
+                                    Spell::Curse as u8,
+                                    target.oid,
+                                ));
                                 // C# Map.cs：40% 概率附加 Slow 毒（Duration=1+(Lv+1)*2、TickSpeed 1000、Value=GetDamage(SC)）
                                 if fastrand::i32(0..10) < 4 {
                                     let value = hero_spell_damage(
@@ -1759,15 +2205,25 @@ impl WorldActor {
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
                         } else if can_reveal {
                             // #1533：C# TaoistHero Revelation——显血（HumanObject.cs:6284：value 秒内显示目标 HP）
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Revelation as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::Revelation as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 // C# value = GetAttackPower(MinSC,MaxSC) + GetPower()
@@ -1777,17 +2233,28 @@ impl WorldActor {
                                     Spell::Revelation as u8,
                                     &hero_stats,
                                     snap.class,
-                                ).max(1);
+                                )
+                                .max(1);
                                 let until = self.tick_count + (value as u64) * 10;
                                 revelation_intents.push((snap.session_id, target.oid, until));
                                 // #1208：施放广播 ObjectMagic（目标 = 怪物）
-                                magic_anim_intents.push((snap.session_id, Spell::Revelation as u8, target.oid));
+                                magic_anim_intents.push((
+                                    snap.session_id,
+                                    Spell::Revelation as u8,
+                                    target.oid,
+                                ));
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
@@ -1800,7 +2267,11 @@ impl WorldActor {
                                 &hero_stats,
                                 snap.class,
                             );
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::SoulFireBall as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::SoulFireBall as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 spell_intents.push((
@@ -1816,30 +2287,52 @@ impl WorldActor {
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
                         } else {
                             let _ = hero_melee_fallback(
-                                snap.session_id, target.oid, target_dist,
-                                snap.class, &snap.hero_magics, snap.behaviour,
-                                &hero_combat, &mut attack_intents, &mut support_intents,
+                                snap.session_id,
+                                target.oid,
+                                target_dist,
+                                snap.class,
+                                &snap.hero_magics,
+                                snap.behaviour,
+                                &hero_combat,
+                                &mut attack_intents,
+                                &mut support_intents,
                             );
                             ai_local.next_attack_tick = self.tick_count + 10;
                         }
                     }
                     MirClass::Archer => {
                         // #1194：C# ArcherHero：PoisonShot（已学+目标无绿毒+无 buff）→ StraightShot（MC/MAC）→ 近战
-                        let poison_lv = hero_magic_level(&snap.hero_magics, Spell::PoisonShot as u8);
-                        let straight_lv = hero_magic_level(&snap.hero_magics, Spell::StraightShot as u8);
-                        let has_poison_buff = ai_local.buffs.iter().any(|b| b.kind == HeroBuffKind::PoisonShot);
+                        let poison_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::PoisonShot as u8);
+                        let straight_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::StraightShot as u8);
+                        let has_poison_buff = ai_local
+                            .buffs
+                            .iter()
+                            .any(|b| b.kind == HeroBuffKind::PoisonShot);
                         // #1537：C# ArcherHero ElementalShot 聚球条件（GetElementalOrbCount<1；需 Meditation）
-                        let elemental_lv = hero_magic_level(&snap.hero_magics, Spell::ElementalShot as u8);
-                        let meditation_lv = hero_magic_level(&snap.hero_magics, Spell::Meditation as u8);
-                        let orb_count = crate::actors::world::elements::elemental_orb_count(ai_local.elements_level, &orbs_exp);
+                        let elemental_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::ElementalShot as u8);
+                        let meditation_lv =
+                            hero_magic_level(&snap.hero_magics, Spell::Meditation as u8);
+                        let orb_count = crate::actors::world::elements::elemental_orb_count(
+                            ai_local.elements_level,
+                            &orbs_exp,
+                        );
                         let can_elemental = elemental_lv > 0 && meditation_lv > 0 && orb_count < 1;
                         if poison_lv > 0 && !target.has_green && !has_poison_buff {
                             // #1194：C# SpecialArrowShot：PoisonShot 魔法箭（MC 伤害/MAC 防御）
@@ -1850,7 +2343,11 @@ impl WorldActor {
                                 &hero_stats,
                                 snap.class,
                             );
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::PoisonShot as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::PoisonShot as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 spell_intents.push((
@@ -1868,8 +2365,12 @@ impl WorldActor {
                                     ai_local.buffs.push(HeroBuff {
                                         kind: HeroBuffKind::PoisonShot,
                                         expire_tick: self.tick_count
-                                            + hero_buff_duration(&self.magic_infos, HeroBuffKind::PoisonShot, poison_lv, &snap.hero_stats)
-                                                * 10,
+                                            + hero_buff_duration(
+                                                &self.magic_infos,
+                                                HeroBuffKind::PoisonShot,
+                                                poison_lv,
+                                                &snap.hero_stats,
+                                            ) * 10,
                                         level: poison_lv,
                                         hero_level: snap.hero_level,
                                     });
@@ -1877,29 +2378,50 @@ impl WorldActor {
                                 ai_local.next_attack_tick = self.tick_count + 8;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
                             }
                         } else if can_elemental {
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::ElementalShot as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::ElementalShot as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 // C# ObtainElement(true)：ElementsLevel = OrbsExpList[0]；Meditation Lv3 → [1]（GatherOrbsPerLevel）
-                                ai_local.elements_level = if meditation_lv >= 3 && orbs_exp.len() > 1 {
-                                    orbs_exp[1]
-                                } else {
-                                    orbs_exp[0]
-                                };
-                                magic_anim_intents.push((snap.session_id, Spell::ElementalShot as u8, target.oid));
+                                ai_local.elements_level =
+                                    if meditation_lv >= 3 && orbs_exp.len() > 1 {
+                                        orbs_exp[1]
+                                    } else {
+                                        orbs_exp[0]
+                                    };
+                                magic_anim_intents.push((
+                                    snap.session_id,
+                                    Spell::ElementalShot as u8,
+                                    target.oid,
+                                ));
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
@@ -1912,7 +2434,11 @@ impl WorldActor {
                                 &hero_stats,
                                 snap.class,
                             );
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::StraightShot as u8);
+                            let cost = hero_spell_cost(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::StraightShot as u8,
+                            );
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 spell_intents.push((
@@ -1927,7 +2453,8 @@ impl WorldActor {
                                 ));
                                 // #1194：PoisonShot buff 生效时本次射击附加绿毒（C# CompleteRangeAttack 取消 buff 并 ApplyPoison）
                                 if has_poison_buff {
-                                    let duration = (raw * 2 + (straight_lv as i32 + 1) * 7).max(1) as u32;
+                                    let duration =
+                                        (raw * 2 + (straight_lv as i32 + 1) * 7).max(1) as u32;
                                     let pv = hero_poison_shot_value(
                                         raw,
                                         straight_lv as i32,
@@ -1941,22 +2468,36 @@ impl WorldActor {
                                         pv,
                                         2000,
                                     ));
-                                    ai_local.buffs.retain(|b| b.kind != HeroBuffKind::PoisonShot);
+                                    ai_local
+                                        .buffs
+                                        .retain(|b| b.kind != HeroBuffKind::PoisonShot);
                                 }
                                 ai_local.next_attack_tick = self.tick_count + 7;
                             } else {
                                 let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    snap.class, &snap.hero_magics, snap.behaviour,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                    snap.session_id,
+                                    target.oid,
+                                    target_dist,
+                                    snap.class,
+                                    &snap.hero_magics,
+                                    snap.behaviour,
+                                    &hero_combat,
+                                    &mut attack_intents,
+                                    &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
                             }
                         } else {
                             let _ = hero_melee_fallback(
-                                snap.session_id, target.oid, target_dist,
-                                snap.class, &snap.hero_magics, snap.behaviour,
-                                &hero_combat, &mut attack_intents, &mut support_intents,
+                                snap.session_id,
+                                target.oid,
+                                target_dist,
+                                snap.class,
+                                &snap.hero_magics,
+                                snap.behaviour,
+                                &hero_combat,
+                                &mut attack_intents,
+                                &mut support_intents,
                             );
                             ai_local.next_attack_tick = self.tick_count + 6;
                         }
@@ -1976,7 +2517,6 @@ impl WorldActor {
                         .saturating_sub(haste_ticks)
                         .max(self.tick_count + 2);
                 }
-
             } else if target_dist > attack_range && can_move {
                 // ===== 不在攻击范围：移动靠近目标（ProcessTarget.MoveTo） =====
                 if let Some((nx, ny, dir)) = hero_path_step(
@@ -2087,8 +2627,13 @@ impl WorldActor {
             };
             let spell = hero_owner_shield_spell(*kind);
             let buff_lv = hero_magic_level(&snap.hero_magics, spell as u8);
-            let (buff_type, ticks) =
-                hero_owner_shield_buff(*kind, snap.class, snap.owner_level, buff_lv, &snap.hero_stats);
+            let (buff_type, ticks) = hero_owner_shield_buff(
+                *kind,
+                snap.class,
+                snap.owner_level,
+                buff_lv,
+                &snap.hero_stats,
+            );
             let _ = record
                 .actor_ref
                 .ask(crate::actors::player::ApplyBuff {
@@ -2104,7 +2649,10 @@ impl WorldActor {
         // ===== 阶段 2.4c：道士英雄净化主人（#1210：C# Purification → PurifyPoisons） =====
         for session_id in &purify_intents {
             if let Some(record) = self.players.get(session_id).map(|r| r.clone()) {
-                let _ = record.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::PurifyPoisons)
+                    .await;
                 debug!("Hero Taoist purified owner {}", session_id);
             }
         }
@@ -2140,13 +2688,16 @@ impl WorldActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: snap.session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::HeroHealthChanged as i16,
-                        &body,
-                    ),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: snap.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::HeroHealthChanged as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
             if let Some(ai) = self.hero_ai_states.get_mut(&snap.session_id) {
                 ai.last_sent_hp = hp;
@@ -2155,7 +2706,11 @@ impl WorldActor {
             // #1141：英雄头顶血条（C# S.ObjectHealth：percent + expire 秒，客户端挂 ActorHp）
             if let Some(record) = self.players.get(&snap.session_id) {
                 let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
-                let max_hp = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.max_hp).unwrap_or(hp);
+                let max_hp = self
+                    .hero_ai_states
+                    .get(&snap.session_id)
+                    .map(|ai| ai.max_hp)
+                    .unwrap_or(hp);
                 let percent = (hp * 100 / max_hp.max(1)).min(100) as u8;
                 let ohealth = mir2_shared::packets::server::object::ObjectHealth {
                     object_id: hero_oid,
@@ -2176,16 +2731,23 @@ impl WorldActor {
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.map_index == owner_map {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: data.clone(),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: data.clone(),
+                                    })
+                                    .await;
                             }
                         }
                     }
                 }
                 // #1794：英雄头顶蓝条（C# HeroObject.BroadcastManaChange → Owner.Enqueue(S.ObjectMana)）
-                let max_mp = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.max_mp).unwrap_or(mp);
+                let max_mp = self
+                    .hero_ai_states
+                    .get(&snap.session_id)
+                    .map(|ai| ai.max_mp)
+                    .unwrap_or(mp);
                 let omana = mir2_shared::packets::server::object::ObjectMana {
                     object_id: hero_oid,
                     percent: hero_mana_percent(mp, max_mp),
@@ -2197,10 +2759,13 @@ impl WorldActor {
                         &omana_body,
                     );
                     // C# 只发主人（Owner.Enqueue）
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: snap.session_id,
-                        data,
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: snap.session_id,
+                            data,
+                        })
+                        .await;
                 }
             }
             debug!("Hero HP changed: session={} hp={}", snap.session_id, hp);
@@ -2236,10 +2801,13 @@ impl WorldActor {
             for (sid, other) in &self.players {
                 if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == owner_map {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid,
-                            data: walk_packet.clone(),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: walk_packet.clone(),
+                            })
+                            .await;
                     }
                 }
             }
@@ -2251,7 +2819,8 @@ impl WorldActor {
                 Some(s) => s.hero_combat,
                 None => continue,
             };
-            let hero_level = snapshots.iter()
+            let hero_level = snapshots
+                .iter()
                 .find(|s| s.session_id == *session_id)
                 .map(|s| s.hero_level)
                 .unwrap_or(0);
@@ -2263,7 +2832,11 @@ impl WorldActor {
             // #1456：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
             let level_offset = combat_attack::level_offset(hero_level, monster_level);
             let result = combat_attack::resolve_attack(
-                &attacker_stats, &defender_stats, *raw_damage, *defence, level_offset,
+                &attacker_stats,
+                &defender_stats,
+                *raw_damage,
+                *defence,
+                level_offset,
             );
             if result.is_hit && result.damage > 0 {
                 if let Some(monster) = self.monsters.get_mut(target_oid) {
@@ -2276,17 +2849,25 @@ impl WorldActor {
                     // 怪物循环 hp<=0 时被清掉，导致主人/英雄拿不到击杀经验归属
                     monster.register_hit(*session_id, self.tick_count);
                     // #1735：英雄物理攻击命中广播（与玩家一致：ObjectStruck/DamageIndicator/ObjectHealth）
-                    let owner_oid = self.players.get(session_id).map(|r| r.object_id).unwrap_or(0);
+                    let owner_oid = self
+                        .players
+                        .get(session_id)
+                        .map(|r| r.object_id)
+                        .unwrap_or(0);
                     let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
-                    let (hx, hy) = self.hero_ai_states.get(session_id)
+                    let (hx, hy) = self
+                        .hero_ai_states
+                        .get(session_id)
                         .map(|ai| (ai.x, ai.y))
-                        .unwrap_or_else(|| snapshots.iter()
-                            .find(|s| s.session_id == *session_id)
-                            .map(|s| (s.owner_x, s.owner_y))
-                            .unwrap_or((monster.x, monster.y)));
-                    monster.direction = crate::actors::world::ai::direction_towards(
-                        monster.x, monster.y, hx, hy,
-                    );
+                        .unwrap_or_else(|| {
+                            snapshots
+                                .iter()
+                                .find(|s| s.session_id == *session_id)
+                                .map(|s| (s.owner_x, s.owner_y))
+                                .unwrap_or((monster.x, monster.y))
+                        });
+                    monster.direction =
+                        crate::actors::world::ai::direction_towards(monster.x, monster.y, hx, hy);
                     let mut struck_body = Vec::new();
                     struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     struck_body.extend_from_slice(&hero_oid.to_le_bytes());
@@ -2294,20 +2875,27 @@ impl WorldActor {
                     struck_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
                     struck_body.push(monster.direction);
                     let struck_packet = build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16,
+                        &struck_body,
+                    );
                     let mut dmg_body = Vec::new();
                     dmg_body.extend_from_slice(&result.damage.to_le_bytes());
                     dmg_body.push(if result.is_critical { 5u8 } else { 0u8 }); // damage_type: 0=Hit 5=Critical
                     dmg_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-                    let percent = ((monster.hp.max(0) as f32 / monster.max_hp.max(1) as f32) * 100.0) as u8;
+                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16,
+                        &dmg_body,
+                    );
+                    let percent =
+                        ((monster.hp.max(0) as f32 / monster.max_hp.max(1) as f32) * 100.0) as u8;
                     let mut health_body = Vec::new();
                     health_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     health_body.push(percent);
                     health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
                     let health_packet = build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16,
+                        &health_body,
+                    );
                     // #1649：动画/飘字/血条广播只发同图玩家（C# CurrentMap.Broadcast）
                     let hit_map = monster.map_index;
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &struck_packet).await;
@@ -2315,7 +2903,12 @@ impl WorldActor {
                     broadcast_to_map(&self.gate_ref, &self.players, hit_map, &health_packet).await;
                     debug!(
                         "Hero (owner {}) attacked monster '{}' (#{}) for {} dmg [hit={}, crit={}]",
-                        session_id, monster.name, target_oid, result.damage, result.is_hit, result.is_critical
+                        session_id,
+                        monster.name,
+                        target_oid,
+                        result.damage,
+                        result.is_hit,
+                        result.is_critical
                     );
                 }
             }
@@ -2375,7 +2968,10 @@ impl WorldActor {
                         spell_shared: *spell,
                         // #1230：C# LevelMagic exp = Random.Next(3)+1（英雄继承 HumanObject）
                         amount: (1 + fastrand::i32(0..3)) as u16,
-                        info: self.magic_infos.get(&((*spell).saturating_sub(3) as u32)).cloned(),
+                        info: self
+                            .magic_infos
+                            .get(&((*spell).saturating_sub(3) as u32))
+                            .cloned(),
                     })
                     .await
                     .unwrap_or(None)
@@ -2391,12 +2987,16 @@ impl WorldActor {
                         };
                         let mut md_body = Vec::new();
                         if md.write_body(&mut md_body).is_ok() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *session_id,
-                                data: build_packet_bytes(
-                                    mir2_shared::enums::ServerPacketIds::MagicDelay as i16, &md_body,
-                                ),
-                            }).await;
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::MagicDelay as i16,
+                                        &md_body,
+                                    ),
+                                })
+                                .await;
                         }
                     }
                     let leveled = mir2_shared::packets::server::magic::MagicLeveled {
@@ -2428,12 +3028,18 @@ impl WorldActor {
             if *is_heal {
                 // 道士治疗主人：直接 Heal（#1184：C# Healing = GetAttackPower(MinSC,MaxSC)*2 + Level）
                 if let Some(record) = self.players.get(heal_target_session) {
-                    let amount = snapshots.iter()
+                    let amount = snapshots
+                        .iter()
                         .find(|s| s.session_id == *session_id)
                         .map(|s| {
                             // #1214：MassHealing 用群疗量（C# GetDamage(SC)），单疗用原公式
                             if *spell_id == mir2_shared::enums::Spell::MassHealing as u8 {
-                                hero_mass_heal_amount(&self.magic_infos, &s.hero_magics, &s.hero_stats, s.class)
+                                hero_mass_heal_amount(
+                                    &self.magic_infos,
+                                    &s.hero_magics,
+                                    &s.hero_stats,
+                                    s.class,
+                                )
                             } else {
                                 hero_heal_amount(
                                     &self.magic_infos,
@@ -2444,8 +3050,14 @@ impl WorldActor {
                             }
                         })
                         .unwrap_or(5);
-                    let _ = record.actor_ref.ask(crate::actors::player::Heal { amount }).await;
-                    debug!("Hero healed owner {} for {} HP", heal_target_session, amount);
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::Heal { amount })
+                        .await;
+                    debug!(
+                        "Hero healed owner {} for {} HP",
+                        heal_target_session, amount
+                    );
                 }
             }
             // #1208：支持类法术改由 3g 广播 ObjectMagic；此处仅广播物理技能（Attack → S.ObjectAttack）
@@ -2474,7 +3086,11 @@ impl WorldActor {
                 &attack_body,
             );
             let hero_map = match self.players.get(session_id) {
-                Some(rec) => match rec.actor_ref.ask(crate::actors::player::GetPlayerState).await {
+                Some(rec) => match rec
+                    .actor_ref
+                    .ask(crate::actors::player::GetPlayerState)
+                    .await
+                {
                     Ok(Some(st)) => st.map_index,
                     _ => 0,
                 },
@@ -2515,16 +3131,27 @@ impl WorldActor {
             body.extend_from_slice(&target_oid.to_le_bytes());
             body.push(percent);
             body.extend_from_slice(&expire.to_le_bytes());
-            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &body);
+            let pkt = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ObjectHealth as i16,
+                &body,
+            );
             for (sid, r) in &self.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == m_map {
-                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: pkt.clone() }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: pkt.clone(),
+                            })
+                            .await;
                     }
                 }
             }
-            debug!("Hero {} Revelation: reveal monster {} until tick {} ({}s)",
-                   session_id, target_oid, until, expire);
+            debug!(
+                "Hero {} Revelation: reveal monster {} until tick {} ({}s)",
+                session_id, target_oid, until, expire
+            );
         }
 
         // 3f. 应用法师英雄 AoE（#1200/#1204：C# FireBang/IceStorm 3x3、FlameField/ThunderStorm 5x5，MAC）
@@ -2555,14 +3182,17 @@ impl WorldActor {
             for mid in &hit_ids {
                 if let Some(monster) = self.monsters.get_mut(mid) {
                     // #1204：ThunderStorm 对非亡灵伤害 /10（C# Map.cs）
-                    let dmg = if *spell == mir2_shared::enums::Spell::ThunderStorm as u8 && !monster.undead {
+                    let dmg = if *spell == mir2_shared::enums::Spell::ThunderStorm as u8
+                        && !monster.undead
+                    {
                         (*raw / 10).max(1)
                     } else {
                         *raw
                     };
                     let ds = monster.to_combat_stats();
                     // #1456：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
-                    let level_offset = combat_attack::level_offset(hero_level, monster.level.max(0) as u16);
+                    let level_offset =
+                        combat_attack::level_offset(hero_level, monster.level.max(0) as u16);
                     let r = combat_attack::resolve_attack(
                         &attacker_stats,
                         &ds,
@@ -2585,7 +3215,11 @@ impl WorldActor {
             }
             debug!(
                 "Hero Wizard AoE spell={} at ({},{}) dmg={} hits={}",
-                spell, tx, ty, raw, hit_ids.len()
+                spell,
+                tx,
+                ty,
+                raw,
+                hit_ids.len()
             );
         }
 
@@ -2624,7 +3258,9 @@ impl WorldActor {
     /// 标记死亡（DB 持久化）+ 移除英雄对象 + 下发 S.HeroHealthChanged(0) + 系统消息。
     /// 复活复用现有 REVIVEHERO（npc.rs 已按 hero.dead / AI HP<=0 判定）。
     async fn hero_die(&mut self, session_id: u64) {
-        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let Some(record) = self.players.get(&session_id).cloned() else {
+            return;
+        };
         let state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,
@@ -2638,14 +3274,25 @@ impl WorldActor {
             }
         }
         if died {
-            let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&session_id)
-                .map(|hs| hs.iter().map(|h| db::DbHero {
-                    index: h.index, name: h.name.clone(), level: h.level,
-                    class: h.class as u8, gender: h.gender as u8,
-                    dead: h.dead, sealed: h.sealed, autopot: h.autopot,
-                    experience: h.experience,
-                    max_experience: h.max_experience,
-                }).collect())
+            let db_heroes: Vec<db::DbHero> = self
+                .player_heroes
+                .get(&session_id)
+                .map(|hs| {
+                    hs.iter()
+                        .map(|h| db::DbHero {
+                            index: h.index,
+                            name: h.name.clone(),
+                            level: h.level,
+                            class: h.class as u8,
+                            gender: h.gender as u8,
+                            dead: h.dead,
+                            sealed: h.sealed,
+                            autopot: h.autopot,
+                            experience: h.experience,
+                            max_experience: h.max_experience,
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on hero death: {}", e);
@@ -2657,16 +3304,26 @@ impl WorldActor {
         let packet = mir2_shared::packets::server::combat::HeroHealthChanged { hp: 0, mp: 0 };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::HeroHealthChanged as i16,
-                    &body,
-                ),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HeroHealthChanged as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
-        send_system_message(&self.gate_ref, session_id, "英雄已阵亡，请找 NPC 复活（REVIVEHERO）");
-        info!("Hero died: session={} hero_index={}", session_id, state.hero_index);
+        send_system_message(
+            &self.gate_ref,
+            session_id,
+            "英雄已阵亡，请找 NPC 复活（REVIVEHERO）",
+        );
+        info!(
+            "Hero died: session={} hero_index={}",
+            session_id, state.hero_index
+        );
     }
 
     /// 英雄经验发放（#1142/#1163，对齐 C# HeroObject.GainExp/LevelUp）：
@@ -2676,7 +3333,9 @@ impl WorldActor {
         if amount == 0 {
             return;
         }
-        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let Some(record) = self.players.get(&session_id).cloned() else {
+            return;
+        };
         let state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,
@@ -2684,7 +3343,9 @@ impl WorldActor {
         if state.hero_index == 0 || state.is_dead {
             return;
         }
-        let Some(hero) = self.player_heroes.get_mut(&session_id)
+        let Some(hero) = self
+            .player_heroes
+            .get_mut(&session_id)
             .and_then(|hs| hs.iter_mut().find(|h| h.index as u8 == state.hero_index))
         else {
             return;
@@ -2698,7 +3359,8 @@ impl WorldActor {
             hero.experience -= hero.max_experience;
             hero.level += 1;
             // #2418：C# HeroExperienceList[Level-1]（默认 100/级，缺省回退）
-            hero.max_experience = self.hero_exp_list
+            hero.max_experience = self
+                .hero_exp_list
                 .get(hero.level.saturating_sub(1) as usize)
                 .copied()
                 .unwrap_or(super::hero_stats::HERO_MAX_EXPERIENCE);
@@ -2714,13 +3376,16 @@ impl WorldActor {
         let pkt = mir2_shared::packets::server::experience::GainHeroExperience { amount };
         let mut body = Vec::new();
         if pkt.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::GainHeroExperience as i16,
-                    &body,
-                ),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::GainHeroExperience as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
         if leveled {
             // S.HeroLevelChanged（C# Hero.LevelUp → Owner.Enqueue）
@@ -2731,23 +3396,37 @@ impl WorldActor {
             };
             let mut lvl_body = Vec::new();
             if lvl_pkt.write_body(&mut lvl_body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::HeroLevelChanged as i16,
-                        &lvl_body,
-                    ),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::HeroLevelChanged as i16,
+                            &lvl_body,
+                        ),
+                    })
+                    .await;
             }
             // DB 持久化等级
-            let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&session_id)
-                .map(|hs| hs.iter().map(|h| db::DbHero {
-                    index: h.index, name: h.name.clone(), level: h.level,
-                    class: h.class as u8, gender: h.gender as u8,
-                    dead: h.dead, sealed: h.sealed, autopot: h.autopot,
-                    experience: h.experience,
-                    max_experience: h.max_experience,
-                }).collect())
+            let db_heroes: Vec<db::DbHero> = self
+                .player_heroes
+                .get(&session_id)
+                .map(|hs| {
+                    hs.iter()
+                        .map(|h| db::DbHero {
+                            index: h.index,
+                            name: h.name.clone(),
+                            level: h.level,
+                            class: h.class as u8,
+                            gender: h.gender as u8,
+                            dead: h.dead,
+                            sealed: h.sealed,
+                            autopot: h.autopot,
+                            experience: h.experience,
+                            max_experience: h.max_experience,
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on hero level up: {}", e);
@@ -2756,7 +3435,10 @@ impl WorldActor {
             self.broadcast_hero_spawn(session_id).await;
             info!("🦸 Hero {} leveled to Lv.{}", hero_name, hero_level);
         }
-        debug!("Hero {} gained {} exp (total {}, Lv.{})", hero_name, amount, hero_exp, hero_level);
+        debug!(
+            "Hero {} gained {} exp (total {}, Lv.{})",
+            hero_name, amount, hero_exp, hero_level
+        );
     }
 }
 
@@ -2778,7 +3460,11 @@ fn step_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> (i32, i32, u8
             best_dir = dir;
         }
     }
-    (from_x + DIR_DX[best_dir as usize], from_y + DIR_DY[best_dir as usize], best_dir)
+    (
+        from_x + DIR_DX[best_dir as usize],
+        from_y + DIR_DY[best_dir as usize],
+        best_dir,
+    )
 }
 
 /// 远离目标走一步（逃跑用）
@@ -2805,10 +3491,13 @@ fn hero_path_step(
 ) -> Option<(i32, i32, u8)> {
     let path = paths.entry(hero_session).or_default();
     let recalc = path.is_empty()
-        || targets.get(&hero_session)
+        || targets
+            .get(&hero_session)
             .map(|(k, px, py)| *k != kind || *px != tx || *py != ty)
             .unwrap_or(true)
-        || !map.map(|m| m.is_walkable(path[0].0, path[0].1)).unwrap_or(false);
+        || !map
+            .map(|m| m.is_walkable(path[0].0, path[0].1))
+            .unwrap_or(false);
     if recalc {
         *path = map
             .and_then(|m| crate::maps::pathfind::find_path(m, (from_x, from_y), (tx, ty)))
@@ -2861,7 +3550,8 @@ fn hero_equip_poison_shape(
     equipment: &[Option<mir2_shared::data::item::UserItem>],
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
 ) -> i32 {
-    let Some(Some(item)) = equipment.get(crate::actors::inventory::EquipmentSlot::Pendant as usize) else {
+    let Some(Some(item)) = equipment.get(crate::actors::inventory::EquipmentSlot::Pendant as usize)
+    else {
         return 0;
     };
     let Some(info) = item_infos.get(&item.item_index) else {
@@ -2883,7 +3573,8 @@ fn hero_has_amulet(
     equipment: &[Option<mir2_shared::data::item::UserItem>],
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
 ) -> bool {
-    let Some(Some(item)) = equipment.get(crate::actors::inventory::EquipmentSlot::Pendant as usize) else {
+    let Some(Some(item)) = equipment.get(crate::actors::inventory::EquipmentSlot::Pendant as usize)
+    else {
         return false;
     };
     let Some(info) = item_infos.get(&item.item_index) else {
@@ -2941,7 +3632,12 @@ fn hero_surrounded_count(monsters: &[(u32, i32, i32)], x: i32, y: i32, range: i3
 }
 
 /// 目标 1 格内是否还有其他怪（#1200：C# WizardHero TargetSurroundedCount > 1）
-fn hero_target_surrounded(monsters: &[(u32, i32, i32)], target_oid: u32, target_x: i32, target_y: i32) -> bool {
+fn hero_target_surrounded(
+    monsters: &[(u32, i32, i32)],
+    target_oid: u32,
+    target_x: i32,
+    target_y: i32,
+) -> bool {
     monsters.iter().any(|(oid, x, y)| {
         *oid != target_oid && (x - target_x).abs() <= 1 && (y - target_y).abs() <= 1
     })
@@ -2972,18 +3668,15 @@ fn hero_owner_shield_buff(
         OwnerShieldKind::BlessedArmour => HeroBuffKind::BlessedArmour,
         OwnerShieldKind::UltimateEnhancer => HeroBuffKind::UltimateEnhancer,
     };
-    let ticks = (hero_buff_duration(&std::collections::HashMap::new(), hero_kind, buff_lv, stats) * 10) as u32;
+    let ticks = (hero_buff_duration(&std::collections::HashMap::new(), hero_kind, buff_lv, stats)
+        * 10) as u32;
     let buff = match kind {
-        OwnerShieldKind::SoulShield => {
-            BuffType::MacDefenseBoost {
-                bonus: owner_level as i32 / 7 + 4,
-            }
-        }
-        OwnerShieldKind::BlessedArmour => {
-            BuffType::AcDefenseBoost {
-                bonus: owner_level as i32 / 7 + 4,
-            }
-        }
+        OwnerShieldKind::SoulShield => BuffType::MacDefenseBoost {
+            bonus: owner_level as i32 / 7 + 4,
+        },
+        OwnerShieldKind::BlessedArmour => BuffType::AcDefenseBoost {
+            bonus: owner_level as i32 / 7 + 4,
+        },
         OwnerShieldKind::UltimateEnhancer => {
             let value = if stats.max_sc >= 5 {
                 (stats.max_sc / 5).min(8)
@@ -3037,7 +3730,12 @@ fn hero_repulsion_succeeds(spell_level: u8, hero_level: i32, target_level: i32) 
     hero_repulsion_succeeds_with(fastrand::i32(0..20), spell_level, hero_level, target_level)
 }
 
-fn hero_repulsion_succeeds_with(roll: i32, spell_level: u8, hero_level: i32, target_level: i32) -> bool {
+fn hero_repulsion_succeeds_with(
+    roll: i32,
+    spell_level: u8,
+    hero_level: i32,
+    target_level: i32,
+) -> bool {
     roll < 6 + spell_level as i32 * 3 + hero_level - target_level
 }
 
@@ -3119,32 +3817,24 @@ fn hero_friend_buffs(
 ) -> &'static [(mir2_shared::enums::Spell, HeroBuffKind)] {
     use mir2_shared::enums::{MirClass, Spell};
     match class {
-        MirClass::Warrior => {
-            &[
-                (Spell::Rage, HeroBuffKind::Rage),
-                (Spell::ProtectionField, HeroBuffKind::ProtectionField),
-            ]
-        }
-        MirClass::Assassin => {
-            &[
-                (Spell::Haste, HeroBuffKind::Haste),
-                (Spell::LightBody, HeroBuffKind::LightBody),
-            ]
-        }
-        MirClass::Wizard => {
-            &[
-                (Spell::MagicShield, HeroBuffKind::MagicShield),
-                (Spell::MagicBooster, HeroBuffKind::MagicBooster),
-            ]
-        }
+        MirClass::Warrior => &[
+            (Spell::Rage, HeroBuffKind::Rage),
+            (Spell::ProtectionField, HeroBuffKind::ProtectionField),
+        ],
+        MirClass::Assassin => &[
+            (Spell::Haste, HeroBuffKind::Haste),
+            (Spell::LightBody, HeroBuffKind::LightBody),
+        ],
+        MirClass::Wizard => &[
+            (Spell::MagicShield, HeroBuffKind::MagicShield),
+            (Spell::MagicBooster, HeroBuffKind::MagicBooster),
+        ],
         MirClass::Archer => &[(Spell::Concentration, HeroBuffKind::Concentration)],
-        MirClass::Taoist => {
-            &[
-                (Spell::SoulShield, HeroBuffKind::SoulShield),
-                (Spell::BlessedArmour, HeroBuffKind::BlessedArmour),
-                (Spell::UltimateEnhancer, HeroBuffKind::UltimateEnhancer),
-            ]
-        }
+        MirClass::Taoist => &[
+            (Spell::SoulShield, HeroBuffKind::SoulShield),
+            (Spell::BlessedArmour, HeroBuffKind::BlessedArmour),
+            (Spell::UltimateEnhancer, HeroBuffKind::UltimateEnhancer),
+        ],
         _ => &[],
     }
 }
@@ -3168,9 +3858,12 @@ fn hero_buff_duration(
             let spell_cs = (mir2_shared::enums::Spell::MagicShield as u8 as i32).saturating_sub(3);
             let mc = crate::combat::attack::get_attack_power(stats.min_mc, stats.max_mc, 0).max(1);
             match magic_infos.get(&(spell_cs as u32)) {
-                Some(info) => {
-                    (crate::combat::magic::magic_power_with_base(info, level.min(255) as u8, mc + 15) as u64).max(1)
-                }
+                Some(info) => (crate::combat::magic::magic_power_with_base(
+                    info,
+                    level.min(255) as u8,
+                    mc + 15,
+                ) as u64)
+                    .max(1),
                 None => 30 + 10 * level, // 无 MagicInfo 兜底（保持原近似）
             }
         }
@@ -3178,9 +3871,7 @@ fn hero_buff_duration(
         HeroBuffKind::Concentration => 45 + 15 * level,
         // #1194：C# SpecialArrowShot：PoisonShot buff = 5 + 5*Lv 秒
         HeroBuffKind::PoisonShot => 5 + 5 * level,
-        HeroBuffKind::SoulShield
-        | HeroBuffKind::BlessedArmour
-        | HeroBuffKind::UltimateEnhancer => {
+        HeroBuffKind::SoulShield | HeroBuffKind::BlessedArmour | HeroBuffKind::UltimateEnhancer => {
             let sc = if stats.max_sc > stats.min_sc {
                 (stats.min_sc + stats.max_sc) / 2
             } else {
@@ -3245,8 +3936,9 @@ fn hero_apply_buffs(
                 match class {
                     mir2_shared::enums::MirClass::Warrior
                     | mir2_shared::enums::MirClass::Assassin => combat.max_atk += value,
-                    mir2_shared::enums::MirClass::Wizard
-                    | mir2_shared::enums::MirClass::Archer => stats.max_mc += value,
+                    mir2_shared::enums::MirClass::Wizard | mir2_shared::enums::MirClass::Archer => {
+                        stats.max_mc += value
+                    }
                     mir2_shared::enums::MirClass::Taoist => stats.max_sc += value,
                     _ => {}
                 }
@@ -3296,12 +3988,24 @@ fn hero_warrior_melee_skill(hero_magics: &[(i32, u8)]) -> Option<(mir2_shared::e
 fn hero_has_ranged_spell(hero_magics: &[(i32, u8)]) -> bool {
     use mir2_shared::enums::Spell;
     const RANGED: &[Spell] = &[
-        Spell::FireBall, Spell::ThunderBolt, Spell::FireBang, Spell::FireWall,
-        Spell::FrostCrunch, Spell::Vampirism, Spell::FlameDisruptor, Spell::IceStorm,
-        Spell::MeteorStrike, Spell::Blizzard, Spell::SoulFireBall, Spell::StraightShot,
-        Spell::ElementalShot, Spell::PoisonShot,
+        Spell::FireBall,
+        Spell::ThunderBolt,
+        Spell::FireBang,
+        Spell::FireWall,
+        Spell::FrostCrunch,
+        Spell::Vampirism,
+        Spell::FlameDisruptor,
+        Spell::IceStorm,
+        Spell::MeteorStrike,
+        Spell::Blizzard,
+        Spell::SoulFireBall,
+        Spell::StraightShot,
+        Spell::ElementalShot,
+        Spell::PoisonShot,
     ];
-    RANGED.iter().any(|s| hero_magic_level(hero_magics, *s as u8) > 0)
+    RANGED
+        .iter()
+        .any(|s| hero_magic_level(hero_magics, *s as u8) > 0)
 }
 
 /// 英雄法术伤害（#1188：C# GetDamage = (DamageBase + GetPower()) * GetMultiplier()）
@@ -3346,14 +4050,22 @@ fn hero_melee_fallback(
     // 远程英雄（有 Globals.RangedSpells 技能）在其他行为下不近战（C# 返回/走位）。
     // ArcherHero 近战条件不同（有职业武器即可近战），保持既有行为。
     let may_melee = match class {
-        mir2_shared::enums::MirClass::Wizard | mir2_shared::enums::MirClass::Taoist =>
-            (!hero_has_ranged_spell(hero_magics) || behaviour == HERO_BEHAVIOUR_ATTACK) && target_dist <= 1,
+        mir2_shared::enums::MirClass::Wizard | mir2_shared::enums::MirClass::Taoist => {
+            (!hero_has_ranged_spell(hero_magics) || behaviour == HERO_BEHAVIOUR_ATTACK)
+                && target_dist <= 1
+        }
         _ => target_dist <= 1,
     };
     if may_melee {
         let mraw = hero_attack_power(combat);
         // C# HumanObject.cs:3066 默认近战防御 ACAgility
-        attack_intents.push((session_id, target_oid, mraw, mir2_shared::enums::DefenceType::AcAgility, false));
+        attack_intents.push((
+            session_id,
+            target_oid,
+            mraw,
+            mir2_shared::enums::DefenceType::AcAgility,
+            false,
+        ));
         support_intents.push((session_id, 0, mir2_shared::enums::Spell::None as u8, false));
         true
     } else {
@@ -3460,7 +4172,8 @@ async fn broadcast_hero_magic(
         },
         None => 0,
     };
-    crate::actors::world::broadcast_to_map(&world.gate_ref, &world.players, owner_map, &packet).await;
+    crate::actors::world::broadcast_to_map(&world.gate_ref, &world.players, owner_map, &packet)
+        .await;
 }
 
 impl WorldActor {
@@ -3531,10 +4244,13 @@ impl WorldActor {
         for (sid, other) in &self.players {
             if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                 if os.map_index == owner_map {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: packet.clone(),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: *sid,
+                            data: packet.clone(),
+                        })
+                        .await;
                 }
             }
         }
@@ -3558,24 +4274,33 @@ impl WorldActor {
         let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
         let mut body = Vec::new();
         body.extend_from_slice(&hero_oid.to_le_bytes());
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
+        let packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectRemove as i16,
+            &body,
+        );
         for (sid, other) in &self.players {
             match owner_map {
                 Some(map) => {
                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                         if os.map_index == map {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: packet.clone(),
-                            }).await;
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: *sid,
+                                    data: packet.clone(),
+                                })
+                                .await;
                         }
                     }
                 }
                 None => {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: packet.clone(),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: *sid,
+                            data: packet.clone(),
+                        })
+                        .await;
                 }
             }
         }
@@ -3605,12 +4330,30 @@ mod tests {
     fn hero_autopot_from_heroes_restores_persisted() {
         // C#：AutoPot 解锁随 HeroInfo 持久化，重召唤后仍生效
         let heroes = vec![
-            HeroInfo { index: 1, name: "H1".to_string(), level: 1, class: mir2_shared::enums::MirClass::Warrior,
-                gender: mir2_shared::enums::MirGender::Male, dead: false, sealed: false,
-                autopot: true, experience: 0, max_experience: 100 },
-            HeroInfo { index: 2, name: "H2".to_string(), level: 1, class: mir2_shared::enums::MirClass::Wizard,
-                gender: mir2_shared::enums::MirGender::Female, dead: false, sealed: false,
-                autopot: false, experience: 0, max_experience: 100 },
+            HeroInfo {
+                index: 1,
+                name: "H1".to_string(),
+                level: 1,
+                class: mir2_shared::enums::MirClass::Warrior,
+                gender: mir2_shared::enums::MirGender::Male,
+                dead: false,
+                sealed: false,
+                autopot: true,
+                experience: 0,
+                max_experience: 100,
+            },
+            HeroInfo {
+                index: 2,
+                name: "H2".to_string(),
+                level: 1,
+                class: mir2_shared::enums::MirClass::Wizard,
+                gender: mir2_shared::enums::MirGender::Female,
+                dead: false,
+                sealed: false,
+                autopot: false,
+                experience: 0,
+                max_experience: 100,
+            },
         ];
         assert!(hero_autopot_from_heroes(&heroes, 1));
         assert!(!hero_autopot_from_heroes(&heroes, 2));
@@ -3716,16 +4459,36 @@ mod tests {
             mk(Spell::TwinDrakeBlade, 3),
             mk(Spell::FlamingSword, 4),
         ];
-        assert_eq!(hero_warrior_melee_skill(&magics), Some((Spell::FlamingSword, 4)));
+        assert_eq!(
+            hero_warrior_melee_skill(&magics),
+            Some((Spell::FlamingSword, 4))
+        );
         // 无 FlamingSword → TwinDrakeBlade
-        let magics2 = vec![mk(Spell::HalfMoon, 1), mk(Spell::CrossHalfMoon, 2), mk(Spell::TwinDrakeBlade, 3)];
-        assert_eq!(hero_warrior_melee_skill(&magics2), Some((Spell::TwinDrakeBlade, 3)));
+        let magics2 = vec![
+            mk(Spell::HalfMoon, 1),
+            mk(Spell::CrossHalfMoon, 2),
+            mk(Spell::TwinDrakeBlade, 3),
+        ];
+        assert_eq!(
+            hero_warrior_melee_skill(&magics2),
+            Some((Spell::TwinDrakeBlade, 3))
+        );
         // Slaying 优先于一切（C# spell==None 时才进入高阶链）
-        let magics3 = vec![mk(Spell::HalfMoon, 1), mk(Spell::FlamingSword, 2), mk(Spell::Slaying, 5)];
-        assert_eq!(hero_warrior_melee_skill(&magics3), Some((Spell::Slaying, 5)));
+        let magics3 = vec![
+            mk(Spell::HalfMoon, 1),
+            mk(Spell::FlamingSword, 2),
+            mk(Spell::Slaying, 5),
+        ];
+        assert_eq!(
+            hero_warrior_melee_skill(&magics3),
+            Some((Spell::Slaying, 5))
+        );
         // 仅 HalfMoon
         let magics4 = vec![mk(Spell::HalfMoon, 2)];
-        assert_eq!(hero_warrior_melee_skill(&magics4), Some((Spell::HalfMoon, 2)));
+        assert_eq!(
+            hero_warrior_melee_skill(&magics4),
+            Some((Spell::HalfMoon, 2))
+        );
         // 未学 → None
         assert_eq!(hero_warrior_melee_skill(&[]), None);
     }
@@ -3742,7 +4505,10 @@ mod tests {
         assert!(hero_has_ranged_spell(&[mk(Spell::FireBall, 1)]));
         assert!(hero_has_ranged_spell(&[mk(Spell::StraightShot, 2)]));
         // 混合（Slaying + SoulFireBall）
-        assert!(hero_has_ranged_spell(&[mk(Spell::Slaying, 1), mk(Spell::SoulFireBall, 1)]));
+        assert!(hero_has_ranged_spell(&[
+            mk(Spell::Slaying, 1),
+            mk(Spell::SoulFireBall, 1)
+        ]));
     }
 
     #[test]
@@ -3799,26 +4565,73 @@ mod tests {
         let mut atk: Vec<(u64, u32, i32, DefenceType, bool)> = Vec::new();
         let mut sup: Vec<(u64, u64, u8, bool)> = Vec::new();
         // 近战职业：dist<=1 命中，防御 ACAgility（C# HumanObject.cs:3066）
-        let hit = hero_melee_fallback(1, 100, 1, MirClass::Warrior, &[], HERO_BEHAVIOUR_ATTACK, &combat, &mut atk, &mut sup);
+        let hit = hero_melee_fallback(
+            1,
+            100,
+            1,
+            MirClass::Warrior,
+            &[],
+            HERO_BEHAVIOUR_ATTACK,
+            &combat,
+            &mut atk,
+            &mut sup,
+        );
         assert!(hit);
         assert_eq!(atk.len(), 1);
         assert_eq!(atk[0].0, 1);
         assert_eq!(atk[0].1, 100);
-        assert!((5..=9).contains(&atk[0].2), "damage out of range: {}", atk[0].2); // #1414：GetAttackPower 随机 5..9
+        assert!(
+            (5..=9).contains(&atk[0].2),
+            "damage out of range: {}",
+            atk[0].2
+        ); // #1414：GetAttackPower 随机 5..9
         assert_eq!(atk[0].3, DefenceType::AcAgility);
         assert!(!atk[0].4);
         assert_eq!(sup.len(), 1);
         // 距离 2 不攻击
-        let hit2 = hero_melee_fallback(1, 100, 2, MirClass::Warrior, &[], HERO_BEHAVIOUR_ATTACK, &combat, &mut atk, &mut sup);
+        let hit2 = hero_melee_fallback(
+            1,
+            100,
+            2,
+            MirClass::Warrior,
+            &[],
+            HERO_BEHAVIOUR_ATTACK,
+            &combat,
+            &mut atk,
+            &mut sup,
+        );
         assert!(!hit2);
         assert_eq!(atk.len(), 1);
         // 远程法师（已学 FireBall）+ CounterAttack 行为：dist1 也不近战（C# ProcessTarget 门控）
-        let magics = vec![((mir2_shared::enums::Spell::FireBall as u8).saturating_sub(3) as i32, 1u8)];
-        let hit3 = hero_melee_fallback(1, 100, 1, MirClass::Wizard, &magics, 1, &combat, &mut atk, &mut sup);
+        let magics = vec![(
+            (mir2_shared::enums::Spell::FireBall as u8).saturating_sub(3) as i32,
+            1u8,
+        )];
+        let hit3 = hero_melee_fallback(
+            1,
+            100,
+            1,
+            MirClass::Wizard,
+            &magics,
+            1,
+            &combat,
+            &mut atk,
+            &mut sup,
+        );
         assert!(!hit3);
         assert_eq!(atk.len(), 1);
         // 远程法师 + Attack 行为：dist1 近战（C# Attack 行为豁免）
-        let hit4 = hero_melee_fallback(1, 100, 1, MirClass::Wizard, &magics, HERO_BEHAVIOUR_ATTACK, &combat, &mut atk, &mut sup);
+        let hit4 = hero_melee_fallback(
+            1,
+            100,
+            1,
+            MirClass::Wizard,
+            &magics,
+            HERO_BEHAVIOUR_ATTACK,
+            &combat,
+            &mut atk,
+            &mut sup,
+        );
         assert!(hit4);
         assert_eq!(atk.len(), 2);
     }
@@ -3832,7 +4645,10 @@ mod tests {
         assert_eq!(hero_friend_buffs(MirClass::Archer).len(), 1);
         // #1192：道士 SoulShield/BlessedArmour/UltimateEnhancer
         assert_eq!(hero_friend_buffs(MirClass::Taoist).len(), 3);
-        assert_eq!(hero_friend_buffs(MirClass::Warrior)[0].1, HeroBuffKind::Rage);
+        assert_eq!(
+            hero_friend_buffs(MirClass::Warrior)[0].1,
+            HeroBuffKind::Rage
+        );
     }
 
     #[test]
@@ -3840,16 +4656,69 @@ mod tests {
         use mir2_shared::enums::MirClass;
         let stats = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
         // Rage：18+6*Lv；Haste：25+15*Lv；LightBody：(Lv+1)*30；MagicBooster：60
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::Rage, 2, &stats), 30);
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::ProtectionField, 1, &stats), 60);
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::Haste, 2, &stats), 55);
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::LightBody, 1, &stats), 60);
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::MagicBooster, 3, &stats), 60);
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::Rage,
+                2,
+                &stats
+            ),
+            30
+        );
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::ProtectionField,
+                1,
+                &stats
+            ),
+            60
+        );
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::Haste,
+                2,
+                &stats
+            ),
+            55
+        );
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::LightBody,
+                1,
+                &stats
+            ),
+            60
+        );
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::MagicBooster,
+                3,
+                &stats
+            ),
+            60
+        );
 
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::Concentration, 1, &stats), 60);
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::Concentration,
+                1,
+                &stats
+            ),
+            60
+        );
         // #1192：道士护盾 Duration = SC*4 + (Lv+1)*50 秒（Taoist Lv30 SC 中值 = 4）
         assert_eq!(
-            hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::SoulShield, 1, &stats),
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::SoulShield,
+                1,
+                &stats
+            ),
             4 * 4 + (1 + 1) * 50
         );
     }
@@ -3861,8 +4730,18 @@ mod tests {
         let mut combat = base_stats.to_combat_stats();
         let mut stats = base_stats;
         let buffs = vec![
-            HeroBuff { kind: HeroBuffKind::Rage, expire_tick: 0, level: 3, hero_level: 30 },
-            HeroBuff { kind: HeroBuffKind::MagicShield, expire_tick: 0, level: 2, hero_level: 30 },
+            HeroBuff {
+                kind: HeroBuffKind::Rage,
+                expire_tick: 0,
+                level: 3,
+                hero_level: 30,
+            },
+            HeroBuff {
+                kind: HeroBuffKind::MagicShield,
+                expire_tick: 0,
+                level: 2,
+                hero_level: 30,
+            },
         ];
         let shield = hero_apply_buffs(&buffs, MirClass::Warrior, &mut combat, &mut stats);
         // Rage：MaxDC*(0.12+0.03*3)；MagicShield：(2+2)*10=40%
@@ -3874,13 +4753,23 @@ mod tests {
         let wizard_base = super::hero_stats::hero_base_stats(MirClass::Wizard, 30);
         let mut stats2 = wizard_base;
         let mut combat2 = wizard_base.to_combat_stats();
-        let buffs2 = vec![HeroBuff { kind: HeroBuffKind::MagicBooster, expire_tick: 0, level: 2, hero_level: 30 }];
+        let buffs2 = vec![HeroBuff {
+            kind: HeroBuffKind::MagicBooster,
+            expire_tick: 0,
+            level: 2,
+            hero_level: 30,
+        }];
         hero_apply_buffs(&buffs2, MirClass::Wizard, &mut combat2, &mut stats2);
         assert_eq!(stats2.max_mc, wizard_base.max_mc + 18);
         // LightBody：Agility + (Lv+1)*2
         let mut stats3 = base_stats;
         let mut combat3 = base_stats.to_combat_stats();
-        let buffs3 = vec![HeroBuff { kind: HeroBuffKind::LightBody, expire_tick: 0, level: 1, hero_level: 30 }];
+        let buffs3 = vec![HeroBuff {
+            kind: HeroBuffKind::LightBody,
+            expire_tick: 0,
+            level: 1,
+            hero_level: 30,
+        }];
         hero_apply_buffs(&buffs3, MirClass::Assassin, &mut combat3, &mut stats3);
         assert_eq!(combat3.agility, base_stats.agility + 4);
     }
@@ -3893,24 +4782,45 @@ mod tests {
         let mut c1 = base.to_combat_stats();
         let mut s1 = base;
         hero_apply_buffs(
-            &[HeroBuff { kind: HeroBuffKind::SoulShield, expire_tick: 0, level: 1, hero_level: 30 }],
-            MirClass::Taoist, &mut c1, &mut s1,
+            &[HeroBuff {
+                kind: HeroBuffKind::SoulShield,
+                expire_tick: 0,
+                level: 1,
+                hero_level: 30,
+            }],
+            MirClass::Taoist,
+            &mut c1,
+            &mut s1,
         );
         assert_eq!(c1.max_mac, base.max_mac + 8);
         // BlessedArmour：MaxAC = Lv/7+4
         let mut c2 = base.to_combat_stats();
         let mut s2 = base;
         hero_apply_buffs(
-            &[HeroBuff { kind: HeroBuffKind::BlessedArmour, expire_tick: 0, level: 1, hero_level: 28 }],
-            MirClass::Taoist, &mut c2, &mut s2,
+            &[HeroBuff {
+                kind: HeroBuffKind::BlessedArmour,
+                expire_tick: 0,
+                level: 1,
+                hero_level: 28,
+            }],
+            MirClass::Taoist,
+            &mut c2,
+            &mut s2,
         );
         assert_eq!(c2.max_ac, base.max_ac + 8); // 28/7+4 = 8
-        // UltimateEnhancer：道士 → MaxSC += min(8, max(1, MaxSC/5))
+                                                // UltimateEnhancer：道士 → MaxSC += min(8, max(1, MaxSC/5))
         let mut c3 = base.to_combat_stats();
         let mut s3 = base;
         hero_apply_buffs(
-            &[HeroBuff { kind: HeroBuffKind::UltimateEnhancer, expire_tick: 0, level: 1, hero_level: 30 }],
-            MirClass::Taoist, &mut c3, &mut s3,
+            &[HeroBuff {
+                kind: HeroBuffKind::UltimateEnhancer,
+                expire_tick: 0,
+                level: 1,
+                hero_level: 30,
+            }],
+            MirClass::Taoist,
+            &mut c3,
+            &mut s3,
         );
         assert_eq!(s3.max_sc, base.max_sc + 1); // MaxSC=7 → 7/5=1
     }
@@ -3942,21 +4852,24 @@ mod tests {
             },
         );
         // 毒护符装备在 Pendant 槽
-        let mut eq: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
+        let mut eq: Vec<Option<mir2_shared::data::item::UserItem>> =
+            vec![None; EquipmentSlot::COUNT];
         let mut poison = mir2_shared::data::item::UserItem::new(100);
         poison.count = 1;
         eq[EquipmentSlot::Pendant as usize] = Some(poison);
         assert_eq!(hero_equip_poison_shape(&eq, &item_infos), 1);
         assert!(!hero_has_amulet(&eq, &item_infos));
         // 普通护符
-        let mut eq2: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
+        let mut eq2: Vec<Option<mir2_shared::data::item::UserItem>> =
+            vec![None; EquipmentSlot::COUNT];
         let mut amulet = mir2_shared::data::item::UserItem::new(101);
         amulet.count = 1;
         eq2[EquipmentSlot::Pendant as usize] = Some(amulet);
         assert_eq!(hero_equip_poison_shape(&eq2, &item_infos), 0);
         assert!(hero_has_amulet(&eq2, &item_infos));
         // 未装备 → 0/false
-        let empty: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
+        let empty: Vec<Option<mir2_shared::data::item::UserItem>> =
+            vec![None; EquipmentSlot::COUNT];
         assert_eq!(hero_equip_poison_shape(&empty, &item_infos), 0);
         assert!(!hero_has_amulet(&empty, &item_infos));
     }
@@ -3966,13 +4879,28 @@ mod tests {
         use mir2_shared::enums::MirClass;
         let stats = super::hero_stats::hero_base_stats(MirClass::Archer, 30);
         // C#：PoisonShot buff = 5 + 5*Lv 秒
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::PoisonShot, 2, &stats), 15);
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::PoisonShot,
+                2,
+                &stats
+            ),
+            15
+        );
         // PoisonShot 无属性加成
         let mut combat = stats.to_combat_stats();
         let mut s = stats;
         let shield = hero_apply_buffs(
-            &[HeroBuff { kind: HeroBuffKind::PoisonShot, expire_tick: 0, level: 2, hero_level: 30 }],
-            MirClass::Archer, &mut combat, &mut s,
+            &[HeroBuff {
+                kind: HeroBuffKind::PoisonShot,
+                expire_tick: 0,
+                level: 2,
+                hero_level: 30,
+            }],
+            MirClass::Archer,
+            &mut combat,
+            &mut s,
         );
         assert_eq!(shield, 0);
         assert_eq!(combat.max_atk, stats.max_dc);
@@ -3989,7 +4917,10 @@ mod tests {
         let dmg = hero_spell_damage(&map, &[(cs as i32, 1)], shared, &stats, MirClass::Archer);
         // C# 弓箭手技能用 MC（非 DC）
         let mc = (stats.min_mc + stats.max_mc) / 2;
-        assert_eq!(dmg, crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, mc));
+        assert_eq!(
+            dmg,
+            crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, mc)
+        );
         assert!(dmg > 0);
     }
 
@@ -4030,15 +4961,18 @@ mod tests {
         use mir2_shared::enums::MirClass;
         let stats = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
         // SoulShield：主人等级 30 → MacDefenseBoost 30/7+4 = 8；时长 = SC*4+(Lv+1)*50 秒 → ticks ×10
-        let (bt, ticks) = hero_owner_shield_buff(
-            OwnerShieldKind::SoulShield,
-            MirClass::Taoist,
-            30,
-            1,
-            &stats,
-        );
+        let (bt, ticks) =
+            hero_owner_shield_buff(OwnerShieldKind::SoulShield, MirClass::Taoist, 30, 1, &stats);
         assert_eq!(bt, BuffType::MacDefenseBoost { bonus: 8 });
-        assert_eq!(ticks, (hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::SoulShield, 1, &stats) * 10) as u32);
+        assert_eq!(
+            ticks,
+            (hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::SoulShield,
+                1,
+                &stats
+            ) * 10) as u32
+        );
         // BlessedArmour → AcDefenseBoost
         let (bt2, _) = hero_owner_shield_buff(
             OwnerShieldKind::BlessedArmour,
@@ -4119,7 +5053,7 @@ mod tests {
         // 击退距离：1 + max(0, Lv-1) + roll
         assert_eq!(hero_repulsion_distance_with(0, 1), 1);
         assert_eq!(hero_repulsion_distance_with(1, 3), 4); // 1 + 2 + 1
-        // TurnUndead：roll_low + Level - 1 <= 目标等级 → 不杀
+                                                           // TurnUndead：roll_low + Level - 1 <= 目标等级 → 不杀
         assert!(!hero_turn_undead_kills_with(0, 0, 30, 35, 1));
         // roll_high 过大 → 不杀
         assert!(!hero_turn_undead_kills_with(1, 99, 30, 10, 1));
@@ -4138,7 +5072,10 @@ mod tests {
         let amount = hero_mass_heal_amount(&map, &[(cs as i32, 1)], &stats, MirClass::Taoist);
         // C#：value = GetDamage(GetAttackPower(SC))；Taoist Lv30 SC 中值 = 4
         let sc = (stats.min_sc + stats.max_sc) / 2;
-        assert_eq!(amount, crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, sc));
+        assert_eq!(
+            amount,
+            crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, sc)
+        );
         assert!(amount >= 1);
     }
 
@@ -4203,7 +5140,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn hero_spell_damage_random_power_deterministic_when_min_eq_max() {
         // #1406：GetAttackPower(Min,Max) 在 min==max 时确定（C# 同样）
@@ -4252,7 +5188,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn hero_attack_power_random_deterministic_when_min_eq_max() {
         // #1414：GetAttackPower 在 min==max 时确定
@@ -4273,7 +5208,6 @@ mod tests {
             assert_eq!(hero_attack_power_sc(&hs), 20);
         }
     }
-
 
     #[test]
     fn hero_magicshield_duration_matches_csharp() {
@@ -4310,10 +5244,24 @@ mod tests {
             ..Default::default()
         };
         // lv=0：round(25/4*1)=6 秒；lv=1：round(25/4*2)=13 秒
-        assert_eq!(hero_buff_duration(&infos, HeroBuffKind::MagicShield, 0, &stats), 6);
-        assert_eq!(hero_buff_duration(&infos, HeroBuffKind::MagicShield, 1, &stats), 13);
+        assert_eq!(
+            hero_buff_duration(&infos, HeroBuffKind::MagicShield, 0, &stats),
+            6
+        );
+        assert_eq!(
+            hero_buff_duration(&infos, HeroBuffKind::MagicShield, 1, &stats),
+            13
+        );
         // 无 MagicInfo 兜底：30 + 10*lv
-        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::MagicShield, 0, &stats), 30);
+        assert_eq!(
+            hero_buff_duration(
+                &std::collections::HashMap::new(),
+                HeroBuffKind::MagicShield,
+                0,
+                &stats
+            ),
+            30
+        );
     }
 
     #[test]
@@ -4368,7 +5316,4 @@ mod tests {
         assert_eq!(hero_mana_percent(-5, 100), 0);
         assert_eq!(hero_mana_percent(10, 0), 100); // max 兜底 1
     }
-
 }
-
-

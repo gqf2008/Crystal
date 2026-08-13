@@ -6,10 +6,10 @@
 //!   - 近战（dist<=1）：2/3 普通 DC / 1/3 Fullmoon 弧形（8 格）
 //!   - 远程：2/3 普通 MC / 1/3 MC*2 强化
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 6;
 
@@ -23,7 +23,8 @@ impl TreeGuardianBehavior {
 
 impl MonsterBehavior for TreeGuardianBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index) {
+        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+        {
             Some(t) => *t,
             None => return,
         };
@@ -32,52 +33,66 @@ impl MonsterBehavior for TreeGuardianBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# 远程/魔法攻击用 MC（#2328）
-            let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
+            let mc_damage = crate::combat::attack::get_attack_power(
+                monster.min_mc,
+                monster.max_mc,
+                monster.luck,
+            )
+            .max(1);
             if dist <= 1 {
                 // 近战：2/3 普通 / 1/3 Fullmoon
                 if fastrand::i32(0..3) > 0 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else {
                     // C# FullmoonAttack(damage)：8 格（8 方向 × 距离 1，无中心）
                     let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                     monster.direction = dir;
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        direction: dir,
-                        count: 8,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Arc {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            direction: dir,
+                            count: 8,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             } else {
                 // 远程：2/3 普通 MC / 1/3 MC*2
                 if fastrand::i32(0..3) > 0 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage: mc_damage,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage: mc_damage,
+                            spell_id: 0,
+                        });
                 } else {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage: mc_damage.saturating_mul(2),
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage: mc_damage.saturating_mul(2),
+                            spell_id: 0,
+                        });
                 }
             }
             return;

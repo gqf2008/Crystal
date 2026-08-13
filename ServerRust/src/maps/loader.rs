@@ -88,7 +88,10 @@ pub fn load_map(file_name: &str, data_dir: &Path) -> io::Result<MapData> {
 /// 尝试解析多种格式的 .map 文件
 pub fn parse_map_bytes(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     if bytes.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "empty map file"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "empty map file",
+        ));
     }
 
     // 检测格式类型
@@ -111,7 +114,10 @@ enum MapFormat {
 /// 检测地图格式
 fn detect_format(bytes: &[u8]) -> io::Result<MapFormat> {
     if bytes.len() < 4 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "file too short"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "file too short",
+        ));
     }
 
     // Type 100: magic "C#" at offset 2-3
@@ -121,7 +127,12 @@ fn detect_format(bytes: &[u8]) -> io::Result<MapFormat> {
 
     // Map 2010 Ver 1.0（Daneo1989 服务器地图）：0x10 "Map 2010 Ver 1.0"，14 bytes/cell
     // 之前被误判为 Type 0（12 bytes/cell）→ 尺寸/单元/障碍位全错（#57 实测）
-    if bytes.len() >= 20 && bytes[0] == 0x10 && bytes[2] == 0x61 && bytes[7] == 0x31 && bytes[14] == 0x31 {
+    if bytes.len() >= 20
+        && bytes[0] == 0x10
+        && bytes[2] == 0x61
+        && bytes[7] == 0x31
+        && bytes[14] == 0x31
+    {
         return Ok(MapFormat::Type1);
     }
 
@@ -133,14 +144,20 @@ fn detect_format(bytes: &[u8]) -> io::Result<MapFormat> {
 #[allow(clippy::needless_range_loop)]
 fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     if bytes.len() < 8 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 100 header too short"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Type 100 header too short",
+        ));
     }
 
     let width = i16::from_le_bytes([bytes[4], bytes[5]]);
     let height = i16::from_le_bytes([bytes[6], bytes[7]]);
 
     if width <= 0 || height <= 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid map dimensions"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid map dimensions",
+        ));
     }
 
     let cell_size: usize = 26;
@@ -175,12 +192,8 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
             let offset = data_start + (y * width as usize + x) * cell_size;
             let cell_bytes = &bytes[offset..offset + cell_size];
 
-            let back_image = i32::from_le_bytes([
-                cell_bytes[2],
-                cell_bytes[3],
-                cell_bytes[4],
-                cell_bytes[5],
-            ]);
+            let back_image =
+                i32::from_le_bytes([cell_bytes[2], cell_bytes[3], cell_bytes[4], cell_bytes[5]]);
 
             let walkable = (back_image & OBSTACLE_BIT) == 0;
 
@@ -217,7 +230,10 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
 #[allow(clippy::needless_range_loop)]
 fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     if bytes.len() < 54 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 1 header too short"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Type 1 header too short",
+        ));
     }
 
     let mut offset = 21usize;
@@ -242,7 +258,10 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     let cell_size: usize = 15;
     let total_cells = (width as usize) * (height as usize);
     if bytes.len() < offset + total_cells * cell_size {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 1 file truncated"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Type 1 file truncated",
+        ));
     }
 
     let mut cells = vec![
@@ -263,12 +282,7 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     for x in 0..width as usize {
         for y in 0..height as usize {
             let o = offset + (x * height as usize + y) * cell_size;
-            let back_raw = i32::from_le_bytes([
-                bytes[o],
-                bytes[o + 1],
-                bytes[o + 2],
-                bytes[o + 3],
-            ]);
+            let back_raw = i32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
             let back_image = back_raw ^ BACK_XOR;
             let walkable = (back_image & OBSTACLE_BIT) == 0;
             // C# LoadMapCellsv1：每格 15 字节，light 在 cell[13]
@@ -301,7 +315,10 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
 #[allow(clippy::needless_range_loop)]
 fn load_type_0(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     if bytes.len() < 52 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 0 header too short"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Type 0 header too short",
+        ));
     }
 
     let mut cursor = Cursor::new(&bytes[0..4]);
@@ -309,7 +326,10 @@ fn load_type_0(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     let height = cursor.read_i16::<LittleEndian>()?;
 
     if width <= 0 || height <= 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid map dimensions"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid map dimensions",
+        ));
     }
 
     let cell_size: usize = 12;
@@ -455,13 +475,19 @@ mod tests {
     fn test_type_100_obstacle_detection() {
         let mut bytes = vec![0x01, 0x00, 0x43, 0x23, 0x02, 0x00, 0x01, 0x00];
         // Cell 0,0: walkable (back_image=0, starts at offset 2 in cell)
-        bytes.push(0); bytes.push(0); // back_index
+        bytes.push(0);
+        bytes.push(0); // back_index
         bytes.extend_from_slice(&0i32.to_le_bytes()); // back_image
-        for _ in 0..20 { bytes.push(0u8); } // rest of cell (20 bytes to total 26)
-        // Cell 1,0: obstacle (back_image has bit 0x20000000)
-        bytes.push(0); bytes.push(0); // back_index
+        for _ in 0..20 {
+            bytes.push(0u8);
+        } // rest of cell (20 bytes to total 26)
+          // Cell 1,0: obstacle (back_image has bit 0x20000000)
+        bytes.push(0);
+        bytes.push(0); // back_index
         bytes.extend_from_slice(&0x20000000i32.to_le_bytes()); // back_image
-        for _ in 0..20 { bytes.push(0u8); }
+        for _ in 0..20 {
+            bytes.push(0u8);
+        }
 
         let map = parse_map_bytes(&bytes, "test.map").unwrap();
         assert_eq!(map.width, 2);
@@ -474,7 +500,10 @@ mod tests {
     fn test_type_1_map_parsing() {
         // Map 2010 Ver 1.0: 0x10 "Map 2010 Ver 1.0" + XOR 尺寸 + 15B/cell
         // 验证 cell_size=15（14 会错位导致 walkable 判定错误，#61）
-        let mut bytes = vec![0x10, b'M', b'a', b'p', b' ', b'2', b'0', b'1', b'0', b' ', b'V', b'e', b'r', b' ', b'1', b'.', b'0'];
+        let mut bytes = vec![
+            0x10, b'M', b'a', b'p', b' ', b'2', b'0', b'1', b'0', b' ', b'V', b'e', b'r', b' ',
+            b'1', b'.', b'0',
+        ];
         bytes.resize(21, 0u8);
         // offset 21: w, xor, h
         let xor: i16 = 0x1234;
@@ -497,11 +526,21 @@ mod tests {
             bytes.extend_from_slice(&cell);
         }
         let fmt = detect_format(&bytes).expect("detect");
-        assert!(matches!(fmt, MapFormat::Type1), "expected Type1, got {:?}", fmt);
+        assert!(
+            matches!(fmt, MapFormat::Type1),
+            "expected Type1, got {:?}",
+            fmt
+        );
         let map = load_type_1(&bytes, "test.map").expect("parse Type1");
-        eprintln!("map {}x{} cells[1][0] walkable={} back=0x{:08X} cells[2][1] walkable={} back=0x{:08X}",
-            map.width, map.height, map.cells[1][0].walkable, map.cells[1][0].back_image as u32,
-            map.cells[2][1].walkable, map.cells[2][1].back_image as u32);
+        eprintln!(
+            "map {}x{} cells[1][0] walkable={} back=0x{:08X} cells[2][1] walkable={} back=0x{:08X}",
+            map.width,
+            map.height,
+            map.cells[1][0].walkable,
+            map.cells[1][0].back_image as u32,
+            map.cells[2][1].walkable,
+            map.cells[2][1].back_image as u32
+        );
         eprintln!("bytes[84..92]={:02X?}", &bytes[84..92]);
         assert_eq!(map.width, 3);
         assert_eq!(map.height, 2);
@@ -515,9 +554,11 @@ mod tests {
         // Type 0: 52-byte header + 12 bytes/cell
         // 3x2 map = 6 cells * 12 = 72 + 52 = 124 bytes
         let mut bytes = vec![0u8; 52];
-        bytes[0] = 0x03; bytes[1] = 0x00; // width=3
-        bytes[2] = 0x02; bytes[3] = 0x00; // height=2
-        // All cells walkable
+        bytes[0] = 0x03;
+        bytes[1] = 0x00; // width=3
+        bytes[2] = 0x02;
+        bytes[3] = 0x00; // height=2
+                         // All cells walkable
         for _ in 0..(3 * 2 * 12) {
             bytes.push(0u8);
         }
@@ -559,7 +600,10 @@ mod tests {
     #[test]
     fn test_fishing_attribute_type_1() {
         // Type1：3x1 map，15B/cell，light 在 cell[13]
-        let mut bytes = vec![0x10, b'M', b'a', b'p', b' ', b'2', b'0', b'1', b'0', b' ', b'V', b'e', b'r', b' ', b'1', b'.', b'0'];
+        let mut bytes = vec![
+            0x10, b'M', b'a', b'p', b' ', b'2', b'0', b'1', b'0', b' ', b'V', b'e', b'r', b' ',
+            b'1', b'.', b'0',
+        ];
         bytes.resize(21, 0u8);
         let xor: i16 = 0x1234;
         let w: i16 = 3 ^ xor;
@@ -585,8 +629,10 @@ mod tests {
     fn test_fishing_attribute_type_0() {
         // Type0：52B 头 + 12B/cell，light 在 cell[11]
         let mut bytes = vec![0u8; 52];
-        bytes[0] = 0x02; bytes[1] = 0x00; // width=2
-        bytes[2] = 0x01; bytes[3] = 0x00; // height=1
+        bytes[0] = 0x02;
+        bytes[1] = 0x00; // width=2
+        bytes[2] = 0x01;
+        bytes[3] = 0x00; // height=1
         let mut cell0 = vec![0u8; 12];
         cell0[11] = 100; // FishingAttribute = 0
         bytes.extend_from_slice(&cell0);
@@ -596,5 +642,4 @@ mod tests {
         assert_eq!(map.fishing_attribute(0, 0), 0);
         assert_eq!(map.fishing_attribute(1, 0), -1);
     }
-
 }

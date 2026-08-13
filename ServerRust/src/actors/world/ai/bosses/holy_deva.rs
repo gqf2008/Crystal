@@ -9,10 +9,10 @@
 //! Attack（C# :23-44）：ObjectRangeAttack + DC MAC。
 //! ProcessTarget（C# :46-97）：Master!=null→MoveTo Master；InRange && (Master || FearTime)→Attack。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 6;
 const VIEW_RANGE: i32 = 15;
@@ -41,18 +41,21 @@ impl MonsterBehavior for HolyDevaBehavior {
         let is_pet = monster.master_session.is_some();
 
         // 射程内攻击（宠物无条件攻击，野生需在 FearTime 内）
-        if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick
+        if dist <= ATTACK_RANGE
+            && ctx.tick_count >= monster.next_attack_tick
             && (is_pet || ctx.tick_count < self.fear_end_tick)
         {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
             return;
         }
 

@@ -1,6 +1,5 @@
 /// 持续性法术对象，对应 C# SpellObject
 /// 代表地图上的火墙、暴风雪、毒云等持续效果
-
 use std::time::Instant;
 
 /// 法术对象实例
@@ -185,16 +184,31 @@ fn make_spell_config(
 
 /// 创建持久法术对象
 pub fn create_persistent_spell(
-    object_id: u32, caster_id: u32, caster_session: u64, map_index: u16,
-    x: i32, y: i32, level: u8, stat: i32, value: i32,
+    object_id: u32,
+    caster_id: u32,
+    caster_session: u64,
+    map_index: u16,
+    x: i32,
+    y: i32,
+    level: u8,
+    stat: i32,
+    value: i32,
     spell: mir2_shared::enums::Spell,
 ) -> SpellObject {
     let cfg = make_spell_config(spell, level, stat, value);
     SpellObject::new(
-        object_id, cfg.spell,
-        caster_id, caster_session, map_index, x, y,
-        cfg.duration_ms, cfg.tick_value, cfg.tick_interval_ms,
-        level, stat,
+        object_id,
+        cfg.spell,
+        caster_id,
+        caster_session,
+        map_index,
+        x,
+        y,
+        cfg.duration_ms,
+        cfg.tick_value,
+        cfg.tick_interval_ms,
+        level,
+        stat,
     )
 }
 

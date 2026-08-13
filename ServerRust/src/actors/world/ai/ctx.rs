@@ -3,8 +3,8 @@
 //! behavior 通过 AiCtx 读取怪物自身状态 + 玩家快照，通过输出队列推动作，
 //! 循环外由 tick_monsters 统一应用（避免 &mut self.monsters 借用冲突）。
 
-use mir2_shared::enums::{PetMode, Spell};
 use crate::combat::poison::Poison;
+use mir2_shared::enums::{PetMode, Spell};
 
 /// 玩家快照（behavior 不可直接访问 PlayerActor，只读此快照）
 #[derive(Debug, Clone, Copy)]
@@ -275,12 +275,14 @@ fn current_target_in_range<'a>(
     view_range: i32,
     map_index: u16,
 ) -> Option<&'a PlayerSnap> {
-    current.and_then(|cur| players.iter().find(|p| {
-        p.session_id == cur
-            && p.map_index == map_index
-            && p.hp > 0
-            && (p.x - cx).abs().max((p.y - cy).abs()) <= view_range
-    }))
+    current.and_then(|cur| {
+        players.iter().find(|p| {
+            p.session_id == cur
+                && p.map_index == map_index
+                && p.hp > 0
+                && (p.x - cx).abs().max((p.y - cy).abs()) <= view_range
+        })
+    })
 }
 
 /// #2048：cells 顺序每格取第一个命中玩家（C# Halfmoon/Fullmoon/IceThrust break 语义）
@@ -300,18 +302,33 @@ impl<'a> AiCtx<'a> {
     /// - FocusMasterTarget：只攻击主人目标（无法解析则无目标 → 跟随主人）
     /// - MoveOnly/None：不攻击（跟随主人）
     /// - Both/AttackOnly：不自主攻击玩家（#471：由 pet_targets 协战打主人攻击的怪物）
-    pub fn pet_target(&self, x: i32, y: i32, view_range: i32, map_index: u16) -> Option<PlayerSnap> {
+    pub fn pet_target(
+        &self,
+        x: i32,
+        y: i32,
+        view_range: i32,
+        map_index: u16,
+    ) -> Option<PlayerSnap> {
         match self.master_pet_mode {
             None => self.nearest_target(x, y, view_range, map_index).copied(),
             Some(PetMode::MoveOnly) | Some(PetMode::None) => None,
-            Some(PetMode::FocusMasterTarget) => self.master_target.filter(|t| t.map_index == map_index),
+            Some(PetMode::FocusMasterTarget) => {
+                self.master_target.filter(|t| t.map_index == map_index)
+            }
             Some(PetMode::Both) | Some(PetMode::AttackOnly) => None,
         }
     }
 
     /// 查找范围内所有玩家（对齐 C# FindAllTargets(range, point, false)）
-    pub fn find_targets_in_range(&self, cx: i32, cy: i32, radius: i32, map_index: u16) -> Vec<&PlayerSnap> {
-        self.players.iter()
+    pub fn find_targets_in_range(
+        &self,
+        cx: i32,
+        cy: i32,
+        radius: i32,
+        map_index: u16,
+    ) -> Vec<&PlayerSnap> {
+        self.players
+            .iter()
             .filter(|p| p.map_index == map_index)
             .filter(|p| {
                 let dx = (p.x - cx).abs();
@@ -323,30 +340,52 @@ impl<'a> AiCtx<'a> {
 
     /// #2048：C# Halfmoon/FullmoonAttack/IceThrust（带 break）——cells 顺序每格取第一个可攻击玩家
     pub fn find_targets_in_cells(&self, cells: &[(i32, i32)], map_index: u16) -> Vec<&PlayerSnap> {
-        let positions: Vec<(u64, i32, i32)> = self.players.iter()
+        let positions: Vec<(u64, i32, i32)> = self
+            .players
+            .iter()
             .filter(|p| p.map_index == map_index)
             .map(|p| (p.session_id, p.x, p.y))
             .collect();
         let ids = first_player_per_cell(&positions, cells);
-        self.players.iter()
+        self.players
+            .iter()
             .filter(|p| ids.contains(&p.session_id))
             .collect()
     }
 
     /// #2048：C# Kirin.IceThrust（无 break）——格内全部玩家
-    pub fn find_all_targets_in_cells(&self, cells: &[(i32, i32)], map_index: u16) -> Vec<&PlayerSnap> {
-        self.players.iter()
+    pub fn find_all_targets_in_cells(
+        &self,
+        cells: &[(i32, i32)],
+        map_index: u16,
+    ) -> Vec<&PlayerSnap> {
+        self.players
+            .iter()
             .filter(|p| p.map_index == map_index)
             .filter(|p| cells.contains(&(p.x, p.y)))
             .collect()
     }
 
     /// 查找最近玩家（对齐 C# FindTarget 的最近目标选取；#1870 优先保持当前目标）
-    pub fn nearest_target(&self, cx: i32, cy: i32, view_range: i32, map_index: u16) -> Option<&PlayerSnap> {
-        if let Some(p) = current_target_in_range(self.players, self.current_target, cx, cy, view_range, map_index) {
+    pub fn nearest_target(
+        &self,
+        cx: i32,
+        cy: i32,
+        view_range: i32,
+        map_index: u16,
+    ) -> Option<&PlayerSnap> {
+        if let Some(p) = current_target_in_range(
+            self.players,
+            self.current_target,
+            cx,
+            cy,
+            view_range,
+            map_index,
+        ) {
             return Some(p);
         }
-        self.players.iter()
+        self.players
+            .iter()
             .filter(|p| p.map_index == map_index && p.hp > 0)
             .min_by_key(|p| {
                 let dx = (p.x - cx).abs();
@@ -368,8 +407,16 @@ mod tests {
 
     fn snap(id: u64, x: i32, y: i32, hp: i32) -> PlayerSnap {
         PlayerSnap {
-            session_id: id, x, y, hp, map_index: 1, object_id: id as u32,
-            level: 30, pk_points: 0, min_dc: 10, poison_flags: mir2_shared::enums::PoisonType::NONE,
+            session_id: id,
+            x,
+            y,
+            hp,
+            map_index: 1,
+            object_id: id as u32,
+            level: 30,
+            pk_points: 0,
+            min_dc: 10,
+            poison_flags: mir2_shared::enums::PoisonType::NONE,
         }
     }
 
@@ -379,7 +426,10 @@ mod tests {
         // #2048：C# Halfmoon/Fullmoon——cells 顺序每格取第一个可攻击玩家
         let players = [(1, 5, 5), (2, 6, 5), (3, 5, 5)];
         // 同格 (5,5) 有 1 和 3：每格只取第一个（玩家顺序 1）
-        assert_eq!(first_player_per_cell(&players, &[(5, 5), (6, 5)]), vec![1, 2]);
+        assert_eq!(
+            first_player_per_cell(&players, &[(5, 5), (6, 5)]),
+            vec![1, 2]
+        );
         // 空 cells → 空
         assert!(first_player_per_cell(&players, &[]).is_empty());
         // 无命中格 → 空

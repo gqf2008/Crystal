@@ -9,7 +9,9 @@ pub fn is_red_name(pk_points: i32) -> bool {
 }
 /// #1828：选“最弱”玩家目标（C# DarkCaptain/SnowWolfKing 按 MinDC 选更弱目标）。
 /// 返回 MinDC 最低的玩家；空列表返回 None。
-pub fn weakest_player_by_dc(targets: &[crate::actors::world::ai::ctx::PlayerSnap]) -> Option<crate::actors::world::ai::ctx::PlayerSnap> {
+pub fn weakest_player_by_dc(
+    targets: &[crate::actors::world::ai::ctx::PlayerSnap],
+) -> Option<crate::actors::world::ai::ctx::PlayerSnap> {
     targets.iter().min_by_key(|p| p.min_dc).copied()
 }
 
@@ -17,7 +19,6 @@ pub fn weakest_player_by_dc(targets: &[crate::actors::world::ai::ctx::PlayerSnap
 pub fn poison_sc_value(monster: &crate::actors::world::MonsterState) -> i32 {
     crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1)
 }
-
 
 /// 方向增量（8 方向，对齐 MirDirection）
 pub const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
@@ -37,7 +38,13 @@ pub fn arc_cells(center_x: i32, center_y: i32, direction: u8, count: u8) -> Vec<
 
 /// C# TriangleAttack（Server/MirObjects/MonsterObject.cs:3540）：沿 direction 每行 center + Left/Right 扩展。
 /// Left(d)=(d+6)%8、Right(d)=(d+2)%8（Shared/Functions/Functions.cs:248/280）；limit_width=-1 不限单侧格数。
-pub fn triangle_cells(center_x: i32, center_y: i32, direction: u8, distance: u8, limit_width: i32) -> Vec<(i32, i32)> {
+pub fn triangle_cells(
+    center_x: i32,
+    center_y: i32,
+    direction: u8,
+    distance: u8,
+    limit_width: i32,
+) -> Vec<(i32, i32)> {
     let mut cells = Vec::new();
     let d = (direction as usize) % 8;
     let (cdx, cdy) = (DIR_DX[d], DIR_DY[d]);
@@ -70,12 +77,19 @@ pub fn triangle_cells(center_x: i32, center_y: i32, direction: u8, distance: u8,
 pub fn line_cells(center_x: i32, center_y: i32, direction: u8, range: i32) -> Vec<(i32, i32)> {
     let d = (direction as usize) % 8;
     let (dx, dy) = (DIR_DX[d], DIR_DY[d]);
-    (1..=range.max(0)).map(|k| (center_x + dx * k, center_y + dy * k)).collect()
+    (1..=range.max(0))
+        .map(|k| (center_x + dx * k, center_y + dy * k))
+        .collect()
 }
 
 /// C# IceThrust（Kirin.cs:126 / ManectricClaw.cs:85）：3 列（prevdir/dir/nextdir 起点）× 3 深 = 9 格。
 /// 返回 (x, y, j)，j=0..depth-1 为纵深段（ManectricClaw 用 j<=1 近 DC / j==2 远 MC）。
-pub fn ice_thrust_cells(center_x: i32, center_y: i32, direction: u8, depth: u8) -> Vec<(i32, i32, i32)> {
+pub fn ice_thrust_cells(
+    center_x: i32,
+    center_y: i32,
+    direction: u8,
+    depth: u8,
+) -> Vec<(i32, i32, i32)> {
     let mut cells = Vec::new();
     let d = (direction as usize) % 8;
     let (dx, dy) = (DIR_DX[d], DIR_DY[d]);
@@ -176,8 +190,8 @@ mod tests {
     use super::eight_dir_rings;
     use super::ice_thrust_cells;
     use super::line_cells;
-    use super::triangle_cells;
     use super::slave_spawn_count;
+    use super::triangle_cells;
 
     #[test]
     fn slave_spawn_count_caps_at_slave_list_room() {
@@ -196,7 +210,15 @@ mod tests {
         // C# TriangleAttack(d, 3, 1) dir=0(Up)：row1 (0,-1)；row2 (0,-2),(-1,-2),(1,-2)；row3 (0,-3),(-1,-3),(1,-3)
         let cells = triangle_cells(0, 0, 0, 3, 1);
         assert_eq!(cells.len(), 7);
-        for c in [(0, -1), (0, -2), (-1, -2), (1, -2), (0, -3), (-1, -3), (1, -3)] {
+        for c in [
+            (0, -1),
+            (0, -2),
+            (-1, -2),
+            (1, -2),
+            (0, -3),
+            (-1, -3),
+            (1, -3),
+        ] {
             assert!(cells.contains(&c), "missing {c:?}");
         }
         // C# TriangleAttack(d, 3, 2)：row3 左右扩展到 k=2 → 9 格
@@ -240,7 +262,10 @@ mod tests {
             assert_eq!(sorted.len(), cells.len(), "dir={dir} 不应重复");
             // 对角方向左/右扩是斜向（如 UpRight 的 Left=UpLeft），最大切比雪夫距离 = distance + width
             for &(x, y) in &cells {
-                assert!((x - 10).abs().max((y - 10).abs()) <= 4, "dir={dir} 超距 {x},{y}");
+                assert!(
+                    (x - 10).abs().max((y - 10).abs()) <= 4,
+                    "dir={dir} 超距 {x},{y}"
+                );
             }
         }
     }
@@ -250,7 +275,17 @@ mod tests {
         // C# Kirin/ManectricClaw.IceThrust：dir=0(Up)，3 列（UpLeft/Up/UpRight 起点）× 3 深 = 9 格
         let cells = ice_thrust_cells(0, 0, 0, 3);
         assert_eq!(cells.len(), 9);
-        for c in [(-1, -1, 0), (-1, -2, 1), (-1, -3, 2), (0, -1, 0), (0, -2, 1), (0, -3, 2), (1, -1, 0), (1, -2, 1), (1, -3, 2)] {
+        for c in [
+            (-1, -1, 0),
+            (-1, -2, 1),
+            (-1, -3, 2),
+            (0, -1, 0),
+            (0, -2, 1),
+            (0, -3, 2),
+            (1, -1, 0),
+            (1, -2, 1),
+            (1, -3, 2),
+        ] {
             assert!(cells.contains(&c), "missing {c:?}");
         }
         // dir=2(Right)：起点 (1,-1)/(1,0)/(1,1)，向右延伸 3 深
@@ -275,18 +310,39 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), 16, "不应重复");
         for &(x, y) in &cells {
-            assert!([1, 2].contains(&x.abs().max(y.abs())), "距离应为 1/2: {x},{y}");
+            assert!(
+                [1, 2].contains(&x.abs().max(y.abs())),
+                "距离应为 1/2: {x},{y}"
+            );
         }
-        assert_eq!(cells.iter().filter(|&&(x, y)| x.abs().max(y.abs()) == 1).count(), 8);
-        assert_eq!(cells.iter().filter(|&&(x, y)| x.abs().max(y.abs()) == 2).count(), 8);
+        assert_eq!(
+            cells
+                .iter()
+                .filter(|&&(x, y)| x.abs().max(y.abs()) == 1)
+                .count(),
+            8
+        );
+        assert_eq!(
+            cells
+                .iter()
+                .filter(|&&(x, y)| x.abs().max(y.abs()) == 2)
+                .count(),
+            8
+        );
     }
 
     #[test]
     fn arc_cells_halfmoon_matches_csharp() {
         // C# HalfmoonAttack dir=0（Up）：PreviousDir=7(UpLeft) 起 4 向 → (-1,-1),(0,-1),(1,-1),(1,0)
-        assert_eq!(arc_cells(0, 0, 0, 4), vec![(-1, -1), (0, -1), (1, -1), (1, 0)]);
+        assert_eq!(
+            arc_cells(0, 0, 0, 4),
+            vec![(-1, -1), (0, -1), (1, -1), (1, 0)]
+        );
         // dir=4（Down）：PreviousDir=3(DownRight) 起 4 向
-        assert_eq!(arc_cells(0, 0, 4, 4), vec![(1, 1), (0, 1), (-1, 1), (-1, 0)]);
+        assert_eq!(
+            arc_cells(0, 0, 4, 4),
+            vec![(1, 1), (0, 1), (-1, 1), (-1, 0)]
+        );
         // 每格都是距离 1
         for &(x, y) in &arc_cells(0, 0, 0, 4) {
             assert_eq!(x.abs().max(y.abs()), 1);
@@ -303,7 +359,11 @@ mod tests {
             sorted.dedup();
             assert_eq!(sorted.len(), 8, "dir={dir} 不应重复");
             assert_eq!(arc_cells(10, 10, dir, 4).len(), 4, "dir={dir} 半月应 4 格");
-            assert_eq!(arc_cells(10, 10, dir, 6).len(), 6, "dir={dir} 三日月应 6 格");
+            assert_eq!(
+                arc_cells(10, 10, dir, 6).len(),
+                6,
+                "dir={dir} 三日月应 6 格"
+            );
         }
     }
 
@@ -312,7 +372,16 @@ mod tests {
         use super::weakest_player_by_dc;
         use crate::actors::world::ai::ctx::PlayerSnap;
         let snap = |id: u64, dc: i32| PlayerSnap {
-            session_id: id, x: 0, y: 0, hp: 100, map_index: 1, object_id: id as u32, level: 30, pk_points: 0, min_dc: dc, poison_flags: mir2_shared::enums::PoisonType::NONE,
+            session_id: id,
+            x: 0,
+            y: 0,
+            hp: 100,
+            map_index: 1,
+            object_id: id as u32,
+            level: 30,
+            pk_points: 0,
+            min_dc: dc,
+            poison_flags: mir2_shared::enums::PoisonType::NONE,
         };
         assert!(weakest_player_by_dc(&[]).is_none());
         let snaps = [snap(1, 50), snap(2, 20), snap(3, 80)];
@@ -322,5 +391,4 @@ mod tests {
         let snaps = [snap(1, 20), snap(2, 20)];
         assert_eq!(weakest_player_by_dc(&snaps).unwrap().session_id, 1);
     }
-
 }

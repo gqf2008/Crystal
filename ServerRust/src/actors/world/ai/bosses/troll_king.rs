@@ -10,12 +10,12 @@
 //! Attack（C# :21-79）：<=3 MC AOE(MACAgility)；>3 DC 范围(ACAgility)。
 //! CompleteRangeAttack（C# :92-105）：Attacked + MACAgility 二次 + Dazed。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const ATTACK_RANGE: i32 = 7;
 const VIEW_RANGE: i32 = 15;
@@ -26,7 +26,9 @@ const SPLASH_RADIUS: i32 = 3;
 pub struct TrollKingBehavior;
 
 impl TrollKingBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for TrollKingBehavior {
@@ -45,15 +47,18 @@ impl MonsterBehavior for TrollKingBehavior {
                 // 近战：2/3 概率范围攻击，1/3 WalkAway（C# Random(2)==0 || !InRange(,2)）
                 if fastrand::i32(0..2) == 0 || dist > 2 {
                     // MC 范围 3 格 AOE（C# FindAllTargets(3) MACAgility）
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        radius: SPLASH_RADIUS,
-                        damage,
-                        spell_id: 0,
-                    });
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            radius: SPLASH_RADIUS,
+                            damage,
+                            spell_id: 0,
+                        });
                 } else {
                     // WalkAway（拉开）
                     let (nx, ny, dir) = step_away(monster.x, monster.y, target.x, target.y);
@@ -62,23 +67,36 @@ impl MonsterBehavior for TrollKingBehavior {
                 }
             } else {
                 // 远程投石：目标点 3 格 AOE（ACAgility）+ 命中后 Dazed（C# DefenceType.ACAgility）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: target.x,
-                    center_y: target.y,
-                    radius: SPLASH_RADIUS,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: target.x,
+                        center_y: target.y,
+                        radius: SPLASH_RADIUS,
+                        damage,
+                        spell_id: 0,
+                    });
                 // C# CompleteRangeAttack：命中后 Dazed 1s
                 // C# PoisonTarget(1, random(MaxMC), Dazed, 1000)：时长=random(MaxMC)、值=SC
-                let mc_power = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                let sc_power = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::DAZED, fastrand::i32(0..mc_power.max(1)) as u32, sc_power, 1000),
-                });
+                let mc_power =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                let sc_power =
+                    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0)
+                        .max(1);
+                ctx.out_poisons
+                    .push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(
+                            PoisonType::DAZED,
+                            fastrand::i32(0..mc_power.max(1)) as u32,
+                            sc_power,
+                            1000,
+                        ),
+                    });
             }
             return;
         }

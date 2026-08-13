@@ -119,7 +119,11 @@ impl Packet for NPCImageUpdate {
         let npc_id = reader.read_u32::<LittleEndian>()?;
         let image = reader.read_u16::<LittleEndian>()?;
         let colour = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { npc_id, image, colour })
+        Ok(Self {
+            npc_id,
+            image,
+            colour,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -168,7 +172,11 @@ mod tests {
     #[test]
     fn npc_image_update_roundtrip_with_colour() {
         // C# ServerPackets.cs：ObjectID + Image + Colour（Color.ToArgb）
-        let pkt = NPCImageUpdate { npc_id: 42, image: 1000, colour: 0x00FF0000 };
+        let pkt = NPCImageUpdate {
+            npc_id: 42,
+            image: 1000,
+            colour: 0x00FF0000,
+        };
         let mut buf = Vec::new();
         pkt.write_body(&mut buf).unwrap();
         // u32 + u16 + i32 = 10 bytes

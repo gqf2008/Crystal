@@ -353,8 +353,8 @@ impl Packet for ConfirmItemRental {
 
 #[cfg(test)]
 mod tests {
-    use crate::packets::base::Packet;
     use super::*;
+    use crate::packets::base::Packet;
 
     /// #2214：GetRentedItems 物主视角线格式 roundtrip（含 renting_player_name）
     #[test]

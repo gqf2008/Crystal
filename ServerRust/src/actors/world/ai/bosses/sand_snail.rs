@@ -5,10 +5,10 @@
 //!   - 6/7：1/2 物理近战（DC）/ 1/2 魔法（MC，Type=2，毒标记→AOE 1 + 100% 绿毒 5s tick 2000）
 //!   - 1/7：Halfmoon 弧形攻击（DC，4 格弧）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 
@@ -34,52 +34,74 @@ impl MonsterBehavior for SandSnailBehavior {
 
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             // C# Envir.Random.Next(7) > 0：6/7 走普通攻击分支
             if fastrand::i32(0..7) > 0 {
                 // C# Envir.Random.Next(2) > 0：1/2 物理近战 / 1/2 魔法毒分支
                 if fastrand::i32(0..2) > 0 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 } else {
                     // C# 毒分支 Type2 = MC（SandSnail.cs:43-45）：FindAllTargets(1) AOE + PoisonTarget
-                    let mc_damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, monster.luck).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        radius: AOE_RADIUS,
-                        damage: mc_damage,
-                        spell_id: 0,
-                    });
-                    let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
-                        .iter().map(|p| p.session_id).collect();
-                    for sid in nearby {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::GREEN, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 2000),
+                    let mc_damage = crate::combat::attack::get_attack_power(
+                        monster.min_mc,
+                        monster.max_mc,
+                        monster.luck,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Aoe {
+                            attacker_oid: monster.object_id,
+                            center_x: monster.x,
+                            center_y: monster.y,
+                            radius: AOE_RADIUS,
+                            damage: mc_damage,
+                            spell_id: 0,
                         });
+                    let nearby: Vec<u64> = ctx
+                        .find_targets_in_range(monster.x, monster.y, AOE_RADIUS, monster.map_index)
+                        .iter()
+                        .map(|p| p.session_id)
+                        .collect();
+                    for sid in nearby {
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(
+                                    PoisonType::GREEN,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    2000,
+                                ),
+                            });
                     }
                 }
             } else {
                 // C# 1/7 HalfmoonAttack(damage, 300)：PreviousDir 起 4 方向 × 距离 1
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Arc {
-                    attacker_oid: monster.object_id,
-                    center_x: monster.x,
-                    center_y: monster.y,
-                    direction: dir,
-                    count: 4,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Arc {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        direction: dir,
+                        count: 4,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
             return;
         }

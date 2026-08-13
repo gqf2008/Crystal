@@ -217,7 +217,17 @@ mod tests {
     use crate::maps::loader::CellInfo;
 
     fn test_map(w: i32, h: i32, obstacles: &[(i32, i32)]) -> MapData {
-        let mut cells = vec![vec![CellInfo { back_image: 0, walkable: true, fishing_attribute: -1 }; h as usize]; w as usize];
+        let mut cells = vec![
+            vec![
+                CellInfo {
+                    back_image: 0,
+                    walkable: true,
+                    fishing_attribute: -1
+                };
+                h as usize
+            ];
+            w as usize
+        ];
         for (x, y) in obstacles {
             cells[*x as usize][*y as usize].walkable = false;
         }
@@ -262,10 +272,7 @@ mod tests {
         for cell in cells[2].iter_mut() {
             cell.walkable = false;
         }
-        let map2 = MapData {
-            cells,
-            ..map
-        };
+        let map2 = MapData { cells, ..map };
         assert!(find_path(&map2, (0, 2), (4, 2)).is_none());
     }
 
@@ -289,10 +296,15 @@ mod tests {
         // 左/右都堵死、下方可走 → 绕行，不斜切
         let map4 = test_map(6, 6, &[(3, 2), (1, 2)]);
         let p = find_path(&map4, (2, 2), (3, 3)).unwrap();
-        assert!(p.windows(2).all(|w| {
-            let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
-            !(dx != 0 && dy != 0) || (map4.is_walkable(w[0].0 + dx, w[0].1) && map4.is_walkable(w[0].0, w[0].1 + dy))
-        }), "路径中不允许斜穿墙角");
+        assert!(
+            p.windows(2).all(|w| {
+                let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
+                !(dx != 0 && dy != 0)
+                    || (map4.is_walkable(w[0].0 + dx, w[0].1)
+                        && map4.is_walkable(w[0].0, w[0].1 + dy))
+            }),
+            "路径中不允许斜穿墙角"
+        );
     }
 
     /// 纯 45° 直线路径应保持单一对角方向（smooth_path 不应合成锯齿）
@@ -339,6 +351,11 @@ mod tests {
             })
             .collect();
         let changes = dirs.windows(2).filter(|w| w[0] != w[1]).count();
-        assert!(changes <= 2, "绕障碍方向变化应稳定，实际 {} 次：{:?}", changes, dirs);
+        assert!(
+            changes <= 2,
+            "绕障碍方向变化应稳定，实际 {} 次：{:?}",
+            changes,
+            dirs
+        );
     }
 }

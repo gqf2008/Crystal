@@ -9,10 +9,10 @@
 //!   - 受击高伤时 FindWeakerTarget 切换到更弱目标（简化：受击大伤切换目标）
 //!   - 死亡时 1 格内全体 MAC 爆炸 + 驯化奴仆（tick 层转移给击杀者，上限 6）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 /// 视野范围
 const VIEW_RANGE: i32 = 20;
@@ -52,7 +52,8 @@ impl MonsterBehavior for SnowWolfKingBehavior {
         // C# FindWeakerTarget（SnowWolfKing.cs:30-65）：受击伤害 > 自身随机 DC 且 Random(2)==0
         if self.switch_pending {
             self.switch_pending = false;
-            let own_dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let own_dmg =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             if self.last_damage > own_dmg && fastrand::i32(0..2) == 0 {
                 // 视野内找更弱目标（C# FindWeakerTarget 按 MinDC）
                 let weakest_opt: Option<(u64, i32, i32)> = {
@@ -115,33 +116,36 @@ impl MonsterBehavior for SnowWolfKingBehavior {
 
         if dist <= MELEE_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let base =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             // 2/3 概率普攻（Type 0）
             if fastrand::i32(0..3) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage: base,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage: base,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
                 // 1/3：HP 分档三形态（C# HealthPercent 阶段）
                 let (attack_type, freeze) = if hp_pct >= 60 {
-                    (1, true)  // 冰系：冻
+                    (1, true) // 冰系：冻
                 } else if hp_pct >= 30 {
                     (2, false) // 普攻
                 } else {
                     (3, false) // 狂攻（简化为伤害不变）
                 };
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage: base,
-                    spell_id: 0,
-                    attack_type,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage: base,
+                        spell_id: 0,
+                        attack_type,
+                    });
                 // C# SnowWolfKing 无毒（DelayedAction 的 poison/aoe 标志在 CompleteAttack 被忽略）
                 let _ = freeze;
             }
@@ -155,14 +159,16 @@ impl MonsterBehavior for SnowWolfKingBehavior {
 
     fn on_die(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // C# CompleteDeath：1 格内全体 MAC 爆炸
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-            attacker_oid: monster.object_id,
-            center_x: monster.x,
-            center_y: monster.y,
-            radius: 1,
-            damage,
-            spell_id: 0,
-        });
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Aoe {
+                attacker_oid: monster.object_id,
+                center_x: monster.x,
+                center_y: monster.y,
+                radius: 1,
+                damage,
+                spell_id: 0,
+            });
     }
 }

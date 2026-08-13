@@ -8,12 +8,12 @@
 //!   - 任务核心：周期召唤奥玛系小怪（原版无显式召唤，但作为奥玛王控制力补充，
 //!     对齐任务"召唤奥玛系小怪"）
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 /// 视野范围（C# 标准 ViewRange）
 const VIEW_RANGE: i32 = 20;
@@ -22,12 +22,7 @@ const ATTACK_RANGE: i32 = 7;
 /// 召唤周期（约 25s）
 const SUMMON_INTERVAL_TICKS: u64 = 250;
 /// 召唤池（C# 奥玛系：OmaFighter/OmaSlasher/OmaWitcher/OmaAxeman 等）
-const SLAVE_NAMES: [&str; 4] = [
-    "OmaFighter",
-    "OmaSlasher",
-    "OmaWitcher",
-    "OmaAxeman",
-];
+const SLAVE_NAMES: [&str; 4] = ["OmaFighter", "OmaSlasher", "OmaWitcher", "OmaAxeman"];
 
 pub struct OmaKingBehavior {
     next_summon_tick: u64,
@@ -36,7 +31,10 @@ pub struct OmaKingBehavior {
 
 impl OmaKingBehavior {
     pub fn new() -> Self {
-        Self { next_summon_tick: 0, spawned: false }
+        Self {
+            next_summon_tick: 0,
+            spawned: false,
+        }
     }
 }
 
@@ -81,21 +79,24 @@ impl MonsterBehavior for OmaKingBehavior {
             let is_melee = in_melee;
             if is_melee && fastrand::i32(0..3) > 0 {
                 // 2/3：LineAttack（DC）—— C# LineAttack(damage, 2, 300)：沿朝向每格命中第一个目标
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
                 for i in 1..=2i32 {
                     let tx = monster.x + DIR_DX[dir] * i;
                     let ty = monster.y + DIR_DY[dir] * i;
-                    if let Some(p) = ctx.players.iter()
-                        .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
-                    {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: p.session_id,
-                            damage,
-                            spell_id: 0,
-                            attack_type: 0,
-                        });
+                    if let Some(p) = ctx.players.iter().find(|p| {
+                        p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0
+                    }) {
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: p.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 0,
+                            });
                     }
                 }
                 // C# OmaKing.cs:74-99：等级门控 Random(20) < 4+(60-目标等级) 才推挤；
@@ -103,26 +104,37 @@ impl MonsterBehavior for OmaKingBehavior {
                 if fastrand::i32(0..20) < 4 + (60 - target.level as i32) {
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
                         session_id: target.session_id,
-                        dir: crate::actors::world::ai::direction_towards(monster.x, monster.y, target.x, target.y),
+                        dir: crate::actors::world::ai::direction_towards(
+                            monster.x, monster.y, target.x, target.y,
+                        ),
                         distance: 3 + fastrand::i32(0..3),
                     });
                     if fastrand::i32(0..8) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, crate::actors::world::ai::helpers::poison_sc_value(monster), 1000),
-                        });
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(
+                                    PoisonType::PARALYSIS,
+                                    5,
+                                    crate::actors::world::ai::helpers::poison_sc_value(monster),
+                                    1000,
+                                ),
+                            });
                     }
                 }
             } else {
                 // 1/3 或远距离：远程 MC 弹道（C# Type=1，DefenceType.MAC）
-                let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
         } else if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {
             // 追击（C# MoveTo）

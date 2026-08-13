@@ -10,10 +10,10 @@
 //! Attack（C# :21-52）：range→ObjectRangeAttack 弹道；否则 base.Attack。
 //! SpawnSlaves（C# :85-121）：count=min(8, 40-SlaveList.Count)，随机 4 种骨怪。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 7;
 const VIEW_RANGE: i32 = 15;
@@ -28,7 +28,10 @@ pub struct BoneLordBehavior {
 
 impl BoneLordBehavior {
     pub fn new() -> Self {
-        Self { stage: 3, called: [false; 3] }
+        Self {
+            stage: 3,
+            called: [false; 3],
+        }
     }
 }
 
@@ -63,27 +66,36 @@ impl MonsterBehavior for BoneLordBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
         } else if dist <= ATTACK_RANGE {
             // 远程掷骨弹道
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
@@ -98,7 +110,12 @@ impl BoneLordBehavior {
     fn spawn_slaves(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // #1441：C# count = min(8, 40 - SlaveList.Count)
         let count = slave_spawn_count(8, ctx.slave_count, 40) as u8;
-        let names = ["BoneMonster1", "BoneMonster2", "BoneMonster3", "BoneMonster4"];
+        let names = [
+            "BoneMonster1",
+            "BoneMonster2",
+            "BoneMonster3",
+            "BoneMonster4",
+        ];
         for i in 0..count {
             let dir = (i % 8) as usize;
             let nm = names[(i % 4) as usize];

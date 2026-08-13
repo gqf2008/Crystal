@@ -31,42 +31,72 @@ fn parse_chat_channel(message: &str) -> Option<ChatChannel> {
             let target = it.next().unwrap_or("").trim().to_string();
             let msg = it.next().unwrap_or("").trim().to_string();
             if !target.is_empty() && !msg.is_empty() {
-                return Some(ChatChannel::Whisper { target, message: msg });
+                return Some(ChatChannel::Whisper {
+                    target,
+                    message: msg,
+                });
             }
         } else if !first.is_empty() && !second.is_empty() {
-            return Some(ChatChannel::Whisper { target: first.to_string(), message: second.to_string() });
+            return Some(ChatChannel::Whisper {
+                target: first.to_string(),
+                message: second.to_string(),
+            });
         }
         return None;
     }
     // 组队 !!（C# 2001；必须先于单 ! 判断）
     if let Some(rest) = message.strip_prefix("!!") {
         let m = rest.trim();
-        return if m.is_empty() { None } else { Some(ChatChannel::Group(m.to_string())) };
+        return if m.is_empty() {
+            None
+        } else {
+            Some(ChatChannel::Group(m.to_string()))
+        };
     }
     // 行会 !~（C# 2014）
     if let Some(rest) = message.strip_prefix("!~") {
         let m = rest.trim();
-        return if m.is_empty() { None } else { Some(ChatChannel::Guild(m.to_string())) };
+        return if m.is_empty() {
+            None
+        } else {
+            Some(ChatChannel::Guild(m.to_string()))
+        };
     }
     // 师徒 !#（C# 2026）
     if let Some(rest) = message.strip_prefix("!#") {
         let m = rest.trim();
-        return if m.is_empty() { None } else { Some(ChatChannel::Mentor(m.to_string())) };
+        return if m.is_empty() {
+            None
+        } else {
+            Some(ChatChannel::Mentor(m.to_string()))
+        };
     }
     // 夫妻 :)（C# 2116）
     if let Some(rest) = message.strip_prefix(":)") {
         let m = rest.trim();
-        return if m.is_empty() { None } else { Some(ChatChannel::Spouse(m.to_string())) };
+        return if m.is_empty() {
+            None
+        } else {
+            Some(ChatChannel::Spouse(m.to_string()))
+        };
     }
     // GM 全服公告 @!（C# 2140；必须先于 @ 命令判断）
     if let Some(rest) = message.strip_prefix("@!") {
         let m = rest.trim();
-        return if m.is_empty() { None } else { Some(ChatChannel::GmAnnouncement(m.to_string())) };
+        return if m.is_empty() {
+            None
+        } else {
+            Some(ChatChannel::GmAnnouncement(m.to_string()))
+        };
     }
     // 喊话 !（C# 2050）
     if let Some(rest) = message.strip_prefix('!') {
         let m = rest.trim();
-        return if m.is_empty() { None } else { Some(ChatChannel::Shout(m.to_string())) };
+        return if m.is_empty() {
+            None
+        } else {
+            Some(ChatChannel::Shout(m.to_string()))
+        };
     }
     None
 }
@@ -100,7 +130,9 @@ fn chat_throttle_decision(
 ) -> ChatDecision {
     // C#：禁言中 → 提示剩余时间；到期自动解封（ChatBanned=false）
     if banned_until_ms > now_ms {
-        return ChatDecision::Banned { remaining_ms: banned_until_ms - now_ms };
+        return ChatDecision::Banned {
+            remaining_ms: banned_until_ms - now_ms,
+        };
     }
     // 2s 窗口重置/建立：窗口内第一条消息不计数（C# 首个聊天 ChatTick=0，仅设 ChatTime）
     if now_ms - throttle.window_start_ms >= 2000 {
@@ -147,7 +179,9 @@ impl WorldActor {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        let last_access = db::get_character_last_access(&self.db_pool, character_name).await.unwrap_or(0);
+        let last_access = db::get_character_last_access(&self.db_pool, character_name)
+            .await
+            .unwrap_or(0);
         if last_update <= last_access {
             return;
         }
@@ -156,12 +190,21 @@ impl WorldActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UpdateNotice as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::UpdateNotice as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
-        info!("Login notice sent to {} (session={})", character_name, session_id);
+        info!(
+            "Login notice sent to {} (session={})",
+            character_name, session_id
+        );
     }
 }
 
@@ -281,17 +324,26 @@ impl Message<StartGameRequest> for WorldActor {
                     let idx = msg.character_index.max(0) as usize;
                     if idx < chars.len() {
                         let (char_name, _map_idx, _x, _y) = &chars[idx];
-                        info!("Loading character '{}' for account '{}'", char_name, msg.account_username);
-                        if let Ok(Some(mut loaded)) = db::load_character(&self.db_pool, char_name).await {
+                        info!(
+                            "Loading character '{}' for account '{}'",
+                            char_name, msg.account_username
+                        );
+                        if let Ok(Some(mut loaded)) =
+                            db::load_character(&self.db_pool, char_name).await
+                        {
                             // #2382：C# Envir :3545 收件箱超 MailCapacity 清理已读已收取无附件的旧邮件
-                            let mail_capacity = self.social_ref
+                            let mail_capacity = self
+                                .social_ref
                                 .ask(crate::actors::social::NpcGetMailSettings)
                                 .await
                                 .map(|(_, _, _, c, _, _)| c)
                                 .unwrap_or(100);
                             let trimmed = loaded.mailbox.trim_to_capacity(mail_capacity as usize);
                             if trimmed > 0 {
-                                debug!("MailCapacity: trimmed {} old mails for '{}'", trimmed, char_name);
+                                debug!(
+                                    "MailCapacity: trimmed {} old mails for '{}'",
+                                    trimmed, char_name
+                                );
                             }
                             state = Some(loaded);
                         } else {
@@ -303,7 +355,10 @@ impl Message<StartGameRequest> for WorldActor {
                 }
             }
             Err(e) => {
-                warn!("Failed to list characters for account '{}': {}", msg.account_username, e);
+                warn!(
+                    "Failed to list characters for account '{}': {}",
+                    msg.account_username, e
+                );
             }
         }
 
@@ -311,15 +366,27 @@ impl Message<StartGameRequest> for WorldActor {
         let mut state = match state {
             Some(s) => s,
             None => {
-                let packet = mir2_shared::packets::server::login::StartGame { result: 2, resolution: 0 };
+                let packet = mir2_shared::packets::server::login::StartGame {
+                    result: 2,
+                    resolution: 0,
+                };
                 let mut body = Vec::new();
                 if packet.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: msg.session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StartGame as i16, &body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
-                warn!("StartGame rejected: character_index {} not found for account {}", msg.character_index, msg.account_username);
+                warn!(
+                    "StartGame rejected: character_index {} not found for account {}",
+                    msg.character_index, msg.account_username
+                );
                 return;
             }
         };
@@ -333,12 +400,21 @@ impl Message<StartGameRequest> for WorldActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StartGameBanned as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::StartGameBanned as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
-            warn!("StartGame rejected: character '{}' banned until ticks {}", state.name, state.char_ban_expiry_ticks);
+            warn!(
+                "StartGame rejected: character '{}' banned until ticks {}",
+                state.name, state.char_ban_expiry_ticks
+            );
             return;
         }
         if state.char_ban_expiry_ticks > 0 {
@@ -348,16 +424,34 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // C# Settings.AllowStartGame：非 GM 且关闭时 → S.StartGame{Result=0}（GM 用加载角色的 is_gm 判断）
-        if !self.social_ref.ask(crate::actors::social::NpcGetAllowStartGame).await.unwrap_or(true) && !state.is_gm {
-            let packet = mir2_shared::packets::server::login::StartGame { result: 0, resolution: 0 };
+        if !self
+            .social_ref
+            .ask(crate::actors::social::NpcGetAllowStartGame)
+            .await
+            .unwrap_or(true)
+            && !state.is_gm
+        {
+            let packet = mir2_shared::packets::server::login::StartGame {
+                result: 0,
+                resolution: 0,
+            };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StartGame as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
-            warn!("StartGame rejected: AllowStartGame=false for account {}", msg.account_username);
+            warn!(
+                "StartGame rejected: AllowStartGame=false for account {}",
+                msg.account_username
+            );
             return;
         }
 
@@ -380,26 +474,40 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 加载地图 — 优先用 DB 中的 map_infos 获取文件名
         // Phase A fix: 如果 map_index 在 DB 里找不到(idx 从 1 开始),fallback 到第一张可用地图
-        let (map_file, map_title, map_info_idx) = if let Some(m) = self.map_infos.get(&(map_index as i32)) {
-            (m.file_name.clone(), m.title.clone(), m.index)
-        } else if let Some(by_name) = self.map_infos.values().find(|m| {
-            // #2434：DB 地图 idx 从 1 开始（如新手村 file "0" → idx 1），存量角色 map_index=0 需按文件名解析
-            m.file_name == map_index.to_string()
-                || m.file_name.starts_with(&format!("{}.", map_index))
-                || m.file_name == format!("{}.map", map_index)
-        }) {
-            info!("map_index {} not in DB by idx, resolved by file name: {} ({})", map_index, by_name.file_name, by_name.title);
-            (by_name.file_name.clone(), by_name.title.clone(), by_name.index)
-        } else if let Some(first) = self.map_infos.values().next() {
-            info!("map_index {} not in DB, using first available: {} ({})", map_index, first.file_name, first.title);
-            (first.file_name.clone(), first.title.clone(), first.index)
-        } else {
-            ("0".to_string(), "Unknown".to_string(), 0) // "0" = first .map file
-        };
+        let (map_file, map_title, map_info_idx) =
+            if let Some(m) = self.map_infos.get(&(map_index as i32)) {
+                (m.file_name.clone(), m.title.clone(), m.index)
+            } else if let Some(by_name) = self.map_infos.values().find(|m| {
+                // #2434：DB 地图 idx 从 1 开始（如新手村 file "0" → idx 1），存量角色 map_index=0 需按文件名解析
+                m.file_name == map_index.to_string()
+                    || m.file_name.starts_with(&format!("{}.", map_index))
+                    || m.file_name == format!("{}.map", map_index)
+            }) {
+                info!(
+                    "map_index {} not in DB by idx, resolved by file name: {} ({})",
+                    map_index, by_name.file_name, by_name.title
+                );
+                (
+                    by_name.file_name.clone(),
+                    by_name.title.clone(),
+                    by_name.index,
+                )
+            } else if let Some(first) = self.map_infos.values().next() {
+                info!(
+                    "map_index {} not in DB, using first available: {} ({})",
+                    map_index, first.file_name, first.title
+                );
+                (first.file_name.clone(), first.title.clone(), first.index)
+            } else {
+                ("0".to_string(), "Unknown".to_string(), 0) // "0" = first .map file
+            };
 
         let map_slot = map_info_idx as u16;
         if self.get_or_load_map(&map_file, map_slot).is_some() {
-            info!("Map '{}' loaded for player {} (slot {})", map_file, player_name, map_slot);
+            info!(
+                "Map '{}' loaded for player {} (slot {})",
+                map_file, player_name, map_slot
+            );
         }
 
         // 注入地图数据（按真实 map_index 查找）
@@ -430,7 +538,10 @@ impl Message<StartGameRequest> for WorldActor {
         let pos_walkable = self
             .maps
             .get(&map_slot)
-            .map(|m| m.is_valid(loaded_state.x, loaded_state.y) && m.is_walkable(loaded_state.x, loaded_state.y))
+            .map(|m| {
+                m.is_valid(loaded_state.x, loaded_state.y)
+                    && m.is_walkable(loaded_state.x, loaded_state.y)
+            })
             .unwrap_or(false);
         if (loaded_state.x == 0 && loaded_state.y == 0) || !pos_walkable {
             if let Some(mi) = self.map_infos.get(&(map_index as i32)) {
@@ -440,7 +551,11 @@ impl Message<StartGameRequest> for WorldActor {
                         player_name,
                         sz.x,
                         sz.y,
-                        if pos_walkable { "" } else { "（原位置不可走）" }
+                        if pos_walkable {
+                            ""
+                        } else {
+                            "（原位置不可走）"
+                        }
                     );
                     loaded_state.x = sz.x;
                     loaded_state.y = sz.y;
@@ -491,21 +606,30 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
-        let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() }).await;
+        let _ = player_ref
+            .ask(SetPlayerState {
+                state: loaded_state.clone(),
+            })
+            .await;
 
-        self.players.insert(msg.session_id, PlayerRecord {
-            actor_ref: player_ref.clone(),
-            session_id: msg.session_id,
-            name: player_name.clone(),
-            account_username: msg.account_username.clone(),
-            last_pk_points: loaded_state.pk_points,
-            last_colour: 0,
-            object_id: loaded_state.object_id,
-            world_map_setup_sent: false,
-        });
+        self.players.insert(
+            msg.session_id,
+            PlayerRecord {
+                actor_ref: player_ref.clone(),
+                session_id: msg.session_id,
+                name: player_name.clone(),
+                account_username: msg.account_username.clone(),
+                last_pk_points: loaded_state.pk_points,
+                last_colour: 0,
+                object_id: loaded_state.object_id,
+                world_map_setup_sent: false,
+            },
+        );
 
-        info!("Player {} entered world (object_id={}, session={})",
-              player_name, object_id, msg.session_id);
+        info!(
+            "Player {} entered world (object_id={}, session={})",
+            player_name, object_id, msg.session_id
+        );
         // #1540：登录即同步 ClearRing 隐身（头盔宝石）
         self.sync_clear_ring_visibility(msg.session_id).await;
 
@@ -515,9 +639,11 @@ impl Message<StartGameRequest> for WorldActor {
         // C# StartGame NoReconnect：由独立消息 ApplyNoReconnect 处理
         //（避免登录 handler 内同步加载大图导致 tokio 栈溢出，#881 回归）
         if let Some(world_ref) = self.self_ref.clone() {
-            let _ = world_ref.tell(crate::actors::world::ApplyNoReconnect {
-                session_id: msg.session_id,
-            }).try_send();
+            let _ = world_ref
+                .tell(crate::actors::world::ApplyNoReconnect {
+                    session_id: msg.session_id,
+                })
+                .try_send();
         }
 
         // C# PlayerObject.StartGame → SetLevelEffects：按 flags 990-998 刷新等级特效
@@ -527,38 +653,60 @@ impl Message<StartGameRequest> for WorldActor {
 
         // C# StartGame：下发玩家所属行会的激活 Buff 列表（S.GuildBuffList）
         if let Some(guild_name) = &loaded_state.guild_name {
-            let buffs = self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs {
-                guild_name: guild_name.clone(),
-            }).await.unwrap_or_default();
+            let buffs = self
+                .social_ref
+                .ask(crate::actors::social::NpcGetGuildBuffs {
+                    guild_name: guild_name.clone(),
+                })
+                .await
+                .unwrap_or_default();
             let packet = mir2_shared::packets::server::special_systems::GuildBuffList {
                 active_buffs: buffs.iter().map(|b| *b as i32).collect(),
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildBuffList as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::GuildBuffList as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
         }
 
         // #188：下发英雄列表（ManageHeroes）
         // #194：从 DB 载入英雄（重启不丢）
         if let Ok(db_heroes) = db::load_heroes(&self.db_pool, &player_name).await {
-            self.player_heroes.insert(msg.session_id, db_heroes.into_iter().map(|h| HeroInfo {
-                index: h.index,
-                name: h.name,
-                level: h.level,
-                class: mir2_shared::enums::MirClass::try_from(h.class).unwrap_or(mir2_shared::enums::MirClass::Warrior),
-                gender: mir2_shared::enums::MirGender::try_from(h.gender).unwrap_or(mir2_shared::enums::MirGender::Male),
-                dead: h.dead,
-                sealed: h.sealed,
-                autopot: h.autopot,
-                experience: h.experience,
-                max_experience: h.max_experience,
-            }).collect());
+            self.player_heroes.insert(
+                msg.session_id,
+                db_heroes
+                    .into_iter()
+                    .map(|h| HeroInfo {
+                        index: h.index,
+                        name: h.name,
+                        level: h.level,
+                        class: mir2_shared::enums::MirClass::try_from(h.class)
+                            .unwrap_or(mir2_shared::enums::MirClass::Warrior),
+                        gender: mir2_shared::enums::MirGender::try_from(h.gender)
+                            .unwrap_or(mir2_shared::enums::MirGender::Male),
+                        dead: h.dead,
+                        sealed: h.sealed,
+                        autopot: h.autopot,
+                        experience: h.experience,
+                        max_experience: h.max_experience,
+                    })
+                    .collect(),
+            );
         }
-        let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+        let heroes = self
+            .player_heroes
+            .get(&msg.session_id)
+            .cloned()
+            .unwrap_or_default();
         send_manage_heroes_packet(&self.gate_ref, msg.session_id, &loaded_state, &heroes);
         // #198：有英雄则生成英雄对象
         if loaded_state.hero_index > 0 {
@@ -566,32 +714,61 @@ impl Message<StartGameRequest> for WorldActor {
             // #203：下发完整英雄信息（背包/装备/自动药）
             self.send_hero_information_packet(msg.session_id).await;
             // C# HeroObject.SendBaseStats（HeroObject.cs:1265）：下发英雄基础属性
-            if let Some(hero) = self.player_heroes.get(&msg.session_id)
-                .and_then(|hs| hs.iter().find(|h| h.index == loaded_state.hero_index as i32))
-            {
-                let hs = crate::actors::world::hero_stats::hero_base_stats(hero.class, hero.level as i32);
+            if let Some(hero) = self.player_heroes.get(&msg.session_id).and_then(|hs| {
+                hs.iter()
+                    .find(|h| h.index == loaded_state.hero_index as i32)
+            }) {
+                let hs = crate::actors::world::hero_stats::hero_base_stats(
+                    hero.class,
+                    hero.level as i32,
+                );
                 let stats = vec![
-                    hs.max_hp, hs.max_mp, hs.min_ac, hs.max_ac, hs.min_mac, hs.max_mac,
-                    hs.min_dc, hs.max_dc, hs.min_mc, hs.max_mc, hs.min_sc, hs.max_sc,
-                    hs.accuracy, hs.agility, hs.bag_weight, hs.wear_weight, hs.hand_weight, hs.poison_attack,
+                    hs.max_hp,
+                    hs.max_mp,
+                    hs.min_ac,
+                    hs.max_ac,
+                    hs.min_mac,
+                    hs.max_mac,
+                    hs.min_dc,
+                    hs.max_dc,
+                    hs.min_mc,
+                    hs.max_mc,
+                    hs.min_sc,
+                    hs.max_sc,
+                    hs.accuracy,
+                    hs.agility,
+                    hs.bag_weight,
+                    hs.wear_weight,
+                    hs.hand_weight,
+                    hs.poison_attack,
                 ];
-                let packet = mir2_shared::packets::server::miscellaneous::HeroBaseStatsInfo { stats };
+                let packet =
+                    mir2_shared::packets::server::miscellaneous::HeroBaseStatsInfo { stats };
                 let mut body = Vec::new();
                 if packet.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: msg.session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HeroBaseStatsInfo as i16, &body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::HeroBaseStatsInfo as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
             }
         }
 
         // 通知 SocialActor 玩家上线（组队/好友/行会查询依赖在线表）
-        let _ = self.social_ref.tell(crate::actors::social::SocialPlayerJoined {
-            session_id: msg.session_id,
-            actor_ref: player_ref.clone(),
-            name: player_name.clone(),
-        }).try_send();
+        let _ = self
+            .social_ref
+            .tell(crate::actors::social::SocialPlayerJoined {
+                session_id: msg.session_id,
+                actor_ref: player_ref.clone(),
+                name: player_name.clone(),
+            })
+            .try_send();
 
         // C# ApplyMapEntryRules：登录进入世界后应用地图规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
         super::npc_script::apply_map_entry_rules(self, msg.session_id).await;
@@ -611,14 +788,19 @@ impl Message<StartGameRequest> for WorldActor {
                     / 86400;
                 if st.last_access / 86400 < today {
                     // C# ProcessNewDay → ClearDailyQuests：每日任务从已完成移除（次日可重接）
-                    let daily: Vec<i32> = self.quest_infos.values()
+                    let daily: Vec<i32> = self
+                        .quest_infos
+                        .values()
                         .filter(|q| q.quest_type == 1) // QuestType.Daily
                         .map(|q| q.index)
                         .collect();
                     if !daily.is_empty() {
-                        let _ = r.actor_ref.ask(crate::actors::player::ClearDailyQuests {
-                            quest_indices: daily,
-                        }).await;
+                        let _ = r
+                            .actor_ref
+                            .ask(crate::actors::player::ClearDailyQuests {
+                                quest_indices: daily,
+                            })
+                            .await;
                     }
                     self.queue_default_npc(msg.session_id, "_daily");
                 }
@@ -631,45 +813,78 @@ impl Message<StartGameRequest> for WorldActor {
         self.sync_temp_skills(msg.session_id).await;
 
         // 发送玩家自身的 ObjectPlayer（客户端据此生成本地玩家实体并驱动移动/拾取）
-        let self_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+        let self_weapon = loaded_state
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.shape as i16).unwrap_or(-1);
-        let self_armor = loaded_state.inventory.get_equipment(EquipmentSlot::Armour)
+            .map(|info| info.shape as i16)
+            .unwrap_or(-1);
+        let self_armor = loaded_state
+            .inventory
+            .get_equipment(EquipmentSlot::Armour)
             .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.shape as i16).unwrap_or(0);
-        let self_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .map(|info| info.shape as i16)
+            .unwrap_or(0);
+        let self_weapon_effect = loaded_state
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.effect as i16).unwrap_or(0);
+            .map(|info| info.effect as i16)
+            .unwrap_or(0);
         // #934：C# MapInfo.NoNames——该地图实体名字显示 ?????（含自身）
-        let self_display_name = if self.map_infos.get(&(loaded_state.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
+        let self_display_name = if self
+            .map_infos
+            .get(&(loaded_state.map_index as i32))
+            .map(|m| m.no_names)
+            .unwrap_or(false)
+        {
             "?????"
         } else {
             player_name.as_str()
         };
         let self_packet = build_object_player_packet(
-            self_display_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction,
-            loaded_state.level, self.self_name_colour(&loaded_state),
-            loaded_state.class, loaded_state.gender, loaded_state.hair,
-            self_weapon, self_weapon_effect, self_armor,
-            loaded_state.mount_type, loaded_state.is_mounted,
+            self_display_name,
+            object_id,
+            loaded_state.x,
+            loaded_state.y,
+            loaded_state.direction,
+            loaded_state.level,
+            self.self_name_colour(&loaded_state),
+            loaded_state.class,
+            loaded_state.gender,
+            loaded_state.hair,
+            self_weapon,
+            self_weapon_effect,
+            self_armor,
+            loaded_state.mount_type,
+            loaded_state.is_mounted,
             loaded_state.level_effects,
             loaded_state.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(loaded_state.guild_rank),
         );
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: self_packet,
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: self_packet,
+            })
+            .await;
 
         // 多玩家可见性：向新玩家发送已有玩家的 ObjectPlayer（同图 + 跳过隐身，#1651/#1653）
-        self.send_map_players_to(msg.session_id, &loaded_state, loaded_state.map_index).await;
+        self.send_map_players_to(msg.session_id, &loaded_state, loaded_state.map_index)
+            .await;
 
         // 向已有玩家发送新玩家的 ObjectPlayer（隐身新玩家不发送，#1651/#1653）
         let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
-        if loaded_state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == invis_tag) {
+        if loaded_state
+            .buffs
+            .iter()
+            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag)
+        {
             self.invisible_sessions.insert(msg.session_id);
         }
-        self.send_player_to_map(msg.session_id, &loaded_state, loaded_state.map_index).await;
+        self.send_player_to_map(msg.session_id, &loaded_state, loaded_state.map_index)
+            .await;
 
         // 发送游戏进入序列（使用真实状态数据）
         send_game_entry_sequence(
@@ -682,12 +897,20 @@ impl Message<StartGameRequest> for WorldActor {
             &self.item_infos,
             &self.quest_infos,
             &self.recipe_infos,
-        ).await;
+        )
+        .await;
 
         // C# StartGameSuccess：复活已驯服宠物（Info.Pets 循环；Spawn(CurrentMap, Back)）
         if let Ok(pets) = db::load_player_pets(&self.db_pool, &player_name).await {
             for pet in pets {
-                self.spawn_tamed_pet(msg.session_id, &pet, loaded_state.map_index, loaded_state.x, loaded_state.y).await;
+                self.spawn_tamed_pet(
+                    msg.session_id,
+                    &pet,
+                    loaded_state.map_index,
+                    loaded_state.x,
+                    loaded_state.y,
+                )
+                .await;
             }
         }
 
@@ -706,10 +929,16 @@ impl Message<StartGameRequest> for WorldActor {
             };
             let mut sg_body = Vec::new();
             if sg.write_body(&mut sg_body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SwitchGroup as i16, &sg_body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::SwitchGroup as i16,
+                            &sg_body,
+                        ),
+                    })
+                    .await;
             }
         }
 
@@ -732,7 +961,8 @@ impl Message<StartGameRequest> for WorldActor {
             &mut self.next_object_id,
             &spawn_ctx,
             self.maps.get(&map_slot),
-        ).await;
+        )
+        .await;
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
@@ -744,14 +974,18 @@ impl Message<StartGameRequest> for WorldActor {
             loaded_state.map_index,
             msg.session_id,
             &mut self.next_object_id,
-        ).await;
+        )
+        .await;
         for flag in new_flags {
             self.conquest_flags.insert(flag.object_id, flag);
         }
         // 装饰物同步（C# GetObjectsPassive 含 DecoObject）
-        self.sync_decos_on_map(msg.session_id, loaded_state.map_index).await;
+        self.sync_decos_on_map(msg.session_id, loaded_state.map_index)
+            .await;
         // M53：发送 NewMapInfo（大地图 NPC 列表，供 BigMapDialog 显示）
-        let map_npcs: Vec<crate::actors::world::NpcState> = self.npcs.values()
+        let map_npcs: Vec<crate::actors::world::NpcState> = self
+            .npcs
+            .values()
             .filter(|n| n.map_index == loaded_state.map_index)
             .cloned()
             .collect();
@@ -762,26 +996,36 @@ impl Message<StartGameRequest> for WorldActor {
                 &map_npcs,
                 &self.npc_infos,
             );
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: new_map_info,
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: new_map_info,
+                })
+                .await;
             info!("NewMapInfo: map={} npcs={}", map_info_idx, map_npcs.len());
         }
         // #302：世界地图配置（C# CheckMapInfo 每连接下发一次）
         if let Some(rec) = self.players.get_mut(&msg.session_id) {
             if !rec.world_map_setup_sent {
                 rec.world_map_setup_sent = true;
-                let wm = super::build_world_map_setup_packet(&self.map_infos, self.setup_cfg.teleport_to_npc_cost);
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: wm,
-                }).await;
+                let wm = super::build_world_map_setup_packet(
+                    &self.map_infos,
+                    self.setup_cfg.teleport_to_npc_cost,
+                );
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: wm,
+                    })
+                    .await;
                 info!("WorldMapSetup: sent to session {}", msg.session_id);
             }
         }
         // 先收集精英广播信息（move 前遍历）
-        let elite_broadcasts: Vec<String> = new_monsters.iter()
+        let elite_broadcasts: Vec<String> = new_monsters
+            .iter()
             .filter(|m| m.rarity > 0)
             .map(|m| m.name.clone())
             .collect();
@@ -791,14 +1035,23 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 初始生成精英广播
         for name in &elite_broadcasts {
-            let map_name = self.map_infos.get(&(map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
-            broadcast_system_message(&self.gate_ref, &self.players,
-                &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name));
+            let map_name = self
+                .map_infos
+                .get(&(map_index as i32))
+                .map(|m| m.title.clone())
+                .unwrap_or_else(|| "未知地图".to_string());
+            broadcast_system_message(
+                &self.gate_ref,
+                &self.players,
+                &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name),
+            );
         }
 
         // 同步当前地图上的地面物品给新玩家
         let map_index_val = loaded_state.map_index;
-        let ground_sync: Vec<_> = self.ground_items.iter()
+        let ground_sync: Vec<_> = self
+            .ground_items
+            .iter()
             .filter(|gi| gi.map_index == map_index_val)
             .map(|gi| (gi.object_id, gi.item.clone(), gi.x, gi.y, gi.gold_amount))
             .collect();
@@ -812,8 +1065,18 @@ impl Message<StartGameRequest> for WorldActor {
                 };
                 let mut buf = Vec::new();
                 if mir2_shared::packets::base::serialize_packet(
-                    &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
+                    &mut std::io::Cursor::new(&mut buf),
+                    &object_gold,
+                )
+                .is_ok()
+                {
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: buf,
+                        })
+                        .await;
                 }
             } else {
                 let object_item = mir2_shared::packets::server::ObjectItem {
@@ -824,14 +1087,26 @@ impl Message<StartGameRequest> for WorldActor {
                 };
                 let mut buf = Vec::new();
                 if mir2_shared::packets::base::serialize_packet(
-                    &mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
+                    &mut std::io::Cursor::new(&mut buf),
+                    &object_item,
+                )
+                .is_ok()
+                {
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: buf,
+                        })
+                        .await;
                 }
             }
         }
 
         // 同步当前地图上已打开的门给新玩家
-        let open_doors_sync: Vec<_> = self.open_doors.iter()
+        let open_doors_sync: Vec<_> = self
+            .open_doors
+            .iter()
             .filter(|(map_idx, _)| *map_idx == map_index_val)
             .map(|(_, door_idx)| *door_idx)
             .collect();
@@ -849,10 +1124,16 @@ impl Message<StartGameRequest> for WorldActor {
                 };
                 let mut body = Vec::new();
                 if new_magic.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: msg.session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::NewMagic as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
                 // Send SpellToggle for toggled-on spells
                 if magic.toggled {
@@ -860,10 +1141,16 @@ impl Message<StartGameRequest> for WorldActor {
                     toggle_body.extend_from_slice(&loaded_state.object_id.to_le_bytes());
                     toggle_body.push(magic.spell as u8);
                     toggle_body.push(1u8); // canUse = true
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: msg.session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SpellToggle as i16, &toggle_body),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::SpellToggle as i16,
+                                &toggle_body,
+                            ),
+                        })
+                        .await;
                 }
             }
         }
@@ -874,41 +1161,66 @@ impl Message<StartGameRequest> for WorldActor {
         // C# StartGameSuccess（:1177-1179）：登录下发攻击/宠物模式同步（客户端本地显示与持久化值一致）
         {
             let body = vec![loaded_state.attack_mode as u8];
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeAMode as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ChangeAMode as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
         {
             let body = vec![loaded_state.pet_mode as u8];
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangePMode as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ChangePMode as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
         // C# StartGameSuccess（:1221）：下发默认 NPC ObjectID（客户端默认 NPC 按钮路由）
         {
             let mut body = Vec::new();
             body.extend_from_slice(&self.default_npc_object_id.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DefaultNPC as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::DefaultNPC as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
 
         // C# SendBaseStats（HumanObject.cs:1726）：登录下发职业基础属性（BaseStats.Stats 按公式计算当前等级值）
         {
-            let stats: Vec<i32> = mir2_shared::data::stats::BaseStats::new(loaded_state.class).stats
+            let stats: Vec<i32> = mir2_shared::data::stats::BaseStats::new(loaded_state.class)
+                .stats
                 .iter()
                 .map(|bs| bs.calculate(loaded_state.class, loaded_state.level as i32))
                 .collect();
             let packet = mir2_shared::packets::server::miscellaneous::BaseStatsInfo { stats };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::BaseStatsInfo as i16, &body),
-                }).await;
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::BaseStatsInfo as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
             }
         }
 
@@ -917,10 +1229,16 @@ impl Message<StartGameRequest> for WorldActor {
             let mut body = Vec::new();
             body.push(crate::actors::player::buff_tag(&buff.buff_type));
             body.extend_from_slice(&buff.remaining_ticks.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AddBuff as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::AddBuff as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
 
         // 发送自动药水设置（恢复持久化数据）
@@ -928,19 +1246,31 @@ impl Message<StartGameRequest> for WorldActor {
             let mut body = Vec::new();
             body.push(12u8); // Stat = HP (C# Stat.HP = 12)
             body.extend_from_slice(&loaded_state.auto_pot_hp.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
         if loaded_state.auto_pot_mp > 0 {
             let mut body = Vec::new();
             body.push(13u8); // Stat = MP (C# Stat.MP = 13)
             body.extend_from_slice(&loaded_state.auto_pot_mp.to_le_bytes());
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
 
         // 发送欢迎消息
@@ -952,8 +1282,14 @@ impl Message<StartGameRequest> for WorldActor {
             mir2_shared::enums::LightSetting::Night => "夜晚",
             _ => "正常",
         };
-        send_system_message(&self.gate_ref, msg.session_id,
-            &format!("欢迎来到水晶世界！当前在线玩家: {} 人，当前时间: {}", online_count, light_name));
+        send_system_message(
+            &self.gate_ref,
+            msg.session_id,
+            &format!(
+                "欢迎来到水晶世界！当前在线玩家: {} 人，当前时间: {}",
+                online_count, light_name
+            ),
+        );
     }
 }
 
@@ -975,41 +1311,69 @@ impl Message<WorldMoveRequest> for WorldActor {
         // #1426/#1428：run/steps 在 state 块内确定（块外也要用 move_type/扣忠诚度）
         let (mut run, mut steps) = (false, 1);
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            if state.is_dead { return; }
+            if state.is_dead {
+                return;
+            }
 
             // C# CanWalk/CanRun（HumanObject.cs:128/4977）：InTrapRock 困敌中不可走/跑（TrapRock）
             if self.in_trap_rock.contains(&msg.session_id) {
-                send_user_location_sync(&self.gate_ref, msg.session_id, state.direction, state.x, state.y).await;
+                send_user_location_sync(
+                    &self.gate_ref,
+                    msg.session_id,
+                    state.direction,
+                    state.x,
+                    state.y,
+                )
+                .await;
                 return;
             }
 
             // #1426：负重超限——C# CanWalk 不含负重（超重可走）；CanRun 含负重 → Run 退化为 Walk（HumanObject.Run :2516）
-            let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
-            let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos)
-                + crate::combat::buff::get_stat_bonus(
-                    &state.buffs,
-                    &crate::combat::buff::BuffType::BagWeightBoost { bonus: 0 },
-                );
+            let (bag_weight, _, _) =
+                super::compute_player_weights(&state.inventory, &self.item_infos);
+            let limit = super::weight_limit(
+                &state.inventory,
+                state.class,
+                state.level,
+                mir2_shared::enums::Stat::BagWeight,
+                &self.item_infos,
+            ) + crate::combat::buff::get_stat_bonus(
+                &state.buffs,
+                &crate::combat::buff::BuffType::BagWeightBoost { bonus: 0 },
+            );
             let overweight = bag_weight > limit;
             // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2
             run = effective_run(msg.is_run, overweight);
-            let swift_feet = state.buffs.iter().any(|b| matches!(
-                b.buff_type, crate::combat::buff::BuffType::MoveSpeedBoost { .. }
-            ));
+            let swift_feet = state.buffs.iter().any(|b| {
+                matches!(
+                    b.buff_type,
+                    crate::combat::buff::BuffType::MoveSpeedBoost { .. }
+                )
+            });
             steps = move_steps(run, state.is_mounted, swift_feet);
             // #1408/#1428：C# Walk/Run 对每一格做阻挡校验——NPC / 未摧毁城墙城门阻挡通行
             let dir = msg.direction as usize % 8;
-            let npc_tiles: Vec<(i32, i32)> = self.npcs.values()
+            let npc_tiles: Vec<(i32, i32)> = self
+                .npcs
+                .values()
                 .filter(|n| n.map_index == state.map_index)
                 .map(|n| (n.x, n.y))
                 .collect();
-            let struct_tiles: Vec<(i32, i32)> = self.siege_structures.values()
+            let struct_tiles: Vec<(i32, i32)> = self
+                .siege_structures
+                .values()
                 .filter(|s| s.is_blocking() && !s.is_destroyed())
-                .filter(|s| self.conquest_instances.iter().any(|c| c.id == s.conquest_id && c.map_index == state.map_index as i32))
+                .filter(|s| {
+                    self.conquest_instances
+                        .iter()
+                        .any(|c| c.id == s.conquest_id && c.map_index == state.map_index as i32)
+                })
                 .map(|s| (s.x, s.y))
                 .collect();
             // #1717：C# EmptyCell——怪物占用目标格不可走（玩家不阻挡）
-            let monster_tiles: Vec<(i32, i32)> = self.monsters.values()
+            let monster_tiles: Vec<(i32, i32)> = self
+                .monsters
+                .values()
                 .filter(|m| m.map_index == state.map_index)
                 .map(|m| (m.x, m.y))
                 .collect();
@@ -1025,7 +1389,14 @@ impl Message<WorldMoveRequest> for WorldActor {
             }
             if blocked {
                 // #1427：C# Walk/Run 失败 Enqueue S.UserLocation（用服务端坐标重同步）
-                send_user_location_sync(&self.gate_ref, msg.session_id, state.direction, state.x, state.y).await;
+                send_user_location_sync(
+                    &self.gate_ref,
+                    msg.session_id,
+                    state.direction,
+                    state.x,
+                    state.y,
+                )
+                .await;
                 return;
             }
         }
@@ -1038,7 +1409,9 @@ impl Message<WorldMoveRequest> for WorldActor {
         let interval_ms = if pacing_ms > 0 {
             // C# GetDelayTime：持有 Slow 毒时翻倍
             let slow = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                st.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW))
+                st.poison_list
+                    .iter()
+                    .any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW))
             } else {
                 false
             };
@@ -1056,20 +1429,32 @@ impl Message<WorldMoveRequest> for WorldActor {
                 return; // 拒绝移动
             }
         }
-        self.last_move_time.insert(msg.session_id, std::time::Instant::now());
+        self.last_move_time
+            .insert(msg.session_id, std::time::Instant::now());
 
         let move_type = if run { MoveType::Run } else { MoveType::Walk };
 
         // 发送移动请求到 PlayerActor
         // #1427：C# Walk/Run 失败 Enqueue S.UserLocation（目标不可走/眩晕/非法方向等）
-        if let Ok(success) = record.actor_ref.ask(MoveRequest {
-            session_id: msg.session_id,
-            direction: msg.direction,
-            is_run: run,
-        }).await {
+        if let Ok(success) = record
+            .actor_ref
+            .ask(MoveRequest {
+                session_id: msg.session_id,
+                direction: msg.direction,
+                is_run: run,
+            })
+            .await
+        {
             if !success {
                 if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                    send_user_location_sync(&self.gate_ref, msg.session_id, st.direction, st.x, st.y).await;
+                    send_user_location_sync(
+                        &self.gate_ref,
+                        msg.session_id,
+                        st.direction,
+                        st.x,
+                        st.y,
+                    )
+                    .await;
                 }
                 return;
             }
@@ -1078,52 +1463,78 @@ impl Message<WorldMoveRequest> for WorldActor {
         }
 
         // #1757：C# Walk/Run——移动取消交易（双方收 S.TradeCancel）
-        let _ = self.social_ref.tell(crate::actors::social::TradeCancel {
-            session_id: msg.session_id,
-        }).try_send();
+        let _ = self
+            .social_ref
+            .tell(crate::actors::social::TradeCancel {
+                session_id: msg.session_id,
+            })
+            .try_send();
 
         // C# HumanObject Walk/Run：移动打断专注（3s 内不提供专注加成）
         self.interrupt_concentration(msg.session_id).await;
 
         // C# HumanObject Walk/Run：骑乘移动扣坐骑忠诚度（Walk=1 / Run=2，LoyaltyDelay 限速）
-        let _ = record.actor_ref.tell(crate::actors::player::DecreaseMountLoyalty {
-            amount: if run { 2 } else { 1 },
-        }).try_send();
+        let _ = record
+            .actor_ref
+            .tell(crate::actors::player::DecreaseMountLoyalty {
+                amount: if run { 2 } else { 1 },
+            })
+            .try_send();
 
         // C# HumanObject Walk/Run：进入安全区时更新绑定点（SetBindSafeZone）
         if let Ok(Some(post_state)) = record.actor_ref.ask(GetPlayerState).await {
-            self.update_bind_safe_zone(msg.session_id, post_state.map_index, post_state.x, post_state.y).await;
+            self.update_bind_safe_zone(
+                msg.session_id,
+                post_state.map_index,
+                post_state.x,
+                post_state.y,
+            )
+            .await;
         }
 
         // 获取移动后的状态并广播给其他玩家
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             // 隐身玩家移动时不广播给其他人
             if !self.invisible_sessions.contains(&msg.session_id) {
-                let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
+                let others: Vec<_> = self
+                    .same_map_players(msg.session_id, state.map_index)
+                    .await
                     .into_iter()
                     .map(|r| r.actor_ref.clone())
                     .collect();
 
                 for other in others {
-                    let _ = other.ask(BroadcastMovement {
-                        object_id: state.object_id,
-                        x: state.x,
-                        y: state.y,
-                        direction: state.direction,
-                        move_type,
-                        exclude_session: msg.session_id,
-                    }).await;
+                    let _ = other
+                        .ask(BroadcastMovement {
+                            object_id: state.object_id,
+                            x: state.x,
+                            y: state.y,
+                            direction: state.direction,
+                            move_type,
+                            exclude_session: msg.session_id,
+                        })
+                        .await;
                 }
             }
 
             // 检查是否踩到地图传送点（Movement）— O(1) index lookup
-            let mv = self.movement_index.get(&(state.map_index as i32, state.x, state.y)).cloned();
+            let mv = self
+                .movement_index
+                .get(&(state.map_index as i32, state.x, state.y))
+                .cloned();
 
             // C# PlayerObject.CheckMovement（:4459-4471）：落点命中 ActiveCoords → 默认 NPC [@_MapCoord(map,x,y)]
             if let Some(coords) = self.active_coords.get(&(state.map_index as i32)) {
                 if coords.contains(&(state.x, state.y)) {
-                    if let Some(file) = self.map_infos.get(&(state.map_index as i32)).map(|m| m.file_name.clone()) {
-                        self.queue_default_npc(msg.session_id, &format!("_mapcoord({},{},{})", file, state.x, state.y));
+                    if let Some(file) = self
+                        .map_infos
+                        .get(&(state.map_index as i32))
+                        .map(|m| m.file_name.clone())
+                    {
+                        self.queue_default_npc(
+                            msg.session_id,
+                            &format!("_mapcoord({},{},{})", file, state.x, state.y),
+                        );
                     }
                 }
             }
@@ -1132,12 +1543,18 @@ impl Message<WorldMoveRequest> for WorldActor {
                 // C# MovementInfo.NeedHole：需源格有 DigOutZombie/DigOutArmadillo 洞口 SpellObject 才能传送
                 if mv.need_hole {
                     let has_hole = self.spell_objects.values().any(|so| {
-                        so.map_index == state.map_index && so.x == state.x && so.y == state.y
+                        so.map_index == state.map_index
+                            && so.x == state.x
+                            && so.y == state.y
                             && (so.spell == mir2_shared::enums::Spell::DigOutZombie
                                 || so.spell == mir2_shared::enums::Spell::DigOutArmadillo)
                     });
                     if !has_hole {
-                        send_system_message(&self.gate_ref, msg.session_id, "这里需要先挖开洞口才能通过");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "这里需要先挖开洞口才能通过",
+                        );
                         return;
                     }
                 }
@@ -1146,11 +1563,16 @@ impl Message<WorldMoveRequest> for WorldActor {
                 if mv.conquest_index > 0 {
                     let owns = state.guild_name.as_ref().is_some_and(|guild| {
                         self.conquest_instances.iter().any(|c| {
-                            c.id == mv.conquest_index && c.owner_guild.as_deref() == Some(guild.as_str())
+                            c.id == mv.conquest_index
+                                && c.owner_guild.as_deref() == Some(guild.as_str())
                         })
                     });
                     if !owns {
-                        send_system_message(&self.gate_ref, msg.session_id, "你的行会未拥有该领地，无法通过");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "你的行会未拥有该领地，无法通过",
+                        );
                         return;
                     }
                 }
@@ -1161,9 +1583,12 @@ impl Message<WorldMoveRequest> for WorldActor {
 
                 // C# NeedMove 语义：暂存传送点（不直接传送），由 NPC 脚本 ENTERMAP 指令执行
                 if mv.need_move {
-                    self.session_last_movement.insert(msg.session_id, (dest_map_index as u16, dest_x, dest_y));
-                    debug!("Movement staged for ENTERMAP: {} ({},{}) -> {} ({},{})",
-                           state.map_index, state.x, state.y, dest_map_index, dest_x, dest_y);
+                    self.session_last_movement
+                        .insert(msg.session_id, (dest_map_index as u16, dest_x, dest_y));
+                    debug!(
+                        "Movement staged for ENTERMAP: {} ({},{}) -> {} ({},{})",
+                        state.map_index, state.x, state.y, dest_map_index, dest_x, dest_y
+                    );
                     return;
                 }
 
@@ -1172,7 +1597,10 @@ impl Message<WorldMoveRequest> for WorldActor {
 
                 if let Some(dest_mi) = dest_map_info {
                     if dest_mi.no_teleport {
-                        debug!("Movement trigger blocked: map {} has no_teleport", dest_map_index);
+                        debug!(
+                            "Movement trigger blocked: map {} has no_teleport",
+                            dest_map_index
+                        );
                         return;
                     }
                     // #935：C# RequiredGroup——必须组队才能进入（GM 豁免）
@@ -1191,7 +1619,10 @@ impl Message<WorldMoveRequest> for WorldActor {
                     // Check no_escape on source map
                     if let Some(src_mi) = self.map_infos.get(&(state.map_index as i32)) {
                         if src_mi.no_escape {
-                            debug!("Movement trigger blocked: source map {} has no_escape", state.map_index);
+                            debug!(
+                                "Movement trigger blocked: source map {} has no_escape",
+                                state.map_index
+                            );
                             return;
                         }
                     }
@@ -1204,9 +1635,16 @@ impl Message<WorldMoveRequest> for WorldActor {
                     // Load dest map（按目标 map_index 加载，支持多图并存）
                     let dest_slot = dest_map_index as u16;
                     if self.get_or_load_map(&dest_file, dest_slot).is_some() {
-                        info!("Player {} teleported via movement: {} ({},{}) -> {} ({},{})",
-                            player_name, state.map_index, state.x, state.y,
-                            dest_map_index, dest_x, dest_y);
+                        info!(
+                            "Player {} teleported via movement: {} ({},{}) -> {} ({},{})",
+                            player_name,
+                            state.map_index,
+                            state.x,
+                            state.y,
+                            dest_map_index,
+                            dest_x,
+                            dest_y
+                        );
 
                         // Inject new map data into player for collision/pathfinding
                         if let Some(map_data) = self.maps.get(&dest_slot).cloned() {
@@ -1214,25 +1652,46 @@ impl Message<WorldMoveRequest> for WorldActor {
                         }
 
                         // Update player position
-                        let _ = player_ref.ask(SetPlayerPosition {
-                            x: dest_x,
-                            y: dest_y,
-                            direction: state.direction,
-                            map_index: Some(dest_map_index as u16),
-                            is_mounted: None,
-                        }).await;
+                        let _ = player_ref
+                            .ask(SetPlayerPosition {
+                                x: dest_x,
+                                y: dest_y,
+                                direction: state.direction,
+                                map_index: Some(dest_map_index as u16),
+                                is_mounted: None,
+                            })
+                            .await;
 
                         // Send MapChanged packet
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_map_changed_packet(dest_map_index as u16, &dest_file, &dest_title, dest_x, dest_y, state.direction, Some(&dest_mi)),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_map_changed_packet(
+                                    dest_map_index as u16,
+                                    &dest_file,
+                                    &dest_title,
+                                    dest_x,
+                                    dest_y,
+                                    state.direction,
+                                    Some(&dest_mi),
+                                ),
+                            })
+                            .await;
                         // C# GetMapInfo：换图补发 MapInformation
-                        let map_info = super::build_map_information_packet(dest_map_index as u16, &dest_file, &dest_title, Some(&dest_mi));
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: map_info,
-                        }).await;
+                        let map_info = super::build_map_information_packet(
+                            dest_map_index as u16,
+                            &dest_file,
+                            &dest_title,
+                            Some(&dest_mi),
+                        );
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: map_info,
+                            })
+                            .await;
 
                         // Send UserLocation to confirm new position
                         if let Ok(Some(new_state)) = player_ref.ask(GetPlayerState).await {
@@ -1240,10 +1699,16 @@ impl Message<WorldMoveRequest> for WorldActor {
                             loc_body.extend_from_slice(&(new_state.x as u32).to_le_bytes());
                             loc_body.extend_from_slice(&(new_state.y as u32).to_le_bytes());
                             loc_body.push(new_state.direction);
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: msg.session_id,
-                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc_body),
-                            }).await;
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                                        &loc_body,
+                                    ),
+                                })
+                                .await;
                         }
 
                         // 清理旧地图视野：发送 ObjectRemove 给该玩家（移除旧地图上的怪物/玩家/地面物品）
@@ -1252,10 +1717,17 @@ impl Message<WorldMoveRequest> for WorldActor {
                             if monster.map_index == old_map {
                                 let mut rb = Vec::new();
                                 rb.extend_from_slice(&oid.to_le_bytes());
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: msg.session_id,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: msg.session_id,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::ObjectRemove
+                                                as i16,
+                                            &rb,
+                                        ),
+                                    })
+                                    .await;
                             }
                         }
                         for (sid, rec) in &self.players {
@@ -1276,10 +1748,17 @@ impl Message<WorldMoveRequest> for WorldActor {
                             if gi.map_index == old_map {
                                 let mut rb = Vec::new();
                                 rb.extend_from_slice(&gi.object_id.to_le_bytes());
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: msg.session_id,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: msg.session_id,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::ObjectRemove
+                                                as i16,
+                                            &rb,
+                                        ),
+                                    })
+                                    .await;
                             }
                         }
 
@@ -1302,7 +1781,8 @@ impl Message<WorldMoveRequest> for WorldActor {
                             &mut self.next_object_id,
                             &spawn_ctx,
                             self.maps.get(&(dest_map_index as u16)),
-                        ).await;
+                        )
+                        .await;
                         for npc in new_npcs {
                             self.npcs.insert(npc.object_id, npc);
                         }
@@ -1314,30 +1794,43 @@ impl Message<WorldMoveRequest> for WorldActor {
                             dest_map_index as u16,
                             msg.session_id,
                             &mut self.next_object_id,
-                        ).await;
+                        )
+                        .await;
                         for flag in new_flags {
                             self.conquest_flags.insert(flag.object_id, flag);
                         }
                         // 装饰物同步（C# GetObjectsPassive 含 DecoObject）
-                        self.sync_decos_on_map(msg.session_id, dest_map_index as u16).await;
-                        let elite_broadcasts: Vec<String> = new_monsters.iter()
-                            .filter(|m| m.rarity > 0).map(|m| m.name.clone()).collect();
+                        self.sync_decos_on_map(msg.session_id, dest_map_index as u16)
+                            .await;
+                        let elite_broadcasts: Vec<String> = new_monsters
+                            .iter()
+                            .filter(|m| m.rarity > 0)
+                            .map(|m| m.name.clone())
+                            .collect();
                         for monster in new_monsters {
                             self.monsters.insert(monster.object_id, monster);
                         }
 
                         // 初始生成精英广播
                         for name in &elite_broadcasts {
-                            let map_name = self.map_infos.get(&(dest_map_index)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
+                            let map_name = self
+                                .map_infos
+                                .get(&(dest_map_index))
+                                .map(|m| m.title.clone())
+                                .unwrap_or_else(|| "未知地图".to_string());
                             broadcast_system_message(
-                                &self.gate_ref, &self.players,
-                                &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name));
+                                &self.gate_ref,
+                                &self.players,
+                                &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name),
+                            );
                         }
 
                         // 同步新地图上的地面物品
                         let dest_map_u16 = dest_map_index as u16;
                         for gi in &self.ground_items {
-                            if gi.map_index != dest_map_u16 { continue; }
+                            if gi.map_index != dest_map_u16 {
+                                continue;
+                            }
                             if gi.item.item_index == 0 {
                                 let object_gold = mir2_shared::packets::server::ObjectGold {
                                     object_id: gi.object_id,
@@ -1347,8 +1840,18 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 };
                                 let mut buf = Vec::new();
                                 if mir2_shared::packets::base::serialize_packet(
-                                    &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
-                                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
+                                    &mut std::io::Cursor::new(&mut buf),
+                                    &object_gold,
+                                )
+                                .is_ok()
+                                {
+                                    let _ = self
+                                        .gate_ref
+                                        .tell(SendToClient {
+                                            session_id: msg.session_id,
+                                            data: buf,
+                                        })
+                                        .await;
                                 }
                             } else {
                                 let object_item = mir2_shared::packets::server::ObjectItem {
@@ -1359,8 +1862,18 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 };
                                 let mut buf = Vec::new();
                                 if mir2_shared::packets::base::serialize_packet(
-                                    &mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
-                                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
+                                    &mut std::io::Cursor::new(&mut buf),
+                                    &object_item,
+                                )
+                                .is_ok()
+                                {
+                                    let _ = self
+                                        .gate_ref
+                                        .tell(SendToClient {
+                                            session_id: msg.session_id,
+                                            data: buf,
+                                        })
+                                        .await;
                                 }
                             }
                         }
@@ -1368,7 +1881,8 @@ impl Message<WorldMoveRequest> for WorldActor {
                         // 同步新地图上已打开的门
                         for (map_idx, door_idx) in &self.open_doors {
                             if *map_idx == dest_map_u16 {
-                                send_opendoor(&self.gate_ref, msg.session_id, *door_idx, false).await;
+                                send_opendoor(&self.gate_ref, msg.session_id, *door_idx, false)
+                                    .await;
                             }
                         }
 
@@ -1378,24 +1892,47 @@ impl Message<WorldMoveRequest> for WorldActor {
                             let mut rm = Vec::new();
                             rm.extend_from_slice(&mover_state.object_id.to_le_bytes());
                             let remove_packet = build_packet_bytes(
-                                mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rm);
-                            broadcast_to_map(&self.gate_ref, &self.players, old_map, &remove_packet).await;
+                                mir2_shared::enums::ServerPacketIds::ObjectRemove as i16,
+                                &rm,
+                            );
+                            broadcast_to_map(
+                                &self.gate_ref,
+                                &self.players,
+                                old_map,
+                                &remove_packet,
+                            )
+                            .await;
                             // 向 mover 发送新地图其他玩家
-                            self.send_map_players_to(msg.session_id, &mover_state, dest_map_u16).await;
+                            self.send_map_players_to(msg.session_id, &mover_state, dest_map_u16)
+                                .await;
                             // 向新地图其他玩家发送 mover（隐身跳过）
-                            self.send_player_to_map(msg.session_id, &mover_state, dest_map_u16).await;
+                            self.send_player_to_map(msg.session_id, &mover_state, dest_map_u16)
+                                .await;
                             // #1661：英雄随主人跨图召回（C# HeroObject.OwnerRecall → Teleport(Owner.CurrentMap, Owner.Back)）
                             if self.hero_ai_states.contains_key(&msg.session_id) {
-                                let hero_oid = mover_state.object_id
+                                let hero_oid = mover_state
+                                    .object_id
                                     .wrapping_add(crate::actors::world::hero::HERO_OID_OFFSET);
                                 let mut rh = Vec::new();
                                 rh.extend_from_slice(&hero_oid.to_le_bytes());
                                 let hero_remove = build_packet_bytes(
-                                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rh);
-                                broadcast_to_map(&self.gate_ref, &self.players, old_map, &hero_remove).await;
+                                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16,
+                                    &rh,
+                                );
+                                broadcast_to_map(
+                                    &self.gate_ref,
+                                    &self.players,
+                                    old_map,
+                                    &hero_remove,
+                                )
+                                .await;
                                 if let Some(ai) = self.hero_ai_states.get_mut(&msg.session_id) {
                                     let (hx, hy) = crate::actors::world::point_move(
-                                        mover_state.x, mover_state.y, mover_state.direction, 1);
+                                        mover_state.x,
+                                        mover_state.y,
+                                        mover_state.direction,
+                                        1,
+                                    );
                                     ai.x = hx;
                                     ai.y = hy;
                                     ai.direction = mover_state.direction;
@@ -1418,15 +1955,24 @@ impl WorldActor {
         target: &crate::actors::player::PlayerState,
         viewer: Option<&crate::actors::player::PlayerState>,
     ) -> Vec<u8> {
-        let target_weapon = target.inventory.get_equipment(EquipmentSlot::Weapon)
+        let target_weapon = target
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.shape as i16).unwrap_or(-1);
-        let target_armor = target.inventory.get_equipment(EquipmentSlot::Armour)
+            .map(|info| info.shape as i16)
+            .unwrap_or(-1);
+        let target_armor = target
+            .inventory
+            .get_equipment(EquipmentSlot::Armour)
             .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.shape as i16).unwrap_or(0);
-        let target_weapon_effect = target.inventory.get_equipment(EquipmentSlot::Weapon)
+            .map(|info| info.shape as i16)
+            .unwrap_or(0);
+        let target_weapon_effect = target
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.effect as i16).unwrap_or(0);
+            .map(|info| info.effect as i16)
+            .unwrap_or(0);
         let (at_war, enemy) = super::guild_war_flags(
             viewer.and_then(|v| v.guild_name.as_deref()),
             target.guild_name.as_deref(),
@@ -1442,17 +1988,32 @@ impl WorldActor {
             enemy,
         );
         // #934：C# MapInfo.NoNames——按目标所在地图掩码
-        let display_name = if self.map_infos.get(&(target.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
+        let display_name = if self
+            .map_infos
+            .get(&(target.map_index as i32))
+            .map(|m| m.no_names)
+            .unwrap_or(false)
+        {
             "?????"
         } else {
             target.name.as_str()
         };
         build_object_player_packet(
-            display_name, target.object_id, target.x, target.y, target.direction, target.level,
+            display_name,
+            target.object_id,
+            target.x,
+            target.y,
+            target.direction,
+            target.level,
             colour,
-            target.class, target.gender, target.hair,
-            target_weapon, target_weapon_effect, target_armor,
-            target.mount_type, target.is_mounted,
+            target.class,
+            target.gender,
+            target.hair,
+            target_weapon,
+            target_weapon_effect,
+            target_armor,
+            target.mount_type,
+            target.is_mounted,
             target.level_effects,
             target.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(target.guild_rank),
@@ -1468,14 +2029,32 @@ impl WorldActor {
     ) {
         let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
         for (sid, rec) in &self.players {
-            if *sid == viewer_session { continue; }
-            let Ok(Some(ep_state)) = rec.actor_ref.ask(GetPlayerState).await else { continue };
-            if ep_state.map_index != map_index { continue; }
-            let is_invisible = ep_state.buffs.iter()
+            if *sid == viewer_session {
+                continue;
+            }
+            let Ok(Some(ep_state)) = rec.actor_ref.ask(GetPlayerState).await else {
+                continue;
+            };
+            if ep_state.map_index != map_index {
+                continue;
+            }
+            let is_invisible = ep_state
+                .buffs
+                .iter()
                 .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
-            if is_invisible { continue; }
-            let packet = self.build_player_object_packet(&ep_state, Some(viewer_state)).await;
-            let _ = self.gate_ref.tell(SendToClient { session_id: viewer_session, data: packet }).await;
+            if is_invisible {
+                continue;
+            }
+            let packet = self
+                .build_player_object_packet(&ep_state, Some(viewer_state))
+                .await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: viewer_session,
+                    data: packet,
+                })
+                .await;
         }
     }
 
@@ -1487,15 +2066,33 @@ impl WorldActor {
         map_index: u16,
     ) {
         let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
-        if mover_state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == invis_tag) {
+        if mover_state
+            .buffs
+            .iter()
+            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag)
+        {
             return;
         }
         for (sid, rec) in &self.players {
-            if *sid == mover_session { continue; }
-            let Ok(Some(viewer)) = rec.actor_ref.ask(GetPlayerState).await else { continue };
-            if viewer.map_index != map_index { continue; }
-            let packet = self.build_player_object_packet(mover_state, Some(&viewer)).await;
-            let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet }).await;
+            if *sid == mover_session {
+                continue;
+            }
+            let Ok(Some(viewer)) = rec.actor_ref.ask(GetPlayerState).await else {
+                continue;
+            };
+            if viewer.map_index != map_index {
+                continue;
+            }
+            let packet = self
+                .build_player_object_packet(mover_state, Some(&viewer))
+                .await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: *sid,
+                    data: packet,
+                })
+                .await;
         }
     }
 }
@@ -1528,27 +2125,38 @@ impl Message<WorldTurnRequest> for WorldActor {
         }
         self.last_turn_ms.insert(msg.session_id, now_ms);
 
-        let _ = record.actor_ref.ask(TurnRequest {
-            session_id: msg.session_id,
-            direction: msg.direction,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(TurnRequest {
+                session_id: msg.session_id,
+                direction: msg.direction,
+            })
+            .await;
 
         // 广播转向
-        if let Ok(Some(state)) = record.actor_ref.ask(crate::actors::player::GetPlayerState).await {
-            let others: Vec<_> = self.same_map_players(msg.session_id, state.map_index).await
+        if let Ok(Some(state)) = record
+            .actor_ref
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+        {
+            let others: Vec<_> = self
+                .same_map_players(msg.session_id, state.map_index)
+                .await
                 .into_iter()
                 .map(|r| r.actor_ref.clone())
                 .collect();
 
             for other in others {
-                let _ = other.ask(BroadcastMovement {
-                    object_id: state.object_id,
-                    x: state.x,
-                    y: state.y,
-                    direction: state.direction,
-                    move_type: MoveType::Turn,
-                    exclude_session: msg.session_id,
-                }).await;
+                let _ = other
+                    .ask(BroadcastMovement {
+                        object_id: state.object_id,
+                        x: state.x,
+                        y: state.y,
+                        direction: state.direction,
+                        move_type: MoveType::Turn,
+                        exclude_session: msg.session_id,
+                    })
+                    .await;
             }
         }
     }
@@ -1564,7 +2172,11 @@ pub struct ApplyNoReconnect {
 impl Message<ApplyNoReconnect> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: ApplyNoReconnect, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ApplyNoReconnect,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
             None => return,
@@ -1579,7 +2191,9 @@ impl Message<ApplyNoReconnect> for WorldActor {
         if !mi.no_reconnect || mi.no_reconnect_map.is_empty() {
             return;
         }
-        let Some(dest_mi) = self.map_infos.values()
+        let Some(dest_mi) = self
+            .map_infos
+            .values()
             .find(|m| m.file_name.eq_ignore_ascii_case(&mi.no_reconnect_map))
             .cloned()
         else {
@@ -1602,8 +2216,17 @@ impl Message<ApplyNoReconnect> for WorldActor {
             (330, 330)
         };
         crate::actors::world::npc_script::teleport_player(
-            self, msg.session_id, dest_map_index, rx, ry).await;
-        info!("NoReconnect: moved session {} to map {} ({},{})", msg.session_id, dest_map_index, rx, ry);
+            self,
+            msg.session_id,
+            dest_map_index,
+            rx,
+            ry,
+        )
+        .await;
+        info!(
+            "NoReconnect: moved session {} to map {} ({},{})",
+            msg.session_id, dest_map_index, rx, ry
+        );
     }
 }
 
@@ -1630,13 +2253,18 @@ impl Message<PlayerDisconnected> for WorldActor {
         info!("Player removed from world (session={})", msg.session_id);
 
         // #835：断线即离队——先清 group_id 再保存，避免陈旧组队引用被持久化
-        let _ = record.actor_ref.ask(crate::actors::player::SetGroupId { group_id: None }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetGroupId { group_id: None })
+            .await;
 
         // 保存玩家数据到数据库
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             // #2218：驯服宠物持久化（C# Info.Pets；仅存活且 master 匹配）
             self.persist_tamed_pets(msg.session_id, &state.name).await;
-            if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
+            if let Err(e) =
+                db::save_character(&self.db_pool, &state, &record.account_username).await
+            {
                 warn!("Failed to save player {} on disconnect: {}", record.name, e);
             } else {
                 info!("Player {} saved to database on disconnect", record.name);
@@ -1647,26 +2275,39 @@ impl Message<PlayerDisconnected> for WorldActor {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             if let Err(e) = db::update_last_access(&self.db_pool, &record.name, now).await {
-                warn!("Failed to update last_access for {} on disconnect: {}", record.name, e);
+                warn!(
+                    "Failed to update last_access for {} on disconnect: {}",
+                    record.name, e
+                );
             }
 
             // #1127：断线同样持久化英雄列表——save_character 会 DELETE heroes 子表但不重建，
             // 若断线路径不补 save_heroes，英雄会在重启/再登录后永久丢失（与 PlayerLogOut 对齐）
-            let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
-            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
-                index: h.index,
-                name: h.name.clone(),
-                level: h.level,
-                class: h.class as u8,
-                gender: h.gender as u8,
-                dead: h.dead,
-                sealed: h.sealed,
-                autopot: h.autopot,
-                experience: h.experience,
-                max_experience: h.max_experience,
-            }).collect();
+            let heroes = self
+                .player_heroes
+                .get(&msg.session_id)
+                .cloned()
+                .unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = heroes
+                .iter()
+                .map(|h| db::DbHero {
+                    index: h.index,
+                    name: h.name.clone(),
+                    level: h.level,
+                    class: h.class as u8,
+                    gender: h.gender as u8,
+                    dead: h.dead,
+                    sealed: h.sealed,
+                    autopot: h.autopot,
+                    experience: h.experience,
+                    max_experience: h.max_experience,
+                })
+                .collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
-                warn!("Failed to save heroes for {} on disconnect: {}", record.name, e);
+                warn!(
+                    "Failed to save heroes for {} on disconnect: {}",
+                    record.name, e
+                );
             }
 
             // 行会离线状态由 SocialActor 管理
@@ -1678,9 +2319,12 @@ impl Message<PlayerDisconnected> for WorldActor {
         }
 
         // 通知 SocialActor 玩家下线（组队/好友在线表清理）
-        let _ = self.social_ref.tell(crate::actors::social::SocialPlayerLeft {
-            session_id: msg.session_id,
-        }).try_send();
+        let _ = self
+            .social_ref
+            .tell(crate::actors::social::SocialPlayerLeft {
+                session_id: msg.session_id,
+            })
+            .try_send();
 
         // 组队离线状态由 SocialActor 管理
 
@@ -1711,14 +2355,21 @@ impl Message<PlayerLogOut> for WorldActor {
             .unwrap_or(0);
         let block_until = self.player_logout_block_ms.get(&msg.session_id).copied();
         if crate::actors::world::combat::logout_blocked(now_ms, block_until) {
-            debug!("Logout blocked: session={} until={} (C# LogTime)", msg.session_id, block_until.unwrap_or(0));
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::LogOutFailed as i16,
-                    &[],
-                ),
-            }).await;
+            debug!(
+                "Logout blocked: session={} until={} (C# LogTime)",
+                msg.session_id,
+                block_until.unwrap_or(0)
+            );
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::LogOutFailed as i16,
+                        &[],
+                    ),
+                })
+                .await;
             return;
         }
         self.player_logout_block_ms.remove(&msg.session_id);
@@ -1743,13 +2394,22 @@ impl Message<PlayerLogOut> for WorldActor {
             // This player was the renter (initiator) - return item to owner
             if let Some(item) = session.owner_item {
                 if let Some(owner_record) = self.players.get(&session.partner_session) {
-                    let _ = owner_record.actor_ref.ask(AddItemToInventory { item }).await;
-                    send_system_message(&self.gate_ref, session.partner_session, "租赁对方已下线，物品已退回");
+                    let _ = owner_record
+                        .actor_ref
+                        .ask(AddItemToInventory { item })
+                        .await;
+                    send_system_message(
+                        &self.gate_ref,
+                        session.partner_session,
+                        "租赁对方已下线，物品已退回",
+                    );
                 }
             }
         }
         // Check if this player is the owner in someone else's rental session
-        let renter_session = self.rental_sessions.iter()
+        let renter_session = self
+            .rental_sessions
+            .iter()
             .find(|(_, s)| s.partner_session == msg.session_id)
             .map(|(k, _)| *k);
         if let Some(renter_sid) = renter_session {
@@ -1763,25 +2423,36 @@ impl Message<PlayerLogOut> for WorldActor {
         }
 
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            info!("Player {} logged out (session={})", state.name, msg.session_id);
+            info!(
+                "Player {} logged out (session={})",
+                state.name, msg.session_id
+            );
             // #2218：驯服宠物持久化（必须在清理地图生成前，避免宠物先被移除）
             self.persist_tamed_pets(msg.session_id, &state.name).await;
             // M61：该地图无其他玩家时清理 NPC/怪物
             self.cleanup_map_spawns(state.map_index).await;
-        // 通知 SocialActor 玩家下线（组队/好友在线表清理）
-        let _ = self.social_ref.tell(crate::actors::social::SocialPlayerLeft {
-            session_id: msg.session_id,
-        }).try_send();
+            // 通知 SocialActor 玩家下线（组队/好友在线表清理）
+            let _ = self
+                .social_ref
+                .tell(crate::actors::social::SocialPlayerLeft {
+                    session_id: msg.session_id,
+                })
+                .try_send();
 
             // #835：断线即离队——先清 group_id 再保存，避免陈旧组队引用被持久化
-            let _ = record.actor_ref.ask(crate::actors::player::SetGroupId { group_id: None }).await;
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::SetGroupId { group_id: None })
+                .await;
             // 重新取状态（group_id 已清）
             let state = match record.actor_ref.ask(GetPlayerState).await {
                 Ok(Some(s)) => s,
                 _ => return,
             };
             // 保存玩家数据到数据库
-            if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
+            if let Err(e) =
+                db::save_character(&self.db_pool, &state, &record.account_username).await
+            {
                 warn!("Failed to save player {} on logout: {}", record.name, e);
             } else {
                 info!("Player {} saved to database on logout", record.name);
@@ -1792,23 +2463,33 @@ impl Message<PlayerLogOut> for WorldActor {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             if let Err(e) = db::update_last_access(&self.db_pool, &record.name, now).await {
-                warn!("Failed to update last_access for {} on logout: {}", record.name, e);
+                warn!(
+                    "Failed to update last_access for {} on logout: {}",
+                    record.name, e
+                );
             }
 
             // #194：保存英雄列表到 DB（重启不丢）
-            let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
-            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
-                index: h.index,
-                name: h.name.clone(),
-                level: h.level,
-                class: h.class as u8,
-                gender: h.gender as u8,
-                dead: h.dead,
-                sealed: h.sealed,
-                autopot: h.autopot,
-                experience: h.experience,
-                max_experience: h.max_experience,
-            }).collect();
+            let heroes = self
+                .player_heroes
+                .get(&msg.session_id)
+                .cloned()
+                .unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = heroes
+                .iter()
+                .map(|h| db::DbHero {
+                    index: h.index,
+                    name: h.name.clone(),
+                    level: h.level,
+                    class: h.class as u8,
+                    gender: h.gender as u8,
+                    dead: h.dead,
+                    sealed: h.sealed,
+                    autopot: h.autopot,
+                    experience: h.experience,
+                    max_experience: h.max_experience,
+                })
+                .collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on logout: {}", record.name, e);
             }
@@ -1816,7 +2497,9 @@ impl Message<PlayerLogOut> for WorldActor {
             self.broadcast_hero_remove(record.object_id).await;
 
             // 发送 LogOutSuccess 给客户端（带角色列表，C# SelectScene 用）
-            let characters = db::list_character_summaries(&self.db_pool, &record.account_username).await.unwrap_or_default();
+            let characters = db::list_character_summaries(&self.db_pool, &record.account_username)
+                .await
+                .unwrap_or_default();
             let mut body = Vec::new();
             body.extend_from_slice(&(characters.len() as i32).to_le_bytes());
             let now_secs = std::time::SystemTime::now()
@@ -1833,10 +2516,16 @@ impl Message<PlayerLogOut> for WorldActor {
                 let ticks = 621355968000000000i64 + now_secs * 10_000_000;
                 body.extend_from_slice(&ticks.to_le_bytes());
             }
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16, &body),
-            }).await;
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16,
+                        &body,
+                    ),
+                })
+                .await;
 
             // 通知其他玩家该玩家已离开
             // #1680：玩家登出 ObjectRemove 只发同图玩家（C# CurrentMap）
@@ -1864,7 +2553,11 @@ impl WorldActor {
         if others_on_map > 0 {
             return;
         }
-        let npc_count = self.npcs.values().filter(|n| n.map_index == map_index).count();
+        let npc_count = self
+            .npcs
+            .values()
+            .filter(|n| n.map_index == map_index)
+            .count();
         let npc_ids: Vec<u32> = self
             .npcs
             .iter()
@@ -1874,7 +2567,11 @@ impl WorldActor {
         for id in &npc_ids {
             self.npcs.remove(id);
         }
-        let mon_count = self.monsters.values().filter(|m| m.map_index == map_index).count();
+        let mon_count = self
+            .monsters
+            .values()
+            .filter(|m| m.map_index == map_index)
+            .count();
         let mon_ids: Vec<u32> = self
             .monsters
             .iter()
@@ -1884,7 +2581,10 @@ impl WorldActor {
         for id in &mon_ids {
             self.monsters.remove(id);
         }
-        info!("Map {} spawns cleaned (npcs={} monsters={})", map_index, npc_count, mon_count);
+        info!(
+            "Map {} spawns cleaned (npcs={} monsters={})",
+            map_index, npc_count, mon_count
+        );
     }
 }
 
@@ -2017,11 +2717,19 @@ impl Message<ChatRequest> for WorldActor {
             window_start_ms: chat_state.chat_window_start_ms,
             tick: chat_state.chat_tick,
         };
-        match chat_throttle_decision(&mut throttle, now_ms, chat_state.chat_banned_until_ms, chat_state.is_gm) {
+        match chat_throttle_decision(
+            &mut throttle,
+            now_ms,
+            chat_state.chat_banned_until_ms,
+            chat_state.is_gm,
+        ) {
             ChatDecision::Banned { remaining_ms } => {
                 // C# ChatBanRemainingTimeBySecond（:1923-1930 剩余时间提示）
-                send_system_message(&self.gate_ref, msg.session_id,
-                    &format!("你已被禁言，剩余 {} 秒", (remaining_ms / 1000).max(1)));
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &format!("你已被禁言，剩余 {} 秒", (remaining_ms / 1000).max(1)),
+                );
                 return;
             }
             ChatDecision::BanNow => {
@@ -2029,8 +2737,15 @@ impl Message<ChatRequest> for WorldActor {
                 chat_state.chat_banned_until_ms = now_ms + 300_000;
                 chat_state.chat_window_start_ms = throttle.window_start_ms;
                 chat_state.chat_tick = throttle.tick;
-                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: chat_state }).await;
-                send_system_message(&self.gate_ref, msg.session_id, "检测到频繁发言，禁言 5 分钟");
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::SetPlayerState { state: chat_state })
+                    .await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "检测到频繁发言，禁言 5 分钟",
+                );
                 return;
             }
             ChatDecision::Allow => {
@@ -2041,10 +2756,15 @@ impl Message<ChatRequest> for WorldActor {
                 {
                     chat_state.chat_window_start_ms = throttle.window_start_ms;
                     chat_state.chat_tick = throttle.tick;
-                    if chat_state.chat_banned_until_ms > 0 && chat_state.chat_banned_until_ms <= now_ms {
+                    if chat_state.chat_banned_until_ms > 0
+                        && chat_state.chat_banned_until_ms <= now_ms
+                    {
                         chat_state.chat_banned_until_ms = 0; // C# 到期解封
                     }
-                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: chat_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::SetPlayerState { state: chat_state })
+                        .await;
                 }
             }
         }
@@ -2062,7 +2782,9 @@ impl Message<ChatRequest> for WorldActor {
         };
 
         // 聊天物品链接：%物品名#uid% → [物品:物品名]、<物品名> → <物品名/uid>、推送 S.NewChatItem
-        let message = self.process_chat_links(msg.session_id, &message, &msg.linked_items).await;
+        let message = self
+            .process_chat_links(msg.session_id, &message, &msg.linked_items)
+            .await;
 
         // C# 聊天频道前缀（PlayerObject.Chat：1962-2150）：/ 私聊、!! 组队、!~ 行会、!# 师徒、:) 夫妻、@! GM公告
         // 喊话（!）保留下方原逻辑（卷轴/冷却/范围）；此处只处理其余频道
@@ -2072,13 +2794,18 @@ impl Message<ChatRequest> for WorldActor {
                 ChatChannel::Whisper { target, message } => {
                     let self_name = record.name.clone();
                     // 自己拉黑对方 → 拒绝（C# CannotMessageBlacklistedPlayer）
-                    let self_blocked = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                        st.friend_list.is_blocked_name(&target)
-                    } else {
-                        false
-                    };
+                    let self_blocked =
+                        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                            st.friend_list.is_blocked_name(&target)
+                        } else {
+                            false
+                        };
                     if self_blocked {
-                        send_system_message(&self.gate_ref, msg.session_id, "不能给黑名单玩家发消息");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "不能给黑名单玩家发消息",
+                        );
                         return;
                     }
                     let mut found = false;
@@ -2088,25 +2815,47 @@ impl Message<ChatRequest> for WorldActor {
                                 found = true;
                                 // 对方拉黑自己 → 拒绝（C# PlayerNotAcceptingMessages）
                                 if os.friend_list.is_blocked_name(&self_name) {
-                                    send_system_message(&self.gate_ref, msg.session_id, "对方不接收你的消息");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "对方不接收你的消息",
+                                    );
                                     return;
                                 }
                                 // WhisperIn 给目标（C#："{Name}=>{msg}"）
                                 let mut in_body = Vec::new();
-                                write_dotnet_string(&mut in_body, &format!("{}=>{}", self_name, message));
+                                write_dotnet_string(
+                                    &mut in_body,
+                                    &format!("{}=>{}", self_name, message),
+                                );
                                 in_body.push(mir2_shared::enums::ChatType::WhisperIn as u8);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &in_body),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                            &in_body,
+                                        ),
+                                    })
+                                    .await;
                                 // WhisperOut 给自己（C#："/" + 原消息）
                                 let mut out_body = Vec::new();
-                                write_dotnet_string(&mut out_body, &format!("/{} {}", target, message));
+                                write_dotnet_string(
+                                    &mut out_body,
+                                    &format!("/{} {}", target, message),
+                                );
                                 out_body.push(mir2_shared::enums::ChatType::WhisperOut as u8);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: msg.session_id,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &out_body),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: msg.session_id,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                            &out_body,
+                                        ),
+                                    })
+                                    .await;
                                 debug!("Whisper: {} -> {}: {}", self_name, target, message);
                                 break;
                             }
@@ -2118,7 +2867,12 @@ impl Message<ChatRequest> for WorldActor {
                     return;
                 }
                 ChatChannel::Group(gmsg) => {
-                    let group_id = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.group_id } else { return; };
+                    let group_id = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await
+                    {
+                        st.group_id
+                    } else {
+                        return;
+                    };
                     let Some(gid) = group_id else {
                         send_system_message(&self.gate_ref, msg.session_id, "你不在队伍中");
                         return;
@@ -2127,18 +2881,30 @@ impl Message<ChatRequest> for WorldActor {
                     let mut body = Vec::new();
                     write_dotnet_string(&mut body, &format!("{}: {}", self_name, gmsg));
                     body.push(mir2_shared::enums::ChatType::Group as u8);
-                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let packet =
+                        build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.group_id == Some(gid) {
-                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: packet.clone(),
+                                    })
+                                    .await;
                             }
                         }
                     }
                     return;
                 }
                 ChatChannel::Guild(gmsg) => {
-                    let guild_name = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.guild_name.clone() } else { return; };
+                    let guild_name =
+                        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                            st.guild_name.clone()
+                        } else {
+                            return;
+                        };
                     let Some(gname) = guild_name else {
                         send_system_message(&self.gate_ref, msg.session_id, "你不在公会中");
                         return;
@@ -2147,68 +2913,119 @@ impl Message<ChatRequest> for WorldActor {
                     let mut body = Vec::new();
                     write_dotnet_string(&mut body, &format!("{}: {}", self_name, gmsg));
                     body.push(mir2_shared::enums::ChatType::Guild as u8);
-                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let packet =
+                        build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.guild_name.as_ref() == Some(&gname) {
-                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: packet.clone(),
+                                    })
+                                    .await;
                             }
                         }
                     }
                     return;
                 }
                 ChatChannel::Mentor(mmsg) => {
-                    let mentor_name = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.mentor_name.clone() } else { return; };
-                    let Some(mentor_name) = mentor_name else { return; }; // C# 无师徒关系直接 return
+                    let mentor_name =
+                        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                            st.mentor_name.clone()
+                        } else {
+                            return;
+                        };
+                    let Some(mentor_name) = mentor_name else {
+                        return;
+                    }; // C# 无师徒关系直接 return
                     let self_name = record.name.clone();
                     let mut body = Vec::new();
                     write_dotnet_string(&mut body, &format!("{}: {}", self_name, mmsg));
                     body.push(mir2_shared::enums::ChatType::Mentor as u8);
-                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let packet =
+                        build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
                     let mut found = false;
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.name.eq_ignore_ascii_case(&mentor_name) {
                                 found = true;
-                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: packet.clone(),
+                                    })
+                                    .await;
                                 break;
                             }
                         }
                     }
                     if found {
-                        let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: packet }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: packet,
+                            })
+                            .await;
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "导师不在线");
                     }
                     return;
                 }
                 ChatChannel::Spouse(smsg) => {
-                    let spouse_name = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.spouse_name.clone() } else { return; };
-                    let Some(spouse_name) = spouse_name else { return; }; // C# 未结婚直接 return
+                    let spouse_name =
+                        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                            st.spouse_name.clone()
+                        } else {
+                            return;
+                        };
+                    let Some(spouse_name) = spouse_name else {
+                        return;
+                    }; // C# 未结婚直接 return
                     let self_name = record.name.clone();
                     let mut body = Vec::new();
                     write_dotnet_string(&mut body, &format!("{}: {}", self_name, smsg));
                     body.push(mir2_shared::enums::ChatType::Relationship as u8);
-                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let packet =
+                        build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
                     let mut found = false;
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.name.eq_ignore_ascii_case(&spouse_name) {
                                 found = true;
-                                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: packet.clone(),
+                                    })
+                                    .await;
                                 break;
                             }
                         }
                     }
                     if found {
-                        let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: packet }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: packet,
+                            })
+                            .await;
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "配偶不在线");
                     }
                     return;
                 }
                 ChatChannel::GmAnnouncement(amsg) => {
-                    let is_gm = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.is_gm } else { false };
+                    let is_gm = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                        st.is_gm
+                    } else {
+                        false
+                    };
                     if !is_gm {
                         return; // C#：非 GM 直接 return
                     }
@@ -2216,9 +3033,16 @@ impl Message<ChatRequest> for WorldActor {
                     let mut body = Vec::new();
                     write_dotnet_string(&mut body, &format!("(*){}:{}", self_name, amsg));
                     body.push(mir2_shared::enums::ChatType::Announcement as u8);
-                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let packet =
+                        build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
                     for sid in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: packet.clone(),
+                            })
+                            .await;
                     }
                     return;
                 }
@@ -2235,7 +3059,12 @@ impl Message<ChatRequest> for WorldActor {
                     .unwrap_or(0);
                 let (level, map_shout, server_shout, last_shout_time) =
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        (state.level, state.has_map_shout, state.has_server_shout, state.last_shout_time)
+                        (
+                            state.level,
+                            state.has_map_shout,
+                            state.has_server_shout,
+                            state.last_shout_time,
+                        )
                     } else {
                         (0u16, false, false, 0i64)
                     };
@@ -2247,66 +3076,103 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, "需要 8 级才能喊话");
                     return;
                 }
-                let sender_map = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                let sender_map = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await
+                {
                     state.map_index
                 } else {
                     return;
                 };
                 if map_shout {
                     // 地图喊话（C# ChatType.Shout2），消耗卷轴标记
-                    let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
-                        map_shout: false,
-                        server_shout: false,
-                        last_shout_time: now_ms,
-                    }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::SetShoutState {
+                            map_shout: false,
+                            server_shout: false,
+                            last_shout_time: now_ms,
+                        })
+                        .await;
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.map_index == sender_map {
                                 let mut body = Vec::new();
-                                write_dotnet_string(&mut body, &format!("(!){}:{}", record.name, shout_msg));
+                                write_dotnet_string(
+                                    &mut body,
+                                    &format!("(!){}:{}", record.name, shout_msg),
+                                );
                                 body.push(mir2_shared::enums::ChatType::Shout2 as u8);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                            &body,
+                                        ),
+                                    })
+                                    .await;
                             }
                         }
                     }
                     return;
                 } else if server_shout {
                     // 全服喊话（C# ChatType.Shout3），消耗卷轴标记
-                    let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
-                        map_shout: false,
-                        server_shout: false,
-                        last_shout_time: now_ms,
-                    }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::SetShoutState {
+                            map_shout: false,
+                            server_shout: false,
+                            last_shout_time: now_ms,
+                        })
+                        .await;
                     for sid in self.players.keys() {
                         let mut body = Vec::new();
-                        write_dotnet_string(&mut body, &format!("(!!){}:{}", record.name, shout_msg));
+                        write_dotnet_string(
+                            &mut body,
+                            &format!("(!!){}:{}", record.name, shout_msg),
+                        );
                         body.push(mir2_shared::enums::ChatType::Shout3 as u8);
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                    &body,
+                                ),
+                            })
+                            .await;
                     }
                     return;
                 } else {
                     // 8 级+ 普通喊话：同地图（C# Shout 范围内）；记录冷却
-                    let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
-                        map_shout: false,
-                        server_shout: false,
-                        last_shout_time: now_ms,
-                    }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::SetShoutState {
+                            map_shout: false,
+                            server_shout: false,
+                            last_shout_time: now_ms,
+                        })
+                        .await;
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.map_index == sender_map {
                                 let mut body = Vec::new();
-                                write_dotnet_string(&mut body, &format!("[喊话] {}: {}", record.name, shout_msg));
+                                write_dotnet_string(
+                                    &mut body,
+                                    &format!("[喊话] {}: {}", record.name, shout_msg),
+                                );
                                 body.push(mir2_shared::enums::ChatType::Shout as u8);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                            &body,
+                                        ),
+                                    })
+                                    .await;
                             }
                         }
                     }
@@ -2325,8 +3191,62 @@ impl Message<ChatRequest> for WorldActor {
                     self.queue_default_npc(msg.session_id, &format!("_customcommand({})", cmd));
                     return;
                 }
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "DECO" | "LEVELHERO" | "INFO" | "TRIGGER" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD" | "REMOVEAWAKENING" | "AWAKENING" | "CLEARIPBLOCKS" | "BACKUPPLAYER" | "ARCHIVEPLAYER" | "LOADPLAYER" | "RESTOREPLAYER") {
-                    let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
+                if matches!(
+                    cmd.as_str(),
+                    "LEVEL"
+                        | "GOLD"
+                        | "MAKE"
+                        | "MONSTER"
+                        | "GOTO"
+                        | "RECALLMOB"
+                        | "CLEARBAG"
+                        | "REVIVE"
+                        | "GIVEGOLD"
+                        | "GIVESKILL"
+                        | "CLEARMOB"
+                        | "ADJUSTPKPOINT"
+                        | "CHANGEGENDER"
+                        | "HAIR"
+                        | "SETLIGHT"
+                        | "DECO"
+                        | "LEVELHERO"
+                        | "INFO"
+                        | "TRIGGER"
+                        | "SETFLAG"
+                        | "CLEARFLAGS"
+                        | "DELETESKILL"
+                        | "GIVEHEROSKILL"
+                        | "GAMEMASTER"
+                        | "MOB"
+                        | "KILL"
+                        | "DIE"
+                        | "RELOADDROPS"
+                        | "RELOADNPCS"
+                        | "SUPERMAN"
+                        | "OBSERVER"
+                        | "CHANGECLASS"
+                        | "SETQUEST"
+                        | "CLEARQUESTS"
+                        | "GIVEPEARLS"
+                        | "GIVECREDIT"
+                        | "MAPMOVE"
+                        | "LISTFLAGS"
+                        | "STARTWAR"
+                        | "CREATEGUILD"
+                        | "REMOVEAWAKENING"
+                        | "AWAKENING"
+                        | "CLEARIPBLOCKS"
+                        | "BACKUPPLAYER"
+                        | "ARCHIVEPLAYER"
+                        | "LOADPLAYER"
+                        | "RESTOREPLAYER"
+                ) {
+                    let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await
+                    {
+                        state.is_gm
+                    } else {
+                        false
+                    };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
                         return;
@@ -2336,7 +3256,11 @@ impl Message<ChatRequest> for WorldActor {
                         "BACKUPPLAYER" => {
                             let name = parts.get(1).copied().unwrap_or("");
                             if name.is_empty() {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法: @BACKUPPLAYER <角色名>");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法: @BACKUPPLAYER <角色名>",
+                                );
                                 return;
                             }
                             // 在线 → 用实时状态 + 记录账号；离线 → 从 DB 加载 + 查账号（C# GetCharacterInfo 等价）
@@ -2352,113 +3276,249 @@ impl Message<ChatRequest> for WorldActor {
                                 }
                             }
                             if state.is_none() {
-                                if let Ok(Some(s)) = db::load_character(&self.db_pool, &name).await {
+                                if let Ok(Some(s)) = db::load_character(&self.db_pool, &name).await
+                                {
                                     state = Some(s);
-                                    account = db::get_character_account(&self.db_pool, &name).await.unwrap_or(None);
+                                    account = db::get_character_account(&self.db_pool, &name)
+                                        .await
+                                        .unwrap_or(None);
                                 }
                             }
                             match (state, account) {
-                                (Some(s), Some(acc)) => {
-                                    match serde_json::to_string(&s) {
-                                        Ok(json) => match db::archive_player_json(&self.db_pool, &s.name, &acc, &json).await {
-                                            Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已存档", s.name)),
-                                            Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档失败: {}", e)),
-                                        },
-                                        Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档序列化失败: {}", e)),
-                                    }
-                                }
-                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {}", name)),
+                                (Some(s), Some(acc)) => match serde_json::to_string(&s) {
+                                    Ok(json) => match db::archive_player_json(
+                                        &self.db_pool,
+                                        &s.name,
+                                        &acc,
+                                        &json,
+                                    )
+                                    .await
+                                    {
+                                        Ok(()) => send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("角色 {} 已存档", s.name),
+                                        ),
+                                        Err(e) => send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("存档失败: {}", e),
+                                        ),
+                                    },
+                                    Err(e) => send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("存档序列化失败: {}", e),
+                                    ),
+                                },
+                                _ => send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到角色 {}", name),
+                                ),
                             }
                         }
                         // @ARCHIVEPLAYER <name>（C# PlayerObject.cs:2709：存档 + 从账号移除）
                         "ARCHIVEPLAYER" => {
                             let name = parts.get(1).copied().unwrap_or("");
                             if name.is_empty() {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法: @ARCHIVEPLAYER <角色名>");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法: @ARCHIVEPLAYER <角色名>",
+                                );
                                 return;
                             }
                             // 在线目标拒绝（C# 禁当前玩家；Rust 更严避免删在线角色数据）
-                            if self.players.values().any(|r| r.name.eq_ignore_ascii_case(&name)) {
-                                send_system_message(&self.gate_ref, msg.session_id, "不能存档在线玩家");
+                            if self
+                                .players
+                                .values()
+                                .any(|r| r.name.eq_ignore_ascii_case(&name))
+                            {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "不能存档在线玩家",
+                                );
                                 return;
                             }
                             match db::load_character(&self.db_pool, &name).await {
                                 Ok(Some(s)) => {
-                                    let account = db::get_character_account(&self.db_pool, &name).await.unwrap_or(None);
+                                    let account = db::get_character_account(&self.db_pool, &name)
+                                        .await
+                                        .unwrap_or(None);
                                     if let Some(acc) = account {
                                         if let Ok(json) = serde_json::to_string(&s) {
-                                            let _ = db::archive_player_json(&self.db_pool, &s.name, &acc, &json).await;
+                                            let _ = db::archive_player_json(
+                                                &self.db_pool,
+                                                &s.name,
+                                                &acc,
+                                                &json,
+                                            )
+                                            .await;
                                         }
                                     }
                                     match db::delete_character(&self.db_pool, &name).await {
-                                        Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已存档并删除", name)),
-                                        Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档成功但删除失败: {}", e)),
+                                        Ok(()) => send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("角色 {} 已存档并删除", name),
+                                        ),
+                                        Err(e) => send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("存档成功但删除失败: {}", e),
+                                        ),
                                     }
                                 }
-                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {}", name)),
+                                _ => send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到角色 {}", name),
+                                ),
                             }
                         }
                         // @LOADPLAYER <name>（C# PlayerObject.cs:2745：存档覆盖现役角色）
                         "LOADPLAYER" => {
                             let name = parts.get(1).copied().unwrap_or("");
                             if name.is_empty() {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法: @LOADPLAYER <角色名>");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法: @LOADPLAYER <角色名>",
+                                );
                                 return;
                             }
-                            if !db::character_exists_by_name(&self.db_pool, &name).await.unwrap_or(false) {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到现役角色 {}", name));
+                            if !db::character_exists_by_name(&self.db_pool, &name)
+                                .await
+                                .unwrap_or(false)
+                            {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到现役角色 {}", name),
+                                );
                                 return;
                             }
-                            let Some(account) = db::get_character_account(&self.db_pool, &name).await.unwrap_or(None) else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("无法确定角色 {} 的账号", name));
+                            let Some(account) = db::get_character_account(&self.db_pool, &name)
+                                .await
+                                .unwrap_or(None)
+                            else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("无法确定角色 {} 的账号", name),
+                                );
                                 return;
                             };
                             match db::load_archived_player(&self.db_pool, &name).await {
-                                Ok(Some((_, json))) => match serde_json::from_str::<crate::actors::player::PlayerState>(&json) {
-                                    Ok(state) => match db::save_character(&self.db_pool, &state, &account).await {
-                                        Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已从存档加载", name)),
-                                        Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("加载失败: {}", e)),
-                                    },
-                                    Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档数据损坏: {}", e)),
+                                Ok(Some((_, json))) => match serde_json::from_str::<
+                                    crate::actors::player::PlayerState,
+                                >(&json)
+                                {
+                                    Ok(state) => {
+                                        match db::save_character(&self.db_pool, &state, &account)
+                                            .await
+                                        {
+                                            Ok(()) => send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("角色 {} 已从存档加载", name),
+                                            ),
+                                            Err(e) => send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("加载失败: {}", e),
+                                            ),
+                                        }
+                                    }
+                                    Err(e) => send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("存档数据损坏: {}", e),
+                                    ),
                                 },
-                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {} 的存档", name)),
+                                _ => send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到角色 {} 的存档", name),
+                                ),
                             }
                         }
                         // @RESTOREPLAYER <name> [account]（C# PlayerObject.cs:2780：恢复存档到指定/原账号）
                         "RESTOREPLAYER" => {
                             let name = parts.get(1).copied().unwrap_or("");
                             if name.is_empty() {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法: @RESTOREPLAYER <角色名> [账号]");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法: @RESTOREPLAYER <角色名> [账号]",
+                                );
                                 return;
                             }
                             let target_account = parts.get(2).map(|s| s.to_string());
                             match db::load_archived_player(&self.db_pool, &name).await {
-                                Ok(Some((orig_account, json))) => match serde_json::from_str::<crate::actors::player::PlayerState>(&json) {
+                                Ok(Some((orig_account, json))) => match serde_json::from_str::<
+                                    crate::actors::player::PlayerState,
+                                >(
+                                    &json
+                                ) {
                                     Ok(state) => {
-                                        let account = target_account.clone().unwrap_or(orig_account);
+                                        let account =
+                                            target_account.clone().unwrap_or(orig_account);
                                         if account.is_empty() {
-                                            send_system_message(&self.gate_ref, msg.session_id, "存档无原账号且未指定目标账号");
+                                            send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                "存档无原账号且未指定目标账号",
+                                            );
                                             return;
                                         }
-                                        match db::save_character(&self.db_pool, &state, &account).await {
-                                            Ok(()) => send_system_message(&self.gate_ref, msg.session_id, &format!("角色 {} 已恢复到账号 {}", state.name, account)),
-                                            Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("恢复失败: {}", e)),
+                                        match db::save_character(&self.db_pool, &state, &account)
+                                            .await
+                                        {
+                                            Ok(()) => send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!(
+                                                    "角色 {} 已恢复到账号 {}",
+                                                    state.name, account
+                                                ),
+                                            ),
+                                            Err(e) => send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("恢复失败: {}", e),
+                                            ),
                                         }
                                     }
-                                    Err(e) => send_system_message(&self.gate_ref, msg.session_id, &format!("存档数据损坏: {}", e)),
+                                    Err(e) => send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("存档数据损坏: {}", e),
+                                    ),
                                 },
-                                _ => send_system_message(&self.gate_ref, msg.session_id, &format!("未找到角色 {} 的存档", name)),
+                                _ => send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到角色 {} 的存档", name),
+                                ),
                             }
                         }
                         // @level [玩家] <等级>（#1468：C# GM LEVEL parts>=3 改目标玩家）
                         "LEVEL" => {
-                            let lv = parts.last().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).min(200);
+                            let lv = parts
+                                .last()
+                                .and_then(|s| s.parse::<u16>().ok())
+                                .unwrap_or(1)
+                                .min(200);
                             if parts.len() >= 3 {
                                 // C#：@level <玩家> <等级>——改目标在线玩家
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -2466,64 +3526,133 @@ impl Message<ChatRequest> for WorldActor {
                                     }
                                 }
                                 let Some(target_sid) = found else {
-                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "未找到在线玩家",
+                                    );
                                     return;
                                 };
                                 if let Some(r) = self.players.get(&target_sid) {
-                                    let _ = r.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
+                                    let _ = r
+                                        .actor_ref
+                                        .ask(crate::actors::player::ChangeLevel { level: lv })
+                                        .await;
                                 }
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已设置 {} 的等级为 {}", name, lv));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("已设置 {} 的等级为 {}", name, lv),
+                                );
                             } else {
-                                let _ = record.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("等级已设置为 {}", lv));
+                                let _ = record
+                                    .actor_ref
+                                    .ask(crate::actors::player::ChangeLevel { level: lv })
+                                    .await;
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("等级已设置为 {}", lv),
+                                );
                             }
                         }
                         // @removedawakening <ItemType>（C# case "REMOVEAWAKENING" ~3561：GM/TestServer 按类型移除装备觉醒）
                         "REMOVEAWAKENING" => {
-                            let Some(type_name) = parts.get(1).copied() else { return; };
-                            let Some(item_type) = parse_item_type(type_name) else {
-                                send_system_message(&self.gate_ref, msg.session_id, "无效的物品类型");
+                            let Some(type_name) = parts.get(1).copied() else {
                                 return;
                             };
-                            let _ = record.actor_ref.ask(crate::actors::player::RemoveAwakeningByItemType { item_type }).await;
+                            let Some(item_type) = parse_item_type(type_name) else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "无效的物品类型",
+                                );
+                                return;
+                            };
+                            let _ = record
+                                .actor_ref
+                                .ask(crate::actors::player::RemoveAwakeningByItemType { item_type })
+                                .await;
                         }
                         // @awakening <ItemType> <AwakeType>（C# case "AWAKENING" ~3518：GM/TestServer 升级装备觉醒）
                         "AWAKENING" => {
-                            let (Some(type_name), Some(awake_name)) = (parts.get(1).copied(), parts.get(2).copied()) else { return; };
+                            let (Some(type_name), Some(awake_name)) =
+                                (parts.get(1).copied(), parts.get(2).copied())
+                            else {
+                                return;
+                            };
                             let Some(item_type) = parse_item_type(type_name) else {
-                                send_system_message(&self.gate_ref, msg.session_id, "无效的物品类型");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "无效的物品类型",
+                                );
                                 return;
                             };
                             let Some(awake_type) = parse_awake_type(awake_name) else {
-                                send_system_message(&self.gate_ref, msg.session_id, "无效的觉醒类型");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "无效的觉醒类型",
+                                );
                                 return;
                             };
-                            self.gm_awakening(msg.session_id, item_type, awake_type).await;
+                            self.gm_awakening(msg.session_id, item_type, awake_type)
+                                .await;
                         }
                         // @clearipblocks（C# case "CLEARIPBLOCKS" ~3065：清空全部 IP 封禁，仅 GM）
                         "CLEARIPBLOCKS" => {
                             let _ = self.gate_ref.ask(crate::gate::actor::ClearIpBlocks).await;
-                            send_system_message(&self.gate_ref, msg.session_id, "已清空全部 IP 封禁");
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                "已清空全部 IP 封禁",
+                            );
                         }
                         // @gold <n>
                         "GOLD" => {
-                            let g = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: g }).await;
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 金币", g));
+                            let g = parts
+                                .get(1)
+                                .and_then(|s| s.parse::<u64>().ok())
+                                .unwrap_or(0);
+                            let _ = record
+                                .actor_ref
+                                .ask(crate::actors::player::AddGold { amount: g })
+                                .await;
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已获得 {} 金币", g),
+                            );
                         }
                         // @make <物品名|索引> [数量]（#1471：C# MAKE 索引/名称双查）
                         "MAKE" => {
                             let name = parts.get(1).copied().unwrap_or("");
-                            let count = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).max(1);
+                            let count = parts
+                                .get(2)
+                                .and_then(|s| s.parse::<u16>().ok())
+                                .unwrap_or(1)
+                                .max(1);
                             let item_idx = if let Ok(idx) = name.parse::<i32>() {
-                                if self.item_infos.contains_key(&idx) { Some(idx) } else { None }
+                                if self.item_infos.contains_key(&idx) {
+                                    Some(idx)
+                                } else {
+                                    None
+                                }
                             } else {
-                                self.item_infos.iter().find(|(_, i)| i.name.eq_ignore_ascii_case(&name)).map(|(k, _)| *k)
+                                self.item_infos
+                                    .iter()
+                                    .find(|(_, i)| i.name.eq_ignore_ascii_case(&name))
+                                    .map(|(k, _)| *k)
                             };
                             if let Some(idx) = item_idx {
                                 // C# MAKE（PlayerObject.cs:2362-2401）：按 StackSize 分批生成（CreateDropItem + GMMade=true；#2364）
-                                let stack_size = self.item_infos.get(&idx)
-                                    .map(|i| i.stack_size as u16).unwrap_or(1).max(1);
+                                let stack_size = self
+                                    .item_infos
+                                    .get(&idx)
+                                    .map(|i| i.stack_size as u16)
+                                    .unwrap_or(1)
+                                    .max(1);
                                 let mut remaining = count;
                                 while remaining > 0 {
                                     let batch = remaining.min(stack_size);
@@ -2533,24 +3662,46 @@ impl Message<ChatRequest> for WorldActor {
                                         item.current_dura = info.durability as u16;
                                     }
                                     item.is_gm_made = true; // C# item.GMMade
-                                    crate::actors::world::enrich_item_info(&mut item, &self.item_infos);
-                                    let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                                    crate::actors::world::enrich_item_info(
+                                        &mut item,
+                                        &self.item_infos,
+                                    );
+                                    let _ = record
+                                        .actor_ref
+                                        .ask(crate::actors::player::AddItemToInventory { item })
+                                        .await;
                                     remaining -= batch;
                                 }
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已生成 {} x{}", name, count));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("已生成 {} x{}", name, count),
+                                );
                             } else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到物品：{}", name));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到物品：{}", name),
+                                );
                             }
                         }
                         // @monster|@mob <怪物名|索引> [数量]（#1472：C# MOB 索引/名称双查）
                         "MONSTER" | "MOB" => {
                             let key = parts.get(1).copied().unwrap_or("");
                             let idx_opt = if let Ok(idx) = key.parse::<i32>() {
-                                if self.monster_infos.contains_key(&idx) { Some(idx) } else { None }
+                                if self.monster_infos.contains_key(&idx) {
+                                    Some(idx)
+                                } else {
+                                    None
+                                }
                             } else {
                                 self.monster_name_index.get(&key.to_lowercase()).copied()
                             };
-                            let count = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1).max(1);
+                            let count = parts
+                                .get(2)
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(1)
+                                .max(1);
                             let state = match record.actor_ref.ask(GetPlayerState).await {
                                 Ok(Some(s)) => s,
                                 _ => return,
@@ -2558,7 +3709,16 @@ impl Message<ChatRequest> for WorldActor {
                             let spawned = if let Some(idx) = idx_opt {
                                 // 按索引取怪名后走 spawn_monster_named（#1472）
                                 match self.monster_infos.get(&idx).map(|i| i.name.clone()) {
-                                    Some(name) => self.spawn_monster_named(&name, state.x, state.y, count, state.map_index).await,
+                                    Some(name) => {
+                                        self.spawn_monster_named(
+                                            &name,
+                                            state.x,
+                                            state.y,
+                                            count,
+                                            state.map_index,
+                                        )
+                                        .await
+                                    }
                                     None => 0,
                                 }
                             } else {
@@ -2573,105 +3733,179 @@ impl Message<ChatRequest> for WorldActor {
                         }
                         // @goto <玩家名>：传送到目标身边（C# case "GOTO" ~2915；独立消息处理）
                         "GOTO" => {
-                            let Some(target_name) = parts.get(1).copied() else { return; };
+                            let Some(target_name) = parts.get(1).copied() else {
+                                return;
+                            };
                             if let Some(world_ref) = self.self_ref.clone() {
-                                let _ = world_ref.tell(crate::actors::world::GmGotoRequest {
-                                    session_id: msg.session_id,
-                                    target_name: target_name.to_string(),
-                                }).try_send();
+                                let _ = world_ref
+                                    .tell(crate::actors::world::GmGotoRequest {
+                                        session_id: msg.session_id,
+                                        target_name: target_name.to_string(),
+                                    })
+                                    .try_send();
                             }
                         }
                         // @recallmob <怪物名|id> [数量] [x] [y]（C# case "RECALLMOB" ~2992）
                         "RECALLMOB" => {
-                            let Some(name) = parts.get(1).copied() else { return; };
-                            let count = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1).max(1);
+                            let Some(name) = parts.get(1).copied() else {
+                                return;
+                            };
+                            let count = parts
+                                .get(2)
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(1)
+                                .max(1);
                             let state = match record.actor_ref.ask(GetPlayerState).await {
                                 Ok(Some(s)) => s,
                                 _ => return,
                             };
-                            let x = parts.get(3).and_then(|s| s.parse::<i32>().ok()).unwrap_or(state.x);
-                            let y = parts.get(4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(state.y);
-                            let spawned = self.spawn_monster_named(name, x, y, count, state.map_index).await;
+                            let x = parts
+                                .get(3)
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .unwrap_or(state.x);
+                            let y = parts
+                                .get(4)
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .unwrap_or(state.y);
+                            let spawned = self
+                                .spawn_monster_named(name, x, y, count, state.map_index)
+                                .await;
                             if spawned > 0 {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已召唤 {} x{}", name, spawned));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("已召唤 {} x{}", name, spawned),
+                                );
                             } else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到怪物：{}", name));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到怪物：{}", name),
+                                );
                             }
                         }
                         // @clearbag [玩家名]（C# case "CLEARBAG" ~2419）
-                        "CLEARBAG" => {
-                            match parts.get(1).copied() {
-                                None => {
-                                    let _ = record.actor_ref.ask(crate::actors::player::ClearBackpack).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, "背包已清空");
-                                }
-                                Some(n) => {
-                                    let mut found = false;
-                                    for (_sid, other) in &self.players {
-                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
-                                            if os.name.eq_ignore_ascii_case(n) {
-                                                let _ = other.actor_ref.ask(crate::actors::player::ClearBackpack).await;
-                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已清空 {} 的背包", os.name));
-                                                found = true;
-                                                break;
-                                            }
+                        "CLEARBAG" => match parts.get(1).copied() {
+                            None => {
+                                let _ = record
+                                    .actor_ref
+                                    .ask(crate::actors::player::ClearBackpack)
+                                    .await;
+                                send_system_message(&self.gate_ref, msg.session_id, "背包已清空");
+                            }
+                            Some(n) => {
+                                let mut found = false;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
+                                        if os.name.eq_ignore_ascii_case(n) {
+                                            let _ = other
+                                                .actor_ref
+                                                .ask(crate::actors::player::ClearBackpack)
+                                                .await;
+                                            send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("已清空 {} 的背包", os.name),
+                                            );
+                                            found = true;
+                                            break;
                                         }
                                     }
-                                    if !found {
-                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
-                                    }
+                                }
+                                if !found {
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("未找到在线玩家：{}", n),
+                                    );
                                 }
                             }
-                        }
+                        },
                         // @revive [玩家名]（C# case "REVIVE" ~4055）
-                        "REVIVE" => {
-                            match parts.get(1).copied() {
-                                None => {
-                                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, "你已复活");
-                                }
-                                Some(n) => {
-                                    let mut found = false;
-                                    for (_sid, other) in &self.players {
-                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
-                                            if os.name.eq_ignore_ascii_case(n) {
-                                                let _ = other.actor_ref.ask(crate::actors::player::Revive).await;
-                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已复活 {}", os.name));
-                                                found = true;
-                                                break;
-                                            }
+                        "REVIVE" => match parts.get(1).copied() {
+                            None => {
+                                let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "你已复活");
+                            }
+                            Some(n) => {
+                                let mut found = false;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
+                                        if os.name.eq_ignore_ascii_case(n) {
+                                            let _ = other
+                                                .actor_ref
+                                                .ask(crate::actors::player::Revive)
+                                                .await;
+                                            send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("已复活 {}", os.name),
+                                            );
+                                            found = true;
+                                            break;
                                         }
                                     }
-                                    if !found {
-                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
-                                    }
+                                }
+                                if !found {
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("未找到在线玩家：{}", n),
+                                    );
                                 }
                             }
-                        }
+                        },
                         // @givegold [玩家] <数量>（C# case "GIVEGOLD" ~3071）
                         "GIVEGOLD" => {
-                            let amount = parts.last().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                            if amount == 0 { return; }
+                            let amount = parts
+                                .last()
+                                .and_then(|s| s.parse::<u64>().ok())
+                                .unwrap_or(0);
+                            if amount == 0 {
+                                return;
+                            }
                             match parts.get(1).copied() {
                                 Some(n) if parts.len() >= 3 => {
                                     let mut found = false;
                                     for (_sid, other) in &self.players {
-                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if let Ok(Some(os)) =
+                                            other.actor_ref.ask(GetPlayerState).await
+                                        {
                                             if os.name.eq_ignore_ascii_case(n) {
-                                                let _ = other.actor_ref.ask(crate::actors::player::AddGold { amount }).await;
-                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已给 {} {} 金币", os.name, amount));
+                                                let _ = other
+                                                    .actor_ref
+                                                    .ask(crate::actors::player::AddGold { amount })
+                                                    .await;
+                                                send_system_message(
+                                                    &self.gate_ref,
+                                                    msg.session_id,
+                                                    &format!("已给 {} {} 金币", os.name, amount),
+                                                );
                                                 found = true;
                                                 break;
                                             }
                                         }
                                     }
                                     if !found {
-                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
+                                        send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("未找到在线玩家：{}", n),
+                                        );
                                     }
                                 }
                                 _ => {
-                                    let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount }).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 金币", amount));
+                                    let _ = record
+                                        .actor_ref
+                                        .ask(crate::actors::player::AddGold { amount })
+                                        .await;
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("已获得 {} 金币", amount),
+                                    );
                                 }
                             }
                         }
@@ -2679,12 +3913,27 @@ impl Message<ChatRequest> for WorldActor {
                         "GIVESKILL" => {
                             // 技能名：有 3+ 参数时是最后两个（[玩家] 技能 等级）；2 参数时是 (技能 等级)
                             let (skill_arg, level_arg) = if parts.len() >= 3 {
-                                (parts.get(parts.len() - 2).copied().unwrap_or(""), parts.get(parts.len() - 1).copied().unwrap_or("0"))
+                                (
+                                    parts.get(parts.len() - 2).copied().unwrap_or(""),
+                                    parts.get(parts.len() - 1).copied().unwrap_or("0"),
+                                )
                             } else {
-                                (parts.get(1).copied().unwrap_or(""), parts.get(2).copied().unwrap_or("0"))
+                                (
+                                    parts.get(1).copied().unwrap_or(""),
+                                    parts.get(2).copied().unwrap_or("0"),
+                                )
                             };
-                            let Some(info) = self.magic_infos.values().find(|m| m.name.eq_ignore_ascii_case(skill_arg)).cloned() else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到技能：{}", skill_arg));
+                            let Some(info) = self
+                                .magic_infos
+                                .values()
+                                .find(|m| m.name.eq_ignore_ascii_case(skill_arg))
+                                .cloned()
+                            else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到技能：{}", skill_arg),
+                                );
                                 return;
                             };
                             let level = level_arg.parse::<u8>().unwrap_or(0).min(3);
@@ -2693,7 +3942,8 @@ impl Message<ChatRequest> for WorldActor {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some((*_sid, other.actor_ref.clone()));
                                             break;
@@ -2705,7 +3955,11 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(msg.session_id)
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
                             let target = match self.players.get(&target_sid) {
@@ -2722,9 +3976,17 @@ impl Message<ChatRequest> for WorldActor {
                                 state.magics.push(m);
                                 let _ = target.actor_ref.ask(SetPlayerState { state }).await;
                                 self.send_new_magic_packet(target_sid, info.spell).await;
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已传授技能 {}", info.name));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("已传授技能 {}", info.name),
+                                );
                             } else {
-                                send_system_message(&self.gate_ref, msg.session_id, "对方已学会该技能");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "对方已学会该技能",
+                                );
                             }
                         }
                         // @clearmob（C# case "CLEARMOB" ~3399；简化：清空当前地图怪物）
@@ -2736,20 +3998,28 @@ impl Message<ChatRequest> for WorldActor {
                             // #1469：C# CLEARMOB parts.Length>1 按地图名清指定图
                             let map_index = if parts.len() > 1 {
                                 let name = parts.get(1).copied().unwrap_or("");
-                                match self.map_infos.values()
+                                match self
+                                    .map_infos
+                                    .values()
                                     .find(|m| m.file_name.eq_ignore_ascii_case(name))
                                     .map(|m| m.index as u16)
                                 {
                                     Some(idx) => idx,
                                     None => {
-                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到地图：{}", name));
+                                        send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("未找到地图：{}", name),
+                                        );
                                         return;
                                     }
                                 }
                             } else {
                                 state.map_index
                             };
-                            let ids: Vec<u32> = self.monsters.iter()
+                            let ids: Vec<u32> = self
+                                .monsters
+                                .iter()
                                 .filter(|(_, m)| m.map_index == map_index)
                                 .map(|(oid, _)| *oid)
                                 .collect();
@@ -2758,10 +4028,20 @@ impl Message<ChatRequest> for WorldActor {
                                 if self.monsters.remove(oid).is_some() {
                                     removed += 1;
                                     let packet = Self::build_object_remove_packet(*oid);
-                                    broadcast_to_map(&self.gate_ref, &self.players, map_index, &packet).await;
+                                    broadcast_to_map(
+                                        &self.gate_ref,
+                                        &self.players,
+                                        map_index,
+                                        &packet,
+                                    )
+                                    .await;
                                 }
                             }
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("已清除 {} 只怪物", removed));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已清除 {} 只怪物", removed),
+                            );
                         }
                         // @adjustpkpoint [玩家] <点数>（C# case "ADJUSTPKPOINT" ~3494：直接设置 PK）
                         "ADJUSTPKPOINT" => {
@@ -2769,7 +4049,8 @@ impl Message<ChatRequest> for WorldActor {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -2781,29 +4062,44 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(msg.session_id)
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
                             let target = match self.players.get(&target_sid) {
                                 Some(r) => r.clone(),
                                 None => return,
                             };
-                            let want = parts.last().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                            let want = parts
+                                .last()
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .unwrap_or(0);
                             let state = match target.actor_ref.ask(GetPlayerState).await {
                                 Ok(Some(s)) => s,
                                 _ => return,
                             };
                             let delta = want - state.pk_points;
-                            let _ = target.actor_ref.ask(crate::actors::player::AddPkPoints { points: delta }).await;
+                            let _ = target
+                                .actor_ref
+                                .ask(crate::actors::player::AddPkPoints { points: delta })
+                                .await;
                             self.broadcast_viewer_colours(target_sid).await;
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("已设置 PK 值为 {}", want));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已设置 PK 值为 {}", want),
+                            );
                         }
                         // @changegender [玩家]（C# case "CHANGEGENDER" ~2237：切换性别）
                         "CHANGEGENDER" => {
                             let target_sid = if let Some(n) = parts.get(1).copied() {
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(n) {
                                             found = Some(*_sid);
                                             break;
@@ -2815,7 +4111,11 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(msg.session_id)
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
                             let target = match self.players.get(&target_sid) {
@@ -2827,8 +4127,12 @@ impl Message<ChatRequest> for WorldActor {
                                 _ => return,
                             };
                             state.gender = match state.gender {
-                                mir2_shared::enums::MirGender::Male => mir2_shared::enums::MirGender::Female,
-                                mir2_shared::enums::MirGender::Female => mir2_shared::enums::MirGender::Male,
+                                mir2_shared::enums::MirGender::Male => {
+                                    mir2_shared::enums::MirGender::Female
+                                }
+                                mir2_shared::enums::MirGender::Female => {
+                                    mir2_shared::enums::MirGender::Male
+                                }
                             };
                             let _ = target.actor_ref.ask(SetPlayerState { state }).await;
                             send_system_message(
@@ -2853,11 +4157,18 @@ impl Message<ChatRequest> for WorldActor {
                             };
                             state.hair = hair;
                             let _ = record.actor_ref.ask(SetPlayerState { state }).await;
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("发型已设置为 {}", hair));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("发型已设置为 {}", hair),
+                            );
                         }
                         // @setlight <0-4>（C# case "SETLIGHT" ~4137：设置当前光照并广播）
                         "SETLIGHT" => {
-                            let light_val = parts.get(1).and_then(|s| s.parse::<u8>().ok()).unwrap_or(255);
+                            let light_val = parts
+                                .get(1)
+                                .and_then(|s| s.parse::<u8>().ok())
+                                .unwrap_or(255);
                             let setting = match light_val {
                                 0 => mir2_shared::enums::LightSetting::Normal,
                                 1 => mir2_shared::enums::LightSetting::Dawn,
@@ -2865,7 +4176,11 @@ impl Message<ChatRequest> for WorldActor {
                                 3 => mir2_shared::enums::LightSetting::Evening,
                                 4 => mir2_shared::enums::LightSetting::Night,
                                 _ => {
-                                    send_system_message(&self.gate_ref, msg.session_id, "用法：@setlight <0=Normal 1=Dawn 2=Day 3=Evening 4=Night>");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "用法：@setlight <0=Normal 1=Dawn 2=Day 3=Evening 4=Night>",
+                                    );
                                     return;
                                 }
                             };
@@ -2873,16 +4188,24 @@ impl Message<ChatRequest> for WorldActor {
                             for sid in self.players.keys() {
                                 self.send_time_of_day(*sid, setting);
                             }
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("光照已设置为 {:?}", setting));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("光照已设置为 {:?}", setting),
+                            );
                         }
                         // @levelhero <等级> / @levelhero <玩家> <等级>（C# case "LEVELHERO" ~2312）
                         "LEVELHERO" => {
                             let (target_sid, level) = if parts.len() >= 3 {
                                 let name = parts.get(1).copied().unwrap_or("");
-                                let lv = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+                                let lv = parts
+                                    .get(2)
+                                    .and_then(|s| s.parse::<u16>().ok())
+                                    .unwrap_or(0);
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -2891,13 +4214,25 @@ impl Message<ChatRequest> for WorldActor {
                                 }
                                 (found, lv)
                             } else {
-                                (Some(msg.session_id), parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0))
+                                (
+                                    Some(msg.session_id),
+                                    parts
+                                        .get(1)
+                                        .and_then(|s| s.parse::<u16>().ok())
+                                        .unwrap_or(0),
+                                )
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
-                            if level == 0 { return; }
+                            if level == 0 {
+                                return;
+                            }
                             let target = match self.players.get(&target_sid) {
                                 Some(r) => r.clone(),
                                 None => return,
@@ -2907,20 +4242,41 @@ impl Message<ChatRequest> for WorldActor {
                                 _ => return,
                             };
                             let hero_index = state.hero_index as i32;
-                            let old = self.player_heroes.get(&target_sid)
+                            let old = self
+                                .player_heroes
+                                .get(&target_sid)
                                 .and_then(|hs| hs.iter().find(|h| h.index == hero_index))
                                 .map(|h| h.level);
                             if let Some(heroes) = self.player_heroes.get_mut(&target_sid) {
-                                if let Some(hero) = heroes.iter_mut().find(|h| h.index == hero_index) {
+                                if let Some(hero) =
+                                    heroes.iter_mut().find(|h| h.index == hero_index)
+                                {
                                     hero.level = level;
                                 }
                             }
-                            let heroes = self.player_heroes.get(&target_sid).cloned().unwrap_or_default();
-                            super::send_manage_heroes_packet(&self.gate_ref, target_sid, &state, &heroes);
+                            let heroes = self
+                                .player_heroes
+                                .get(&target_sid)
+                                .cloned()
+                                .unwrap_or_default();
+                            super::send_manage_heroes_packet(
+                                &self.gate_ref,
+                                target_sid,
+                                &state,
+                                &heroes,
+                            );
                             self.send_hero_information_packet(target_sid).await;
                             match old {
-                                Some(old) => send_system_message(&self.gate_ref, msg.session_id, &format!("英雄等级 {} -> {}", old, level)),
-                                None => send_system_message(&self.gate_ref, msg.session_id, &format!("英雄等级已设为 {}", level)),
+                                Some(old) => send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("英雄等级 {} -> {}", old, level),
+                                ),
+                                None => send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("英雄等级已设为 {}", level),
+                                ),
                             }
                         }
                         // @info [玩家名]（C# case "INFO" ~3724：查看玩家/怪物信息）
@@ -2929,7 +4285,9 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(n) => {
                                     let mut found_player = false;
                                     for (_sid, other) in &self.players {
-                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if let Ok(Some(os)) =
+                                            other.actor_ref.ask(GetPlayerState).await
+                                        {
                                             if os.name.eq_ignore_ascii_case(n) {
                                                 send_system_message(
                                                     &self.gate_ref,
@@ -2943,7 +4301,11 @@ impl Message<ChatRequest> for WorldActor {
                                         }
                                     }
                                     if !found_player {
-                                        if let Some(m) = self.monsters.values().find(|m| m.name.eq_ignore_ascii_case(n)) {
+                                        if let Some(m) = self
+                                            .monsters
+                                            .values()
+                                            .find(|m| m.name.eq_ignore_ascii_case(n))
+                                        {
                                             send_system_message(
                                                 &self.gate_ref,
                                                 msg.session_id,
@@ -2951,12 +4313,17 @@ impl Message<ChatRequest> for WorldActor {
                                                     m.monster_index, m.name, m.hp, m.max_hp, m.x, m.y, m.map_index),
                                             );
                                         } else {
-                                            send_system_message(&self.gate_ref, msg.session_id, &format!("未找到目标：{}", n));
+                                            send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("未找到目标：{}", n),
+                                            );
                                         }
                                     }
                                 }
                                 None => {
-                                    if let Ok(Some(s)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(s)) = record.actor_ref.ask(GetPlayerState).await
+                                    {
                                         send_system_message(
                                             &self.gate_ref,
                                             msg.session_id,
@@ -2971,10 +4338,18 @@ impl Message<ChatRequest> for WorldActor {
                         "GAMEMASTER" => {
                             if self.gm_protected.contains(&msg.session_id) {
                                 self.gm_protected.remove(&msg.session_id);
-                                send_system_message(&self.gate_ref, msg.session_id, "已关闭 GM 保护模式（可被攻击）");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "已关闭 GM 保护模式（可被攻击）",
+                                );
                             } else {
                                 self.gm_protected.insert(msg.session_id);
-                                send_system_message(&self.gate_ref, msg.session_id, "已开启 GM 保护模式（不可被攻击）");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "已开启 GM 保护模式（不可被攻击）",
+                                );
                             }
                         }
 
@@ -2983,34 +4358,70 @@ impl Message<ChatRequest> for WorldActor {
                             let name = parts.get(1).copied().unwrap_or("");
                             // C# 无参数：击杀前方 1 格 Cell 内所有玩家/怪物（ob.EXPOwner=GM + Die）
                             if name.is_empty() {
-                                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { return; };
+                                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await
+                                else {
+                                    return;
+                                };
                                 let (fx, fy) = point_move(st.x, st.y, st.direction, 1);
                                 // 前方玩家（C#：GMNeverDie 豁免）
                                 let mut front_players: Vec<u64> = Vec::new();
                                 for (sid, other) in &self.players {
-                                    if *sid == msg.session_id { continue; }
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
-                                        if !os.is_dead && os.map_index == st.map_index && os.x == fx && os.y == fy {
+                                    if *sid == msg.session_id {
+                                        continue;
+                                    }
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
+                                        if !os.is_dead
+                                            && os.map_index == st.map_index
+                                            && os.x == fx
+                                            && os.y == fy
+                                        {
                                             front_players.push(*sid);
                                         }
                                     }
                                 }
                                 for sid in front_players {
                                     if let Some(target) = self.players.get(&sid).cloned() {
-                                        if let Ok(Some(ts)) = target.actor_ref.ask(GetPlayerState).await {
-                                            if ts.gm_never_die { continue; }
-                                            let died = target.actor_ref.ask(crate::actors::player::TakeDamage {
-                                                attacker_id: 0, attacker_session: 0, damage: i32::MAX,
-                                            }).await.unwrap_or(false);
+                                        if let Ok(Some(ts)) =
+                                            target.actor_ref.ask(GetPlayerState).await
+                                        {
+                                            if ts.gm_never_die {
+                                                continue;
+                                            }
+                                            let died = target
+                                                .actor_ref
+                                                .ask(crate::actors::player::TakeDamage {
+                                                    attacker_id: 0,
+                                                    attacker_session: 0,
+                                                    damage: i32::MAX,
+                                                })
+                                                .await
+                                                .unwrap_or(false);
                                             if died {
-                                                let died_packet = Self::build_object_died_packet(ts.object_id, ts.x, ts.y, ts.direction, 0u8);
+                                                let died_packet = Self::build_object_died_packet(
+                                                    ts.object_id,
+                                                    ts.x,
+                                                    ts.y,
+                                                    ts.direction,
+                                                    0u8,
+                                                );
                                                 for (psid, _) in &self.players {
-                                                    let _ = self.gate_ref.tell(SendToClient {
-                                                        session_id: *psid,
-                                                        data: died_packet.clone(),
-                                                    }).await;
+                                                    let _ = self
+                                                        .gate_ref
+                                                        .tell(SendToClient {
+                                                            session_id: *psid,
+                                                            data: died_packet.clone(),
+                                                        })
+                                                        .await;
                                                 }
-                                                self.handle_player_death_drop(sid, ts.x, ts.y, ts.map_index, false).await;
+                                                self.handle_player_death_drop(
+                                                    sid,
+                                                    ts.x,
+                                                    ts.y,
+                                                    ts.map_index,
+                                                    false,
+                                                )
+                                                .await;
                                             }
                                         }
                                     }
@@ -3018,7 +4429,11 @@ impl Message<ChatRequest> for WorldActor {
                                 // 前方怪物（C#：EXPOwner=GM；hp=0 交由 tick 统一结算死亡/掉落）
                                 let mut front_mobs: Vec<u32> = Vec::new();
                                 for (oid, m) in &self.monsters {
-                                    if m.hp > 0 && m.map_index == st.map_index && m.x == fx && m.y == fy {
+                                    if m.hp > 0
+                                        && m.map_index == st.map_index
+                                        && m.x == fx
+                                        && m.y == fy
+                                    {
                                         front_mobs.push(*oid);
                                     }
                                 }
@@ -3028,7 +4443,11 @@ impl Message<ChatRequest> for WorldActor {
                                         m.hp = 0;
                                     }
                                 }
-                                send_system_message(&self.gate_ref, msg.session_id, "已击杀前方目标");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "已击杀前方目标",
+                                );
                                 return;
                             }
                             // C# 带玩家名：GMNeverDie（@SUPERMAN 无敌）目标不可被击杀
@@ -3042,88 +4461,184 @@ impl Message<ChatRequest> for WorldActor {
                                 }
                             }
                             let Some(target_sid) = found else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
-                            let Some(target) = self.players.get(&target_sid).cloned() else { return; };
+                            let Some(target) = self.players.get(&target_sid).cloned() else {
+                                return;
+                            };
                             if let Ok(Some(st)) = target.actor_ref.ask(GetPlayerState).await {
                                 if st.gm_never_die {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 处于 GM 无敌状态，无法击杀", st.name));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("{} 处于 GM 无敌状态，无法击杀", st.name),
+                                    );
                                     return;
                                 }
-                                let died = target.actor_ref.ask(crate::actors::player::TakeDamage {
-                                    attacker_id: 0, attacker_session: 0, damage: i32::MAX,
-                                }).await.unwrap_or(false);
+                                let died = target
+                                    .actor_ref
+                                    .ask(crate::actors::player::TakeDamage {
+                                        attacker_id: 0,
+                                        attacker_session: 0,
+                                        damage: i32::MAX,
+                                    })
+                                    .await
+                                    .unwrap_or(false);
                                 if died {
-                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction, 0u8);
+                                    let died_packet = Self::build_object_died_packet(
+                                        st.object_id,
+                                        st.x,
+                                        st.y,
+                                        st.direction,
+                                        0u8,
+                                    );
                                     for (sid, _) in &self.players {
-                                        let _ = self.gate_ref.tell(SendToClient {
-                                            session_id: *sid,
-                                            data: died_packet.clone(),
-                                        }).await;
+                                        let _ = self
+                                            .gate_ref
+                                            .tell(SendToClient {
+                                                session_id: *sid,
+                                                data: died_packet.clone(),
+                                            })
+                                            .await;
                                     }
-                                    self.handle_player_death_drop(target_sid, st.x, st.y, st.map_index, false).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("已击杀 {}", st.name));
+                                    self.handle_player_death_drop(
+                                        target_sid,
+                                        st.x,
+                                        st.y,
+                                        st.map_index,
+                                        false,
+                                    )
+                                    .await;
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("已击杀 {}", st.name),
+                                    );
                                 }
                             }
                         }
 
                         // @trigger <id> [玩家名]（C# case "TRIGGER"：GM 触发目标玩家默认 NPC [@_Trigger(id)]）
                         "TRIGGER" => {
-                            let Some(id) = parts.get(1).copied() else { return; };
+                            let Some(id) = parts.get(1).copied() else {
+                                return;
+                            };
                             let target_session = match parts.get(2).copied() {
                                 Some(name) => {
                                     let mut found = None;
                                     for (sid, other) in &self.players {
-                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
-                                            if os.name.eq_ignore_ascii_case(name) { found = Some(*sid); break; }
+                                        if let Ok(Some(os)) =
+                                            other.actor_ref.ask(GetPlayerState).await
+                                        {
+                                            if os.name.eq_ignore_ascii_case(name) {
+                                                found = Some(*sid);
+                                                break;
+                                            }
                                         }
                                     }
                                     match found {
-                                        Some(sid) => sid, None => { send_system_message(&self.gate_ref, msg.session_id, "未找到玩家"); return; }
+                                        Some(sid) => sid,
+                                        None => {
+                                            send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                "未找到玩家",
+                                            );
+                                            return;
+                                        }
                                     }
                                 }
                                 None => msg.session_id,
                             };
                             self.queue_default_npc(target_session, &format!("_trigger({})", id));
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("已触发默认 NPC 事件 [@_Trigger({})]", id));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已触发默认 NPC 事件 [@_Trigger({})]", id),
+                            );
                         }
 
                         // @die（C# case "DIE"：自杀）
                         "DIE" => {
                             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                                let died = record.actor_ref.ask(crate::actors::player::TakeDamage {
-                                    attacker_id: 0, attacker_session: 0, damage: i32::MAX,
-                                }).await.unwrap_or(false);
+                                let died = record
+                                    .actor_ref
+                                    .ask(crate::actors::player::TakeDamage {
+                                        attacker_id: 0,
+                                        attacker_session: 0,
+                                        damage: i32::MAX,
+                                    })
+                                    .await
+                                    .unwrap_or(false);
                                 if died {
-                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction, 0u8);
+                                    let died_packet = Self::build_object_died_packet(
+                                        st.object_id,
+                                        st.x,
+                                        st.y,
+                                        st.direction,
+                                        0u8,
+                                    );
                                     for (sid, _) in &self.players {
-                                        let _ = self.gate_ref.tell(SendToClient {
-                                            session_id: *sid,
-                                            data: died_packet.clone(),
-                                        }).await;
+                                        let _ = self
+                                            .gate_ref
+                                            .tell(SendToClient {
+                                                session_id: *sid,
+                                                data: died_packet.clone(),
+                                            })
+                                            .await;
                                     }
-                                    self.handle_player_death_drop(msg.session_id, st.x, st.y, st.map_index, false).await;
+                                    self.handle_player_death_drop(
+                                        msg.session_id,
+                                        st.x,
+                                        st.y,
+                                        st.map_index,
+                                        false,
+                                    )
+                                    .await;
                                 }
                             }
                         }
 
                         // @reloaddrops（C# case "RELOADDROPS"：重载掉落表）
                         "RELOADDROPS" => {
-                            let item_name_index: std::collections::HashMap<String, i32> = self.item_infos.iter()
+                            let item_name_index: std::collections::HashMap<String, i32> = self
+                                .item_infos
+                                .iter()
                                 .map(|(idx, i)| (i.name.to_lowercase(), *idx))
                                 .collect();
                             let drop_dir = self.map_dir.join("Envir").join("Drops");
                             if drop_dir.exists() {
-                                if let Err(e) = db::import_drops_from_dir(&drop_dir, &self.monster_infos, &item_name_index, &self.db_pool).await {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("掉落重载失败：{}", e));
+                                if let Err(e) = db::import_drops_from_dir(
+                                    &drop_dir,
+                                    &self.monster_infos,
+                                    &item_name_index,
+                                    &self.db_pool,
+                                )
+                                .await
+                                {
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("掉落重载失败：{}", e),
+                                    );
                                     return;
                                 }
                             }
                             match db::load_monster_drops(&self.db_pool).await {
-                                Ok(d) => { self.monster_drops = d; }
+                                Ok(d) => {
+                                    self.monster_drops = d;
+                                }
                                 Err(e) => {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("掉落重载失败：{}", e));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("掉落重载失败：{}", e),
+                                    );
                                     return;
                                 }
                             }
@@ -3135,30 +4650,59 @@ impl Message<ChatRequest> for WorldActor {
                         "RELOADNPCS" => {
                             let npc_dir = self.map_dir.join("Envir").join("NPCs");
                             if npc_dir.exists() {
-                                let npc_infos_vec: Vec<db::NPCInfo> = self.npc_infos.values().cloned().collect();
-                                if let Err(e) = db::import_npc_scripts_from_dir(&npc_dir, &npc_infos_vec, &self.db_pool).await {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                let npc_infos_vec: Vec<db::NPCInfo> =
+                                    self.npc_infos.values().cloned().collect();
+                                if let Err(e) = db::import_npc_scripts_from_dir(
+                                    &npc_dir,
+                                    &npc_infos_vec,
+                                    &self.db_pool,
+                                )
+                                .await
+                                {
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("NPC 重载失败：{}", e),
+                                    );
                                     return;
                                 }
                             }
                             match db::load_npc_infos(&self.db_pool).await {
-                                Ok(m) => { self.npc_infos = m.into_iter().map(|n| (n.index, n)).collect(); }
+                                Ok(m) => {
+                                    self.npc_infos = m.into_iter().map(|n| (n.index, n)).collect();
+                                }
                                 Err(e) => {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("NPC 重载失败：{}", e),
+                                    );
                                     return;
                                 }
                             }
                             match db::load_npc_scripts(&self.db_pool).await {
-                                Ok(s) => { self.npc_scripts = s; }
+                                Ok(s) => {
+                                    self.npc_scripts = s;
+                                }
                                 Err(e) => {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("NPC 重载失败：{}", e),
+                                    );
                                     return;
                                 }
                             }
                             match db::load_npc_goods(&self.db_pool).await {
-                                Ok(g) => { self.npc_goods = g; }
+                                Ok(g) => {
+                                    self.npc_goods = g;
+                                }
                                 Err(e) => {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("NPC 重载失败：{}", e),
+                                    );
                                     return;
                                 }
                             }
@@ -3167,11 +4711,26 @@ impl Message<ChatRequest> for WorldActor {
 
                         // @superman（C# case "SUPERMAN"：切换 GM 无敌模式 GMNeverDie）
                         "SUPERMAN" => {
-                            let current = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.gm_never_die } else { false };
+                            let current =
+                                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                    st.gm_never_die
+                                } else {
+                                    false
+                                };
                             let enabled = !current;
-                            let _ = record.actor_ref.ask(crate::actors::player::SetGmNeverDie { enabled }).await;
-                            send_system_message(&self.gate_ref, msg.session_id,
-                                if enabled { "已开启无敌模式（不会死亡）" } else { "已关闭无敌模式" });
+                            let _ = record
+                                .actor_ref
+                                .ask(crate::actors::player::SetGmNeverDie { enabled })
+                                .await;
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                if enabled {
+                                    "已开启无敌模式（不会死亡）"
+                                } else {
+                                    "已关闭无敌模式"
+                                },
+                            );
                         }
 
                         // @observer（C# case "OBSERVER"：GM 观战隐身）
@@ -3181,43 +4740,70 @@ impl Message<ChatRequest> for WorldActor {
                                 if hidden {
                                     self.invisible_sessions.insert(msg.session_id);
                                     self.hide_player_from_others(msg.session_id, &st).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, "已进入观战模式（对他人隐身）");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "已进入观战模式（对他人隐身）",
+                                    );
                                 } else {
                                     self.invisible_sessions.remove(&msg.session_id);
                                     self.reveal_player_to_others(msg.session_id, &st).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, "已退出观战模式");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "已退出观战模式",
+                                    );
                                 }
                             }
                         }
 
                         // @deco <image>（C# case "DECO"：GM 生成装饰物；C# 还允许 TestServer，Rust 仅 GM）
                         "DECO" => {
-                            let image = parts.get(1).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+                            let image = parts
+                                .get(1)
+                                .and_then(|v| v.parse::<i32>().ok())
+                                .unwrap_or(0);
                             let state = match record.actor_ref.ask(GetPlayerState).await {
                                 Ok(Some(s)) => s,
                                 _ => return,
                             };
                             let object_id = self.next_object_id;
                             self.next_object_id += 1;
-                            self.deco_objects.insert(object_id, DecoObjectInfo {
+                            self.deco_objects.insert(
                                 object_id,
-                                map_index: state.map_index,
-                                x: state.x,
-                                y: state.y,
-                                image,
-                            });
+                                DecoObjectInfo {
+                                    object_id,
+                                    map_index: state.map_index,
+                                    x: state.x,
+                                    y: state.y,
+                                    image,
+                                },
+                            );
                             // 发给自己（C# Enqueue GetInfo）
-                            let packet = build_object_deco_packet(object_id, state.x, state.y, image);
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: msg.session_id,
-                                data: packet,
-                            }).await;
+                            let packet =
+                                build_object_deco_packet(object_id, state.x, state.y, image);
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: packet,
+                                })
+                                .await;
                             // 广播同图 DataRange(16) 内其他玩家（C# Spawned → BroadcastInfo）
                             self.broadcast_deco_on_map(
-                                object_id, state.x, state.y, image, state.map_index, Some(msg.session_id),
-                            ).await;
-                            send_system_message(&self.gate_ref, msg.session_id,
-                                &format!("已生成装饰物 Image={}（ID={}）", image, object_id));
+                                object_id,
+                                state.x,
+                                state.y,
+                                image,
+                                state.map_index,
+                                Some(msg.session_id),
+                            )
+                            .await;
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已生成装饰物 Image={}（ID={}）", image, object_id),
+                            );
                         }
 
                         // @changeclass [玩家] <职业>（C# case "CHANGECLASS"：GM 转职）
@@ -3239,7 +4825,8 @@ impl Message<ChatRequest> for WorldActor {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -3247,7 +4834,11 @@ impl Message<ChatRequest> for WorldActor {
                                     }
                                 }
                                 let Some(sid) = found else {
-                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "未找到在线玩家",
+                                    );
                                     return;
                                 };
                                 Some(sid)
@@ -3256,10 +4847,17 @@ impl Message<ChatRequest> for WorldActor {
                             };
                             if let Some(sid) = target_sid {
                                 if let Some(r) = self.players.get(&sid) {
-                                    let _ = r.actor_ref.ask(crate::actors::player::ChangeClass { class }).await;
+                                    let _ = r
+                                        .actor_ref
+                                        .ask(crate::actors::player::ChangeClass { class })
+                                        .await;
                                     if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
                                         self.refresh_player_appearance(sid).await;
-                                        send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已转职为 {:?}", st.name, class));
+                                        send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("{} 已转职为 {:?}", st.name, class),
+                                        );
                                     }
                                 }
                             }
@@ -3267,17 +4865,28 @@ impl Message<ChatRequest> for WorldActor {
 
                         // @setquest <id> <0|1> [玩家]（C# case "SETQUEST"：0=取消 1=完成）
                         "SETQUEST" => {
-                            let quest_id = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-                            let state = parts.get(2).and_then(|s| s.parse::<i32>().ok()).unwrap_or(-1);
+                            let quest_id = parts
+                                .get(1)
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .unwrap_or(0);
+                            let state = parts
+                                .get(2)
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .unwrap_or(-1);
                             if quest_id < 1 || !matches!(state, 0 | 1) {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法：@setquest <任务ID> <0=取消|1=完成> [玩家]");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法：@setquest <任务ID> <0=取消|1=完成> [玩家]",
+                                );
                                 return;
                             }
                             let target_sid = if parts.len() >= 4 {
                                 let name = parts.get(3).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -3285,7 +4894,11 @@ impl Message<ChatRequest> for WorldActor {
                                     }
                                 }
                                 let Some(sid) = found else {
-                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "未找到在线玩家",
+                                    );
                                     return;
                                 };
                                 Some(sid)
@@ -3294,8 +4907,22 @@ impl Message<ChatRequest> for WorldActor {
                             };
                             if let Some(sid) = target_sid {
                                 if let Some(r) = self.players.get(&sid) {
-                                    let _ = r.actor_ref.ask(crate::actors::player::GmSetQuest { quest_index: quest_id, complete: state == 1 }).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("任务 {} 已{}", quest_id, if state == 1 { "完成" } else { "取消" }));
+                                    let _ = r
+                                        .actor_ref
+                                        .ask(crate::actors::player::GmSetQuest {
+                                            quest_index: quest_id,
+                                            complete: state == 1,
+                                        })
+                                        .await;
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!(
+                                            "任务 {} 已{}",
+                                            quest_id,
+                                            if state == 1 { "完成" } else { "取消" }
+                                        ),
+                                    );
                                 }
                             }
                         }
@@ -3305,7 +4932,8 @@ impl Message<ChatRequest> for WorldActor {
                             let target_sid = if let Some(n) = parts.get(1).copied() {
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(n) {
                                             found = Some(*_sid);
                                             break;
@@ -3313,7 +4941,11 @@ impl Message<ChatRequest> for WorldActor {
                                     }
                                 }
                                 let Some(sid) = found else {
-                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "未找到在线玩家",
+                                    );
                                     return;
                                 };
                                 Some(sid)
@@ -3322,22 +4954,33 @@ impl Message<ChatRequest> for WorldActor {
                             };
                             if let Some(sid) = target_sid {
                                 if let Some(r) = self.players.get(&sid) {
-                                    let _ = r.actor_ref.ask(crate::actors::player::GmClearQuests).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, "任务已清空");
+                                    let _ =
+                                        r.actor_ref.ask(crate::actors::player::GmClearQuests).await;
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        "任务已清空",
+                                    );
                                 }
                             }
                         }
 
                         // @setflag <index> [玩家]（C# case "SETFLAG" ~3351：切换 flag）
                         "SETFLAG" => {
-                            let Some(flag) = parts.get(1).and_then(|s| s.parse::<i32>().ok()) else {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法：@setflag <index> [玩家]");
+                            let Some(flag) = parts.get(1).and_then(|s| s.parse::<i32>().ok())
+                            else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法：@setflag <index> [玩家]",
+                                );
                                 return;
                             };
                             let target_sid = if let Some(n) = parts.get(2).copied() {
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(n) {
                                             found = Some(*_sid);
                                             break;
@@ -3349,7 +4992,11 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(msg.session_id)
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
                             let target = match self.players.get(&target_sid) {
@@ -3365,33 +5012,49 @@ impl Message<ChatRequest> for WorldActor {
                             state.flags.insert(key, if cur == 0 { 1 } else { 0 });
                             let _ = target.actor_ref.ask(SetPlayerState { state }).await;
                             // 旗标任务进度（C# QuestFlagTask：按 flag 号置满）
-                            let updates = target.actor_ref.ask(crate::actors::player::ProcessFlagQuest {
-                                flag_number: flag,
-                            }).await.unwrap_or_default();
+                            let updates = target
+                                .actor_ref
+                                .ask(crate::actors::player::ProcessFlagQuest { flag_number: flag })
+                                .await
+                                .unwrap_or_default();
                             for (quest_index, _, _) in &updates {
-                                if let Ok(Some(q)) = target.actor_ref.ask(crate::actors::player::GetQuest {
-                                    quest_index: *quest_index,
-                                }).await {
+                                if let Ok(Some(q)) = target
+                                    .actor_ref
+                                    .ask(crate::actors::player::GetQuest {
+                                        quest_index: *quest_index,
+                                    })
+                                    .await
+                                {
                                     crate::actors::social_packets::send_quest_change_packet(
-                                        &self.gate_ref, target_sid, &q);
+                                        &self.gate_ref,
+                                        target_sid,
+                                        &q,
+                                    );
                                 }
                             }
                             // 990-998 等级特效即时刷新
                             if (990..=998).contains(&flag) {
                                 if let Some(world_ref) = self.self_ref.clone() {
-                                    let _ = world_ref.tell(crate::actors::world::effects::RefreshLevelEffects {
-                                        session_id: target_sid,
-                                    }).try_send();
+                                    let _ = world_ref
+                                        .tell(crate::actors::world::effects::RefreshLevelEffects {
+                                            session_id: target_sid,
+                                        })
+                                        .try_send();
                                 }
                             }
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("已切换 flag {} -> {}", flag, 1 - cur));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已切换 flag {} -> {}", flag, 1 - cur),
+                            );
                         }
                         // @clearflags [玩家]（C# case "CLEARFLAGS" ~3383：清空 flags）
                         "CLEARFLAGS" => {
                             let target_sid = if let Some(n) = parts.get(1).copied() {
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(n) {
                                             found = Some(*_sid);
                                             break;
@@ -3403,7 +5066,11 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(msg.session_id)
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
                             let target = match self.players.get(&target_sid) {
@@ -3417,9 +5084,11 @@ impl Message<ChatRequest> for WorldActor {
                             state.flags.clear();
                             let _ = target.actor_ref.ask(SetPlayerState { state }).await;
                             if let Some(world_ref) = self.self_ref.clone() {
-                                let _ = world_ref.tell(crate::actors::world::effects::RefreshLevelEffects {
-                                    session_id: target_sid,
-                                }).try_send();
+                                let _ = world_ref
+                                    .tell(crate::actors::world::effects::RefreshLevelEffects {
+                                        session_id: target_sid,
+                                    })
+                                    .try_send();
                             }
                             send_system_message(&self.gate_ref, msg.session_id, "flags 已清空");
                         }
@@ -3429,7 +5098,8 @@ impl Message<ChatRequest> for WorldActor {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -3441,11 +5111,24 @@ impl Message<ChatRequest> for WorldActor {
                                 (Some(msg.session_id), parts.get(1).copied().unwrap_or(""))
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
-                            let Some(info) = self.magic_infos.values().find(|m| m.name.eq_ignore_ascii_case(skill_arg)).cloned() else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到技能：{}", skill_arg));
+                            let Some(info) = self
+                                .magic_infos
+                                .values()
+                                .find(|m| m.name.eq_ignore_ascii_case(skill_arg))
+                                .cloned()
+                            else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到技能：{}", skill_arg),
+                                );
                                 return;
                             };
                             let target = match self.players.get(&target_sid) {
@@ -3461,9 +5144,17 @@ impl Message<ChatRequest> for WorldActor {
                             if state.magics.len() != before {
                                 let _ = target.actor_ref.ask(SetPlayerState { state }).await;
                                 self.send_remove_magic_packet(target_sid, info.spell).await;
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已删除技能 {}", info.name));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("已删除技能 {}", info.name),
+                                );
                             } else {
-                                send_system_message(&self.gate_ref, msg.session_id, "对方未学会该技能");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "对方未学会该技能",
+                                );
                             }
                         }
                         // @giveheroskill [玩家] <技能名> <等级0-3>（对齐 C# HEROGIVESKILL 语义）
@@ -3472,23 +5163,45 @@ impl Message<ChatRequest> for WorldActor {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
                                         }
                                     }
                                 }
-                                (found, parts.get(2).copied().unwrap_or(""), parts.get(3).copied().unwrap_or("0"))
+                                (
+                                    found,
+                                    parts.get(2).copied().unwrap_or(""),
+                                    parts.get(3).copied().unwrap_or("0"),
+                                )
                             } else {
-                                (Some(msg.session_id), parts.get(1).copied().unwrap_or(""), parts.get(2).copied().unwrap_or("0"))
+                                (
+                                    Some(msg.session_id),
+                                    parts.get(1).copied().unwrap_or(""),
+                                    parts.get(2).copied().unwrap_or("0"),
+                                )
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
-                            let Some(info) = self.magic_infos.values().find(|m| m.name.eq_ignore_ascii_case(skill_arg)).cloned() else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到技能：{}", skill_arg));
+                            let Some(info) = self
+                                .magic_infos
+                                .values()
+                                .find(|m| m.name.eq_ignore_ascii_case(skill_arg))
+                                .cloned()
+                            else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到技能：{}", skill_arg),
+                                );
                                 return;
                             };
                             let level = level_arg.parse::<u8>().unwrap_or(0).min(3);
@@ -3506,47 +5219,88 @@ impl Message<ChatRequest> for WorldActor {
                                 state.hero_magics.push(m);
                                 let _ = target.actor_ref.ask(SetPlayerState { state }).await;
                                 self.send_hero_information_packet(target_sid).await;
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("英雄已学会技能 {}", info.name));
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("英雄已学会技能 {}", info.name),
+                                );
                             } else {
-                                send_system_message(&self.gate_ref, msg.session_id, "英雄已学会该技能");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "英雄已学会该技能",
+                                );
                             }
                         }
                         // @givepearls [玩家] <数量>（C# case "GIVEPEARLS" ~3103：GainPearls，上限 int.MaxValue）
                         "GIVEPEARLS" => {
-                            let amount = parts.last().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                            if amount == 0 { return; }
+                            let amount = parts
+                                .last()
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(0);
+                            if amount == 0 {
+                                return;
+                            }
                             match parts.get(1).copied() {
                                 Some(n) if parts.len() >= 3 => {
                                     let mut found = false;
                                     for (_sid, other) in &self.players {
-                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if let Ok(Some(os)) =
+                                            other.actor_ref.ask(GetPlayerState).await
+                                        {
                                             if os.name.eq_ignore_ascii_case(n) {
-                                                let _ = other.actor_ref.ask(crate::actors::player::GainPearls { amount }).await;
-                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已给 {} {} 珍珠", os.name, amount));
+                                                let _ = other
+                                                    .actor_ref
+                                                    .ask(crate::actors::player::GainPearls {
+                                                        amount,
+                                                    })
+                                                    .await;
+                                                send_system_message(
+                                                    &self.gate_ref,
+                                                    msg.session_id,
+                                                    &format!("已给 {} {} 珍珠", os.name, amount),
+                                                );
                                                 found = true;
                                                 break;
                                             }
                                         }
                                     }
                                     if !found {
-                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
+                                        send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("未找到在线玩家：{}", n),
+                                        );
                                     }
                                 }
                                 _ => {
-                                    let _ = record.actor_ref.ask(crate::actors::player::GainPearls { amount }).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 珍珠", amount));
+                                    let _ = record
+                                        .actor_ref
+                                        .ask(crate::actors::player::GainPearls { amount })
+                                        .await;
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("已获得 {} 珍珠", amount),
+                                    );
                                 }
                             }
                         }
                         // @givecredit [玩家] <数量>（C# case "GIVECREDIT" ~3135：账户积分，上限 uint.MaxValue）
                         "GIVECREDIT" => {
-                            let amount = parts.last().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                            if amount == 0 { return; }
+                            let amount = parts
+                                .last()
+                                .and_then(|s| s.parse::<u64>().ok())
+                                .unwrap_or(0);
+                            if amount == 0 {
+                                return;
+                            }
                             let target_sid = if parts.len() >= 3 {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -3558,7 +5312,11 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(msg.session_id)
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
                             self.npc_change_credit(target_sid, amount as i64).await;
@@ -3566,11 +5324,24 @@ impl Message<ChatRequest> for WorldActor {
                         // @mapmove <地图名> [x] [y]（C# case "MAPMOVE" ~2872：按地图名传送，无坐标随机落点）
                         "MAPMOVE" => {
                             let Some(map_name) = parts.get(1).copied() else {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法：@mapmove <地图名> [x] [y]");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法：@mapmove <地图名> [x] [y]",
+                                );
                                 return;
                             };
-                            let Some(mi) = self.map_infos.values().find(|m| m.file_name.eq_ignore_ascii_case(map_name)).cloned() else {
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到地图：{}", map_name));
+                            let Some(mi) = self
+                                .map_infos
+                                .values()
+                                .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                                .cloned()
+                            else {
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("未找到地图：{}", map_name),
+                                );
                                 return;
                             };
                             let map_index = mi.index as u16;
@@ -3587,8 +5358,19 @@ impl Message<ChatRequest> for WorldActor {
                                 };
                                 (fastrand::i32(0..w.max(1)), fastrand::i32(0..h.max(1)))
                             };
-                            crate::actors::world::npc_script::teleport_player(self, msg.session_id, map_index, x, y).await;
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("已传送至 {} ({}, {})", mi.title, x, y));
+                            crate::actors::world::npc_script::teleport_player(
+                                self,
+                                msg.session_id,
+                                map_index,
+                                x,
+                                y,
+                            )
+                            .await;
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("已传送至 {} ({}, {})", mi.title, x, y),
+                            );
                         }
                         // @listflags（C# case "LISTFLAGS" ~3372：列出玩家 flags）
                         "LISTFLAGS" => {
@@ -3597,20 +5379,33 @@ impl Message<ChatRequest> for WorldActor {
                                 _ => return,
                             };
                             if state.flags.is_empty() {
-                                send_system_message(&self.gate_ref, msg.session_id, "当前没有 flag");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "当前没有 flag",
+                                );
                             } else {
                                 for (k, v) in &state.flags {
-                                    send_system_message(&self.gate_ref, msg.session_id, &format!("flag {} = {}", k, v));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        msg.session_id,
+                                        &format!("flag {} = {}", k, v),
+                                    );
                                 }
                             }
                         }
                         // @startwar <行会名>（C# case "STARTWAR" ~3597：GM + 会长宣战，复用 GuildWarReturn 宣战流程）
                         "STARTWAR" => {
                             let Some(enemy) = parts.get(1).copied() else {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法：@startwar <行会名>");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "用法：@startwar <行会名>",
+                                );
                                 return;
                             };
-                            self.declare_guild_war(msg.session_id, enemy.to_string()).await;
+                            self.declare_guild_war(msg.session_id, enemy.to_string())
+                                .await;
                         }
                         // @createguild [玩家] <行会名>（C# case "CREATEGUILD" ~3264：GM 直接建会，跳过等级/金币）
                         "CREATEGUILD" => {
@@ -3618,7 +5413,8 @@ impl Message<ChatRequest> for WorldActor {
                                 let name = parts.get(1).copied().unwrap_or("");
                                 let mut found = None;
                                 for (_sid, other) in &self.players {
-                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await
+                                    {
                                         if os.name.eq_ignore_ascii_case(name) {
                                             found = Some(*_sid);
                                             break;
@@ -3630,13 +5426,20 @@ impl Message<ChatRequest> for WorldActor {
                                 (Some(msg.session_id), parts.get(1).copied().unwrap_or(""))
                             };
                             let Some(target_sid) = target_sid else {
-                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "未找到在线玩家",
+                                );
                                 return;
                             };
-                            let _ = self.social_ref.ask(crate::actors::social::GmCreateGuildRequest {
-                                session_id: target_sid,
-                                guild_name: guild_name.to_string(),
-                            }).await;
+                            let _ = self
+                                .social_ref
+                                .ask(crate::actors::social::GmCreateGuildRequest {
+                                    session_id: target_sid,
+                                    guild_name: guild_name.to_string(),
+                                })
+                                .await;
                         }
                         _ => {}
                     }
@@ -3648,7 +5451,10 @@ impl Message<ChatRequest> for WorldActor {
         // @LOGIN —— 输入 GM 密码升级为 GM（C# PlayerObject case "LOGIN"：GMLogin=true + EnterGmPassword；无 GM 门槛）
         if let Some(cmd_rest) = message.strip_prefix('@') {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
-            if parts.first().is_some_and(|c| c.eq_ignore_ascii_case("LOGIN")) {
+            if parts
+                .first()
+                .is_some_and(|c| c.eq_ignore_ascii_case("LOGIN"))
+            {
                 self.gm_login_pending.insert(msg.session_id);
                 send_system_message(&self.gate_ref, msg.session_id, "请输入 GM 密码");
                 return;
@@ -3659,17 +5465,33 @@ impl Message<ChatRequest> for WorldActor {
         // 无 GM 校验；首次 80→160，已扩容则 +10 天续期；下发 LoseGold + ResizeStorage + 系统消息）
         if let Some(cmd_rest) = message.strip_prefix('@') {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
-            if parts.first().is_some_and(|c| c.eq_ignore_ascii_case("ADDSTORAGE")) {
+            if parts
+                .first()
+                .is_some_and(|c| c.eq_ignore_ascii_case("ADDSTORAGE"))
+            {
                 const COST: u64 = 1_000_000;
                 const ADDED_SECS: i64 = 10 * 24 * 60 * 60; // C# new TimeSpan(10,0,0,0) = 10 天
 
                 if let Some(record) = self.players.get(&msg.session_id) {
                     // 金币校验（C# Account.Gold >= cost；不足 → LowGold 系统消息）
-                    if !record.actor_ref.ask(crate::actors::player::HasGold { amount: COST }).await.unwrap_or(false) {
-                        send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法购买仓库扩容（需要 1,000,000 金币）。");
+                    if !record
+                        .actor_ref
+                        .ask(crate::actors::player::HasGold { amount: COST })
+                        .await
+                        .unwrap_or(false)
+                    {
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "金币不足，无法购买仓库扩容（需要 1,000,000 金币）。",
+                        );
                         return;
                     }
-                    let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: COST }).await.unwrap_or(false);
+                    let deducted = record
+                        .actor_ref
+                        .ask(crate::actors::player::DeductGold { amount: COST })
+                        .await
+                        .unwrap_or(false);
                     if !deducted {
                         return;
                     }
@@ -3695,7 +5517,10 @@ impl Message<ChatRequest> for WorldActor {
                         now_unix + ADDED_SECS
                     };
                     new_state.expanded_storage_expiry_date = expiry;
-                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(SetPlayerState { state: new_state })
+                        .await;
 
                     // C# S.ResizeStorage{Size, HasExpandedStorage=true, ExpiryTime}
                     let resize = mir2_shared::packets::server::ui_events::ResizeStorage {
@@ -3705,10 +5530,16 @@ impl Message<ChatRequest> for WorldActor {
                     };
                     let mut resize_body = Vec::new();
                     if resize.write_body(&mut resize_body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeStorage as i16, &resize_body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ResizeStorage as i16,
+                                    &resize_body,
+                                ),
+                            })
+                            .await;
                     }
 
                     // DB 持久化（重启不丢；C# AccountInfo 存档）
@@ -3717,18 +5548,30 @@ impl Message<ChatRequest> for WorldActor {
                         &record.account_username,
                         true,
                         expiry,
-                    ).await {
-                        warn!("Failed to persist storage expansion for {}: {}", record.name, e);
+                    )
+                    .await
+                    {
+                        warn!(
+                            "Failed to persist storage expansion for {}: {}",
+                            record.name, e
+                        );
                     }
 
                     // C# ExpandedStorageExpiresOn + 到期时间
                     let dt = chrono::DateTime::from_timestamp(expiry, 0)
-                        .map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
+                        .map(|d| {
+                            d.with_timezone(&chrono::Local)
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string()
+                        })
                         .unwrap_or_else(|| expiry.to_string());
                     send_system_message(
                         &self.gate_ref,
                         msg.session_id,
-                        &format!("仓库扩容成功！仓库已扩容至 {} 格，到期时间：{}", new_len, dt),
+                        &format!(
+                            "仓库扩容成功！仓库已扩容至 {} 格，到期时间：{}",
+                            new_len, dt
+                        ),
                     );
                 }
                 return;
@@ -3743,48 +5586,82 @@ impl Message<ChatRequest> for WorldActor {
                 Some("TIME") => {
                     // C#：TheTimeIs + Envir.Now.ToString("hh:mm tt")（12 小时制 AM/PM）
                     let now = chrono::Local::now().format("%I:%M %p").to_string();
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("服务器时间：{}", now));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("服务器时间：{}", now),
+                    );
                     return;
                 }
                 Some("MAP") => {
                     // C#：YouAreInMapId + CurrentMap.Info.Title / FileName
-                    let (map_title, map_file) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        self.map_infos.get(&(state.map_index as i32))
-                            .map(|m| (m.title.clone(), m.file_name.clone()))
-                            .unwrap_or_else(|| ("未知地图".to_string(), String::new()))
-                    } else {
-                        ("未知地图".to_string(), String::new())
-                    };
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
+                    let (map_title, map_file) =
+                        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                            self.map_infos
+                                .get(&(state.map_index as i32))
+                                .map(|m| (m.title.clone(), m.file_name.clone()))
+                                .unwrap_or_else(|| ("未知地图".to_string(), String::new()))
+                        } else {
+                            ("未知地图".to_string(), String::new())
+                        };
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("你所在的地图：{} ({})", map_title, map_file),
+                    );
                     return;
                 }
                 Some("SETTIMER") => {
                     // C# case "SETTIMER"（PlayerObject.cs:4126-4136）：@SETTIMER <key> <seconds> <type>
                     // 注册 NPC 计时器（Rust npc_timers key 为 i32）并下发 S.SetTimer
-                    if parts.len() < 4 { return; }
-                    let Ok(key) = parts[1].parse::<i32>() else { return; };
-                    let Ok(seconds) = parts[2].parse::<i64>() else { return; };
+                    if parts.len() < 4 {
+                        return;
+                    }
+                    let Ok(key) = parts[1].parse::<i32>() else {
+                        return;
+                    };
+                    let Ok(seconds) = parts[2].parse::<i64>() else {
+                        return;
+                    };
                     let _timer_type = parts[3].parse::<u8>().unwrap_or(0);
                     // 世界循环 100ms/tick：1 秒 = 10 ticks（对齐 NPC 脚本 SETTIMER）
                     let expire_tick = self.tick_count.saturating_add(seconds.max(0) as u64 * 10);
-                    self.npc_timers.entry(msg.session_id).or_default().insert(key, expire_tick);
+                    self.npc_timers
+                        .entry(msg.session_id)
+                        .or_default()
+                        .insert(key, expire_tick);
                     let packet = mir2_shared::packets::server::ui_events::SetTimer {
                         timer_id: key,
                         seconds: seconds as i32,
                     };
                     let mut body = Vec::new();
-                    if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: body,
-                        }).await;
+                    if mir2_shared::packets::base::serialize_packet(
+                        &mut std::io::Cursor::new(&mut body),
+                        &packet,
+                    )
+                    .is_ok()
+                    {
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: body,
+                            })
+                            .await;
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("计时器已设置：key={} {}s", key, seconds));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("计时器已设置：key={} {}s", key, seconds),
+                    );
                     return;
                 }
                 Some("TOGGLETRANSFORM") => {
                     // C# case "TOGGLETRANSFORM"（~3836）：暂停/恢复变身 buff（无 GM 门槛）
-                    let _ = record.actor_ref.ask(crate::actors::player::ToggleTransform).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::ToggleTransform)
+                        .await;
                     return;
                 }
                 Some("TELEPORT") | Some("MOVE") => {
@@ -3793,13 +5670,20 @@ impl Message<ChatRequest> for WorldActor {
                         Ok(Some(s)) => s,
                         _ => return,
                     };
-                    let has_tp = super::has_special_equipped(&state, mir2_shared::enums::SpecialItemMode::TELEPORT);
+                    let has_tp = super::has_special_equipped(
+                        &state,
+                        mir2_shared::enums::SpecialItemMode::TELEPORT,
+                    );
                     if !state.is_gm && !has_tp {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
                         return;
                     }
                     if !state.is_gm
-                        && self.map_infos.get(&(state.map_index as i32)).map(|m| m.no_position).unwrap_or(false)
+                        && self
+                            .map_infos
+                            .get(&(state.map_index as i32))
+                            .map(|m| m.no_position)
+                            .unwrap_or(false)
                     {
                         send_system_message(&self.gate_ref, msg.session_id, "该地图禁止传送");
                         return;
@@ -3811,7 +5695,11 @@ impl Message<ChatRequest> for WorldActor {
                             .unwrap_or(0);
                         if let Some(last) = self.last_teleport_time.get(&msg.session_id).copied() {
                             if now_ms - last < 10_000 {
-                                send_system_message(&self.gate_ref, msg.session_id, "传送冷却中，请稍后再试");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "传送冷却中，请稍后再试",
+                                );
                                 return;
                             }
                         }
@@ -3820,10 +5708,21 @@ impl Message<ChatRequest> for WorldActor {
                     let x = parts.get(1).and_then(|s| s.parse::<i32>().ok());
                     let y = parts.get(2).and_then(|s| s.parse::<i32>().ok());
                     if let (Some(x), Some(y)) = (x, y) {
-                        let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                            x, y, direction: 4, map_index: None, is_mounted: None,
-                        }).await;
-                        send_system_message(&self.gate_ref, msg.session_id, &format!("已传送至 ({}, {})", x, y));
+                        let _ = record
+                            .actor_ref
+                            .ask(crate::actors::player::SetPlayerPosition {
+                                x,
+                                y,
+                                direction: 4,
+                                map_index: None,
+                                is_mounted: None,
+                            })
+                            .await;
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            &format!("已传送至 ({}, {})", x, y),
+                        );
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "用法：@move <x> <y>");
                     }
@@ -3835,7 +5734,10 @@ impl Message<ChatRequest> for WorldActor {
                         Ok(Some(s)) => s,
                         _ => return,
                     };
-                    let has_probe = super::has_special_equipped(&state, mir2_shared::enums::SpecialItemMode::PROBE);
+                    let has_probe = super::has_special_equipped(
+                        &state,
+                        mir2_shared::enums::SpecialItemMode::PROBE,
+                    );
                     if !state.is_gm && !has_probe {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
                         return;
@@ -3851,7 +5753,11 @@ impl Message<ChatRequest> for WorldActor {
                             .unwrap_or(0);
                         if let Some(last) = self.last_probe_time.get(&msg.session_id).copied() {
                             if now_ms - last < 180_000 {
-                                send_system_message(&self.gate_ref, msg.session_id, "探测冷却中，请稍后再试");
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "探测冷却中，请稍后再试",
+                                );
                                 return;
                             }
                         }
@@ -3860,7 +5766,9 @@ impl Message<ChatRequest> for WorldActor {
                     for (_sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.name.eq_ignore_ascii_case(target_name) {
-                                let title = self.map_infos.get(&(os.map_index as i32))
+                                let title = self
+                                    .map_infos
+                                    .get(&(os.map_index as i32))
                                     .map(|m| m.title.clone())
                                     .unwrap_or_else(|| "未知地图".to_string());
                                 send_system_message(
@@ -3872,7 +5780,11 @@ impl Message<ChatRequest> for WorldActor {
                             }
                         }
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("未找到在线玩家：{}", target_name),
+                    );
                     return;
                 }
                 Some("SUMMONHERO") => {
@@ -3889,7 +5801,10 @@ impl Message<ChatRequest> for WorldActor {
                     new_state.hero_despawned = !new_state.hero_despawned;
                     let now_spawned = !new_state.hero_despawned;
                     let object_id = state.object_id;
-                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(SetPlayerState { state: new_state })
+                        .await;
                     if now_spawned {
                         // 召唤英雄（C# SummonHero：生成英雄对象 + 下发完整信息）
                         self.broadcast_hero_spawn(msg.session_id).await;
@@ -3904,7 +5819,10 @@ impl Message<ChatRequest> for WorldActor {
                 }
                 Some("CLEARBUFFS") => {
                     // C# case "CLEARBUFFS"（~2411）：清除自己全部 Buff（无 GM 校验）
-                    let _ = record.actor_ref.ask(crate::actors::player::ClearAllBuffs).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::ClearAllBuffs)
+                        .await;
                     send_system_message(&self.gate_ref, msg.session_id, "已清除全部状态效果");
                     return;
                 }
@@ -3917,13 +5835,25 @@ impl Message<ChatRequest> for WorldActor {
                     let Some(guild) = state.guild_name.clone() else {
                         return;
                     };
-                    if self.guild_wars.get(&guild).map(|s| !s.is_empty()).unwrap_or(false) {
-                        send_system_message(&self.gate_ref, msg.session_id, "行会战争中无法离开行会");
+                    if self
+                        .guild_wars
+                        .get(&guild)
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
+                    {
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "行会战争中无法离开行会",
+                        );
                         return;
                     }
-                    let _ = self.social_ref.ask(crate::actors::social::LeaveGuildRequest {
-                        session_id: msg.session_id,
-                    }).await;
+                    let _ = self
+                        .social_ref
+                        .ask(crate::actors::social::LeaveGuildRequest {
+                            session_id: msg.session_id,
+                        })
+                        .await;
                     return;
                 }
                 Some("RECALL") => {
@@ -3939,7 +5869,11 @@ impl Message<ChatRequest> for WorldActor {
                     let target_name = match parts.get(1) {
                         Some(n) => *n,
                         None => {
-                            send_system_message(&self.gate_ref, msg.session_id, "用法：@recall <玩家名>");
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                "用法：@recall <玩家名>",
+                            );
                             return;
                         }
                     };
@@ -3952,24 +5886,42 @@ impl Message<ChatRequest> for WorldActor {
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.name.eq_ignore_ascii_case(target_name) {
-                                let _ = other.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                    x: fx,
-                                    y: fy,
-                                    direction: os.direction,
-                                    map_index: Some(my_state.map_index),
-                                    is_mounted: None,
-                                }).await;
+                                let _ = other
+                                    .actor_ref
+                                    .ask(crate::actors::player::SetPlayerPosition {
+                                        x: fx,
+                                        y: fy,
+                                        direction: os.direction,
+                                        map_index: Some(my_state.map_index),
+                                        is_mounted: None,
+                                    })
+                                    .await;
                                 let body = user_location_body(fx, fy, os.direction);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-                                }).await;
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 传送到你身边", os.name));
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::UserLocation
+                                                as i16,
+                                            &body,
+                                        ),
+                                    })
+                                    .await;
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("已将 {} 传送到你身边", os.name),
+                                );
                                 return;
                             }
                         }
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("未找到在线玩家：{}", target_name),
+                    );
                     return;
                 }
                 Some("ALLOWTRADE") => {
@@ -3980,18 +5932,29 @@ impl Message<ChatRequest> for WorldActor {
                     };
                     new_state.allow_trade = !new_state.allow_trade;
                     let enabled = new_state.allow_trade;
-                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(SetPlayerState { state: new_state })
+                        .await;
                     send_system_message(
                         &self.gate_ref,
                         msg.session_id,
-                        if enabled { "已开启交易（其他玩家可向你发起交易）" } else { "已关闭交易" },
+                        if enabled {
+                            "已开启交易（其他玩家可向你发起交易）"
+                        } else {
+                            "已关闭交易"
+                        },
                     );
                     return;
                 }
                 Some("OBSERVE") => {
                     // C# case "OBSERVE"（~2481）：观察玩家——非 GM 也可用（目标 AllowObserve 开启时）
                     let Some(name) = parts.get(1).copied() else {
-                        send_system_message(&self.gate_ref, msg.session_id, "用法：@OBSERVE <玩家名>");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "用法：@OBSERVE <玩家名>",
+                        );
                         return;
                     };
                     self.observe_player(msg.session_id, name).await;
@@ -4005,14 +5968,20 @@ impl Message<ChatRequest> for WorldActor {
                         _ => return,
                     };
                     let Some(guild) = state.guild_name.clone() else {
-                        send_system_message(&self.gate_ref, msg.session_id, "没有行会，无法修改旗标");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "没有行会，无法修改旗标",
+                        );
                         return;
                     };
                     if state.guild_rank != crate::actors::guild::GuildRank::Leader {
                         send_system_message(&self.gate_ref, msg.session_id, "没有权限修改旗标");
                         return;
                     }
-                    let Some(inst) = self.conquest_instances.iter()
+                    let Some(inst) = self
+                        .conquest_instances
+                        .iter()
                         .find(|c| c.owner_guild.as_deref() == Some(guild.as_str()))
                         .cloned()
                     else {
@@ -4025,31 +5994,51 @@ impl Message<ChatRequest> for WorldActor {
                     }
                     let is_colour = parts[0].eq_ignore_ascii_case("CHANGEFLAGCOLOUR");
                     // 当前旗标外观（C# 在现有值基础上改）
-                    let current = self.social_ref.ask(crate::actors::social::NpcGetGuildFlagAppearance {
-                        guild_name: guild.clone(),
-                    }).await.unwrap_or(None).unwrap_or((1000, 0));
+                    let current = self
+                        .social_ref
+                        .ask(crate::actors::social::NpcGetGuildFlagAppearance {
+                            guild_name: guild.clone(),
+                        })
+                        .await
+                        .unwrap_or(None)
+                        .unwrap_or((1000, 0));
                     let (new_image, new_colour) = if is_colour {
                         // CHANGEFLAGCOLOUR [r] [g] [b]：缺省随机（C# Random(255)）
-                        let r = parts.get(1).and_then(|v| v.parse::<u8>().ok())
+                        let r = parts
+                            .get(1)
+                            .and_then(|v| v.parse::<u8>().ok())
                             .unwrap_or_else(|| fastrand::u8(0..255));
-                        let g = parts.get(2).and_then(|v| v.parse::<u8>().ok())
+                        let g = parts
+                            .get(2)
+                            .and_then(|v| v.parse::<u8>().ok())
                             .unwrap_or_else(|| fastrand::u8(0..255));
-                        let b = parts.get(3).and_then(|v| v.parse::<u8>().ok())
+                        let b = parts
+                            .get(3)
+                            .and_then(|v| v.parse::<u8>().ok())
                             .unwrap_or_else(|| fastrand::u8(0..255));
                         (current.0, changeflag_colour(r, g, b))
                     } else {
                         // CHANGEFLAG [index]：缺省随机 0..12；C# FlagImage = 1000 + flag
                         (changeflag_image(parts.get(1).copied()), current.1)
                     };
-                    let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildFlagAppearance {
-                        guild_name: guild.clone(),
-                        flag_image: new_image,
-                        flag_colour: new_colour,
-                    }).await;
+                    let _ = self
+                        .social_ref
+                        .ask(crate::actors::social::NpcSetGuildFlagAppearance {
+                            guild_name: guild.clone(),
+                            flag_image: new_image,
+                            flag_colour: new_colour,
+                        })
+                        .await;
                     // 广播旗子外观更新（C# FlagList[i].UpdateImage/UpdateColour）
                     self.broadcast_conquest_flag_updates(inst.id).await;
-                    send_system_message(&self.gate_ref, msg.session_id,
-                        &format!("领地旗标已更新（Image={} Colour=#{:08X}）", new_image, new_colour as u32));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!(
+                            "领地旗标已更新（Image={} Colour=#{:08X}）",
+                            new_image, new_colour as u32
+                        ),
+                    );
                     return;
                 }
                 Some("STARTCONQUEST") | Some("RESETCONQUEST") => {
@@ -4063,42 +6052,71 @@ impl Message<ChatRequest> for WorldActor {
                         return;
                     }
                     let Some(guild) = my_guild else {
-                        send_system_message(&self.gate_ref, msg.session_id, "需要行会才能使用攻城命令");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "需要行会才能使用攻城命令",
+                        );
                         return;
                     };
                     let Some(id_str) = parts.get(1) else {
-                        send_system_message(&self.gate_ref, msg.session_id, &format!("用法：@{} <领地ID>", parts[0].to_lowercase()));
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            &format!("用法：@{} <领地ID>", parts[0].to_lowercase()),
+                        );
                         return;
                     };
-                    let Ok(conquest_id) = id_str.parse::<i32>() else { return; };
+                    let Ok(conquest_id) = id_str.parse::<i32>() else {
+                        return;
+                    };
 
                     let is_start = parts[0].eq_ignore_ascii_case("STARTCONQUEST");
                     let mut found = false;
-                    if let Some(inst) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_id) {
+                    if let Some(inst) = self
+                        .conquest_instances
+                        .iter_mut()
+                        .find(|c| c.id == conquest_id)
+                    {
                         found = true;
                         if is_start {
                             if inst.state == crate::actors::world::conquest::WarState::InProgress {
                                 inst.end_war();
                                 broadcast_system_message(
-                                    &self.gate_ref, &self.players,
+                                    &self.gate_ref,
+                                    &self.players,
                                     &format!("攻城战 {} 已停止", conquest_id),
                                 );
                             } else {
                                 inst.start_war(&guild);
                                 broadcast_system_message(
-                                    &self.gate_ref, &self.players,
+                                    &self.gate_ref,
+                                    &self.players,
                                     &format!("攻城战 {} 已开始（攻击方：{}）", conquest_id, guild),
                                 );
                             }
-                        } else if inst.state != crate::actors::world::conquest::WarState::InProgress {
+                        } else if inst.state != crate::actors::world::conquest::WarState::InProgress
+                        {
                             inst.reset();
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("领地 {} 已重置", conquest_id));
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("领地 {} 已重置", conquest_id),
+                            );
                         } else {
-                            send_system_message(&self.gate_ref, msg.session_id, "攻城进行中无法重置");
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                "攻城进行中无法重置",
+                            );
                         }
                     }
                     if !found {
-                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到领地：{}", conquest_id));
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            &format!("未找到领地：{}", conquest_id),
+                        );
                     }
                     return;
                 }
@@ -4109,14 +6127,20 @@ impl Message<ChatRequest> for WorldActor {
                         _ => return,
                     };
                     let Some(guild) = state.guild_name.clone() else {
-                        send_system_message(&self.gate_ref, msg.session_id, "没有行会，无法控制城门");
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "没有行会，无法控制城门",
+                        );
                         return;
                     };
                     if state.guild_rank == crate::actors::guild::GuildRank::Member {
                         send_system_message(&self.gate_ref, msg.session_id, "没有权限控制城门");
                         return;
                     }
-                    let Some(inst) = self.conquest_instances.iter()
+                    let Some(inst) = self
+                        .conquest_instances
+                        .iter()
                         .find(|c| c.owner_guild.as_deref() == Some(guild.as_str()))
                         .cloned()
                     else {
@@ -4134,7 +6158,11 @@ impl Message<ChatRequest> for WorldActor {
                         Some("OPEN") => Some(false),
                         None => None,
                         Some(_) => {
-                            send_system_message(&self.gate_ref, msg.session_id, "用法：@gates [open|close]");
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                "用法：@gates [open|close]",
+                            );
                             return;
                         }
                     };
@@ -4154,7 +6182,11 @@ impl Message<ChatRequest> for WorldActor {
                         let gate_id = (i + 1) as u8;
                         let close = match force_close {
                             Some(c) => c,
-                            None => !self.siege_structures.get(oid).map(|s| s.is_open).unwrap_or(false),
+                            None => !self
+                                .siege_structures
+                                .get(oid)
+                                .map(|s| s.is_open)
+                                .unwrap_or(false),
                         };
                         if let Some(s) = self.siege_structures.get_mut(oid) {
                             s.is_open = !close;
@@ -4167,13 +6199,18 @@ impl Message<ChatRequest> for WorldActor {
                             gate_id,
                             close,
                             msg.session_id,
-                        ).await;
+                        )
+                        .await;
                     }
                     if !gates.is_empty() {
                         send_system_message(
                             &self.gate_ref,
                             msg.session_id,
-                            if any_closed { "城门已关闭" } else { "城门已打开" },
+                            if any_closed {
+                                "城门已关闭"
+                            } else {
+                                "城门已打开"
+                            },
                         );
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "领地没有可控制的城门");
@@ -4188,11 +6225,18 @@ impl Message<ChatRequest> for WorldActor {
                     };
                     new_state.enable_guild_invite = !new_state.enable_guild_invite;
                     let enabled = new_state.enable_guild_invite;
-                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(SetPlayerState { state: new_state })
+                        .await;
                     send_system_message(
                         &self.gate_ref,
                         msg.session_id,
-                        if enabled { "已开启行会邀请（他人可邀请你加入行会）" } else { "已关闭行会邀请" },
+                        if enabled {
+                            "已开启行会邀请（他人可邀请你加入行会）"
+                        } else {
+                            "已关闭行会邀请"
+                        },
                     );
                     return;
                 }
@@ -4204,19 +6248,32 @@ impl Message<ChatRequest> for WorldActor {
                     };
                     new_state.allow_observe = !new_state.allow_observe;
                     let allowed = new_state.allow_observe;
-                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(SetPlayerState { state: new_state })
+                        .await;
                     let pkt = mir2_shared::packets::server::miscellaneous::AllowObserve { allowed };
                     let mut observe_body = Vec::new();
                     if pkt.write_body(&mut observe_body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AllowObserve as i16, &observe_body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::AllowObserve as i16,
+                                    &observe_body,
+                                ),
+                            })
+                            .await;
                     }
                     send_system_message(
                         &self.gate_ref,
                         msg.session_id,
-                        if allowed { "已允许其他玩家观察你" } else { "已禁止其他玩家观察你" },
+                        if allowed {
+                            "已允许其他玩家观察你"
+                        } else {
+                            "已禁止其他玩家观察你"
+                        },
                     );
                     return;
                 }
@@ -4229,13 +6286,28 @@ impl Message<ChatRequest> for WorldActor {
                         _ => return,
                     };
                     let level = (new_state.inventory.backpack.len() as i64
-                        - crate::actors::inventory::BACKPACK_SIZE as i64).max(0) / 4;
+                        - crate::actors::inventory::BACKPACK_SIZE as i64)
+                        .max(0)
+                        / 4;
                     let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
-                    if !record.actor_ref.ask(crate::actors::player::HasGold { amount: cost }).await.unwrap_or(false) {
-                        send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法扩展背包。");
+                    if !record
+                        .actor_ref
+                        .ask(crate::actors::player::HasGold { amount: cost })
+                        .await
+                        .unwrap_or(false)
+                    {
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "金币不足，无法扩展背包。",
+                        );
                         return;
                     }
-                    let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false);
+                    let deducted = record
+                        .actor_ref
+                        .ask(crate::actors::player::DeductGold { amount: cost })
+                        .await
+                        .unwrap_or(false);
                     if !deducted {
                         return;
                     }
@@ -4243,42 +6315,64 @@ impl Message<ChatRequest> for WorldActor {
                     send_gold_changed_packet(&self.gate_ref, msg.session_id, cost);
 
                     let new_len = new_state.inventory.resize_inventory();
-                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let _ = record
+                        .actor_ref
+                        .ask(SetPlayerState { state: new_state })
+                        .await;
 
                     // C# S.ResizeInventory{Size}
-                    let resize = mir2_shared::packets::server::ui_events::ResizeInventory { size: new_len as i32 };
+                    let resize = mir2_shared::packets::server::ui_events::ResizeInventory {
+                        size: new_len as i32,
+                    };
                     let mut resize_body = Vec::new();
                     if resize.write_body(&mut resize_body).is_ok() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeInventory as i16, &resize_body),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ResizeInventory as i16,
+                                    &resize_body,
+                                ),
+                            })
+                            .await;
                     }
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("背包扩容成功！背包已扩容至 {} 格", new_len));
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("背包扩容成功！背包已扩容至 {} 格", new_len),
+                    );
                     return;
                 }
                 Some("ROLL") => {
                     // C#：Envir.Random.Next(5) + 1（1~5）；GroupMembers == null 直接 return；
                     // 向所有组员发 ChatType.Group 消息 HasRolledNumber
-                    let (player_name, group_id) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        (state.name.clone(), state.group_id)
-                    } else {
+                    let (player_name, group_id) =
+                        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                            (state.name.clone(), state.group_id)
+                        } else {
+                            return;
+                        };
+                    let Some(gid) = group_id else {
                         return;
                     };
-                    let Some(gid) = group_id else { return; };
                     let dice = fastrand::i32(1..=5);
                     let text = format_roll_message(&player_name, dice);
                     let mut body = Vec::new();
                     write_dotnet_string(&mut body, &text);
                     body.push(mir2_shared::enums::ChatType::Group as u8);
-                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    let packet =
+                        build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.group_id == Some(gid) {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: packet.clone(),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: packet.clone(),
+                                    })
+                                    .await;
                             }
                         }
                     }
@@ -4291,29 +6385,41 @@ impl Message<ChatRequest> for WorldActor {
         // Check for social chat commands and forward to SocialActor
         let parts: Vec<&str> = message.split_whitespace().collect();
         // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
-        let cmd = parts.first().unwrap_or(&"").trim_start_matches('@').to_uppercase();
+        let cmd = parts
+            .first()
+            .unwrap_or(&"")
+            .trim_start_matches('@')
+            .to_uppercase();
         match cmd.as_str() {
-            "GROUPRECALL" | "RECALLMEMBER" | "RECALLLOVER" | "ENABLEGROUPRECALL" | "DISABLEGROUPRECALL" | "RIDE" => {
+            "GROUPRECALL" | "RECALLMEMBER" | "RECALLLOVER" | "ENABLEGROUPRECALL"
+            | "DISABLEGROUPRECALL" | "RIDE" => {
                 let args: Vec<String> = parts.iter().skip(1).map(|s| s.to_string()).collect();
-                let _ = self.social_ref.ask(SocialChatCommand {
-                    session_id: msg.session_id,
-                    command: cmd,
-                    args,
-                }).await;
+                let _ = self
+                    .social_ref
+                    .ask(SocialChatCommand {
+                        session_id: msg.session_id,
+                        command: cmd,
+                        args,
+                    })
+                    .await;
                 return;
             }
             _ => {}
         }
 
         // 获取玩家名称、组队和公会信息
-        let (player_name, group_id, guild_name) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            (state.name, state.group_id, state.guild_name.clone())
-        } else {
-            return;
-        };
+        let (player_name, group_id, guild_name) =
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                (state.name, state.group_id, state.guild_name.clone())
+            } else {
+                return;
+            };
 
         // 私聊 /w <name> <message>
-        if let Some(whisper_cmd) = message.strip_prefix("/w ").or_else(|| message.strip_prefix("/W ")) {
+        if let Some(whisper_cmd) = message
+            .strip_prefix("/w ")
+            .or_else(|| message.strip_prefix("/W "))
+        {
             let mut whisper_parts = whisper_cmd.splitn(2, ' ');
             let target_name = whisper_parts.next().unwrap_or("").trim();
             let whisper_msg = whisper_parts.next().unwrap_or("").trim();
@@ -4325,21 +6431,42 @@ impl Message<ChatRequest> for WorldActor {
                             found = true;
                             // 发给目标: WhisperIn
                             let mut in_body = Vec::new();
-                            write_dotnet_string(&mut in_body, &format!("{}: {}", player_name, whisper_msg));
+                            write_dotnet_string(
+                                &mut in_body,
+                                &format!("{}: {}", player_name, whisper_msg),
+                            );
                             in_body.push(mir2_shared::enums::ChatType::WhisperIn as u8);
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &in_body),
-                            }).await;
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                        &in_body,
+                                    ),
+                                })
+                                .await;
                             // 发给自己: WhisperOut
                             let mut out_body = Vec::new();
-                            write_dotnet_string(&mut out_body, &format!("-> {}: {}", target_name, whisper_msg));
+                            write_dotnet_string(
+                                &mut out_body,
+                                &format!("-> {}: {}", target_name, whisper_msg),
+                            );
                             out_body.push(mir2_shared::enums::ChatType::WhisperOut as u8);
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: msg.session_id,
-                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &out_body),
-                            }).await;
-                            debug!("Whisper: {} -> {}: {}", player_name, target_name, whisper_msg);
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                        &out_body,
+                                    ),
+                                })
+                                .await;
+                            debug!(
+                                "Whisper: {} -> {}: {}",
+                                player_name, target_name, whisper_msg
+                            );
                             break;
                         }
                     }
@@ -4352,7 +6479,9 @@ impl Message<ChatRequest> for WorldActor {
         }
 
         // 组队聊天 /g <message> 或 ! <message>
-        let group_msg = message.strip_prefix("/g ").or_else(|| message.strip_prefix("/G "))
+        let group_msg = message
+            .strip_prefix("/g ")
+            .or_else(|| message.strip_prefix("/G "))
             .or_else(|| message.strip_prefix("! "));
         if let Some(gmsg) = group_msg {
             let gmsg = gmsg.trim();
@@ -4363,12 +6492,21 @@ impl Message<ChatRequest> for WorldActor {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.group_id == Some(gid) {
                                 let mut body = Vec::new();
-                                write_dotnet_string(&mut body, &format!("[组队] {}: {}", player_name, gmsg));
+                                write_dotnet_string(
+                                    &mut body,
+                                    &format!("[组队] {}: {}", player_name, gmsg),
+                                );
                                 body.push(mir2_shared::enums::ChatType::Group as u8);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                            &body,
+                                        ),
+                                    })
+                                    .await;
                                 sent = true;
                             }
                         }
@@ -4385,8 +6523,11 @@ impl Message<ChatRequest> for WorldActor {
         }
 
         // 公会聊天 /guild <message> 或 /gu <message>
-        let guild_msg = message.strip_prefix("/guild ").or_else(|| message.strip_prefix("/GUILD "))
-            .or_else(|| message.strip_prefix("/gu ")).or_else(|| message.strip_prefix("/GU "));
+        let guild_msg = message
+            .strip_prefix("/guild ")
+            .or_else(|| message.strip_prefix("/GUILD "))
+            .or_else(|| message.strip_prefix("/gu "))
+            .or_else(|| message.strip_prefix("/GU "));
         if let Some(gmsg) = guild_msg {
             let gmsg = gmsg.trim();
             if !gmsg.is_empty() {
@@ -4396,12 +6537,21 @@ impl Message<ChatRequest> for WorldActor {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.guild_name.as_ref() == Some(gname) {
                                 let mut body = Vec::new();
-                                write_dotnet_string(&mut body, &format!("[公会] {}: {}", player_name, gmsg));
+                                write_dotnet_string(
+                                    &mut body,
+                                    &format!("[公会] {}: {}", player_name, gmsg),
+                                );
                                 body.push(mir2_shared::enums::ChatType::Guild as u8);
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                                }).await;
+                                let _ = self
+                                    .gate_ref
+                                    .tell(SendToClient {
+                                        session_id: *sid,
+                                        data: build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                            &body,
+                                        ),
+                                    })
+                                    .await;
                                 sent = true;
                             }
                         }
@@ -4418,10 +6568,14 @@ impl Message<ChatRequest> for WorldActor {
         }
 
         // 喊话 /s <message> — 同地图广播
-        if let Some(smsg) = message.strip_prefix("/s ").or_else(|| message.strip_prefix("/S ")) {
+        if let Some(smsg) = message
+            .strip_prefix("/s ")
+            .or_else(|| message.strip_prefix("/S "))
+        {
             let smsg = smsg.trim();
             if !smsg.is_empty() {
-                let sender_map = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                let sender_map = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await
+                {
                     state.map_index
                 } else {
                     return;
@@ -4431,23 +6585,38 @@ impl Message<ChatRequest> for WorldActor {
                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                         if os.map_index == sender_map {
                             let mut body = Vec::new();
-                            write_dotnet_string(&mut body, &format!("[喊话] {}: {}", player_name, smsg));
+                            write_dotnet_string(
+                                &mut body,
+                                &format!("[喊话] {}: {}", player_name, smsg),
+                            );
                             body.push(mir2_shared::enums::ChatType::Shout as u8);
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                            }).await;
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::Chat as i16,
+                                        &body,
+                                    ),
+                                })
+                                .await;
                             sent += 1;
                         }
                     }
                 }
-                debug!("Shout: {} on map {}: {} ({} recipients)", player_name, sender_map, smsg, sent);
+                debug!(
+                    "Shout: {} on map {}: {} ({} recipients)",
+                    player_name, sender_map, smsg, sent
+                );
                 return;
             }
         }
 
         // GM 全服公告 /announce <message>
-        if let Some(amsg) = message.strip_prefix("/announce ").or_else(|| message.strip_prefix("/ANNOUNCE ")) {
+        if let Some(amsg) = message
+            .strip_prefix("/announce ")
+            .or_else(|| message.strip_prefix("/ANNOUNCE "))
+        {
             let amsg = amsg.trim();
             if !amsg.is_empty() {
                 if amsg.len() > MAX_CHAT_LENGTH {
@@ -4460,8 +6629,11 @@ impl Message<ChatRequest> for WorldActor {
                     false
                 };
                 if is_gm {
-                    broadcast_system_message(&self.gate_ref, &self.players,
-                        &format!("[公告] {}", amsg));
+                    broadcast_system_message(
+                        &self.gate_ref,
+                        &self.players,
+                        &format!("[公告] {}", amsg),
+                    );
                     debug!("Announce: {}", amsg);
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -4471,7 +6643,10 @@ impl Message<ChatRequest> for WorldActor {
         }
 
         // GM 经验活动 /expevent <multiplier> <duration_minutes>
-        if let Some(eargs) = message.strip_prefix("/expevent ").or_else(|| message.strip_prefix("/EXPEVENT ")) {
+        if let Some(eargs) = message
+            .strip_prefix("/expevent ")
+            .or_else(|| message.strip_prefix("/EXPEVENT "))
+        {
             let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 state.is_gm
             } else {
@@ -4495,23 +6670,45 @@ impl Message<ChatRequest> for WorldActor {
                     self.global_gold_multiplier = mul;
                     self.global_exp_event_end_tick = self.tick_count + duration_ticks;
                     self.global_event_name = Some("经验活动".to_string());
-                    broadcast_system_message(&self.gate_ref, &self.players,
-                        &format!("【服务器活动】经验倍率 x{} 已启动，持续 {} 分钟！", mul, dur));
-                    debug!("GM {} started exp event: x{} for {} min", msg.session_id, mul, dur);
+                    broadcast_system_message(
+                        &self.gate_ref,
+                        &self.players,
+                        &format!(
+                            "【服务器活动】经验倍率 x{} 已启动，持续 {} 分钟！",
+                            mul, dur
+                        ),
+                    );
+                    debug!(
+                        "GM {} started exp event: x{} for {} min",
+                        msg.session_id, mul, dur
+                    );
                 } else {
-                    send_system_message(&self.gate_ref, msg.session_id, "用法: /expevent <倍率> <分钟>");
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "用法: /expevent <倍率> <分钟>",
+                    );
                 }
             } else {
-                send_system_message(&self.gate_ref, msg.session_id, "用法: /expevent <倍率> <分钟>");
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "用法: /expevent <倍率> <分钟>",
+                );
             }
             return;
         }
 
         // 在线人数 /online
-        if message.trim().eq_ignore_ascii_case("/online") || message.trim().eq_ignore_ascii_case("/who") {
+        if message.trim().eq_ignore_ascii_case("/online")
+            || message.trim().eq_ignore_ascii_case("/who")
+        {
             let count = self.players.len();
-            send_system_message(&self.gate_ref, msg.session_id,
-                &format!("当前在线玩家: {} 人", count));
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!("当前在线玩家: {} 人", count),
+            );
             return;
         }
 
@@ -4525,7 +6722,11 @@ impl Message<ChatRequest> for WorldActor {
         debug!("Chat from {}: {}", player_name, message);
         let packet = build_packet_bytes(
             mir2_shared::enums::ServerPacketIds::ObjectChat as i16,
-            &object_chat_body(sender_object_id, &formatted, mir2_shared::enums::ChatType::Normal as u8),
+            &object_chat_body(
+                sender_object_id,
+                &formatted,
+                mir2_shared::enums::ChatType::Normal as u8,
+            ),
         );
         for (sid, other) in &self.players {
             // 不给自己回发（本地已 add_message）
@@ -4534,10 +6735,13 @@ impl Message<ChatRequest> for WorldActor {
             }
             if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                 if os.map_index == sender_map {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: packet.clone(),
-                    }).await;
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: *sid,
+                            data: packet.clone(),
+                        })
+                        .await;
                 }
             }
         }
@@ -4562,12 +6766,21 @@ impl Message<ChangeAModeRequest> for WorldActor {
 
         // 发送 ChangeAMode 确认包给客户端
         let body = vec![msg.mode as u8];
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeAMode as i16, &body);
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: packet,
-        }).await;
-        debug!("ChangeAMode: session={} mode={:?}", msg.session_id, msg.mode);
+        let packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ChangeAMode as i16,
+            &body,
+        );
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            })
+            .await;
+        debug!(
+            "ChangeAMode: session={} mode={:?}",
+            msg.session_id, msg.mode
+        );
     }
 }
 
@@ -4590,12 +6803,21 @@ impl Message<ChangePModeRequest> for WorldActor {
 
         // 发送 ChangePMode 确认包给客户端
         let body = vec![msg.mode as u8];
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangePMode as i16, &body);
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: packet,
-        }).await;
-        debug!("ChangePMode: session={} mode={:?}", msg.session_id, msg.mode);
+        let packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ChangePMode as i16,
+            &body,
+        );
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            })
+            .await;
+        debug!(
+            "ChangePMode: session={} mode={:?}",
+            msg.session_id, msg.mode
+        );
     }
 }
 
@@ -4611,11 +6833,14 @@ impl Message<SetSpellKeyRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
-        let _ = record.actor_ref.ask(SetSpellKey {
-            spell: msg.spell,
-            key: msg.key,
-            old_key: msg.old_key,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(SetSpellKey {
+                spell: msg.spell,
+                key: msg.key,
+                old_key: msg.old_key,
+            })
+            .await;
     }
 }
 
@@ -4628,7 +6853,9 @@ impl Message<SpellToggleRequest> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         // can_use: -1 = hero toggle (skip for now), 0 = off, 1 = on
-        if msg.can_use < 0 { return; }
+        if msg.can_use < 0 {
+            return;
+        }
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
             None => return,
@@ -4637,11 +6864,15 @@ impl Message<SpellToggleRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        if state.is_dead { return; }
+        if state.is_dead {
+            return;
+        }
         // 客户端协议编号 = C# 编号 + 3（与 ToggleSpell 注释一致）
         let spell_cs = msg.spell.saturating_sub(3);
         let learned = state.magics.iter().any(|m| m.spell == spell_cs);
-        let magic_level = state.magics.iter()
+        let magic_level = state
+            .magics
+            .iter()
             .find(|m| m.spell == spell_cs)
             .map(|m| m.level)
             .unwrap_or(0);
@@ -4653,26 +6884,44 @@ impl Message<SpellToggleRequest> for WorldActor {
             || spell_cs == SPELL_TWIN_DRAKE_BLADE_CS
         {
             // C# GetMagic(spell) 为 null 直接返回（未学习）
-            if !learned { return; }
+            if !learned {
+                return;
+            }
             // C#：cost = BaseCost + Lv*LevelCost；cost >= MP 拒绝（需严格大于）
-            let cost = spell_info.map(|m| crate::combat::magic::magic_cost(m, magic_level)).unwrap_or(5);
-            if cost >= state.mp { return; }
+            let cost = spell_info
+                .map(|m| crate::combat::magic::magic_cost(m, magic_level))
+                .unwrap_or(5);
+            if cost >= state.mp {
+                return;
+            }
             match spell_cs {
                 _ if spell_cs == SPELL_FLAMING_SWORD_CS => {
                     // C# :8539 已武装且未过期 → return（到期后可重新武装）
                     if let Some((expire, _)) = self.flaming_sword.get(&msg.session_id).copied() {
-                        if self.tick_count < expire { return; }
+                        if self.tick_count < expire {
+                            return;
+                        }
                     }
-                    self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, magic_level));
+                    self.flaming_sword
+                        .insert(msg.session_id, (self.tick_count + 100, magic_level));
                     // C# :8547 S.SpellToggle CanUse=true
-                    self.send_spell_toggle(msg.session_id, record.object_id, SPELL_FLAMING_SWORD_CS as u8, true).await;
+                    self.send_spell_toggle(
+                        msg.session_id,
+                        record.object_id,
+                        SPELL_FLAMING_SWORD_CS as u8,
+                        true,
+                    )
+                    .await;
                 }
                 _ if spell_cs == SPELL_COUNTER_ATTACK_CS => {
                     // C# :8551 已武装且未过期 → return
                     if let Some((expire, _)) = self.counter_attack.get(&msg.session_id).copied() {
-                        if self.tick_count < expire { return; }
+                        if self.tick_count < expire {
+                            return;
+                        }
                     }
-                    self.counter_attack.insert(msg.session_id, (self.tick_count + 70, magic_level));
+                    self.counter_attack
+                        .insert(msg.session_id, (self.tick_count + 70, magic_level));
                     // C# :8568 AddBuff(CounterAttack, 7s, MinAC/MaxAC/MinMAC/MaxMAC = 11+Lv*3)
                     let bonus = crate::combat::magic::counterattack_ac_bonus(magic_level as i32);
                     for bt in [
@@ -4680,35 +6929,53 @@ impl Message<SpellToggleRequest> for WorldActor {
                         crate::combat::buff::BuffType::MacDefenseBoost { bonus },
                     ] {
                         let buff = crate::combat::buff::BuffInstance::new(bt, 70, 5);
-                        let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                        let _ = record
+                            .actor_ref
+                            .ask(crate::actors::player::ApplyBuff { buff })
+                            .await;
                     }
                 }
                 _ => {
                     // TwinDrakeBlade（C# :8526-8537）：已武装 → return；武装直至下一次近战消耗
-                    if self.double_hit_melee.contains_key(&msg.session_id) { return; }
-                    self.double_hit_melee.insert(msg.session_id, (self.tick_count + 100, magic_level, 0));
+                    if self.double_hit_melee.contains_key(&msg.session_id) {
+                        return;
+                    }
+                    self.double_hit_melee
+                        .insert(msg.session_id, (self.tick_count + 100, magic_level, 0));
                 }
             }
             // C#：ChangeMP(-cost)
-            let _ = record.actor_ref.ask(crate::actors::player::DeductMP { amount: cost }).await;
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::DeductMP { amount: cost })
+                .await;
             return;
         }
 
         // ===== 常驻开关技能：保持原 ToggleSpell 行为 =====
         let toggled = msg.can_use > 0;
-        let _ = record.actor_ref.ask(ToggleSpell {
-            spell: msg.spell,
-            toggled,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(ToggleSpell {
+                spell: msg.spell,
+                toggled,
+            })
+            .await;
         // 确认包 spell 用 C# 号（与登录下发 magic.spell 一致；此前误发 +3 客户端号）
         let mut body = Vec::new();
         body.extend_from_slice(&record.object_id.to_le_bytes());
         body.push(spell_cs as u8);
         body.push(if toggled { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SpellToggle as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::SpellToggle as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -4724,13 +6991,24 @@ impl Message<SetHeroBehaviourRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
-        let _ = record.actor_ref.ask(SetHeroBehaviour { behaviour: msg.behaviour }).await;
+        let _ = record
+            .actor_ref
+            .ask(SetHeroBehaviour {
+                behaviour: msg.behaviour,
+            })
+            .await;
         // Send HeroBehaviour confirmation to client
         let body = vec![msg.behaviour];
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetHeroBehaviour as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::SetHeroBehaviour as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -4747,18 +7025,35 @@ impl Message<SetAutoPotValueRequest> for WorldActor {
             None => return,
         };
         // C# SetAutoPotValue（PlayerObject.cs:9641）：!HeroSpawned || !Hero.AutoPot → return
-        if !self.hero_ai_states.get(&msg.session_id).map(|ai| ai.autopot_unlocked).unwrap_or(false) {
+        if !self
+            .hero_ai_states
+            .get(&msg.session_id)
+            .map(|ai| ai.autopot_unlocked)
+            .unwrap_or(false)
+        {
             return;
         }
-        let _ = record.actor_ref.ask(SetAutoPotValue { stat: msg.stat, value: msg.value }).await;
+        let _ = record
+            .actor_ref
+            .ask(SetAutoPotValue {
+                stat: msg.stat,
+                value: msg.value,
+            })
+            .await;
         // Send SetAutoPotValue confirmation to client
         let mut body = Vec::new();
         body.push(msg.stat);
         body.extend_from_slice(&msg.value.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -4775,20 +7070,41 @@ impl Message<SetAutoPotItemRequest> for WorldActor {
             None => return,
         };
         // C# SetAutoPotItem（PlayerObject.cs:9653）：!HeroSpawned || !Hero.AutoPot → return
-        if !self.hero_ai_states.get(&msg.session_id).map(|ai| ai.autopot_unlocked).unwrap_or(false) {
+        if !self
+            .hero_ai_states
+            .get(&msg.session_id)
+            .map(|ai| ai.autopot_unlocked)
+            .unwrap_or(false)
+        {
             return;
         }
         // C# SetAutoPotItem：物品不存在则置 0
-        let item_index = if self.item_infos.contains_key(&msg.item_index) { msg.item_index } else { 0 };
-        let _ = record.actor_ref.ask(SetAutoPotItem { grid: msg.grid, item_index }).await;
+        let item_index = if self.item_infos.contains_key(&msg.item_index) {
+            msg.item_index
+        } else {
+            0
+        };
+        let _ = record
+            .actor_ref
+            .ask(SetAutoPotItem {
+                grid: msg.grid,
+                item_index,
+            })
+            .await;
         // Send SetAutoPotItem confirmation to client
         let mut body = Vec::new();
         body.push(msg.grid);
         body.extend_from_slice(&item_index.to_le_bytes());
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotItem as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::SetAutoPotItem as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
 }
 
@@ -4804,13 +7120,17 @@ impl Message<RemoveSlotItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
-        let success = record.actor_ref.ask(RemoveSlotItemMsg {
-            grid: msg.grid,
-            grid_to: msg.grid_to,
-            unique_id: msg.unique_id,
-            to: msg.to,
-            from_unique_id: msg.from_unique_id,
-        }).await.unwrap_or(false);
+        let success = record
+            .actor_ref
+            .ask(RemoveSlotItemMsg {
+                grid: msg.grid,
+                grid_to: msg.grid_to,
+                unique_id: msg.unique_id,
+                to: msg.to,
+                from_unique_id: msg.from_unique_id,
+            })
+            .await
+            .unwrap_or(false);
         // Send RemoveSlotItem response to client
         let mut body = Vec::new();
         body.push(msg.grid);
@@ -4818,10 +7138,16 @@ impl Message<RemoveSlotItemRequest> for WorldActor {
         body.extend_from_slice(&msg.unique_id.to_le_bytes());
         body.extend_from_slice(&msg.to.to_le_bytes());
         body.push(if success { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveSlotItem as i16, &body),
-        }).await;
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::RemoveSlotItem as i16,
+                    &body,
+                ),
+            })
+            .await;
         // #937：卸装/换装后临时技能同步
         if success {
             self.sync_temp_skills(msg.session_id).await;
@@ -4829,15 +7155,18 @@ impl Message<RemoveSlotItemRequest> for WorldActor {
     }
 }
 
-fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors::player::PlayerState {
-    use crate::actors::player::PlayerState;
-    use crate::actors::inventory::PlayerInventory;
-    use crate::actors::friend::FriendList;
-    use crate::actors::mail::Mailbox;
-    use crate::actors::quest::QuestLog;
+fn create_default_player_state(
+    session_id: u64,
+    object_id: u32,
+) -> crate::actors::player::PlayerState {
     use crate::actors::creature::CreatureLog;
-    use crate::actors::refine::RefineLog;
+    use crate::actors::friend::FriendList;
     use crate::actors::guild::GuildRank;
+    use crate::actors::inventory::PlayerInventory;
+    use crate::actors::mail::Mailbox;
+    use crate::actors::player::PlayerState;
+    use crate::actors::quest::QuestLog;
+    use crate::actors::refine::RefineLog;
 
     PlayerState {
         object_id: 0,
@@ -4943,15 +7272,15 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         enable_group_recall: false,
         last_recall_time: 0,
         is_dead: false,
-            unlock_curse: false,
-            last_revival_time: 0,
-            last_access: 0,
-            rested_counter: 0,
-            rested_exp_percent: 0,
-            rested_exp_end_tick: 0,
-            has_map_shout: false,
-            has_server_shout: false,
-            last_shout_time: 0,
+        unlock_curse: false,
+        last_revival_time: 0,
+        last_access: 0,
+        rested_counter: 0,
+        rested_exp_percent: 0,
+        rested_exp_end_tick: 0,
+        has_map_shout: false,
+        has_server_shout: false,
+        last_shout_time: 0,
         is_mounted: false,
         mount_type: 0,
         allow_lover_recall: false,
@@ -4959,7 +7288,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         mentor_skill_boost: true,
         mentee_exp_bank: 1,
         is_gm: false,
-        gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+        gm_never_die: false,   // #1480：GM 无敌模式（C# GMNeverDie）
         special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
         has_expanded_storage: false,
         expanded_storage_expiry_date: 0,
@@ -4978,59 +7307,59 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         exp_multiplier: 1.0,
         exp_rate: 1.0,
         exp_multiplier_end_tick: 0,
-            drop_multiplier: 1.0,
-            drop_multiplier_end_tick: 0,
-            exp_multiplier_pause_in_safe: false,
-            drop_multiplier_pause_in_safe: false,
-            item_drop_rate_percent: 0,
-            gold_drop_rate_percent: 0,
-            elements_level: 0,
-            has_elemental: false,
-            concentration_interrupted: false,
-            concentration_interrupt_time: 0,
-            bind_map_index: 0,
-            bind_x: 0,
-            bind_y: 0,
-            level_effects: 0,
-            is_mentor: false,
-            mentee_exp: 0,
-            mentor_exp: 0,
-            mentor_date: 0,
-            mentor_damage_bonus: false,
-            newbie_exp_bonus: false,
-            exp_bonus_lover_percent: 0,
-            exp_bonus_mentee_percent: 0,
-            exp_bonus_newbie_percent: 0,
-            guild_buff_exp_percent: 0,
-            guild_buff_fish_rate_percent: 0,
-            mine_rate_percent: 0,
-            gem_rate_percent: 0,
-            craft_rate_percent: 0,
-            hp_rate_percent: 0,
-            mp_rate_percent: 0,
-            max_ac_rate_percent: 0,
-            max_mac_rate_percent: 0,
-            max_dc_rate_percent: 0,
-            max_mc_rate_percent: 0,
-            max_sc_rate_percent: 0,
-            attack_speed_rate_percent: 0,
-            chat_banned_until_ms: 0,
-            chat_window_start_ms: 0,
-            chat_tick: 0,
-            char_ban_expiry_ticks: 0,
-            char_ban_reason: String::new(),
-            skill_gain_multiplier: 0,
-            guild_buff_mine_rate_percent: 0,
-            guild_buff_stats: mir2_shared::data::stats::Stats::new(),
-            no_experience_map: false,
-            brown_until_ms: 0,
-            mount_loyalty_decrease_time: 0,
-            mount_loyalty_increase_time: 0,
-            torch_burn_time: 0,
-            last_damage_ms: 0,
-            pot_hp_amount: 0,
-            pot_mp_amount: 0,
-            pot_time_ms: 0,
+        drop_multiplier: 1.0,
+        drop_multiplier_end_tick: 0,
+        exp_multiplier_pause_in_safe: false,
+        drop_multiplier_pause_in_safe: false,
+        item_drop_rate_percent: 0,
+        gold_drop_rate_percent: 0,
+        elements_level: 0,
+        has_elemental: false,
+        concentration_interrupted: false,
+        concentration_interrupt_time: 0,
+        bind_map_index: 0,
+        bind_x: 0,
+        bind_y: 0,
+        level_effects: 0,
+        is_mentor: false,
+        mentee_exp: 0,
+        mentor_exp: 0,
+        mentor_date: 0,
+        mentor_damage_bonus: false,
+        newbie_exp_bonus: false,
+        exp_bonus_lover_percent: 0,
+        exp_bonus_mentee_percent: 0,
+        exp_bonus_newbie_percent: 0,
+        guild_buff_exp_percent: 0,
+        guild_buff_fish_rate_percent: 0,
+        mine_rate_percent: 0,
+        gem_rate_percent: 0,
+        craft_rate_percent: 0,
+        hp_rate_percent: 0,
+        mp_rate_percent: 0,
+        max_ac_rate_percent: 0,
+        max_mac_rate_percent: 0,
+        max_dc_rate_percent: 0,
+        max_mc_rate_percent: 0,
+        max_sc_rate_percent: 0,
+        attack_speed_rate_percent: 0,
+        chat_banned_until_ms: 0,
+        chat_window_start_ms: 0,
+        chat_tick: 0,
+        char_ban_expiry_ticks: 0,
+        char_ban_reason: String::new(),
+        skill_gain_multiplier: 0,
+        guild_buff_mine_rate_percent: 0,
+        guild_buff_stats: mir2_shared::data::stats::Stats::new(),
+        no_experience_map: false,
+        brown_until_ms: 0,
+        mount_loyalty_decrease_time: 0,
+        mount_loyalty_increase_time: 0,
+        torch_burn_time: 0,
+        last_damage_ms: 0,
+        pot_hp_amount: 0,
+        pot_mp_amount: 0,
+        pot_time_ms: 0,
     }
 }
 
@@ -5047,7 +7376,9 @@ fn tile_blocked_by(
     struct_tiles: &[(i32, i32)],
     monster_tiles: &[(i32, i32)],
 ) -> bool {
-    npc_tiles.contains(&(tx, ty)) || struct_tiles.contains(&(tx, ty)) || monster_tiles.contains(&(tx, ty))
+    npc_tiles.contains(&(tx, ty))
+        || struct_tiles.contains(&(tx, ty))
+        || monster_tiles.contains(&(tx, ty))
 }
 
 /// #1344：构建 S.ObjectChat body（wire 对齐 C# ObjectChat：[ObjectID u32][Text dotnet][ChatType u8]）
@@ -5097,17 +7428,24 @@ async fn send_user_location_sync(
     y: i32,
 ) {
     let body = user_location_body(x, y, direction);
-    let _ = gate_ref.tell(SendToClient {
-        session_id,
-        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-    }).await;
+    let _ = gate_ref
+        .tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                &body,
+            ),
+        })
+        .await;
 }
 
 impl WorldActor {
     /// #2398：C# Envir.ProcessNewDay（Envir.cs:4856-4862）——跨零点：全在线玩家清每日任务 + 触发 [@_Daily]
     pub(crate) async fn process_new_day(&mut self, today: i64) {
         self.current_day = today;
-        let daily: Vec<i32> = self.quest_infos.values()
+        let daily: Vec<i32> = self
+            .quest_infos
+            .values()
             .filter(|q| q.quest_type == 1) // QuestType.Daily
             .map(|q| q.index)
             .collect();
@@ -5116,9 +7454,12 @@ impl WorldActor {
         for sid in sessions {
             if let Some(r) = self.players.get(&sid) {
                 if !daily.is_empty() {
-                    let _ = r.actor_ref.ask(crate::actors::player::ClearDailyQuests {
-                        quest_indices: daily.clone(),
-                    }).await;
+                    let _ = r
+                        .actor_ref
+                        .ask(crate::actors::player::ClearDailyQuests {
+                            quest_indices: daily.clone(),
+                        })
+                        .await;
                 }
                 // C# c.Player?.CallDefaultNPC(DefaultNPCType.Daily)
                 self.queue_default_npc(sid, "_daily");
@@ -5137,7 +7478,11 @@ pub struct ArchiveInactiveCharacters {
 impl Message<ArchiveInactiveCharacters> for WorldActor {
     type Reply = usize;
 
-    async fn handle(&mut self, msg: ArchiveInactiveCharacters, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: ArchiveInactiveCharacters,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let months = msg.months.max(1);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -5148,14 +7493,21 @@ impl Message<ArchiveInactiveCharacters> for WorldActor {
         let chars = match db::list_all_characters(&self.db_pool).await {
             Ok(c) => c,
             Err(e) => {
-                warn!("ArchiveInactiveCharacters: list_all_characters failed: {}", e);
+                warn!(
+                    "ArchiveInactiveCharacters: list_all_characters failed: {}",
+                    e
+                );
                 return 0;
             }
         };
         let mut archived = 0usize;
         for (name, account, last_access) in chars {
             // 跳过在线角色（C# 归档只发生在账号加载时，不会碰在线数据）
-            if self.players.values().any(|r| r.name.eq_ignore_ascii_case(&name)) {
+            if self
+                .players
+                .values()
+                .any(|r| r.name.eq_ignore_ascii_case(&name))
+            {
                 continue;
             }
             // 从未登录（last_access==0）：Rust 无角色创建时间列，无法判龄，跳过
@@ -5167,14 +7519,20 @@ impl Message<ArchiveInactiveCharacters> for WorldActor {
                 Ok(Some(state)) => {
                     let mut ok = false;
                     if let Ok(json) = serde_json::to_string(&state) {
-                        if db::archive_player_json(&self.db_pool, &name, &account, &json).await.is_ok()
+                        if db::archive_player_json(&self.db_pool, &name, &account, &json)
+                            .await
+                            .is_ok()
                             && db::delete_character(&self.db_pool, &name).await.is_ok()
                         {
                             ok = true;
                         }
                     }
                     if ok {
-                        info!("ArchiveInactiveCharacters: archived '{}' (inactive {}s)", name, now - last_access);
+                        info!(
+                            "ArchiveInactiveCharacters: archived '{}' (inactive {}s)",
+                            name,
+                            now - last_access
+                        );
                         archived += 1;
                     } else {
                         warn!("ArchiveInactiveCharacters: failed to archive '{}'", name);
@@ -5184,18 +7542,22 @@ impl Message<ArchiveInactiveCharacters> for WorldActor {
                 Err(e) => warn!("ArchiveInactiveCharacters: load '{}' failed: {}", name, e),
             }
         }
-        info!("ArchiveInactiveCharacters: archived {} characters (months={})", archived, months);
+        info!(
+            "ArchiveInactiveCharacters: archived {} characters (months={})",
+            archived, months
+        );
         archived
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use mir2_shared::packets::Packet;
     use super::{
-        effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by,
-        user_location_body, parse_chat_channel, char_ban_active, chat_throttle_decision, ChatChannel, ChatDecision, ChatThrottle,
+        char_ban_active, chat_throttle_decision, effective_run, format_roll_message, move_steps,
+        object_chat_body, parse_chat_channel, tile_blocked_by, user_location_body, ChatChannel,
+        ChatDecision, ChatThrottle,
     };
+    use mir2_shared::packets::Packet;
 
     #[test]
     fn test_roll_message_format() {
@@ -5206,53 +7568,85 @@ mod tests {
     /// #2334：C# PlayerObject.Chat（:1917-1954）防刷屏禁言
     #[test]
     fn test_chat_throttle_ban_on_seventh() {
-        let mut t = ChatThrottle { window_start_ms: 0, tick: 0 };
+        let mut t = ChatThrottle {
+            window_start_ms: 0,
+            tick: 0,
+        };
         // 窗口内第 1 条建立窗口（不计数），第 2-6 条放行（tick 1..5），第 7 条触发禁言（C# ChatTick>=5 → BanNow）
-        assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::Allow);
+        assert_eq!(
+            chat_throttle_decision(&mut t, 3000, 0, false),
+            ChatDecision::Allow
+        );
         assert_eq!(t.tick, 0); // 首条不计数
         for i in 0..5 {
-            assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::Allow, "msg {}", i + 2);
+            assert_eq!(
+                chat_throttle_decision(&mut t, 3000, 0, false),
+                ChatDecision::Allow,
+                "msg {}",
+                i + 2
+            );
         }
         assert_eq!(t.tick, 5);
-        assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::BanNow);
+        assert_eq!(
+            chat_throttle_decision(&mut t, 3000, 0, false),
+            ChatDecision::BanNow
+        );
     }
 
     #[test]
     fn test_chat_throttle_gm_exempt() {
-        let mut t = ChatThrottle { window_start_ms: 1000, tick: 0 };
+        let mut t = ChatThrottle {
+            window_start_ms: 1000,
+            tick: 0,
+        };
         for _ in 0..20 {
-            assert_eq!(chat_throttle_decision(&mut t, 1500, 0, true), ChatDecision::Allow);
+            assert_eq!(
+                chat_throttle_decision(&mut t, 1500, 0, true),
+                ChatDecision::Allow
+            );
         }
     }
 
     #[test]
     fn test_chat_throttle_window_resets_after_2s() {
-        let mut t = ChatThrottle { window_start_ms: 1000, tick: 5 };
+        let mut t = ChatThrottle {
+            window_start_ms: 1000,
+            tick: 5,
+        };
         // 2s 后窗口重置：首条建立新窗口（不计数），不再触发禁言
-        assert_eq!(chat_throttle_decision(&mut t, 3000, 0, false), ChatDecision::Allow);
+        assert_eq!(
+            chat_throttle_decision(&mut t, 3000, 0, false),
+            ChatDecision::Allow
+        );
         assert_eq!(t.tick, 0);
         assert_eq!(t.window_start_ms, 3000);
     }
 
     #[test]
     fn test_chat_throttle_banned_returns_remaining() {
-        let mut t = ChatThrottle { window_start_ms: 1000, tick: 0 };
+        let mut t = ChatThrottle {
+            window_start_ms: 1000,
+            tick: 0,
+        };
         assert_eq!(
             chat_throttle_decision(&mut t, 2000, 5000, false),
             ChatDecision::Banned { remaining_ms: 3000 }
         );
         // 到期后（banned_until <= now）→ 正常放行路径
-        assert_eq!(chat_throttle_decision(&mut t, 6000, 5000, false), ChatDecision::Allow);
+        assert_eq!(
+            chat_throttle_decision(&mut t, 6000, 5000, false),
+            ChatDecision::Allow
+        );
     }
 
     /// #2336：C# MirConnection.cs:1111-1118 角色封禁判定
     #[test]
     fn test_char_ban_active() {
         let now = 638_000_000_000_000_000i64; // 任意固定 now
-        assert!(!char_ban_active(0, now));               // 未封禁
-        assert!(char_ban_active(now + 1, now));          // 封禁中
-        assert!(!char_ban_active(now - 1, now));         // 已到期
-        assert!(!char_ban_active(now, now));             // 恰好到期
+        assert!(!char_ban_active(0, now)); // 未封禁
+        assert!(char_ban_active(now + 1, now)); // 封禁中
+        assert!(!char_ban_active(now - 1, now)); // 已到期
+        assert!(!char_ban_active(now, now)); // 恰好到期
     }
 
     /// #2184：C# PlayerObject.Chat 频道前缀解析（/、!!、!~、!#、:)、@!、!）
@@ -5260,18 +7654,42 @@ mod tests {
     fn test_parse_chat_channel_prefixes() {
         assert_eq!(
             parse_chat_channel("/Alice hello"),
-            Some(ChatChannel::Whisper { target: "Alice".into(), message: "hello".into() })
+            Some(ChatChannel::Whisper {
+                target: "Alice".into(),
+                message: "hello".into()
+            })
         );
         assert_eq!(
             parse_chat_channel("/w Alice hello"),
-            Some(ChatChannel::Whisper { target: "Alice".into(), message: "hello".into() })
+            Some(ChatChannel::Whisper {
+                target: "Alice".into(),
+                message: "hello".into()
+            })
         );
-        assert_eq!(parse_chat_channel("!!大家好"), Some(ChatChannel::Group("大家好".into())));
-        assert_eq!(parse_chat_channel("!~行会消息"), Some(ChatChannel::Guild("行会消息".into())));
-        assert_eq!(parse_chat_channel("!#师徒消息"), Some(ChatChannel::Mentor("师徒消息".into())));
-        assert_eq!(parse_chat_channel(":)亲爱的"), Some(ChatChannel::Spouse("亲爱的".into())));
-        assert_eq!(parse_chat_channel("@!全体公告"), Some(ChatChannel::GmAnnouncement("全体公告".into())));
-        assert_eq!(parse_chat_channel("!喊话"), Some(ChatChannel::Shout("喊话".into())));
+        assert_eq!(
+            parse_chat_channel("!!大家好"),
+            Some(ChatChannel::Group("大家好".into()))
+        );
+        assert_eq!(
+            parse_chat_channel("!~行会消息"),
+            Some(ChatChannel::Guild("行会消息".into()))
+        );
+        assert_eq!(
+            parse_chat_channel("!#师徒消息"),
+            Some(ChatChannel::Mentor("师徒消息".into()))
+        );
+        assert_eq!(
+            parse_chat_channel(":)亲爱的"),
+            Some(ChatChannel::Spouse("亲爱的".into()))
+        );
+        assert_eq!(
+            parse_chat_channel("@!全体公告"),
+            Some(ChatChannel::GmAnnouncement("全体公告".into()))
+        );
+        assert_eq!(
+            parse_chat_channel("!喊话"),
+            Some(ChatChannel::Shout("喊话".into()))
+        );
         // 普通消息 / @ 命令不在此解析
         assert_eq!(parse_chat_channel("hello world"), None);
         assert_eq!(parse_chat_channel("@ALLOWTRADE"), None);
@@ -5359,5 +7777,3 @@ mod tests {
         assert!(!tile_blocked_by(100, 100, &[], &[], &[]));
     }
 }
-
-

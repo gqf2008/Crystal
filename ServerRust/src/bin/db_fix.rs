@@ -13,7 +13,8 @@ async fn main() -> anyhow::Result<()> {
     ];
     for (table, name) in &tables {
         let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
-            .fetch_one(&pool).await?;
+            .fetch_one(&pool)
+            .await?;
         println!("  {}: {} rows", name, count);
     }
     Ok(())

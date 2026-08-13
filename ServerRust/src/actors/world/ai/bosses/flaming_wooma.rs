@@ -8,10 +8,10 @@
 //! Attack（C# :12-33）：DefenceType.MACAgility（魔法闪避判定）。
 //! 注意：Rust 端 attack_type 字段编码防御类型，用 2 标记 MACAgility（由战斗层解读）。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 const MELEE_RANGE: i32 = 1;
@@ -36,14 +36,20 @@ impl MonsterBehavior for FlamingWoomaBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 2, // MACAgility（C# DefenceType.MACAgility）
-                });
+                let damage = crate::combat::attack::get_attack_power(
+                    monster.min_dmg,
+                    monster.max_dmg,
+                    monster.luck,
+                )
+                .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 2, // MACAgility（C# DefenceType.MACAgility）
+                    });
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

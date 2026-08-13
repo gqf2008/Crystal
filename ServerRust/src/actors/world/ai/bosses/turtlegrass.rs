@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/Turtlegrass.cs（继承 ZumaMonster）
 //! 机制：InAttackRange 2 格十字/对角；3/4 base.Attack（DC）/ 1/4 SinglePushAttack（伤害+推挤 3，等级门控）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 12;
 
@@ -27,29 +27,37 @@ impl MonsterBehavior for TurtlegrassBehavior {
         monster.target_session = Some(target.session_id);
         let dx = (target.x - monster.x).abs();
         let dy = (target.y - monster.y).abs();
-        let in_range = dx <= 2 && dy <= 2 && ((dx <= 1 && dy <= 1) || (dx == dy || dx % 2 == dy % 2));
+        let in_range =
+            dx <= 2 && dy <= 2 && ((dx <= 1 && dy <= 1) || (dx == dy || dx % 2 == dy % 2));
 
         if in_range && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             // C# Random.Next(4) > 0：3/4 base / 1/4 SinglePush
             if fastrand::i32(0..4) > 0 {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 1,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
                 // C# SinglePushAttack：目标等级<=怪+5 才推 3 格（MonsterObject.cs:3842）
                 if (target.level as i32) <= monster.level + 5 {
                     ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {

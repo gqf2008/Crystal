@@ -591,7 +591,9 @@ impl Packet for UpdateIntelligentCreature {
         let unsummon_me = reader.read_u8()? != 0;
         let release_me = reader.read_u8()? != 0;
         let mut filter = [0u8; 9];
-        for b in filter.iter_mut() { *b = reader.read_u8()?; }
+        for b in filter.iter_mut() {
+            *b = reader.read_u8()?;
+        }
         let grade = reader.read_u8()?;
         let options_save = reader.read_u8()? != 0;
         Ok(Self {
@@ -614,7 +616,9 @@ impl Packet for UpdateIntelligentCreature {
         writer.write_u8(if self.summon_me { 1 } else { 0 })?;
         writer.write_u8(if self.unsummon_me { 1 } else { 0 })?;
         writer.write_u8(if self.release_me { 1 } else { 0 })?;
-        for b in &self.filter { writer.write_u8(*b)?; }
+        for b in &self.filter {
+            writer.write_u8(*b)?;
+        }
         writer.write_u8(self.grade)?;
         writer.write_u8(if self.options_save { 1 } else { 0 })?;
         Ok(())

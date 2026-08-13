@@ -3,10 +3,10 @@
 //! C# 参考：Server/MirObjects/Monsters/BlueSoul.cs（继承 AxeSkeleton）
 //! 机制：纯远程 ObjectRangeAttack + RangeDamage（MACAgility）
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 6;
 
@@ -20,7 +20,8 @@ impl BlueSoulBehavior {
 
 impl MonsterBehavior for BlueSoulBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index) {
+        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+        {
             Some(t) => *t,
             None => return,
         };
@@ -29,14 +30,20 @@ impl MonsterBehavior for BlueSoulBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            let damage = crate::combat::attack::get_attack_power(
+                monster.min_dmg,
+                monster.max_dmg,
+                monster.luck,
+            )
+            .max(1);
+            ctx.out_attacks
+                .push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
             return;
         }
 

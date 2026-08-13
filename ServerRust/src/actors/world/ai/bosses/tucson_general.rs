@@ -10,13 +10,13 @@
 //! Attack（C# :25-126）：Rage→落石；近战/远程分支。
 //! CompleteAttack（C# :128-152）：stomp→AOE3 + Paralysis。
 
-use mir2_shared::enums::Spell;
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
+use mir2_shared::enums::Spell;
 
 const VIEW_RANGE: i32 = 15;
 const STOMP_RADIUS: i32 = 3;
@@ -49,9 +49,11 @@ impl MonsterBehavior for TucsonGeneralBehavior {
         if ctx.tick_count >= self.next_rage_tick {
             self.next_rage_tick = ctx.tick_count + RAGE_COOLDOWN_TICKS;
             // 收集目标用于 1/3 落点
-            let targets: Vec<crate::actors::world::ai::PlayerSnap> =
-                ctx.find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index)
-                    .into_iter().copied().collect();
+            let targets: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                .find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+                .into_iter()
+                .copied()
+                .collect();
             for _ in 0..ROCK_COUNT {
                 let (rx, ry) = if fastrand::i32(0..3) == 0 && !targets.is_empty() {
                     // 1/3 概率落在随机玩家身上
@@ -64,17 +66,20 @@ impl MonsterBehavior for TucsonGeneralBehavior {
                         monster.y + fastrand::i32(-VIEW_RANGE..=VIEW_RANGE),
                     )
                 };
-                let value = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                    spell: Spell::MapQuake1,
-                    x: rx,
-                    y: ry,
-                    value,
-                    duration_ms: 2000,
-                    tick_ms: 1000,
-                    caster_oid: monster.object_id,
-                    caster_session: 0,
-                });
+                let value =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_spell_fields
+                    .push(crate::actors::world::ai::SpellFieldSpawn {
+                        spell: Spell::MapQuake1,
+                        x: rx,
+                        y: ry,
+                        value,
+                        duration_ms: 2000,
+                        tick_ms: 1000,
+                        caster_oid: monster.object_id,
+                        caster_session: 0,
+                    });
             }
             monster.next_attack_tick = ctx.tick_count + 80;
             return;
@@ -88,57 +93,85 @@ impl MonsterBehavior for TucsonGeneralBehavior {
             if melee && fastrand::i32(0..4) > 0 {
                 if fastrand::i32(0..3) > 0 {
                     // Type0 DC 单体
-                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
-                } else {
-                    // Type1 MC 践踏 AOE 3 + Paralysis
-                    let damage = crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0).max(1);
-                    let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                        ctx.find_targets_in_range(monster.x, monster.y, STOMP_RADIUS, monster.map_index)
-                            .into_iter().copied().collect();
-                    for h in hits {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                    let damage = crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg,
+                        0,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
                             attacker_oid: monster.object_id,
-                            target_session: h.session_id,
+                            target_session: target.session_id,
                             damage,
                             spell_id: 0,
-                            attack_type: 1,
+                            attack_type: 0,
                         });
-                        // C# PoisonTarget 1/3
-                            if fastrand::i32(0..3) == 0 {
-                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                                session_id: h.session_id,
-                                poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
+                } else {
+                    // Type1 MC 践踏 AOE 3 + Paralysis
+                    let damage =
+                        crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
+                            .max(1);
+                    let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                        .find_targets_in_range(
+                            monster.x,
+                            monster.y,
+                            STOMP_RADIUS,
+                            monster.map_index,
+                        )
+                        .into_iter()
+                        .copied()
+                        .collect();
+                    for h in hits {
+                        ctx.out_attacks
+                            .push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: h.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 1,
                             });
-                            }
+                        // C# PoisonTarget 1/3
+                        if fastrand::i32(0..3) == 0 {
+                            ctx.out_poisons
+                                .push(crate::actors::world::ai::PoisonPlayer {
+                                    session_id: h.session_id,
+                                    poison: Poison::new(
+                                        PoisonType::PARALYSIS,
+                                        5,
+                                        poison_sc_value(monster),
+                                        1000,
+                                    ),
+                                });
+                        }
                     }
                 }
             } else if fastrand::i32(0..4) > 0 {
                 // Type1 SC 弹道（TucsonGeneral.cs:111）
-                let damage = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             } else {
                 // Type2 SC*2 强力弹道（TucsonGeneral.cs:119）
-                let damage = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc * 2, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc * 2, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

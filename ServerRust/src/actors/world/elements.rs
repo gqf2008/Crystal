@@ -17,14 +17,20 @@ pub(crate) const ORBS_DEF_LIST: [i32; 4] = [2, 4, 6, 8];
 /// 元素球数量（C# HumanObject.GetElementalOrbCount：满足 ElementsLevel >= OrbsExpList[i]
 /// 的档位数；OrbsExpList 升序 [50,100,150,200]，故为升序计数）
 pub(crate) fn elemental_orb_count(elements_level: i32, exp_list: &[i32]) -> usize {
-    exp_list.iter().filter(|exp| elements_level >= **exp).count()
+    exp_list
+        .iter()
+        .filter(|exp| elements_level >= **exp)
+        .count()
 }
 
 /// 元素球加成（C# HumanObject.GetElementalOrbPower：无元素返回 0；
 /// defensive 用 OrbsDefList，否则 OrbsDmgList，取当前球数档位；空表返回 0）
 pub(crate) fn elemental_orb_power(
-    elements_level: i32, defensive: bool,
-    exp_list: &[i32], dmg_list: &[i32], def_list: &[i32],
+    elements_level: i32,
+    defensive: bool,
+    exp_list: &[i32],
+    dmg_list: &[i32],
+    def_list: &[i32],
 ) -> i32 {
     let count = elemental_orb_count(elements_level, exp_list);
     if count == 0 {
@@ -40,17 +46,29 @@ pub(crate) fn elemental_orb_power(
 impl WorldActor {
     /// 元素经验档位（#2414：Configs/OrbsExpList.ini 为空时回退 C# 默认 [50,100,150,200]）
     pub(crate) fn orbs_exp(&self) -> &[i32] {
-        if self.orbs_exp_list.is_empty() { &ORBS_EXP_LIST } else { &self.orbs_exp_list }
+        if self.orbs_exp_list.is_empty() {
+            &ORBS_EXP_LIST
+        } else {
+            &self.orbs_exp_list
+        }
     }
 
     /// 元素攻击加成档位（空回退默认 [4,8,12,16]）
     pub(crate) fn orbs_dmg(&self) -> &[i32] {
-        if self.orbs_dmg_list.is_empty() { &ORBS_DMG_LIST } else { &self.orbs_dmg_list }
+        if self.orbs_dmg_list.is_empty() {
+            &ORBS_DMG_LIST
+        } else {
+            &self.orbs_dmg_list
+        }
     }
 
     /// 元素防御加成档位（空回退默认 [2,4,6,8]）
     pub(crate) fn orbs_def(&self) -> &[i32] {
-        if self.orbs_def_list.is_empty() { &ORBS_DEF_LIST } else { &self.orbs_def_list }
+        if self.orbs_def_list.is_empty() {
+            &ORBS_DEF_LIST
+        } else {
+            &self.orbs_def_list
+        }
     }
 
     /// 当前世界时间（毫秒，近似 C# Envir.Time）
@@ -60,21 +78,33 @@ impl WorldActor {
 
     /// 广播 SetConcentration（C# HumanObject.UpdateConcentration：自己 + 同图广播）
     pub(crate) async fn broadcast_set_concentration(
-        &self, object_id: u32, enabled: bool, interrupted: bool, map_index: u16,
+        &self,
+        object_id: u32,
+        enabled: bool,
+        interrupted: bool,
+        map_index: u16,
     ) {
         let packet = mir2_shared::packets::server::movement::SetConcentration {
-            object_id, enabled, interrupted,
+            object_id,
+            enabled,
+            interrupted,
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let pkt = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::SetConcentration as i16, &body);
+                mir2_shared::enums::ServerPacketIds::SetConcentration as i16,
+                &body,
+            );
             for (sid, r) in &self.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == map_index {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid, data: pkt.clone(),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: pkt.clone(),
+                            })
+                            .await;
                     }
                 }
             }
@@ -83,21 +113,37 @@ impl WorldActor {
 
     /// 广播 SetElemental（C# HumanObject.ObtainElement 末尾 Enqueue + Broadcast）
     pub(crate) async fn broadcast_set_elemental(
-        &self, object_id: u32, enabled: bool, value: u32, element: u8, expire_time: i64, map_index: u16,
+        &self,
+        object_id: u32,
+        enabled: bool,
+        value: u32,
+        element: u8,
+        expire_time: i64,
+        map_index: u16,
     ) {
         let packet = mir2_shared::packets::server::movement::SetElemental {
-            object_id, enabled, value, element, expire_time,
+            object_id,
+            enabled,
+            value,
+            element,
+            expire_time,
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let pkt = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::SetElemental as i16, &body);
+                mir2_shared::enums::ServerPacketIds::SetElemental as i16,
+                &body,
+            );
             for (sid, r) in &self.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == map_index {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid, data: pkt.clone(),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: pkt.clone(),
+                            })
+                            .await;
                     }
                 }
             }
@@ -106,22 +152,36 @@ impl WorldActor {
 
     /// 广播 ObjectEffect（C# CurrentMap.Broadcast，ElementalBarrierUp/Down 等）
     pub(crate) async fn broadcast_object_effect(
-        &self, object_id: u32, effect: mir2_shared::enums::SpellEffect,
-        effect_type: u32, time: u32, map_index: u16,
+        &self,
+        object_id: u32,
+        effect: mir2_shared::enums::SpellEffect,
+        effect_type: u32,
+        time: u32,
+        map_index: u16,
     ) {
         let packet = mir2_shared::packets::server::magic_combat::ObjectEffect {
-            object_id, effect, effect_type, delay_time: 0, time,
+            object_id,
+            effect,
+            effect_type,
+            delay_time: 0,
+            time,
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let pkt = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ObjectEffect as i16, &body);
+                mir2_shared::enums::ServerPacketIds::ObjectEffect as i16,
+                &body,
+            );
             for (sid, r) in &self.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == map_index {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid, data: pkt.clone(),
-                        }).await;
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *sid,
+                                data: pkt.clone(),
+                            })
+                            .await;
                     }
                 }
             }
@@ -135,10 +195,13 @@ impl WorldActor {
             Some(r) => r.clone(),
             None => return,
         };
-        let _ = record.actor_ref.ask(crate::actors::player::SetElements {
-            level: 0,
-            has_elemental: false,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetElements {
+                level: 0,
+                has_elemental: false,
+            })
+            .await;
         self.obtain_element(session_id, false).await;
     }
 
@@ -152,18 +215,27 @@ impl WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        let active = state.buffs.iter().any(|b| matches!(
-            b.buff_type, crate::combat::buff::BuffType::MpRegenBoost { .. }));
-        if !active { return; }
+        let active = state.buffs.iter().any(|b| {
+            matches!(
+                b.buff_type,
+                crate::combat::buff::BuffType::MpRegenBoost { .. }
+            )
+        });
+        if !active {
+            return;
+        }
         let was_interrupted = state.concentration_interrupted;
-        let _ = record.actor_ref.ask(crate::actors::player::SetConcentrationInterrupt {
-            interrupted: true,
-            interrupt_time_ms: self.now_ms() + 3000,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetConcentrationInterrupt {
+                interrupted: true,
+                interrupt_time_ms: self.now_ms() + 3000,
+            })
+            .await;
         // C#：仅首次打断时广播（后续只刷新 InterruptTime）
         if !was_interrupted {
-            self.broadcast_set_concentration(
-                state.object_id, true, true, state.map_index).await;
+            self.broadcast_set_concentration(state.object_id, true, true, state.map_index)
+                .await;
         }
     }
 
@@ -177,24 +249,36 @@ impl WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        let meditation_lv = state.magics.iter()
+        let meditation_lv = state
+            .magics
+            .iter()
             .find(|m| m.spell == (SPELL_MEDITATION as i32 - 3))
             .map(|m| m.level)
             .unwrap_or(0);
-        if meditation_lv == 0 { return; } // C#：未学冥想直接 return
+        if meditation_lv == 0 {
+            return;
+        } // C#：未学冥想直接 return
 
         // rnd >= (8 - meditationLvl - concentrateChance) 时获得元素
         let mut chance = 8 - meditation_lv as i32;
-        let concentration_active = state.buffs.iter().any(|b| matches!(
-            b.buff_type, crate::combat::buff::BuffType::MpRegenBoost { .. }));
+        let concentration_active = state.buffs.iter().any(|b| {
+            matches!(
+                b.buff_type,
+                crate::combat::buff::BuffType::MpRegenBoost { .. }
+            )
+        });
         if concentration_active && !state.concentration_interrupted {
-            let conc_lv = state.magics.iter()
+            let conc_lv = state
+                .magics
+                .iter()
                 .find(|m| m.spell == (SPELL_CONCENTRATION as i32 - 3))
                 .map(|m| m.level)
                 .unwrap_or(0);
             chance -= conc_lv as i32 + 1;
         }
-        if fastrand::i32(0..10) < chance { return; }
+        if fastrand::i32(0..10) < chance {
+            return;
+        }
         self.obtain_element(session_id, false).await;
     }
 
@@ -211,7 +295,9 @@ impl WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        let meditation_lv = state.magics.iter()
+        let meditation_lv = state
+            .magics
+            .iter()
             .find(|m| m.spell == (SPELL_MEDITATION as i32 - 3))
             .map(|m| m.level)
             .unwrap_or(0);
@@ -233,9 +319,14 @@ impl WorldActor {
             if self.setup_cfg.gather_orbs_per_level && meditation_lv == 3 && exp_list.len() > 1 {
                 // C# 特殊：冥想 Lv3 时先广播第一档，再升到第二档
                 self.broadcast_set_elemental(
-                    state.object_id, true, exp_list[0] as u32, 1,
-                    max_orbs as i64, state.map_index,
-                ).await;
+                    state.object_id,
+                    true,
+                    exp_list[0] as u32,
+                    1,
+                    max_orbs as i64,
+                    state.map_index,
+                )
+                .await;
                 level = exp_list[1];
                 orb_type = 2;
             }
@@ -251,7 +342,9 @@ impl WorldActor {
                     level = cap;
                 }
             }
-            if level >= exp_list[0] { has_elemental = true; }
+            if level >= exp_list[0] {
+                has_elemental = true;
+            }
             for (i, exp) in exp_list.iter().enumerate() {
                 if *exp == level {
                     orb_type = (i + 1) as u8;
@@ -260,17 +353,24 @@ impl WorldActor {
             }
         }
 
-        let _ = record.actor_ref.ask(crate::actors::player::SetElements {
-            level,
-            has_elemental,
-        }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetElements {
+                level,
+                has_elemental,
+            })
+            .await;
         self.broadcast_set_elemental(
-            state.object_id, has_elemental, level as u32, orb_type,
-            max_orbs as i64, state.map_index,
-        ).await;
+            state.object_id,
+            has_elemental,
+            level as u32,
+            orb_type,
+            max_orbs as i64,
+            state.map_index,
+        )
+        .await;
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -287,14 +387,38 @@ mod tests {
         assert_eq!(elemental_orb_count(200, &ORBS_EXP_LIST), 4);
         assert_eq!(elemental_orb_count(999, &ORBS_EXP_LIST), 4);
         // C# GetElementalOrbPower：攻击 OrbsDmgList=[4,8,12,16]，防御 OrbsDefList=[2,4,6,8]
-        assert_eq!(elemental_orb_power(0, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 0);
-        assert_eq!(elemental_orb_power(50, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 4);
-        assert_eq!(elemental_orb_power(100, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 8);
-        assert_eq!(elemental_orb_power(150, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 12);
-        assert_eq!(elemental_orb_power(200, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 16);
-        assert_eq!(elemental_orb_power(50, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 2);
-        assert_eq!(elemental_orb_power(100, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 4);
-        assert_eq!(elemental_orb_power(200, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST), 8);
+        assert_eq!(
+            elemental_orb_power(0, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            0
+        );
+        assert_eq!(
+            elemental_orb_power(50, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            4
+        );
+        assert_eq!(
+            elemental_orb_power(100, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            8
+        );
+        assert_eq!(
+            elemental_orb_power(150, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            12
+        );
+        assert_eq!(
+            elemental_orb_power(200, false, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            16
+        );
+        assert_eq!(
+            elemental_orb_power(50, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            2
+        );
+        assert_eq!(
+            elemental_orb_power(100, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            4
+        );
+        assert_eq!(
+            elemental_orb_power(200, true, &ORBS_EXP_LIST, &ORBS_DMG_LIST, &ORBS_DEF_LIST),
+            8
+        );
 
         // #2414：自定义三表（OrbsExpList.ini 数据驱动）
         let exp = [10, 20];

@@ -1,22 +1,24 @@
 // Crystal Server - Legend of Mir 2 game server
 // 启动入口：初始化 actors → 启动 TCP 监听 → 进入事件循环
 
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use kameo::actor::Spawn;
 use kameo::mailbox;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 
 use crystal_server::actors::account::AccountActor;
-use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
-use crystal_server::gate::actor::{GateActor, SetAccountRef, SetSocialRef, SetWorldRef, SetMaxConnections, ShutdownAll};
-use crystal_server::util::config;
+use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::db;
+use crystal_server::gate::actor::{
+    GateActor, SetAccountRef, SetMaxConnections, SetSocialRef, SetWorldRef, ShutdownAll,
+};
+use crystal_server::util::config;
 
 fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -63,7 +65,9 @@ async fn async_main() -> anyhow::Result<()> {
     info!("GateActor spawned");
 
     // Phase 1.1: 把 cfg.network.max_connections 传给 GateActor(防止资源耗尽)
-    let _ = gate_ref.ask(SetMaxConnections(cfg.network.max_connections)).await;
+    let _ = gate_ref
+        .ask(SetMaxConnections(cfg.network.max_connections))
+        .await;
     info!("Configured max_connections={}", cfg.network.max_connections);
 
     let map_dir = PathBuf::from(&cfg.server.map_data_dir);
@@ -86,12 +90,30 @@ async fn async_main() -> anyhow::Result<()> {
     crystal_server::combat::attack::set_max_luck(setup_ini.max_luck);
     // #2426：注入战斗权重（C# Settings.[Items] *Weight，供 combat::attack 纯函数使用）
     use crystal_server::combat::attack::{set_combat_weight, CombatWeight};
-    set_combat_weight(CombatWeight::MagicResist, setup_ini.magic_resist_weight as i32);
-    set_combat_weight(CombatWeight::PoisonResist, setup_ini.poison_resist_weight as i32);
-    set_combat_weight(CombatWeight::CriticalRate, setup_ini.critical_rate_weight as i32);
-    set_combat_weight(CombatWeight::CriticalDamage, setup_ini.critical_damage_weight as i32);
-    set_combat_weight(CombatWeight::FreezingAttack, setup_ini.freezing_attack_weight as i32);
-    set_combat_weight(CombatWeight::PoisonAttack, setup_ini.poison_attack_weight as i32);
+    set_combat_weight(
+        CombatWeight::MagicResist,
+        setup_ini.magic_resist_weight as i32,
+    );
+    set_combat_weight(
+        CombatWeight::PoisonResist,
+        setup_ini.poison_resist_weight as i32,
+    );
+    set_combat_weight(
+        CombatWeight::CriticalRate,
+        setup_ini.critical_rate_weight as i32,
+    );
+    set_combat_weight(
+        CombatWeight::CriticalDamage,
+        setup_ini.critical_damage_weight as i32,
+    );
+    set_combat_weight(
+        CombatWeight::FreezingAttack,
+        setup_ini.freezing_attack_weight as i32,
+    );
+    set_combat_weight(
+        CombatWeight::PoisonAttack,
+        setup_ini.poison_attack_weight as i32,
+    );
     // #2404：玩家升级经验曲线（C# Settings.ExperienceList：Configs/ExpList.ini）；
     // server.toml 显式配置优先，否则用 ini 曲线
     let exp_list = {
@@ -121,9 +143,14 @@ async fn async_main() -> anyhow::Result<()> {
             pool
         }
         Err(e) => {
-            warn!("Failed to initialize SQLite DB, using in-memory only: {}", e);
+            warn!(
+                "Failed to initialize SQLite DB, using in-memory only: {}",
+                e
+            );
             // Fallback: still start server but without persistence
-            db::init_db(&PathBuf::from(":memory:")).await.expect("in-memory DB should always work")
+            db::init_db(&PathBuf::from(":memory:"))
+                .await
+                .expect("in-memory DB should always work")
         }
     };
 
@@ -216,7 +243,10 @@ async fn async_main() -> anyhow::Result<()> {
     social_config.marriage_level_required = marriage_ini.level_required;
     social_config.mentor_level_gap = mentor_ini.level_gap;
     social_config.mentor_length_days = mentor_ini.length_days;
-    info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
+    info!(
+        "Social config: guild_creation_cost_gold = {}",
+        social_config.guild_creation_cost_gold
+    );
     let social_ref = SocialActor::spawn(SocialActorArgs {
         gate_ref: gate_ref.clone(),
         db_pool: db_pool.clone(),
@@ -280,22 +310,31 @@ async fn async_main() -> anyhow::Result<()> {
         hero_exp_list,
         setup_cfg: setup_ini,
     });
-    info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
+    info!(
+        "WorldActor spawned (tick={}ms, map_dir={})",
+        cfg.server.tick_ms, cfg.server.map_data_dir
+    );
 
     // AccountActor 需要 GateActor 的引用和数据库
     let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
     info!("AccountActor spawned");
 
     // 双向链接：GateActor 需要 AccountActor 和 WorldActor 的引用
-    let _ = gate_ref.ask(SetAccountRef {
-        account_ref: account_ref.clone(),
-    }).await;
-    let _ = gate_ref.ask(SetWorldRef {
-        world_ref: world_ref.clone(),
-    }).await;
-    let _ = gate_ref.ask(SetSocialRef {
-        social_ref: social_ref.clone(),
-    }).await;
+    let _ = gate_ref
+        .ask(SetAccountRef {
+            account_ref: account_ref.clone(),
+        })
+        .await;
+    let _ = gate_ref
+        .ask(SetWorldRef {
+            world_ref: world_ref.clone(),
+        })
+        .await;
+    let _ = gate_ref
+        .ask(SetSocialRef {
+            social_ref: social_ref.clone(),
+        })
+        .await;
 
     // 启动 TCP 监听
     info!("Starting gate listener on {}...", cfg.network.listen_addr);
@@ -303,7 +342,9 @@ async fn async_main() -> anyhow::Result<()> {
     let gate_addr = cfg.network.listen_addr.clone();
     let gate_ref_for_listener = gate_ref.clone();
     tokio::spawn(async move {
-        if let Err(e) = crystal_server::gate::actor::run_gate_listener(gate_addr, gate_ref_for_listener).await {
+        if let Err(e) =
+            crystal_server::gate::actor::run_gate_listener(gate_addr, gate_ref_for_listener).await
+        {
             error!("Gate listener error: {}", e);
         }
     });
@@ -316,7 +357,8 @@ async fn async_main() -> anyhow::Result<()> {
         crystal_server::util::admin::run_admin_server(
             admin_stats_clone,
             format!("0.0.0.0:{}", admin_port),
-        ).await;
+        )
+        .await;
     });
     info!("Admin health check on port {}", admin_port);
 
@@ -328,7 +370,10 @@ async fn async_main() -> anyhow::Result<()> {
 
     // Phase 2.2: 优雅关机 — 断开所有 session 触发自动保存
     if let Ok(count) = gate_ref.ask(ShutdownAll).await {
-        info!("Disconnect packets sent to {} sessions, waiting 5s for saves...", count);
+        info!(
+            "Disconnect packets sent to {} sessions, waiting 5s for saves...",
+            count
+        );
     }
     // 给 actor 5 秒处理断连 + 保存
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
@@ -336,4 +381,3 @@ async fn async_main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

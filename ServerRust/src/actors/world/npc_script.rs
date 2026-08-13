@@ -34,8 +34,7 @@
 use super::*;
 use crate::actors::player::{
     AddExperience, AddGold, AddItemToInventory, ChangeClass, CheckQuestState, DeductGold,
-    GetPlayerState, HasItem, RemoveItemByIndexWithDura, SetHair, SetPlayerPosition,
-    SetPlayerState,
+    GetPlayerState, HasItem, RemoveItemByIndexWithDura, SetHair, SetPlayerPosition, SetPlayerState,
 };
 use mir2_shared::enums::MirClass;
 use std::collections::HashMap;
@@ -152,7 +151,9 @@ pub fn extract_custom_commands(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in content.lines() {
         let up = line.to_uppercase();
-        if !up.contains("CUSTOMCOMMAND") { continue; }
+        if !up.contains("CUSTOMCOMMAND") {
+            continue;
+        }
         // 提取第一个括号内容：CUSTOMCOMMAND(name) / #CUSTOMCOMMAND (name)
         if let Some(open) = line.find('(') {
             if let Some(close) = line[open + 1..].find(')') {
@@ -178,7 +179,9 @@ pub fn extract_map_coords(content: &str) -> Vec<(String, i32, i32)> {
     let mut out: Vec<(String, i32, i32)> = Vec::new();
     for line in content.lines() {
         let up = line.to_uppercase();
-        if !up.starts_with("[@_") || !up.contains("MAPCOORD") { continue; }
+        if !up.starts_with("[@_") || !up.contains("MAPCOORD") {
+            continue;
+        }
         // 段头格式：[@_MapCoord(map,x,y)]（map 可含字母数字下划线）
         let inner = line.trim_start_matches('[').trim_end_matches(']');
         if let Some(open) = inner.find('(') {
@@ -186,7 +189,10 @@ pub fn extract_map_coords(content: &str) -> Vec<(String, i32, i32)> {
                 let body = &inner[open + 1..open + 1 + close];
                 let parts: Vec<&str> = body.split(',').collect();
                 if parts.len() == 3 {
-                    if let (Ok(x), Ok(y)) = (parts[1].trim().parse::<i32>(), parts[2].trim().parse::<i32>()) {
+                    if let (Ok(x), Ok(y)) = (
+                        parts[1].trim().parse::<i32>(),
+                        parts[2].trim().parse::<i32>(),
+                    ) {
                         let map = parts[0].trim().to_string();
                         if !map.is_empty() && !out.contains(&(map.clone(), x, y)) {
                             out.push((map, x, y));
@@ -207,7 +213,7 @@ impl ParsedScript {
     /// - `;` 开头的行视为注释，整行忽略。
     /// - 其余非空行按当前模式分发为 check/action/say。
     /// - `#INSERT`/`#INCLUDE` 行由 `load_default_content` 在解析前展开，本函数跳过。
-pub fn parse(content: &str) -> ParsedScript {
+    pub fn parse(content: &str) -> ParsedScript {
         let mut script = ParsedScript::default();
         let mut cur_sec: Option<usize> = None;
         let mut seg = Segment::default();
@@ -234,7 +240,10 @@ pub fn parse(content: &str) -> ParsedScript {
                 flush_segment(&mut seg, &mut cur_sec, &mut script);
                 mode = ParseMode::Idle;
                 let inner = &line[1..line.len() - 1];
-                let name = inner.strip_prefix('@').map(|s| s.to_string()).unwrap_or_else(|| inner.to_string());
+                let name = inner
+                    .strip_prefix('@')
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| inner.to_string());
                 let lower = name.to_lowercase();
                 if let Some(&_idx) = script.index.get(&lower) {
                     warn!("NPC script: duplicate section [@{}] ignored", name);
@@ -242,7 +251,10 @@ pub fn parse(content: &str) -> ParsedScript {
                     continue;
                 }
                 let idx = script.sections.len();
-                script.sections.push(Section { name, segments: Vec::new() });
+                script.sections.push(Section {
+                    name,
+                    segments: Vec::new(),
+                });
                 script.index.insert(lower, idx);
                 cur_sec = Some(idx);
                 continue;
@@ -279,17 +291,25 @@ pub fn parse(content: &str) -> ParsedScript {
                     }
                     "LABEL" => {}
                     "BREAK" => {
-                        push_action(&mut seg, mode, Action {
-                            action_type: "BREAK".into(),
-                            args: Vec::new(),
-                        });
+                        push_action(
+                            &mut seg,
+                            mode,
+                            Action {
+                                action_type: "BREAK".into(),
+                                args: Vec::new(),
+                            },
+                        );
                     }
                     _ => {
                         let args = tokenize_args(rest);
-                        push_action(&mut seg, mode, Action {
-                            action_type: keyword.clone(),
-                            args,
-                        });
+                        push_action(
+                            &mut seg,
+                            mode,
+                            Action {
+                                action_type: keyword.clone(),
+                                args,
+                            },
+                        );
                         debug!("NPC script: unknown directive #{}", keyword);
                     }
                 }
@@ -310,14 +330,24 @@ pub fn parse(content: &str) -> ParsedScript {
                     let tokens = tokenize_args(line);
                     if let Some(ct) = tokens.first().cloned() {
                         let args = tokens.into_iter().skip(1).collect();
-                        seg.checks.push(Check { check_type: ct.to_uppercase(), args });
+                        seg.checks.push(Check {
+                            check_type: ct.to_uppercase(),
+                            args,
+                        });
                     }
                 }
                 ParseMode::Act | ParseMode::ElseAct => {
                     let tokens = tokenize_args(line);
                     if let Some(at) = tokens.first().cloned() {
                         let args = tokens.into_iter().skip(1).collect();
-                        push_action(&mut seg, mode, Action { action_type: at.to_uppercase(), args });
+                        push_action(
+                            &mut seg,
+                            mode,
+                            Action {
+                                action_type: at.to_uppercase(),
+                                args,
+                            },
+                        );
                     }
                 }
             }
@@ -362,7 +392,14 @@ pub fn parse(content: &str) -> ParsedScript {
                 Some(s) => s,
                 None => return result, // 玩家已离线，停止
             };
-            let passed = eval_checks(world, session_id, &player_state, &seg.checks, &seg.or_groups).await;
+            let passed = eval_checks(
+                world,
+                session_id,
+                &player_state,
+                &seg.checks,
+                &seg.or_groups,
+            )
+            .await;
             let (actions, say_src) = if passed {
                 (seg.actions.clone(), seg.say.clone())
             } else {
@@ -371,7 +408,15 @@ pub fn parse(content: &str) -> ParsedScript {
 
             // 收集 say（变量替换，用 segment 开头获取的 player_state，避免每行 actor 往返）
             for raw in &say_src {
-                let line = replace_vars(world, session_id, raw, &player_state, &npc.name, custom_vars).await;
+                let line = replace_vars(
+                    world,
+                    session_id,
+                    raw,
+                    &player_state,
+                    &npc.name,
+                    custom_vars,
+                )
+                .await;
                 result.say_lines.push(line);
             }
 
@@ -499,7 +544,9 @@ pub async fn replace_vars(
     out = out.replace("<$gender>", gender_name(player.gender));
 
     // 地图/坐标（C# MAP=CurrentMap.Info.FileName）
-    let map_name = world.map_infos.get(&(player.map_index as i32))
+    let map_name = world
+        .map_infos
+        .get(&(player.map_index as i32))
         .map(|m| m.file_name.clone())
         .unwrap_or_default();
     out = out.replace("<$MAP>", &map_name);
@@ -529,7 +576,9 @@ pub async fn replace_vars(
     out = out.replace("<$maplight>", &format!("{:?}", world.current_light));
 
     // 行会名（C# "GuildName 行会" / NoGuild）
-    let guild_name = player.guild_name.as_deref()
+    let guild_name = player
+        .guild_name
+        .as_deref()
         .map(|g| format!("{} 行会", g))
         .unwrap_or_else(|| "无行会".to_string());
     out = out.replace("<$GUILDNAME>", &guild_name);
@@ -537,7 +586,9 @@ pub async fn replace_vars(
 
     // 账户积分（C# player.Account.Credit；db 权威，异步查询）
     let credit = if let Some(record) = world.players.get(&session_id) {
-        crate::db::get_account_credit(&world.db_pool, &record.account_username).await.unwrap_or(0)
+        crate::db::get_account_credit(&world.db_pool, &record.account_username)
+            .await
+            .unwrap_or(0)
     } else {
         0
     };
@@ -545,9 +596,7 @@ pub async fn replace_vars(
     out = out.replace("<$credit>", &credit.to_string());
 
     // 待收取邮件数（C# GetMailAwaitingCollectionAmount：统计所有未收取邮件，不限附件）
-    let parcel_amount = player.mailbox.inbox.iter()
-        .filter(|m| !m.collected)
-        .count();
+    let parcel_amount = player.mailbox.inbox.iter().filter(|m| !m.collected).count();
     out = out.replace("<$PARCELAMOUNT>", &parcel_amount.to_string());
     out = out.replace("<$parcelamount>", &parcel_amount.to_string());
 
@@ -559,29 +608,66 @@ pub async fn replace_vars(
 
     // 装备槽位（C# Equipment[i].FriendlyName / 无X）
     let eq = |slot: crate::actors::inventory::EquipmentSlot, none_label: &str| -> String {
-        player.inventory.get_equipment(slot)
+        player
+            .inventory
+            .get_equipment(slot)
             .and_then(|it| world.item_infos.get(&it.item_index))
             .map(|info| info.name.clone())
             .unwrap_or_else(|| none_label.to_string())
     };
-    out = out.replace("<$WEAPON>", &eq(crate::actors::inventory::EquipmentSlot::Weapon, "无武器"));
-    out = out.replace("<$ARMOUR>", &eq(crate::actors::inventory::EquipmentSlot::Armour, "无盔甲"));
-    out = out.replace("<$HELMET>", &eq(crate::actors::inventory::EquipmentSlot::Helmet, "无头盔"));
-    out = out.replace("<$NECKLACE>", &eq(crate::actors::inventory::EquipmentSlot::Necklace, "无项链"));
-    out = out.replace("<$BRACELET_L>", &eq(crate::actors::inventory::EquipmentSlot::BraceletL, "无手镯"));
-    out = out.replace("<$BRACELET_R>", &eq(crate::actors::inventory::EquipmentSlot::BraceletR, "无手镯"));
-    out = out.replace("<$RING_L>", &eq(crate::actors::inventory::EquipmentSlot::RingL, "无戒指"));
-    out = out.replace("<$RING_R>", &eq(crate::actors::inventory::EquipmentSlot::RingR, "无戒指"));
-    out = out.replace("<$BOOTS>", &eq(crate::actors::inventory::EquipmentSlot::Shoes, "无鞋子"));
-    out = out.replace("<$AMULET>", &eq(crate::actors::inventory::EquipmentSlot::Pendant, "无护身符"));
-    out = out.replace("<$MOUNT>", &eq(crate::actors::inventory::EquipmentSlot::Mount, "无坐骑"));
+    out = out.replace(
+        "<$WEAPON>",
+        &eq(crate::actors::inventory::EquipmentSlot::Weapon, "无武器"),
+    );
+    out = out.replace(
+        "<$ARMOUR>",
+        &eq(crate::actors::inventory::EquipmentSlot::Armour, "无盔甲"),
+    );
+    out = out.replace(
+        "<$HELMET>",
+        &eq(crate::actors::inventory::EquipmentSlot::Helmet, "无头盔"),
+    );
+    out = out.replace(
+        "<$NECKLACE>",
+        &eq(crate::actors::inventory::EquipmentSlot::Necklace, "无项链"),
+    );
+    out = out.replace(
+        "<$BRACELET_L>",
+        &eq(crate::actors::inventory::EquipmentSlot::BraceletL, "无手镯"),
+    );
+    out = out.replace(
+        "<$BRACELET_R>",
+        &eq(crate::actors::inventory::EquipmentSlot::BraceletR, "无手镯"),
+    );
+    out = out.replace(
+        "<$RING_L>",
+        &eq(crate::actors::inventory::EquipmentSlot::RingL, "无戒指"),
+    );
+    out = out.replace(
+        "<$RING_R>",
+        &eq(crate::actors::inventory::EquipmentSlot::RingR, "无戒指"),
+    );
+    out = out.replace(
+        "<$BOOTS>",
+        &eq(crate::actors::inventory::EquipmentSlot::Shoes, "无鞋子"),
+    );
+    out = out.replace(
+        "<$AMULET>",
+        &eq(crate::actors::inventory::EquipmentSlot::Pendant, "无护身符"),
+    );
+    out = out.replace(
+        "<$MOUNT>",
+        &eq(crate::actors::inventory::EquipmentSlot::Mount, "无坐骑"),
+    );
     // Rust 无对应槽位：按 C# 文案返回「无」
     out = out.replace("<$BELT>", "无腰带");
     out = out.replace("<$STONE>", "无宝石");
     out = out.replace("<$TORCH>", "无火把");
 
     // 坐骑耐久（C# MOUNTLOYALTY = CurrentDura (MaxDura) / NoMount）
-    let mount_dura = player.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Mount)
+    let mount_dura = player
+        .inventory
+        .get_equipment(crate::actors::inventory::EquipmentSlot::Mount)
         .map(|it| format!("{} ({})", it.current_dura, it.max_dura))
         .unwrap_or_else(|| "无坐骑".to_string());
     out = out.replace("<$MOUNTLOYALTY>", &mount_dura);
@@ -591,8 +677,12 @@ pub async fn replace_vars(
     let rent_fee = world.conquest_cfg.buy_gold.to_string();
     out = out.replace("<$GUILDRENTFEE>", &rent_fee);
     out = out.replace("<$guildrentfee>", &rent_fee);
-    let owns_gt = player.guild_name.as_deref()
-        .and_then(|g| world.conquest_instances.iter().find(|c| c.owner_guild.as_deref() == Some(g)));
+    let owns_gt = player.guild_name.as_deref().and_then(|g| {
+        world
+            .conquest_instances
+            .iter()
+            .find(|c| c.owner_guild.as_deref() == Some(g))
+    });
     let extend_fee = owns_gt
         .map(|_| format!("延长费用 {}", world.conquest_cfg.extend_gold))
         .unwrap_or_else(|| "无".to_string());
@@ -609,7 +699,11 @@ pub async fn replace_vars(
     out = out.replace("<$agitguildname>", agit_name);
 
     // 行会宣战费用/时长（C# Settings.Guild_WarCost / Guild_WarTime）
-    if let Ok((war_cost, war_time)) = world.social_ref.ask(crate::actors::social::NpcGetGuildWarSettings).await {
+    if let Ok((war_cost, war_time)) = world
+        .social_ref
+        .ask(crate::actors::social::NpcGetGuildWarSettings)
+        .await
+    {
         let war_cost_s = war_cost.to_string();
         out = out.replace("<$GUILDWARFEE>", &war_cost_s);
         out = out.replace("<$guildwarfee>", &war_cost_s);
@@ -651,17 +745,26 @@ fn resolve_num_var(var_ref: &str, custom_vars: &HashMap<String, String>) -> i32 
     } else {
         format!("%{}", var_ref)
     };
-    custom_vars.get(&key).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0)
+    custom_vars
+        .get(&key)
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(0)
 }
 
 /// 函数式变量替换 `<$NAME(A0)>`（对齐 C# ReplaceValue 的 varRegex/oneValRegex 形式：
 /// OUTPUT / CONQUESTOWNER / CONQUESTGOLD / CONQUESTRATE / CONQUESTSCHEDULE）
-fn replace_function_vars(out: &str, world: &WorldActor, custom_vars: &HashMap<String, String>) -> String {
+fn replace_function_vars(
+    out: &str,
+    world: &WorldActor,
+    custom_vars: &HashMap<String, String>,
+) -> String {
     let mut result = out.to_string();
     let mut pos = 0usize;
     while let Some(rel) = result[pos..].find("<$") {
         let start = pos + rel;
-        let Some(end_rel) = result[start..].find('>') else { break };
+        let Some(end_rel) = result[start..].find('>') else {
+            break;
+        };
         let end = start + end_rel + 1; // 含 '>'
         let token = &result[start + 2..end - 1];
         let mut replaced: Option<String> = None;
@@ -674,12 +777,26 @@ fn replace_function_vars(out: &str, world: &WorldActor, custom_vars: &HashMap<St
                 let conquest = world.conquest_instances.iter().find(|c| c.id == idx);
                 replaced = match name.to_uppercase().as_str() {
                     "OUTPUT" => Some(idx.to_string()),
-                    "CONQUESTOWNER" => Some(conquest.and_then(|c| c.owner_guild.clone())
-                        .unwrap_or_else(|| "无所有者".to_string())),
-                    "CONQUESTGOLD" => Some(conquest.map(|c| c.gold_storage.to_string()).unwrap_or_default()),
-                    "CONQUESTRATE" => Some(conquest.map(|c| format!("{}%", c.tax_rate)).unwrap_or_default()),
-                    "CONQUESTSCHEDULE" => Some(conquest.and_then(|c| c.attacker_guild.clone())
-                        .unwrap_or_else(|| "未宣战".to_string())),
+                    "CONQUESTOWNER" => Some(
+                        conquest
+                            .and_then(|c| c.owner_guild.clone())
+                            .unwrap_or_else(|| "无所有者".to_string()),
+                    ),
+                    "CONQUESTGOLD" => Some(
+                        conquest
+                            .map(|c| c.gold_storage.to_string())
+                            .unwrap_or_default(),
+                    ),
+                    "CONQUESTRATE" => Some(
+                        conquest
+                            .map(|c| format!("{}%", c.tax_rate))
+                            .unwrap_or_default(),
+                    ),
+                    "CONQUESTSCHEDULE" => Some(
+                        conquest
+                            .and_then(|c| c.attacker_guild.clone())
+                            .unwrap_or_else(|| "未宣战".to_string()),
+                    ),
                     _ => None,
                 };
             }
@@ -793,9 +910,17 @@ async fn eval_one_check(
             if idx == 0 {
                 false
             } else {
-                let total: u16 = player.inventory.backpack.iter().flatten()
+                let total: u16 = player
+                    .inventory
+                    .backpack
+                    .iter()
+                    .flatten()
                     .filter(|s| s.item.item_index == idx)
-                    .filter(|s| min_dura.map(|d| (s.item.current_dura as u32) >= d * 1000).unwrap_or(true))
+                    .filter(|s| {
+                        min_dura
+                            .map(|d| (s.item.current_dura as u32) >= d * 1000)
+                            .unwrap_or(true)
+                    })
                     .map(|s| s.item.count)
                     .sum();
                 total >= cnt
@@ -845,7 +970,12 @@ async fn eval_one_check(
         "CHECK" => {
             if let Some(flag) = parse_flag(arg0()) {
                 let want = arg1().parse::<i32>().unwrap_or(1);
-                player.flags.get(&format!("NPC_FLAG_{}", flag)).copied().unwrap_or(0) == want
+                player
+                    .flags
+                    .get(&format!("NPC_FLAG_{}", flag))
+                    .copied()
+                    .unwrap_or(0)
+                    == want
             } else {
                 false
             }
@@ -864,29 +994,38 @@ async fn eval_one_check(
         }
         // CHECKBUFF <type> — 检查是否拥有指定 Buff（对齐 C# CheckType.CheckBuff：HasBuff；
         // BuffType 带数据，用 discriminant 比较类型）
-        "CHECKBUFF" => {
-            match parse_buff_type(arg0()) {
-                Some(want_bt) => {
-                    let want_disc = std::mem::discriminant(&want_bt);
-                    player.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == want_disc)
-                }
-                None => false,
+        "CHECKBUFF" => match parse_buff_type(arg0()) {
+            Some(want_bt) => {
+                let want_disc = std::mem::discriminant(&want_bt);
+                player
+                    .buffs
+                    .iter()
+                    .any(|b| std::mem::discriminant(&b.buff_type) == want_disc)
             }
-        }
+            None => false,
+        },
         // CHECKTIMER <key> <op> <seconds> — 检查计时器剩余秒数（对齐 C# CheckType.CheckTimer；
         // 先查全局 Envir.Timers["_-"+key]，再查玩家个人计时器；无计时器视为 0）
         "CHECKTIMER" => {
             let key = arg0().parse::<i32>().unwrap_or(0);
             let (op, want) = parse_op_amount(&args[1..]);
-            let expire = world.npc_timers.get(&GLOBAL_TIMER_SESSION).and_then(|m| m.get(&key)).copied()
-                .or_else(|| world.npc_timers.get(&session_id).and_then(|m| m.get(&key)).copied());
+            let expire = world
+                .npc_timers
+                .get(&GLOBAL_TIMER_SESSION)
+                .and_then(|m| m.get(&key))
+                .copied()
+                .or_else(|| {
+                    world
+                        .npc_timers
+                        .get(&session_id)
+                        .and_then(|m| m.get(&key))
+                        .copied()
+                });
             let remaining = npc_timer_remaining_secs(world.tick_count, expire);
             compare_i64(remaining, op, want)
         }
         // CHECKDAY / DAYOFWEEK <DayOfWeek> — 当前星期几（对齐 C# CheckType.CheckDay；C# 命令名为 DAYOFWEEK）
-        "CHECKDAY" | "DAYOFWEEK" => {
-            now_weekday_upper().eq_ignore_ascii_case(arg0().trim())
-        }
+        "CHECKDAY" | "DAYOFWEEK" => now_weekday_upper().eq_ignore_ascii_case(arg0().trim()),
         // CHECKHOUR / HOUR <hour> — 当前小时（对齐 C# CheckType.CheckHour；C# 命令名为 HOUR）
         "CHECKHOUR" | "HOUR" => {
             let want = arg0().parse::<u32>().unwrap_or(u32::MAX);
@@ -900,8 +1039,9 @@ async fn eval_one_check(
         // CHECKNAMELIST <file> — 玩家名在名单文件（对齐 C# CheckType.CheckNameList）
         "CHECKNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { false }
-            else {
+            if file_path.is_empty() {
+                false
+            } else {
                 let base = world.script_dir.clone();
                 let path = base.join(file_path);
                 path.starts_with(&base) && name_list_contains(&path, &player.name)
@@ -910,8 +1050,9 @@ async fn eval_one_check(
         // CHECKGUILDNAME <file> — 行会名在名单文件（对齐 C# CheckType.CheckGuildNameList；需在行会）
         "CHECKGUILDNAME" | "CHECKGUILDNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { false }
-            else if let Some(guild_name) = &player.guild_name {
+            if file_path.is_empty() {
+                false
+            } else if let Some(guild_name) = &player.guild_name {
                 let base = world.script_dir.clone();
                 let path = base.join(file_path);
                 path.starts_with(&base) && name_list_contains(&path, guild_name)
@@ -926,9 +1067,14 @@ async fn eval_one_check(
             let count = if let Some(mi) = map_index_by_name(world, map_name) {
                 let mut n = 0i64;
                 for (sid, r) in &world.players {
-                    if *sid == session_id { n += 1; continue; }
+                    if *sid == session_id {
+                        n += 1;
+                        continue;
+                    }
                     if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
-                        if os.map_index == mi { n += 1; }
+                        if os.map_index == mi {
+                            n += 1;
+                        }
                     }
                 }
                 n
@@ -946,13 +1092,20 @@ async fn eval_one_check(
             let map_name = args.get(3).map(|s| s.as_str()).unwrap_or("");
             let count = if let Some(mi) = map_index_by_name(world, map_name) {
                 // 怪物名是否存在（去空格、忽略大小写）
-                let known = world.monster_name_index.keys()
+                let known = world
+                    .monster_name_index
+                    .keys()
                     .any(|k| k.replace(' ', "").eq_ignore_ascii_case(monster_name));
                 if !known {
                     -1
                 } else {
-                    world.monsters.values()
-                        .filter(|m| m.map_index == mi && m.name.replace(' ', "").eq_ignore_ascii_case(monster_name))
+                    world
+                        .monsters
+                        .values()
+                        .filter(|m| {
+                            m.map_index == mi
+                                && m.name.replace(' ', "").eq_ignore_ascii_case(monster_name)
+                        })
                         .count() as i64
                 }
             } else {
@@ -965,7 +1118,11 @@ async fn eval_one_check(
             let (op, want) = parse_op_amount(args);
             let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
             let count = if let Some(mi) = map_index_by_name(world, map_name) {
-                world.monsters.values().filter(|m| m.map_index == mi).count() as i64
+                world
+                    .monsters
+                    .values()
+                    .filter(|m| m.map_index == mi)
+                    .count() as i64
             } else {
                 -1
             };
@@ -974,14 +1131,23 @@ async fn eval_one_check(
         // PETLEVEL <op> <level> — 宠物等级比较（对齐 C# CheckType.PetLevel；无宠物视为失败）
         "PETLEVEL" => {
             let (op, want) = parse_op_amount(args);
-            let level = player.creature_log.active_creature.as_ref().map(|c| c.level as i64).unwrap_or(-1);
+            let level = player
+                .creature_log
+                .active_creature
+                .as_ref()
+                .map(|c| c.level as i64)
+                .unwrap_or(-1);
             compare_i64(level, op, want)
         }
         // PETCOUNT <op> <count> — 宠物数量（active + owned，对齐 C# CheckType.PetCount）
         "PETCOUNT" => {
             let (op, want) = parse_op_amount(args);
             let pets = player.creature_log.owned_creatures.len() as i64
-                + if player.creature_log.active_creature.is_some() { 1 } else { 0 };
+                + if player.creature_log.active_creature.is_some() {
+                    1
+                } else {
+                    0
+                };
             compare_i64(pets, op, want)
         }
         // CHECKPET [宠物名] — 是否有宠物（对齐 C# CheckType.CheckPet）
@@ -995,11 +1161,18 @@ async fn eval_one_check(
             } else {
                 let want = name.to_lowercase();
                 let pet_matches = |c: &crate::actors::creature::IntelligentCreature| {
-                    c.custom_name.as_deref().map(|n| n.to_lowercase() == want).unwrap_or(false)
+                    c.custom_name
+                        .as_deref()
+                        .map(|n| n.to_lowercase() == want)
+                        .unwrap_or(false)
                         || format!("{:?}", c.creature_type).to_lowercase() == want
                 };
-                let active_match = player.creature_log.active_creature.as_ref()
-                    .map(|c| pet_matches(c)).unwrap_or(false);
+                let active_match = player
+                    .creature_log
+                    .active_creature
+                    .as_ref()
+                    .map(|c| pet_matches(c))
+                    .unwrap_or(false);
                 active_match || player.creature_log.owned_creatures.iter().any(pet_matches)
             }
         }
@@ -1009,14 +1182,19 @@ async fn eval_one_check(
         "CHECKWEDDINGRING" => {
             if player.spouse_name.is_none() {
                 false
-            } else if let Some(ring) = player.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL) {
+            } else if let Some(ring) = player
+                .inventory
+                .get_equipment(crate::actors::inventory::EquipmentSlot::RingL)
+            {
                 if ring.wedding_ring != 0 {
                     // 已是结婚戒指，不能再制作
                     false
                 } else {
                     // 戒指类型允许结婚戒指（C# ItemInfo.Bind.NoWeddingRing = 0x0800）
                     let no_wedding = mir2_shared::enums::BindMode::NO_WEDDING_RING.bits() as i32;
-                    world.item_infos.get(&ring.item_index)
+                    world
+                        .item_infos
+                        .get(&ring.item_index)
                         .map(|info| (info.bind_mode & no_wedding) == 0)
                         .unwrap_or(true)
                 }
@@ -1028,9 +1206,15 @@ async fn eval_one_check(
         "CHECKRANGE" => {
             let x = arg0().parse::<i32>().unwrap_or(i32::MIN);
             let y = arg1().parse::<i32>().unwrap_or(i32::MIN);
-            let range = args.get(2).map(|s| s.as_str()).unwrap_or("").parse::<i64>().unwrap_or(-1);
-            if range < 0 { false }
-            else {
+            let range = args
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("")
+                .parse::<i64>()
+                .unwrap_or(-1);
+            if range < 0 {
+                false
+            } else {
                 let dx = (player.x as i64) - x as i64;
                 let dy = (player.y as i64) - y as i64;
                 dx * dx + dy * dy <= range * range
@@ -1043,19 +1227,21 @@ async fn eval_one_check(
             !want.is_empty() && cur == want
         }
         // CHECKRELATIONSHIP — 是否已婚（对齐 C# CheckType.CheckRelationship：player.Info.Married != 0）
-        "CHECKRELATIONSHIP" => {
-            player.spouse_name.is_some()
-        }
+        "CHECKRELATIONSHIP" => player.spouse_name.is_some(),
         // HEROLEVEL <op> <level> — 当前英雄等级（对齐 C# CheckType.HeroLevel）
         "HEROLEVEL" => {
             let (op, want) = parse_op_amount(args);
-            let level = current_hero(world, session_id, player).map(|h| h.level as i64).unwrap_or(-1);
+            let level = current_hero(world, session_id, player)
+                .map(|h| h.level as i64)
+                .unwrap_or(-1);
             compare_i64(level, op, want)
         }
         // CHECKHEROCLASS <class> — 当前英雄职业（对齐 C# CheckType.CheckHeroClass）
         "CHECKHEROCLASS" => {
             if let Some(cls) = parse_class(arg0()) {
-                current_hero(world, session_id, player).map(|h| h.class == cls).unwrap_or(false)
+                current_hero(world, session_id, player)
+                    .map(|h| h.class == cls)
+                    .unwrap_or(false)
             } else {
                 false
             }
@@ -1063,7 +1249,9 @@ async fn eval_one_check(
         // CHECKHEROGENDER <male|female|0|1> — 当前英雄性别（对齐 C# CheckType.CheckHeroGender）
         "CHECKHEROGENDER" => {
             if let Some(g) = parse_gender(arg0()) {
-                current_hero(world, session_id, player).map(|h| h.gender == g).unwrap_or(false)
+                current_hero(world, session_id, player)
+                    .map(|h| h.gender == g)
+                    .unwrap_or(false)
             } else {
                 false
             }
@@ -1071,7 +1259,9 @@ async fn eval_one_check(
         // CHECKCONQUEST <index> — 领地不在战争中（对齐 C# CheckType.CheckConquest：failed=WarIsOn）
         "CHECKCONQUEST" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
-            world.conquest_instances.iter()
+            world
+                .conquest_instances
+                .iter()
                 .find(|c| c.id == index)
                 .map(|c| c.state != crate::actors::world::conquest::WarState::InProgress)
                 .unwrap_or(false)
@@ -1080,7 +1270,9 @@ async fn eval_one_check(
         "CONQUESTOWNER" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             if let Some(guild_name) = &player.guild_name {
-                world.conquest_instances.iter()
+                world
+                    .conquest_instances
+                    .iter()
                     .find(|c| c.id == index)
                     .map(|c| c.owner_guild.as_deref() == Some(guild_name.as_str()))
                     .unwrap_or(false)
@@ -1092,11 +1284,23 @@ async fn eval_one_check(
         "AFFORDGATE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
-            if player.guild_name.is_none() || index < 0 || id < 0 { false }
-            else {
-                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::CastleGate, id);
-                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
-                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            if player.guild_name.is_none() || index < 0 || id < 0 {
+                false
+            } else {
+                let oid = world.find_siege_structure(
+                    index,
+                    crate::actors::world::conquest::SiegeStructureType::CastleGate,
+                    id,
+                );
+                let cost = oid
+                    .and_then(|o| world.siege_structures.get(&o))
+                    .map(|s| s.repair_cost())
+                    .unwrap_or(0);
+                let gold = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGetGuildGold { session_id })
+                    .await
+                    .unwrap_or(0);
                 cost > 0 && gold >= cost
             }
         }
@@ -1104,11 +1308,23 @@ async fn eval_one_check(
         "AFFORDWALL" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
-            if player.guild_name.is_none() || index < 0 || id < 0 { false }
-            else {
-                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::Wall, id);
-                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
-                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            if player.guild_name.is_none() || index < 0 || id < 0 {
+                false
+            } else {
+                let oid = world.find_siege_structure(
+                    index,
+                    crate::actors::world::conquest::SiegeStructureType::Wall,
+                    id,
+                );
+                let cost = oid
+                    .and_then(|o| world.siege_structures.get(&o))
+                    .map(|s| s.repair_cost())
+                    .unwrap_or(0);
+                let gold = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGetGuildGold { session_id })
+                    .await
+                    .unwrap_or(0);
                 cost > 0 && gold >= cost
             }
         }
@@ -1116,11 +1332,23 @@ async fn eval_one_check(
         "AFFORDGUARD" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
-            if player.guild_name.is_none() || index < 0 || id < 0 { false }
-            else {
-                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::ArcherTower, id);
-                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
-                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            if player.guild_name.is_none() || index < 0 || id < 0 {
+                false
+            } else {
+                let oid = world.find_siege_structure(
+                    index,
+                    crate::actors::world::conquest::SiegeStructureType::ArcherTower,
+                    id,
+                );
+                let cost = oid
+                    .and_then(|o| world.siege_structures.get(&o))
+                    .map(|s| s.repair_cost())
+                    .unwrap_or(0);
+                let gold = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGetGuildGold { session_id })
+                    .await
+                    .unwrap_or(0);
                 cost > 0 && gold >= cost
             }
         }
@@ -1129,11 +1357,23 @@ async fn eval_one_check(
         "AFFORDSIEGE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
-            if player.guild_name.is_none() || index < 0 || id < 0 { false }
-            else {
-                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::CastleGate, id);
-                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
-                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            if player.guild_name.is_none() || index < 0 || id < 0 {
+                false
+            } else {
+                let oid = world.find_siege_structure(
+                    index,
+                    crate::actors::world::conquest::SiegeStructureType::CastleGate,
+                    id,
+                );
+                let cost = oid
+                    .and_then(|o| world.siege_structures.get(&o))
+                    .map(|s| s.repair_cost())
+                    .unwrap_or(0);
+                let gold = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGetGuildGold { session_id })
+                    .await
+                    .unwrap_or(0);
                 cost > 0 && gold >= cost
             }
         }
@@ -1141,7 +1381,9 @@ async fn eval_one_check(
         "CHECKCREDIT" => {
             let (op, want) = parse_op_amount(args);
             let credit = if let Some(record) = world.players.get(&session_id) {
-                crate::db::get_account_credit(&world.db_pool, &record.account_username).await.unwrap_or(0) as i64
+                crate::db::get_account_credit(&world.db_pool, &record.account_username)
+                    .await
+                    .unwrap_or(0) as i64
             } else {
                 0
             };
@@ -1150,7 +1392,11 @@ async fn eval_one_check(
         // ISNEWHUMAN — 账户只有 1 个角色（新玩家，对齐 C# CheckType.IsNewHuman）
         "ISNEWHUMAN" => {
             if let Some(record) = world.players.get(&session_id) {
-                let count = crate::db::list_character_summaries(&world.db_pool, &record.account_username).await.unwrap_or_default().len();
+                let count =
+                    crate::db::list_character_summaries(&world.db_pool, &record.account_username)
+                        .await
+                        .unwrap_or_default()
+                        .len();
                 count <= 1
             } else {
                 false
@@ -1159,9 +1405,15 @@ async fn eval_one_check(
         // GROUPCHECKNEARBY — 所有组员在 NPC 附近 9 格（对齐 C# CheckType.GroupCheckNearby）
         "GROUPCHECKNEARBY" => {
             // 当前 NPC 位置
-            let Some(&npc_oid) = world.session_npc.get(&session_id) else { return false };
-            let Some(npc) = world.npcs.get(&npc_oid) else { return false };
-            let Some(gid) = player.group_id else { return false };
+            let Some(&npc_oid) = world.session_npc.get(&session_id) else {
+                return false;
+            };
+            let Some(npc) = world.npcs.get(&npc_oid) else {
+                return false;
+            };
+            let Some(gid) = player.group_id else {
+                return false;
+            };
             let mut all_nearby = true;
             for (sid, r) in &world.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
@@ -1184,9 +1436,14 @@ async fn eval_one_check(
             if player.guild_name.is_none() {
                 false
             } else {
-                world.conquest_instances.iter()
+                world
+                    .conquest_instances
+                    .iter()
                     .find(|c| c.id == index)
-                    .map(|c| c.attacker_guild.is_none() && c.state == crate::actors::world::conquest::WarState::Idle)
+                    .map(|c| {
+                        c.attacker_guild.is_none()
+                            && c.state == crate::actors::world::conquest::WarState::Idle
+                    })
                     .unwrap_or(false)
             }
         }
@@ -1197,11 +1454,23 @@ async fn eval_one_check(
             let item_name = arg0();
             let count = args.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
             let min_dura = args.get(2).and_then(|s| s.parse::<u32>().ok());
-            let idx = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)).map(|i| i.index);
+            let idx = world
+                .item_infos
+                .values()
+                .find(|i| i.name.eq_ignore_ascii_case(item_name))
+                .map(|i| i.index);
             if let Some(idx) = idx {
-                let total: u32 = player.hero_inventory.backpack.iter().flatten()
+                let total: u32 = player
+                    .hero_inventory
+                    .backpack
+                    .iter()
+                    .flatten()
                     .filter(|s| s.item.item_index == idx)
-                    .filter(|s| min_dura.map(|d| (s.item.current_dura as u32) >= d * 1000).unwrap_or(true))
+                    .filter(|s| {
+                        min_dura
+                            .map(|d| (s.item.current_dura as u32) >= d * 1000)
+                            .unwrap_or(true)
+                    })
                     .map(|s| s.item.count as u32)
                     .sum();
                 total >= count
@@ -1225,14 +1494,21 @@ async fn eval_one_check(
             if bit == 0 {
                 false
             } else {
-                let options = world.social_ref.ask(crate::actors::social::NpcGetGuildMemberOptions { session_id }).await.unwrap_or(0);
+                let options = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGetGuildMemberOptions { session_id })
+                    .await
+                    .unwrap_or(0);
                 options & bit != 0
             }
         }
         // HASGT — 行会是否拥有领地（对齐 C# CheckType.HasGT）
         "HASGT" => {
             if let Some(guild_name) = &player.guild_name {
-                world.conquest_instances.iter().any(|c| c.owner_guild.as_deref() == Some(guild_name.as_str()))
+                world
+                    .conquest_instances
+                    .iter()
+                    .any(|c| c.owner_guild.as_deref() == Some(guild_name.as_str()))
             } else {
                 false
             }
@@ -1240,20 +1516,31 @@ async fn eval_one_check(
         // CHECKGUILDGOLD <op> <amount> — 行会金币比较（对齐 C# CheckType.CheckGuildGold）
         "CHECKGUILDGOLD" => {
             let (op, want) = parse_op_amount(args);
-            let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            let gold = world
+                .social_ref
+                .ask(crate::actors::social::NpcGetGuildGold { session_id })
+                .await
+                .unwrap_or(0);
             compare_i64(gold as i64, op, want)
         }
         // CHECKCALC <left> <op> <right> — 整数比较（对齐 C# CheckType.CheckCalc）
         "CHECKCALC" => {
             let left = arg0().parse::<i64>().unwrap_or(0);
             let op = arg1();
-            let right = args.get(2).map(|s| s.as_str()).unwrap_or("").parse::<i64>().unwrap_or(0);
+            let right = args
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("")
+                .parse::<i64>()
+                .unwrap_or(0);
             compare_i64(left, op, right)
         }
         // GROUPLEADER — 是否队长（对齐 C# CheckType.Groupleader）
-        "GROUPLEADER" => {
-            world.social_ref.ask(crate::actors::social::NpcIsGroupLeader { session_id }).await.unwrap_or(false)
-        }
+        "GROUPLEADER" => world
+            .social_ref
+            .ask(crate::actors::social::NpcIsGroupLeader { session_id })
+            .await
+            .unwrap_or(false),
         // INGUILD / GUILDNAME <name>
         // INGUILD [公会名] — 在行会；指定公会名时需精确匹配（对齐 C# CheckType.InGuild）
         "INGUILD" => {
@@ -1270,10 +1557,9 @@ async fn eval_one_check(
             if let Ok(idx) = want.parse::<u16>() {
                 player.map_index == idx
             } else {
-                world
-                    .map_infos
-                    .values()
-                    .any(|m| m.file_name.eq_ignore_ascii_case(want) && m.index as u16 == player.map_index)
+                world.map_infos.values().any(|m| {
+                    m.file_name.eq_ignore_ascii_case(want) && m.index as u16 == player.map_index
+                })
             }
         }
         // CHECKGENDER <Male|Female|0|1>
@@ -1311,11 +1597,19 @@ async fn eval_one_check(
         // 统计空槽数，按 op 与 count 比较；无参/缺参时按 >= 0 恒真，等价 C# 缺参丢弃检查）
         "HASBAGSPACE" => {
             let (op, want) = parse_op_amount(args);
-            let empty = player.inventory.backpack.iter().filter(|s| s.is_none()).count() as i64;
+            let empty = player
+                .inventory
+                .backpack
+                .iter()
+                .filter(|s| s.is_none())
+                .count() as i64;
             compare_i64(empty, op, want)
-        },
+        }
         _ => {
-            warn!("NPC check '{}' not implemented, treating as PASS", c.check_type);
+            warn!(
+                "NPC check '{}' not implemented, treating as PASS",
+                c.check_type
+            );
             true
         }
     }
@@ -1388,14 +1682,24 @@ async fn exec_action(
         // SETPKPOINT <points> —— 设置 PK 值（对齐 C# ActionType.SetPkPoint）
         "SETPKPOINT" => {
             let points = arg0().parse::<i32>().unwrap_or(0);
-            send_player_msg(world, session_id, crate::actors::player::SetPkPoints { points }).await;
+            send_player_msg(
+                world,
+                session_id,
+                crate::actors::player::SetPkPoints { points },
+            )
+            .await;
             debug!("NPC SETPKPOINT: {}", points);
         }
         // REDUCEPKPOINT <amount> —— 减少 PK 值（对齐 C# ActionType.ReducePkPoint）
         "REDUCEPKPOINT" => {
             let amount = arg0().parse::<i32>().unwrap_or(0);
             if amount > 0 {
-                send_player_msg(world, session_id, crate::actors::player::ReducePkPoints { amount }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::ReducePkPoints { amount },
+                )
+                .await;
                 debug!("NPC REDUCEPKPOINT: -{}", amount);
             }
         }
@@ -1406,10 +1710,16 @@ async fn exec_action(
                     send_system_message(&world.gate_ref, session_id, "你已经有行会了");
                 } else {
                     let mut body = Vec::new();
-                    let _ = world.gate_ref.tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildNameRequest as i16, &body),
-                    }).await;
+                    let _ = world
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::GuildNameRequest as i16,
+                                &body,
+                            ),
+                        })
+                        .await;
                 }
             }
         }
@@ -1417,21 +1727,40 @@ async fn exec_action(
         "GIVEGUILDGOLD" => {
             let amount = arg0().parse::<u32>().unwrap_or(0);
             if amount > 0 {
-                let _ = world.social_ref.ask(crate::actors::social::NpcGuildGoldChange { session_id, amount, change_type: 3 }).await;
+                let _ = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGuildGoldChange {
+                        session_id,
+                        amount,
+                        change_type: 3,
+                    })
+                    .await;
             }
         }
         // TAKEGUILDGOLD <amount> —— 行会仓库减少金币（对齐 C# ActionType.TakeGuildGold）
         "TAKEGUILDGOLD" => {
             let amount = arg0().parse::<u32>().unwrap_or(0);
             if amount > 0 {
-                let _ = world.social_ref.ask(crate::actors::social::NpcGuildGoldChange { session_id, amount, change_type: 2 }).await;
+                let _ = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcGuildGoldChange {
+                        session_id,
+                        amount,
+                        change_type: 2,
+                    })
+                    .await;
             }
         }
         // INCREASEPKPOINT <amount> —— 增加 PK 值（对齐 C# ActionType.IncreasePkPoint）
         "INCREASEPKPOINT" | "ADDPKPOINT" => {
             let amount = arg0().parse::<i32>().unwrap_or(0);
             if amount > 0 {
-                send_player_msg(world, session_id, crate::actors::player::AddPkPoints { points: amount }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::AddPkPoints { points: amount },
+                )
+                .await;
                 debug!("NPC INCREASEPKPOINT: +{}", amount);
             }
         }
@@ -1442,15 +1771,17 @@ async fn exec_action(
             if script_id <= 0 {
                 warn!("NPC CALL: invalid script id '{}'", arg0());
             } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
-                world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction {
+                world
+                    .npc_delayed_actions
+                    .entry(session_id)
+                    .or_default()
+                    .push(crate::actors::world::DelayedNpcAction {
                         expire_tick: world.tick_count,
                         npc_object_id: npc_oid,
                         section: "main".to_string(),
                         target_db_index: Some(script_id),
                         teleport: None,
-                    },
-                );
+                    });
                 debug!("NPC CALL: script {} [@MAIN] queued", script_id);
             } else {
                 warn!("NPC CALL: no current NPC for session {}", session_id);
@@ -1472,17 +1803,23 @@ async fn exec_action(
                             let mut given_items = 0usize;
                             for d in &drops {
                                 // C# AttemptDrop：1/分母 概率
-                                if fastrand::f64() > d.chance { continue; }
+                                if fastrand::f64() > d.chance {
+                                    continue;
+                                }
                                 // GROUP 嵌套（C# GroupedDrop）：遍历子项各自概率，first/random/全部选择
                                 if let Some(group) = &d.group {
                                     let mut hit_gold = 0u64;
                                     let mut hit_items: Vec<String> = Vec::new();
                                     for sub in &group.drops {
-                                        if fastrand::f64() > sub.chance { continue; }
+                                        if fastrand::f64() > sub.chance {
+                                            continue;
+                                        }
                                         if let Some(g) = sub.gold {
                                             let lo = g / 2;
                                             let hi = g + g / 2;
-                                            hit_gold += if hi > lo { fastrand::u32(lo..=hi) } else { lo } as u64;
+                                            hit_gold +=
+                                                if hi > lo { fastrand::u32(lo..=hi) } else { lo }
+                                                    as u64;
                                         }
                                         if let Some(item) = &sub.item_name {
                                             hit_items.push(item.clone());
@@ -1497,11 +1834,20 @@ async fn exec_action(
                                         hit_items = vec![hit_items[idx].clone()];
                                     }
                                     if hit_gold > 0 {
-                                        send_player_msg(world, session_id, AddGold { amount: hit_gold }).await;
+                                        send_player_msg(
+                                            world,
+                                            session_id,
+                                            AddGold { amount: hit_gold },
+                                        )
+                                        .await;
                                         given_gold += hit_gold;
                                     }
                                     for item_name in &hit_items {
-                                        if let Some(info) = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)) {
+                                        if let Some(info) = world
+                                            .item_infos
+                                            .values()
+                                            .find(|i| i.name.eq_ignore_ascii_case(item_name))
+                                        {
                                             give_item(world, session_id, info.index, 1).await;
                                             given_items += 1;
                                         } else {
@@ -1516,12 +1862,23 @@ async fn exec_action(
                                     let hi = gold + gold / 2;
                                     let amount = if hi > lo { fastrand::u32(lo..=hi) } else { lo };
                                     if amount > 0 {
-                                        send_player_msg(world, session_id, AddGold { amount: amount as u64 }).await;
+                                        send_player_msg(
+                                            world,
+                                            session_id,
+                                            AddGold {
+                                                amount: amount as u64,
+                                            },
+                                        )
+                                        .await;
                                         given_gold += amount as u64;
                                     }
                                 }
                                 if let Some(item_name) = &d.item_name {
-                                    if let Some(info) = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)) {
+                                    if let Some(info) = world
+                                        .item_infos
+                                        .values()
+                                        .find(|i| i.name.eq_ignore_ascii_case(item_name))
+                                    {
                                         give_item(world, session_id, info.index, 1).await;
                                         given_items += 1;
                                     } else {
@@ -1529,7 +1886,13 @@ async fn exec_action(
                                     }
                                 }
                             }
-                            debug!("NPC DROP: {} ({} entries, gold={}, items={})", file_path, drops.len(), given_gold, given_items);
+                            debug!(
+                                "NPC DROP: {} ({} entries, gold={}, items={})",
+                                file_path,
+                                drops.len(),
+                                given_gold,
+                                given_items
+                            );
                         }
                         Err(e) => warn!("NPC DROP: failed {}: {}", path.display(), e),
                     }
@@ -1550,7 +1913,12 @@ async fn exec_action(
         "GIVEMP" => {
             let amount = arg0().parse::<i32>().unwrap_or(0);
             if amount > 0 {
-                send_player_msg(world, session_id, crate::actors::player::RestoreMp { amount }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::RestoreMp { amount },
+                )
+                .await;
                 debug!("NPC GIVEMP: +{}", amount);
             }
         }
@@ -1559,20 +1927,34 @@ async fn exec_action(
             let amount = arg0().parse::<i32>().unwrap_or(0);
             if amount > 0 {
                 // 与击杀/任务奖励同一入口：自动处理 CanGainExp / 无经验地图 / 倍率
-                send_player_msg(world, session_id, crate::actors::player::AddExperience {
-                    amount: world.apply_global_exp_multiplier(amount),
-                    experience_list: world.experience_list.clone(),
-                }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::AddExperience {
+                        amount: world.apply_global_exp_multiplier(amount),
+                        experience_list: world.experience_list.clone(),
+                    },
+                )
+                .await;
                 debug!("NPC GIVEEXP: +{}", amount);
             }
         }
         // CLEARPETS —— 清除所有宠物（对齐 C# ActionType.ClearPets）
         "CLEARPETS" => {
             if let Some(mut st) = current_player_state(world, session_id).await {
-                if st.creature_log.active_creature.is_some() || !st.creature_log.owned_creatures.is_empty() {
+                if st.creature_log.active_creature.is_some()
+                    || !st.creature_log.owned_creatures.is_empty()
+                {
                     st.creature_log.active_creature = None;
                     st.creature_log.owned_creatures.clear();
-                    send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
+                    send_player_msg(
+                        world,
+                        session_id,
+                        crate::actors::player::SetCreature {
+                            creature_log: st.creature_log,
+                        },
+                    )
+                    .await;
                     debug!("NPC CLEARPETS: all pets cleared");
                 }
             }
@@ -1595,7 +1977,12 @@ async fn exec_action(
         "GIVEPEARLS" => {
             let amount = arg0().parse::<u32>().unwrap_or(0);
             if amount > 0 {
-                send_player_msg(world, session_id, crate::actors::player::GainPearls { amount }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::GainPearls { amount },
+                )
+                .await;
                 debug!("NPC GIVEPEARLS: +{}", amount);
             }
         }
@@ -1603,7 +1990,12 @@ async fn exec_action(
         "TAKEPEARLS" => {
             let amount = arg0().parse::<u32>().unwrap_or(0);
             if amount > 0 {
-                send_player_msg(world, session_id, crate::actors::player::LosePearls { amount }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::LosePearls { amount },
+                )
+                .await;
                 debug!("NPC TAKEPEARLS: -{}", amount);
             }
         }
@@ -1637,7 +2029,14 @@ async fn exec_action(
         "CONQUESTSIEGE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             if index >= 0 {
-                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::Catapult, None).await;
+                world
+                    .npc_spawn_siege_structure(
+                        session_id,
+                        index,
+                        crate::actors::world::conquest::SiegeStructureType::Catapult,
+                        None,
+                    )
+                    .await;
             }
         }
         // CONQUESTGUARD <index> <id> —— 生成守卫（对齐 C# ActionType.ConquestGuard；按 id 落点生成箭塔结构）
@@ -1645,7 +2044,14 @@ async fn exec_action(
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().ok();
             if index >= 0 {
-                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::ArcherTower, id).await;
+                world
+                    .npc_spawn_siege_structure(
+                        session_id,
+                        index,
+                        crate::actors::world::conquest::SiegeStructureType::ArcherTower,
+                        id,
+                    )
+                    .await;
             }
         }
         // CONQUESTGATE <index> <id> —— 修复城门（对齐 C# ActionType.ConquestGate）
@@ -1653,7 +2059,14 @@ async fn exec_action(
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
             if index >= 0 && id >= 0 {
-                world.npc_repair_siege_structure(session_id, index, id, crate::actors::world::conquest::SiegeStructureType::CastleGate).await;
+                world
+                    .npc_repair_siege_structure(
+                        session_id,
+                        index,
+                        id,
+                        crate::actors::world::conquest::SiegeStructureType::CastleGate,
+                    )
+                    .await;
             }
         }
         // CONQUESTWALL <index> <id> —— 修复城墙（对齐 C# ActionType.ConquestWall）
@@ -1661,7 +2074,14 @@ async fn exec_action(
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
             if index >= 0 && id >= 0 {
-                world.npc_repair_siege_structure(session_id, index, id, crate::actors::world::conquest::SiegeStructureType::Wall).await;
+                world
+                    .npc_repair_siege_structure(
+                        session_id,
+                        index,
+                        id,
+                        crate::actors::world::conquest::SiegeStructureType::Wall,
+                    )
+                    .await;
             }
         }
         // CONQUESTREPAIRALL <index> —— GM 修复全部（对齐 C# ActionType.ConquestRepairAll）
@@ -1684,7 +2104,9 @@ async fn exec_action(
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
             if index >= 0 && id >= 0 {
-                world.npc_open_close_gate(session_id, index, id, false).await;
+                world
+                    .npc_open_close_gate(session_id, index, id, false)
+                    .await;
             }
         }
         // TAKECONQUESTGOLD <index> —— 所有者取走攻城金库（对齐 C# ActionType.TakeConquestGold）
@@ -1725,7 +2147,12 @@ async fn exec_action(
             let skill_name = arg0();
             if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
                 let level = arg1().parse::<u8>().unwrap_or(0).min(3);
-                send_player_msg(world, session_id, crate::actors::player::LearnHeroMagicWithLevel { spell, level }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::LearnHeroMagicWithLevel { spell, level },
+                )
+                .await;
                 debug!("NPC HEROGIVESKILL: spell={} level={}", spell, level);
             } else {
                 warn!("NPC HEROGIVESKILL: unknown skill '{}'", skill_name);
@@ -1735,7 +2162,12 @@ async fn exec_action(
         "HEROREMOVESKILL" => {
             let skill_name = arg0();
             if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
-                send_player_msg(world, session_id, crate::actors::player::RemoveHeroMagicWithId { spell }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::RemoveHeroMagicWithId { spell },
+                )
+                .await;
                 debug!("NPC HEROREMOVESKILL: spell={}", spell);
             } else {
                 warn!("NPC HEROREMOVESKILL: unknown skill '{}'", skill_name);
@@ -1744,14 +2176,24 @@ async fn exec_action(
         // CANGAINEXP <true|false> —— 设置是否可获得经验（对齐 C# ActionType.CanGainExp）
         "CANGAINEXP" => {
             let can = arg0().eq_ignore_ascii_case("true") || arg0() == "1";
-            send_player_msg(world, session_id, crate::actors::player::SetCanGainExp { can }).await;
+            send_player_msg(
+                world,
+                session_id,
+                crate::actors::player::SetCanGainExp { can },
+            )
+            .await;
             debug!("NPC CANGAINEXP: {}", can);
         }
         // CHANGELEVEL <level> —— 设置等级（对齐 C# ActionType.ChangeLevel：设等级 + 经验 0 + LevelUp）
         "CHANGELEVEL" => {
             let level = arg0().parse::<u16>().unwrap_or(0);
             if level > 0 {
-                send_player_msg(world, session_id, crate::actors::player::ChangeLevel { level }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::ChangeLevel { level },
+                )
+                .await;
                 debug!("NPC CHANGELEVEL: {}", level);
             }
         }
@@ -1759,7 +2201,15 @@ async fn exec_action(
         "GIVEEXP" | "ADDEXP" | "ADD EXP" => {
             let amt = arg0().parse::<i32>().unwrap_or(0);
             let boosted = world.apply_global_exp_multiplier(amt);
-            send_player_msg(world, session_id, AddExperience { amount: boosted , experience_list: world.experience_list.clone()}).await;
+            send_player_msg(
+                world,
+                session_id,
+                AddExperience {
+                    amount: boosted,
+                    experience_list: world.experience_list.clone(),
+                },
+            )
+            .await;
         }
         // GOTO @section
         "GOTO" => {
@@ -1786,13 +2236,24 @@ async fn exec_action(
                 auto_roll,
             };
             let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                let _ = world.gate_ref.tell(SendToClient {
-                    session_id,
-                    data: body,
-                }).await;
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &packet,
+            )
+            .is_ok()
+            {
+                let _ = world
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id,
+                        data: body,
+                    })
+                    .await;
             }
-            info!("NPC {}: ROLL type={} result={} page={} auto={}", npc.name, r#type, result, page, auto_roll);
+            info!(
+                "NPC {}: ROLL type={} result={} page={} auto={}",
+                npc.name, r#type, result, page, auto_roll
+            );
         }
         // BUYGT —— 会长购买领地（对齐 C# ActionType.BuyGT）
         "BUYGT" => {
@@ -1848,12 +2309,17 @@ async fn exec_action(
             let _instance = arg1().parse::<i32>().unwrap_or(0);
             let x = arg2().parse::<i32>().unwrap_or(0);
             let y = arg3().parse::<i32>().unwrap_or(0);
-            if let Some(map_index) = world.map_infos.values()
+            if let Some(map_index) = world
+                .map_infos
+                .values()
                 .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
                 .map(|m| m.index as u16)
             {
                 teleport_player(world, session_id, map_index, x, y).await;
-                debug!("NPC INSTANCEMOVE: map={} ({},{}) instance={}", map_name, x, y, _instance);
+                debug!(
+                    "NPC INSTANCEMOVE: map={} ({},{}) instance={}",
+                    map_name, x, y, _instance
+                );
             } else {
                 warn!("NPC INSTANCEMOVE: map '{}' not found", map_name);
             }
@@ -1904,7 +2370,9 @@ async fn exec_action(
                     (npc.x, npc.y)
                 };
                 let map_index = if let Some(map_name) = &flow.map_name {
-                    world.map_infos.values()
+                    world
+                        .map_infos
+                        .values()
                         .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
                         .map(|m| m.index as u16)
                         .unwrap_or(npc.map_index)
@@ -1913,8 +2381,13 @@ async fn exec_action(
                 } else {
                     npc.map_index
                 };
-                let spawned = world.spawn_monster_named(mob_name, tx, ty, count, map_index).await;
-                debug!("NPC MONGEN: '{}' x{} at ({},{}) map {} spawned={}", mob_name, count, tx, ty, map_index, spawned);
+                let spawned = world
+                    .spawn_monster_named(mob_name, tx, ty, count, map_index)
+                    .await;
+                debug!(
+                    "NPC MONGEN: '{}' x{} at ({},{}) map {} spawned={}",
+                    mob_name, count, tx, ty, map_index, spawned
+                );
             }
         }
         // MONCLEAR <map名|index> —— 清除指定地图所有怪物（对齐 C# ActionType.MonClear）
@@ -1923,7 +2396,9 @@ async fn exec_action(
             let map_index = if let Ok(idx) = map_ref.parse::<u16>() {
                 idx
             } else {
-                world.map_infos.values()
+                world
+                    .map_infos
+                    .values()
                     .find(|m| m.file_name.eq_ignore_ascii_case(map_ref))
                     .map(|m| m.index as u16)
                     .unwrap_or(0)
@@ -1943,12 +2418,18 @@ async fn exec_action(
                 if secs > 0 {
                     // 世界循环 100ms/tick：1 秒 = 10 ticks（对齐 C# Settings.Second * duration）
                     let ticks = secs.saturating_mul(10);
-                    send_player_msg(world, session_id, crate::actors::player::ApplyBuff {
-                        buff: crate::combat::buff::BuffInstance::new(bt, ticks, 1),
-                    }).await;
+                    send_player_msg(
+                        world,
+                        session_id,
+                        crate::actors::player::ApplyBuff {
+                            buff: crate::combat::buff::BuffInstance::new(bt, ticks, 1),
+                        },
+                    )
+                    .await;
                     // C# AddBuff(BuffType.MoonLight/DarkBody) → Sneaking=true（MapObject.cs:659-661）
                     if bt == crate::combat::buff::BuffType::Invisibility
-                        && (buff_name.eq_ignore_ascii_case("MOONLIGHT") || buff_name.eq_ignore_ascii_case("DARKBODY"))
+                        && (buff_name.eq_ignore_ascii_case("MOONLIGHT")
+                            || buff_name.eq_ignore_ascii_case("DARKBODY"))
                     {
                         world.set_sneaking(session_id, true).await;
                     }
@@ -1962,7 +2443,12 @@ async fn exec_action(
         "REMOVEBUFF" => {
             let buff_name = arg0();
             if let Some(bt) = parse_buff_type(buff_name) {
-                send_player_msg(world, session_id, crate::actors::player::RemoveBuff { buff_type: bt }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::RemoveBuff { buff_type: bt },
+                )
+                .await;
                 debug!("NPC REMOVEBUFF: '{}'", buff_name);
             } else {
                 warn!("NPC REMOVEBUFF: unknown buff type '{}'", buff_name);
@@ -1973,7 +2459,12 @@ async fn exec_action(
             let skill_name = arg0();
             if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
                 let level = arg1().parse::<u8>().unwrap_or(0).min(3);
-                send_player_msg(world, session_id, crate::actors::player::LearnMagicWithLevel { spell, level }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::LearnMagicWithLevel { spell, level },
+                )
+                .await;
                 debug!("NPC GIVESKILL: spell={} level={}", spell, level);
             } else {
                 warn!("NPC GIVESKILL: unknown skill '{}'", skill_name);
@@ -1983,7 +2474,12 @@ async fn exec_action(
         "REMOVESKILL" => {
             let skill_name = arg0();
             if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
-                send_player_msg(world, session_id, crate::actors::player::RemoveMagicWithId { spell }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::RemoveMagicWithId { spell },
+                )
+                .await;
                 debug!("NPC REMOVESKILL: spell={}", spell);
             } else {
                 warn!("NPC REMOVESKILL: unknown skill '{}'", skill_name);
@@ -1995,14 +2491,17 @@ async fn exec_action(
             let mut slots = Vec::new();
             if slot_arg.is_empty() {
                 for i in 0..crate::actors::inventory::EquipmentSlot::COUNT {
-                    if let Some(slot) = crate::actors::inventory::EquipmentSlot::from_i32(i as i32) {
+                    if let Some(slot) = crate::actors::inventory::EquipmentSlot::from_i32(i as i32)
+                    {
                         slots.push(slot);
                     }
                 }
-            } else if let Some(slot) = (0..crate::actors::inventory::EquipmentSlot::COUNT).find_map(|i| {
-                let slot = crate::actors::inventory::EquipmentSlot::from_i32(i as i32)?;
-                (format!("{:?}", slot).to_lowercase() == slot_arg).then_some(slot)
-            }) {
+            } else if let Some(slot) =
+                (0..crate::actors::inventory::EquipmentSlot::COUNT).find_map(|i| {
+                    let slot = crate::actors::inventory::EquipmentSlot::from_i32(i as i32)?;
+                    (format!("{:?}", slot).to_lowercase() == slot_arg).then_some(slot)
+                })
+            {
                 slots.push(slot);
             } else {
                 warn!("NPC UNEQUIPITEM: unknown slot '{}'", arg0());
@@ -2017,13 +2516,18 @@ async fn exec_action(
                         .unwrap_or(false);
                     if ok {
                         removed_any = true;
-                        if let Some(state) = world.recalculate_and_set_stat_bonuses(session_id).await {
+                        if let Some(state) =
+                            world.recalculate_and_set_stat_bonuses(session_id).await
+                        {
                             world.broadcast_equipment_visuals(session_id, &state).await;
                         }
                     }
                 }
             }
-            debug!("NPC UNEQUIPITEM: session={} removed={}", session_id, removed_any);
+            debug!(
+                "NPC UNEQUIPITEM: session={} removed={}",
+                session_id, removed_any
+            );
         }
         // CHANGECLASS <Warrior|...>
         "CHANGECLASS" => {
@@ -2039,10 +2543,16 @@ async fn exec_action(
             if creature_type != crate::actors::creature::CreatureType::None {
                 if let Some(mut st) = current_player_state(world, session_id).await {
                     let mut log = st.creature_log;
-                    let mut creature = crate::actors::creature::IntelligentCreature::new(creature_type);
+                    let mut creature =
+                        crate::actors::creature::IntelligentCreature::new(creature_type);
                     creature.enabled = true;
                     log.set_creature(creature);
-                    send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: log }).await;
+                    send_player_msg(
+                        world,
+                        session_id,
+                        crate::actors::player::SetCreature { creature_log: log },
+                    )
+                    .await;
                     send_system_message(&world.gate_ref, session_id, "获得新宠物！");
                     debug!("NPC GIVEPET: type={:?}", creature_type);
                 }
@@ -2052,12 +2562,20 @@ async fn exec_action(
         "GIVEPETFOOD" => {
             let amount = arg0().parse::<u8>().unwrap_or(20);
             let restored = if let Some(record) = world.players.get(&session_id) {
-                record.actor_ref.ask(crate::actors::player::RestoreCreatureHunger { amount }).await.unwrap_or(false)
+                record
+                    .actor_ref
+                    .ask(crate::actors::player::RestoreCreatureHunger { amount })
+                    .await
+                    .unwrap_or(false)
             } else {
                 false
             };
             if restored {
-                send_system_message(&world.gate_ref, session_id, &format!("宠物吃了食物，饥饿值恢复 {} 点", amount));
+                send_system_message(
+                    &world.gate_ref,
+                    session_id,
+                    &format!("宠物吃了食物，饥饿值恢复 {} 点", amount),
+                );
             } else {
                 send_system_message(&world.gate_ref, session_id, "你没有召唤宠物");
             }
@@ -2072,10 +2590,18 @@ async fn exec_action(
                 } else {
                     let want = name.to_lowercase();
                     let pet_matches = |c: &crate::actors::creature::IntelligentCreature| {
-                        c.custom_name.as_deref().map(|n| n.to_lowercase() == want).unwrap_or(false)
+                        c.custom_name
+                            .as_deref()
+                            .map(|n| n.to_lowercase() == want)
+                            .unwrap_or(false)
                             || format!("{:?}", c.creature_type).to_lowercase() == want
                     };
-                    let active_removed = st.creature_log.active_creature.as_ref().map(|c| pet_matches(c)).unwrap_or(false);
+                    let active_removed = st
+                        .creature_log
+                        .active_creature
+                        .as_ref()
+                        .map(|c| pet_matches(c))
+                        .unwrap_or(false);
                     if active_removed {
                         st.creature_log.active_creature = None;
                         true
@@ -2086,7 +2612,14 @@ async fn exec_action(
                     }
                 };
                 if removed {
-                    send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
+                    send_player_msg(
+                        world,
+                        session_id,
+                        crate::actors::player::SetCreature {
+                            creature_log: st.creature_log,
+                        },
+                    )
+                    .await;
                     debug!("NPC REMOVEPET: pet removed (name='{}')", name);
                 }
             }
@@ -2094,22 +2627,38 @@ async fn exec_action(
         // MAKEWEDDINGRING —— 制作结婚戒指（对齐 C# ActionType.MakeWeddingRing）
         "MAKEWEDDINGRING" => {
             let ok = if let Some(record) = world.players.get(&session_id) {
-                record.actor_ref.ask(crate::actors::player::MakeWeddingRing).await.unwrap_or(false)
+                record
+                    .actor_ref
+                    .ask(crate::actors::player::MakeWeddingRing)
+                    .await
+                    .unwrap_or(false)
             } else {
                 false
             };
             if !ok {
-                send_system_message(&world.gate_ref, session_id, "需要已婚并佩戴未绑定的左戒指才能制作结婚戒指");
+                send_system_message(
+                    &world.gate_ref,
+                    session_id,
+                    "需要已婚并佩戴未绑定的左戒指才能制作结婚戒指",
+                );
             }
         }
         // FORCEDIVORCE —— 强制离婚（对齐 C# ActionType.ForceDivorce）
         "FORCEDIVORCE" => {
-            let _ = world.social_ref.ask(crate::actors::social::NpcForceDivorce { session_id }).await;
+            let _ = world
+                .social_ref
+                .ask(crate::actors::social::NpcForceDivorce { session_id })
+                .await;
         }
         // CHANGEGENDER <male|female|0|1> —— 修改性别（对齐 C# ActionType.ChangeGender）
         "CHANGEGENDER" => {
             if let Some(gender) = parse_gender(arg0()) {
-                send_player_msg(world, session_id, crate::actors::player::SetGender { gender }).await;
+                send_player_msg(
+                    world,
+                    session_id,
+                    crate::actors::player::SetGender { gender },
+                )
+                .await;
                 world.refresh_player_appearance(session_id).await;
                 debug!("NPC CHANGEGENDER: {:?}", gender);
             } else {
@@ -2127,8 +2676,19 @@ async fn exec_action(
             let sound_id = arg0().parse::<i32>().unwrap_or(0);
             let packet = mir2_shared::packets::server::ui_events::PlaySound { sound_id };
             let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &packet,
+            )
+            .is_ok()
+            {
+                let _ = world
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id,
+                        data: body,
+                    })
+                    .await;
                 debug!("NPC PLAYSOUND: id={}", sound_id);
             }
         }
@@ -2137,8 +2697,19 @@ async fn exec_action(
             let url = unquote(arg0()).to_string();
             let packet = mir2_shared::packets::server::ui_events::OpenBrowser { url: url.clone() };
             let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &packet,
+            )
+            .is_ok()
+            {
+                let _ = world
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id,
+                        data: body,
+                    })
+                    .await;
                 debug!("NPC OPENBROWSER: {}", url);
             }
         }
@@ -2204,13 +2775,24 @@ async fn exec_action(
             if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 // C#：记录下达命令时玩家当前地图/坐标，到点先传送
-                let teleport = current_player_state(world, session_id).await
+                let teleport = current_player_state(world, session_id)
+                    .await
                     .map(|st| (st.map_index, st.x, st.y));
-                world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None, teleport },
+                world
+                    .npc_delayed_actions
+                    .entry(session_id)
+                    .or_default()
+                    .push(crate::actors::world::DelayedNpcAction {
+                        expire_tick,
+                        npc_object_id: npc_oid,
+                        section: section.clone(),
+                        target_db_index: None,
+                        teleport,
+                    });
+                debug!(
+                    "NPC TIMERECALL: session={} section='{}' in {}s (expire {}) teleport={:?}",
+                    session_id, section, secs, expire_tick, teleport
                 );
-                debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {}) teleport={:?}",
-                    session_id, section, secs, expire_tick, teleport);
             } else {
                 warn!("NPC TIMERECALL: no current NPC for session {}", session_id);
             }
@@ -2221,11 +2803,15 @@ async fn exec_action(
             // C#：无 section 参数 → page=""（到点仅传送，不执行脚本段）
             let section = arg1().to_string();
             if let Some(&npc_oid) = world.session_npc.get(&session_id) {
-                let Some(st) = current_player_state(world, session_id).await else { return };
+                let Some(st) = current_player_state(world, session_id).await else {
+                    return;
+                };
                 let gid = st.group_id;
                 let mut targets = vec![session_id];
                 for (sid, r) in &world.players {
-                    if *sid == session_id { continue; }
+                    if *sid == session_id {
+                        continue;
+                    }
                     if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                         if os.group_id == gid {
                             targets.push(*sid);
@@ -2235,13 +2821,25 @@ async fn exec_action(
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 for sid in &targets {
                     // C#：每位组员记录自己当前地图/坐标，到点各自传送
-                    let teleport = current_player_state(world, *sid).await
+                    let teleport = current_player_state(world, *sid)
+                        .await
                         .map(|os| (os.map_index, os.x, os.y));
                     world.npc_delayed_actions.entry(*sid).or_default().push(
-                        crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None, teleport },
+                        crate::actors::world::DelayedNpcAction {
+                            expire_tick,
+                            npc_object_id: npc_oid,
+                            section: section.clone(),
+                            target_db_index: None,
+                            teleport,
+                        },
                     );
                 }
-                debug!("NPC TIMERECALLGROUP: {} players section='{}' in {}s", targets.len(), section, secs);
+                debug!(
+                    "NPC TIMERECALLGROUP: {} players section='{}' in {}s",
+                    targets.len(),
+                    section,
+                    secs
+                );
             }
         }
         // BREAKTIMERECALL —— 取消该玩家所有 NPC 延迟执行（对齐 C# ActionType.BreakTimeRecall）
@@ -2257,9 +2855,17 @@ async fn exec_action(
                 warn!("NPC DELAYGOTO: missing section");
             } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
-                world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section, target_db_index: None, teleport: None },
-                );
+                world
+                    .npc_delayed_actions
+                    .entry(session_id)
+                    .or_default()
+                    .push(crate::actors::world::DelayedNpcAction {
+                        expire_tick,
+                        npc_object_id: npc_oid,
+                        section,
+                        target_db_index: None,
+                        teleport: None,
+                    });
             }
         }
         // SETTIMER <key> <seconds> [type] [global] —— 注册计时器（对齐 C# ActionType.SetTimer）
@@ -2272,19 +2878,41 @@ async fn exec_action(
             let global = arg3().eq_ignore_ascii_case("true") || arg3() == "1";
             // 世界循环 100ms/tick：1 秒 = 10 ticks
             let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
-            let owner = if global { GLOBAL_TIMER_SESSION } else { session_id };
-            world.npc_timers.entry(owner).or_default().insert(key, expire_tick);
+            let owner = if global {
+                GLOBAL_TIMER_SESSION
+            } else {
+                session_id
+            };
+            world
+                .npc_timers
+                .entry(owner)
+                .or_default()
+                .insert(key, expire_tick);
             if !global {
                 let packet = mir2_shared::packets::server::ui_events::SetTimer {
                     timer_id: key,
                     seconds: secs as i32,
                 };
                 let mut body = Vec::new();
-                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                    let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+                if mir2_shared::packets::base::serialize_packet(
+                    &mut std::io::Cursor::new(&mut body),
+                    &packet,
+                )
+                .is_ok()
+                {
+                    let _ = world
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id,
+                            data: body,
+                        })
+                        .await;
                 }
             }
-            debug!("NPC SETTIMER: key={} {}s global={} (expire tick {})", key, secs, global, expire_tick);
+            debug!(
+                "NPC SETTIMER: key={} {}s global={} (expire tick {})",
+                key, secs, global, expire_tick
+            );
         }
         // EXPIRETIMER <key> —— 移除计时器（对齐 C# ActionType.ExpireTimer：全局和个人都移除；发 S.ExpireTimer）
         "EXPIRETIMER" | "CLEARTIMER" => {
@@ -2297,8 +2925,19 @@ async fn exec_action(
             }
             let packet = mir2_shared::packets::server::ui_events::ExpireTimer { timer_id: key };
             let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &packet,
+            )
+            .is_ok()
+            {
+                let _ = world
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id,
+                        data: body,
+                    })
+                    .await;
             }
             debug!("NPC EXPIRETIMER: key={}", key);
         }
@@ -2318,7 +2957,9 @@ async fn exec_action(
                     let gid = st.group_id;
                     let mut targets = vec![session_id];
                     for (sid, r) in &world.players {
-                        if *sid == session_id { continue; }
+                        if *sid == session_id {
+                            continue;
+                        }
                         if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                             if os.group_id == gid {
                                 targets.push(*sid);
@@ -2329,10 +2970,20 @@ async fn exec_action(
                     let expire_tick = world.tick_count;
                     for sid in &targets {
                         world.npc_delayed_actions.entry(*sid).or_default().push(
-                            crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None, teleport: None },
+                            crate::actors::world::DelayedNpcAction {
+                                expire_tick,
+                                npc_object_id: npc_oid,
+                                section: section.clone(),
+                                target_db_index: None,
+                                teleport: None,
+                            },
                         );
                     }
-                    debug!("NPC GROUPGOTO: {} players section='{}'", targets.len(), section);
+                    debug!(
+                        "NPC GROUPGOTO: {} players section='{}'",
+                        targets.len(),
+                        section
+                    );
                 }
             }
         }
@@ -2341,17 +2992,25 @@ async fn exec_action(
             let map_name = arg0();
             let tx = arg2().parse::<i32>().unwrap_or(0);
             let ty = arg3().parse::<i32>().unwrap_or(0);
-            let target_map = world.map_infos.values()
+            let target_map = world
+                .map_infos
+                .values()
                 .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
                 .map(|m| m.index as u16);
             if let Some(map_index) = target_map {
                 if let Some(st) = current_player_state(world, session_id).await {
                     let gid = st.group_id;
-                    let (fx, fy) = if tx > 0 && ty > 0 { (tx, ty) } else { (st.x, st.y) };
+                    let (fx, fy) = if tx > 0 && ty > 0 {
+                        (tx, ty)
+                    } else {
+                        (st.x, st.y)
+                    };
                     // 先收集同组在线成员，避免借用冲突
                     let mut group_sessions = Vec::new();
                     for (sid, r) in &world.players {
-                        if *sid == session_id { continue; }
+                        if *sid == session_id {
+                            continue;
+                        }
                         if let Ok(Some(mst)) = r.actor_ref.ask(GetPlayerState).await {
                             if mst.group_id == gid {
                                 group_sessions.push(*sid);
@@ -2362,7 +3021,13 @@ async fn exec_action(
                     for sid in &group_sessions {
                         teleport_player(world, *sid, map_index, fx, fy).await;
                     }
-                    debug!("NPC GROUPTELEPORT: {} members -> map {} ({},{})", group_sessions.len() + 1, map_index, fx, fy);
+                    debug!(
+                        "NPC GROUPTELEPORT: {} members -> map {} ({},{})",
+                        group_sessions.len() + 1,
+                        map_index,
+                        fx,
+                        fy
+                    );
                 }
             } else {
                 warn!("NPC GROUPTELEPORT: map '{}' not found", map_name);
@@ -2372,22 +3037,35 @@ async fn exec_action(
         "ADDGUILD" | "ADDTOGUILD" => {
             let guild_name = unquote(arg0()).to_string();
             if !guild_name.is_empty() {
-                let _ = world.social_ref.ask(crate::actors::social::NpcAddToGuild { session_id, guild_name }).await;
+                let _ = world
+                    .social_ref
+                    .ask(crate::actors::social::NpcAddToGuild {
+                        session_id,
+                        guild_name,
+                    })
+                    .await;
             }
         }
         // REMOVEFROMGUILD —— 离开行会（对齐 C# ActionType.RemoveFromGuild）
         "REMOVEFROMGUILD" | "REMOVEGUILD" => {
-            let _ = world.social_ref.ask(crate::actors::social::NpcRemoveFromGuild { session_id }).await;
+            let _ = world
+                .social_ref
+                .ask(crate::actors::social::NpcRemoveFromGuild { session_id })
+                .await;
         }
         // GROUPRECALL —— 组队召回（对齐 C# ActionType.GroupRecall：NPC 版无限制，直接召回组员到玩家位置）
         "GROUPRECALL" | "RECALLGROUP" => {
-            let _ = world.social_ref.ask(crate::actors::social::NpcGroupRecall { session_id }).await;
+            let _ = world
+                .social_ref
+                .ask(crate::actors::social::NpcGroupRecall { session_id })
+                .await;
         }
         // ADDNAMELIST <file> —— 玩家名追加到名单文件（对齐 C# ActionType.AddNameList）
         "ADDNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { warn!("NPC ADDNAMELIST: missing file"); }
-            else if let Some(st) = current_player_state(world, session_id).await {
+            if file_path.is_empty() {
+                warn!("NPC ADDNAMELIST: missing file");
+            } else if let Some(st) = current_player_state(world, session_id).await {
                 let base = world.script_dir.clone();
                 let path = base.join(file_path);
                 if path.starts_with(&base) {
@@ -2401,8 +3079,9 @@ async fn exec_action(
         // DELNAMELIST <file> —— 从名单文件删除玩家名（对齐 C# ActionType.DelNameList）
         "DELNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { warn!("NPC DELNAMELIST: missing file"); }
-            else if let Some(st) = current_player_state(world, session_id).await {
+            if file_path.is_empty() {
+                warn!("NPC DELNAMELIST: missing file");
+            } else if let Some(st) = current_player_state(world, session_id).await {
                 let base = world.script_dir.clone();
                 let path = base.join(file_path);
                 if path.starts_with(&base) {
@@ -2416,8 +3095,9 @@ async fn exec_action(
         // CLEARNAMELIST <file> —— 清空名单文件（对齐 C# ActionType.ClearNameList）
         "CLEARNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { warn!("NPC CLEARNAMELIST: missing file"); }
-            else {
+            if file_path.is_empty() {
+                warn!("NPC CLEARNAMELIST: missing file");
+            } else {
                 let base = world.script_dir.clone();
                 let path = base.join(file_path);
                 if path.starts_with(&base) {
@@ -2431,8 +3111,9 @@ async fn exec_action(
         // ADDGUILDNAME <file> —— 行会名追加（对齐 C# ActionType.AddGuildNameList；需在行会）
         "ADDGUILDNAME" | "ADDGUILDNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { warn!("NPC ADDGUILDNAME: missing file"); }
-            else if let Some(st) = current_player_state(world, session_id).await {
+            if file_path.is_empty() {
+                warn!("NPC ADDGUILDNAME: missing file");
+            } else if let Some(st) = current_player_state(world, session_id).await {
                 if let Some(guild_name) = &st.guild_name {
                     let base = world.script_dir.clone();
                     let path = base.join(file_path);
@@ -2450,8 +3131,9 @@ async fn exec_action(
         // DELGUILDNAME / DELGUILDNAMELIST <file> —— 从名单删除行会名（对齐 C# ActionType.DelGuildNameList；C# 命令名为 DELGUILDNAMELIST）
         "DELGUILDNAME" | "DELGUILDNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { warn!("NPC DELGUILDNAME: missing file"); }
-            else if let Some(st) = current_player_state(world, session_id).await {
+            if file_path.is_empty() {
+                warn!("NPC DELGUILDNAME: missing file");
+            } else if let Some(st) = current_player_state(world, session_id).await {
                 if let Some(guild_name) = &st.guild_name {
                     let base = world.script_dir.clone();
                     let path = base.join(file_path);
@@ -2469,8 +3151,9 @@ async fn exec_action(
         // CLEARGUILDNAME <file> —— 清空名单（对齐 C# ActionType.ClearGuildNameList；需在行会）
         "CLEARGUILDNAME" | "CLEARGUILDNAMELIST" => {
             let file_path = arg0();
-            if file_path.is_empty() { warn!("NPC CLEARGUILDNAME: missing file"); }
-            else if let Some(st) = current_player_state(world, session_id).await {
+            if file_path.is_empty() {
+                warn!("NPC CLEARGUILDNAME: missing file");
+            } else if let Some(st) = current_player_state(world, session_id).await {
                 if st.guild_name.is_some() {
                     let base = world.script_dir.clone();
                     let path = base.join(file_path);
@@ -2497,7 +3180,8 @@ async fn exec_action(
                 if path.starts_with(&base) {
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
-                            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+                            let lines: Vec<&str> =
+                                content.lines().filter(|l| !l.trim().is_empty()).collect();
                             if !lines.is_empty() {
                                 let idx = fastrand::usize(0..lines.len());
                                 custom_vars.insert(var, lines[idx].to_string());
@@ -2524,7 +3208,10 @@ async fn exec_action(
                 let path = base.join(file_path);
                 if path.starts_with(&base) {
                     match ini_write(&path, header, key, &value) {
-                        Ok(()) => debug!("NPC SAVEVALUE: {} [{}] {}={}", file_path, header, key, value),
+                        Ok(()) => debug!(
+                            "NPC SAVEVALUE: {} [{}] {}={}",
+                            file_path, header, key, value
+                        ),
                         Err(e) => warn!("NPC SAVEVALUE: failed {}: {}", path.display(), e),
                     }
                 } else {
@@ -2546,7 +3233,14 @@ async fn exec_action(
                 if path.starts_with(&base) {
                     if let Some(value) = ini_read(&path, header, key) {
                         custom_vars.insert(var, value);
-                        debug!("NPC LOADVALUE: {} = {} ({} [{}] {})", arg0(), key, file_path, header, key);
+                        debug!(
+                            "NPC LOADVALUE: {} = {} ({} [{}] {})",
+                            arg0(),
+                            key,
+                            file_path,
+                            header,
+                            key
+                        );
                     }
                 } else {
                     warn!("NPC LOADVALUE: path escape denied: {}", file_path);
@@ -2578,7 +3272,11 @@ async fn exec_action(
         // COMPOSEMAIL "body" <sender> —— 创建邮件草稿（对齐 C# ComposeMail；配合 ADDMAILGOLD/ADDMAILITEM/SENDMAIL）
         "COMPOSEMAIL" => {
             let body = unquote(arg0()).to_string();
-            let sender = if arg1().is_empty() { "系统".to_string() } else { arg1().to_string() };
+            let sender = if arg1().is_empty() {
+                "系统".to_string()
+            } else {
+                arg1().to_string()
+            };
             flow.mail = Some(crate::actors::mail::MailMessage {
                 mail_id: crate::actors::mail::generate_mail_id(),
                 sender_name: sender,
@@ -2612,7 +3310,12 @@ async fn exec_action(
             } else if let Some(m) = flow.mail.as_mut() {
                 if m.items.len() >= 5 {
                     warn!("NPC ADDMAILITEM: mail attachments full (max 5)");
-                } else if let Some(info) = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)).cloned() {
+                } else if let Some(info) = world
+                    .item_infos
+                    .values()
+                    .find(|i| i.name.eq_ignore_ascii_case(item_name))
+                    .cloned()
+                {
                     let mut remaining = count;
                     let stack = info.stack_size.max(1) as u16;
                     while remaining > 0 && m.items.len() < 5 {
@@ -2684,7 +3387,8 @@ fn now_weekday_upper() -> String {
         chrono::Weekday::Fri => "FRIDAY",
         chrono::Weekday::Sat => "SATURDAY",
         chrono::Weekday::Sun => "SUNDAY",
-    }.to_string()
+    }
+    .to_string()
 }
 
 /// 当前小时（本地时间）
@@ -2701,7 +3405,9 @@ fn now_minute() -> u32 {
 
 /// 地图名（file_name）→ map_index（大小写不敏感）
 fn map_index_by_name(world: &WorldActor, map_name: &str) -> Option<u16> {
-    world.map_infos.values()
+    world
+        .map_infos
+        .values()
         .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
         .map(|m| m.index as u16)
 }
@@ -2744,7 +3450,9 @@ fn parse_drop_line(line: &str) -> Option<ParsedDrop> {
         return None;
     }
     // C# FromLine：parts[0].Substring(2) 去掉 "1/" 前缀取分母
-    let denom = parts[0].strip_prefix("1/").or_else(|| parts[0].strip_prefix("1\\"))?;
+    let denom = parts[0]
+        .strip_prefix("1/")
+        .or_else(|| parts[0].strip_prefix("1\\"))?;
     let denom = denom.parse::<f64>().ok()?;
     if denom <= 0.0 {
         return None;
@@ -2755,7 +3463,12 @@ fn parse_drop_line(line: &str) -> Option<ParsedDrop> {
         if gold == 0 {
             return None;
         }
-        Some(ParsedDrop { chance, gold: Some(gold), item_name: None, group: None })
+        Some(ParsedDrop {
+            chance,
+            gold: Some(gold),
+            item_name: None,
+            group: None,
+        })
     } else if parts[1].to_uppercase().starts_with("GROUP") {
         Some(ParsedDrop {
             chance,
@@ -2768,7 +3481,12 @@ fn parse_drop_line(line: &str) -> Option<ParsedDrop> {
             }),
         })
     } else {
-        Some(ParsedDrop { chance, gold: None, item_name: Some(parts[1].to_string()), group: None })
+        Some(ParsedDrop {
+            chance,
+            gold: None,
+            item_name: Some(parts[1].to_string()),
+            group: None,
+        })
     }
 }
 
@@ -2785,7 +3503,9 @@ fn parse_drop_table(content: &str) -> Vec<ParsedDrop> {
         if line.is_empty() || line.starts_with(';') {
             continue;
         }
-        let Some(mut d) = parse_drop_line(line) else { continue };
+        let Some(mut d) = parse_drop_line(line) else {
+            continue;
+        };
         // GROUP 块：对齐 C# ParseGroup（`{` 后子行直到 `}`）
         if d.group.is_some() {
             // 找 `{`；无块则跳过该 GROUP 行且不消费后续行（对齐 C# 无 start 不填充）
@@ -2843,9 +3563,14 @@ fn name_list_add(path: &std::path::Path, name: &str) {
 
 /// 名单文件：删除匹配行（对齐 C# DelNameList）
 fn name_list_remove(path: &std::path::Path, name: &str) {
-    let Ok(content) = std::fs::read_to_string(path) else { return };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
     let filtered: Vec<&str> = content.lines().filter(|l| *l != name).collect();
-    let _ = std::fs::write(path, filtered.join("\n") + if filtered.is_empty() { "" } else { "\n" });
+    let _ = std::fs::write(
+        path,
+        filtered.join("\n") + if filtered.is_empty() { "" } else { "\n" },
+    );
 }
 
 /// 名单文件：清空（对齐 C# ClearNameList）
@@ -2908,7 +3633,8 @@ fn ini_write(path: &std::path::Path, header: &str, key: &str, value: &str) -> st
 
 /// 当前英雄（对齐 C# player.CurrentHero）：按 hero_index 从 player_heroes 查找
 fn current_hero(world: &WorldActor, session_id: u64, player: &PlayerState) -> Option<HeroInfo> {
-    world.player_heroes
+    world
+        .player_heroes
         .get(&session_id)
         .and_then(|hs| hs.iter().find(|h| h.index as u8 == player.hero_index))
         .cloned()
@@ -2931,15 +3657,22 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "MPREGEN" => Some(BuffType::MpRegen { amount_per_tick: 0 }),
         "ATTACKBOOST" | "FURY" | "ATTACK" => Some(BuffType::AttackBoost { bonus: 0 }),
         "DEFENSEBOOST" | "DEFENSE" => Some(BuffType::DefenseBoost { bonus: 0 }),
-        "ACDEFENSEBOOST" | "BLESSEDARMOUR" | "BLESSEDARMOR" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
+        "ACDEFENSEBOOST" | "BLESSEDARMOUR" | "BLESSEDARMOR" => {
+            Some(BuffType::AcDefenseBoost { bonus: 0 })
+        }
         "MACDEFENSEBOOST" | "SOULSHIELD" => Some(BuffType::MacDefenseBoost { bonus: 0 }),
-        "DAMAGEREDUCTION" | "MAGICSHIELD" | "ELEMENTALBARRIER" => Some(BuffType::DamageReduction { percent: 0, kind: crate::combat::buff::ShieldKind::Other }),
+        "DAMAGEREDUCTION" | "MAGICSHIELD" | "ELEMENTALBARRIER" => Some(BuffType::DamageReduction {
+            percent: 0,
+            kind: crate::combat::buff::ShieldKind::Other,
+        }),
         "POISON" | "POISONSHOT" => Some(BuffType::Poison { damage_per_tick: 0 }),
         "SILENCE" => Some(BuffType::Silence),
         "STUN" => Some(BuffType::Stun),
         "INVISIBILITY" | "HIDING" | "MOONLIGHT" | "DARKBODY" => Some(BuffType::Invisibility),
         "ATTACKSPEEDBOOST" | "HASTE" => Some(BuffType::AttackSpeedBoost { percent: 0 }),
-        "MOVESPEEDBOOST" | "SWIFTFEET" | "LIGHTBODY" => Some(BuffType::MoveSpeedBoost { percent: 0 }),
+        "MOVESPEEDBOOST" | "SWIFTFEET" | "LIGHTBODY" => {
+            Some(BuffType::MoveSpeedBoost { percent: 0 })
+        }
         "AGILITYBOOST" => Some(BuffType::AgilityBoost { bonus: 0 }),
         "CRITICALRATEBOOST" | "RAGE" => Some(BuffType::CriticalRateBoost { bonus: 0 }),
         "MPREGENBOOST" | "CONCENTRATION" => Some(BuffType::MpRegenBoost { bonus: 0 }),
@@ -2947,7 +3680,10 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "REFLECT" | "ENERGYSHIELD" | "COUNTERATTACK" => Some(BuffType::Reflect { percent: 0 }),
         "TAUNT" | "LIONROAR" => Some(BuffType::Taunt),
         // 法术批已实现的 C# BuffType 别名：ProtectionField/ImmortalSkin/UltimateEnhancer
-        "PROTECTIONFIELD" => Some(BuffType::DamageReduction { percent: 0, kind: crate::combat::buff::ShieldKind::Other }),
+        "PROTECTIONFIELD" => Some(BuffType::DamageReduction {
+            percent: 0,
+            kind: crate::combat::buff::ShieldKind::Other,
+        }),
         "IMMORTALSKIN" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
         "ULTIMATEENHANCER" => Some(BuffType::McBoost { bonus: 0 }),
         // #1508：C# Curse 降低目标输出（MaxDC/MC/SC RatePercent）；脚本 GIVEBUFF CURSE 用独立 Curse debuff
@@ -2962,29 +3698,55 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
 fn resolve_magic_id(magic_infos: &HashMap<u32, crate::db::MagicInfo>, s: &str) -> Option<i32> {
     let s = s.trim();
     if let Ok(id) = s.parse::<i32>() {
-        return if magic_infos.contains_key(&(id as u32)) { Some(id) } else { None };
+        return if magic_infos.contains_key(&(id as u32)) {
+            Some(id)
+        } else {
+            None
+        };
     }
-    magic_infos.values()
+    magic_infos
+        .values()
         .find(|m| m.name.eq_ignore_ascii_case(s))
         .map(|m| m.spell)
 }
 
 /// SENDMAIL：投递邮件（在线直接 AddMail + 通知；离线落库，登录时读回）
-async fn send_npc_mail(world: &WorldActor, session_id: u64, mail: crate::actors::mail::MailMessage) {
-    if let Some(target) = world.find_session_by_name_ignore_case(&mail.receiver_name).await {
+async fn send_npc_mail(
+    world: &WorldActor,
+    session_id: u64,
+    mail: crate::actors::mail::MailMessage,
+) {
+    if let Some(target) = world
+        .find_session_by_name_ignore_case(&mail.receiver_name)
+        .await
+    {
         if let Some(record) = world.players.get(&target) {
-            let _ = record.actor_ref.ask(crate::actors::player::AddMail { mail: mail.clone() }).await;
-            crate::actors::social_packets::send_mail_received_packet(&world.gate_ref, target, &mail);
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::AddMail { mail: mail.clone() })
+                .await;
+            crate::actors::social_packets::send_mail_received_packet(
+                &world.gate_ref,
+                target,
+                &mail,
+            );
             send_system_message(&world.gate_ref, session_id, "邮件已发送");
             debug!("NPC SENDMAIL delivered online: -> {}", mail.receiver_name);
             return;
         }
     }
     if let Err(e) = crate::db::insert_mail(&world.db_pool, &mail.receiver_name, &mail).await {
-        warn!("NPC SENDMAIL: failed to save offline mail for {}: {}", mail.receiver_name, e);
+        warn!(
+            "NPC SENDMAIL: failed to save offline mail for {}: {}",
+            mail.receiver_name, e
+        );
         send_system_message(&world.gate_ref, session_id, "邮件发送失败，请稍后重试");
     } else {
-        send_system_message(&world.gate_ref, session_id, "邮件已发送（玩家离线，将在登录时收到）");
+        send_system_message(
+            &world.gate_ref,
+            session_id,
+            "邮件已发送（玩家离线，将在登录时收到）",
+        );
     }
 }
 
@@ -3029,7 +3791,9 @@ async fn quest_state(world: &WorldActor, session_id: u64, quest_index: i32) -> u
 }
 
 async fn give_item(world: &WorldActor, session_id: u64, item_index: i32, count: u16) {
-    let Some(record) = world.players.get(&session_id) else { return };
+    let Some(record) = world.players.get(&session_id) else {
+        return;
+    };
     let info = world.item_infos.get(&item_index);
     let max_dura = info.map(|i| i.durability as u16).unwrap_or(0);
     let identified = info.map(|i| i.is_identified()).unwrap_or(false);
@@ -3057,16 +3821,30 @@ async fn give_item(world: &WorldActor, session_id: u64, item_index: i32, count: 
     }
 }
 
-async fn take_item(world: &WorldActor, session_id: u64, item_index: i32, count: u16, min_dura: Option<u32>) {
-    let Some(record) = world.players.get(&session_id) else { return };
+async fn take_item(
+    world: &WorldActor,
+    session_id: u64,
+    item_index: i32,
+    count: u16,
+    min_dura: Option<u32>,
+) {
+    let Some(record) = world.players.get(&session_id) else {
+        return;
+    };
     let _ = record
         .actor_ref
-        .ask(RemoveItemByIndexWithDura { item_index, count, min_dura })
+        .ask(RemoveItemByIndexWithDura {
+            item_index,
+            count,
+            min_dura,
+        })
         .await;
 }
 
 async fn set_player_flag(world: &WorldActor, session_id: u64, key: String, val: i32) {
-    let Some(record) = world.players.get(&session_id) else { return };
+    let Some(record) = world.players.get(&session_id) else {
+        return;
+    };
     if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
         state.flags.insert(key, val);
         let _ = record.actor_ref.ask(SetPlayerState { state }).await;
@@ -3075,8 +3853,13 @@ async fn set_player_flag(world: &WorldActor, session_id: u64, key: String, val: 
 
 /// C# ApplyMapEntryRules：地图变更后应用 NoGroup/NoPets/NoIntelligentCreatures/NoHero 规则
 pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u64) {
-    let Some(record) = world.players.get(&session_id).cloned() else { return };
-    let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+    let Some(record) = world.players.get(&session_id).cloned() else {
+        return;
+    };
+    let state = match record.actor_ref.ask(GetPlayerState).await {
+        Ok(Some(s)) => s,
+        _ => return,
+    };
     let mi = world.map_infos.get(&(state.map_index as i32));
     let Some(mi) = mi else { return };
 
@@ -3088,20 +3871,40 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
     if (mi.no_intelligent_creatures || mi.no_pets) && state.creature_log.active_creature.is_some() {
         let mut st = state.clone();
         st.creature_log.active_creature = None;
-        let _ = record.actor_ref.ask(crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
-        debug!("MapEntryRules: session={} pet unsummoned (NoIntelligentCreatures/NoPets)", session_id);
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetCreature {
+                creature_log: st.creature_log,
+            })
+            .await;
+        debug!(
+            "MapEntryRules: session={} pet unsummoned (NoIntelligentCreatures/NoPets)",
+            session_id
+        );
     }
 
     // NoHero：解除英雄
     if mi.no_hero && state.hero_index > 0 {
-        let _ = record.actor_ref.ask(crate::actors::player::SetHeroIndex { hero_index: 0 }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetHeroIndex { hero_index: 0 })
+            .await;
         world.broadcast_hero_remove(state.object_id).await;
-        debug!("MapEntryRules: session={} hero dismissed (NoHero)", session_id);
+        debug!(
+            "MapEntryRules: session={} hero dismissed (NoHero)",
+            session_id
+        );
     }
 
     // NoMount：下马 + 广播 MountUpdate
     if mi.no_mount && state.is_mounted {
-        let _ = record.actor_ref.ask(crate::actors::player::SetMountState { mounted: false, mount_type: 0 }).await;
+        let _ = record
+            .actor_ref
+            .ask(crate::actors::player::SetMountState {
+                mounted: false,
+                mount_type: 0,
+            })
+            .await;
         let packet = mir2_shared::packets::server::miscellaneous::MountUpdate {
             object_id: state.object_id,
             mount_type: 0,
@@ -3110,7 +3913,13 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             for sid in world.players.keys() {
-                let _ = world.gate_ref.tell(SendToClient { session_id: *sid, data: body.clone() }).await;
+                let _ = world
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: *sid,
+                        data: body.clone(),
+                    })
+                    .await;
             }
         }
         debug!("MapEntryRules: session={} dismounted (NoMount)", session_id);
@@ -3118,23 +3927,38 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
 
     // NoGroup：离开组队（C# DisbandGroup）
     if mi.no_group && state.group_id.is_some() {
-        let _ = world.social_ref.ask(crate::actors::social::SwitchGroupRequest {
-            session_id,
-            allow_group: false,
-        }).await;
+        let _ = world
+            .social_ref
+            .ask(crate::actors::social::SwitchGroupRequest {
+                session_id,
+                allow_group: false,
+            })
+            .await;
         debug!("MapEntryRules: session={} left group (NoGroup)", session_id);
     }
 }
 
 /// 传送：MOVE map_index x y（pub(crate)：NPC 脚本 + 行会领地 TELEPORTGT 共用完整跨图逻辑）
-pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map_index: u16, x: i32, y: i32) {
+pub(crate) async fn teleport_player(
+    world: &mut WorldActor,
+    session_id: u64,
+    map_index: u16,
+    x: i32,
+    y: i32,
+) {
     let dest = world.map_infos.get(&(map_index as i32)).cloned();
     let Some(dest_mi) = dest else {
         // 无地图配置：仍尝试在同图改坐标
         if let Some(record) = world.players.get(&session_id) {
             let _ = record
                 .actor_ref
-                .ask(SetPlayerPosition { x, y, direction: 4, map_index: Some(map_index), is_mounted: None })
+                .ask(SetPlayerPosition {
+                    x,
+                    y,
+                    direction: 4,
+                    map_index: Some(map_index),
+                    is_mounted: None,
+                })
                 .await;
         }
         return;
@@ -3154,7 +3978,11 @@ pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map
                 let required = 2.max(dest_mi.required_group_size);
                 let have = world.group_member_count(session_id).await;
                 if (have as i32) < required {
-                    send_system_message(&world.gate_ref, session_id, &format!("该地图需要至少 {} 人组队才能进入", required));
+                    send_system_message(
+                        &world.gate_ref,
+                        session_id,
+                        &format!("该地图需要至少 {} 人组队才能进入", required),
+                    );
                     return;
                 }
             }
@@ -3168,25 +3996,50 @@ pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map
     if let Some(record) = world.players.get(&session_id) {
         let _ = record
             .actor_ref
-            .ask(SetPlayerPosition { x, y, direction: 4, map_index: Some(map_index), is_mounted: None })
+            .ask(SetPlayerPosition {
+                x,
+                y,
+                direction: 4,
+                map_index: Some(map_index),
+                is_mounted: None,
+            })
             .await;
-        let map_pkt = build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, 4, Some(&dest_mi));
-        let _ = world.gate_ref.tell(SendToClient { session_id, data: map_pkt }).await;
+        let map_pkt =
+            build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, 4, Some(&dest_mi));
+        let _ = world
+            .gate_ref
+            .tell(SendToClient {
+                session_id,
+                data: map_pkt,
+            })
+            .await;
         // C# GetMapInfo：换图补发 MapInformation
-        let map_info = super::build_map_information_packet(map_index, &dest_file, &dest_title, Some(&dest_mi));
-        let _ = world.gate_ref.tell(SendToClient { session_id, data: map_info }).await;
+        let map_info =
+            super::build_map_information_packet(map_index, &dest_file, &dest_title, Some(&dest_mi));
+        let _ = world
+            .gate_ref
+            .tell(SendToClient {
+                session_id,
+                data: map_info,
+            })
+            .await;
         let mut body = Vec::new();
         body.extend_from_slice(&x.to_le_bytes());
         body.extend_from_slice(&y.to_le_bytes());
         body.push(4u8);
-        let _ = world.gate_ref.tell(SendToClient {
-            session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        }).await;
+        let _ = world
+            .gate_ref
+            .tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                    &body,
+                ),
+            })
+            .await;
     }
     // C# ApplyMapEntryRules：传送后应用地图进入规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
     apply_map_entry_rules(world, session_id).await;
-
 }
 
 // =============================================================================
@@ -3294,7 +4147,10 @@ fn resolve_num(s: &str, custom_vars: &HashMap<String, String>) -> i64 {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix('%') {
         let key = format!("%{}", rest);
-        custom_vars.get(&key).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)
+        custom_vars
+            .get(&key)
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0)
     } else {
         s.parse::<i64>().unwrap_or(0)
     }
@@ -3340,9 +4196,26 @@ pub fn expand_includes(lines: &[String], envir_dir: &std::path::Path) -> Vec<Str
             out.push(line.clone());
             continue;
         }
-        let open = match t.find('[') { Some(i) => i, None => { warn!("NPC script #INCLUDE missing '[': {}", t); out.push(line.clone()); continue; } };
-        let close = match t.find(']') { Some(i) => i, None => { warn!("NPC script #INCLUDE missing ']': {}", t); out.push(line.clone()); continue; } };
-        if close <= open { out.push(line.clone()); continue; }
+        let open = match t.find('[') {
+            Some(i) => i,
+            None => {
+                warn!("NPC script #INCLUDE missing '[': {}", t);
+                out.push(line.clone());
+                continue;
+            }
+        };
+        let close = match t.find(']') {
+            Some(i) => i,
+            None => {
+                warn!("NPC script #INCLUDE missing ']': {}", t);
+                out.push(line.clone());
+                continue;
+            }
+        };
+        if close <= open {
+            out.push(line.clone());
+            continue;
+        }
         let rel_path = &t[open + 1..close];
         let page = t[close + 1..].trim().to_string();
         let full = envir_dir.join(rel_path.replace('\\', "/"));
@@ -3371,7 +4244,11 @@ pub fn expand_includes(lines: &[String], envir_dir: &std::path::Path) -> Vec<Str
                     }
                 }
                 if !finished {
-                    warn!("NPC script #INCLUDE page {} not found in {}", want, full.display());
+                    warn!(
+                        "NPC script #INCLUDE page {} not found in {}",
+                        want,
+                        full.display()
+                    );
                 }
             }
             Err(_) => {
@@ -3392,9 +4269,26 @@ pub fn expand_inserts(lines: &[String], envir_dir: &std::path::Path) -> Vec<Stri
             out.push(line.clone());
             continue;
         }
-        let open = match t.find('[') { Some(i) => i, None => { warn!("NPC script #INSERT missing '[': {}", t); out.push(line.clone()); continue; } };
-        let close = match t.find(']') { Some(i) => i, None => { warn!("NPC script #INSERT missing ']': {}", t); out.push(line.clone()); continue; } };
-        if close <= open { out.push(line.clone()); continue; }
+        let open = match t.find('[') {
+            Some(i) => i,
+            None => {
+                warn!("NPC script #INSERT missing '[': {}", t);
+                out.push(line.clone());
+                continue;
+            }
+        };
+        let close = match t.find(']') {
+            Some(i) => i,
+            None => {
+                warn!("NPC script #INSERT missing ']': {}", t);
+                out.push(line.clone());
+                continue;
+            }
+        };
+        if close <= open {
+            out.push(line.clone());
+            continue;
+        }
         let rel_path = &t[open + 1..close];
         let full = envir_dir.join(rel_path.replace('\\', "/"));
         match std::fs::read_to_string(&full) {
@@ -3446,11 +4340,14 @@ mod tests {
         assert!(ext.find("_onfinishquest(5)").is_some());
         assert!(ext.find("_trigger(3)").is_some());
         // 收尾段：Client / CustomCommand
-        let fin = ParsedScript::parse("[@_Client]\n#ACT\nBREAK\n\n[@_CustomCommand(vip)]\n#ACT\nBREAK\n");
+        let fin =
+            ParsedScript::parse("[@_Client]\n#ACT\nBREAK\n\n[@_CustomCommand(vip)]\n#ACT\nBREAK\n");
         assert!(fin.find("_client").is_some());
         assert!(fin.find("_customcommand(vip)").is_some());
         // CUSTOMCOMMAND 指令提取（大小写不敏感、去重）
-        let cc = extract_custom_commands("; CUSTOMCOMMAND(vip)\n#CUSTOMCOMMAND(HELP)\ncustomcommand ( Vip )\n");
+        let cc = extract_custom_commands(
+            "; CUSTOMCOMMAND(vip)\n#CUSTOMCOMMAND(HELP)\ncustomcommand ( Vip )\n",
+        );
         // MapCoord：[@_MapCoord(map,x,y)] 注册活动坐标（去重）
         let mc = extract_map_coords("[@_MapCoord(0,5,5)]\n#ACT\nBREAK\n\n[@_MapCoord(3,10,20)]\n#ACT\nBREAK\n\n[@_MapCoord(0,5,5)]\n");
         assert_eq!(mc.len(), 2);
@@ -3568,7 +4465,8 @@ You don't have enough Gold!
 
     #[test]
     fn parse_buttons_extracts_label_and_target() {
-        let buttons = parse_buttons("Teleport to: <BorderVillage/@move1> {(500 Gold)/GOLD}\n<Close/@exit>");
+        let buttons =
+            parse_buttons("Teleport to: <BorderVillage/@move1> {(500 Gold)/GOLD}\n<Close/@exit>");
         assert_eq!(buttons.len(), 2);
         assert_eq!(buttons[0].0, "BorderVillage");
         assert_eq!(buttons[0].1, "@move1"); // @ 前缀保留（C# 原始格式）
@@ -3648,7 +4546,8 @@ You don't have enough Gold!
 
     #[test]
     fn ignores_insert_directive_and_comments() {
-        let s = "; a comment\n#INSERT [SystemScripts\\00Default\\Login.txt] @Main\n[@Main]\n#SAY\nhi\n";
+        let s =
+            "; a comment\n#INSERT [SystemScripts\\00Default\\Login.txt] @Main\n[@Main]\n#SAY\nhi\n";
         let script = ParsedScript::parse(s);
         assert_eq!(script.sections.len(), 1);
         let main = script.find("main").unwrap();
@@ -3722,41 +4621,65 @@ You don't have enough Gold!
     #[test]
     fn buff_type_parse_accepts_csharp_and_rust_names() {
         use crate::combat::buff::BuffType;
-        assert!(matches!(parse_buff_type("Hiding"), Some(BuffType::Invisibility)));
-        assert!(matches!(parse_buff_type("hiding"), Some(BuffType::Invisibility)));
-        assert!(matches!(parse_buff_type("HpRegen"), Some(BuffType::HpRegen { .. })));
-        assert!(matches!(parse_buff_type("POISON"), Some(BuffType::Poison { .. })));
-        assert!(matches!(parse_buff_type("SoulShield"), Some(BuffType::MacDefenseBoost { .. })));
-        assert!(matches!(parse_buff_type("SwiftFeet"), Some(BuffType::MoveSpeedBoost { .. })));
-        assert!(matches!(parse_buff_type("CURSE"), Some(BuffType::Curse { .. })));
+        assert!(matches!(
+            parse_buff_type("Hiding"),
+            Some(BuffType::Invisibility)
+        ));
+        assert!(matches!(
+            parse_buff_type("hiding"),
+            Some(BuffType::Invisibility)
+        ));
+        assert!(matches!(
+            parse_buff_type("HpRegen"),
+            Some(BuffType::HpRegen { .. })
+        ));
+        assert!(matches!(
+            parse_buff_type("POISON"),
+            Some(BuffType::Poison { .. })
+        ));
+        assert!(matches!(
+            parse_buff_type("SoulShield"),
+            Some(BuffType::MacDefenseBoost { .. })
+        ));
+        assert!(matches!(
+            parse_buff_type("SwiftFeet"),
+            Some(BuffType::MoveSpeedBoost { .. })
+        ));
+        assert!(matches!(
+            parse_buff_type("CURSE"),
+            Some(BuffType::Curse { .. })
+        ));
         assert!(parse_buff_type("NotABuff").is_none());
     }
 
     #[test]
     fn resolve_magic_id_accepts_numeric_id_and_name() {
         let mut infos = HashMap::new();
-        infos.insert(4, crate::db::MagicInfo {
-            name: "Fencing".to_string(),
-            spell: 4,
-            base_cost: 0,
-            level_cost: 0,
-            icon: 0,
-            level1: 0,
-            level2: 0,
-            level3: 0,
-            need1: 0,
-            need2: 0,
-            need3: 0,
-            delay_base: 0,
-            delay_reduction: 0,
-            power_base: 0,
-            power_bonus: 0,
-            mpower_base: 0,
-            mpower_bonus: 0,
-            range: 0,
-            multiplier_base: 0.0,
-            multiplier_bonus: 0.0,
-        });
+        infos.insert(
+            4,
+            crate::db::MagicInfo {
+                name: "Fencing".to_string(),
+                spell: 4,
+                base_cost: 0,
+                level_cost: 0,
+                icon: 0,
+                level1: 0,
+                level2: 0,
+                level3: 0,
+                need1: 0,
+                need2: 0,
+                need3: 0,
+                delay_base: 0,
+                delay_reduction: 0,
+                power_base: 0,
+                power_bonus: 0,
+                mpower_base: 0,
+                mpower_bonus: 0,
+                range: 0,
+                multiplier_base: 0.0,
+                multiplier_bonus: 0.0,
+            },
+        );
         assert_eq!(resolve_magic_id(&infos, "4"), Some(4));
         assert_eq!(resolve_magic_id(&infos, "Fencing"), Some(4));
         assert_eq!(resolve_magic_id(&infos, "fencing"), Some(4));
@@ -3766,10 +4689,19 @@ You don't have enough Gold!
 
     #[test]
     fn parse_gender_accepts_names_and_ids() {
-        assert_eq!(parse_gender("male"), Some(mir2_shared::enums::MirGender::Male));
-        assert_eq!(parse_gender("FEMALE"), Some(mir2_shared::enums::MirGender::Female));
+        assert_eq!(
+            parse_gender("male"),
+            Some(mir2_shared::enums::MirGender::Male)
+        );
+        assert_eq!(
+            parse_gender("FEMALE"),
+            Some(mir2_shared::enums::MirGender::Female)
+        );
         assert_eq!(parse_gender("0"), Some(mir2_shared::enums::MirGender::Male));
-        assert_eq!(parse_gender("1"), Some(mir2_shared::enums::MirGender::Female));
+        assert_eq!(
+            parse_gender("1"),
+            Some(mir2_shared::enums::MirGender::Female)
+        );
         assert_eq!(parse_gender("x"), None);
     }
 
@@ -3852,15 +4784,23 @@ You don't have enough Gold!
     #[test]
     fn weekday_is_uppercase_weekday_name() {
         let w = now_weekday_upper();
-        assert!(w == "MONDAY" || w == "TUESDAY" || w == "WEDNESDAY" || w == "THURSDAY"
-            || w == "FRIDAY" || w == "SATURDAY" || w == "SUNDAY");
+        assert!(
+            w == "MONDAY"
+                || w == "TUESDAY"
+                || w == "WEDNESDAY"
+                || w == "THURSDAY"
+                || w == "FRIDAY"
+                || w == "SATURDAY"
+                || w == "SUNDAY"
+        );
         assert!(now_hour() <= 23);
         assert!(now_minute() <= 59);
     }
 
     #[test]
     fn drop_table_parses_csharp_format() {
-        let content = "; 注释\n\n1/100 金创药\n1/10 Gold 500\n1/2 GROUP100\ninvalid\n1/1000 强效金创药\n";
+        let content =
+            "; 注释\n\n1/100 金创药\n1/10 Gold 500\n1/2 GROUP100\ninvalid\n1/1000 强效金创药\n";
         let drops = parse_drop_table(content);
         assert_eq!(drops.len(), 3);
         assert!((drops[0].chance - 0.01).abs() < 1e-9);

@@ -10,10 +10,10 @@
 //! Attack（C# :26-61）：!ranged→DC ACAgility；ranged→MC MAC。
 //! ProcessTarget（C# :64-81）：InRange→Attack；否则 MoveTo。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 5;
 const VIEW_RANGE: i32 = 15;
@@ -22,7 +22,9 @@ const MELEE_RANGE: i32 = 1;
 pub struct IcePhantomBehavior;
 
 impl IcePhantomBehavior {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl MonsterBehavior for IcePhantomBehavior {
@@ -46,21 +48,23 @@ impl MonsterBehavior for IcePhantomBehavior {
             };
 
             if dist <= MELEE_RANGE {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             } else {
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
             }
             return;
         }

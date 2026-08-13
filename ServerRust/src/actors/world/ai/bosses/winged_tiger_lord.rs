@@ -12,12 +12,12 @@
 //! CompleteRangeAttack（C# :148-161）：Dazed。
 //! CompleteAttack（C# :163-182）：Stomp→Paralysis。
 
-use crate::actors::world::MonsterState;
-use crate::combat::poison::Poison;
-use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
 
 const VIEW_RANGE: i32 = 15;
 const ATTACK_RANGE: i32 = 5;
@@ -32,7 +32,10 @@ pub struct WingedTigerLordBehavior {
 
 impl WingedTigerLordBehavior {
     pub fn new() -> Self {
-        Self { pending_stomp: false, pending_tornado: false }
+        Self {
+            pending_stomp: false,
+            pending_tornado: false,
+        }
     }
 }
 
@@ -50,27 +53,43 @@ impl MonsterBehavior for WingedTigerLordBehavior {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 self.pending_tornado = false;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 // C# FindAllTargets(1, Target.CurrentLocation) AOE
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(target.x, target.y, 1, monster.map_index)
-                        .into_iter().copied().collect();
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(target.x, target.y, 1, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        target_object_id: h.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            target_object_id: h.object_id,
+                            damage,
+                            spell_id: 0,
+                        });
                     // C# PoisonTarget(2, poisonTime, Dazed, 2000)：1/2、时长=poisonTime=SC 攻、值=SC（PoisonTarget 内部固定 Value=SC）
                     if fastrand::i32(0..2) == 0 {
-                        let poison_time = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(2) as u32;
-                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::DAZED, poison_time, sc_value, 2000),
-                        });
+                        let poison_time = crate::combat::attack::get_attack_power(
+                            monster.min_sc,
+                            monster.max_sc,
+                            0,
+                        )
+                        .max(2) as u32;
+                        let sc_value = crate::combat::attack::get_attack_power(
+                            monster.min_sc,
+                            monster.max_sc,
+                            0,
+                        )
+                        .max(1);
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::DAZED, poison_time, sc_value, 2000),
+                            });
                     }
                 }
             }
@@ -96,61 +115,81 @@ impl MonsterBehavior for WingedTigerLordBehavior {
             if self.pending_stomp {
                 self.pending_stomp = false;
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 // C# 周围 8 格 AOE
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, MELEE_RANGE, monster.map_index)
-                        .into_iter().copied().collect();
+                let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, MELEE_RANGE, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
                 for h in hits {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: h.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 2,
-                    });
-                    // C# PoisonTarget(2, 5, Paralysis, 2000)：1/2、值=SC
-                        if fastrand::i32(0..2) == 0 {
-                        let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, sc_value, 2000),
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: h.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 2,
                         });
-                        }
+                    // C# PoisonTarget(2, 5, Paralysis, 2000)：1/2、值=SC
+                    if fastrand::i32(0..2) == 0 {
+                        let sc_value = crate::combat::attack::get_attack_power(
+                            monster.min_sc,
+                            monster.max_sc,
+                            0,
+                        )
+                        .max(1);
+                        ctx.out_poisons
+                            .push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, sc_value, 2000),
+                            });
+                    }
                 }
                 return;
             }
 
             // 普通近战
-            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             match fastrand::i32(0..2) {
                 0 => {
                     // Type0 双连斩（两次 DC）
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
-                    let damage2 = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: damage2,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
+                    let damage2 = crate::combat::attack::get_attack_power(
+                        monster.min_dmg,
+                        monster.max_dmg,
+                        0,
+                    )
+                    .max(1);
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage: damage2,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
                 _ => {
                     // Type1 双手斩（一次 DC）
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 1,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 1,
+                        });
                 }
             }
 

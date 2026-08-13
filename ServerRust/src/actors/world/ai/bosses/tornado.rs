@@ -8,10 +8,10 @@
 //!
 //! Attack（C# :20-55）：ranged→FindAllTargets(5) 逐个 Pushed(dir=朝自身, dist-1)。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 5;
 const VIEW_RANGE: i32 = 12;
@@ -37,23 +37,30 @@ impl MonsterBehavior for TornadoBehavior {
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Melee {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        damage,
+                        spell_id: 0,
+                        attack_type: 0,
+                    });
             }
         } else if dist <= ATTACK_RANGE {
             // 吸拉：把范围内玩家朝自身拉近（C# Pushed 朝龙卷风方向 dist-1 格）
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let pulls: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
-                        .into_iter().copied().collect();
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                let pulls: Vec<crate::actors::world::ai::PlayerSnap> = ctx
+                    .find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+                    .into_iter()
+                    .copied()
+                    .collect();
+                let damage =
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
+                        .max(1);
                 for p in pulls {
                     // C# Tornado.cs:48 targets[i].Pushed(this, DirectionFromPoint(player→tornado), dist-1)
                     let dist = max_distance(monster.x, monster.y, p.x, p.y);
@@ -62,13 +69,14 @@ impl MonsterBehavior for TornadoBehavior {
                         dir: direction_towards(p.x, p.y, monster.x, monster.y),
                         distance: (dist - 1).max(1),
                     });
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: p.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: p.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
                 }
             }
         } else if ctx.tick_count >= monster.next_move_tick {
