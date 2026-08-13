@@ -1041,6 +1041,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             allow_lover_recall: false,
         mentor_damage_rate_percent: 0,
         mentee_exp_bank: 1,
+        mentor_skill_boost: true,
             is_gm: false,
             gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
             special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）

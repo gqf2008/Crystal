@@ -156,6 +156,8 @@ pub struct WorldActorArgs {
     pub mentor_exp_boost: u8,
     /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10）
     pub mentor_damage_boost: u8,
+    /// 导师技能经验翻倍开关（C# Settings.MentorSkillBoost = true）
+    pub mentor_skill_boost: bool,
     /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
     pub mentee_exp_bank: u8,
     /// 元素经验档位（C# Settings.OrbsExpList：Configs/OrbsExpList.ini [Exp] Orb1..N；空 = 回退默认 [50,100,150,200]）
@@ -1607,6 +1609,8 @@ pub struct WorldActor {
     pub(crate) mentor_exp_boost: u8,
     /// 导师伤害加成 %（C# Settings.MentorDamageBoost = 10）
     pub(crate) mentor_damage_boost: u8,
+    /// 导师技能经验翻倍开关（C# Settings.MentorSkillBoost）
+    pub(crate) mentor_skill_boost: bool,
     /// 徒弟经验转导师 %（C# Settings.MenteeExpBank = 1）
     pub(crate) mentee_exp_bank: u8,
     /// 元素三表（#2414：Configs/OrbsExpList.ini；空 = 回退默认常量）
@@ -2075,6 +2079,7 @@ impl WorldActor {
             lover_exp_bonus: 5,
             mentor_exp_boost: 10,
             mentor_damage_boost: 10,
+            mentor_skill_boost: true,
             mentee_exp_bank: 1,
             orbs_exp_list: Vec::new(),
             orbs_dmg_list: Vec::new(),
@@ -6035,6 +6040,7 @@ Ok(Self {
             lover_exp_bonus: args.lover_exp_bonus,
             mentor_exp_boost: args.mentor_exp_boost,
             mentor_damage_boost: args.mentor_damage_boost,
+            mentor_skill_boost: args.mentor_skill_boost,
             mentee_exp_bank: args.mentee_exp_bank,
             orbs_exp_list: args.orbs_exp_list,
             orbs_dmg_list: args.orbs_dmg_list,

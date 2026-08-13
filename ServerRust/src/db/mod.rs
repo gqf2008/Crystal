@@ -1857,6 +1857,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             mentee_exp: 0,
             mentor_damage_bonus: false,
         mentor_damage_rate_percent: 0,
+        mentor_skill_boost: true,
         mentee_exp_bank: 1,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
