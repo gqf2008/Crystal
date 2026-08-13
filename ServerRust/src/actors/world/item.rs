@@ -144,7 +144,10 @@ fn compute_repair_cost(item: &mir2_shared::data::item::UserItem, info: &db::Item
     let p_float = (max_dura * (price / 2.0 / durability as f64) + price / 2.0).floor()
         * (added_count * 0.1 + 1.0);
     let p = p_float as u64;
-    let mut cost = p.saturating_mul(item.count as u64).saturating_sub(info.price as u64);
+    // C# RepairPrice：cost = p * Count - Price()；Price() = 当前单价 × Count（耐久/附加属性修正）
+    let current_price = compute_item_price_per_unit(item, info);
+    let mut cost = p.saturating_mul(item.count as u64)
+        .saturating_sub(current_price.saturating_mul(item.count as u64));
     if item.rental_information.is_some() {
         cost = cost.saturating_mul(2);
     }
@@ -4475,6 +4478,25 @@ mod tests {
         // 不同图 → 不在
         let npc_other_map = NpcState { object_id: 3, name: "n".into(), x: 100, y: 100, direction: 0, db_index: 1, map_index: 4 };
         assert!(!npc_in_range(3, 100, 100, &npc_other_map));
+    }
+
+    #[test]
+    fn repair_cost_matches_csharp_repair_price() {
+        use mir2_shared::data::item::UserItem;
+        let info = crate::db::ItemInfo {
+            index: 1,
+            price: 100,
+            durability: 50,
+            ..Default::default()
+        };
+
+        // 满耐久堆叠：C# RepairPrice = 0（修复基价 100 == 当前单价 100）
+        let full = UserItem { item_index: 1, count: 3, max_dura: 50, current_dura: 50, ..Default::default() };
+        assert_eq!(compute_repair_cost(&full, &info, false), 0);
+
+        // 半耐久单件：修复基价 100 - 当前残值 87 = 13
+        let damaged = UserItem { item_index: 1, count: 1, max_dura: 50, current_dura: 25, ..Default::default() };
+        assert_eq!(compute_repair_cost(&damaged, &info, false), 13);
     }
 
 }
