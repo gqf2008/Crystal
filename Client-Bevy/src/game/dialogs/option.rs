@@ -205,7 +205,7 @@ fn option_view_system(
     mut skill_slots: Query<
         &mut Visibility,
         (
-            With<crate::game::skills::SkillBarSlot>,
+            With<crate::game::skills::SkillBarRoot>,
             Without<crate::actor::GroundItem>,
             Without<crate::actor::ActorNameLabel>,
             Without<crate::game::combat::HpBarBg>,
@@ -216,7 +216,7 @@ fn option_view_system(
         &mut Visibility,
         (
             With<crate::actor::GroundItem>,
-            Without<crate::game::skills::SkillBarSlot>,
+            Without<crate::game::skills::SkillBarRoot>,
             Without<crate::actor::ActorNameLabel>,
             Without<crate::game::combat::HpBarBg>,
             Without<crate::game::combat::HpBarFill>,
@@ -226,7 +226,7 @@ fn option_view_system(
         &mut Visibility,
         (
             With<crate::actor::ActorNameLabel>,
-            Without<crate::game::skills::SkillBarSlot>,
+            Without<crate::game::skills::SkillBarRoot>,
             Without<crate::actor::GroundItem>,
             Without<crate::game::combat::HpBarBg>,
             Without<crate::game::combat::HpBarFill>,
@@ -236,7 +236,7 @@ fn option_view_system(
         &mut Visibility,
         (
             Or<(With<crate::game::combat::HpBarBg>, With<crate::game::combat::HpBarFill>)>,
-            Without<crate::game::skills::SkillBarSlot>,
+            Without<crate::game::skills::SkillBarRoot>,
             Without<crate::actor::GroundItem>,
             Without<crate::actor::ActorNameLabel>,
         ),
@@ -248,6 +248,7 @@ fn option_view_system(
         std::sync::atomic::Ordering::Relaxed,
     );
     let target = |show: bool| if show { Visibility::Visible } else { Visibility::Hidden };
+    // C# GameScene.DialogProcess：SkillBar 开关显隐整个 SkillBarDialog（根实体隐藏，子控件随层级联动）
     let sb = target(view_should_show(OptionViewKind::SkillBar, &opt));
     for mut vis in &mut skill_slots {
         if *vis != sb {

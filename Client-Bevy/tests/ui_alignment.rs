@@ -291,6 +291,60 @@ fn game_chat_death_aligned() {
     println!("  ✓ 游戏内聊天面板 + 死亡弹窗 布局对齐");
 }
 
+/// 技能快捷栏（#2487 对齐 C# SkillBarDialog，MainDialogs.cs L1516-1744）。
+/// 全部坐标引用 `client_bevy::game::skills` 的 pub 常量（防代码漂移），
+/// 尺寸用真实精灵元数据运行时校验（基线 = 本次实测：2190=216x28、2193=204x28、2247=16x28、MagIcon/冷却帧=24x22）。
+#[test]
+fn skill_bar_aligned() {
+    use client_bevy::game::skills as sk;
+    let mut libs = Libs::new();
+
+    // C# 源码字面值（MainDialogs.cs L1516-1744）——独立于被测代码的真源，
+    // 代码常量漂移任意一个都会在这里变红：
+    assert_eq!(sk::SKILL_BAR_W, 216.0, "栏宽 = Prguse[2190] 宽（实测 216）");
+    assert_eq!(sk::SKILL_BAR_H, 28.0, "栏高 = Prguse[2190] 高（实测 28）");
+    assert_eq!(sk::SKILL_GRID_OFFSET_X, 12.0, "格网偏移 = C# BeforeDraw DisplayLocation.X+12（L1659）");
+    assert_eq!(sk::SKILL_SLOT_X, 15.0, "首格 x = C# i*25+15（L1565）");
+    assert_eq!(sk::SKILL_SLOT_Y, 3.0, "格 y = C# L1565");
+    assert_eq!(sk::SKILL_SLOT_STEP, 25.0, "格步进 = C# i*25（L1565）");
+    assert_eq!(sk::SKILL_SLOT_W, 24.0, "格宽 = MagIcon 实测 24");
+    assert_eq!(sk::SKILL_SLOT_H, 22.0, "格高 = MagIcon 实测 22");
+    assert_eq!(sk::SKILL_KEY_X, 13.0, "键名标签 x = C# i*25+13（L1603）");
+    assert_eq!(sk::SKILL_COOLDOWN_BASE, 1260, "冷却帧基址 = C# Index=1260+startFrame（L1741）");
+    assert_eq!(sk::SKILL_COOLDOWN_FRAMES, 22, "冷却帧数 = C# totalFrames=22（L1721）");
+
+    // 底图 Prguse[2190]：栏 bbox（默认 @(0,0)，C# Settings.SkillbarLocation 默认 {0,0}）
+    let (bw, bh) = libs.size(LibraryName::Prguse, 2190);
+    assert_eq!((bw, bh), (sk::SKILL_BAR_W, sk::SKILL_BAR_H), "[尺寸] 栏常量应等于底图实测");
+    assert_in_canvas("技能栏底图", 0.0, 0.0, bw, bh);
+
+    // 格网 Prguse[2193] @(+12,0)（BeforeDraw）：必须完整落在底图内
+    let (gw, gh) = libs.size(LibraryName::Prguse, 2193);
+    assert_inside("技能栏格网", sk::SKILL_GRID_OFFSET_X, 0.0, gw, gh, 0.0, 0.0, bw, bh);
+
+    // 切换绑定按钮 Prguse[2247] @(0,0)：C# Size(16,28)
+    let (sw, sh) = libs.size(LibraryName::Prguse, 2247);
+    assert_eq!((sw, sh), (16.0, 28.0), "[尺寸] 切换绑定按钮应为 16x28（C# Size + 实测）");
+    assert_inside("切换绑定按钮", 0.0, 0.0, sw, sh, 0.0, 0.0, bw, bh);
+
+    // 8 技能格 @(i*25+15, 3) 24x22（C# Cells Location + MagIcon 自然尺寸）：全部落在底图内且互不重叠
+    let (iw, ih) = libs.size(LibraryName::MagIcon, 0);
+    assert_eq!((iw, ih), (sk::SKILL_SLOT_W, sk::SKILL_SLOT_H), "[尺寸] 格常量应等于 MagIcon 实测");
+    for i in 0..8usize {
+        let x = sk::SKILL_SLOT_X + i as f32 * sk::SKILL_SLOT_STEP;
+        assert_inside("技能格", x, sk::SKILL_SLOT_Y, iw, ih, 0.0, 0.0, bw, bh);
+        // 键名标签 @(i*25+13, 0)（C# Size 25x25）：落在底图内
+        assert_inside("键名标签", sk::SKILL_KEY_X + i as f32 * sk::SKILL_SLOT_STEP, 0.0, 25.0, 25.0, 0.0, 0.0, bw, bh);
+    }
+    // 冷却帧 Prguse2[1260..=1282]（C# Index=1260+startFrame，startFrame∈[0,22] 共 23 帧）全部存在且为格尺寸
+    for f in 0..=sk::SKILL_COOLDOWN_FRAMES {
+        let (fw, fh) = libs.size(LibraryName::Prguse2, sk::SKILL_COOLDOWN_BASE + f);
+        assert_eq!((fw, fh), (iw, ih), "[尺寸] 冷却帧 {} 应与技能格同尺寸", f);
+    }
+
+    println!("  ✓ 技能快捷栏 底图/格网/切换钮/8 格/键名标签/23 冷却帧 布局对齐");
+}
+
 #[test]
 fn login_select_meta_aligned() {
     let mut libs = Libs::new();
