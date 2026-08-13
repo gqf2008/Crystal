@@ -650,6 +650,11 @@ fn hero_autopot_from_heroes(heroes: &[HeroInfo], hero_index: u8) -> bool {
         .unwrap_or(false)
 }
 
+/// C# HumanObject.ProcessRegen：自然回血/回蓝 = (int)(Stats*0.03)+1，最少 1。
+fn natural_regen(max_value: i32) -> i32 {
+    (max_value * 3 / 100 + 1).max(1)
+}
+
 impl WorldActor {
     /// 英雄战斗 AI 主循环（每 3 ticks 运行一次，约 300ms）
     ///
@@ -927,7 +932,7 @@ impl WorldActor {
             if !snap.owner_dead && ai_local.hp > 0 && ai_local.hp < ai_local.max_hp
                 && ai_local.target_oid.is_none()
             {
-                let regen = (ai_local.max_hp / 100).max(1);
+                let regen = natural_regen(ai_local.max_hp);
                 ai_local.hp = (ai_local.hp + regen).min(ai_local.max_hp);
             }
             // #1182：药水持续回复（C# HumanObject.ProcessRegen：PerTickRegen = 5 + Level/10）
@@ -946,7 +951,7 @@ impl WorldActor {
                 && ai_local.mp < ai_local.max_mp
                 && ai_local.target_oid.is_none()
             {
-                let regen = (ai_local.max_mp * 3 / 100 + 1).max(1);
+                let regen = natural_regen(ai_local.max_mp);
                 ai_local.mp = (ai_local.mp + regen).min(ai_local.max_mp);
             }
             // #1186：药水持续回蓝（C# ProcessRegen：PerTickRegen 从 PotManaAmount 扣除）
@@ -3579,6 +3584,15 @@ impl WorldActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn natural_regen_matches_csharp_process_regen() {
+        // C# (int)(Stats*0.03)+1
+        assert_eq!(natural_regen(100), 4); // 3+1
+        assert_eq!(natural_regen(1000), 31); // 30+1
+        assert_eq!(natural_regen(33), 1); // 0+1
+        assert_eq!(natural_regen(0), 1); // min 1
+    }
 
     #[test]
     fn hero_autopot_unlocked_defaults_false() {
