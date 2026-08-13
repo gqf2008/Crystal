@@ -18,6 +18,12 @@ pub struct FrozenAxemanBehavior {
     next_pull_tick: u64,
 }
 
+impl Default for FrozenAxemanBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrozenAxemanBehavior {
     pub fn new() -> Self {
         Self { next_pull_tick: 0 }

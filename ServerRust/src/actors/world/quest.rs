@@ -515,16 +515,15 @@ impl Message<ShareQuestRequest> for WorldActor {
         };
 
         // Verify the player has the quest
-        let has_quest = match record
-            .actor_ref
-            .ask(GetQuest {
-                quest_index: msg.quest_id as i32,
-            })
-            .await
-        {
-            Ok(Some(_)) => true,
-            _ => false,
-        };
+        let has_quest = matches!(
+            record
+                .actor_ref
+                .ask(GetQuest {
+                    quest_index: msg.quest_id as i32,
+                })
+                .await,
+            Ok(Some(_))
+        );
         if !has_quest {
             send_system_message(&self.gate_ref, msg.session_id, "你没有这个任务");
             return;

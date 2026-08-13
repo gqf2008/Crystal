@@ -16,6 +16,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct PowerBeadBehavior;
 
+impl Default for PowerBeadBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PowerBeadBehavior {
     pub fn new() -> Self {
         Self

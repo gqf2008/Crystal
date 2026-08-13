@@ -13,6 +13,12 @@ const ATTACK_RANGE: i32 = 4;
 
 pub struct FlameSpearBehavior;
 
+impl Default for FlameSpearBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlameSpearBehavior {
     pub fn new() -> Self {
         Self

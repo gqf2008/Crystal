@@ -30,6 +30,12 @@ const SLAVE_NAMES: [&str; 3] = ["BehemothHugger", "Crawler", "BoulderSpirit"];
 
 pub struct BehemothBehavior;
 
+impl Default for BehemothBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BehemothBehavior {
     pub fn new() -> Self {
         Self
@@ -138,7 +144,7 @@ impl MonsterBehavior for BehemothBehavior {
                     // #1443：C# count = min(8, targets*5 - SlaveList.Count)
                     let count = (targets_count * 5).saturating_sub(ctx.slave_count).min(8);
                     for i in 0..count {
-                        let dir = (i as usize) % 8;
+                        let dir = i % 8;
                         let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];
                         ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                             monster_name: name.to_string(),

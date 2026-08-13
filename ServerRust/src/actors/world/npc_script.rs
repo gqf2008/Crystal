@@ -562,8 +562,8 @@ pub async fn replace_vars(
     let date_str = now.format("%Y/%m/%d").to_string();
     out = out.replace("<$DATE>", &date_str);
     out = out.replace("<$date>", &date_str);
-    out = out.replace("<$DAYOFWEEK>", &weekday_title(now.weekday()));
-    out = out.replace("<$dayofweek>", &weekday_title(now.weekday()));
+    out = out.replace("<$DAYOFWEEK>", weekday_title(now.weekday()));
+    out = out.replace("<$dayofweek>", weekday_title(now.weekday()));
     out = out.replace("<$HOUR>", &now_hour().to_string());
     out = out.replace("<$hour>", &now_hour().to_string());
     out = out.replace("<$MIN>", &now_minute().to_string());
@@ -1171,7 +1171,7 @@ async fn eval_one_check(
                     .creature_log
                     .active_creature
                     .as_ref()
-                    .map(|c| pet_matches(c))
+                    .map(&pet_matches)
                     .unwrap_or(false);
                 active_match || player.creature_log.owned_creatures.iter().any(pet_matches)
             }
@@ -1415,7 +1415,7 @@ async fn eval_one_check(
                 return false;
             };
             let mut all_nearby = true;
-            for (sid, r) in &world.players {
+            for r in world.players.values() {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.group_id == Some(gid) {
                         let dx = (os.x - npc.x).abs() as i64;
@@ -1709,7 +1709,7 @@ async fn exec_action(
                 if st.guild_name.is_some() {
                     send_system_message(&world.gate_ref, session_id, "你已经有行会了");
                 } else {
-                    let mut body = Vec::new();
+                    let body = Vec::new();
                     let _ = world
                         .gate_ref
                         .tell(SendToClient {
@@ -2198,7 +2198,7 @@ async fn exec_action(
             }
         }
         // GIVEEXP <amount>
-        "GIVEEXP" | "ADDEXP" | "ADD EXP" => {
+        "ADDEXP" | "ADD EXP" => {
             let amt = arg0().parse::<i32>().unwrap_or(0);
             let boosted = world.apply_global_exp_multiplier(amt);
             send_player_msg(
@@ -2541,7 +2541,7 @@ async fn exec_action(
             let type_id = arg0().parse::<u8>().unwrap_or(0);
             let creature_type = crate::actors::creature::CreatureType::from(type_id);
             if creature_type != crate::actors::creature::CreatureType::None {
-                if let Some(mut st) = current_player_state(world, session_id).await {
+                if let Some(st) = current_player_state(world, session_id).await {
                     let mut log = st.creature_log;
                     let mut creature =
                         crate::actors::creature::IntelligentCreature::new(creature_type);
@@ -2600,7 +2600,7 @@ async fn exec_action(
                         .creature_log
                         .active_creature
                         .as_ref()
-                        .map(|c| pet_matches(c))
+                        .map(&pet_matches)
                         .unwrap_or(false);
                     if active_removed {
                         st.creature_log.active_creature = None;
@@ -3604,21 +3604,20 @@ fn ini_write(path: &std::path::Path, header: &str, key: &str, value: &str) -> st
     let mut idx = 0usize;
     while idx < lines.len() {
         let t = lines[idx].trim();
-        if t.starts_with('[') && t.ends_with(']') {
-            if t[1..t.len() - 1].eq_ignore_ascii_case(header) {
-                idx += 1;
-                while idx < lines.len() && !lines[idx].trim().starts_with('[') {
-                    if let Some((k, _)) = lines[idx].split_once('=') {
-                        if k.trim().eq_ignore_ascii_case(key) {
-                            lines[idx] = format!("{}={}", key, value);
-                            return std::fs::write(path, lines.join("\n"));
-                        }
+        if t.starts_with('[') && t.ends_with(']') && t[1..t.len() - 1].eq_ignore_ascii_case(header)
+        {
+            idx += 1;
+            while idx < lines.len() && !lines[idx].trim().starts_with('[') {
+                if let Some((k, _)) = lines[idx].split_once('=') {
+                    if k.trim().eq_ignore_ascii_case(key) {
+                        lines[idx] = format!("{}={}", key, value);
+                        return std::fs::write(path, lines.join("\n"));
                     }
-                    idx += 1;
                 }
-                lines.insert(idx, format!("{}={}", key, value));
-                return std::fs::write(path, lines.join("\n"));
+                idx += 1;
             }
+            lines.insert(idx, format!("{}={}", key, value));
+            return std::fs::write(path, lines.join("\n"));
         }
         idx += 1;
     }
@@ -3812,7 +3811,7 @@ async fn give_item(world: &WorldActor, session_id: u64, item_index: i32, count: 
             item_index,
             count: batch,
             current_dura: max_dura,
-            max_dura: max_dura,
+            max_dura,
             identified,
             ..Default::default()
         };

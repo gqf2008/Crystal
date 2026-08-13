@@ -26,6 +26,12 @@ pub struct DarkDevilBehavior {
     area_tick: u64,
 }
 
+impl Default for DarkDevilBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DarkDevilBehavior {
     pub fn new() -> Self {
         Self { area_tick: 0 }

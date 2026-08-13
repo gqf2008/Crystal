@@ -32,6 +32,12 @@ pub struct ArmadilloBehavior {
     run_away: bool,
 }
 
+impl Default for ArmadilloBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArmadilloBehavior {
     pub fn new() -> Self {
         Self {

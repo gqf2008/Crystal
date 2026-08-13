@@ -25,6 +25,12 @@ fn in_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct FurbolgWarriorBehavior;
 
+impl Default for FurbolgWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FurbolgWarriorBehavior {
     pub fn new() -> Self {
         Self

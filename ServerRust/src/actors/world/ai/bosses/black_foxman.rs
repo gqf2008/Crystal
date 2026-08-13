@@ -13,6 +13,12 @@ const LINE_RANGE: i32 = 2;
 
 pub struct BlackFoxmanBehavior;
 
+impl Default for BlackFoxmanBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlackFoxmanBehavior {
     pub fn new() -> Self {
         Self

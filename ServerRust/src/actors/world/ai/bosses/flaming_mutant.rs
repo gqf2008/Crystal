@@ -25,6 +25,12 @@ const WEB_RADIUS: i32 = 3;
 
 pub struct FlamingMutantBehavior;
 
+impl Default for FlamingMutantBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlamingMutantBehavior {
     pub fn new() -> Self {
         Self

@@ -13,6 +13,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct BoulderSpiritBehavior;
 
+impl Default for BoulderSpiritBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BoulderSpiritBehavior {
     pub fn new() -> Self {
         Self

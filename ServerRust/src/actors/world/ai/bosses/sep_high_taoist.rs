@@ -27,6 +27,12 @@ pub struct SepHighTaoistBehavior {
     has_summoned: bool,
 }
 
+impl Default for SepHighTaoistBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepHighTaoistBehavior {
     pub fn new() -> Self {
         Self {

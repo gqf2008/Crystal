@@ -12,6 +12,12 @@ const VIEW_RANGE: i32 = 8;
 
 pub struct CaveMaggotBehavior;
 
+impl Default for CaveMaggotBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CaveMaggotBehavior {
     pub fn new() -> Self {
         Self

@@ -14,6 +14,12 @@ const ATTACK_RANGE: i32 = 3;
 
 pub struct SepAssassinBehavior;
 
+impl Default for SepAssassinBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SepAssassinBehavior {
     pub fn new() -> Self {
         Self

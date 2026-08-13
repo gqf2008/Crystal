@@ -32,6 +32,12 @@ fn random_clone_pos(x: i32, y: i32) -> (i32, i32) {
 
 pub struct FloatingRockBehavior;
 
+impl Default for FloatingRockBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FloatingRockBehavior {
     pub fn new() -> Self {
         Self

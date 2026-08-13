@@ -81,7 +81,7 @@ impl WorldActor {
 
         let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
         // 内联 ItemInfo（客户端显示名称/图标/类型，与 build_user_information_packet 一致）
-        let mut enrich = |mut item: mir2_shared::data::item::UserItem| {
+        let enrich = |mut item: mir2_shared::data::item::UserItem| {
             super::enrich_item_info(&mut item, &self.item_infos);
             item
         };
@@ -96,7 +96,7 @@ impl WorldActor {
             .equipment
             .iter()
             .cloned()
-            .map(|s| s.map(|item| enrich(item)))
+            .map(|s| s.map(&enrich))
             .collect();
         let ai_hp = self
             .hero_ai_states
@@ -756,7 +756,7 @@ impl WorldActor {
     ///   4. ProcessRoam：无目标时跟随主人（保持 3-5 格）
     pub(crate) async fn tick_heroes(&mut self) {
         // 每 3 ticks 执行一次，降低 CPU 开销
-        if self.tick_count % 3 != 0 {
+        if !self.tick_count.is_multiple_of(3) {
             return;
         }
 
@@ -2546,7 +2546,7 @@ impl WorldActor {
         // shape 0 NormalPotion：PotHealthAmount/PotManaAmount += Stats（每 AI tick 回复 PerTickRegen）；
         // shape 1 SunPotion：立即回血回蓝（C# ChangeHP/ChangeMP）。
         for (session_id, item_index, is_mp) in &autopot_intents {
-            let Some(record) = self.players.get(session_id).map(|r| r.clone()) else {
+            let Some(record) = self.players.get(session_id).cloned() else {
                 continue;
             };
             // TryAutoPot：英雄背包里找第一个同 item_index 的药水
@@ -2619,7 +2619,7 @@ impl WorldActor {
 
         // ===== 阶段 2.4b：道士英雄给主人上护盾（#1202：C# TaoistHero ProcessFriend 目标含 Owner） =====
         for (session_id, kind) in &owner_shield_intents {
-            let Some(record) = self.players.get(session_id).map(|r| r.clone()) else {
+            let Some(record) = self.players.get(session_id).cloned() else {
                 continue;
             };
             let Some(snap) = snapshots.iter().find(|s| s.session_id == *session_id) else {
@@ -2648,7 +2648,7 @@ impl WorldActor {
 
         // ===== 阶段 2.4c：道士英雄净化主人（#1210：C# Purification → PurifyPoisons） =====
         for session_id in &purify_intents {
-            if let Some(record) = self.players.get(session_id).map(|r| r.clone()) {
+            if let Some(record) = self.players.get(session_id).cloned() {
                 let _ = record
                     .actor_ref
                     .ask(crate::actors::player::PurifyPoisons)
@@ -3370,7 +3370,6 @@ impl WorldActor {
         let hero_level = hero.level;
         let hero_exp = hero.experience;
         let hero_max = hero.max_experience;
-        drop(hero); // 释放 player_heroes 借用后再用 self
 
         // S.GainHeroExperience（C# Hero.GainExp → Owner.Enqueue）
         let pkt = mir2_shared::packets::server::experience::GainHeroExperience { amount };
@@ -3687,7 +3686,6 @@ fn hero_owner_shield_buff(
                 MirClass::Warrior | MirClass::Assassin => BuffType::AttackBoost { bonus: value },
                 MirClass::Wizard | MirClass::Archer => BuffType::McBoost { bonus: value },
                 MirClass::Taoist => BuffType::ScBoost { bonus: value },
-                _ => BuffType::AttackBoost { bonus: value },
             }
         }
     };
@@ -3835,7 +3833,6 @@ fn hero_friend_buffs(
             (Spell::BlessedArmour, HeroBuffKind::BlessedArmour),
             (Spell::UltimateEnhancer, HeroBuffKind::UltimateEnhancer),
         ],
-        _ => &[],
     }
 }
 
@@ -3940,7 +3937,6 @@ fn hero_apply_buffs(
                         stats.max_mc += value
                     }
                     mir2_shared::enums::MirClass::Taoist => stats.max_sc += value,
-                    _ => {}
                 }
             }
             // #1194：PoisonShot 是标记 buff（无属性，命中附加绿毒）

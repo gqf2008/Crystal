@@ -19,6 +19,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct RestlessJarBehavior;
 
+impl Default for RestlessJarBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RestlessJarBehavior {
     pub fn new() -> Self {
         Self

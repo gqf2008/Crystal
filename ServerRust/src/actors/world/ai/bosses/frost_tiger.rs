@@ -17,6 +17,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct FrostTigerBehavior;
 
+impl Default for FrostTigerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrostTigerBehavior {
     pub fn new() -> Self {
         Self

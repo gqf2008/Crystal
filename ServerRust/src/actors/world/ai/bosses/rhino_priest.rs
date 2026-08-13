@@ -24,6 +24,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct RhinoPriestBehavior;
 
+impl Default for RhinoPriestBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RhinoPriestBehavior {
     pub fn new() -> Self {
         Self

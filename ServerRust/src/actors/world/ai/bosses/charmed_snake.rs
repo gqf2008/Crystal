@@ -16,6 +16,12 @@ const MASTER_RANGE: i32 = 15;
 
 pub struct CharmedSnakeBehavior;
 
+impl Default for CharmedSnakeBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CharmedSnakeBehavior {
     pub fn new() -> Self {
         Self

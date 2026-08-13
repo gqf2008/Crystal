@@ -17,6 +17,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct SandSnailBehavior;
 
+impl Default for SandSnailBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SandSnailBehavior {
     pub fn new() -> Self {
         Self

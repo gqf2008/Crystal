@@ -14,6 +14,12 @@ const ATTACK_RANGE: i32 = 6;
 
 pub struct AvengingWarriorBehavior;
 
+impl Default for AvengingWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AvengingWarriorBehavior {
     pub fn new() -> Self {
         Self

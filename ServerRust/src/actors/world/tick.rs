@@ -92,8 +92,8 @@ async fn apply_monster_hit_player(
     attacker_level: i32,
     target_session: u64,
     damage: i32,
-    px: i32,
-    py: i32,
+    _px: i32,
+    _py: i32,
     map_index: u16,
     target_in_safe: bool,
     defence_type: mir2_shared::enums::DefenceType,
@@ -211,7 +211,7 @@ async fn apply_monster_hit_player(
                     0u8,
                 );
                 // #1710：死亡动画只发同图玩家（C# CurrentMap.Broadcast；原实现漏过滤跨图）
-                for (sid, _) in players {
+                for sid in players.keys() {
                     if let Ok(Some(st)) = players
                         .get(sid)
                         .expect("player exists")
@@ -234,7 +234,7 @@ async fn apply_monster_hit_player(
                 // 死亡经验惩罚（配置百分比；默认 0=关闭，对齐 C# 无通用死亡惩罚）
                 if death_exp_penalty_percent > 0 {
                     let pct = (death_exp_penalty_percent.min(100)) as i64;
-                    let penalty = ((defender.max_experience as i64 * pct) / 100).max(1) as i32;
+                    let penalty = ((defender.max_experience * pct) / 100).max(1) as i32;
                     let deducted = record
                         .actor_ref
                         .ask(crate::actors::player::DeductExperience { amount: penalty })
@@ -242,7 +242,7 @@ async fn apply_monster_hit_player(
                         .unwrap_or(0);
                     if deducted > 0 {
                         send_system_message(
-                            &gate_ref,
+                            gate_ref,
                             target_session,
                             &format!("你损失了 {} 经验值", deducted),
                         );
@@ -396,7 +396,7 @@ async fn broadcast_miss_feedback(
         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16,
         &dmg_body,
     );
-    for (sid, _) in players {
+    for sid in players.keys() {
         if *sid == exclude_session {
             continue;
         }
@@ -452,7 +452,7 @@ async fn broadcast_hit_feedback(
         &dmg_body,
     );
     // 同图其他玩家（C# CurrentMap.Broadcast 排除受害者）
-    for (sid, _) in players {
+    for sid in players.keys() {
         if *sid == exclude_session {
             continue;
         }
@@ -1075,9 +1075,9 @@ fn pet_find_hostile_target(
         .iter()
         .filter(|s| s.0 != monster.object_id && s.5 == monster.map_index && s.3 > 0)
         .filter(|s| {
-            monster_hostility.get(&s.0).map_or(false, |(ms, ts)| {
-                *ms != monster.master_session && *ts == Some(master)
-            })
+            monster_hostility
+                .get(&s.0)
+                .is_some_and(|(ms, ts)| *ms != monster.master_session && *ts == Some(master))
         })
         .min_by_key(|s| ((s.1 - monster.x).abs() + (s.2 - monster.y).abs(), s.0))
         .map(|s| (s.0, s.1, s.2))
@@ -1125,7 +1125,7 @@ fn monster_route_patrol(
     let idx2 = monster.route_point.min(monster.route.len() - 1);
     let (tx, ty) = (monster.route[idx2].x, monster.route[idx2].y);
     // C# MoveTo(Route[RoutePoint].Location)：A* 寻路
-    let mut path = paths.entry(monster.object_id).or_default();
+    let path = paths.entry(monster.object_id).or_default();
     let recalc = path.is_empty()
         || path_targets
             .get(&monster.object_id)
@@ -1497,7 +1497,7 @@ impl WorldActor {
 
     /// C# PlayerObject.Process 周期条件（每 5 tick）：扩容到期 + RequiredGroup 停留强制
     pub(crate) async fn tick_player_conditions(&mut self) {
-        if self.tick_count % 5 != 0 {
+        if !self.tick_count.is_multiple_of(5) {
             return;
         }
         self.tick_storage_expiry().await;
@@ -1952,7 +1952,7 @@ impl WorldActor {
     }
 
     pub(crate) async fn tick_potion_pools(&mut self) {
-        if self.tick_count % 2 != 0 {
+        if !self.tick_count.is_multiple_of(2) {
             return;
         }
         let now_ms = std::time::SystemTime::now()
@@ -1978,7 +1978,7 @@ impl WorldActor {
 
     /// 玩家 Buff tick + 死亡复活（每 5 ticks）
     pub(crate) async fn tick_buffs_and_revive(&mut self) {
-        if self.tick_count % 5 == 0 {
+        if self.tick_count.is_multiple_of(5) {
             let mut to_revive = Vec::new();
             let mut to_remove = Vec::new();
             let mut to_despawn_pets = Vec::new();
@@ -2067,13 +2067,13 @@ impl WorldActor {
             let mut pending_explosions: Vec<(u64, u16, i32, i32, i32)> = Vec::new(); // (caster, map, x, y, value)
             let mut binding_releases: Vec<(u32, u16, i32, i32)> = Vec::new(); // (object_id, map, x, y)——BindingShot 定身解除广播
             let mut delayed_removals: Vec<(u32, u16)> = Vec::new(); // (object_id, map)——炸弹延迟爆炸移除清理广播
-            for (_, monster) in &mut self.monsters {
+            for monster in self.monsters.values_mut() {
                 // #1888：友军增益每 tick 减时，过期回退属性
                 tick_monster_buffs(monster);
                 if monster.poison_list.is_empty() {
                     continue;
                 }
-                if self.tick_count % 20 == 0 {
+                if self.tick_count.is_multiple_of(20) {
                     let mut remove_delayed = false;
                     if let Some(p) = monster
                         .poison_list
@@ -2323,7 +2323,7 @@ impl WorldActor {
     /// - 专注打断 3s 后自动恢复、buff 过期广播 SetConcentration(false,false)
     /// - 玩家伤害触发的元素攒取（C# GatherElement 每次命中）
     pub(crate) async fn tick_elements(&mut self) {
-        if self.tick_count % 5 != 0 {
+        if !self.tick_count.is_multiple_of(5) {
             return;
         }
         for (sid, record) in &self.players {
@@ -2374,7 +2374,7 @@ impl WorldActor {
     /// 地图环境伤害（C# Map.cs MapLightning/MapLava：随机落雷/岩浆，3~15s 一波）
     /// + 禁止坐骑地图自动下坐骑（每 20 ticks）
     pub(crate) async fn tick_environment_damage(&mut self) {
-        if self.tick_count % 20 == 0 {
+        if self.tick_count.is_multiple_of(20) {
             // C# Map.cs：Info.Lightning/Fire 且到时 → 对每个玩家生成一次落雷/岩浆
             // （25% 落在玩家脚下，75% 在 ±10 格内随机），值 = Random(0..damage)
             let mut strikes: Vec<(u16, i32, i32, bool)> = Vec::new(); // (map, x, y, is_lightning)
@@ -2391,7 +2391,7 @@ impl WorldActor {
                             map_index_u16,
                             self.tick_count + fastrand::i32(30..=150) as u64,
                         );
-                        for (_, record) in &self.players {
+                        for record in self.players.values() {
                             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                                 if st.is_dead || st.map_index != map_index_u16 {
                                     continue;
@@ -2427,7 +2427,7 @@ impl WorldActor {
                             map_index_u16,
                             self.tick_count + fastrand::i32(30..=150) as u64,
                         );
-                        for (_, record) in &self.players {
+                        for record in self.players.values() {
                             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                                 if st.is_dead || st.map_index != map_index_u16 {
                                     continue;
@@ -2553,7 +2553,7 @@ impl WorldActor {
         }
 
         // 自动下坐骑：进入禁止坐骑地图时
-        if self.tick_count % 20 == 0 {
+        if self.tick_count.is_multiple_of(20) {
             let mut to_dismount: Vec<u64> = Vec::new();
             for (session_id, record) in &self.players {
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -2579,7 +2579,7 @@ impl WorldActor {
 
     /// 经验倍率过期、全局事件过期、随机世界事件、隐身过期（每 100 ticks）
     pub(crate) async fn tick_exp_events_and_invisibility(&mut self) {
-        if self.tick_count % 100 == 0 {
+        if self.tick_count.is_multiple_of(100) {
             for (session_id, record) in &self.players {
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                     // C# PauseInSafeZone：安全区内到期顺延 100 tick（计时冻结）
@@ -2660,7 +2660,7 @@ impl WorldActor {
                 self.global_drop_multiplier = 1.0;
                 self.global_gold_multiplier = 1.0;
                 self.global_exp_event_end_tick = 0;
-                for (session_id, _) in &self.players {
+                for session_id in self.players.keys() {
                     send_system_message(
                         &self.gate_ref,
                         *session_id,
@@ -2671,7 +2671,7 @@ impl WorldActor {
             }
             // 随机世界事件触发（每 36000 ticks = 1 小时，20% 概率）
             if self.tick_count > 0
-                && self.tick_count % 36000 == 0
+                && self.tick_count.is_multiple_of(36000)
                 && self.global_exp_event_end_tick == 0
             {
                 let roll = fastrand::u32(1..=100);
@@ -2732,7 +2732,7 @@ impl WorldActor {
     /// 休息经验加成累积（C# PlayerObject.Process：安全区每秒 _restedCounter++；每 RestedPeriod*60 秒给一次 GiveRestedBonus）
     /// 同时处理休息加成过期（每 10 ticks = 1 秒）
     pub(crate) async fn tick_rested(&mut self) {
-        if self.tick_count % 10 != 0 {
+        if !self.tick_count.is_multiple_of(10) {
             return;
         }
         let cfg = self.rested_cfg.clone();
@@ -3524,7 +3524,7 @@ impl WorldActor {
 
     /// C# MonsterObject.Process：EXPOwnerDelay=5000ms——EXPOwner 5s 未命中则清除归属
     pub(crate) async fn tick_monster_ownership_expiry(&mut self) {
-        if self.tick_count % 5 != 0 {
+        if !self.tick_count.is_multiple_of(5) {
             return;
         }
         for (_, m) in self.monsters.iter_mut() {
@@ -3609,7 +3609,7 @@ impl WorldActor {
     /// #2114：C# GuildInfo.HasGT（GTRent > Now）——领地租期到期释放归属
     /// #2136：C# GuildObject.Process（:795-813）——行会 Buff 时限到期自动停用
     pub(crate) async fn tick_guild_buff_expiry(&mut self) {
-        if self.tick_count % 10 != 0 || self.guild_buff_expiries.is_empty() {
+        if !self.tick_count.is_multiple_of(10) || self.guild_buff_expiries.is_empty() {
             return;
         }
         let now = self.tick_count;
@@ -3692,7 +3692,10 @@ impl WorldActor {
 
     pub(crate) async fn tick_pk_decay(&mut self) {
         // #2420：C# Settings.PKDelay（秒 × 10 ticks/s；默认 12s = 120 ticks）
-        if self.tick_count % (self.setup_cfg.pk_delay_seconds as u64 * 10) == 0 {
+        if self
+            .tick_count
+            .is_multiple_of(self.setup_cfg.pk_delay_seconds as u64 * 10)
+        {
             let mut colour_changes = Vec::new();
             for (session_id, record) in &self.players {
                 let _ = record
@@ -3721,7 +3724,7 @@ impl WorldActor {
 
     /// 钓鱼收获判定（每 tick；#2386 改为相位驱动：咬钩→收竿，对齐 C# UpdateFish）
     pub(crate) async fn tick_fishing(&mut self) {
-        let attempts = self.fishing_cfg.attempts.max(1) as u32;
+        let attempts = self.fishing_cfg.attempts.max(1);
         let now_tick = self.tick_count;
         let mut sessions_update: Vec<(u64, FishingSession)> = Vec::new();
         let mut bites = Vec::new(); // session_id（咬钩后需发 bite 包）
@@ -3839,7 +3842,7 @@ impl WorldActor {
             return;
         };
 
-        let attempts = self.fishing_cfg.attempts.max(1) as u32;
+        let attempts = self.fishing_cfg.attempts.max(1);
         // C# FishingCast(false)：FishingProgress > 99 → FishingChanceCounter++（跨抛竿保留）
         if session.progress >= attempts {
             let counter = self.fishing_success_counters.entry(session_id).or_insert(0);
@@ -3987,7 +3990,7 @@ impl WorldActor {
 
     /// 地面物品过期清理（每 50 ticks）
     pub(crate) async fn tick_ground_cleanup(&mut self) {
-        if self.tick_count % 50 == 0 {
+        if self.tick_count.is_multiple_of(50) {
             // C# Settings.ItemTimeOut = 30s（配置化 item_timeout_ticks）；
             // 死亡掉落 PlayerDiedItemTimeOut = 120s（4×）
             let expired: Vec<_> = self
@@ -4366,7 +4369,7 @@ impl WorldActor {
         }
 
         // 应用拾取（从后往前删除，避免索引偏移）
-        pet_pickups.sort_by(|a, b| b.0.cmp(&a.0));
+        pet_pickups.sort_by_key(|x| std::cmp::Reverse(x.0));
         pet_pickups.dedup_by(|a, b| a.0 == b.0); // 同一物品只拾取一次
 
         for (gi_idx, session_id) in pet_pickups {
@@ -4406,11 +4409,7 @@ impl WorldActor {
                                 item: gi.item.clone(),
                             })
                             .await;
-                        send_system_message(
-                            &self.gate_ref,
-                            session_id,
-                            &format!("宠物帮你拾取了物品"),
-                        );
+                        send_system_message(&self.gate_ref, session_id, "宠物帮你拾取了物品");
                     } else {
                         // 背包已满，把物品掉回去
                         self.ground_items.push(gi);
@@ -4939,7 +4938,7 @@ impl WorldActor {
 
     /// 定期自动保存（每 300 ticks）
     pub(crate) async fn tick_auto_save(&mut self) {
-        if self.tick_count % 300 == 0 && !self.players.is_empty() {
+        if self.tick_count.is_multiple_of(300) && !self.players.is_empty() {
             let player_count = self.players.len();
             let mut saved = 0;
             for record in self.players.values() {
@@ -4985,7 +4984,7 @@ impl WorldActor {
 
     /// 拍卖过期清理（每 36000 ticks = 1小时）
     pub(crate) async fn tick_auction_expiry(&mut self) {
-        if self.tick_count % 36000 == 0 {
+        if self.tick_count.is_multiple_of(36000) {
             let now = chrono::Local::now().timestamp();
             let seven_days = 7 * 24 * 60 * 60;
             let mut expired = Vec::new();
@@ -5000,7 +4999,7 @@ impl WorldActor {
 
                 // Return item to seller
                 let mut seller_online = false;
-                for (_, record) in &self.players {
+                for record in self.players.values() {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         if state.name == auction.seller_name {
                             let added = record
@@ -5052,7 +5051,7 @@ impl WorldActor {
 
     /// 租赁过期处理（每 3600 ticks = 6分钟检查一次）
     pub(crate) async fn tick_rental_expiry(&mut self) {
-        if self.tick_count % 3600 != 0 {
+        if !self.tick_count.is_multiple_of(3600) {
             return;
         }
         let now = chrono::Local::now().timestamp();
@@ -5181,7 +5180,7 @@ impl WorldActor {
             // C# ReturnRentalItem：归还物主前解除租赁信息（恢复完整控制权）
             item.rental_information = None;
             let mut owner_online = false;
-            for (_, owner_record) in &self.players {
+            for owner_record in self.players.values() {
                 if let Ok(Some(owner_state)) = owner_record.actor_ref.ask(GetPlayerState).await {
                     if owner_state.name == rental.owner_name {
                         let added = owner_record
@@ -5604,7 +5603,7 @@ impl WorldActor {
         }
 
         // 节流：每 10 ticks 检查一次（~1秒），避免每个 tick 都查
-        if self.tick_count % 10 != 0 {
+        if !self.tick_count.is_multiple_of(10) {
             return;
         }
 
@@ -5804,7 +5803,7 @@ impl WorldActor {
 
     /// 行会战到期检查（C# Envir.cs 2317-2327：TimeRemaining 递减，到期 EndWar）
     pub(crate) async fn tick_guild_wars(&mut self) {
-        if self.tick_count % 30 != 0 {
+        if !self.tick_count.is_multiple_of(30) {
             return; // 每 3 秒检查
         }
         let now = std::time::SystemTime::now()
@@ -6036,10 +6035,10 @@ impl WorldActor {
                     match s.structure_type {
                         conquest::SiegeStructureType::Catapult => catapult_ids.push(*oid),
                         conquest::SiegeStructureType::Wall
-                        | conquest::SiegeStructureType::CastleGate => {
-                            if !s.is_destroyed() {
-                                wall_ids.push(*oid);
-                            }
+                        | conquest::SiegeStructureType::CastleGate
+                            if !s.is_destroyed() =>
+                        {
+                            wall_ids.push(*oid);
                         }
                         _ => {}
                     }
@@ -6057,8 +6056,8 @@ impl WorldActor {
                     }
                     // 攻击间隔节流：用 damage_level + object_id 模拟冷却。
                     // 简化：每 CATAPULT_ATTACK_INTERVAL ticks 攻击一次。
-                    if (self.tick_count + (*cat_oid as u64)) % conquest::CATAPULT_ATTACK_INTERVAL
-                        != 0
+                    if !(self.tick_count + (*cat_oid as u64))
+                        .is_multiple_of(conquest::CATAPULT_ATTACK_INTERVAL)
                     {
                         continue;
                     }
@@ -6109,11 +6108,11 @@ impl WorldActor {
         }
 
         // 4) 箭塔自动攻击（C# ConquestArcher：战争期间攻击非守方玩家；每 30 ticks = 3s 一轮）
-        if self.tick_count % 30 == 0 {
+        if self.tick_count.is_multiple_of(30) {
             // 预收集玩家 (session, map, x, y, guild)
             let player_snaps: Vec<(u64, u16, i32, i32, Option<String>)> = {
                 let mut out = Vec::new();
-                for (_sid, record) in &self.players {
+                for record in self.players.values() {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         if !state.is_dead {
                             out.push((
@@ -6186,14 +6185,14 @@ impl WorldActor {
         }
 
         // 3) 控制点占领判定（ControlPoints 模式）：每 60 ticks 检查玩家位置
-        if self.tick_count % 60 != 0 {
+        if !self.tick_count.is_multiple_of(60) {
             return;
         }
 
         // 预收集玩家 (session, x, y, guild_name, map_index)
         let player_snaps: Vec<(u64, i32, i32, Option<String>, i32)> = {
             let mut out = Vec::new();
-            for (_sid, record) in &self.players {
+            for record in self.players.values() {
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                     if !state.is_dead {
                         out.push((
@@ -6465,8 +6464,8 @@ impl WorldActor {
                         }
                     }
                 }
-                Spell::ExplosiveTrap => {
-                    if !spell_obj.detonated {
+                Spell::ExplosiveTrap
+                    if !spell_obj.detonated => {
                         // C# ExplosiveTrap：可攻击目标踩中该格才引爆（单目标 MAC）
                         let stepped: Option<u32> = self
                             .monsters
@@ -6526,11 +6525,10 @@ impl WorldActor {
                             ));
                         }
                     }
-                }
-                Spell::DelayedExplosion => {
+                Spell::DelayedExplosion
                     // C# HumanObject.cs:6462 DelayedType.Magic：延迟到期 → 对目标一次 MAC 伤害
                     // + 挂 DelayedExplosion 毒（目标身上三级 ObjectEffect 后 3×3 AoE）。
-                    if !spell_obj.detonated && elapsed >= spell_obj.expires_at_ms {
+                    if !spell_obj.detonated && elapsed >= spell_obj.expires_at_ms => {
                         debug!(
                             "SpellObject: DelayedExplosion impact on target {:?} at ({},{})",
                             spell_obj.target_id, spell_obj.x, spell_obj.y
@@ -6580,7 +6578,6 @@ impl WorldActor {
                         }
                         expired_ids.push(*obj_id);
                     }
-                }
                 _ => {}
             }
         }
@@ -6635,15 +6632,13 @@ impl WorldActor {
                         // 各法术附加状态（对齐 C# SpellObject.ProcessSpell）
                         match spell {
                             // Blizzard：1/8 概率 Slow（C# SpellObject.cs:175）
-                            Spell::Blizzard => {
-                                if fastrand::i32(0..8) == 0 {
-                                    let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1)))
-                                        as u32;
-                                    poison::apply_poison(
-                                        &mut monster.poison_list,
-                                        poison::Poison::new(PoisonType::SLOW, dur, 0, 2000),
-                                    );
-                                }
+                            Spell::Blizzard if fastrand::i32(0..8) == 0 => {
+                                let dur =
+                                    (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
+                                poison::apply_poison(
+                                    &mut monster.poison_list,
+                                    poison::Poison::new(PoisonType::SLOW, dur, 0, 2000),
+                                );
                             }
                             // PoisonCloud：绿毒强度基于 tick_value（创建时按 magic_stat 算出，道士=SC）
                             Spell::PoisonCloud => {
@@ -7133,7 +7128,7 @@ impl WorldActor {
         let defence = DefenceType::Mac;
 
         // 弓手被动 Focus（C# HumanObject CompleteRangeAttack：Random(5)<=Lv 时命中概率 ×2）
-        let mut attacker_stats_owned = attacker_stats.clone();
+        let mut attacker_stats_owned = *attacker_stats;
         if is_archer {
             // #1184：英雄弹道查英雄技能（hero_magics 同 C# 编号）；普通玩家查玩家技能
             let focus_lv = if pending.hero_stats.is_some() {
@@ -7609,7 +7604,7 @@ impl WorldActor {
                 if other_state.is_dead {
                     continue;
                 }
-                if self.gm_protected.contains(&other_session) {
+                if self.gm_protected.contains(other_session) {
                     continue;
                 }
                 if !super::can_attack_player(caster_state, &other_state, &self.guild_wars) {
@@ -7761,24 +7756,23 @@ impl WorldActor {
                     }
 
                     // ElementalShot：击退玩家（C# DoKnockback 同样作用于玩家，HumanObject.cs:5660）
-                    if spell == Spell::ElementalShot {
-                        if fastrand::i32(0..20)
+                    if spell == Spell::ElementalShot
+                        && fastrand::i32(0..20)
                             < 6 + pending.spell_level as i32 * 3 + caster_state.level as i32
                                 - other_state.level as i32
-                        {
-                            let distance =
-                                1 + (pending.spell_level as i32 - 1).max(0) + fastrand::i32(0..2);
-                            pvp_knockback = Some((
-                                *other_session,
-                                crate::actors::world::ai::direction_towards(
-                                    caster_state.x,
-                                    caster_state.y,
-                                    other_state.x,
-                                    other_state.y,
-                                ),
-                                distance,
-                            ));
-                        }
+                    {
+                        let distance =
+                            1 + (pending.spell_level as i32 - 1).max(0) + fastrand::i32(0..2);
+                        pvp_knockback = Some((
+                            *other_session,
+                            crate::actors::world::ai::direction_towards(
+                                caster_state.x,
+                                caster_state.y,
+                                other_state.x,
+                                other_state.y,
+                            ),
+                            distance,
+                        ));
                     }
 
                     debug!(
@@ -7830,14 +7824,14 @@ impl Message<Tick> for WorldActor {
         self.tick_npc_timers();
 
         // 组队位置广播（C# Group 周期 SendLocations；每 50 tick ≈ 5s，#1309）
-        if self.tick_count % 50 == 0 {
+        if self.tick_count.is_multiple_of(50) {
             crate::actors::world::broadcast_group_locations(self).await;
             // #1325：寄售/拍卖到期结算（C# Envir.ProcessAuction）
             crate::actors::world::market::resolve_expired_auctions(self).await;
         }
 
         // #2376：过期回购转入各 NPC 二手货（C# NPCObject.ProcessGoods，每 60 秒）
-        if self.tick_count % 600 == 0 {
+        if self.tick_count.is_multiple_of(600) {
             self.flush_expired_buyback_to_used_goods();
         }
 
@@ -8217,8 +8211,7 @@ impl Message<Tick> for WorldActor {
                                 monster.ai_state = MonsterAiState::Attack;
                             } else if self.tick_count >= monster.next_move_tick && !pet_move_blocked
                             {
-                                let mut path =
-                                    self.monster_paths.entry(monster.object_id).or_default();
+                                let path = self.monster_paths.entry(monster.object_id).or_default();
                                 let recalc = path.is_empty()
                                     || self
                                         .monster_path_targets
@@ -8343,20 +8336,19 @@ impl Message<Tick> for WorldActor {
                     let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
                     for (session, px, py, _, pk, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
-                        if dist <= profile.aggro_range && *pk > 0 {
-                            if red_nearest.is_none_or(|n| dist < n.3) {
-                                red_nearest = Some((*session, *px, *py, dist));
-                            }
+                        if dist <= profile.aggro_range
+                            && *pk > 0
+                            && red_nearest.is_none_or(|n| dist < n.3)
+                        {
+                            red_nearest = Some((*session, *px, *py, dist));
                         }
                     }
                     nearest = red_nearest;
                 } else {
                     for (session, px, py, _, _, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
-                        if dist <= profile.aggro_range {
-                            if nearest.is_none_or(|n| dist < n.3) {
-                                nearest = Some((*session, *px, *py, dist));
-                            }
+                        if dist <= profile.aggro_range && nearest.is_none_or(|n| dist < n.3) {
+                            nearest = Some((*session, *px, *py, dist));
                         }
                     }
                 }
@@ -8522,11 +8514,11 @@ impl Message<Tick> for WorldActor {
                                 + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                             monster.ai_state = MonsterAiState::Attack;
                         } else if can_move {
-                            let mut path = self.monster_paths.entry(*oid).or_default();
+                            let path = self.monster_paths.entry(*oid).or_default();
                             let recalc = path.is_empty()
                                 || self
                                     .monster_path_targets
-                                    .get(&*oid)
+                                    .get(oid)
                                     .map(|(s, px, py)| {
                                         *s != PATH_TARGET_PET_ATTACK || *px != tx || *py != ty
                                     })
@@ -8610,7 +8602,7 @@ impl Message<Tick> for WorldActor {
                                 + slow_adjusted_ticks(profile.attack_cooldown, slowed);
                             monster.ai_state = MonsterAiState::Attack;
                         } else if can_move {
-                            let mut path = self.monster_paths.entry(*oid).or_default();
+                            let path = self.monster_paths.entry(*oid).or_default();
                             let recalc = path.is_empty()
                                 || self
                                     .monster_path_targets
@@ -8951,7 +8943,7 @@ impl Message<Tick> for WorldActor {
                     } else if should_chase && dist > profile.attack_range && can_move {
                         // #1691：追击——8 方向 A* 寻路（C# PathFinder.FindPath），
                         // 目标变更/路径失效才重算；贪心 step_toward 遇墙会卡住无法绕行
-                        let mut path = self.monster_paths.entry(*oid).or_default();
+                        let path = self.monster_paths.entry(*oid).or_default();
                         let recalc = path.is_empty()
                             || self
                                 .monster_path_targets
@@ -9040,7 +9032,7 @@ impl Message<Tick> for WorldActor {
                             } else if dist_master > 2 {
                                 // #1693：宠物跟随主人（C# ProcessRoam → MoveTo(Master.Back) 用 PathFinder），
                                 // A* 寻路到主人附近，保持 ~2 格；目标哨兵 session=u64::MAX 区分追击/回出生点
-                                let mut path = self.monster_paths.entry(*oid).or_default();
+                                let path = self.monster_paths.entry(*oid).or_default();
                                 let recalc = path.is_empty()
                                     || self
                                         .monster_path_targets
@@ -9102,7 +9094,7 @@ impl Message<Tick> for WorldActor {
                     }
                 } else if can_move && dist_to_spawn(monster) > 2 {
                     // #1691：无目标 → 回出生点（8 方向 A*，避免卡墙；目标哨兵 session=0）
-                    let mut path = self.monster_paths.entry(*oid).or_default();
+                    let path = self.monster_paths.entry(*oid).or_default();
                     let recalc = path.is_empty()
                         || self
                             .monster_path_targets

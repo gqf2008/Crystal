@@ -19,6 +19,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct TornadoBehavior;
 
+impl Default for TornadoBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TornadoBehavior {
     pub fn new() -> Self {
         Self

@@ -18,6 +18,12 @@ pub struct ManectricBlestBehavior {
     attack_count: u32,
 }
 
+impl Default for ManectricBlestBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ManectricBlestBehavior {
     pub fn new() -> Self {
         Self { attack_count: 0 }

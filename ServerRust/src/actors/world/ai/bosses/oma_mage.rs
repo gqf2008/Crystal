@@ -21,6 +21,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct OmaMageBehavior;
 
+impl Default for OmaMageBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OmaMageBehavior {
     pub fn new() -> Self {
         Self

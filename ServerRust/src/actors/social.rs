@@ -14,8 +14,8 @@ use crate::actors::group::{Group, GroupMember};
 use crate::actors::guild::{Guild, GuildRank};
 use crate::actors::inventory::EquipmentSlot;
 use crate::actors::player::{
-    AddFriendToSelf, AddGold, AddItemToInventory, CanGainGold, CanGainItems, DeductGold,
-    GetItemInfo, GetPlayerState, PlayerActor, RemoveFriendFromSelf, RemoveItemFromInventory,
+    AddFriendToSelf, AddGold, AddItemToInventory, CanGainGold, DeductGold, GetItemInfo,
+    GetPlayerState, PlayerActor, RemoveFriendFromSelf, RemoveItemFromInventory,
     SetAllowLoverRecall, SetAllowMarriage, SetAllowMentor, SetEnableGroupRecall, SetFriendMemo,
     SetGroupId, SetGuildInfo, SetLastRecallTime, SetMentor, SetMentorExp, SetPlayerPosition,
     SetPlayerState, SetSpouse,
@@ -1528,7 +1528,7 @@ fn marriage_target_check(
     None
 }
 
-/// 行会创建费用：金币（对应 C# Settings.Guild_CreationCostList gold entry）
+// 行会创建费用：金币（对应 C# Settings.Guild_CreationCostList gold entry）
 // 创建行会所需金币来自 cfg.server.toml (social.guild_creation_cost_gold),
 // 不再需要 hardcoded 常量。config 在 SocialActor.config 字段里。
 
@@ -1994,7 +1994,7 @@ impl SocialActor {
                 let gold_ok = gold_b == 0
                     || rec
                         .ask(CanGainGold {
-                            amount: (gold_b as u32).min(u32::MAX),
+                            amount: (gold_b as u32),
                         })
                         .await
                         .unwrap_or(false);
@@ -2015,7 +2015,7 @@ impl SocialActor {
                 let gold_ok = gold_a == 0
                     || rec
                         .ask(CanGainGold {
-                            amount: (gold_a as u32).min(u32::MAX),
+                            amount: (gold_a as u32),
                         })
                         .await
                         .unwrap_or(false);
@@ -2217,7 +2217,7 @@ impl SocialActor {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         if now_ms < state.last_recall_time {
-            let remaining = (state.last_recall_time - now_ms + 999) / 1000;
+            let remaining = (state.last_recall_time - now_ms).div_ceil(1000);
             send_system_message(
                 &self.gate_ref,
                 leader_session,
@@ -2348,7 +2348,7 @@ impl SocialActor {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         if now_ms < state.last_recall_time {
-            let remaining = (state.last_recall_time - now_ms + 999) / 1000;
+            let remaining = (state.last_recall_time - now_ms).div_ceil(1000);
             send_system_message(
                 &self.gate_ref,
                 leader_session,
@@ -2559,7 +2559,7 @@ impl SocialActor {
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
                     if now_ms < state.last_recall_time {
-                        let remaining = (state.last_recall_time - now_ms + 999) / 1000;
+                        let remaining = (state.last_recall_time - now_ms).div_ceil(1000);
                         send_system_message(
                             &self.gate_ref,
                             session_id,
@@ -2568,7 +2568,7 @@ impl SocialActor {
                         return;
                     }
                     if now_ms < other_state.last_recall_time {
-                        let remaining = (other_state.last_recall_time - now_ms + 999) / 1000;
+                        let remaining = (other_state.last_recall_time - now_ms).div_ceil(1000);
                         send_system_message(
                             &self.gate_ref,
                             session_id,
@@ -4508,7 +4508,7 @@ impl Message<CreateGuildRequest> for SocialActor {
                 }
             } else {
                 // 兼容：无 Required 列表时回退金币仅（guild_creation_cost_gold）
-                if state.inventory.gold < self.config.guild_creation_cost_gold as u64 {
+                if state.inventory.gold < self.config.guild_creation_cost_gold {
                     send_system_message(
                         &self.gate_ref,
                         msg.session_id,
@@ -5196,7 +5196,6 @@ impl Message<LeaveGuildRequest> for SocialActor {
                 LeaderLeaveOutcome::Disband => {
                     // LeaderOk：最后会长离开 → Envir.DeleteGuild（:505-506）
                     let online: Vec<u64> = guild.online_sessions(0);
-                    drop(guild);
                     self.guilds.remove(&guild_name);
                     let _ = db::delete_guild(&self.db_pool, &guild_name).await;
                     for sid in online {
@@ -5616,19 +5615,18 @@ impl Message<MarriageRequest> for SocialActor {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        if requester_state.married_date > 0 {
-            if now_unix < requester_state.married_date + self.config.marriage_cooldown_days * 86_400
-            {
-                send_system_message(
-                    &self.gate_ref,
-                    msg.session_id,
-                    &format!(
-                        "离婚后 {} 天内无法再次结婚",
-                        self.config.marriage_cooldown_days
-                    ),
-                );
-                return;
-            }
+        if requester_state.married_date > 0
+            && now_unix < requester_state.married_date + self.config.marriage_cooldown_days * 86_400
+        {
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                &format!(
+                    "离婚后 {} 天内无法再次结婚",
+                    self.config.marriage_cooldown_days
+                ),
+            );
+            return;
         }
         // C# MarriageRequest（:13146-13150）：等级要求（Settings.MarriageLevelRequired=10）
         if requester_state.level < self.config.marriage_level_required {
@@ -6397,9 +6395,7 @@ impl SocialActor {
         if mentor_settle_amount(self_is_mentor, new_self_mentor_exp) > 0 {
             if let Some(world) = &self.world_ref {
                 let _ = world
-                    .ask(crate::actors::world::partners::SettleMentorExp {
-                        session_id: session_id,
-                    })
+                    .ask(crate::actors::world::partners::SettleMentorExp { session_id })
                     .await;
             }
         }

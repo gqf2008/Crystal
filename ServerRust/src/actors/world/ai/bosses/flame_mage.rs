@@ -18,6 +18,12 @@ const VIEW_RANGE: i32 = 15;
 
 pub struct FlameMageBehavior;
 
+impl Default for FlameMageBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlameMageBehavior {
     pub fn new() -> Self {
         Self

@@ -26,6 +26,12 @@ pub struct HellKnightBehavior {
     summoned: bool,
 }
 
+impl Default for HellKnightBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HellKnightBehavior {
     pub fn new() -> Self {
         Self { summoned: false }

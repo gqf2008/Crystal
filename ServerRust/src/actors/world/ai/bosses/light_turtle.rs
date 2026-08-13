@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct LightTurtleBehavior;
 
+impl Default for LightTurtleBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LightTurtleBehavior {
     pub fn new() -> Self {
         Self

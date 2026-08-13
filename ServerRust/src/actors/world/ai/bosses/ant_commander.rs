@@ -20,6 +20,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct AntCommanderBehavior;
 
+impl Default for AntCommanderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AntCommanderBehavior {
     pub fn new() -> Self {
         Self

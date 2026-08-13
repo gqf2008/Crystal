@@ -20,6 +20,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct HarvestMonsterBehavior;
 
+impl Default for HarvestMonsterBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HarvestMonsterBehavior {
     pub fn new() -> Self {
         Self

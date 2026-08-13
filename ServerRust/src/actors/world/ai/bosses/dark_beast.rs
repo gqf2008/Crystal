@@ -15,6 +15,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct DarkBeastBehavior;
 
+impl Default for DarkBeastBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DarkBeastBehavior {
     pub fn new() -> Self {
         Self

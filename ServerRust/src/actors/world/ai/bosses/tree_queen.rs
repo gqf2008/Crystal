@@ -17,6 +17,12 @@ pub struct TreeQueenBehavior {
     spawned: bool,
 }
 
+impl Default for TreeQueenBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TreeQueenBehavior {
     pub fn new() -> Self {
         Self {

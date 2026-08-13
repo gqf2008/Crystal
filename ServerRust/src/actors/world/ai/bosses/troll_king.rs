@@ -25,6 +25,12 @@ const SPLASH_RADIUS: i32 = 3;
 
 pub struct TrollKingBehavior;
 
+impl Default for TrollKingBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TrollKingBehavior {
     pub fn new() -> Self {
         Self

@@ -12,6 +12,12 @@ use crate::actors::world::MonsterState;
 /// 默认行为（普通怪物）
 pub struct DefaultBehavior;
 
+impl Default for DefaultBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefaultBehavior {
     pub fn new() -> Self {
         Self

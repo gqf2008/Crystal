@@ -23,6 +23,12 @@ fn in_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct KingScorpionBehavior;
 
+impl Default for KingScorpionBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KingScorpionBehavior {
     pub fn new() -> Self {
         Self

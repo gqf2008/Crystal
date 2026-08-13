@@ -20,6 +20,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct HoodedSummonerScrollsBehavior;
 
+impl Default for HoodedSummonerScrollsBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HoodedSummonerScrollsBehavior {
     pub fn new() -> Self {
         Self

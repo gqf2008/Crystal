@@ -267,14 +267,14 @@ pub struct AiCtx<'a> {
 }
 
 /// #1870：C# 目标保持——当前目标存活、同图且在射程内时优先返回，否则 None
-fn current_target_in_range<'a>(
-    players: &'a [PlayerSnap],
+fn current_target_in_range(
+    players: &[PlayerSnap],
     current: Option<u64>,
     cx: i32,
     cy: i32,
     view_range: i32,
     map_index: u16,
-) -> Option<&'a PlayerSnap> {
+) -> Option<&PlayerSnap> {
     current.and_then(|cur| {
         players.iter().find(|p| {
             p.session_id == cur

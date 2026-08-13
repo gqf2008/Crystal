@@ -20,6 +20,12 @@ const CLOSE_RANGE: i32 = 3;
 
 pub struct HornedMageBehavior;
 
+impl Default for HornedMageBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HornedMageBehavior {
     pub fn new() -> Self {
         Self

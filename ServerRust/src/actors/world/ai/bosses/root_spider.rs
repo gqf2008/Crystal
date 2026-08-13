@@ -19,6 +19,12 @@ const SUMMON_COOLDOWN: u64 = 30;
 
 pub struct RootSpiderBehavior;
 
+impl Default for RootSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RootSpiderBehavior {
     pub fn new() -> Self {
         Self

@@ -90,7 +90,7 @@ impl WorldActor {
             let level_offset = if other_state.level > caster_level {
                 0
             } else {
-                (caster_level - other_state.level).min(10) as u16
+                (caster_level - other_state.level).min(10)
             };
             let attack_result = combat_attack::resolve_attack(
                 attacker_stats,
@@ -145,21 +145,19 @@ impl WorldActor {
                     .await;
                 // C# SpellObject.ProcessSpell 附加状态（Blizzard 1/8 Slow、PoisonCloud 绿毒）
                 match spell {
-                    mir2_shared::enums::Spell::Blizzard => {
-                        if fastrand::i32(0..8) == 0 {
-                            let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
-                            let _ = other_actor
-                                .actor_ref
-                                .ask(crate::actors::player::ApplyCombatPoisons {
-                                    poisons: vec![crate::combat::poison::Poison::new(
-                                        mir2_shared::enums::PoisonType::SLOW,
-                                        dur,
-                                        0,
-                                        2000,
-                                    )],
-                                })
-                                .await;
-                        }
+                    mir2_shared::enums::Spell::Blizzard if fastrand::i32(0..8) == 0 => {
+                        let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
+                        let _ = other_actor
+                            .actor_ref
+                            .ask(crate::actors::player::ApplyCombatPoisons {
+                                poisons: vec![crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::SLOW,
+                                    dur,
+                                    0,
+                                    2000,
+                                )],
+                            })
+                            .await;
                     }
                     mir2_shared::enums::Spell::PoisonCloud => {
                         let poison_value = (raw_damage / 4).min(10);
@@ -239,10 +237,10 @@ const ATTACK_SKILL_SPELLS: [u8; 7] = [
 
 /// #1256：攻击技能查找——magics/hero_magics 存 C# 编号，入参为 SharedRust(+3)，
 /// 需 -3 转换（此前 Slaying/HalfMoon/CrossHalfMoon 直接比较 SharedRust 值导致永不匹配）
-fn find_attack_skill<'a>(
-    magics: &'a [crate::actors::player::PlayerMagic],
+fn find_attack_skill(
+    magics: &[crate::actors::player::PlayerMagic],
     spell_shared: u8,
-) -> Option<&'a crate::actors::player::PlayerMagic> {
+) -> Option<&crate::actors::player::PlayerMagic> {
     let cs = (spell_shared as i32).saturating_sub(3);
     magics.iter().find(|m| m.spell == cs)
 }
@@ -1354,7 +1352,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                             let level_offset = if other_state.level > state.level {
                                 0
                             } else {
-                                (state.level - other_state.level).min(10) as u16
+                                (state.level - other_state.level).min(10)
                             };
                             let attack_result = combat_attack::resolve_attack(
                                 &attacker_stats,
@@ -1685,7 +1683,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     other_state.direction,
                                     0u8,
                                 );
-                                for (sid, _) in &self.players {
+                                for sid in self.players.keys() {
                                     let _ = self
                                         .gate_ref
                                         .tell(SendToClient {
@@ -2190,32 +2188,29 @@ impl Message<InspectPlayerRequest> for WorldActor {
         let Some(target) = target_state else {
             // 排行榜查看：在线找不到 → 按名字查 DB 返回基础信息（C# 离线同样可看）
             if msg.ranking && !msg.name.is_empty() {
-                match sqlx::query(
+                if let Ok(Some(row)) = sqlx::query(
                     "SELECT name, class, gender, level, guild_name FROM characters WHERE name = ?",
                 )
                 .bind(&msg.name)
                 .fetch_optional(&self.db_pool)
                 .await
                 {
-                    Ok(Some(row)) => {
-                        use sqlx::Row;
-                        let name: String = row.get("name");
-                        let class: i32 = row.get("class");
-                        let gender: i32 = row.get("gender");
-                        let level: i32 = row.get("level");
-                        let guild: Option<String> = row.get("guild_name");
-                        send_basic_inspect_packet(
-                            &self.gate_ref,
-                            msg.session_id,
-                            &name,
-                            guild.as_deref().unwrap_or(""),
-                            level as u16,
-                            class as u8,
-                            gender as u8,
-                        );
-                        return;
-                    }
-                    _ => {}
+                    use sqlx::Row;
+                    let name: String = row.get("name");
+                    let class: i32 = row.get("class");
+                    let gender: i32 = row.get("gender");
+                    let level: i32 = row.get("level");
+                    let guild: Option<String> = row.get("guild_name");
+                    send_basic_inspect_packet(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &name,
+                        guild.as_deref().unwrap_or(""),
+                        level as u16,
+                        class as u8,
+                        gender as u8,
+                    );
+                    return;
                 }
             }
             send_system_message(&self.gate_ref, msg.session_id, "找不到目标玩家");
@@ -2260,8 +2255,7 @@ impl WorldActor {
         }
 
         // Send AllowObserve(true)
-        let mut allow_body = Vec::new();
-        allow_body.push(1u8);
+        let allow_body = vec![1u8];
         let _ = self
             .gate_ref
             .tell(SendToClient {
@@ -2709,9 +2703,9 @@ impl WorldActor {
         defender_session: u64,
         raw_damage: i32,
         level_offset: u16,
-        direction: u8,
-        target_x: i32,
-        target_y: i32,
+        _direction: u8,
+        _target_x: i32,
+        _target_y: i32,
     ) -> bool {
         let (Some(attacker_record), Some(defender_record)) = (
             self.players.get(&attacker_session).cloned(),
@@ -2850,7 +2844,7 @@ impl WorldActor {
                 defender_state.direction,
                 0u8,
             );
-            for (sid, _) in &self.players {
+            for sid in self.players.keys() {
                 let _ = self
                     .gate_ref
                     .tell(SendToClient {
@@ -3305,7 +3299,7 @@ impl Message<MagicRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "你尚未学会这个技能");
             return;
         }
-        let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
+        let spell_range = spell_db.map(|m| m.range).unwrap_or(2);
         // #1620：C# HumanObject.Magic——目标格超施法范围拒绝（location!=0 && Range!=0 && !InRange）
         if cast_out_of_range(state.x, state.y, msg.target_x, msg.target_y, spell_range) {
             send_system_message(&self.gate_ref, msg.session_id, "目标超出施法范围");
@@ -3427,7 +3421,7 @@ impl Message<MagicRequest> for WorldActor {
                         && !so.detonated
                 })
                 .count();
-            if active >= spell_level as usize + 1 {
+            if active > spell_level as usize {
                 send_system_message(&self.gate_ref, msg.session_id, "已放置的陷阱数量达到上限");
                 return;
             }
@@ -3486,7 +3480,7 @@ impl Message<MagicRequest> for WorldActor {
                 let mut ids = Vec::new();
                 if let Some(m) = self.monsters.get(&msg.target_id) {
                     if m.hp > 0 {
-                        let mut nearby: Vec<(u32, i32, i32)> = self
+                        let nearby: Vec<(u32, i32, i32)> = self
                             .monsters
                             .iter()
                             .filter(|(id, mm)| {
@@ -4109,7 +4103,7 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 // 拉拽方向 = 施法者朝向的反方向（C# (Direction - 4) % 8）
                 let pull_dir = ((msg.direction as usize + 4) % 8) as u8;
-                let pulldistance = if pull_dir % 2 > 0 {
+                let pulldistance = if !pull_dir.is_multiple_of(2) {
                     ((state.x - mx).abs().min((state.y - my).abs())).max(0)
                 } else {
                     match pull_dir {
@@ -4381,13 +4375,13 @@ impl Message<MagicRequest> for WorldActor {
 
                 // Blink/StormEscape：距离校验 + 成功率（C# Random(4) >= Lv+1 失败）
                 let dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as i32;
-                let range = spell_db.map(|m| m.range as i32).unwrap_or(10);
+                let range = spell_db.map(|m| m.range).unwrap_or(10);
                 if dist > range {
                     send_system_message(&self.gate_ref, msg.session_id, "距离超出闪现范围");
                     return;
                 }
                 // 成功率 (level+1)/4：Random(4) >= level+1 则失败
-                if fastrand::i32(0..4) >= spell_level as i32 + 1 {
+                if fastrand::i32(0..4) > spell_level as i32 {
                     debug!("Magic: {} Blink failed (random miss)", state.name);
                     return;
                 }
@@ -5008,7 +5002,7 @@ impl Message<MagicRequest> for WorldActor {
                     }
                 }
                 // —— 玩家目标（#1508：C# 7x7 含 Player；MaxDC/MC/SC + AttackSpeed RatePercent=-value2）——
-                let now_ms = std::time::SystemTime::now()
+                let _now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
@@ -5075,23 +5069,22 @@ impl Message<MagicRequest> for WorldActor {
                 // #1483：C# SpecialArrowShot——VampireShot/PoisonShot 未武装时 40% 概率武装
                 if (msg.spell == SPELL_VAMPIRE_SHOT || msg.spell == SPELL_POISON_SHOT)
                     && state.special_shot_armed == 0
+                    && fastrand::i32(0..20) >= 8
                 {
-                    if fastrand::i32(0..20) >= 8 {
-                        let armed = if msg.spell == SPELL_VAMPIRE_SHOT {
-                            1
-                        } else {
-                            2
-                        };
-                        let _ = record
-                            .actor_ref
-                            .ask(crate::actors::player::SetSpecialShotArmed { armed })
-                            .await;
-                        debug!(
-                            "Player {} armed {} special shot (40%)",
-                            state.name,
-                            if armed == 1 { "Vampire" } else { "Poison" }
-                        );
-                    }
+                    let armed = if msg.spell == SPELL_VAMPIRE_SHOT {
+                        1
+                    } else {
+                        2
+                    };
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::SetSpecialShotArmed { armed })
+                        .await;
+                    debug!(
+                        "Player {} armed {} special shot (40%)",
+                        state.name,
+                        if armed == 1 { "Vampire" } else { "Poison" }
+                    );
                 }
                 // #1528：C# GetRangeAttackPower(MinMC, MaxMC, distance)——弓手技能用 MC（魔法箭），与英雄弓手一致
                 let archer_dist = (target_x - state.x).abs().max((target_y - state.y).abs());
@@ -5100,7 +5093,7 @@ impl Message<MagicRequest> for WorldActor {
                 let eff_min = range_attack_min_reduction(mc_min, archer_dist);
                 let mut raw_damage =
                     (crate::combat::attack::get_attack_power(eff_min, mc_max, state.luck)
-                        + (power as i32) / 2)
+                        + power / 2)
                         .max(1);
                 // ElementalShot（C# HumanObject.ElementalShot）：无元素时施法凝聚第一档并取消射击；
                 // 有元素时伤害 = GetAttackPower(MinMC, MaxMC) + 元素球攻击加成（OrbsDmgList）
@@ -5125,7 +5118,7 @@ impl Message<MagicRequest> for WorldActor {
                         self.orbs_dmg(),
                         self.orbs_def(),
                     );
-                    raw_damage = (mc_power + (power as i32) / 2 + orb_power).max(1);
+                    raw_damage = (mc_power + power / 2 + orb_power).max(1);
                     debug!(
                         "Magic: {} ElementalShot orb_power +{} (elements_level={})",
                         state.name, orb_power, state.elements_level
@@ -6628,7 +6621,7 @@ impl Message<MagicRequest> for WorldActor {
                     .values()
                     .filter(|m| m.master_session == Some(msg.session_id))
                     .count();
-                if pet_count >= spell_level as usize + 1 {
+                if pet_count > spell_level as usize {
                     send_system_message(&self.gate_ref, msg.session_id, "召唤物数量已达上限");
                     return;
                 }
@@ -7123,17 +7116,16 @@ impl Message<MagicRequest> for WorldActor {
                     2 => mir2_shared::enums::PoisonType::RED,
                     _ => mir2_shared::enums::PoisonType::NONE,
                 };
-                if poison_shape != 0 {
-                    if !record
+                if poison_shape != 0
+                    && !record
                         .actor_ref
                         .ask(crate::actors::player::ConsumePoisonAmuletForPlague {
                             shape: poison_shape as u16,
                         })
                         .await
                         .unwrap_or(false)
-                    {
-                        ptype = mir2_shared::enums::PoisonType::NONE;
-                    }
+                {
+                    ptype = mir2_shared::enums::PoisonType::NONE;
                 }
                 let value = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
@@ -7287,7 +7279,7 @@ impl Message<MagicRequest> for WorldActor {
                     self.broadcast_object_hidden(st.object_id, true, st.map_index)
                         .await;
                 }
-                let raw_damage = (magic_stat + (power as i32) / 2).max(1);
+                let raw_damage = (magic_stat + power / 2).max(1);
                 let attacker_stats = state.to_combat_stats();
                 // C# Map.cs:1347：location ±2 = 5×5
                 let cells = curse_cells_5x5(state.x, state.y);
@@ -7579,15 +7571,14 @@ impl Message<MagicRequest> for WorldActor {
                         }
                     }
                     // 自己的召唤物目标：怪物无 buff 系统，按 DC 提升近似作用于自身
-                    if !found_any || target_session == msg.session_id {
-                        if self
+                    if (!found_any || target_session == msg.session_id)
+                        && self
                             .monsters
                             .get(&msg.target_id)
                             .map(|m| m.master_session == Some(msg.session_id))
                             .unwrap_or(false)
-                        {
-                            target_class = state.class; // DC（怪物默认）
-                        }
+                    {
+                        target_class = state.class; // DC（怪物默认）
                     }
                 }
                 let (buff, label) = match target_class {
@@ -8059,7 +8050,7 @@ impl Message<MagicRequest> for WorldActor {
                 let until = self.tick_count + (value as u64) * 10;
                 // 目标：点击的玩家优先，其次点击格怪物
                 let mut target_oid: Option<u32> = None;
-                for (_sid, r) in &self.players {
+                for r in self.players.values() {
                     if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
                         if s.object_id == msg.target_id {
                             target_oid = Some(s.object_id);
@@ -8086,7 +8077,7 @@ impl Message<MagicRequest> for WorldActor {
                         (m.hp, m.max_hp)
                     } else {
                         let mut pos = (0i32, 1i32);
-                        for (_sid, r) in &self.players {
+                        for r in self.players.values() {
                             if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
                                 if s.object_id == oid {
                                     pos = (s.hp, s.max_hp);

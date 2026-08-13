@@ -28,6 +28,12 @@ pub struct SnowWolfKingBehavior {
     last_damage: i32,
 }
 
+impl Default for SnowWolfKingBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SnowWolfKingBehavior {
     pub fn new() -> Self {
         Self {

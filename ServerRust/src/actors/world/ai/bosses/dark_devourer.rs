@@ -21,6 +21,12 @@ const MELEE_RANGE: i32 = 1;
 
 pub struct DarkDevourerBehavior;
 
+impl Default for DarkDevourerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DarkDevourerBehavior {
     pub fn new() -> Self {
         Self

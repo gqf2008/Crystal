@@ -14,6 +14,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct IncarnatedGhoulBehavior;
 
+impl Default for IncarnatedGhoulBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncarnatedGhoulBehavior {
     pub fn new() -> Self {
         Self

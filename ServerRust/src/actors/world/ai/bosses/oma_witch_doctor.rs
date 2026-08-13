@@ -22,6 +22,12 @@ fn in_line_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct OmaWitchDoctorBehavior;
 
+impl Default for OmaWitchDoctorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OmaWitchDoctorBehavior {
     pub fn new() -> Self {
         Self

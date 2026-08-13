@@ -26,6 +26,12 @@ pub struct BombSpiderBehavior {
     explosion_tick: u64,
 }
 
+impl Default for BombSpiderBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BombSpiderBehavior {
     pub fn new() -> Self {
         Self {

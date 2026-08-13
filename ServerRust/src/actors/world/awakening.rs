@@ -793,13 +793,8 @@ impl Message<AwakeningRequest> for WorldActor {
                 break;
             }
         }
-        let mat_idx = match material_index {
-            Some(idx) => idx,
-            None => {
-                // 没有配置觉醒材料，跳过材料检查
-                0
-            }
-        };
+        // 没有配置觉醒材料（mat_idx == 0），跳过材料检查
+        let mat_idx = material_index.unwrap_or_default();
 
         // 检查材料数量
         if mat_idx > 0 {

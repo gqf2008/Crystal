@@ -21,6 +21,12 @@ fn in_worm_range(dx_abs: i32, dy_abs: i32) -> bool {
 
 pub struct SandWormBehavior;
 
+impl Default for SandWormBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SandWormBehavior {
     pub fn new() -> Self {
         Self

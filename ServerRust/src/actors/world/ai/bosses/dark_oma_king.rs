@@ -39,6 +39,12 @@ pub struct DarkOmaKingBehavior {
     next_thunder_tick: u64,
 }
 
+impl Default for DarkOmaKingBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DarkOmaKingBehavior {
     pub fn new() -> Self {
         Self {

@@ -16,6 +16,12 @@ pub struct HardenRhinoBehavior {
     next_dash_tick: u64,
 }
 
+impl Default for HardenRhinoBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HardenRhinoBehavior {
     pub fn new() -> Self {
         Self { next_dash_tick: 0 }

@@ -14,6 +14,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct DragonWarriorBehavior;
 
+impl Default for DragonWarriorBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DragonWarriorBehavior {
     pub fn new() -> Self {
         Self

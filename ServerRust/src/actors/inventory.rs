@@ -132,7 +132,7 @@ impl PlayerInventory {
                     .info
                     .as_ref()
                     .or(s.item.info.as_ref())
-                    .map(|i| i.stack_size as u16)
+                    .map(|i| i.stack_size)
                     .filter(|c| *c > 1)
                     .unwrap_or(1);
                 if s.item.count >= stack_cap {
@@ -212,7 +212,7 @@ pub fn equip_fishing_gear(
     let gear = inventory
         .backpack
         .iter()
-        .find(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == gear_uid))
+        .find(|s| s.as_ref().is_some_and(|sl| sl.item.unique_id == gear_uid))
         .and_then(|s| s.as_ref().map(|sl| sl.item.clone()));
     let Some(gear) = gear else {
         return Err("背包中找不到钓具");
@@ -225,7 +225,7 @@ pub fn equip_fishing_gear(
     // 从背包移除
     let mut taken = None;
     for s in inventory.backpack.iter_mut() {
-        if s.as_ref().map_or(false, |sl| sl.item.unique_id == gear_uid) {
+        if s.as_ref().is_some_and(|sl| sl.item.unique_id == gear_uid) {
             taken = s.take();
             break;
         }
@@ -589,9 +589,7 @@ impl PlayerInventory {
                 }
             }
         }
-        let Some(idx) = src_idx else {
-            return None;
-        };
+        let idx = src_idx?;
         let item_data = match &self.backpack[idx] {
             Some(s) => s.item.clone(),
             None => return None,
@@ -603,9 +601,7 @@ impl PlayerInventory {
                 break;
             }
         }
-        let Some(new_grid) = new_grid else {
-            return None;
-        };
+        let new_grid = new_grid?;
         if let Some(s) = &mut self.backpack[idx] {
             s.item.count -= count;
         }
@@ -669,7 +665,7 @@ impl PlayerInventory {
         }
         let max_stack = self.stack_limit(&to_item);
         let new_count = from_item.count as u32 + to_item.count as u32;
-        if new_count > max_stack as u32 {
+        if new_count > max_stack {
             return false;
         }
         if let Some(s) = &mut self.backpack[ti] {
@@ -796,10 +792,9 @@ impl PlayerInventory {
             if s.item.item_index != item_index {
                 continue;
             }
-            if min_dura
+            if !min_dura
                 .map(|d| (s.item.current_dura as u32) >= d)
                 .unwrap_or(true)
-                == false
             {
                 continue;
             }
@@ -860,7 +855,7 @@ impl PlayerInventory {
         Some((old_equipment, item.unique_id))
     }
 
-    /// 卸下装备：从装备槽位放回背包
+    // 卸下装备：从装备槽位放回背包
 
     /// #1546：从仓库格装备（C# EquipItem Grid=Storage：从 Account.Storage 定位 → 装备；旧装备放回仓库原格）
     /// 返回 (旧装备 Option<UserItem>, 新装备 unique_id) 或 None
@@ -1102,12 +1097,12 @@ impl PlayerInventory {
     ) -> Option<(u64, u64)> {
         let fi = self.backpack.iter().position(|s| {
             s.as_ref()
-                .map_or(false, |slot| slot.item.unique_id == from_uid)
+                .is_some_and(|slot| slot.item.unique_id == from_uid)
         })?;
-        let ti = self.backpack.iter().position(|s| {
-            s.as_ref()
-                .map_or(false, |slot| slot.item.unique_id == to_uid)
-        })?;
+        let ti = self
+            .backpack
+            .iter()
+            .position(|s| s.as_ref().is_some_and(|slot| slot.item.unique_id == to_uid))?;
         if fi == ti {
             return None;
         }

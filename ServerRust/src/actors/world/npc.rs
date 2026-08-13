@@ -464,7 +464,7 @@ impl Message<NPCCallRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, "你已经有行会了");
                     return;
                 }
-                let mut body = Vec::new();
+                let body = Vec::new();
                 let _ = self
                     .gate_ref
                     .tell(SendToClient {
@@ -1048,8 +1048,7 @@ fn send_new_character_result(
     session_id: u64,
     result: u8,
 ) {
-    let mut body = Vec::new();
-    body.push(result);
+    let body = vec![result];
     let _ = gate_ref
         .tell(SendToClient {
             session_id,
@@ -1455,8 +1454,7 @@ impl Message<DeleteCharacterRequest> for WorldActor {
             .await
             .unwrap_or(true)
         {
-            let mut body = Vec::new();
-            body.push(0u8); // Result = 0
+            let body = vec![0u8]; // Result = 0
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -1489,8 +1487,7 @@ impl Message<DeleteCharacterRequest> for WorldActor {
         let idx = msg.character_index.max(0) as usize;
         let Some((char_name, _, _, _)) = chars.get(idx) else {
             // C#：找不到 → S.DeleteCharacter { Result = 1 }
-            let mut body = Vec::new();
-            body.push(1u8);
+            let body = vec![1u8];
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -2355,7 +2352,7 @@ impl WorldActor {
     /// NPC 脚本 OPENGATE/CLOSEGATE：城门开关
     pub(crate) async fn npc_open_close_gate(
         &mut self,
-        session_id: u64,
+        _session_id: u64,
         conquest_index: i32,
         gate_id: i32,
         open: bool,
@@ -2786,7 +2783,7 @@ impl WorldActor {
         let Some(guild_name) = state.guild_name.clone() else {
             return;
         };
-        for (sid, r) in &self.players {
+        for r in self.players.values() {
             if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                 if os.guild_name.as_deref() == Some(guild_name.as_str())
                     && os.name.eq_ignore_ascii_case(member_name)
@@ -2907,7 +2904,7 @@ impl WorldActor {
             }
             // C# RecipeInfo.CanCraft
             if let Some(lv) = recipe.required_level {
-                if (player_state.level as u16) < lv {
+                if player_state.level < lv {
                     continue;
                 }
             }
@@ -3232,7 +3229,7 @@ impl Message<FishingCastRequest> for WorldActor {
         let cell_attribute = map_data.fishing_attribute(fx, fy);
 
         // C# FishingCast：鱼钩必需（rod.Slots[Hook] == null → NeedHook；#2352）
-        if rod_item.slots.get(0).and_then(|s| s.as_ref()).is_none() {
+        if rod_item.slots.first().and_then(|s| s.as_ref()).is_none() {
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
@@ -3864,7 +3861,7 @@ impl Message<GameshopBuyRequest> for WorldActor {
         );
 
         // 检查金币
-        if state.inventory.gold < total_gold as u64 {
+        if state.inventory.gold < total_gold {
             send_system_message(&self.gate_ref, msg.session_id, "金币不足");
             return;
         }
@@ -3928,9 +3925,7 @@ impl Message<GameshopBuyRequest> for WorldActor {
         // 扣款
         let _ = record
             .actor_ref
-            .ask(DeductGold {
-                amount: total_gold as u64,
-            })
+            .ask(DeductGold { amount: total_gold })
             .await;
 
         // 发送邮件
@@ -4019,7 +4014,7 @@ impl Message<GetRankingRequest> for WorldActor {
 
         // Collect online players
         let mut entries: Vec<(u32, String, u8, i32, i64)> = Vec::new();
-        for (_, record) in &self.players {
+        for record in self.players.values() {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 entries.push((
                     state.object_id,

@@ -16,6 +16,12 @@ const AOE_RADIUS: i32 = 2;
 
 pub struct HellCannibalBehavior;
 
+impl Default for HellCannibalBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HellCannibalBehavior {
     pub fn new() -> Self {
         Self

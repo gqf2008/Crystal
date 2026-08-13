@@ -17,6 +17,12 @@ pub struct SnakeTotemBehavior {
     next_summon_tick: u64,
 }
 
+impl Default for SnakeTotemBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SnakeTotemBehavior {
     pub fn new() -> Self {
         Self {

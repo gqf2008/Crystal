@@ -13,6 +13,12 @@ const AOE_RADIUS: i32 = 1;
 
 pub struct FrozenMinerBehavior;
 
+impl Default for FrozenMinerBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrozenMinerBehavior {
     pub fn new() -> Self {
         Self

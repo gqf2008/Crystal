@@ -24,6 +24,12 @@ const SLAVE_MOB_NAME: &str = "KingHydraxMob";
 
 pub struct KingHydraxBehavior;
 
+impl Default for KingHydraxBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KingHydraxBehavior {
     pub fn new() -> Self {
         Self

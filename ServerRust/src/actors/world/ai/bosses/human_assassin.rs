@@ -31,6 +31,12 @@ pub struct HumanAssassinBehavior {
     spawned: bool,
 }
 
+impl Default for HumanAssassinBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HumanAssassinBehavior {
     pub fn new() -> Self {
         Self {

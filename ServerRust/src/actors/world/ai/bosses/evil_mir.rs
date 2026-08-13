@@ -24,6 +24,12 @@ pub struct EvilMirBehavior {
     mass_attack: bool,
 }
 
+impl Default for EvilMirBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvilMirBehavior {
     pub fn new() -> Self {
         Self {

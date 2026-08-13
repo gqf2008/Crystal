@@ -15,6 +15,12 @@ const DEATH_RADIUS: i32 = 1;
 
 pub struct ToxicGhoulBehavior;
 
+impl Default for ToxicGhoulBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToxicGhoulBehavior {
     pub fn new() -> Self {
         Self

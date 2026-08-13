@@ -986,8 +986,8 @@ impl PlayerActor {
 
         // 更新朝向
         self.state.direction = direction;
-        self.state.x = self.state.x + dx * steps;
-        self.state.y = self.state.y + dy * steps;
+        self.state.x += dx * steps;
+        self.state.y += dy * steps;
         true
     }
 
@@ -1087,8 +1087,7 @@ impl PlayerActor {
         self.state.poison_list.clear();
         self.state.brown_until_ms = 0;
         for (tag, down) in removed {
-            let mut body = Vec::new();
-            body.push(tag);
+            let body = vec![tag];
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -1294,12 +1293,10 @@ impl Message<SetItemInfo> for PlayerActor {
         msg: SetItemInfo,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        for slot in self.state.inventory.equipment.iter_mut() {
-            if let Some(item) = slot {
-                if item.unique_id == msg.unique_id {
-                    item.info = msg.info;
-                    return;
-                }
+        for item in self.state.inventory.equipment.iter_mut().flatten() {
+            if item.unique_id == msg.unique_id {
+                item.info = msg.info;
+                return;
             }
         }
         for s in self.state.inventory.backpack.iter_mut().flatten() {
@@ -2580,8 +2577,7 @@ impl Message<PurifyPoisons> for PlayerActor {
             .buffs
             .retain(|b| !crate::combat::buff::is_debuff(&b.buff_type));
         for tag in tags {
-            let mut body = Vec::new();
-            body.push(tag);
+            let body = vec![tag];
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -2612,8 +2608,7 @@ impl Message<RemoveBuff> for PlayerActor {
     ) -> Self::Reply {
         crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, &msg.buff_type);
         // M44：推送 RemoveBuff（[tag u8]）
-        let mut body = Vec::new();
-        body.push(buff_tag(&msg.buff_type));
+        let body = vec![buff_tag(&msg.buff_type)];
         let _ = self
             .gate_ref
             .tell(SendToClient {
@@ -2757,8 +2752,7 @@ impl Message<ClearAllBuffs> for PlayerActor {
             .collect();
         self.state.buffs.clear();
         for tag in tags {
-            let mut body = Vec::new();
-            body.push(tag);
+            let body = vec![tag];
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -2870,8 +2864,7 @@ impl Message<TickBuff> for PlayerActor {
         // 移除过期 buff
         crate::combat::buff::expire_buffs(&mut self.state.buffs);
         for tag in expired_tags {
-            let mut body = Vec::new();
-            body.push(tag);
+            let body = vec![tag];
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -3887,22 +3880,19 @@ impl Message<FeedMount> for PlayerActor {
     ) -> Self::Reply {
         let result = {
             let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
-            let Some(m) = self
+            let m = self
                 .state
                 .inventory
                 .equipment
                 .get_mut(slot)
-                .and_then(|s| s.as_mut())
-            else {
-                return None;
-            };
+                .and_then(|s| s.as_mut())?;
             if m.current_dura >= m.max_dura {
                 return None;
             }
             // C# Food shape 0：MaxDura -= min(1000, MaxDura - CurrentDura/30)
             if msg.shape == 0 {
                 let reduce = 1000u32.min(m.max_dura as u32 - m.current_dura as u32 / 30);
-                m.max_dura = ((m.max_dura as u32).saturating_sub(reduce)).max(0) as u16;
+                m.max_dura = ((m.max_dura as u32).saturating_sub(reduce)) as u16;
             }
             // C#：CurrentDura += item.CurrentDura（cap MaxDura）
             m.current_dura =
@@ -3966,15 +3956,12 @@ impl Message<RepairWeapon> for PlayerActor {
     ) -> Self::Reply {
         let result = {
             let slot = crate::actors::inventory::EquipmentSlot::Weapon as usize;
-            let Some(w) = self
+            let w = self
                 .state
                 .inventory
                 .equipment
                 .get_mut(slot)
-                .and_then(|s| s.as_mut())
-            else {
-                return None;
-            };
+                .and_then(|s| s.as_mut())?;
             if w.max_dura == 0 || w.current_dura >= w.max_dura {
                 return None;
             }
@@ -3984,7 +3971,7 @@ impl Message<RepairWeapon> for PlayerActor {
             } else {
                 // C# RepairOil：MaxDura -= min(5000, MaxDura-CurrentDura)/30；CurrentDura += 5000（cap MaxDura）
                 let missing = (w.max_dura as u32 - w.current_dura as u32).min(5000);
-                w.max_dura = ((w.max_dura as u32).saturating_sub(missing / 30)).max(0) as u16;
+                w.max_dura = ((w.max_dura as u32).saturating_sub(missing / 30)) as u16;
                 w.current_dura = (w.current_dura as u32 + 5000).min(w.max_dura as u32) as u16;
             }
             w.dura_changed = true;
@@ -4339,7 +4326,7 @@ impl Message<ApplyItemUpgrade> for PlayerActor {
             let cur = item.added_stats.get(stat);
             item.added_stats.set(stat, cur + value);
         }
-        item.max_dura = item.max_dura.saturating_add(msg.add_max_dura).min(u16::MAX);
+        item.max_dura = item.max_dura.saturating_add(msg.add_max_dura);
         item.gem_count = item.gem_count.saturating_add(1);
         self.send_inventory_changed();
         true
@@ -6536,7 +6523,7 @@ impl Message<RemoveSlotItemMsg> for PlayerActor {
             GRID_FISHING => Some(EquipmentSlot::Weapon as usize),
             GRID_SOCKET => self.state.inventory.equipment.iter().position(|e| {
                 e.as_ref()
-                    .map_or(false, |i| i.unique_id == msg.from_unique_id)
+                    .is_some_and(|i| i.unique_id == msg.from_unique_id)
             }),
             _ => None,
         };
@@ -6547,35 +6534,36 @@ impl Message<RemoveSlotItemMsg> for PlayerActor {
         };
 
         // Find and extract the slotted item from parent's slots array
-        let removed =
-            if msg.grid == GRID_SOCKET {
-                // For Socket, parent might be in equipment or backpack
-                if let Some(Some(item)) = self.state.inventory.equipment.get_mut(equip_idx) {
+        let removed = if msg.grid == GRID_SOCKET {
+            // For Socket, parent might be in equipment or backpack
+            if let Some(Some(item)) = self.state.inventory.equipment.get_mut(equip_idx) {
+                let pos = item
+                    .slots
+                    .iter()
+                    .position(|s| s.as_ref().is_some_and(|i| i.unique_id == msg.unique_id));
+                pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
+            } else if let Some(Some(slot)) = self.state.inventory.backpack.get_mut(equip_idx) {
+                let pos = slot
+                    .item
+                    .slots
+                    .iter()
+                    .position(|s| s.as_ref().is_some_and(|i| i.unique_id == msg.unique_id));
+                pos.and_then(|p| slot.item.slots.get_mut(p).and_then(|s| s.take()))
+            } else {
+                None
+            }
+        } else {
+            match self.state.inventory.equipment.get_mut(equip_idx) {
+                Some(Some(item)) => {
                     let pos = item
                         .slots
                         .iter()
-                        .position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
+                        .position(|s| s.as_ref().is_some_and(|i| i.unique_id == msg.unique_id));
                     pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
-                } else if let Some(Some(slot)) = self.state.inventory.backpack.get_mut(equip_idx) {
-                    let pos =
-                        slot.item.slots.iter().position(|s| {
-                            s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id)
-                        });
-                    pos.and_then(|p| slot.item.slots.get_mut(p).and_then(|s| s.take()))
-                } else {
-                    None
                 }
-            } else {
-                match self.state.inventory.equipment.get_mut(equip_idx) {
-                    Some(Some(item)) => {
-                        let pos = item.slots.iter().position(|s| {
-                            s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id)
-                        });
-                        pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
-                    }
-                    _ => None,
-                }
-            };
+                _ => None,
+            }
+        };
 
         let removed_item = match removed {
             Some(item) => item,

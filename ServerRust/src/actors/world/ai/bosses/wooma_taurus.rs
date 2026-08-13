@@ -43,6 +43,12 @@ pub struct WoomaTaurusBehavior {
     spawned: bool,
 }
 
+impl Default for WoomaTaurusBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WoomaTaurusBehavior {
     pub fn new() -> Self {
         Self {
@@ -83,7 +89,7 @@ impl MonsterBehavior for WoomaTaurusBehavior {
             self.rage_end_tick = ctx.tick_count + RAGE_DURATION_TICKS;
             // 阶段触发召唤沃玛系小怪（任务核心机制）
             for i in 0..SLAVES_PER_STAGE {
-                let dir = (i as usize) % 8;
+                let dir = i % 8;
                 let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];
                 ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                     monster_name: name.to_string(),

@@ -13,6 +13,12 @@ const VIEW_RANGE: i32 = 12;
 
 pub struct AssassinBirdBehavior;
 
+impl Default for AssassinBirdBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AssassinBirdBehavior {
     pub fn new() -> Self {
         Self
