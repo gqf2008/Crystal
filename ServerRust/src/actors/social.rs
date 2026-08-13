@@ -576,7 +576,7 @@ impl Message<NpcGetAllowStartGame> for SocialActor {
 pub struct NpcGetMailSettings;
 
 impl Message<NpcGetMailSettings> for SocialActor {
-    type Reply = (u32, u32, bool, u32);
+    type Reply = (u32, u32, bool, u32, bool, bool);
 
     async fn handle(&mut self, _msg: NpcGetMailSettings, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         (
@@ -584,6 +584,8 @@ impl Message<NpcGetMailSettings> for SocialActor {
             self.config.mail_item_insurance_percentage,
             self.config.mail_free_with_stamp,
             self.config.mail_capacity,
+            self.config.mail_auto_send_gold,
+            self.config.mail_auto_send_items,
         )
     }
 }
@@ -1010,6 +1012,10 @@ pub struct SocialActorConfig {
     pub mail_free_with_stamp: bool,
     /// 收件箱容量上限（C# Settings.MailCapacity = 100）
     pub mail_capacity: u32,
+    /// 包裹金币自动收取（C# Settings.MailAutoSendGold）
+    pub mail_auto_send_gold: bool,
+    /// 包裹物品自动收取（C# Settings.MailAutoSendItems）
+    pub mail_auto_send_items: bool,
     /// 是否允许进入游戏（C# Settings.AllowStartGame）
     pub allow_start_game: bool,
     /// 是否允许修改密码（C# Settings.AllowChangePassword）
@@ -1066,6 +1072,8 @@ impl Default for SocialActorConfig {
             mail_item_insurance_percentage: 5,
             mail_free_with_stamp: true,
             mail_capacity: 100,
+            mail_auto_send_gold: false,
+            mail_auto_send_items: false,
             allow_start_game: true,
             allow_change_password: true,
             allow_new_account: true,

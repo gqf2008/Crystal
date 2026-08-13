@@ -89,15 +89,30 @@ impl Mailbox {
     }
 
     /// 收取附件（返回金币和物品）
+    /// C# CollectMail：collected=true 才可领取（false=仍在邮局，需先 [@COLLECTPARCEL] 取回）
     pub fn collect_attachment(&mut self, mail_id: u64) -> Option<(u64, Vec<UserItem>)> {
         let mail = self.get_mail_mut(mail_id)?;
-        if mail.collected {
-            return None; // 已收取
+        if !mail.collected {
+            return None; // 未从邮局取回
         }
         let gold = mail.gold;
         let items = std::mem::take(&mut mail.items);
+        mail.gold = 0;
         mail.collected = true;
         Some((gold, items))
+    }
+
+    /// C# NPCScript CollectParcelKey：把所有包裹从邮局取回（collected=true），不转移金币/物品。
+    /// 返回被取回的邮件数。
+    pub fn release_parcels(&mut self) -> usize {
+        let mut released = 0;
+        for m in &mut self.inbox {
+            if !m.collected && (!m.items.is_empty() || m.gold > 0) {
+                m.collected = true;
+                released += 1;
+            }
+        }
+        released
     }
 
     /// 未读邮件数量
@@ -123,6 +138,29 @@ impl Mailbox {
         }
         removed
     }
+}
+
+/// C# MailInfo.Send()：发信时初始 Collected 计算。
+/// - 无附件（无金币无物品）→ 恒 true（无需邮局取回）
+/// - 有金币有物品 → MailAutoSendGold && MailAutoSendItems
+/// - 仅物品 → MailAutoSendItems
+/// - 仅金币 → MailAutoSendGold
+pub fn initial_collected(
+    has_gold: bool,
+    has_items: bool,
+    auto_send_gold: bool,
+    auto_send_items: bool,
+) -> bool {
+    if !has_gold && !has_items {
+        return true;
+    }
+    if has_gold && has_items {
+        return auto_send_gold && auto_send_items;
+    }
+    if has_items {
+        return auto_send_items;
+    }
+    auto_send_gold
 }
 
 /// 全局邮件 ID 计数器（#73：服务器重启从 1 开始会与 DB 已有 mail_id 冲突 → UNIQUE 约束失败）
@@ -183,12 +221,54 @@ mod tests {
         let mut mailbox = Mailbox::new();
         mailbox.add_mail(make_mail());
 
+        // 未从邮局取回（collected=false）→ 邮箱不能领取
+        assert!(mailbox.collect_attachment(1).is_none());
+
+        // 邮局取回（collected=true）
+        assert_eq!(mailbox.release_parcels(), 1);
+        assert!(mailbox.get_mail(1).unwrap().collected);
+
+        // 邮箱领取
         let (gold, items) = mailbox.collect_attachment(1).unwrap();
         assert_eq!(gold, 100);
         assert!(items.is_empty());
+        assert_eq!(mailbox.get_mail(1).unwrap().gold, 0);
+    }
 
-        // 第二次收取应失败（已收取）
-        assert!(mailbox.collect_attachment(1).is_none());
+    #[test]
+    fn test_release_parcels_only_releases_uncollected_parcels() {
+        let mut mailbox = Mailbox::new();
+        let mut a = make_mail(); // collected=false, gold=100
+        let mut b = make_mail();
+        b.mail_id = 2;
+        b.collected = true; // 已取回
+        let mut c = make_mail();
+        c.mail_id = 3;
+        c.gold = 0; // 无附件（纯消息）
+        mailbox.add_mail(a);
+        mailbox.add_mail(b);
+        mailbox.add_mail(c);
+
+        assert_eq!(mailbox.release_parcels(), 1);
+        assert!(mailbox.get_mail(1).unwrap().collected);
+        assert!(mailbox.get_mail(2).unwrap().collected);
+        assert!(!mailbox.get_mail(3).unwrap().collected);
+    }
+
+    #[test]
+    fn test_initial_collected_matches_csharp_send() {
+        // 无附件恒 true
+        assert!(initial_collected(false, false, false, false));
+        // 仅金币 → auto_send_gold
+        assert!(!initial_collected(true, false, false, false));
+        assert!(initial_collected(true, false, true, false));
+        // 仅物品 → auto_send_items
+        assert!(!initial_collected(false, true, false, false));
+        assert!(initial_collected(false, true, false, true));
+        // 金币+物品 → 两者皆真
+        assert!(!initial_collected(true, true, true, false));
+        assert!(!initial_collected(true, true, false, true));
+        assert!(initial_collected(true, true, true, true));
     }
 
     #[test]

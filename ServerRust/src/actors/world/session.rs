@@ -287,7 +287,7 @@ impl Message<StartGameRequest> for WorldActor {
                             let mail_capacity = self.social_ref
                                 .ask(crate::actors::social::NpcGetMailSettings)
                                 .await
-                                .map(|(_, _, _, c)| c)
+                                .map(|(_, _, _, c, _, _)| c)
                                 .unwrap_or(100);
                             let trimmed = loaded.mailbox.trim_to_capacity(mail_capacity as usize);
                             if trimmed > 0 {

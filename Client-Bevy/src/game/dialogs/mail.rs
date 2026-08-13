@@ -667,8 +667,12 @@ fn mail_ui_system(
                 if d.gold > 0 {
                     s.push_str(&format!("\n金币: {}", d.gold));
                 }
-                if d.collected {
-                    s.push_str("\n（附件已收取）");
+                if !d.items.is_empty() || d.gold > 0 {
+                    if d.collected {
+                        s.push_str("\n（附件待领取）");
+                    } else {
+                        s.push_str("\n（附件需到邮局取回）");
+                    }
                 }
                 if !d.items.is_empty() {
                     s.push_str(&format!("\n附件: {}", d.items.join(", ")));
@@ -682,7 +686,7 @@ fn mail_ui_system(
     let can_collect = mail
         .detail
         .as_ref()
-        .map(|d| !d.collected && (!d.items.is_empty() || d.gold > 0))
+        .map(|d| d.collected && (!d.items.is_empty() || d.gold > 0))
         .unwrap_or(false);
     for (btn, mut vis) in &mut collect_btn {
         *vis = if open && can_collect {
@@ -748,22 +752,29 @@ fn mail_server_events(
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         if let ServerEvent::ParcelCollected { result } = ev {
-            if *result == 1 {
-                // C# Result=1：收取成功 → 本地标记已收取并清空附件显示
-                if let Some(d) = mail.detail.as_mut() {
-                    d.collected = true;
-                    d.gold = 0;
-                    d.items.clear();
-                }
-                if let Some(idx) = mail.selected {
-                    if let Some(m) = mail.mails.get_mut(idx) {
-                        m.collected = true;
-                        m.gold = 0;
+            match *result {
+                1 => {
+                    // C# Result=1：邮箱领取成功 → 本地标记已领取并清空附件显示
+                    if let Some(d) = mail.detail.as_mut() {
+                        d.collected = true;
+                        d.gold = 0;
+                        d.items.clear();
                     }
+                    if let Some(idx) = mail.selected {
+                        if let Some(m) = mail.mails.get_mut(idx) {
+                            m.collected = true;
+                            m.gold = 0;
+                        }
+                    }
+                    tracing::info!("📦 附件已领取");
                 }
-                tracing::info!("📦 附件已收取");
-            } else {
-                tracing::warn!("📦 收取附件失败: result={}", result);
+                0 => {
+                    // C# Result=0：邮局取回成功，列表将由服务端 GetMail 刷新
+                    tracing::info!("📦 已从邮局取回附件");
+                }
+                _ => {
+                    tracing::warn!("📦 收取附件失败: result={}", result);
+                }
             }
         }
         if let ServerEvent::MailReceived { entry, detail } = ev {
