@@ -516,7 +516,7 @@ pub fn load_orbs_settings(configs_dir: &Path) -> OrbsIniSettings {
 pub struct AwakeningIniSettings {
     /// C# Awake.AwakeSuccessRate（[Attribute] SuccessRate = 70）
     pub success_rate: u8,
-    /// C# Awake.AwakeHitRate（[Attribute] HitRate = 70；Rust 觉醒值生成暂未使用）
+    /// C# Awake.AwakeHitRate（[Attribute] HitRate = 70；5 次 Bernoulli 命中概率）
     pub hit_rate: u8,
     /// C# Awake.MaxAwakeLevel（[Attribute] MaxUpgradeLevel = 5）
     pub max_awake_level: usize,
