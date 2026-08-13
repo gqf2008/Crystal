@@ -159,7 +159,8 @@ fn hud_space_weight_system(
     mut sp: Query<&mut Text2d, (With<HudSpaceText>, Without<HudWeightText>)>,
 ) {
     let rem = hud.inventory.max_weight.saturating_sub(hud.inventory.weight);
-    let w = format!("{}/{}", rem, hud.inventory.max_weight);
+    // C# WeightLabel = (BagWeight - CurrentBagWeight).ToString()：仅剩余负重（不带 /max）
+    let w = format!("{}", rem);
     for mut t in &mut wt {
         if t.0 != w {
             t.0 = w.clone();
@@ -297,8 +298,9 @@ struct OrbBase(f32);
 struct HpHpFill;
 #[derive(Component)]
 struct MpMpFill;
+/// 经验条填充：存完整条宽（C# ExperienceBar.Size.Width），避免按已收缩 rect 连乘导致越涨越窄
 #[derive(Component)]
-struct ExpFill;
+struct ExpFill(f32);
 #[derive(Component)]
 struct HpHpText;
 #[derive(Component)]
@@ -328,6 +330,24 @@ const ORB_HEIGHT: f32 = 80.0;
 const ORB_TOP: f32 = 30.0;
 const EXP_TOP: f32 = 143.0;
 const BUTTON_TOP: f32 = 76.0;
+
+// C# MainDialog 标签位置（MainDialogs.cs 构造器，对话框相对坐标；1024 分辨率）
+/// LevelLabel @ (5,108)：纯等级数字
+pub const HUD_LEVEL_X: f32 = 5.0;
+pub const HUD_LEVEL_Y: f32 = 108.0;
+/// CharacterName @ (6,120) 90x16
+pub const HUD_NAME_X: f32 = 6.0;
+pub const HUD_NAME_Y: f32 = 120.0;
+/// GoldLabel @ (Width-105, 119)
+pub const HUD_GOLD_DX: f32 = 105.0;
+pub const HUD_GOLD_Y: f32 = 119.0;
+/// HealthOrb 标签：Label_SizeChanged 水平居中于球心 x=50；HealthLabel/ManaLabel 球体相对 y=27/42
+pub const HUD_ORB_CX: f32 = 50.0;
+pub const HUD_HP_ORB_Y: f32 = 27.0;
+pub const HUD_MP_ORB_Y: f32 = 42.0;
+/// ExperienceLabel @ (ExperienceBar.Width/2 - 20, -10)（经验条相对，条上方 10px）
+pub const HUD_EXP_LABEL_DX: f32 = 20.0;
+pub const HUD_EXP_LABEL_DY: f32 = 10.0;
 
 /// 攻击模式指示（右下角）
 #[derive(Component)]
@@ -465,21 +485,22 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     }
 
     // 经验条（Prguse[8]；800 宽用 7）
+    // C# ExperienceBar @ (9,143)，Size = Prguse[8] 实测 1004x8（1024 分辨率）
+    let (exp_bar_w, exp_bar_h) = libs
+        .0
+        .get_image(LibraryName::Prguse, 8)
+        .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+        .unwrap_or((100.0, 5.0));
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 8) {
         let bar_x = main_x + 9.0;
         let bar_y = main_y + EXP_TOP;
-        let (tw, th) = libs
-            .0
-            .get_image(LibraryName::Prguse, 8)
-            .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
-            .unwrap_or((100.0, 5.0));
         commands.spawn((
             UiEntity,
-            ExpFill,
+            ExpFill(exp_bar_w),
             Sprite {
                 image: h,
-                rect: Some(Rect::new(0.0, 0.0, tw, th)),
-                custom_size: Some(Vec2::new(tw, th)),
+                rect: Some(Rect::new(0.0, 0.0, exp_bar_w, exp_bar_h)),
+                custom_size: Some(Vec2::new(exp_bar_w, exp_bar_h)),
                 ..default()
             },
             Anchor::TOP_LEFT,
@@ -488,67 +509,69 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         ));
     }
 
-    // 文本
+    // 文本（位置逐项对齐 C# MainDialog 标签的对话框相对坐标）
     let orb_x = main_x;
     let orb_y = main_y + ORB_TOP;
-    spawn_text(
+    // C# HealthLabel/ManaLabel：父为 HealthOrb(0,30)，标签球体相对 (0,27)/(0,42)，
+    // 由 Label_SizeChanged 水平居中于球心 x=50（x=50-width/2）→ 用 TOP_CENTER 锚定自动居中。
+    spawn_centered_text(
         &mut commands,
         &font,
-        &mut images,
-        &mut cache,
         HpHpText,
-        orb_x + 9.0,
-        orb_y + 18.0,
+        orb_x + HUD_ORB_CX,
+        orb_y + HUD_HP_ORB_Y,
         "",
     );
-    spawn_text(
+    spawn_centered_text(
         &mut commands,
         &font,
-        &mut images,
-        &mut cache,
         MpMpText,
-        orb_x + 60.0,
-        orb_y + 18.0,
+        orb_x + HUD_ORB_CX,
+        orb_y + HUD_MP_ORB_Y,
         "",
     );
+    // C# ExperienceLabel.Location = (ExperienceBar.Width/2 - 20, -10)（经验条相对：居中偏左、条上方 10px）
     spawn_text(
         &mut commands,
         &font,
         &mut images,
         &mut cache,
         ExpText,
-        main_x + 9.0 + 50.0,
-        main_y + EXP_TOP - 2.0,
+        main_x + 9.0 + exp_bar_w / 2.0 - HUD_EXP_LABEL_DX,
+        main_y + EXP_TOP - HUD_EXP_LABEL_DY,
         "",
     );
+    // C# LevelLabel @ (5,108)：纯等级数字
     spawn_text(
         &mut commands,
         &font,
         &mut images,
         &mut cache,
         LevelText,
-        main_x + 9.0,
-        main_y + 2.0,
+        main_x + HUD_LEVEL_X,
+        main_y + HUD_LEVEL_Y,
         "",
     );
+    // C# GoldLabel @ (Width-105, 119)
     spawn_text(
         &mut commands,
         &font,
         &mut images,
         &mut cache,
         GoldText,
-        main_x + bg_w - 90.0,
-        main_y + 2.0,
+        main_x + bg_w - HUD_GOLD_DX,
+        main_y + HUD_GOLD_Y,
         "",
     );
+    // C# CharacterName @ (6,120) 90x16
     spawn_text(
         &mut commands,
         &font,
         &mut images,
         &mut cache,
         NameText,
-        main_x + 9.0,
-        main_y + 14.0,
+        main_x + HUD_NAME_X,
+        main_y + HUD_NAME_Y,
         "",
     );
 
@@ -738,6 +761,34 @@ fn spawn_text(
     commands.entity(e).insert(_marker);
 }
 
+/// 水平居中标签（C# MirLabel Label_SizeChanged 语义：x = 中心 - width/2，内容变化自动重居中）。
+/// 用 TOP_CENTER 锚定，x 传“居中点”。
+fn spawn_centered_text(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+    _marker: impl Component,
+    x: f32,
+    y: f32,
+    text: &str,
+) {
+    let e = commands
+        .spawn((
+            UiEntity,
+            Text2d::new(text),
+            Anchor::TOP_CENTER,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(x, -y, 4.0),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(e).insert(_marker);
+}
+
 /// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
 fn auto_potion_system(
     mut hud: ResMut<HudState>,
@@ -827,6 +878,7 @@ fn sync_hud_data(mut roots: Query<&mut HudData>, hud: Res<HudState>) {
 
 fn hud_update_system(
     hud: Res<HudState>,
+    opt: Res<crate::game::dialogs::option::OptionState>,
     hud_datas: Query<&HudData, Changed<HudData>>,
     mut fills: Query<(
         &mut Sprite,
@@ -870,12 +922,11 @@ fn hud_update_system(
             if let Some(base) = orb_base {
                 tf.translation.y = base.0 - (ORB_HEIGHT - h);
             }
-        } else if exp.is_some() {
-            let (tw, th) = match sprite.rect {
-                Some(r) => (r.max.x - r.min.x, r.max.y - r.min.y),
-                None => (100.0, 5.0),
-            };
-            let w = tw * exp_pct;
+        } else if let Some(exp_fill) = exp {
+            // C# ExperienceBar_BeforeDraw：section.Width = (Size.Width-3)*percent、Height=Size.Height。
+            // 用组件存的完整条宽（非当前已收缩 rect），修复"按收缩 rect 连乘 → 经验条越涨越窄"。
+            let th = sprite.rect.map(|r| r.max.y - r.min.y).unwrap_or(8.0);
+            let w = (exp_fill.0 - 3.0).max(0.0) * exp_pct;
             sprite.rect = Some(Rect::new(0.0, 0.0, w, th));
             sprite.custom_size = Some(Vec2::new(w, th));
         }
@@ -884,15 +935,28 @@ fn hud_update_system(
     for (mut t, hp, mp, exp, lv, gold, name) in &mut texts {
         // 值变化才更新，避免每帧重排文本（ICU4X 报错 + CPU 开销，#31）
         let new = if hp.is_some() {
-            format!("{}", hud.hp)
+            // C# HPView=true（默认）：HealthLabel = "HP cur/max"；false 走紧凑 cur/max
+            //（C# false 用 Top/Bottom 两行带分隔线格式，见 issue 后续项）
+            if opt.hp_view {
+                format!("HP {}/{}", hud.hp, hud.max_hp)
+            } else {
+                format!("{}/{}", hud.hp, hud.max_hp)
+            }
         } else if mp.is_some() {
-            format!("{}", hud.mp)
+            if opt.hp_view {
+                format!("MP {}/{}", hud.mp, hud.max_mp)
+            } else {
+                format!("{}/{}", hud.mp, hud.max_mp)
+            }
         } else if exp.is_some() {
-            format!("{:.1}%", exp_pct * 100.0)
+            // C# ExperienceLabel = "{0:#0.##%}"（最多两位小数、去尾零）
+            format_exp_percent(exp_pct)
         } else if lv.is_some() {
-            format!("Lv.{}", hud.level)
+            // C# LevelLabel = User.Level.ToString()（纯数字，"Lv" 由底栏美术自带）
+            format!("{}", hud.level)
         } else if gold.is_some() {
-            format!("{}", hud.gold)
+            // C# GoldLabel = Gold.ToString("###,###,##0")（千分位）
+            format_gold(hud.gold)
         } else if name.is_some() {
             hud.name.clone()
         } else {
@@ -902,6 +966,26 @@ fn hud_update_system(
             t.0 = new;
         }
     }
+}
+
+/// C# "{0:#0.##%}"：百分比最多两位小数、去尾零（0.5→"50%"、0.255→"25.5%"、0.1234→"12.34%"）
+fn format_exp_percent(frac: f32) -> String {
+    let s = format!("{:.2}", frac * 100.0);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    format!("{}%", s)
+}
+
+/// C# Gold.ToString("###,###,##0")：三位分节千分位（1234567→"1,234,567"）
+fn format_gold(n: u32) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// 死亡遮罩显隐 + 复活按钮（#46）
@@ -1482,3 +1566,27 @@ fn hud_server_events(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C# GoldLabel = Gold.ToString("###,###,##0")（千分位）
+    #[test]
+    fn format_gold_thousands() {
+        assert_eq!(format_gold(0), "0");
+        assert_eq!(format_gold(999), "999");
+        assert_eq!(format_gold(1000), "1,000");
+        assert_eq!(format_gold(1234567), "1,234,567");
+        assert_eq!(format_gold(12345678), "12,345,678");
+    }
+
+    /// C# ExperienceLabel = "{0:#0.##%}"（最多两位小数、去尾零）
+    #[test]
+    fn format_exp_percent_trims() {
+        assert_eq!(format_exp_percent(0.0), "0%");
+        assert_eq!(format_exp_percent(0.5), "50%");
+        assert_eq!(format_exp_percent(0.255), "25.5%");
+        assert_eq!(format_exp_percent(0.1234), "12.34%");
+        assert_eq!(format_exp_percent(1.0), "100%");
+    }
+}
