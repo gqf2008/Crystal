@@ -796,6 +796,50 @@ fn mode_labels_aligned() {
     println!("  ✓ 模式标签 x=895、顶→底 S/A/P、y=152/167/182(大) 43/58/73(小) 对齐 C# Process");
 }
 
+/// 罗盘容器位置 + 40 帧公式（C# CompassDialog.cs:14,52-61）
+#[test]
+fn compass_aligned() {
+    use client_bevy::game::dialogs::compass as c;
+
+    // 容器位置 == C# 字面值（ScreenWidth/2-25、ScreenHeight/2-120）
+    assert_eq!(c::COMPASS_X, 487.0, "罗盘 x = 512-25");
+    assert_eq!(
+        c::COMPASS_X,
+        1024.0 / 2.0 - 25.0,
+        "罗盘 x = ScreenWidth/2-25"
+    );
+    assert_eq!(c::COMPASS_Y, 264.0, "罗盘 y = 384-120");
+    assert_eq!(
+        c::COMPASS_Y,
+        768.0 / 2.0 - 120.0,
+        "罗盘 y = ScreenHeight/2-120"
+    );
+    assert_eq!(c::COMPASS_BASE, 1470, "首帧 Prguse2[1470]");
+    assert_eq!(c::COMPASS_FRAMES, 40, "40 帧 = 40/360*degree");
+    // 帧公式字面值：玩家 (100,100) 8 方位（degree = (atan2(-xDiff,yDiff)*180/PI+360)%360）
+    let cases: [((i32, i32), usize); 8] = [
+        ((100, 90), 1470),  // N
+        ((110, 90), 1475),  // NE
+        ((110, 100), 1480), // E
+        ((110, 110), 1485), // SE
+        ((100, 110), 1490), // S
+        ((90, 110), 1495),  // SW
+        ((90, 100), 1500),  // W
+        ((90, 90), 1505),   // NW
+    ];
+    for ((tx, ty), want) in cases {
+        assert_eq!(
+            c::compass_index(100, 100, tx, ty),
+            want,
+            "目标 ({tx},{ty}) 帧"
+        );
+    }
+    // ⊆ 画布（最坏情况：容器 + 最大帧偏移 (9,10) + 最大帧 28x27，探针实测上限）
+    assert_in_canvas("罗盘", c::COMPASS_X, c::COMPASS_Y, 9.0 + 28.0, 10.0 + 27.0);
+
+    println!("  ✓ 罗盘容器 (487,264)、40 帧公式、偏移落位对齐 C# CompassDialog");
+}
+
 /// 两个 [x, x+w) 区间是否重叠（同行 y 假设一致）。
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
