@@ -654,16 +654,27 @@ mod tests {
     fn test_to_ini_roundtrip() {
         let mut s = OptionState::default();
         s.skill_mode_ctrl = false;
+        s.skill_bar = false;
         s.effect = false;
+        s.drop_view = false;
+        s.name_view = true;
+        s.hp_view = false;
+        s.allow_observe = true;
+        s.new_move = false;
         s.sound_volume = 0.45;
         s.music_volume = 1.0;
         s.mode_view = true;
         let parsed = OptionState::from_ini(&s.to_ini());
         assert_eq!(parsed.skill_mode_ctrl, false);
+        assert_eq!(parsed.skill_bar, false);
         assert_eq!(parsed.effect, false);
+        assert_eq!(parsed.drop_view, false);
+        assert_eq!(parsed.name_view, true);
+        assert_eq!(parsed.hp_view, false);
+        assert_eq!(parsed.allow_observe, true);
+        assert_eq!(parsed.new_move, false); // 与 mode_view=true 区分，防相邻槽位/参数互换不察
         assert_eq!(parsed.sound_volume, 0.45); // 45 存整数往返
         assert_eq!(parsed.music_volume, 1.0);
-        assert_eq!(parsed.name_view, true);
         assert_eq!(parsed.mode_view, true); // C# ModeView 仅 INI 持久化往返
     }
 
