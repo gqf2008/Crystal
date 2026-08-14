@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::game::dialogs::character::CharPage;
-use crate::game::dialogs::dura_status::{MINIMAP_H_BIG, MINIMAP_H_SMALL};
+use crate::game::dialogs::dura_status::{dura_btn_y, MINIMAP_X};
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::minimap::MiniMapMode;
@@ -356,20 +356,50 @@ pub const HUD_EXP_LABEL_DX: f32 = 20.0;
 pub const HUD_EXP_LABEL_DY: f32 = 10.0;
 
 /// 模式标签 X（C# MiniMapDialog.Process :2082-2087：MiniMapDialog.X - 3 = 898 - 3）
-pub const MODE_LABEL_X: f32 = 895.0;
+pub const MODE_LABEL_X: f32 = MINIMAP_X - 3.0; // 895
 /// 三标签 y 偏移（C# Process: S=H+150 / A=H+165 / P=H+180；
 /// 绝对 y = 小地图高 + offset - 152，其中 152 = ScreenHeight(768) - MainDialog.Y(616)）
 pub const S_MODE_DY: f32 = -2.0;
 pub const A_MODE_DY: f32 = 13.0;
 pub const P_MODE_DY: f32 = 28.0;
 
-/// 模式标签绝对 y（随小地图大/小模式，C# Process 每帧重定位）
+/// 模式标签绝对 y（随小地图大/小模式，C# Process 每帧重定位；复用 dura_btn_y 的大/小高选择）
 pub fn mode_label_y(minimap_big: bool, dy: f32) -> f32 {
-    (if minimap_big {
-        MINIMAP_H_BIG
+    dy + dura_btn_y(minimap_big)
+}
+
+/// 模式标签可见性（C# 构造 Visible=Settings.ModeView，仅 INI，无游戏内开关）
+fn mode_visibility(mode_view: bool) -> Visibility {
+    if mode_view {
+        Visibility::Visible
     } else {
-        MINIMAP_H_SMALL
-    }) + dy
+        Visibility::Hidden
+    }
+}
+
+/// 生成单个模式标签（S/A/P 共用：x=MiniMap.X-3，y=小地图高+dy，12px，z=4，挂 marker + 门控可见性）
+fn spawn_mode_label(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+    text: &str,
+    minimap_big: bool,
+    dy: f32,
+    color: Color,
+    vis: Visibility,
+    marker: impl Component,
+) -> Entity {
+    let e = spawn_ui_text(
+        commands,
+        font,
+        text,
+        MODE_LABEL_X,
+        mode_label_y(minimap_big, dy),
+        12.0,
+        color,
+        4.0,
+    );
+    commands.entity(e).insert((marker, vis));
+    e
 }
 
 /// 攻击模式指示（C# AModeLabel，右上小地图正下方）
@@ -762,45 +792,11 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     // X = MiniMap.X-3 = 895；y 随小地图大/小模式（C# Process 每帧重定位，attack_mode_text_system 跟随）。
     // 颜色对齐 C# 命名色：AMode=Yellow、SMode=LimeGreen、PMode=Orange。
     // 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 Visible=Settings.ModeView）。
-    let mode_vis = if opt.mode_view {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
+    let mode_vis = mode_visibility(opt.mode_view);
     let big = mmap.big;
-    let sm = spawn_ui_text(
-        &mut commands,
-        &font,
-        "技能:Ctrl",
-        MODE_LABEL_X,
-        mode_label_y(big, S_MODE_DY),
-        12.0,
-        Color::srgb(0.196, 0.804, 0.196),
-        4.0,
-    );
-    commands.entity(sm).insert((SModeText, mode_vis));
-    let am = spawn_ui_text(
-        &mut commands,
-        &font,
-        "模式:和平",
-        MODE_LABEL_X,
-        mode_label_y(big, A_MODE_DY),
-        12.0,
-        Color::srgb(1.0, 1.0, 0.0),
-        4.0,
-    );
-    commands.entity(am).insert((AttackModeText, mode_vis));
-    let pm = spawn_ui_text(
-        &mut commands,
-        &font,
-        "宠物:跟随",
-        MODE_LABEL_X,
-        mode_label_y(big, P_MODE_DY),
-        12.0,
-        Color::srgb(1.0, 0.647, 0.0),
-        4.0,
-    );
-    commands.entity(pm).insert((PModeText, mode_vis));
+    spawn_mode_label(&mut commands, &font, "技能:Ctrl", big, S_MODE_DY, Color::srgb(0.196, 0.804, 0.196), mode_vis, SModeText);
+    spawn_mode_label(&mut commands, &font, "模式:和平", big, A_MODE_DY, Color::srgb(1.0, 1.0, 0.0), mode_vis, AttackModeText);
+    spawn_mode_label(&mut commands, &font, "宠物:跟随", big, P_MODE_DY, Color::srgb(1.0, 0.647, 0.0), mode_vis, PModeText);
     // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
     let wt = spawn_ui_text(&mut commands, &font, "0/0", main_x + bg_w - 105.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
     commands.entity(wt).insert(HudWeightText);
@@ -886,6 +882,16 @@ fn auto_potion_system(
     }
 }
 
+/// 模式标签单条更新：文本变化即写 + y 偏离目标 >0.5 才重定位（C# Process 每帧重定位的 0.5px 阈值版本）
+fn update_mode_label(t: &mut Text2d, tf: &mut Transform, want: &str, y: f32) {
+    if t.0 != want {
+        t.0 = want.to_string();
+    }
+    if (tf.translation.y - y).abs() > 0.5 {
+        tf.translation.y = y;
+    }
+}
+
 /// 每帧按 HudState 更新血/蓝/经验条与文本（单查询避免 Bevy B0001 冲突）
 /// 模式指示更新（#156 攻击 / #1388 宠物+技能）：值变化即写，无变化跳过
 fn attack_mode_text_system(
@@ -909,12 +915,7 @@ fn attack_mode_text_system(
     let a = format!("模式:{}", crate::game::combat::attack_mode_name(mode.mode));
     let ay = -mode_label_y(mmap.big, A_MODE_DY);
     for (mut t, mut tf) in &mut am {
-        if t.0 != a {
-            t.0 = a.clone();
-        }
-        if (tf.translation.y - ay).abs() > 0.5 {
-            tf.translation.y = ay;
-        }
+        update_mode_label(&mut t, &mut tf, &a, ay);
     }
     let p = match hud.pet_mode {
         mir2_shared::enums::PetMode::Both => "宠物:攻击和跟随".to_string(),
@@ -926,22 +927,12 @@ fn attack_mode_text_system(
     };
     let py = -mode_label_y(mmap.big, P_MODE_DY);
     for (mut t, mut tf) in &mut pm {
-        if t.0 != p {
-            t.0 = p.clone();
-        }
-        if (tf.translation.y - py).abs() > 0.5 {
-            tf.translation.y = py;
-        }
+        update_mode_label(&mut t, &mut tf, &p, py);
     }
     let s = if opt.skill_mode_ctrl { "技能:Ctrl".to_string() } else { "技能:~".to_string() };
     let sy = -mode_label_y(mmap.big, S_MODE_DY);
     for (mut t, mut tf) in &mut sm {
-        if t.0 != s {
-            t.0 = s.clone();
-        }
-        if (tf.translation.y - sy).abs() > 0.5 {
-            tf.translation.y = sy;
-        }
+        update_mode_label(&mut t, &mut tf, &s, sy);
     }
 }
 
@@ -1676,6 +1667,13 @@ mod tests {
         assert_eq!(format_exp_percent(0.255), "25.5%");
         assert_eq!(format_exp_percent(0.1234), "12.34%");
         assert_eq!(format_exp_percent(1.0), "100%");
+    }
+
+    /// mode_visibility：INI 门控的纯函数（C# 构造 Visible=Settings.ModeView）
+    #[test]
+    fn mode_visibility_maps_mode_view() {
+        assert_eq!(mode_visibility(false), Visibility::Hidden);
+        assert_eq!(mode_visibility(true), Visibility::Visible);
     }
 
     /// 模式标签可见性门控：C# 构造 `Visible=Settings.ModeView`（仅 INI，默认 false）。

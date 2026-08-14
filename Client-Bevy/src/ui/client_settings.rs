@@ -24,6 +24,7 @@ pub struct PersistedSettings {
     pub music_volume: f32,
     pub allow_observe: bool,
     pub new_move: bool,
+    pub mode_view: bool,
     // ChatFilter（聊天过滤 + 透明）
     pub filter_normal: bool,
     pub filter_whisper: bool,
@@ -49,6 +50,7 @@ impl Default for PersistedSettings {
             music_volume: 0.6,
             allow_observe: false,
             new_move: true,
+            mode_view: false,
             filter_normal: false,
             filter_whisper: false,
             filter_shout: false,
@@ -75,6 +77,7 @@ impl From<(&OptionState, &ChatFilter)> for PersistedSettings {
             music_volume: opt.music_volume,
             allow_observe: opt.allow_observe,
             new_move: opt.new_move,
+            mode_view: opt.mode_view,
             filter_normal: chat.normal,
             filter_whisper: chat.whisper,
             filter_shout: chat.shout,
@@ -101,6 +104,7 @@ impl PersistedSettings {
         opt.music_volume = self.music_volume.clamp(0.0, 1.0);
         opt.allow_observe = self.allow_observe;
         opt.new_move = self.new_move;
+        opt.mode_view = self.mode_view;
         chat.normal = self.filter_normal;
         chat.whisper = self.filter_whisper;
         chat.shout = self.filter_shout;
