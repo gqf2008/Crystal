@@ -372,13 +372,13 @@ pub fn mode_label_y(minimap_big: bool, dy: f32) -> f32 {
     }) + dy
 }
 
-/// 攻击模式指示（右下角）
+/// 攻击模式指示（C# AModeLabel，右上小地图正下方）
 #[derive(Component)]
 pub struct AttackModeText;
-/// #1388：宠物模式指示（C# PModeLabel）
+/// 宠物模式指示（C# PModeLabel，右上小地图正下方）
 #[derive(Component)]
 pub struct PModeText;
-/// #1388：技能模式指示（C# SModeLabel）
+/// 技能模式指示（C# SModeLabel，右上小地图正下方）
 #[derive(Component)]
 pub struct SModeText;
 /// #1392：HUD 负重标签（C# WeightLabel）
