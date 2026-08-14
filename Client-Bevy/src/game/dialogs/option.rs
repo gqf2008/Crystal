@@ -41,6 +41,8 @@ pub struct OptionState {
     pub allow_observe: bool,
     /// 新移动模式
     pub new_move: bool,
+    /// 模式标签显示（C# Settings.ModeView，默认 false；仅 INI，无游戏内开关）
+    pub mode_view: bool,
 }
 
 impl Default for OptionState {
@@ -56,6 +58,7 @@ impl Default for OptionState {
             music_volume: 0.6,
             allow_observe: false,
             new_move: true,
+            mode_view: false,
         }
     }
 }
@@ -75,6 +78,7 @@ impl OptionState {
         s.hp_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "HPMPView", s.hp_view);
         s.allow_observe = crate::game::dialogs::settings_file::ini_bool(content, "Game", "AllowObserve", s.allow_observe);
         s.new_move = crate::game::dialogs::settings_file::ini_bool(content, "Game", "NewMove", s.new_move);
+        s.mode_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "ModeView", s.mode_view);
         s
     }
 
@@ -82,7 +86,7 @@ impl OptionState {
     pub fn to_ini(&self) -> String {
         let pct = |v: f32| ((v * 100.0).round() as i32).clamp(0, 100);
         format!(
-            "[Sound]\nVolume={}\nMusic={}\n\n[Game]\nSkillMode={}\nSkillBar={}\nEffect={}\nDropView={}\nNameView={}\nHPMPView={}\nAllowObserve={}\nNewMove={}\n",
+            "[Sound]\nVolume={}\nMusic={}\n\n[Game]\nSkillMode={}\nSkillBar={}\nEffect={}\nDropView={}\nNameView={}\nHPMPView={}\nAllowObserve={}\nNewMove={}\nModeView={}\n",
             pct(self.sound_volume),
             pct(self.music_volume),
             self.skill_mode_ctrl,
@@ -93,6 +97,7 @@ impl OptionState {
             self.hp_view,
             self.allow_observe,
             self.new_move,
+            self.mode_view,
         )
     }
 
@@ -122,6 +127,7 @@ impl OptionState {
             ("HPMPView", self.hp_view.to_string()),
             ("AllowObserve", self.allow_observe.to_string()),
             ("NewMove", self.new_move.to_string()),
+            ("ModeView", self.mode_view.to_string()),
         ] {
             content = set_ini_value(&content, "Game", k, &v);
         }
@@ -624,11 +630,12 @@ mod tests {
         assert_eq!(s.sound_volume, 0.8);
         assert_eq!(s.music_volume, 0.6);
         assert!(!s.allow_observe);
+        assert!(!s.mode_view);
     }
 
     #[test]
     fn test_from_ini_values() {
-        let content = "[Sound]\nVolume=30\nMusic=70\n\n[Game]\nSkillMode=false\nSkillBar=false\nEffect=true\nDropView=false\nNameView=false\nHPMPView=false\nAllowObserve=true\nNewMove=false\n";
+        let content = "[Sound]\nVolume=30\nMusic=70\n\n[Game]\nSkillMode=false\nSkillBar=false\nEffect=true\nDropView=false\nNameView=false\nHPMPView=false\nAllowObserve=true\nNewMove=false\nModeView=true\n";
         let s = OptionState::from_ini(content);
         assert_eq!(s.sound_volume, 0.3);
         assert_eq!(s.music_volume, 0.7);
@@ -640,6 +647,7 @@ mod tests {
         assert!(!s.hp_view);
         assert!(s.allow_observe);
         assert!(!s.new_move);
+        assert!(s.mode_view);
     }
 
     #[test]
@@ -649,12 +657,14 @@ mod tests {
         s.effect = false;
         s.sound_volume = 0.45;
         s.music_volume = 1.0;
+        s.mode_view = true;
         let parsed = OptionState::from_ini(&s.to_ini());
         assert_eq!(parsed.skill_mode_ctrl, false);
         assert_eq!(parsed.effect, false);
         assert_eq!(parsed.sound_volume, 0.45); // 45 存整数往返
         assert_eq!(parsed.music_volume, 1.0);
         assert_eq!(parsed.name_view, true);
+        assert_eq!(parsed.mode_view, true); // C# ModeView 仅 INI 持久化往返
     }
 
     #[test]

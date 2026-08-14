@@ -719,6 +719,83 @@ fn menu_dura_aligned() {
     println!("  ✓ 菜单背景(988,349) Title[567]=36x282、耐久钮(1004, 小地图高154/45) 对齐 C#");
 }
 
+/// 模式标签（C# AMode/PMode/SModeLabel，MainDialogs.cs:2082-2087 MiniMapDialog.Process 每帧定位）。
+/// X = MiniMap.X-3 = 898-3 = 895；顶→底 S/A/P；y = 小地图高 + {-2,+13,+28}
+/// （大模式 152/167/182、小模式 43/58/73；偏移 = Process 的 Height+{150,165,180} 再 -ScreenHeight(768)+MainDialog.Y(616)）。
+#[test]
+fn mode_labels_aligned() {
+    use client_bevy::game::dialogs::dura_status as ds;
+    use client_bevy::game::hud as h;
+
+    // X == C# MiniMapDialog.X-3（与耐久钮同源 MiniMap.X = ScreenWidth-126 = 898）
+    assert_eq!(h::MODE_LABEL_X, 895.0, "模式标签 x = MiniMap.X(898)-3");
+    assert_eq!(
+        h::MODE_LABEL_X,
+        ds::MINIMAP_X - 3.0,
+        "应与耐久钮同源 MiniMap.X"
+    );
+    // y 偏移 == C# Process 的 Height+{150,165,180} 再 -152（ScreenHeight-MainDialog.Y）
+    assert_eq!(h::S_MODE_DY, -2.0, "SMode dy = 150-152");
+    assert_eq!(h::A_MODE_DY, 13.0, "AMode dy = 165-152");
+    assert_eq!(h::P_MODE_DY, 28.0, "PMode dy = 180-152");
+    // 绝对 y（大/小模式）== C# 字面值（小地图高 154/45 + 偏移）
+    assert_eq!(
+        h::mode_label_y(true, h::S_MODE_DY),
+        152.0,
+        "大模式 SMode y=154-2"
+    );
+    assert_eq!(
+        h::mode_label_y(true, h::A_MODE_DY),
+        167.0,
+        "大模式 AMode y=154+13"
+    );
+    assert_eq!(
+        h::mode_label_y(true, h::P_MODE_DY),
+        182.0,
+        "大模式 PMode y=154+28"
+    );
+    assert_eq!(
+        h::mode_label_y(false, h::S_MODE_DY),
+        43.0,
+        "小模式 SMode y=45-2"
+    );
+    assert_eq!(
+        h::mode_label_y(false, h::A_MODE_DY),
+        58.0,
+        "小模式 AMode y=45+13"
+    );
+    assert_eq!(
+        h::mode_label_y(false, h::P_MODE_DY),
+        73.0,
+        "小模式 PMode y=45+28"
+    );
+    // 顶→底顺序 S < A < P（C# 堆叠顺序；Bevy 旧版误为 S,P,A）
+    assert!(
+        h::mode_label_y(true, h::S_MODE_DY) < h::mode_label_y(true, h::A_MODE_DY)
+            && h::mode_label_y(true, h::A_MODE_DY) < h::mode_label_y(true, h::P_MODE_DY),
+        "[顺序] 模式标签应顶→底 S/A/P"
+    );
+    // ⊆ 画布（取栈顶 S 与栈底 P；宽按最长文本 ~100、高 ~12）
+    for (name, big) in [("大", true), ("小", false)] {
+        assert_in_canvas(
+            &format!("模式标签S({name}模)"),
+            h::MODE_LABEL_X,
+            h::mode_label_y(big, h::S_MODE_DY),
+            100.0,
+            12.0,
+        );
+        assert_in_canvas(
+            &format!("模式标签P({name}模)"),
+            h::MODE_LABEL_X,
+            h::mode_label_y(big, h::P_MODE_DY),
+            100.0,
+            12.0,
+        );
+    }
+
+    println!("  ✓ 模式标签 x=895、顶→底 S/A/P、y=152/167/182(大) 43/58/73(小) 对齐 C# Process");
+}
+
 /// 两个 [x, x+w) 区间是否重叠（同行 y 假设一致）。
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
