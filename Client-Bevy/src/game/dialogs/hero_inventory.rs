@@ -144,7 +144,7 @@ fn spawn_hero_inventory(
     ) else {
         return;
     };
-    let (bw, bh) = libs
+    let (_bw, bh) = libs
         .0
         .get_image(LibraryName::Prguse, 1422)
         .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
