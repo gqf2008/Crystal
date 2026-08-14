@@ -10,7 +10,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::inventory::InvItem;
+use crate::game::dialogs::inventory::{DIALOG_X as INV_DIALOG_X, DIALOG_Y as INV_DIALOG_Y, InvItem};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -19,9 +19,9 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache,
 };
 
-/// 背包对话框位置（用于定位镶嵌面板，C#：背包下方）
-const INV_X: f32 = 182.0;
-const INV_BOTTOM: f32 = 217.0 + 37.0 + 5.0 * 33.0;
+/// 背包对话框位置（用于定位镶嵌面板，跟随背包原点常量防漂移）
+const INV_X: f32 = INV_DIALOG_X;
+const INV_BOTTOM: f32 = INV_DIALOG_Y + 37.0 + 5.0 * 33.0;
 
 /// 镶嵌状态（当前展示的物品）
 #[derive(Resource, Default)]
