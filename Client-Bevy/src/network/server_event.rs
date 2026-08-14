@@ -185,11 +185,9 @@ pub enum ServerEvent {
     MagicRemoved { spell: mir2_shared::enums::Spell },
     /// #258 SendOutputMessage：服务端输出消息
     ServerMessage { message: String, message_type: u8 },
-    /// #260 NewQuestInfo：任务完整信息
+    /// #260/#2535 NewQuestInfo：任务定义（全量目录，登录下发；入 QuestCatalog 而非任务日志）
     QuestInfo {
-        id: i32,
-        name: String,
-        tasks: Vec<String>,
+        info: mir2_shared::data::client_data::ClientQuestInfo,
     },
     /// #260 ShareQuest：共享任务
     QuestShared { quest_id: i32 },

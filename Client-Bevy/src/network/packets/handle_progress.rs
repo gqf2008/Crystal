@@ -358,12 +358,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // #260：任务数据包
         x if x == ServerPacketIds::NewQuestInfo as i16 => {
             if let Ok(p) = quest::NewQuestInfo::read_body(&mut cur) {
-                server_events.write(ServerEvent::QuestInfo {
-                    id: p.quest.index,
-                    name: p.quest.name.clone(),
-                    tasks: p.quest.task_description,
-                });
-                tracing::info!("📜 任务信息: #{} {}", p.quest.index, p.quest.name);
+                // #2535：完整定义交 QuestCatalog（可接任务/奖励由目录推导），不再当已接任务写日志
+                server_events.write(ServerEvent::QuestInfo { info: p.quest });
             }
         }
         x if x == ServerPacketIds::ShareQuest as i16 => {
