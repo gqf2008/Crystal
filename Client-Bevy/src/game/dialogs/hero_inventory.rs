@@ -1,7 +1,7 @@
 // ============================================================================
 // 英雄背包对话框（#203-B）
 // 参考：C# HeroInventoryDialog（Client/MirScenes/Dialogs/HeroDialogs.cs）
-//   - 背景 Prguse[1422]，可移动，居中
+//   - 背景 Prguse[1422]，可移动，原点 (0,0)（构造器未设 Location → 默认）
 //   - 40 格（8x5）：Location = (14+x*37, 23+y*33)，GridType=HeroInventory
 //   - 4 行锁条 Prguse[1423]（固定 40 格时隐藏）；HP/MP 锁条 1428/1429
 //   - HP/MP 自动药按钮 Title[560-565] + 百分比标签 + HPItem/MPItem 物品格
@@ -34,6 +34,10 @@ const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
+/// 英雄背包窗口原点：C# HeroInventoryDialog 构造器未设 Location（HeroDialogs.cs:24-31）
+/// → MirControl 默认 (0,0)。旧实现按屏幕居中，非 C# 行为。
+pub const DIALOG_X: f32 = 0.0;
+pub const DIALOG_Y: f32 = 0.0;
 
 /// 英雄背包格相对坐标（C# Location = (14+x*37, 23+y*33)）
 fn hero_cell_pos(i: usize) -> (f32, f32) {
@@ -130,7 +134,7 @@ fn spawn_hero_inventory(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1422]，居中（C# Location = Center）
+    // 背景 Prguse[1422]，原点 (0,0)（C# 构造器未设 Location → MirControl 默认）
     let Some(bg) = ui_image(
         &mut libs,
         &mut images,
@@ -140,13 +144,13 @@ fn spawn_hero_inventory(
     ) else {
         return;
     };
-    let (bw, bh) = libs
+    let (_bw, bh) = libs
         .0
         .get_image(LibraryName::Prguse, 1422)
         .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
         .unwrap_or((320.0, 250.0));
-    let dx = (1024.0 - bw) / 2.0;
-    let dy = (768.0 - bh) / 2.0;
+    let dx = DIALOG_X;
+    let dy = DIALOG_Y;
 
     let e = spawn_ui_sprite(&mut commands, bg, dx, dy, 6.0, 1.0);
     commands.entity(e).insert((

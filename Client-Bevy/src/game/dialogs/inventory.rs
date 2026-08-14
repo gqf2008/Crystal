@@ -1,7 +1,7 @@
 // ============================================================================
 // 背包对话框（M9 第一批）
 // 布局参考：Client/MirScenes/Dialogs/InventoryDialog.cs
-//   - 窗口位置 (182, 217)，背景 Title[196]
+//   - 窗口原点 (0,0)（构造器未设 Location → MirControl 默认零值），背景 Title[196]
 //   - 标签页：道具(6,7) / 道具2(76,7) / 任务(146,7)，72x23
 //   - 关闭按钮 (289,3) Prguse2[360/361/362]
 //   - 金币 (40,212) 111x14；负重 (268,212)
@@ -202,8 +202,11 @@ impl InventoryState {
     }
 }
 
-const DIALOG_X: f32 = 182.0;
-const DIALOG_Y: f32 = 217.0;
+/// 背包窗口原点：C# InventoryDialog 构造器**未设 Location**（InventoryDialog.cs:25-31）
+/// → MirControl 默认 (0,0)（左上角，_location 字段零值，MirControl.cs:300）。
+/// 旧值 (182,217) 误把 WeightBar 的**局部**坐标当对话框原点（InventoryDialog.cs:37）。
+pub const DIALOG_X: f32 = 0.0;
+pub const DIALOG_Y: f32 = 0.0;
 /// 金币文本对话框相对坐标（C# InventoryDialog.cs:137 GoldLabel (40,212) 111x14）
 pub const GOLD_TEXT_X: f32 = 40.0;
 pub const GOLD_TEXT_Y: f32 = 212.0;

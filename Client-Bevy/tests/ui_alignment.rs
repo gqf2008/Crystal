@@ -546,6 +546,11 @@ fn inventory_bigmap_aligned() {
     let mut libs = Libs::new();
 
     // ---- 背包（C# InventoryDialog.cs）常量 == C# 字面值（防漂移）----
+    // 窗口原点：C# 构造器未设 Location（InventoryDialog.cs:25-31）→ MirControl
+    // 默认 (0,0)（_location 零值，MirControl.cs:300）。旧 (182,217) 是 WeightBar
+    // 局部坐标（:37）被误当原点。
+    assert_eq!(inv::DIALOG_X, 0.0, "背包窗口 x = C# 无 Location → 0");
+    assert_eq!(inv::DIALOG_Y, 0.0, "背包窗口 y = C# 无 Location → 0");
     assert_eq!(inv::GOLD_TEXT_X, 40.0, "金币 x = C# GoldLabel (40,212)");
     assert_eq!(inv::GOLD_TEXT_Y, 212.0, "金币 y = C# GoldLabel (40,212)");
     assert_eq!(
@@ -571,7 +576,7 @@ fn inventory_bigmap_aligned() {
 
     // 背包对话框真实尺寸（Title[196]），子控件 bbox ⊆ 对话框
     let (idw, idh) = libs.size(LibraryName::Title, 196);
-    let (ix, iy) = (182.0, 217.0); // 背包窗口原点（固定，C# Location）
+    let (ix, iy) = (inv::DIALOG_X, inv::DIALOG_Y); // 背包窗口原点（C# 无 Location → (0,0)）
     assert_inside(
         "背包扩容按钮",
         ix + 235.0,
@@ -637,7 +642,17 @@ fn inventory_bigmap_aligned() {
         bm::SEARCH_H,
     );
 
-    println!("  ✓ 背包金币/负重(212)+扩容命中(72x23)、大地图搜索框(59,H-27,130x10) 对齐 C#");
+    println!("  ✓ 背包金币/负重(212)+扩容命中(72x23)+窗口原点(0,0)、大地图搜索框(59,H-27,130x10) 对齐 C#");
+}
+
+/// 英雄背包窗口原点（C# HeroInventoryDialog 构造器未设 Location，HeroDialogs.cs:24-31
+/// → MirControl 默认 (0,0)；旧实现按屏幕居中是自创行为）。
+#[test]
+fn hero_inventory_origin_aligned() {
+    use client_bevy::game::dialogs::hero_inventory as hinv;
+    assert_eq!(hinv::DIALOG_X, 0.0, "英雄背包窗口 x = C# 无 Location → 0");
+    assert_eq!(hinv::DIALOG_Y, 0.0, "英雄背包窗口 y = C# 无 Location → 0");
+    println!("  ✓ 英雄背包窗口原点 (0,0) 对齐 C#（非居中）");
 }
 
 #[test]
