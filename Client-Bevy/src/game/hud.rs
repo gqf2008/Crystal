@@ -308,6 +308,11 @@ struct ExpFill(f32);
 struct HpHpText;
 #[derive(Component)]
 struct MpMpText;
+/// hp_view=false 两行格式标签（C# TopLabel/BottomLabel：HealthOrb 相对 (9,20)/(9,50)，85x30 框内水平居中）
+#[derive(Component)]
+struct TopHudText;
+#[derive(Component)]
+struct BottomHudText;
 #[derive(Component)]
 struct ExpText;
 #[derive(Component)]
@@ -351,6 +356,11 @@ pub const HUD_GOLD_Y: f32 = 119.0;
 pub const HUD_ORB_CX: f32 = 50.0;
 pub const HUD_HP_ORB_Y: f32 = 27.0;
 pub const HUD_MP_ORB_Y: f32 = 42.0;
+/// C# TopLabel/BottomLabel 水平中心：Location.X(9) + Size.Width(85)/2 = 51.5（DrawFormat=HorizontalCenter）
+pub const HUD_2LINE_CX: f32 = 51.5;
+/// C# TopLabel/BottomLabel 距 HealthOrb 的 y：Location (9,20)/(9,50)（HealthOrb @ (0,30)）
+pub const HUD_TOP_LABEL_DY: f32 = 20.0;
+pub const HUD_BOTTOM_LABEL_DY: f32 = 50.0;
 /// ExperienceLabel @ (ExperienceBar.Width/2 - 20, -10)（经验条相对，条上方 10px）
 pub const HUD_EXP_LABEL_DX: f32 = 20.0;
 pub const HUD_EXP_LABEL_DY: f32 = 10.0;
@@ -585,6 +595,26 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         Anchor::TOP_CENTER,
         orb_x + HUD_ORB_CX,
         orb_y + HUD_MP_ORB_Y,
+        "",
+    );
+    // C# TopLabel/BottomLabel（仅 HPView=false 显示）：框 85x30、HorizontalCenter
+    // → TOP_CENTER 锚点于框水平中心 x=51.5、框顶 y（HealthOrb 相对 (9,20)/(9,50)）
+    spawn_centered_text(
+        &mut commands,
+        &font,
+        TopHudText,
+        Anchor::TOP_CENTER,
+        orb_x + HUD_2LINE_CX,
+        orb_y + HUD_TOP_LABEL_DY,
+        "",
+    );
+    spawn_centered_text(
+        &mut commands,
+        &font,
+        BottomHudText,
+        Anchor::TOP_CENTER,
+        orb_x + HUD_2LINE_CX,
+        orb_y + HUD_BOTTOM_LABEL_DY,
         "",
     );
     // C# ExperienceLabel.Location = (ExperienceBar.Width/2 - 20, -10)（经验条相对：居中偏左、条上方 10px）
@@ -970,6 +1000,8 @@ fn hud_update_system(
         &mut Text2d,
         Option<&HpHpText>,
         Option<&MpMpText>,
+        Option<&TopHudText>,
+        Option<&BottomHudText>,
         Option<&ExpText>,
         Option<&LevelText>,
         Option<&GoldText>,
@@ -1010,22 +1042,36 @@ fn hud_update_system(
         }
     }
 
-    for (mut t, hp, mp, exp, lv, gold, name) in &mut texts {
+    for (mut t, hp, mp, top, bottom, exp, lv, gold, name) in &mut texts {
         // 值变化才更新，避免每帧重排文本（ICU4X 报错 + CPU 开销，#31）
         let new = if hp.is_some() {
-            // C# HPView=true（默认）：HealthLabel = "HP cur/max"；false 走紧凑 cur/max
-            //（C# false 用 Top/Bottom 两行带分隔线格式，见 issue 后续项）
+            // C# :436-457：HPView=true → HealthLabel="HP cur/max"；
+            // false → HealthLabel/ManaLabel 清空，两行 Top/Bottom 标签接管
             if opt.hp_view {
                 format!("HP {}/{}", hud.hp, hud.max_hp)
             } else {
-                format!("{}/{}", hud.hp, hud.max_hp)
+                String::new()
             }
         } else if mp.is_some() {
             if opt.hp_view {
                 // C# "MP {0}/{1} " 带尾随空格（影响居中测量，与 C# 一致）
                 format!("MP {}/{} ", hud.mp, hud.max_mp)
             } else {
-                format!("{}/{}", hud.mp, hud.max_mp)
+                String::new()
+            }
+        } else if top.is_some() {
+            // C# :452 TopLabel（仅 HPView=false）：" {HP}    {MP} \n---------------"
+            if opt.hp_view {
+                String::new()
+            } else {
+                hud_orb_top_text(hud.hp, hud.mp)
+            }
+        } else if bottom.is_some() {
+            // C# :453 BottomLabel（仅 HPView=false）：" {maxHP}    {maxMP} "
+            if opt.hp_view {
+                String::new()
+            } else {
+                hud_orb_bottom_text(hud.max_hp, hud.max_mp)
             }
         } else if exp.is_some() {
             // C# ExperienceLabel = "{0:#0.##%}"（最多两位小数、去尾零）
@@ -1052,6 +1098,16 @@ fn format_exp_percent(frac: f32) -> String {
     let s = format!("{:.2}", frac * 100.0);
     let s = s.trim_end_matches('0').trim_end_matches('.');
     format!("{}%", s)
+}
+
+/// C# MainDialogs.cs:452 HPView=false TopLabel 两行文本：" {hp}    {mp} \n---------------"
+pub fn hud_orb_top_text(hp: i32, mp: i32) -> String {
+    format!(" {hp}    {mp} \n---------------")
+}
+
+/// C# MainDialogs.cs:453 HPView=false BottomLabel：" {max_hp}    {max_mp} "
+pub fn hud_orb_bottom_text(max_hp: i32, max_mp: i32) -> String {
+    format!(" {max_hp}    {max_mp} ")
 }
 
 /// C# Gold.ToString("###,###,##0")：三位分节千分位（1234567→"1,234,567"）
@@ -1667,6 +1723,66 @@ mod tests {
         assert_eq!(format_exp_percent(0.255), "25.5%");
         assert_eq!(format_exp_percent(0.1234), "12.34%");
         assert_eq!(format_exp_percent(1.0), "100%");
+    }
+
+    /// C# MainDialogs.cs:452-453 两行格式字面值（HPView=false）
+    #[test]
+    fn orb_two_line_matches_csharp() {
+        assert_eq!(hud_orb_top_text(100, 50), " 100    50 \n---------------");
+        assert_eq!(hud_orb_bottom_text(200, 100), " 200    100 ");
+    }
+
+    /// HPView 分支（C# :436-457）：true → 球标签 HP/MP 行、两行标签空；
+    /// false → 球标签空、Top/Bottom 两行 C# 字面值
+    #[test]
+    fn hud_hp_view_two_line_format() {
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn text_of<M: Component>(world: &mut World) -> String {
+            let mut q = world.query_filtered::<&Text2d, With<M>>();
+            q.iter(world).next().expect("应有标签").0.clone()
+        }
+
+        fn texts(hp_view: bool) -> (String, String, String, String) {
+            let mut world = World::new();
+            world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+            world.insert_resource(Assets::<Image>::default());
+            world.insert_resource(UiImageCache::default());
+            world.insert_resource(Assets::<Font>::default());
+            world.insert_resource(UiFont::default());
+            let mut opt = OptionState::default();
+            opt.hp_view = hp_view;
+            world.insert_resource(opt);
+            let mut hud = HudState::default();
+            hud.hp = 100;
+            hud.max_hp = 200;
+            hud.mp = 50;
+            hud.max_mp = 100;
+            world.insert_resource(hud);
+            world.insert_resource(MiniMapMode::default());
+            world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
+            world
+                .run_system_once(hud_update_system)
+                .expect("hud_update_system 应成功");
+            (
+                text_of::<HpHpText>(&mut world),
+                text_of::<MpMpText>(&mut world),
+                text_of::<TopHudText>(&mut world),
+                text_of::<BottomHudText>(&mut world),
+            )
+        }
+
+        let (hp, mp, top, bottom) = texts(true);
+        assert_eq!(hp, "HP 100/200");
+        assert_eq!(mp, "MP 50/100 ");
+        assert_eq!(top, "");
+        assert_eq!(bottom, "");
+        let (hp, mp, top, bottom) = texts(false);
+        assert_eq!(hp, "");
+        assert_eq!(mp, "");
+        assert_eq!(top, " 100    50 \n---------------");
+        assert_eq!(bottom, " 200    100 ");
     }
 
     /// mode_visibility：INI 门控的纯函数（C# 构造 Visible=Settings.ModeView）

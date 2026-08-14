@@ -840,6 +840,44 @@ fn compass_aligned() {
     println!("  ✓ 罗盘容器 (487,264)、40 帧公式、偏移落位对齐 C# CompassDialog");
 }
 
+/// 血球两行标签位置（C# MainDialogs.cs:223-237 TopLabel/BottomLabel：HealthOrb 相对 (9,20)/(9,50)，85x30 框内水平居中）
+#[test]
+fn hud_two_line_labels_aligned() {
+    use client_bevy::game::hud as h;
+
+    assert_eq!(h::HUD_2LINE_CX, 51.5, "两行标签水平中心 = 9+85/2");
+    assert_eq!(
+        h::HUD_2LINE_CX,
+        9.0 + 85.0 / 2.0,
+        "Location.X(9) + Size.Width(85)/2"
+    );
+    assert_eq!(
+        h::HUD_TOP_LABEL_DY,
+        20.0,
+        "TopLabel Location (9,20) 距 HealthOrb"
+    );
+    assert_eq!(
+        h::HUD_BOTTOM_LABEL_DY,
+        50.0,
+        "BottomLabel Location (9,50) 距 HealthOrb"
+    );
+    // ⊆ 画布（HUD 底栏 MainDialog.Y=616、HealthOrb 相对 (0,30)；框 85x30）
+    for (name, dy) in [
+        ("TopLabel", h::HUD_TOP_LABEL_DY),
+        ("BottomLabel", h::HUD_BOTTOM_LABEL_DY),
+    ] {
+        assert_in_canvas(
+            &format!("血球{name}"),
+            h::HUD_2LINE_CX - 42.5,
+            616.0 + 30.0 + dy,
+            85.0,
+            30.0,
+        );
+    }
+
+    println!("  ✓ 血球两行标签 x=51.5、dy=20/50 对齐 C# TopLabel/BottomLabel");
+}
+
 /// 两个 [x, x+w) 区间是否重叠（同行 y 假设一致）。
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
