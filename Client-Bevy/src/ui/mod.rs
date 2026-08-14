@@ -12,4 +12,5 @@ pub mod scroll_list;
 pub mod controls;
 pub mod keyboard_nav;
 pub mod tooltip;
+pub mod outlined_text;
 pub mod client_settings;

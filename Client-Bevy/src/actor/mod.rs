@@ -73,10 +73,14 @@ impl Plugin for ActorPlugin {
             Update,
             actor_hover_tooltip_system.run_if(in_state(crate::scenes::AppState::Game)),
         );
-        // #1402：行会名标签即时更新（加退会/职位变化重发 ObjectPlayer）
+        // #1402：行会名标签即时更新（加退会/职位变化重发 ObjectPlayer）。
+        // 排在 sync_outline_system 之前：变更检测按 tick 严格比较，同帧晚于
+        // sync 的零散写入永不可见（描边副本陈旧）；副本同步另有直接写兜底
         app.add_systems(
             Update,
-            render::actor_guild_label_system.run_if(in_state(crate::scenes::AppState::Game)),
+            render::actor_guild_label_system
+                .before(crate::ui::outlined_text::sync_outline_system)
+                .run_if(in_state(crate::scenes::AppState::Game)),
         );
         // #178 PK 名字染色（ObjectColourChanged）
         app.add_systems(

@@ -502,20 +502,39 @@ fn apply_combat_events(
                 // C# Damage.Draw：显示在目标头顶上方约 75px（暴击 +Offset15）并向上飘 50px；
                 // actor 子实体 +y 向上（根在脚底），故起始 y 用正值、vy 向上
                 let y = if is_crit { 145.0 } else { 130.0 };
+                let mut spawned: Vec<Entity> = Vec::new();
                 commands.entity(target).with_children(|p| {
-                    p.spawn((
-                        Text2d::new(text),
-                        Anchor::TOP_LEFT,
-                        TextColor(color),
-                        TextFont {
-                            font: FontSource::Handle(ui_font.0.clone()),
-                            font_size: FontSize::Px(16.0),
-                            ..default()
-                        },
-                        Transform::from_xyz(0.0, y, 20.0),
-                        DamageText { vy: 50.0, life: 1.2 },
-                    ));
+                    spawned.push(
+                        p.spawn((
+                            Text2d::new(text.clone()),
+                            Anchor::TOP_LEFT,
+                            TextColor(color),
+                            TextFont {
+                                font: FontSource::Handle(ui_font.0.clone()),
+                                font_size: FontSize::Px(16.0),
+                                ..default()
+                            },
+                            Transform::from_xyz(0.0, y, 20.0),
+                            DamageText {
+                                vy: 50.0,
+                                life: 1.2,
+                            },
+                        ))
+                        .id(),
+                    );
                 });
+                // C# Damage.cs:36-37 OutLine=true OutLineColour=Black：伤害数字带黑色描边
+                if let Some(text_entity) = spawned.first() {
+                    crate::ui::outlined_text::outline_on(
+                        &mut commands,
+                        *text_entity,
+                        &text,
+                        ui_font.0.clone(),
+                        16.0,
+                        Anchor::TOP_LEFT,
+                        true,
+                    );
+                }
             }
         }
     }

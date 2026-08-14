@@ -172,6 +172,16 @@ if !crate::ui::sprite_ui::ui_enabled("quest") {
             11.0, Color::WHITE, 20.2,
         );
         commands.entity(e).insert((QuestTrackingText(i), UiEntity));
+        // C# QuestDialogs.cs _questNameLabel/_questTaskLabel OutLine=true：任务追踪文本黑色描边
+        crate::ui::outlined_text::outline_on(
+            &mut commands,
+            e,
+            "",
+            font.clone(),
+            11.0,
+            bevy::sprite::Anchor::TOP_LEFT,
+            false,
+        );
     }
 }
 

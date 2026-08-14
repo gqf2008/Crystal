@@ -16,7 +16,7 @@ use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity};
 #[derive(Resource, Default)]
 pub struct TooltipState {
     pub visible: bool,
-    /// 当前提示归属方（0=无 1=按钮Hint 2=背包 3=仓库 4=其他）
+    /// 当前提示归属方（0=无 1=按钮Hint 2=背包 3=仓库 4=其他 5=角色/商品 11=HUD按钮Hint 12=头顶名字）
     pub source: u16,
     pub title: String,
     pub lines: Vec<String>,
@@ -72,6 +72,11 @@ pub struct TooltipTitle;
 #[derive(Component)]
 pub struct TooltipLine(pub usize);
 
+/// tooltip 文本描边副本标记（面板系统按面板显隐同步；
+/// 区别于其他描边文本的副本，见 outlined_text::OutlineShadow）
+#[derive(Component)]
+pub struct TooltipOutlineShadow;
+
 /// 生成常驻提示面板（背景 + 标题 + 6 行），返回背景实体
 pub fn spawn_tooltip_panel(
     commands: &mut Commands,
@@ -99,12 +104,34 @@ pub fn spawn_tooltip_panel(
         Color::srgb(1.0, 0.9, 0.3), 30.1,
     );
     commands.entity(title).insert(TooltipTitle);
+    let mut line_entities = Vec::with_capacity(6);
     for i in 0..6usize {
         let t = spawn_ui_text(
             commands, font, "", 0.0, 0.0, 12.0,
             Color::srgb(1.0, 1.0, 0.9), 30.2,
         );
         commands.entity(t).insert(TooltipLine(i));
+        line_entities.push(t);
+    }
+    // C# tooltip 文本全部有描边：物品信息面板标签 OutLine=true（GameScene.cs
+    // CreateItemLabel），按钮 Hint 的 HintTextLabel 未显式设 OutLine 但
+    // MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 同样有描边。
+    // 描边副本常驻，tooltip_panel_system 按面板显隐同步
+    for (t, size) in
+        std::iter::once((title, 13.0)).chain(line_entities.into_iter().map(|t| (t, 12.0)))
+    {
+        let shadows = crate::ui::outlined_text::outline_on(
+            commands,
+            t,
+            "",
+            font.clone(),
+            size,
+            bevy::sprite::Anchor::TOP_LEFT,
+            false,
+        );
+        for s in shadows {
+            commands.entity(s).insert(TooltipOutlineShadow);
+        }
     }
     bg
 }
@@ -143,12 +170,25 @@ pub fn tooltip_panel_system(
     mut bg: Query<(&mut Transform, &mut Sprite, &mut Visibility), (With<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>)>,
     mut title: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>)>,
     mut lines: Query<(&mut Text2d, &mut Transform, &mut Visibility, &TooltipLine), (Without<TooltipBg>, Without<TooltipTitle>)>,
+    mut shadows: Query<&mut Visibility, (With<TooltipOutlineShadow>, Without<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>)>,
 ) {
     // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
     if !state.is_changed() {
         return;
     }
     let show = state.visible && (!state.title.is_empty() || !state.lines.is_empty());
+    // C# 依据：tooltip 文本全部有描边——物品面板标签 OutLine=true
+    // （GameScene.cs CreateItemLabel）；按钮 Hint 的 HintTextLabel 未显式设
+    // OutLine，但 MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→
+    // 同样有描边。故描边副本只随面板显隐，无 source 门控
+    let outline_vis = if show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut vis in &mut shadows {
+        *vis = outline_vis;
+    }
     // 估算尺寸：CJK 约 1 字符 = 字号 px
     let mut max_chars = state.title.chars().count().max(1);
     for l in &state.lines {
@@ -244,5 +284,72 @@ mod tests {
         // 归属来源清除生效
         s.update(3, false, String::new(), Vec::new(), 0.0, 0.0);
         assert!(!s.visible);
+    }
+
+    /// C# MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 按钮 Hint
+    /// （CMain.cs:534-540 HintTextLabel 未显式设 OutLine）同样有描边。
+    /// 真实面板：source=1 按钮 Hint 显示 → 描边副本 Inherited；清除 → Hidden
+    #[test]
+    fn tooltip_panel_outline_shadows_follow_panel() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::ecs::world::CommandQueue;
+
+        use crate::ui::outlined_text::OutlineShadow;
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut images = Assets::<Image>::default();
+        spawn_tooltip_panel(&mut commands, &mut images, &Handle::default());
+        queue.apply(&mut world);
+
+        // 面板含 title + 6 行 = 7 个描边文本 × 4 副本
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<OutlineShadow>>()
+                .iter(&world)
+                .count(),
+            28,
+            "title + 6 行各 4 个黑色副本"
+        );
+
+        // 按钮 Hint（source=1）：C# HintTextLabel 默认 _outLine=true → 描边可见
+        let mut state = TooltipState::default();
+        state.update(
+            1,
+            true,
+            String::new(),
+            vec!["按钮提示".to_string()],
+            0.0,
+            0.0,
+        );
+        world.insert_resource(state);
+        world
+            .run_system_once(tooltip_panel_system)
+            .expect("面板渲染应成功");
+        {
+            let mut q = world.query_filtered::<&Visibility, With<TooltipOutlineShadow>>();
+            for v in q.iter(&world) {
+                assert_eq!(
+                    *v,
+                    Visibility::Inherited,
+                    "按钮 Hint 描边可见（C# 默认 OutLine=true）"
+                );
+            }
+        }
+
+        // 清除 → 面板隐藏 → 描边隐藏
+        world
+            .resource_mut::<TooltipState>()
+            .update(1, false, String::new(), Vec::new(), 0.0, 0.0);
+        world
+            .run_system_once(tooltip_panel_system)
+            .expect("面板渲染应成功");
+        {
+            let mut q = world.query_filtered::<&Visibility, With<TooltipOutlineShadow>>();
+            for v in q.iter(&world) {
+                assert_eq!(*v, Visibility::Hidden, "面板隐藏描边隐藏");
+            }
+        }
     }
 }
