@@ -123,6 +123,8 @@ fn main() {
     app.add_systems(Update, (mark_ui_render_layers, propagate_ui_render_layers));
     // #91 UI 按钮交互音效（全场景：登录/选角/游戏）
     app.add_systems(Update, client_bevy::ui::sprite_ui::ui_button_sound_system);
+    // 文本黑色描边同步（C# MirLabel OutLine：4 方向 1px 黑色副本跟随正文内容变化）
+    app.add_systems(Update, client_bevy::ui::outlined_text::sync_outline_system);
     auto::register(&mut app);
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {

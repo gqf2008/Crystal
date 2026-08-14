@@ -142,36 +142,69 @@ pub fn actor_name_label_system(
         };
         commands.entity(e).insert(ActorNamed);
         let guild = g.filter(|g| !g.0.is_empty()).map(|g| g.0.clone());
+        let mut spawned: Vec<Entity> = Vec::new();
         commands.entity(e).with_children(|p| {
             // #1374：行会名标签（名字上方，小字青色，C# 风格）
             if let Some(guild) = &guild {
+                spawned.push(
+                    p.spawn((
+                        ActorGuildLabel,
+                        ActorNameLabel,
+                        Text2d::new(guild.clone()),
+                        bevy::sprite::Anchor::TOP_CENTER,
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(9.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.3, 0.9, 1.0)),
+                        Transform::from_xyz(0.0, 42.0, 0.0),
+                    ))
+                    .id(),
+                );
+            }
+            spawned.push(
                 p.spawn((
-                    ActorGuildLabel,
                     ActorNameLabel,
-                    Text2d::new(guild.clone()),
+                    Text2d::new(text.clone()),
                     bevy::sprite::Anchor::TOP_CENTER,
                     TextFont {
                         font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(9.0),
+                        font_size: FontSize::Px(11.0),
                         ..default()
                     },
-                    TextColor(Color::srgb(0.3, 0.9, 1.0)),
-                    Transform::from_xyz(0.0, 42.0, 0.0),
-                ));
-            }
-            p.spawn((
-                ActorNameLabel,
-                Text2d::new(text),
-                bevy::sprite::Anchor::TOP_CENTER,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(11.0),
-                    ..default()
-                },
-                TextColor(color),
-                Transform::from_xyz(0.0, 28.0, 0.0),
-            ));
+                    TextColor(color),
+                    Transform::from_xyz(0.0, 28.0, 0.0),
+                ))
+                .id(),
+            );
         });
+        // C# PlayerObject.cs:5336/5363 NameLabel/GuildLabel OutLine=true OutLineColour=Black：
+        // 头顶名字与行会名带黑色描边（行会 9px、名字 11px）
+        if guild.is_some() {
+            if let Some(guild_label) = spawned.first() {
+                crate::ui::outlined_text::outline_on(
+                    &mut commands,
+                    *guild_label,
+                    guild.as_deref().unwrap_or(""),
+                    font.clone(),
+                    9.0,
+                    bevy::sprite::Anchor::TOP_CENTER,
+                    true,
+                );
+            }
+        }
+        if let Some(name_label) = spawned.last() {
+            crate::ui::outlined_text::outline_on(
+                &mut commands,
+                *name_label,
+                &text,
+                font.clone(),
+                11.0,
+                bevy::sprite::Anchor::TOP_CENTER,
+                true,
+            );
+        }
     }
 }
 
@@ -203,21 +236,37 @@ pub fn actor_guild_label_system(
                 }
             }
             (Some(name), None) => {
+                let mut spawned: Vec<Entity> = Vec::new();
                 commands.entity(e).with_children(|p| {
-                    p.spawn((
-                        ActorGuildLabel,
-                        ActorNameLabel,
-                        Text2d::new(name),
-                        bevy::sprite::Anchor::TOP_CENTER,
-                        TextFont {
-                            font: FontSource::Handle(font.clone()),
-                            font_size: FontSize::Px(9.0),
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.3, 0.9, 1.0)),
-                        Transform::from_xyz(0.0, 42.0, 0.0),
-                    ));
+                    spawned.push(
+                        p.spawn((
+                            ActorGuildLabel,
+                            ActorNameLabel,
+                            Text2d::new(name.clone()),
+                            bevy::sprite::Anchor::TOP_CENTER,
+                            TextFont {
+                                font: FontSource::Handle(font.clone()),
+                                font_size: FontSize::Px(9.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.3, 0.9, 1.0)),
+                            Transform::from_xyz(0.0, 42.0, 0.0),
+                        ))
+                        .id(),
+                    );
                 });
+                // C# PlayerObject.cs:5363 GuildLabel OutLine=true：行会名黑色描边
+                if let Some(label) = spawned.first() {
+                    crate::ui::outlined_text::outline_on(
+                        &mut commands,
+                        *label,
+                        &name,
+                        font.clone(),
+                        9.0,
+                        bevy::sprite::Anchor::TOP_CENTER,
+                        true,
+                    );
+                }
             }
             (None, Some(le)) => {
                 commands.entity(le).despawn();
