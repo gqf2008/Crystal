@@ -1,0 +1,192 @@
+# ============================================================================
+# 跨平台构建 CI/CD（#2533）
+#   - Client-Bevy（client_bevy）+ ServerRust（mir2_server）三平台 release 构建
+#   - push master / PR：上传 Actions artifacts（可下载验证）
+#   - tag（v*）：自动发布 GitHub Release（三平台产物打包）
+# 说明：
+#   - macos-latest 已是 Apple Silicon → 产物命名 macos-arm64（仅 Apple Silicon）
+#   - sqlx 0.8 的 "sqlite" feature 默认 bundled（单文件可移植），Linux 无需 libsqlite3-dev
+#   - 现有 ci.yml（lint/test 覆盖）保持不变，本文件只做产物构建
+# ============================================================================
+
+name: Build & Release
+
+on:
+  push:
+    branches: [master]
+    # 必须显式声明 tags：branches 过滤器不匹配 tag 推送
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============ ServerRust 三平台 release 构建 ============
+  server-build:
+    name: ServerRust build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            exe: ""
+          - os: windows-latest
+            platform: windows-x86_64
+            exe: ".exe"
+          - os: macos-latest
+            platform: macos-arm64
+            exe: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ServerRust
+      - name: Build release (mir2_server)
+        working-directory: ServerRust
+        run: cargo build --release --bin mir2_server
+      - name: Verify bundled SQLite (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ServerRust
+        run: |
+          if ldd target/release/mir2_server | grep -qi sqlite; then
+            echo "FAIL: mir2_server 动态链接 libsqlite3"
+            exit 1
+          fi
+          echo "OK: no dynamic libsqlite3 (bundled)"
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/stage
+          cp "ServerRust/target/release/mir2_server${{ matrix.exe }}" dist/stage/
+          printf '%s\n' \
+            "Crystal 服务端 ServerRust (${{ matrix.platform }})" \
+            "" \
+            "运行: ./mir2_server${{ matrix.exe }}" \
+            "- 需要自备 Data/ 资源目录与配置文件，与可执行文件同目录放置。" \
+            "- SQLite 为 bundled 构建（sqlx 0.8 默认捆绑编译），单文件可移植，无需安装 libsqlite3。" \
+            "- macOS 未签名：首次打开被 Gatekeeper 拦截时，右键 -> 打开，或执行" \
+            "  xattr -dr com.apple.quarantine mir2_server" > dist/stage/README.txt
+          cd dist/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            powershell -NoProfile -Command "Compress-Archive -Path '*' -DestinationPath '../mir2_server-${{ matrix.platform }}.zip' -Force"
+          else
+            zip -9r "../mir2_server-${{ matrix.platform }}.zip" .
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mir2_server-${{ matrix.platform }}
+          path: dist/mir2_server-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  # ============ Client-Bevy 三平台 release 构建 ============
+  client-bevy-build:
+    name: Client-Bevy build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            exe: ""
+          - os: windows-latest
+            platform: windows-x86_64
+            exe: ".exe"
+          - os: macos-latest
+            platform: macos-arm64
+            exe: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Install system deps (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libgl1-mesa-dev libfreetype6-dev libwayland-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Client-Bevy
+      - name: Build release (client_bevy)
+        working-directory: Client-Bevy
+        run: cargo build --release --bin client_bevy
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/stage
+          cp "Client-Bevy/target/release/client_bevy${{ matrix.exe }}" dist/stage/
+          printf '%s\n' \
+            "Crystal 客户端 Client-Bevy (${{ matrix.platform }})" \
+            "" \
+            "运行: ./client_bevy${{ matrix.exe }}" \
+            "- 需要自备 Data/ 资源目录，与可执行文件同目录放置。" \
+            "- macOS 未签名：首次打开被 Gatekeeper 拦截时，右键 -> 打开，或执行" \
+            "  xattr -dr com.apple.quarantine client_bevy" \
+            "- Windows 首次运行如触发 SmartScreen，请选择 仍要运行。" > dist/stage/README.txt
+          cd dist/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            powershell -NoProfile -Command "Compress-Archive -Path '*' -DestinationPath '../client_bevy-${{ matrix.platform }}.zip' -Force"
+          else
+            zip -9r "../client_bevy-${{ matrix.platform }}.zip" .
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client_bevy-${{ matrix.platform }}
+          path: dist/client_bevy-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  # ============ GitHub Release（仅 tag 触发） ============
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [server-build, client-bevy-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Crystal ${{ github.ref_name }}
+
+          ### 产物（三平台）
+          - `client_bevy-windows-x86_64.zip`（Windows x64）
+          - `client_bevy-linux-x86_64.zip`（Linux x64）
+          - `client_bevy-macos-arm64.zip`（macOS Apple Silicon）
+          - `mir2_server-windows-x86_64.zip`
+          - `mir2_server-linux-x86_64.zip`
+          - `mir2_server-macos-arm64.zip`
+
+          ### 说明
+          - 服务端 SQLite 为 bundled 构建（sqlx 0.8 默认捆绑编译），单文件可移植，无需系统安装 libsqlite3。
+          - 运行需要自备 `Data/` 资源目录（及服务端配置文件），与可执行文件同目录放置。
+          - macOS 产物未签名：首次打开若被 Gatekeeper 拦截，请右键 → 打开，或执行
+            `xattr -dr com.apple.quarantine <文件>`。
+          - Windows 首次运行可能触发 SmartScreen，选择"仍要运行"。
+          EOF
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/*.zip --notes-file release-notes.md

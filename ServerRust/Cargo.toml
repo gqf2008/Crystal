@@ -41,6 +41,9 @@ serde_json = "1"
 byteorder = "1"
 
 # Database
+# sqlx 0.8 的 "sqlite" feature 默认捆绑编译 SQLite（bundled，产物单文件可移植，
+# 无需系统 libsqlite3）；如要链接系统库请改用 "sqlite-unbundled"。
+# 注意：sqlx 0.8 不存在 "sqlite-bundled" feature 名（那是 0.7 的写法）。
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
 # Logging
