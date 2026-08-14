@@ -2,17 +2,18 @@
 //!
 //! C# 技术（MirLabel.cs:220-226）：`OutLine=true` 时先在 4 个 1px 偏移矩形上
 //! 以 `OutLineColour`（全部使用点均为 `Color.Black`，见 Damage.cs:37、
-//! PlayerObject.cs:5336/5363、MapObject.cs:512/554）各画一遍文本，
+//! PlayerObject.cs:5335/5362、MapObject.cs:512/554）各画一遍文本，
 //! 再画正文前景色。相对前景 (1,1)：上 (0,-1)/左 (-1,0)/右 (+1,0)/下 (0,+1)。
+//!
+//! 注意 MirLabel 构造器默认 `_outLine = true`（MirLabel.cs:181-182）——C# 中
+//! 「未设 OutLine」意味着描边**开启**。显式无描边仅聊天标签
+//! （MainDialogs.cs:962/1040 `OutLine=false`）。Bevy 现状：聊天文本无描边
+//! ✓ 一致；按钮文本/模式标签/按钮 Hint 在 C# 中有描边而 Bevy 尚未实现
+//! → 后续批次补齐。
 //!
 //! Bevy 无等价的 4 方向描边内建组件（`TextShadow` 仅单方向），故为每个描边
 //! 文本挂 4 个黑色子实体副本，`sync_outline_system` 在主文本变化时同步内容。
 //! 子实体 `Visibility::Inherited` 随主实体显隐，无需单独同步。
-//!
-//! C# 无描边的文本（不加 outline）：按钮文本（MirButton.cs:172 已注释）、
-//! 聊天标签（MainDialogs.cs:962 `OutLine=false`）、按钮 Hint
-//! （CMain.cs:518-539 HintTextLabel 未设 OutLine）、模式标签
-//! （MainDialogs.cs:356/366/376 仅设 OutLineColour 未设 OutLine=true）。
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -20,8 +21,9 @@ use bevy::sprite::Anchor;
 /// 描边颜色（C# OutLineColour 全部使用点为 Color.Black）
 pub const OUTLINE_COLOR: Color = Color::BLACK;
 
-/// UI 空间（y 向下）相对正文的 4 方向 1px 偏移：
-/// 上/左/右/下（C# MirLabel.cs:220-224 各 rect 相对前景 (1,1)）
+/// UI 空间 4 个 1px 偏移：直接照搬 C# MirLabel.cs:220-224 各 rect 相对前景
+/// (1,1) 的坐标（C# 屏幕系 y 向下）。Bevy UI 实体 y 已翻转，单个条目的视觉
+/// 上下方向与 C# 标注相反，但 4 副本同色且方向集合同为 上/左/右/下 → 渲染等价
 pub const OUTLINE_OFFSETS_UI: [(f32, f32); 4] = [(0.0, -1.0), (-1.0, 0.0), (1.0, 0.0), (0.0, 1.0)];
 
 /// 世界空间（y 向上）的 4 方向 1px 偏移（与 UI 版仅 y 符号相反）
@@ -84,7 +86,10 @@ pub fn outline_on(
     shadows
 }
 
-/// 主文本内容变化 → 同步到 4 个黑色副本（C# 每帧重绘纹理，Bevy 只在变化时复制）
+/// 主文本内容变化 → 同步到 4 个黑色副本（C# 每帧重绘纹理，Bevy 只在变化时复制）。
+/// 注册位置必须排在所有描边文本写方之后（行会名写方以 `.before(本系统)` 显式
+/// 排序，见 actor/mod.rs）：变更检测按 tick 严格比较，同帧晚于本系统的
+/// 零散写入将永不可见（描边副本陈旧）
 pub fn sync_outline_system(
     mains: Query<(Entity, Ref<Text2d>, &Children), (With<OutlinedText>, Without<OutlineShadow>)>,
     mut shadows: Query<&mut Text2d, (With<OutlineShadow>, Without<OutlinedText>)>,

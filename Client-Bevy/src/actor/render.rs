@@ -179,7 +179,7 @@ pub fn actor_name_label_system(
                 .id(),
             );
         });
-        // C# PlayerObject.cs:5336/5363 NameLabel/GuildLabel OutLine=true OutLineColour=Black：
+        // C# PlayerObject.cs:5335/5362 NameLabel/GuildLabel OutLine=true OutLineColour=Black：
         // 头顶名字与行会名带黑色描边（行会 9px、名字 11px）
         if guild.is_some() {
             if let Some(guild_label) = spawned.first() {
@@ -214,6 +214,7 @@ pub fn actor_guild_label_system(
     players: Query<(Entity, Option<&PlayerGuildName>), (With<ActorNamed>, Without<LocalPlayer>)>,
     guild_labels: Query<(Entity, &ChildOf), With<ActorGuildLabel>>,
     mut texts: Query<&mut Text2d, With<ActorGuildLabel>>,
+    mut shadows: Query<(&ChildOf, &mut Text2d), (With<crate::ui::outlined_text::OutlineShadow>, Without<ActorGuildLabel>)>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -231,7 +232,14 @@ pub fn actor_guild_label_system(
             (Some(name), Some(le)) => {
                 if let Ok(mut t) = texts.get_mut(le) {
                     if t.0 != name {
-                        t.0 = name;
+                        t.0 = name.clone();
+                    }
+                }
+                // 描边副本直接同步兜底：本系统已以 .before(sync_outline_system) 排序
+                // （actor/mod.rs），但仍不依赖 sync 的变更检测捕捉改名写入
+                for (child, mut st) in &mut shadows {
+                    if child.parent() == le && st.0 != name {
+                        st.0 = name.clone();
                     }
                 }
             }
@@ -255,7 +263,7 @@ pub fn actor_guild_label_system(
                         .id(),
                     );
                 });
-                // C# PlayerObject.cs:5363 GuildLabel OutLine=true：行会名黑色描边
+                // C# PlayerObject.cs:5362 GuildLabel OutLine=true：行会名黑色描边
                 if let Some(label) = spawned.first() {
                     crate::ui::outlined_text::outline_on(
                         &mut commands,
@@ -324,7 +332,6 @@ pub fn object_colour_server_events(
     }
 }
 
-
 /// #236 中毒染层：根实体挂 PoisonTint 时，把子图层 Sprite 染绿（actor_sprite_render 之后运行）
 pub(crate) fn apply_poison_tint(
     roots: Query<(Entity, Has<super::components::PoisonTint>, &Children)>,
@@ -340,6 +347,83 @@ pub(crate) fn apply_poison_tint(
                     Color::srgba(1.0, 1.0, 1.0, alpha)
                 };
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::ecs::world::CommandQueue;
+
+    /// 行会名改名 → 描边副本立即同步（.before(sync_outline_system) 排序之外的
+    /// 兜底直写；回归：移除 (Some, Some) 分支的副本同步循环则本测试变红）
+    #[test]
+    fn guild_label_rename_syncs_outline_shadows() {
+        use crate::ui::outlined_text::{outline_on, OutlineShadow};
+
+        let mut world = World::new();
+        // UiFont 强句柄 → 系统跳过 load_ui_font 磁盘路径（空字体仅作句柄占位）
+        let mut fonts = Assets::<Font>::default();
+        let font = fonts.add(Font::from_bytes(vec![]));
+        world.insert_resource(fonts);
+        world.insert_resource(UiFont(font.clone()));
+
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let player = commands
+            .spawn((ActorNamed, PlayerGuildName("旧行会".to_string())))
+            .id();
+        commands.entity(player).with_children(|p| {
+            p.spawn((
+                ActorGuildLabel,
+                ActorNameLabel,
+                Text2d::new("旧行会"),
+                bevy::sprite::Anchor::TOP_CENTER,
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(9.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.3, 0.9, 1.0)),
+                Transform::from_xyz(0.0, 42.0, 0.0),
+            ));
+        });
+        queue.apply(&mut world);
+        let label = world
+            .query_filtered::<Entity, With<ActorGuildLabel>>()
+            .single(&world)
+            .unwrap();
+        // 挂 4 个描边副本（与生产路径一致的 outline_on）
+        let mut commands = Commands::new(&mut queue, &world);
+        outline_on(
+            &mut commands,
+            label,
+            "旧行会",
+            font.clone(),
+            9.0,
+            bevy::sprite::Anchor::TOP_CENTER,
+            true,
+        );
+        queue.apply(&mut world);
+
+        // 无变化：系统运行不误写
+        world
+            .run_system_once(actor_guild_label_system)
+            .expect("系统应成功");
+
+        // 改名 → 标签与 4 个描边副本同步
+        world.get_mut::<PlayerGuildName>(player).unwrap().0 = "新行会".to_string();
+        world
+            .run_system_once(actor_guild_label_system)
+            .expect("系统应成功");
+        assert_eq!(world.get::<Text2d>(label).unwrap().0, "新行会");
+        for e in world
+            .query_filtered::<Entity, With<OutlineShadow>>()
+            .iter(&world)
+        {
+            assert_eq!(world.get::<Text2d>(e).unwrap().0, "新行会", "副本同步");
         }
     }
 }
