@@ -100,16 +100,25 @@ fn main() {
         // #UI-align：skip-login 只应触发一次状态跳转。
         // Bevy 每帧 set 同一个 NextState 会反复执行 OnExit/OnEnter，导致游戏场景每帧重建、
         // UI 大量闪烁/残留白块并刷 “Entity despawned” 告警。用 Local<bool> 保证只跳一次。
-        app.add_systems(Update, |mut next: ResMut<NextState<AppState>>, mut done: Local<bool>| {
-            if !*done {
-                *done = true;
-                next.set(AppState::Game);
-            }
-        });
+        app.add_systems(
+            Update,
+            |mut next: ResMut<NextState<AppState>>, mut done: Local<bool>| {
+                if !*done {
+                    *done = true;
+                    next.set(AppState::Game);
+                }
+            },
+        );
     }
     app.add_plugins(EventBusPlugin);
     app.add_plugins(ControlPlugin);
     app.add_plugins(PinyinImePlugin);
+    // UI 字体链 Han 回退（复刻 C# GDI：Arial 缺中文→宋体）：Startup 一次注册系统宋体。
+    // 必须早于任何 Text2d 布局（首个 Update 前）——Startup 阶段即满足
+    app.add_systems(
+        Startup,
+        client_bevy::ui::sprite_ui::setup_han_fallback_system,
+    );
     app.add_plugins((
         NetworkPlugin,
         IntroPlugin,
