@@ -794,9 +794,9 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     // 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 Visible=Settings.ModeView）。
     let mode_vis = mode_visibility(opt.mode_view);
     let big = mmap.big;
-    let sm = spawn_mode_label(&mut commands, &font, "技能:Ctrl", big, S_MODE_DY, Color::srgb(0.196, 0.804, 0.196), mode_vis, SModeText);
-    let am = spawn_mode_label(&mut commands, &font, "模式:和平", big, A_MODE_DY, Color::srgb(1.0, 1.0, 0.0), mode_vis, AttackModeText);
-    let pm = spawn_mode_label(&mut commands, &font, "宠物:跟随", big, P_MODE_DY, Color::srgb(1.0, 0.647, 0.0), mode_vis, PModeText);
+    spawn_mode_label(&mut commands, &font, "技能:Ctrl", big, S_MODE_DY, Color::srgb(0.196, 0.804, 0.196), mode_vis, SModeText);
+    spawn_mode_label(&mut commands, &font, "模式:和平", big, A_MODE_DY, Color::srgb(1.0, 1.0, 0.0), mode_vis, AttackModeText);
+    spawn_mode_label(&mut commands, &font, "宠物:跟随", big, P_MODE_DY, Color::srgb(1.0, 0.647, 0.0), mode_vis, PModeText);
     // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
     let wt = spawn_ui_text(&mut commands, &font, "0/0", main_x + bg_w - 105.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
     commands.entity(wt).insert(HudWeightText);
