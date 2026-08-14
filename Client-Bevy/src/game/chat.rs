@@ -1193,6 +1193,19 @@ mod tests {
         assert_eq!(apply_key_scroll(1, 10, 8, KeyScroll::Down), 0);
     }
 
+    /// C# MainDialogs.cs:974-981 字面值：按 ':'/' ' 拆分取首段，
+    /// Regex.Replace(parts[0], "[^A-Za-z0-9]", "")——中文/符号全剥（原版行为）
+    #[test]
+    fn whisper_click_matches_csharp() {
+        assert_eq!(whisper_name("player1: 你好"), "player1");
+        assert_eq!(whisper_name("张三: 你好"), ""); // 中文被剥空（C# 原版如此）
+        assert_eq!(whisper_name("player_2 卖装备"), "player2"); // 空格也拆；下划线剥掉
+        assert_eq!(whisper_name("-> 李四: 在吗"), ""); // 首段 "->" → 剥空
+        assert_eq!(whisper_name(""), ""); // C# "".Split → [""] → 剥空
+        assert_eq!(chat_click_whisper_text("player1: hi"), "/player1 ");
+        assert_eq!(chat_click_whisper_text("张三: 你好"), "/ ");
+    }
+
     #[test]
     fn chat_filter_from_ini() {
         let content = "[Filter]\nFilterNormalChat=true\nFilterWhisperChat=true\nFilterShoutChat=false\nFilterSystemChat=false\nFilterLoverChat=false\nFilterMentorChat=false\nFilterGroupChat=false\nFilterGuildChat=false\n\n[Game]\nTransparentChat=true\n\n[Chat]\nTab=guild\n";
@@ -1316,10 +1329,27 @@ fn chat_link_row_at(cursor_x: f32, cursor_y: f32, visible_lines: usize) -> Optio
     Some(((cursor_y - ROW_Y) / LINE_H) as usize)
 }
 
+/// C# MainDialogs.cs:974-977：点聊天行取发送者名——按 ':'/' ' 拆分取首段，
+/// 仅保留 [A-Za-z0-9]（C# Regex.Replace(parts[0], "[^A-Za-z0-9]", "")；
+/// 中文名会被剥空，原版行为照搬）
+pub fn whisper_name(text: &str) -> String {
+    text.split([':', ' '])
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+/// C# MainDialogs.cs:979-981：点非链接行 → 输入框文本 "/{name} "
+pub fn chat_click_whisper_text(text: &str) -> String {
+    format!("/{} ", whisper_name(text))
+}
+
 /// #287：点击聊天行（含物品链接）→ 显示物品 tooltip（C# CreateItemLabel 对齐）；
 /// 未缓存则发 C.RequestChatItem 供下次解析
 fn chat_item_click_system(
-    chat: Res<ChatState>,
+    mut chat: ResMut<ChatState>,
     cache: Res<ChatItemCache>,
     net: Res<NetConnection>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
@@ -1337,18 +1367,26 @@ fn chat_item_click_system(
     let Some(row) = chat_link_row_at(cursor.x, cursor.y, chat.visible_lines) else {
         return;
     };
-    // 可见行 uid 列表（与 chat_display_system 一致）
-    let visible: Vec<Option<u64>> = chat
+    // 可见行（文本 + uid，与 chat_display_system 一致）
+    let visible: Vec<(String, Option<u64>)> = chat
         .lines
         .iter()
         .filter(|(_, _, ch, _)| chat.tab == ChatChannel::All || *ch == chat.tab)
-        .map(|(_, _, _, uid)| *uid)
+        .map(|(t, _, _, uid)| (t.clone(), *uid))
         .collect();
     let start = visible
         .len()
         .saturating_sub(chat.visible_lines)
         .saturating_sub(chat.scroll_up);
-    let Some(uid) = visible.get(start + row).copied().flatten() else {
+    let Some((text, uid)) = visible.get(start + row).cloned() else {
+        return;
+    };
+    let Some(uid) = uid else {
+        // C# MainDialogs.cs:970-984：点非链接行 = 对发送者发起悄悄话——
+        // SetFocus + Text="/名字 " + SelectionStart=末尾（Bevy：激活输入框+置文本）
+        chat.input_active = true;
+        chat.input_text = chat_click_whisper_text(&text);
+        tracing::info!("💬 点击聊天行发起悄悄话: {:?}", chat.input_text);
         return;
     };
     if let Some(item) = cache.items.get(&uid) {
