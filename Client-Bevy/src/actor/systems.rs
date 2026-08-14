@@ -427,21 +427,31 @@ pub(crate) fn demo_drive(
 
 /// 悬停玩家/怪物/NPC：鼠标放在目标上时，在**目标头顶**显示名字（source=12）
 /// 位置换算：world_to_viewport 返回的已是 UI 逻辑坐标（0..1024, 0..768），直接使用。
+/// #2481 头顶高度：按目标当前渲染帧的顶边（-offset_y）计算，不再固定 +90——
+/// 实测帧顶：玩家 ~48px、小怪 50~90px、NPC 47~613px、BOSS 最高 921px，固定值只对玩家大致成立。
 pub(crate) fn actor_hover_tooltip_system(
     windows: Query<&Window>,
     map_cameras: Query<
         (&Camera, &GlobalTransform),
         (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
     >,
+    mut libs: ResMut<crate::map_renderer::GameLibraries>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     actors: Query<
-        (Option<&PlayerName>, Option<&MonsterName>, Option<&NpcName>, &Transform),
+        (
+            Option<&PlayerName>,
+            Option<&MonsterName>,
+            Option<&NpcName>,
+            &Transform,
+            &Children,
+        ),
         (
             Without<LocalPlayer>,
             Without<crate::ui::sprite_ui::UiEntity>,
             Without<crate::ui::tooltip::TooltipBg>,
         ),
     >,
+    layers: Query<&SpriteLayer>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
@@ -449,20 +459,47 @@ pub(crate) fn actor_hover_tooltip_system(
     let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else { return };
 
     let mut hit: Option<(String, Vec3)> = None;
-    for (p, m, n, tf) in &actors {
-        let (dx, dy) = (tf.translation.x - world.x, tf.translation.y - world.y);
-        // 目标碰撞盒：脚点向上 ~140px（角色/怪物体型），左右 42px
-        if dx.abs() < 42.0 && dy > -140.0 && dy < 25.0 {
-            let name = p
-                .map(|x| x.0.clone())
-                .or_else(|| m.map(|x| x.0.clone()))
-                .or_else(|| n.map(|x| x.0.clone()));
-            if let Some(name) = name {
-                // 头顶：脚点上方约 90px（对齐 C# 名字标签位置）
-                let head = Vec3::new(tf.translation.x, tf.translation.y + 90.0, 0.0);
-                hit = Some((name, head));
-                break;
+    for (p, m, n, tf, children) in &actors {
+        // 非特效渲染层当前帧的精灵元数据（相对脚点的本地坐标）
+        let mut frames: Vec<(i32, i32, i32, i32)> = Vec::with_capacity(children.len());
+        for child in children.iter() {
+            let Ok(layer) = layers.get(child) else {
+                continue;
+            };
+            if layer.is_effect {
+                continue;
             }
+            let idx = layer.frame.max(0) as u32;
+            if let Some(info) = libs
+                .0
+                .get_array_image(layer.lib, layer.slot as usize, idx as usize)
+            {
+                frames.push((
+                    info.offset_x as i32,
+                    info.offset_y as i32,
+                    info.width as i32,
+                    info.height as i32,
+                ));
+            }
+        }
+        let Some((left, right, bottom, top)) = hover_bounds(&frames) else {
+            continue;
+        };
+        // 命中盒 = 当前帧精灵包围盒（C# MouseOver 语义：按当前帧可见像素命中），
+        // 大怪身体中上部可命中、小怪头顶上方空白不误命中
+        let (dx, dy) = (world.x - tf.translation.x, world.y - tf.translation.y);
+        if !hover_hit(dx, dy, (left, right, bottom, top)) {
+            continue;
+        }
+        let name = p
+            .map(|x| x.0.clone())
+            .or_else(|| m.map(|x| x.0.clone()))
+            .or_else(|| n.map(|x| x.0.clone()));
+        if let Some(name) = name {
+            // 头顶 = 当前帧顶边（top），随体型/动作实时变化
+            let head = Vec3::new(tf.translation.x, tf.translation.y + top, 0.0);
+            hit = Some((name, head));
+            break;
         }
     }
     match hit {
@@ -471,14 +508,99 @@ pub(crate) fn actor_hover_tooltip_system(
                 // world_to_viewport 返回的已是逻辑视口坐标（0..1024, 0..768），勿再缩放
                 // C# MapObject.DrawName：名字标签水平居中于目标头顶。这里按 tooltip_panel_system
                 // 相同的估算公式计算面板宽度，让 tooltip 在头顶居中；y 保持面板底部贴近头顶。
+                // tooltip_panel_system 渲染时还会 +16/+16 偏移（光标跟随惯例），x 减 16 抵消
+                // 才能让面板真正水平居中于头顶。
                 let chars = name.chars().count().max(1) as f32;
                 let width = (chars * 13.0 + 20.0).clamp(40.0, 500.0);
-                tooltip.update(12, true, name.clone(), vec![name], vp.x - width * 0.5, vp.y - 70.0);
+                tooltip.update(
+                    12,
+                    true,
+                    name.clone(),
+                    vec![name],
+                    vp.x - width * 0.5 - 16.0,
+                    vp.y - 70.0,
+                );
             } else {
                 tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0);
             }
         }
         None => tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0),
+    }
+}
+
+/// #2481 悬停几何：输入非特效层当前帧元数据 (offset_x, offset_y, w, h)，
+/// 输出相对脚点的精灵包围盒并集 (left, right, bottom, top)（本地坐标，y 向上）；
+/// top 即头顶高度（帧顶边 = -offset_y）。无有效层时返回 None。
+fn hover_bounds(frames: &[(i32, i32, i32, i32)]) -> Option<(f32, f32, f32, f32)> {
+    if frames.is_empty() {
+        return None;
+    }
+    let mut left = f32::MAX;
+    let mut right = f32::MIN;
+    let mut bottom = f32::MAX;
+    let mut top = f32::MIN;
+    for &(ox, oy, w, h) in frames {
+        left = left.min(ox as f32);
+        right = right.max((ox + w) as f32);
+        bottom = bottom.min((-oy - h) as f32);
+        top = top.max(-oy as f32);
+    }
+    Some((left, right, bottom, top))
+}
+
+/// #2481 命中判断：光标相对脚点偏移是否落在包围盒内（dx/dy 为光标本地坐标，y 向上）
+fn hover_hit(dx: f32, dy: f32, b: (f32, f32, f32, f32)) -> bool {
+    dx >= b.0 && dx <= b.1 && dy >= b.2 && dy <= b.3
+}
+
+#[cfg(test)]
+mod hover_geometry_tests {
+    use super::{hover_bounds, hover_hit};
+
+    /// Monster/000.Lib 帧0 实测：w=104 h=96 ox=1 oy=-74 → 头顶 +74、底边 -22
+    #[test]
+    fn bounds_small_monster() {
+        let b = hover_bounds(&[(1, -74, 104, 96)]).unwrap();
+        assert_eq!(b, (1.0, 105.0, -22.0, 74.0));
+    }
+
+    /// BOSS 大帧：头顶 +850，固定 +90 的旧实现会落在身体中间（错位根因）
+    #[test]
+    fn bounds_boss_monster() {
+        let b = hover_bounds(&[(-150, -850, 300, 900)]).unwrap();
+        assert_eq!(b, (-150.0, 150.0, -50.0, 850.0));
+    }
+
+    /// Npc/00.Lib 帧0 实测：w=60 h=84 ox=9 oy=-53 → 头顶 +53，旧实现 +90 悬空 37px
+    #[test]
+    fn bounds_npc() {
+        let b = hover_bounds(&[(9, -53, 60, 84)]).unwrap();
+        assert_eq!(b, (9.0, 69.0, -31.0, 53.0));
+    }
+
+    /// 玩家多图层（护甲+发型）取并集：头顶取最高层
+    #[test]
+    fn bounds_player_layer_union() {
+        let b = hover_bounds(&[(8, -48, 64, 76), (10, -56, 44, 60)]).unwrap();
+        assert_eq!(b, (8.0, 72.0, -28.0, 56.0));
+    }
+
+    /// 无有效层 → None（不显示提示）
+    #[test]
+    fn bounds_empty() {
+        assert!(hover_bounds(&[]).is_none());
+    }
+
+    /// 命中语义：BOSS 身体中上部（旧固定盒够不到）应命中；小怪头顶上方空白不命中
+    #[test]
+    fn hit_uses_frame_bounds() {
+        let boss = hover_bounds(&[(-150, -850, 300, 900)]).unwrap();
+        assert!(hover_hit(0.0, 400.0, boss)); // BOSS 胸口
+        assert!(!hover_hit(0.0, 860.0, boss)); // 略超头顶（900 帧高，顶 850）
+        let small = hover_bounds(&[(1, -74, 104, 96)]).unwrap();
+        assert!(!hover_hit(0.0, 100.0, small)); // 小怪头顶上方 26px 空白
+        assert!(hover_hit(50.0, 20.0, small)); // 小怪上身
+        assert!(!hover_hit(50.0, -40.0, small)); // 脚点下方
     }
 }
 
