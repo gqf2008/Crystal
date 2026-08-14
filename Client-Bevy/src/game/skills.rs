@@ -241,7 +241,15 @@ impl SkillBarState {
         // 判定为严格大于：x > Resolution-100（逻辑分辨率 1024 → 924）或 y > 700。
         // 负值兜底：C# 运行时拖动钳制（OnMouseMove L910-913）保证永不产生负坐标，故其加载不查负；
         // Bevy 旧版本无钳制可能存过负值 → 一并按无效处理回落默认（与越界同一语义，永不可见的栏不可留）。
-        if s.pos.0 > 924.0 || s.pos.1 > 700.0 || s.pos.0 < 0.0 || s.pos.1 < 0.0 {
+        // 非有限值兜底："NaN"/"inf" 能被 parse::<f32>() 成功解析，而 NaN 的全序比较全为 false，
+        // 单靠下面的越界判定拦不住 → 栏会被定位到 NaN 永不可见（#2517）。NaN/±inf 一并回落默认。
+        if !s.pos.0.is_finite()
+            || !s.pos.1.is_finite()
+            || s.pos.0 > 924.0
+            || s.pos.1 > 700.0
+            || s.pos.0 < 0.0
+            || s.pos.1 < 0.0
+        {
             s.pos = (0.0, 0.0);
         }
         s
@@ -561,6 +569,69 @@ mod tests {
         assert_eq!(old, None);
         assert_eq!(s.by_spell(Spell::Fencing).unwrap().key, 1);
     }
+
+    /// #2517："NaN"/"inf" 能被 parse::<f32>() 成功解析，而 NaN 的全序比较全为 false，
+    /// 单靠越界判定拦不住 → 栏会被定位到 NaN 永不可见。非有限值必须回落默认 (0,0)。
+    #[test]
+    fn skill_bar_state_non_finite_falls_back() {
+        for v in ["NaN", "nan", "inf", "-inf", "Infinity"] {
+            let cx = format!("[Game]\nSkillbar0X={v}\nSkillbar0Y=100\n");
+            assert_eq!(
+                SkillBarState::from_ini(&cx).pos,
+                (0.0, 0.0),
+                "Skillbar0X={v} 非有限/越界应回落默认"
+            );
+            let cy = format!("[Game]\nSkillbar0X=100\nSkillbar0Y={v}\n");
+            assert_eq!(
+                SkillBarState::from_ini(&cy).pos,
+                (0.0, 0.0),
+                "Skillbar0Y={v} 非有限/越界应回落默认"
+            );
+        }
+    }
+
+    /// #2517 回归：技能栏所有可渲染子/孙控件都必须挂 UiEntity。
+    /// RenderLayers 不随层级传播（Bevy 0.19 check_visibility 无父级回溯），UI 相机只画
+    /// layer 1/2；漏挂 UiEntity 的 Sprite/Text2d 留在默认 layer 0 → 被 UI 相机剔除、
+    /// 只被地图相机画到世界原点（整栏不可见）。空 Libraries 下格网/底图等 lib 精灵不生成，
+    /// 但标题文字/格子/图标/冷却/键名标签都会生成，足以守住这条不变量。
+    #[test]
+    fn skill_bar_children_carry_ui_entity() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Font>>()
+            .init_resource::<UiImageCache>()
+            .init_resource::<UiFont>()
+            .insert_resource(GameLibraries(crate::resources::libraries::Libraries::new(
+                "Data",
+            )))
+            .insert_resource(SkillBarState::default());
+        app.world_mut()
+            .run_system_once(spawn_skill_bar)
+            .expect("spawn_skill_bar 应可运行");
+
+        let mut root_q = app
+            .world_mut()
+            .query_filtered::<Entity, With<SkillBarRoot>>();
+        assert_eq!(
+            root_q.iter(app.world()).count(),
+            1,
+            "应生成 1 个技能栏根实体"
+        );
+
+        let mut q = app
+            .world_mut()
+            .query::<(Has<Sprite>, Has<Text2d>, Has<UiEntity>)>();
+        let mut renderable = 0usize;
+        for (has_sprite, has_text, has_ui) in q.iter(app.world()) {
+            if has_sprite || has_text {
+                renderable += 1;
+                assert!(has_ui, "可渲染技能栏控件缺 UiEntity（会被 UI 相机剔除）");
+            }
+        }
+        assert!(renderable > 0, "应至少生成 1 个可渲染控件");
+    }
 }
 
 
@@ -868,6 +939,10 @@ fn spawn_skill_bar(
         ))
         .id();
     commands.entity(root).with_children(|p| {
+        // ⚠️ 每个子/孙控件都必须挂 UiEntity：RenderLayers 不随层级传播（Bevy 0.19
+        // check_visibility_cpu_culling 无父级回溯），仅 Added<UiEntity> 的实体才会被
+        // mark_ui_render_layers 挂到 layer 1，而 UI 相机只画 layer 1/2。漏挂 → 子控件留在
+        // 默认 layer 0 → 被 UI 相机剔除、只被地图相机画到世界原点，整栏不可见（#2517）。
         // C# BeforeDraw（L1659）：格网 Prguse[2193] @(+12,0) 50% 透明，画在底图之下
         if let Some(h) = ui_image(
             &mut libs,
@@ -877,6 +952,7 @@ fn spawn_skill_bar(
             2193,
         ) {
             p.spawn((
+                UiEntity,
                 Sprite {
                     image: h,
                     color: Color::srgba(1.0, 1.0, 1.0, 0.5),
@@ -895,6 +971,7 @@ fn spawn_skill_bar(
             2190,
         ) {
             p.spawn((
+                UiEntity,
                 Sprite::from_image(h),
                 bevy::sprite::Anchor::TOP_LEFT,
                 Transform::from_xyz(0.0, 0.0, 0.0),
@@ -909,6 +986,7 @@ fn spawn_skill_bar(
             2247,
         ) {
             p.spawn((
+                UiEntity,
                 Sprite::from_image(h),
                 bevy::sprite::Anchor::TOP_LEFT,
                 Transform::from_xyz(0.0, 0.0, 0.05),
@@ -916,6 +994,7 @@ fn spawn_skill_bar(
         }
         // 栏位数字 "1" 8pt 白 @(0,1)（L1584-1593；C# 8pt ≈ 11px）
         p.spawn((
+            UiEntity,
             Text2d::new("1"),
             bevy::sprite::Anchor::TOP_LEFT,
             TextFont {
@@ -934,6 +1013,7 @@ fn spawn_skill_bar(
         for i in 0..8usize {
             // 技能格锚点 @(i*25+15, 3)（L1565）：空槽无暗盒，视觉来自 2193 格网
             p.spawn((
+                UiEntity,
                 SkillBarSlot(i),
                 Transform::from_xyz(skill_slot_x(i), -SKILL_SLOT_Y, 0.1),
                 Visibility::Visible,
@@ -941,6 +1021,7 @@ fn spawn_skill_bar(
             .with_children(|c| {
                 // 技能图标：MagIcon[icon*2] 自然尺寸（由 skill_bar_icon_system 填图，不设 custom_size）
                 c.spawn((
+                    UiEntity,
                     SkillBarIcon(i),
                     Sprite {
                         image: white.clone(),
@@ -952,6 +1033,7 @@ fn spawn_skill_bar(
                 ));
                 // 冷却遮罩：Prguse2[1260+frame] 60% 透明（由 skill_bar_cooldown_system 驱动）
                 c.spawn((
+                    UiEntity,
                     SkillBarCooldown(i),
                     Sprite {
                         image: white.clone(),
@@ -964,6 +1046,7 @@ fn spawn_skill_bar(
                 ));
                 // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)；8pt 白；有技能时隐藏
                 c.spawn((
+                    UiEntity,
                     SkillBarKey(i),
                     Text2d::new(format!("F{}", i + 1)),
                     bevy::sprite::Anchor::TOP_LEFT,
@@ -1003,7 +1086,12 @@ fn skill_bar_pointer_system(
     opt: Res<crate::game::dialogs::option::OptionState>,
     magics: Res<MagicsState>,
     mut roots: Query<&mut Transform, With<SkillBarRoot>>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
 ) {
+    // 与 spawn_skill_bar 同一道门：UI_BITS 关掉 skill 时栏未生成，指针系统不应空转/误存（#2517）
+    if !crate::ui::sprite_ui::ui_enabled("skill") {
+        return;
+    }
     if !crate::game::dialogs::option::view_should_show(
         crate::game::dialogs::option::OptionViewKind::SkillBar,
         &opt,
@@ -1013,31 +1101,46 @@ fn skill_bar_pointer_system(
     let Ok(window) = windows.single() else {
         return;
     };
-    let Some(cursor) = window.cursor_position() else {
-        return;
-    };
-    let in_bar = cursor.x >= bar.pos.0
-        && cursor.x <= bar.pos.0 + SKILL_BAR_W
-        && cursor.y >= bar.pos.1
-        && cursor.y <= bar.pos.1 + SKILL_BAR_H;
+    // UI 相机是 ScalingMode::Fixed{1024,768}：窗口缩放/最大化后 cursor_position 的窗口逻辑像素
+    // ≠ UI 逻辑坐标，必须经 viewport_to_world_2d 换算（对齐 ui_button_system，#2517）。
+    // 光标在窗口外时为 None：不能提前 return——否则拖到窗外松开鼠标时，drag_offset 清理与 save
+    // 都被跳过，拖拽态残留（#2517）。故换算成 Option，光标相关的命中/移动仅在 Some 时做。
+    let cursor: Option<Vec2> = window
+        .cursor_position()
+        .and_then(|c| {
+            ui_cameras
+                .single()
+                .ok()
+                .and_then(|(cam, gtf)| cam.viewport_to_world_2d(gtf, c).ok())
+        })
+        .map(|w| Vec2::new(w.x, -w.y));
     if mouse.just_pressed(MouseButton::Left) {
-        // C# 空格 Index=-1 → AutoSize 尺寸 0x0 永不命中，鼠标事件落回对话框本体触发 Movable 拖动；
-        // 仅占用格（绑定技能、显示图标）才走点击流程。故按下点命中空格时按“未命中格”处理 → 拖动。
-        bar.pressed_slot =
-            skill_slot_at(&bar, cursor).filter(|&i| magics.by_key(i as u8 + 1).is_some());
-        if bar.pressed_slot.is_none() && in_bar {
-            bar.drag_offset = Some((cursor.x - bar.pos.0, cursor.y - bar.pos.1));
-            tracing::debug!("⚙️ 技能栏开始拖动");
+        if let Some(cursor) = cursor {
+            // C# 空格 Index=-1 → AutoSize 尺寸 0x0 永不命中，鼠标事件落回对话框本体触发 Movable 拖动；
+            // 仅占用格（绑定技能、显示图标）才走点击流程。故按下点命中空格时按“未命中格”处理 → 拖动。
+            bar.pressed_slot =
+                skill_slot_at(&bar, cursor).filter(|&i| magics.by_key(i as u8 + 1).is_some());
+            let in_bar = cursor.x >= bar.pos.0
+                && cursor.x <= bar.pos.0 + SKILL_BAR_W
+                && cursor.y >= bar.pos.1
+                && cursor.y <= bar.pos.1 + SKILL_BAR_H;
+            if bar.pressed_slot.is_none() && in_bar {
+                bar.drag_offset = Some((cursor.x - bar.pos.0, cursor.y - bar.pos.1));
+                tracing::debug!("⚙️ 技能栏开始拖动");
+            }
         }
     }
     if let Some(off) = bar.drag_offset {
         if mouse.pressed(MouseButton::Left) {
             // C# OnMouseMove：拖动位置钳制在父容器（全屏）内，栏永远不可拖出屏幕（修复：拖出后丢失）
-            bar.pos = (
-                (cursor.x - off.0).clamp(0.0, SKILL_BAR_MAX_X),
-                (cursor.y - off.1).clamp(0.0, SKILL_BAR_MAX_Y),
-            );
+            if let Some(cursor) = cursor {
+                bar.pos = (
+                    (cursor.x - off.0).clamp(0.0, SKILL_BAR_MAX_X),
+                    (cursor.y - off.1).clamp(0.0, SKILL_BAR_MAX_Y),
+                );
+            }
         } else {
+            // 松开（含光标已拖出窗口的松开）：结束拖动并保存
             bar.drag_offset = None;
             bar.save();
             tracing::info!(
@@ -1050,7 +1153,7 @@ fn skill_bar_pointer_system(
     // 松开：按下与松开都在同一格 → 点击施法（C# MirImageControl Click 于 MouseUp 触发）
     if mouse.just_released(MouseButton::Left) {
         if let Some(i) = bar.pressed_slot.take() {
-            if skill_slot_at(&bar, cursor) == Some(i) {
+            if cursor.and_then(|c| skill_slot_at(&bar, c)) == Some(i) {
                 bar.pending_cast = Some(i);
             }
         }
