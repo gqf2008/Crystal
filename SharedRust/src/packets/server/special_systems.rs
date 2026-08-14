@@ -206,6 +206,8 @@ impl Packet for NPCPearlGoods {
 #[derive(Debug, Clone)]
 pub struct GuildBuffList {
     pub active_buffs: Vec<i32>, // 激活的Buff列表
+    /// #2537：Buff 定义目录（C# S.GuildBuffList 第三段 GuildBuffs——客户端 Buff 页数据源）
+    pub guild_buffs: Vec<crate::data::client_data::GuildBuffInfo>,
 }
 
 impl Packet for GuildBuffList {
@@ -215,7 +217,6 @@ impl Packet for GuildBuffList {
         use byteorder::WriteBytesExt;
 
         // Note: C# has Remove(u8) + ActiveBuffs + GuildBuffs
-        // Rust only has active_buffs(Vec<i32>)
         writer.write_u8(0)?; // Remove = 0
         writer.write_i32::<LittleEndian>(self.active_buffs.len() as i32)?;
 
@@ -223,8 +224,11 @@ impl Packet for GuildBuffList {
             writer.write_i32::<LittleEndian>(buff_id)?;
         }
 
-        // GuildBuffs list (empty in Rust)
-        writer.write_i32::<LittleEndian>(0)?;
+        // GuildBuffs list（#2537：原恒写 0——C# 客户端 Buff 页因此拿不到目录）
+        writer.write_i32::<LittleEndian>(self.guild_buffs.len() as i32)?;
+        for info in &self.guild_buffs {
+            info.write_to(writer)?;
+        }
 
         Ok(())
     }
@@ -237,7 +241,24 @@ impl Packet for GuildBuffList {
             active_buffs.push(reader.read_i32::<LittleEndian>()?);
         }
 
-        Ok(Self { active_buffs })
+        // #2537：第三段 GuildBuffs（目录；数量上限 64 对齐服务端 ini TotalBuffs 夹紧）
+        let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 || count > 64 {
+            return Err(crate::data::stats::SharedError::LengthTooLarge {
+                field: "guild_buffs",
+                length: count,
+                max: 64,
+            });
+        }
+        let mut guild_buffs = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            guild_buffs.push(crate::data::client_data::GuildBuffInfo::read_from(reader)?);
+        }
+
+        Ok(Self {
+            active_buffs,
+            guild_buffs,
+        })
     }
 }
 
@@ -520,3 +541,57 @@ impl Packet for GuildTerritoryPage {
 // 并占用了 opcode 277，挤掉了本应是 277 的 StorageUnlockResult。现已移除该伪服务端包，
 // StorageUnlockResult/StoragePasswordResult 恢复为 277/278。
 // 客户端发起购买仍走 client::guild::PurchaseGuildTerritory（ClientPacketIds）。
+
+#[cfg(test)]
+mod guild_buff_tests {
+    use super::*;
+    use crate::data::client_data::GuildBuffInfo;
+    use std::io::Cursor;
+
+    /// #2537：GuildBuffList 目录段往返（write → read 保真；原目录段恒写 0）
+    #[test]
+    fn guild_buff_list_roundtrip_with_catalog() {
+        let info = GuildBuffInfo {
+            id: 7,
+            icon: 24,
+            name: "经验加成".to_string(),
+            level_requirement: 3,
+            points_requirement: 2,
+            time_limit: 60,
+            activation_cost: 500,
+            stats: crate::data::stats::Stats::new(),
+        };
+        let packet = GuildBuffList {
+            active_buffs: vec![7],
+            guild_buffs: vec![info],
+        };
+        let mut body = Vec::new();
+        packet.write_body(&mut body).unwrap();
+
+        let mut cur = Cursor::new(body);
+        // 跳过 write 侧的 Remove(u8)（read_body 不含该字节，与服务端/客户端解析路径一致）
+        cur.set_position(1);
+        let parsed = GuildBuffList::read_body(&mut cur).unwrap();
+        assert_eq!(parsed.active_buffs, vec![7]);
+        assert_eq!(parsed.guild_buffs.len(), 1);
+        assert_eq!(parsed.guild_buffs[0].id, 7);
+        assert_eq!(parsed.guild_buffs[0].name, "经验加成");
+        assert_eq!(parsed.guild_buffs[0].activation_cost, 500);
+    }
+
+    /// #2537：空目录（旧服务端 wire 兼容：目录 count=0）
+    #[test]
+    fn guild_buff_list_empty_catalog() {
+        let packet = GuildBuffList {
+            active_buffs: vec![],
+            guild_buffs: vec![],
+        };
+        let mut body = Vec::new();
+        packet.write_body(&mut body).unwrap();
+        let mut cur = Cursor::new(body);
+        cur.set_position(1);
+        let parsed = GuildBuffList::read_body(&mut cur).unwrap();
+        assert!(parsed.active_buffs.is_empty());
+        assert!(parsed.guild_buffs.is_empty());
+    }
+}

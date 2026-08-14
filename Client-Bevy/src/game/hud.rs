@@ -1371,6 +1371,7 @@ fn hud_server_events(
             | ServerEvent::BuffPaused { .. }
             | ServerEvent::ObjectName { .. }
             | ServerEvent::NpcInputRequest { .. }
+            | ServerEvent::GuildBuffList { .. }
             | ServerEvent::CreatureAcquired { .. }
             | ServerEvent::CreatureRenameEnabled { .. }
             | ServerEvent::CreaturePickupToggled { .. }

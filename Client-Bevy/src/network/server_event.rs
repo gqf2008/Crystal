@@ -366,6 +366,11 @@ pub enum ServerEvent {
     },
     /// GuildInvite：收到行会邀请
     GuildInvited { name: String },
+    /// #2537 GuildBuffList：行会技能（激活列表 + Buff 定义目录）
+    GuildBuffList {
+        active: Vec<i32>,
+        catalog: Vec<mir2_shared::data::client_data::GuildBuffInfo>,
+    },
     /// Rankings 解析失败：清空排行
     RankingsCleared,
     /// MapChanged：天气更新
