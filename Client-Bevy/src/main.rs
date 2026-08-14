@@ -34,6 +34,8 @@ mod auto;
 
 // #71：全局给 UI 实体打 RenderLayers layer 1（由独立 UI 相机渲染，地图相机不重画 UI）
 use client_bevy::ui::sprite_ui::mark_ui_render_layers;
+// #2521：layer 1 向下传播到 UiEntity 的后代（RenderLayers 不随层级传播）
+use client_bevy::ui::sprite_ui::propagate_ui_render_layers;
 
 fn main() {
     // --window-title <标题>：自定义窗口标题（多实例并行时便于区分，如“修复版”）
@@ -118,7 +120,7 @@ fn main() {
         client_bevy::game::GamePlugin,
         client_bevy::ui::client_settings::ClientSettingsPlugin,
     ));
-    app.add_systems(Update, mark_ui_render_layers);
+    app.add_systems(Update, (mark_ui_render_layers, propagate_ui_render_layers));
     // #91 UI 按钮交互音效（全场景：登录/选角/游戏）
     app.add_systems(Update, client_bevy::ui::sprite_ui::ui_button_sound_system);
     auto::register(&mut app);

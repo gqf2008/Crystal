@@ -20,7 +20,8 @@ use crate::game::dialogs::text_input::{
     TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
 };
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    UiImageCache,
 };
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
@@ -479,8 +480,11 @@ fn spawn_npc_input_overlay(
     commands.entity(prompt).insert(NpcInputRoot);
 
     // 输入框
+    // #2521：field 是根级实体（父链无 UiEntity），必须直接挂 UiEntity；
+    // 其子控件 TextInputDisplay 由 propagate_ui_render_layers 统一兜底
     let field = commands
         .spawn((
+            UiEntity,
             NpcInputRoot,
             TextInputField(0),
             TextInputRect(300.0, 130.0, 280.0, 22.0),

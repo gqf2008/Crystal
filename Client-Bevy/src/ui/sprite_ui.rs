@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -47,6 +48,53 @@ pub fn mark_ui_render_layers(
 ) {
     for e in &q {
         commands.entity(e).try_insert(bevy::camera::visibility::RenderLayers::layer(1));
+    }
+}
+
+/// 向下传播 UI 渲染层（#2521）：RenderLayers 不随层级传播（Bevy 0.19
+/// check_visibility_cpu_culling 无父级回溯），挂在 UiEntity 父实体下、自己没挂
+/// UiEntity 的 Sprite/Text2d 子/孙控件默认 layer 0，会被 UI 相机剔除 → 不可见。
+/// 本系统对「UiEntity 实体的后代」统一补 layer 1（try_insert 不覆盖显式层，
+/// 如 day_night 的 layer 2）。触发：Added<UiEntity>（新 UI 根）+
+/// Added/Changed<ChildOf>（新/重挂子实体）。与 mark_ui_render_layers 并列注册：
+/// 实体自身由原系统处理，本系统只管子/孙层级。
+pub fn propagate_ui_render_layers(
+    triggers: Query<Entity, Or<(Added<UiEntity>, Added<ChildOf>, Changed<ChildOf>)>>,
+    ui_marked: Query<(), With<UiEntity>>,
+    parents: Query<&ChildOf>,
+    children: Query<&Children>,
+    has_layers: Query<(), With<RenderLayers>>,
+    mut commands: Commands,
+) {
+    for e in &triggers {
+        // 沿父链上溯：本实体或任一祖先挂 UiEntity 才算 UI 子树（世界实体父链无 UiEntity，不触及）
+        let mut under_ui = false;
+        let mut cur = e;
+        for _ in 0..64 {
+            if ui_marked.contains(cur) {
+                under_ui = true;
+                break;
+            }
+            let Ok(parent) = parents.get(cur) else {
+                break;
+            };
+            cur = parent.0;
+        }
+        if !under_ui {
+            continue;
+        }
+        // 向下 DFS 整棵子树补 layer 1（已有显式 RenderLayers 的不覆盖）
+        let mut stack = vec![e];
+        while let Some(n) = stack.pop() {
+            if !has_layers.contains(n) {
+                commands.entity(n).try_insert(RenderLayers::layer(1));
+            }
+            if let Ok(cs) = children.get(n) {
+                for c in &*cs {
+                    stack.push(*c);
+                }
+            }
+        }
     }
 }
 
@@ -323,4 +371,95 @@ pub fn ui_button_sound_system(
         }
     }
     *hovered_prev = hovered_now;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    /// #2521 回归：UiEntity 根下 with_children 裸 spawn 的子/孙控件都应有 layer 1
+    #[test]
+    fn ui_subtree_children_get_layer_1() {
+        let mut app = App::new();
+        let mut child = Entity::PLACEHOLDER;
+        let mut grandchild = Entity::PLACEHOLDER;
+        let root = app
+            .world_mut()
+            .spawn(UiEntity)
+            .with_children(|p| {
+                child = p
+                    .spawn(())
+                    .with_children(|g| {
+                        grandchild = g.spawn(()).id();
+                    })
+                    .id();
+            })
+            .id();
+        app.world_mut()
+            .run_system_once(propagate_ui_render_layers)
+            .expect("propagate_ui_render_layers 应可运行");
+
+        let mut layers = app.world_mut().query::<&RenderLayers>();
+        for e in [root, child, grandchild] {
+            assert_eq!(
+                *layers.get(app.world(), e).unwrap_or_else(|err| {
+                    panic!("实体 {e:?} 应被补上 layer 1：{err}");
+                }),
+                RenderLayers::layer(1),
+                "实体 {e:?} 应有 layer 1"
+            );
+        }
+    }
+
+    /// #2521 回归：已有显式 RenderLayers 的子控件不被传播覆盖（如 day_night 的 layer 2）
+    #[test]
+    fn explicit_layers_not_overridden() {
+        let mut app = App::new();
+        let mut child = Entity::PLACEHOLDER;
+        let _root = app
+            .world_mut()
+            .spawn(UiEntity)
+            .with_children(|p| {
+                child = p.spawn(RenderLayers::layer(2)).id();
+            })
+            .id();
+        app.world_mut()
+            .run_system_once(propagate_ui_render_layers)
+            .expect("propagate_ui_render_layers 应可运行");
+
+        let mut layers = app.world_mut().query::<&RenderLayers>();
+        assert_eq!(
+            *layers.get(app.world(), child).unwrap(),
+            RenderLayers::layer(2),
+            "显式 layer 2 不应被传播覆盖"
+        );
+    }
+
+    /// #2521 回归：父链无 UiEntity 的实体（世界空间 actor 子树等）不误挂 layer 1
+    #[test]
+    fn non_ui_subtree_untouched() {
+        let mut app = App::new();
+        let mut child = Entity::PLACEHOLDER;
+        let root = app
+            .world_mut()
+            .spawn(())
+            .with_children(|p| {
+                child = p.spawn(()).id();
+            })
+            .id();
+        app.world_mut()
+            .run_system_once(propagate_ui_render_layers)
+            .expect("propagate_ui_render_layers 应可运行");
+
+        let mut layers = app.world_mut().query::<&RenderLayers>();
+        assert!(
+            layers.get(app.world(), root).is_err(),
+            "非 UI 根不应被挂 RenderLayers"
+        );
+        assert!(
+            layers.get(app.world(), child).is_err(),
+            "非 UI 子树子实体不应被挂 RenderLayers"
+        );
+    }
 }
