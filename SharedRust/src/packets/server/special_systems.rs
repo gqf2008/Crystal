@@ -243,7 +243,7 @@ impl Packet for GuildBuffList {
 
         // #2537：第三段 GuildBuffs（目录；数量上限 64 对齐服务端 ini TotalBuffs 夹紧）
         let count = reader.read_i32::<LittleEndian>()?;
-        if count < 0 || count > 64 {
+        if !(0..=64).contains(&count) {
             return Err(crate::data::stats::SharedError::LengthTooLarge {
                 field: "guild_buffs",
                 length: count,
