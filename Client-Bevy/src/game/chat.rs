@@ -719,8 +719,10 @@ fn chat_option_system(
     }
 }
 
-/// 键盘输入：Enter 激活/发送；字符输入；Backspace 删除；内置拼音 IME 中文提交
-fn chat_input_system(
+/// 键盘输入：Enter 激活/发送；Escape 关输入行；字符输入；Backspace 删除；内置拼音 IME 中文提交
+/// （pub(crate)：#2595 esc_close_dialogs_system 的 Esc 优先级排序锚点——
+/// 聊天输入开时 Escape 只关输入行不触发 Closeall，C# MirTextBox.cs:386-395）
+pub(crate) fn chat_input_system(
     mut keys: MessageReader<KeyboardInput>,
     mut ime: ResMut<PinyinIme>,
     mut focus: ResMut<ImeFocus>,
@@ -777,6 +779,14 @@ fn chat_input_system(
             } else {
                 chat.input_active = true;
             }
+            continue;
+        }
+        // Escape：只关输入行、不触发 Closeall（#2595，C# MirTextBox.cs:386-395
+        // TextBox_KeyPress Escape → ActiveControl=null 且 e.Handled；
+        // esc_close_dialogs_system 以 .before(本系统) 让路，组合中先被 IME cancel 接管）
+        if key.logical_key == Key::Escape && chat.input_active {
+            chat.input_active = false;
+            tracing::info!("⌨️ ESC 关闭聊天输入行");
             continue;
         }
     }
@@ -1177,6 +1187,49 @@ mod tests {
             chat.lines.is_empty(),
             "ChatState 初始不应有伪造聊天行（C# 无本地欢迎语）"
         );
+    }
+
+    /// #2595：Escape 只关输入行（C# MirTextBox.cs:386-395 取消聚焦），
+    /// 文本保留（C# ActiveControl=null 不清 TextBox.Text），
+    /// 且不发送（NetConnection 默认实例无从发送）。
+    #[test]
+    fn chat_input_escape_closes_input_only() {
+        use bevy::ecs::message::Messages;
+        use bevy::input::keyboard::{Key, KeyboardInput};
+        use bevy::input::ButtonState;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::ui::pinyin_ime::PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        // 弱字体句柄：候选条/chip 实体不 spawn（纯逻辑测试，text_input.rs 同款）
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.insert_resource(ChatState {
+            input_active: true,
+            input_text: "nihao".to_string(),
+            ..Default::default()
+        });
+        app.init_resource::<crate::network::NetConnection>();
+        app.insert_resource(crate::network::NetMode(
+            crate::network::NetworkMode::Mock,
+        ));
+        app.init_resource::<crate::game::hud::HudState>();
+        app.init_resource::<ChatFilter>();
+        app.add_systems(Update, chat_input_system);
+        app.world_mut()
+            .resource_mut::<Messages<KeyboardInput>>()
+            .write(KeyboardInput {
+                key_code: bevy::input::keyboard::KeyCode::Escape,
+                logical_key: Key::Escape,
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+        app.update();
+        let chat = app.world().resource::<ChatState>();
+        assert!(!chat.input_active, "Escape 应关闭聊天输入行");
+        assert_eq!(chat.input_text, "nihao", "C# 取消聚焦不清文本");
     }
 
     #[test]

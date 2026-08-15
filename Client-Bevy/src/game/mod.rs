@@ -10,6 +10,7 @@ pub mod day_night;
 pub mod effects;
 pub mod dialogs;
 pub mod hud;
+pub mod input_gate;
 pub mod movement;
 pub mod object_state;
 pub mod output_lines;
@@ -40,6 +41,10 @@ impl Plugin for GamePlugin {
         app.add_systems(OnEnter(AppState::Game), open_minimap_default);
         app.add_systems(OnEnter(AppState::Game), crate::ui::sprite_ui::spawn_ui_camera);
 
+        // #2595：文本输入聚焦门（C# WinForms 焦点路由等价）——PreUpdate 先于
+        // 各 Update 键位系统汇总，消费者见 input_gate 模块注释
+        // （单独注册：下方插件元组已 15 个达上限）
+        app.add_plugins(input_gate::TextInputGatePlugin);
         app.add_plugins((
             hud::HudPlugin,
             chat::ChatPlugin,
