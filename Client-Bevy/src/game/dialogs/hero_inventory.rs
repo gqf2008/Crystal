@@ -15,8 +15,8 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::hero::{next_autopot, HeroState, STAT_HP, STAT_MP};
 use crate::game::dialogs::inventory::{
-    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm,
-    ItemUseFeedback, UseItemCtx, UseOutcome,
+    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, ItemUseFeedback,
+    UseItemCtx, UseOutcome,
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
@@ -595,6 +595,7 @@ fn hero_inv_click_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     time: Res<Time>,
+    inv_origin: Res<crate::game::dialogs::inventory::InventoryOrigin>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_hero_click: Local<Option<(usize, f64)>>,
@@ -615,6 +616,7 @@ fn hero_inv_click_system(
         cursor.y,
         hud.inventory.page,
         hud.inventory.items.len(),
+        (inv_origin.0, inv_origin.1),
     )
     .is_some()
     {
@@ -645,7 +647,9 @@ fn hero_inv_click_system(
                     check_fishing: false,
                     allow_consumable: true,
                 };
-                if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+                if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
+                    == UseOutcome::Sent
+                {
                     if let Some(sid) = item_use_sound_id(item) {
                         feedback.sounds.push(sid);
                     }

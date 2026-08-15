@@ -663,6 +663,7 @@ fn storage_action_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     time: Res<Time>,
+    inv_origin: Res<crate::game::dialogs::inventory::InventoryOrigin>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_storage_click: Local<Option<(usize, f64)>>,
@@ -681,6 +682,7 @@ fn storage_action_system(
         cursor.y,
         hud.inventory.page,
         hud.inventory.items.len(),
+        (inv_origin.0, inv_origin.1),
     );
 
     // #1546：仓库格双击 → 装备（C# MirItemCell.OnMouseDoubleClick → UseItem；消耗品要求 Grid==Inventory/HeroInventory 故仓库拦截）
@@ -778,7 +780,11 @@ fn storage_server_events(
     mut storage: ResMut<StorageState>,
     mut hud: ResMut<HudState>,
     mut mgr: ResMut<DialogManager>,
+    mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
     mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
+    // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
+    // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
+    mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -787,23 +793,32 @@ fn storage_server_events(
             storage.visible = *visible;
             // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
             // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
-            // —— 否则 388x346 的仓库完全罩住 316x236 的背包
+            // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
+            // min 取**屏幕**坐标（-tf.y；tf.y 是世界系、越往下越负，直接 min 会取到底缘）
             let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
             for (tf, root) in inv_entities.iter() {
                 if root.0 == DialogKind::Inventory {
                     min_x = min_x.min(tf.translation.x);
-                    min_y = min_y.min(tf.translation.y);
+                    min_y = min_y.min(-tf.translation.y);
                 }
             }
             if min_x < f32::MAX {
-                // translation.y 为 UI y 取负：目标 (393, 0) → delta = (393-min_x, 0-min_y)
-                let (dx, dy) = (STORAGE_W + 5.0 - min_x, -min_y);
+                let dx = STORAGE_W + 5.0 - min_x;
+                let dy_screen = 0.0 - min_y;
                 for (mut tf, root) in &mut inv_entities {
                     if root.0 == DialogKind::Inventory {
                         tf.translation.x += dx;
-                        tf.translation.y += dy;
+                        tf.translation.y -= dy_screen;
                     }
                 }
+                for (mut btn, root) in &mut inv_buttons {
+                    if root.0 == DialogKind::Inventory {
+                        btn.rect.0 += dx;
+                        btn.rect.1 += dy_screen;
+                    }
+                }
+                *inv_origin =
+                    crate::game::dialogs::inventory::InventoryOrigin(STORAGE_W + 5.0, 0.0);
             }
             if !mgr.is_open(DialogKind::Storage) {
                 mgr.open.push(DialogKind::Storage);
