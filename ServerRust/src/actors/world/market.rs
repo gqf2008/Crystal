@@ -455,6 +455,20 @@ impl Message<MarketBuyRequest> for WorldActor {
                 a.current_bid = bid;
                 a.current_buyer = Some(buyer_state.name.clone());
             }
+            // #2566：出价托管态落库（重启后 current_bid/current_buyer 不回退，托管金不蒸发）
+            if let Err(e) = db::update_auction_bid(
+                &self.db_pool,
+                msg.listing_id as i64,
+                bid as i64,
+                &buyer_state.name,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to persist auction bid (auction={}): {}",
+                    msg.listing_id, e
+                );
+            }
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
@@ -776,6 +790,46 @@ pub(crate) fn market_collect_gold(auction: &AuctionListing) -> u64 {
     cost - cost * MARKET_COMMISSION_PERCENT / 100
 }
 
+/// #2566：C# MarketSellNow 结算校验（PlayerObject.cs:8615-8658）：
+/// 仅 Auction 模式且 CurrentBid > Price 且已有出价者才允许"立即售出"（买家已托管扣款，
+/// 成交=物品交付买家+卖家得 CurrentBid−5%）；其余情形一律拒绝，杜绝按起始价无中生有付钱
+pub(crate) fn market_sell_now_settlement(auction: &AuctionListing) -> Result<u64, &'static str> {
+    if auction.item_type != 1 {
+        return Err("寄售物品不支持立即售出，请等待买家购买或到期取回");
+    }
+    if auction.sold || auction.expired {
+        return Err("该物品已售出或已过期");
+    }
+    if auction.current_bid <= auction.price as u64 || auction.current_buyer.is_none() {
+        return Err("暂无有效出价，无法立即售出");
+    }
+    Ok(market_collect_gold(auction))
+}
+
+/// #2566：C# Globals 价格区间（Globals.cs:44-48）：
+/// Consign 5000..50_000_000（MinConsignment/MaxConsignment）；
+/// Auction 起始价 0..50_000（MinStartingBid/MaxStartingBid）
+pub(crate) const MIN_CONSIGN_PRICE: u32 = 5000;
+pub(crate) const MAX_CONSIGN_PRICE: u32 = 50_000_000;
+pub(crate) const MAX_STARTING_BID: u32 = 50_000;
+
+/// #2566：寄售/拍卖价格校验按模式区分（此前两模式统一 5000..50M，拍卖起始价错位）
+pub(crate) fn consign_price_validate(market_type: u8, price: u32) -> Result<(), &'static str> {
+    match market_type {
+        1 => {
+            if price > MAX_STARTING_BID {
+                return Err("拍卖起始价无效（0 - 50,000）");
+            }
+        }
+        _ => {
+            if !(MIN_CONSIGN_PRICE..=MAX_CONSIGN_PRICE).contains(&price) {
+                return Err("价格无效（5000 - 50,000,000）");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// #1325：到期结算（C# Envir.ProcessAuction）
 /// - 拍卖且有人出价 → 成交：物品给买家（离线邮件）、金币给卖家（离线邮件）
 /// - 无出价 → 标记过期，卖家可取回（MarketGetBack）
@@ -927,12 +981,80 @@ impl Message<MarketSellNowRequest> for WorldActor {
                 }
             };
 
-        let auction = &self.auctions[auction_idx];
-        let price = auction.price as u64;
-        // C# Globals.Commission = 0.05（5%）
-        let commission = price * MARKET_COMMISSION_PERCENT / 100;
-        let seller_gold = price - commission;
+        let auction = self.auctions[auction_idx].clone();
+        // #2566：对齐 C# MarketSellNow——仅拍卖且已有更高出价才可立即售出；
+        // 禁止旧实现的"按起始价付钱给卖家并删物品"（无买家扣款=无中生有刷金）
+        let seller_gold = match market_sell_now_settlement(&auction) {
+            Ok(gold) => gold,
+            Err(e) => {
+                send_system_message(&self.gate_ref, msg.session_id, e);
+                self.send_market_fail(msg.session_id, 9);
+                return;
+            }
+        };
 
+        // C# CanGainGold 失败 → MarketFail 8
+        if !record
+            .actor_ref
+            .ask(crate::actors::player::CanGainGold {
+                amount: seller_gold as u32,
+            })
+            .await
+            .unwrap_or(false)
+        {
+            self.send_market_fail(msg.session_id, 8);
+            return;
+        }
+
+        // 买家出价时金币已托管扣款：物品交付买家（在线直接进包，离线走邮件，C# MailCharacter）
+        let buyer_name = auction.current_buyer.clone().unwrap_or_default();
+        let cost = auction.current_bid;
+        let item_name = self
+            .item_infos
+            .get(&auction.item.item_index)
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| "物品".to_string());
+        let mut delivered = false;
+        for r in self.players.values() {
+            if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                if st.name == buyer_name {
+                    let _ = r
+                        .actor_ref
+                        .ask(AddItemToInventory {
+                            item: auction.item.clone(),
+                        })
+                        .await;
+                    send_system_message(
+                        &self.gate_ref,
+                        r.session_id,
+                        &format!("你以 {} 金币购得 {}", cost, item_name),
+                    );
+                    delivered = true;
+                    break;
+                }
+            }
+        }
+        if !delivered {
+            let mail = MailMessage {
+                mail_id: generate_mail_id(),
+                sender_name: "市场交易".to_string(),
+                receiver_name: buyer_name.clone(),
+                subject: "拍卖成交".to_string(),
+                body: format!("卖家已立即售出，你以 {} 金币购得 {}", cost, item_name),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+                read: false,
+                collected: false,
+                locked: false,
+                gold: 0,
+                items: vec![auction.item.clone()],
+            };
+            let _ = db::insert_mail(&self.db_pool, &buyer_name, &mail).await;
+        }
+
+        // 成交：删除寄售记录，卖家得托管出价 − 5% 佣金（佣金回收）
         let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
         self.auctions.remove(auction_idx);
 
@@ -942,14 +1064,13 @@ impl Message<MarketSellNowRequest> for WorldActor {
                 amount: seller_gold,
             })
             .await;
-        send_system_message(
-            &self.gate_ref,
-            msg.session_id,
-            &format!(
-                "立即售出成功，扣除手续费 {} 金币，获得 {} 金币",
-                commission, seller_gold
-            ),
+        let commission = cost - seller_gold;
+        let text = format!(
+            "立即售出成功，扣除手续费 {} 金币，获得 {} 金币",
+            commission, seller_gold
         );
+        send_system_message(&self.gate_ref, msg.session_id, &text);
+        self.send_market_success(msg.session_id, text);
     }
 }
 
@@ -1029,16 +1150,11 @@ impl Message<ConsignItemRequest> for WorldActor {
         }
 
         let price = msg.price as u32;
-        // #1325：寄售/拍卖价格与费用（C# Globals：Consign 5000-50M / Auction 起始价 5000-50M，费用均为 5000）
+        // #1325：寄售/拍卖费用（C# Globals：ConsignmentCost/AuctionCost 均为 5000）
         const CONSIGN_FEE: u64 = 5000;
-        const MIN_PRICE: u32 = 5000;
-        const MAX_PRICE: u32 = 50_000_000;
-        if !(MIN_PRICE..=MAX_PRICE).contains(&price) {
-            send_system_message(
-                &self.gate_ref,
-                msg.session_id,
-                "价格无效（5000 - 50,000,000）",
-            );
+        // #2566：价格区间按模式区分（C# Globals.cs:44-48：Consign 5000-50M；Auction 起始价 0-50,000）
+        if let Err(e) = consign_price_validate(msg.market_type, price) {
+            send_system_message(&self.gate_ref, msg.session_id, e);
             return;
         }
         let fee = CONSIGN_FEE;
@@ -2238,5 +2354,68 @@ mod tests {
         // 用户模式：只看自己寄售
         assert!(market_search_matches(0, true, 0, 0, 0, "A", "A", 0, 0, 0));
         assert!(!market_search_matches(0, true, 0, 0, 0, "A", "B", 0, 0, 0));
+    }
+
+    fn listing(
+        item_type: u8,
+        price: u32,
+        current_bid: u64,
+        current_buyer: Option<&str>,
+    ) -> AuctionListing {
+        AuctionListing {
+            auction_id: 1,
+            seller_name: "S".into(),
+            item: mir2_shared::data::item::UserItem::new(1001),
+            price,
+            consignment_date: 0,
+            sold: false,
+            buyer_name: None,
+            item_type,
+            current_bid,
+            current_buyer: current_buyer.map(|s| s.into()),
+            expired: false,
+        }
+    }
+
+    /// #2566：C# MarketSellNow（PlayerObject.cs:8615-8658）——仅 Auction 且 CurrentBid > Price
+    /// 且有出价者才成交（卖家得 CurrentBid−5%）；寄售/无出价/已售出一律拒绝（防按起始价刷金）
+    #[test]
+    fn market_sell_now_settlement_matches_csharp() {
+        // 寄售（Consign）→ 拒绝
+        assert!(market_sell_now_settlement(&listing(0, 10_000, 0, None)).is_err());
+        // 拍卖但无出价（current_bid == 起始价）→ 拒绝
+        assert!(market_sell_now_settlement(&listing(1, 10_000, 10_000, None)).is_err());
+        // 拍卖出价未超过起始价（current_bid <= price）→ 拒绝
+        assert!(market_sell_now_settlement(&listing(1, 10_000, 9_999, Some("B"))).is_err());
+        // 拍卖有出价者但 current_buyer 缺失 → 拒绝
+        assert!(market_sell_now_settlement(&listing(1, 10_000, 12_000, None)).is_err());
+        // 有效成交：卖家得 CurrentBid − 5%（12_000 − 600 = 11_400）
+        assert_eq!(
+            market_sell_now_settlement(&listing(1, 10_000, 12_000, Some("B"))).unwrap(),
+            11_400
+        );
+        // 已售出 → 拒绝
+        let mut sold = listing(1, 10_000, 12_000, Some("B"));
+        sold.sold = true;
+        assert!(market_sell_now_settlement(&sold).is_err());
+        // 已过期 → 拒绝
+        let mut expired = listing(1, 10_000, 12_000, Some("B"));
+        expired.expired = true;
+        assert!(market_sell_now_settlement(&expired).is_err());
+    }
+
+    /// #2566：价格区间按模式区分（C# Globals.cs:44-48：Consign 5000-50M；Auction 起始价 0-50,000）
+    #[test]
+    fn consign_price_range_per_market_type() {
+        // Consign：[5000, 50_000_000]
+        assert!(consign_price_validate(0, 4_999).is_err());
+        assert!(consign_price_validate(0, 5_000).is_ok());
+        assert!(consign_price_validate(0, 50_000_000).is_ok());
+        assert!(consign_price_validate(0, 50_000_001).is_err());
+        // Auction 起始价：[0, 50_000]
+        assert!(consign_price_validate(1, 0).is_ok());
+        assert!(consign_price_validate(1, 50_000).is_ok());
+        assert!(consign_price_validate(1, 50_001).is_err());
+        assert!(consign_price_validate(1, 5_000).is_ok());
     }
 }

@@ -618,10 +618,20 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             consignment_date INTEGER NOT NULL DEFAULT 0,
             sold INTEGER NOT NULL DEFAULT 0,
             buyer_name TEXT,
-            item_type INTEGER NOT NULL DEFAULT 0
+            item_type INTEGER NOT NULL DEFAULT 0,
+            -- #2566：拍卖托管态（买家已扣款的最高出价/出价者；NULL=旧行，回读时按起拍价/无买家回退）
+            current_bid INTEGER,
+            current_buyer TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_auctions_sold ON auctions(sold);
         CREATE INDEX IF NOT EXISTS idx_auctions_seller ON auctions(seller_name);
+        -- #2566：商城每账号限购计数（C# CharacterInfo.GSpurchases[Product.GIndex] += Quantity）
+        CREATE TABLE IF NOT EXISTS gameshop_purchases (
+            account_username TEXT NOT NULL,
+            gindex INTEGER NOT NULL,
+            purchased INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (account_username, gindex)
+        );
         -- Recipes (crafting). C# Server loads these from Envir/Recipe/*.txt files
         -- (NOT from MirDB binary), so the Rust port persists them in SQLite instead.
         -- recipe_id mirrors C# NextRecipeID (1-based). product_* is the crafted item.
@@ -730,6 +740,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     )
     .execute(&pool)
     .await;
+    // #2566: 拍卖托管态列（safe to re-run；旧行 NULL → 重启回读按起拍价/无买家回退）
+    let _ = sqlx::query("ALTER TABLE auctions ADD COLUMN current_bid INTEGER")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE auctions ADD COLUMN current_buyer TEXT")
+        .execute(&pool)
+        .await;
     // #493: 地图进入规则列（C# MapInfo NoGroup/NoPets/NoIntelligentCreatures/NoHero，safe to re-run）
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_group INTEGER NOT NULL DEFAULT 0")
         .execute(&pool)
@@ -5645,8 +5662,21 @@ pub async fn save_auction(
 
 pub async fn load_all_auctions(
     pool: &DbPool,
-) -> anyhow::Result<Vec<(i64, String, String, i64, i64, i64, i64, Option<String>)>> {
-    let rows = sqlx::query("SELECT auction_id, seller_name, item_json, price, consignment_date, sold, item_type, buyer_name FROM auctions ORDER BY consignment_date DESC")
+) -> anyhow::Result<
+    Vec<(
+        i64,
+        String,
+        String,
+        i64,
+        i64,
+        i64,
+        i64,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+    )>,
+> {
+    let rows = sqlx::query("SELECT auction_id, seller_name, item_json, price, consignment_date, sold, item_type, buyer_name, current_bid, current_buyer FROM auctions ORDER BY consignment_date DESC")
         .fetch_all(pool)
         .await?;
     Ok(rows
@@ -5661,9 +5691,98 @@ pub async fn load_all_auctions(
                 r.get::<i64, _>("sold"),
                 r.get::<i64, _>("item_type"),
                 r.get::<Option<String>, _>("buyer_name"),
+                r.try_get::<Option<i64>, _>("current_bid").ok().flatten(),
+                r.try_get::<Option<String>, _>("current_buyer")
+                    .ok()
+                    .flatten(),
             )
         })
         .collect())
+}
+
+/// #2566：重启恢复拍卖托管态——旧库行 current_bid/current_buyer 为 NULL（迁移前列缺失）时，
+/// 回退为起拍价（拍卖）/无买家（对齐迁移前语义，托管金不再凭空蒸发）
+pub fn restore_auction_escrow(item_type: i32, price: i64, current_bid: Option<i64>) -> u64 {
+    current_bid
+        .filter(|b| *b >= 0)
+        .map(|b| b as u64)
+        .unwrap_or(if item_type == 1 {
+            price.max(0) as u64
+        } else {
+            0
+        })
+}
+
+/// #2566：出价后持久化拍卖托管态（C# AuctionInfo.CurrentBid/CurrentBuyerInfo 落库）
+pub async fn update_auction_bid(
+    pool: &DbPool,
+    auction_id: i64,
+    current_bid: i64,
+    current_buyer: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE auctions SET current_bid = ?, current_buyer = ? WHERE auction_id = ? AND sold = 0",
+    )
+    .bind(current_bid)
+    .bind(current_buyer)
+    .bind(auction_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// #2566：原子扣除账号信用点（C# Account.Credit -= CreditCost；余额不足返回 false，防竞态透支）
+pub async fn try_deduct_account_credit(
+    pool: &DbPool,
+    username: &str,
+    cost: i64,
+) -> anyhow::Result<bool> {
+    let result =
+        sqlx::query("UPDATE accounts SET credit = credit - ? WHERE username = ? AND credit >= ?")
+            .bind(cost)
+            .bind(username)
+            .bind(cost)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// #2566：读取每账号商城限购计数（C# Info.GSpurchases.TryGetValue）
+pub async fn get_gameshop_purchases(
+    pool: &DbPool,
+    username: &str,
+    gindex: i32,
+) -> anyhow::Result<i64> {
+    let row = sqlx::query(
+        "SELECT purchased FROM gameshop_purchases WHERE account_username = ? AND gindex = ?",
+    )
+    .bind(username)
+    .bind(gindex)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row
+        .map(|r| r.get::<i64, _>("purchased").max(0))
+        .unwrap_or(0))
+}
+
+/// #2566：累加每账号商城限购计数（C# Info.GSpurchases[Product.GIndex] += Quantity）
+pub async fn add_gameshop_purchases(
+    pool: &DbPool,
+    username: &str,
+    gindex: i32,
+    quantity: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"INSERT INTO gameshop_purchases (account_username, gindex, purchased)
+           VALUES (?, ?, ?)
+           ON CONFLICT(account_username, gindex) DO UPDATE SET purchased = purchased + excluded.purchased"#,
+    )
+    .bind(username)
+    .bind(gindex)
+    .bind(quantity)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// 加载未归还的租赁记录（重启后恢复 C# CharacterInfo.RentedItems 语义）
@@ -5963,6 +6082,108 @@ mod tests {
         let g = loaded.get("旗标行会").expect("guild exists");
         assert_eq!(g.flag_image, 1200);
         assert_eq!(g.flag_colour, 0xFFFF0000u32 as i32);
+    }
+
+    /// #2566：拍卖托管态持久化——出价 current_bid/current_buyer 落库、重启加载不回退；
+    /// 旧行（迁移前列缺失）NULL → 回退起拍价/无买家
+    #[tokio::test]
+    async fn test_auction_escrow_roundtrip_and_legacy_fallback() {
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        // 新寄售（拍卖，起拍 8000，尚无出价 → 托管列 NULL）
+        save_auction(&pool, 91_001, "卖家甲", "{}", 8000, 100, 1)
+            .await
+            .unwrap();
+        // 买家出价 12_000 → 托管态落库
+        assert!(update_auction_bid(&pool, 91_001, 12_000, "买家乙")
+            .await
+            .unwrap());
+        let rows = load_all_auctions(&pool).await.unwrap();
+        let row = rows.iter().find(|r| r.0 == 91_001).unwrap();
+        assert_eq!(row.8, Some(12_000));
+        assert_eq!(row.9.as_deref(), Some("买家乙"));
+        // 重启加载后的内存态：托管出价不回退
+        assert_eq!(restore_auction_escrow(row.6 as i32, row.3, row.8), 12_000);
+
+        // 模拟旧行（迁移前无托管值）：显式插入省略新列 → NULL
+        sqlx::query(
+            "INSERT INTO auctions (auction_id, seller_name, item_json, price, consignment_date, sold, item_type)
+             VALUES (91002, '卖家甲', '{}', 7000, 100, 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows = load_all_auctions(&pool).await.unwrap();
+        let legacy = rows.iter().find(|r| r.0 == 91_002).unwrap();
+        assert_eq!(legacy.8, None);
+        assert_eq!(legacy.9, None);
+
+        // 托管恢复映射：拍卖 NULL → 起拍价；寄售 NULL → 0；有值用值；负值防御回退
+        assert_eq!(restore_auction_escrow(1, 7000, None), 7000);
+        assert_eq!(restore_auction_escrow(0, 7000, None), 0);
+        assert_eq!(restore_auction_escrow(1, 7000, Some(12_000)), 12_000);
+        assert_eq!(restore_auction_escrow(1, 7000, Some(-5)), 7000);
+    }
+
+    /// #2566：账号信用点原子扣除（余额不足拒绝不透支；账号不存在拒绝）
+    #[tokio::test]
+    async fn test_try_deduct_account_credit() {
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (username, password_hash, credit) VALUES ('credit_buyer', 'x', 500)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // 余额充足 → 扣除成功
+        assert!(try_deduct_account_credit(&pool, "credit_buyer", 300)
+            .await
+            .unwrap());
+        assert_eq!(
+            get_account_credit(&pool, "credit_buyer").await.unwrap(),
+            200
+        );
+        // 余额不足 → 拒绝且余额不变
+        assert!(!try_deduct_account_credit(&pool, "credit_buyer", 201)
+            .await
+            .unwrap());
+        assert_eq!(
+            get_account_credit(&pool, "credit_buyer").await.unwrap(),
+            200
+        );
+        // 账号不存在 → 拒绝
+        assert!(!try_deduct_account_credit(&pool, "ghost", 1).await.unwrap());
+    }
+
+    /// #2566：每账号商城限购计数累加（C# GSpurchases[Product.GIndex] += Quantity）
+    #[tokio::test]
+    async fn test_gameshop_purchases_counter() {
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        assert_eq!(
+            get_gameshop_purchases(&pool, "limit_user", 42)
+                .await
+                .unwrap(),
+            0
+        );
+        add_gameshop_purchases(&pool, "limit_user", 42, 3)
+            .await
+            .unwrap();
+        add_gameshop_purchases(&pool, "limit_user", 42, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_gameshop_purchases(&pool, "limit_user", 42)
+                .await
+                .unwrap(),
+            5
+        );
+        // 不同账号/不同商品互不影响
+        assert_eq!(
+            get_gameshop_purchases(&pool, "limit_user", 43)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(get_gameshop_purchases(&pool, "other", 42).await.unwrap(), 0);
     }
 }
 
