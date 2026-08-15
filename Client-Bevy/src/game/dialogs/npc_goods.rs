@@ -49,7 +49,7 @@ pub struct NpcBuyPending {
 }
 
 /// NPC 商店状态
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct NpcGoodsState {
     pub visible: bool,
     pub title: String,
@@ -61,6 +61,32 @@ pub struct NpcGoodsState {
     pub pending_buy: Option<NpcBuyPending>,
     /// #珍珠商店：是否珍珠购买模式（C# NPCGoodsDialog.UsePearls；显示珍珠价，购买包不变）
     pub use_pearls: bool,
+    /// #2536：当前面板类型（Craft → 合成产物列表；C# NPCGoodsDialog.PType）
+    pub panel: mir2_shared::enums::PanelType,
+    /// #2536：待合成对话框消费的选择（商品行点击 → (recipe_id, 产物名)；
+    /// C# NPCDialogs.cs:1090 CraftDialog.ResetCells/RefreshCraftCells/Show）
+    pub craft_pick: Option<(u32, String)>,
+}
+
+impl Default for NpcGoodsState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            title: String::new(),
+            goods: Vec::new(),
+            selected: None,
+            is_buyback: false,
+            pending_buy: None,
+            use_pearls: false,
+            panel: mir2_shared::enums::PanelType::Buy,
+            craft_pick: None,
+        }
+    }
+}
+
+/// #2536：购买按钮显隐（C# NPCDialogs.cs:1142 Craft 面板 BuyButton.Visible=false）
+fn buy_button_visible(state: &NpcGoodsState) -> bool {
+    state.visible && state.panel != mir2_shared::enums::PanelType::Craft
 }
 
 /// 购买数量上限（C# BuyItem：max = min(StackSize, 库存)；非堆叠 = 1）
@@ -210,6 +236,7 @@ fn spawn_npc_goods(
 }
 
 /// 显示/隐藏 + 商品列表渲染 + 选中/购买/关闭
+#[allow(clippy::type_complexity)]
 fn npc_goods_ui_system(
     mut state: ResMut<NpcGoodsState>,
     mut amount: ResMut<AmountBoxState>,
@@ -218,8 +245,8 @@ fn npc_goods_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<&UiButton, (With<NpcGoodsClose>, Without<NpcGoodsBuy>)>,
-    buy: Query<&UiButton, (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
-    mut widgets: Query<&mut Visibility, With<NpcGoodsWidget>>,
+    mut buy: Query<(&UiButton, &mut Visibility), (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
+    mut widgets: Query<&mut Visibility, (With<NpcGoodsWidget>, Without<NpcGoodsBuy>)>,
     mut lines: Query<(&mut Text2d, &NpcGoodsLine)>,
     mut cells: Query<(&mut ItemCellData, &NpcGoodsCell)>,
     mut scroll: Query<&mut ScrollList, With<NpcGoodsWidget>>,
@@ -230,6 +257,15 @@ fn npc_goods_ui_system(
 ) {
     for mut vis in widgets.iter_mut() {
         *vis = if state.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // #2536：Craft 面板隐藏购买按钮（C# NPCDialogs.cs:1142）
+    let buy_vis = buy_button_visible(&state);
+    for (_, mut vis) in &mut buy {
+        *vis = if buy_vis {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -273,7 +309,10 @@ fn npc_goods_ui_system(
     let off = scroll.single().map(|s| s.offset).unwrap_or(0);
     for (mut text, line) in &mut lines {
         if let Some(g) = state.goods.get(off + line.0) {
-            text.0 = if state.use_pearls {
+            // #2536：Craft 面板行是合成产物（不标价；价格由配方金币决定，服务端校验）
+            text.0 = if state.panel == mir2_shared::enums::PanelType::Craft {
+                format!("合成 {} x{}", g.name, g.count)
+            } else if state.use_pearls {
                 format!("{} x{}  {} 珍珠", g.name, g.count, g.price)
             } else {
                 format!("{} x{}  {} 金", g.name, g.count, g.price)
@@ -343,7 +382,19 @@ fn npc_goods_ui_system(
                 let idx = off + i;
                 if idx < state.goods.len() {
                     state.selected = Some(idx);
-                    tracing::debug!("🏪 选中商品: {}", state.goods[idx].name);
+                    // #2536：Craft 面板点击行 → 交给合成对话框选择配方
+                    // （C# NPCDialogs.cs:1090 CraftDialog.ResetCells/RefreshCraftCells/Show）
+                    if state.panel == mir2_shared::enums::PanelType::Craft {
+                        // unique_id = recipe_id（服务端 send_craft_goods 下发）
+                        let (recipe_id, name) = {
+                            let g = &state.goods[idx];
+                            (g.unique_id as u32, g.name.clone())
+                        };
+                        state.craft_pick = Some((recipe_id, name.clone()));
+                        tracing::debug!("🔧 选中合成产物: {}", name);
+                    } else {
+                        tracing::debug!("🏪 选中商品: {}", state.goods[idx].name);
+                    }
                 }
                 break;
             }
@@ -355,11 +406,16 @@ fn npc_goods_ui_system(
         if btn.clicked {
             state.visible = false;
             state.selected = None;
+            state.craft_pick = None;
         }
     }
     // 购买/回购（原版 C# NPCGoodsDialog 购买按钮 → C.BuyItem；回购面板 → C.BuyItemBack）
-    for btn in &buy {
+    for (btn, _) in &buy {
         if btn.clicked {
+            // #2536：Craft 面板无购买（C# NPCDialogs.cs:1104 DoubleClick return；按钮已隐藏）
+            if state.panel == mir2_shared::enums::PanelType::Craft {
+                continue;
+            }
             if amount.visible {
                 // 数量框打开期间忽略（C# Modal）
                 continue;
@@ -411,14 +467,21 @@ fn npc_goods_ui_system(
 fn npc_goods_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut npc_goods: ResMut<NpcGoodsState>,
+    mut mgr: ResMut<crate::game::dialogs::DialogManager>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::NpcGoods { goods, .. } = ev {
+        if let ServerEvent::NpcGoods { goods, panel, .. } = ev {
             npc_goods.goods = goods.clone();
             npc_goods.selected = None;
             npc_goods.visible = true;
             npc_goods.use_pearls = false;
+            npc_goods.panel = *panel;
+            // #2536：Craft 面板到达 → 同时打开合成对话框
+            // （C# GameScene.cs:4215 NPCCraftGoodsDialog.Show() + CraftDialog.Show()）
+            if *panel == mir2_shared::enums::PanelType::Craft {
+                mgr.open(crate::game::dialogs::DialogKind::Craft);
+            }
         }
         if let ServerEvent::PearlShop { goods, .. } = ev {
             // #珍珠商店：C# NPCPearlGoods → UsePearls=true
@@ -426,6 +489,7 @@ fn npc_goods_server_events(
             npc_goods.selected = None;
             npc_goods.visible = true;
             npc_goods.use_pearls = true;
+            npc_goods.panel = mir2_shared::enums::PanelType::Buy;
         }
     }
 }
@@ -443,6 +507,27 @@ mod tests {
     fn buy_max_quantity_stackable_caps_by_stock_and_stack() {
         assert_eq!(buy_max_quantity(10, 5), 5); // 库存 5 < 堆叠 10
         assert_eq!(buy_max_quantity(10, 99), 10); // 堆叠上限 10
+    }
+
+    /// #2536：Craft 面板隐藏购买按钮（C# NPCDialogs.cs:1142）
+    #[test]
+    fn craft_panel_hides_buy_button() {
+        let mut s = NpcGoodsState::default();
+        s.visible = true;
+        assert!(buy_button_visible(&s));
+        s.panel = mir2_shared::enums::PanelType::Craft;
+        assert!(!buy_button_visible(&s));
+        s.visible = false;
+        assert!(!buy_button_visible(&s));
+    }
+
+    /// #2536：默认面板为 Buy（非合成面板不联动合成对话框关闭）
+    #[test]
+    fn default_panel_is_buy() {
+        assert_eq!(
+            NpcGoodsState::default().panel,
+            mir2_shared::enums::PanelType::Buy
+        );
     }
 }
 

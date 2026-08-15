@@ -1,13 +1,18 @@
 // ============================================================================
-// 合成对话框（M41）
-// 参考：C# NPC 合成页面 + ServerRust get_craft_recipes / CraftItemRequest
+// 合成对话框（M41；#2536 接入 NPC 合成面板入口）
+// 参考：C# NPCDialogs.cs CraftDialog + GameScene.cs:4215
+//   - S.NPCGoods(PanelType::Craft) 到达 → 商品对话框（合成产物列表）+ 本对话框同开
+//   - 商品行点击产物 → 本对话框选中配方（C# 1090 ResetCells/RefreshCraftCells/Show）
+//   - 商品对话框关闭 → 本对话框联动关闭（C# 1413 Hide → CraftDialog.Hide()）
 // 网络（ServerRust gate 实际 wire）：
 //   C: CraftItem[recipe_id u32][materials_count u32]
 //   S: CraftItem[recipe_id u32][count u16][success u8] + 系统聊天消息
+// 材料由服务端按配方校验/扣除（C# 玩家摆槽交互在 Rust wire 下不需要）
 // ============================================================================
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::npc_goods::NpcGoodsState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -17,40 +22,35 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
 
-/// 配方（服务端 get_craft_recipes 硬编码 3 条）
-#[derive(Debug, Clone, Copy)]
-pub struct RecipeInfo {
+/// #2536：当前选中的合成配方（产物；recipe_id 由服务端随合成商品 unique_id 下发）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedRecipe {
     pub recipe_id: u32,
-    pub product_index: i32,
-    pub ingredients: &'static str,
+    pub name: String,
 }
-
-pub const RECIPES: [RecipeInfo; 3] = [
-    RecipeInfo {
-        recipe_id: 1,
-        product_index: 100,
-        ingredients: "木材x3 + 铁矿石x2",
-    },
-    RecipeInfo {
-        recipe_id: 2,
-        product_index: 101,
-        ingredients: "草药x2 + 清水x1",
-    },
-    RecipeInfo {
-        recipe_id: 3,
-        product_index: 102,
-        ingredients: "铁矿石x5",
-    },
-];
 
 /// 合成状态（CraftItem 响应写入）
 #[derive(Resource, Default)]
 pub struct CraftState {
-    pub selected: Option<usize>,
+    pub selected: Option<SelectedRecipe>,
     pub message: String,
     pub last_result: Option<(u32, u16, bool)>,
     /// #262 已学会配方（S.NewRecipeInfo）
     pub learned: Vec<i32>,
+}
+
+/// 配方行文案（C# CraftDialog RecipeLabel）
+pub fn recipe_label(selected: &Option<SelectedRecipe>) -> String {
+    match selected {
+        Some(r) => format!("合成产物: {}", r.name),
+        None => "未选择产物——点击左侧商品列表".to_string(),
+    }
+}
+
+/// 合成对话框是否应随商品面板关闭（C# NPCDialogs.cs:1413 Hide → CraftDialog.Hide()；
+/// 仅 Craft 面板联动——挂机脚本直开场景不受影响）
+pub fn craft_should_close(npc_panel: mir2_shared::enums::PanelType, goods_visible: bool, craft_open: bool) -> bool {
+    craft_open && npc_panel == mir2_shared::enums::PanelType::Craft && !goods_visible
 }
 
 #[derive(Component)]
@@ -70,11 +70,11 @@ pub struct CraftPlugin;
 impl Plugin for CraftPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CraftState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             craft_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_craft);
+        app.add_systems(OnEnter(AppState::Game), spawn_craft);
         app.add_systems(OnExit(AppState::Game), cleanup_craft);
         app.add_systems(
             Update,
@@ -124,8 +124,8 @@ fn spawn_craft(
             CraftWidget,
         ));
     }
-    // 配方 3 行 + 状态 3 行
-    for i in 0..6usize {
+    // 选中配方 + 结果消息 + 提示 + 已学会数
+    for i in 0..4usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
             298.0, 120.0 + i as f32 * 22.0,
@@ -141,7 +141,7 @@ fn spawn_craft(
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 206, 207, 208,
-        360.0, 260.0, 8.3, 76.0, 25.0,
+        360.0, 240.0, 8.3, 76.0, 25.0,
     ) {
         commands.entity(e).insert((
             CraftBtn,
@@ -151,19 +151,26 @@ fn spawn_craft(
     }
 }
 
-/// 显隐 + 渲染 + 选择 + 合成
-#[allow(clippy::too_many_arguments)]
+/// 显隐 + 渲染 + 选择联动 + 合成
 fn craft_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<CraftState>,
+    mut npc_goods: ResMut<NpcGoodsState>,
     net: Res<NetConnection>,
     close: Query<&UiButton, With<CraftClose>>,
     craft_btn: Query<&UiButton, With<CraftBtn>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<CraftWidget>>,
     mut lines: Query<(&mut Text2d, &CraftLine)>,
 ) {
+    // #2536：商品行点击选中的配方（C# NPCDialogs.cs:1090 ResetCells/RefreshCraftCells/Show）
+    if let Some((recipe_id, name)) = npc_goods.craft_pick.take() {
+        state.selected = Some(SelectedRecipe { recipe_id, name });
+        mgr.open(DialogKind::Craft);
+    }
+    // #2536：商品面板关闭 → 联动关闭（C# NPCDialogs.cs:1413）
+    if craft_should_close(npc_goods.panel, npc_goods.visible, mgr.is_open(DialogKind::Craft)) {
+        mgr.close(DialogKind::Craft);
+    }
     let open = mgr.is_open(DialogKind::Craft);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -178,55 +185,25 @@ fn craft_ui_system(
     }
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
-            i if i < 3 => {
-                let r = &RECIPES[i];
-                format!(
-                    "{}: 成品#{}（{}）成功率80%",
-                    r.recipe_id,
-                    r.product_index,
-                    r.ingredients
-                )
-            }
-            3 => format!(
-                "选中配方: {}",
-                state
-                    .selected
-                    .map(|i| format!("配方 {}", RECIPES[i].recipe_id))
-                    .unwrap_or_else(|| "无".to_string())
-            ),
-            4 => state.message.clone(),
-            5 => "点击配方行选中 → 点合成".to_string(),
+            0 => recipe_label(&state.selected),
+            1 => state.message.clone(),
+            2 => "点击左侧产物选中 → 点合成".to_string(),
+            3 => format!("已学会配方: {} 种", state.learned.len()),
             _ => String::new(),
         };
-    }
-    // 配方行点击选中
-    if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
-            if let Some(cursor) = window.cursor_position() {
-                for i in 0..3usize {
-                    let y = 120.0 + i as f32 * 22.0;
-                    if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 20.0 {
-                        state.selected = Some(i);
-                        tracing::info!("🔧 选中配方 {}", RECIPES[i].recipe_id);
-                        break;
-                    }
-                }
-            }
-        }
     }
     // 合成
     for btn in &craft_btn {
         if btn.clicked {
-            if let Some(i) = state.selected {
-                let r = &RECIPES[i];
+            if let Some(r) = state.selected.clone() {
                 net.send_packet(&crate::network::CraftItemWire {
                     recipe_id: r.recipe_id,
                     materials: 0,
                 });
-                state.message = format!("合成配方 {} 中…", r.recipe_id);
-                tracing::info!("🔧 合成配方 {}（成品#{}）", r.recipe_id, r.product_index);
+                state.message = format!("合成 {} 中…", r.name);
+                tracing::info!("🔧 合成配方 {}（{}）", r.recipe_id, r.name);
             } else {
-                state.message = "请先点击选中一个配方".to_string();
+                state.message = "请先在左侧商品列表点击合成产物".to_string();
             }
         }
     }
@@ -255,5 +232,34 @@ fn craft_server_events(
                 format!("合成失败（配方 {}）", recipe_id)
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mir2_shared::enums::PanelType;
+
+    fn sel() -> Option<SelectedRecipe> {
+        Some(SelectedRecipe {
+            recipe_id: 7,
+            name: "精铁剑".to_string(),
+        })
+    }
+
+    /// #2536：配方行文案（选中显示产物名，未选中给提示）
+    #[test]
+    fn recipe_label_shows_selection_or_hint() {
+        assert_eq!(recipe_label(&sel()), "合成产物: 精铁剑");
+        assert_eq!(recipe_label(&None), "未选择产物——点击左侧商品列表");
+    }
+
+    /// #2536：合成对话框仅随 Craft 面板关闭联动（挂机脚本直开不受影响）
+    #[test]
+    fn craft_closes_with_goods_panel_only_in_craft_mode() {
+        assert!(craft_should_close(PanelType::Craft, false, true));
+        assert!(!craft_should_close(PanelType::Craft, true, true));
+        assert!(!craft_should_close(PanelType::Buy, false, true));
+        assert!(!craft_should_close(PanelType::Craft, false, false));
     }
 }

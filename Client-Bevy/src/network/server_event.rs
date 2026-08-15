@@ -434,8 +434,8 @@ pub enum ServerEvent {
     },
     /// CraftItem：合成结果
     CraftResult { recipe_id: u32, count: u16, success: bool },
-    /// NPCGoods：商品对话框（Buy/Craft 等）
-    NpcGoods { goods: Vec<GoodsEntry>, rate: f32 },
+    /// NPCGoods：商品对话框（Buy/BuySub/Craft 等；Craft → 联动合成对话框）
+    NpcGoods { goods: Vec<GoodsEntry>, rate: f32, panel: mir2_shared::enums::PanelType },
     /// #珍珠商店：NPC 珍珠商品（S.NPCPearlGoods → 商品对话框珍珠模式）
     PearlShop { goods: Vec<GoodsEntry>, rate: f32 },
     /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板
