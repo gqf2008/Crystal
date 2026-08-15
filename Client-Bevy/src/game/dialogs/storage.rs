@@ -60,10 +60,13 @@ impl StorageState {
     }
 }
 
-/// 窗口原点 (0,0)：C# StorageDialog 显式 `Location = new Point(0, 0)`（NPCDialogs.cs:2807）。
+/// 窗口原点 (0,0)：C# StorageDialog 显式 `Location = new Point(0, 0)`（NPCDialogs.cs:2812）。
 /// 旧值 (600,60) 是移植期自定右置，与 C# 左上角原点不符。
 const DIALOG_X: f32 = 0.0;
 const DIALOG_Y: f32 = 0.0;
+/// 仓库宽（Prguse[586] 实测 388x346）。C# Show 时背包推到 (仓宽+5, 仓Y)=(393,0) 并排
+/// （NPCDialogs.cs:2967/2990）——避免仓库完全罩住背包
+const STORAGE_W: f32 = 388.0;
 const COLS: usize = 10;
 const ROWS: usize = 8;
 const CELL_W: f32 = 36.0;
@@ -775,13 +778,33 @@ fn storage_server_events(
     mut storage: ResMut<StorageState>,
     mut hud: ResMut<HudState>,
     mut mgr: ResMut<DialogManager>,
+    mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         if let ServerEvent::StorageOpened { items, visible } = ev {
             storage.items = items.clone();
             storage.visible = *visible;
-            // 原版 C#：仓库打开时同时显示背包
+            // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
+            // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
+            // —— 否则 388x346 的仓库完全罩住 316x236 的背包
+            let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+            for (tf, root) in inv_entities.iter() {
+                if root.0 == DialogKind::Inventory {
+                    min_x = min_x.min(tf.translation.x);
+                    min_y = min_y.min(tf.translation.y);
+                }
+            }
+            if min_x < f32::MAX {
+                // translation.y 为 UI y 取负：目标 (393, 0) → delta = (393-min_x, 0-min_y)
+                let (dx, dy) = (STORAGE_W + 5.0 - min_x, -min_y);
+                for (mut tf, root) in &mut inv_entities {
+                    if root.0 == DialogKind::Inventory {
+                        tf.translation.x += dx;
+                        tf.translation.y += dy;
+                    }
+                }
+            }
             if !mgr.is_open(DialogKind::Storage) {
                 mgr.open.push(DialogKind::Storage);
             }

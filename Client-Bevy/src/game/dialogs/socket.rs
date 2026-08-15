@@ -27,9 +27,13 @@ const INV_W_FALLBACK: f32 = 316.0;
 const INV_H_FALLBACK: f32 = 236.0;
 
 /// C# SocketDialog.Show(Inventory) 定位公式（SocketDialog.cs:108-110）：
-/// x = inv.X + (inv.W - sock.W)/2，y = inv.Y + inv.H + 5 —— 全部用背包**真实**尺寸。
+/// x = inv.X + (inv.W - sock.W)/2，y = inv.Y + inv.H + 5 —— 全部用背包**真实**尺寸；
+/// C# Point 是 int，除法整除截断（floor 复刻）。
 fn socket_origin(inv_w: f32, inv_h: f32, sock_w: f32) -> (f32, f32) {
-    (INV_X + (inv_w - sock_w) / 2.0, INV_Y + inv_h + 5.0)
+    (
+        INV_X + ((inv_w - sock_w) / 2.0).floor(),
+        INV_Y + inv_h + 5.0,
+    )
 }
 
 /// 背包背景 Title[196] 真实尺寸（缺失回退 316x236 实测值）
@@ -175,7 +179,12 @@ fn socket_ui_system(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     close: Query<&UiButton, With<SocketClose>>,
-    mut close_tf: Query<&mut Transform, (With<SocketClose>, Without<SocketCell>)>,
+    // B0001：与 panel 双写 Transform，filter 必须可证互斥（Without<SocketPanel>）——
+    // run_if 不拦 schedule 初始化期的访问集检查（详见 LESSON_Bevy同系统多查询双写组件）
+    mut close_tf: Query<
+        &mut Transform,
+        (With<SocketClose>, Without<SocketCell>, Without<SocketPanel>),
+    >,
     mut widgets: Query<&mut Visibility, (With<SocketWidget>, Without<SocketCell>)>,
     mut cells: Query<(&mut Visibility, &mut Sprite, &mut Transform, &SocketCell)>,
     mut panel: Query<(&mut Sprite, &mut Transform), (With<SocketPanel>, Without<SocketCell>)>,
@@ -211,7 +220,7 @@ fn socket_ui_system(
         .0
         .get_image(LibraryName::Prguse3, idx)
         .map(|i| i.width.max(0) as f32)
-        .unwrap_or(INV_W_FALLBACK);
+        .unwrap_or(81.0); // Prguse3 缺失兜底：1 孔面板宽（最小情形）
     let (px, py) = socket_origin(inv_w, inv_h, w);
     if let Ok((mut sprite, mut tf)) = panel.single_mut() {
         if let Some(h) = ui_image(
@@ -297,15 +306,48 @@ mod tests {
     use super::*;
 
     /// C# SocketDialog.Show(Inventory)（SocketDialog.cs:108-110）公式锚点：
-    /// 背包 Title[196] 实测 316x236、原点 (0,0) → 面板 y=241（inv.Y+inv.H+5）、x 随宽度居中。
+    /// 背包 Title[196] 实测 316x236、原点 (0,0) → 面板 y=241（inv.Y+inv.H+5）、x 随宽度居中
+    /// **整除**（C# Point 是 int：(316-81)/2=117 非 117.5）。
     /// 旧实现 y=207（格子底 +5）、x 用硬编码 280 —— 均与 C# 不符。
     #[test]
     fn socket_origin_matches_csharp_show() {
         // 1 孔面板宽 81（Prguse3[20] 实测）
-        assert_eq!(socket_origin(316.0, 236.0, 81.0), (117.5, 241.0));
+        assert_eq!(socket_origin(316.0, 236.0, 81.0), (117.0, 241.0));
         // 12 孔面板宽 268（Prguse3[31]）
         assert_eq!(socket_origin(316.0, 236.0, 268.0), (24.0, 241.0));
         // 关闭钮跟随实际宽度：w-23（spawn 与运行时同步该公式）
-        assert_eq!(socket_origin(316.0, 236.0, 81.0).0 + 81.0 - 23.0, 175.5);
+        assert_eq!(socket_origin(316.0, 236.0, 81.0).0 + 81.0 - 23.0, 175.0);
+    }
+
+    /// B0001 冒烟（PR #2553 审查实证：close_tf 与 panel 双写 Transform 若 filter 不互斥，
+    /// schedule 初始化期即 panic，run_if 不拦、单元测试全绿是盲区）：
+    /// 注册 SocketPlugin 的 App 必须能 update 而不 panic。
+    #[test]
+    fn socket_plugin_updates_without_b0001() {
+        let mut app = bevy::app::App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::input::InputPlugin,
+            bevy::state::app::StatesPlugin,
+        ));
+        app.init_state::<crate::scenes::AppState>();
+        app.init_asset::<Image>();
+        app.init_resource::<crate::ui::sprite_ui::UiImageCache>();
+        app.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        app.init_resource::<DialogManager>();
+        app.add_plugins(SocketPlugin);
+        // 非 Game 状态 + 切到 Game 各跑一帧（两阶段都做：B0001 检查发生在
+        // schedule 初始化，与 run_if 是否命中无关）
+        app.update();
+        app.world_mut()
+            .resource_mut::<NextState<crate::scenes::AppState>>()
+            .set(crate::scenes::AppState::Game);
+        app.update();
+        app.update();
     }
 }
