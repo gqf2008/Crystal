@@ -679,6 +679,9 @@ impl Message<StartGameRequest> for WorldActor {
                         autopot: h.autopot,
                         experience: h.experience,
                         max_experience: h.max_experience,
+                        // #2571：恢复残血/残蓝（C# HeroInfo.HP/MP；-1 = 无存档按满血）
+                        hp: h.hp,
+                        mp: h.mp,
                     })
                     .collect(),
             );
@@ -2263,27 +2266,9 @@ impl Message<PlayerDisconnected> for WorldActor {
             }
 
             // #1127：断线同样持久化英雄列表——save_character 会 DELETE heroes 子表但不重建，
-            // 若断线路径不补 save_heroes，英雄会在重启/再登录后永久丢失（与 PlayerLogOut 对齐）
-            let heroes = self
-                .player_heroes
-                .get(&msg.session_id)
-                .cloned()
-                .unwrap_or_default();
-            let db_heroes: Vec<db::DbHero> = heroes
-                .iter()
-                .map(|h| db::DbHero {
-                    index: h.index,
-                    name: h.name.clone(),
-                    level: h.level,
-                    class: h.class as u8,
-                    gender: h.gender as u8,
-                    dead: h.dead,
-                    sealed: h.sealed,
-                    autopot: h.autopot,
-                    experience: h.experience,
-                    max_experience: h.max_experience,
-                })
-                .collect();
+            // 若断线路径不补 save_heroes，英雄会在重启/再登录后永久丢失（与 PlayerLogOut 对齐）；
+            // #2571：出战英雄实时 HP/MP 一并落库（残血/残蓝重登恢复）
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!(
                     "Failed to save heroes for {} on disconnect: {}",
@@ -2450,27 +2435,8 @@ impl Message<PlayerLogOut> for WorldActor {
                 );
             }
 
-            // #194：保存英雄列表到 DB（重启不丢）
-            let heroes = self
-                .player_heroes
-                .get(&msg.session_id)
-                .cloned()
-                .unwrap_or_default();
-            let db_heroes: Vec<db::DbHero> = heroes
-                .iter()
-                .map(|h| db::DbHero {
-                    index: h.index,
-                    name: h.name.clone(),
-                    level: h.level,
-                    class: h.class as u8,
-                    gender: h.gender as u8,
-                    dead: h.dead,
-                    sealed: h.sealed,
-                    autopot: h.autopot,
-                    experience: h.experience,
-                    max_experience: h.max_experience,
-                })
-                .collect();
+            // #194：保存英雄列表到 DB（重启不丢；#2571 含实时 HP/MP）
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on logout: {}", record.name, e);
             }

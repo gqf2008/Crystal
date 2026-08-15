@@ -1683,6 +1683,9 @@ impl Message<NewHeroRequest> for WorldActor {
                         .first()
                         .copied()
                         .unwrap_or(super::hero_stats::HERO_MAX_EXPERIENCE),
+                    // #2571：新英雄无 HP/MP 存档（C# CreateHero 后首次召唤按满血）
+                    hp: -1,
+                    mp: -1,
                 });
             // C# CreateHero（PlayerObject.cs:9610）：有封印符配置（HeroSealItemName）且背包有空位时，
             // 英雄以"英雄封印符"形式发放（不出战，使用后恢复）；否则直接创建为出战英雄。
@@ -1740,26 +1743,7 @@ impl Message<NewHeroRequest> for WorldActor {
                 self.send_hero_information_packet(msg.session_id).await;
             }
             // 持久化英雄
-            let heroes = self
-                .player_heroes
-                .get(&msg.session_id)
-                .cloned()
-                .unwrap_or_default();
-            let db_heroes: Vec<db::DbHero> = heroes
-                .iter()
-                .map(|h| db::DbHero {
-                    index: h.index,
-                    name: h.name.clone(),
-                    level: h.level,
-                    class: h.class as u8,
-                    gender: h.gender as u8,
-                    dead: h.dead,
-                    sealed: h.sealed,
-                    autopot: h.autopot,
-                    experience: h.experience,
-                    max_experience: h.max_experience,
-                })
-                .collect();
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on NewHero: {}", e);
             }
@@ -1941,26 +1925,8 @@ impl WorldActor {
                 ai.mp = ai.max_mp;
             }
             // DB 保存用更新后的列表：只复活当前英雄，其他英雄保持原 dead/sealed
-            let db_heroes: Vec<db::DbHero> = self
-                .player_heroes
-                .get(&session_id)
-                .map(|hs| {
-                    hs.iter()
-                        .map(|h| db::DbHero {
-                            index: h.index,
-                            name: h.name.clone(),
-                            level: h.level,
-                            class: h.class as u8,
-                            gender: h.gender as u8,
-                            dead: h.dead,
-                            sealed: h.sealed,
-                            autopot: h.autopot,
-                            experience: h.experience,
-                            max_experience: h.max_experience,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            //（#2571：复活后实时满血经 db_heroes_snapshot 落库）
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on ReviveHero: {}", e);
             }
@@ -2049,26 +2015,7 @@ impl WorldActor {
             .ask(crate::actors::player::AddItemToInventory { item })
             .await;
         // 持久化
-        let heroes_now = self
-            .player_heroes
-            .get(&session_id)
-            .cloned()
-            .unwrap_or_default();
-        let db_heroes: Vec<db::DbHero> = heroes_now
-            .iter()
-            .map(|h| db::DbHero {
-                index: h.index,
-                name: h.name.clone(),
-                level: h.level,
-                class: h.class as u8,
-                gender: h.gender as u8,
-                dead: h.dead,
-                sealed: h.sealed,
-                autopot: h.autopot,
-                experience: h.experience,
-                max_experience: h.max_experience,
-            })
-            .collect();
+        let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(session_id);
         if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
             warn!("Failed to save heroes on SealHero: {}", e);
         }
@@ -2100,28 +2047,14 @@ impl WorldActor {
             .filter(|h| h.index as u8 != state.hero_index)
             .collect();
         if remaining.len() < before {
-            self.player_heroes.insert(session_id, remaining.clone());
+            self.player_heroes.insert(session_id, remaining);
             // 清空当前英雄索引 + 移除英雄对象
             let _ = record
                 .actor_ref
                 .ask(crate::actors::player::SetHeroIndex { hero_index: 0 })
                 .await;
             self.broadcast_hero_remove(state.object_id).await;
-            let db_heroes: Vec<db::DbHero> = remaining
-                .iter()
-                .map(|h| db::DbHero {
-                    index: h.index,
-                    name: h.name.clone(),
-                    level: h.level,
-                    class: h.class as u8,
-                    gender: h.gender as u8,
-                    dead: h.dead,
-                    sealed: h.sealed,
-                    autopot: h.autopot,
-                    experience: h.experience,
-                    max_experience: h.max_experience,
-                })
-                .collect();
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on DeleteHero: {}", e);
             }

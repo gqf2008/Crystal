@@ -479,11 +479,14 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
 
         // 切换 buff 激活状态（C# GuildBuffUpdate enable/activate）
         let mut buffs = self.guild_buffs(guild_name).await;
+        // #2571：随本次变更同步到 SocialActor 的时限记录（unix 毫秒；停用清时限）
+        let mut expiry_updates: Vec<(u32, Option<i64>)> = Vec::new();
         if buffs.contains(&msg.buff_id) {
             buffs.retain(|b| *b != msg.buff_id);
             if let Some(exp) = self.guild_buff_expiries.get_mut(guild_name) {
                 exp.remove(&msg.buff_id);
             }
+            expiry_updates.push((msg.buff_id, None));
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
@@ -545,13 +548,15 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
                     gold: gold_cost as u32,
                 })
                 .await;
-            // #2136：C# GuildObject.Process 时限——激活时记录到期 tick（TimeLimit 分钟 × 600，100ms/tick）
+            // #2136：C# GuildObject.Process 时限——激活时记录到期时间（TimeLimit 分钟，
+            // unix 毫秒存档形态；#2571 重启后经 guilds.buffs_json 恢复）
             if info.time_limit_minutes > 0 {
-                let expires = self.tick_count + info.time_limit_minutes as u64 * 600;
+                let expires_ms = crate::db::now_unix_ms() + info.time_limit_minutes as i64 * 60_000;
                 self.guild_buff_expiries
                     .entry(guild_name.clone())
                     .or_default()
-                    .insert(msg.buff_id, expires);
+                    .insert(msg.buff_id, expires_ms);
+                expiry_updates.push((msg.buff_id, Some(expires_ms)));
             }
             buffs.push(msg.buff_id);
             send_system_message(
@@ -560,7 +565,8 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
                 &format!("行会 Buff #{} 已激活", msg.buff_id),
             );
         }
-        self.set_guild_buffs(guild_name, &buffs).await;
+        self.set_guild_buffs(guild_name, &buffs, &expiry_updates)
+            .await;
 
         // 广播给同公会在线成员
         let online: Vec<u64> = self.players.keys().copied().collect();
@@ -637,13 +643,19 @@ impl WorldActor {
             .unwrap_or_default()
     }
 
-    /// 写入行会激活的 Buff 列表
-    pub(crate) async fn set_guild_buffs(&self, guild_name: &str, buffs: &[u32]) {
+    /// 写入行会激活的 Buff 列表（#2571：expiry_updates 同步时限记录并随 guilds.buffs_json 落库）
+    pub(crate) async fn set_guild_buffs(
+        &self,
+        guild_name: &str,
+        buffs: &[u32],
+        expiry_updates: &[(u32, Option<i64>)],
+    ) {
         let _ = self
             .social_ref
             .ask(crate::actors::social::NpcSetGuildBuffs {
                 guild_name: guild_name.to_string(),
                 buffs: buffs.to_vec(),
+                expiry_updates: expiry_updates.to_vec(),
             })
             .await;
 

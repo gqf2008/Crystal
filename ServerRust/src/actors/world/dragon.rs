@@ -75,6 +75,10 @@ pub struct DragonState {
     pub evil_mir_oid: Option<u32>,
     /// 上次记录的 EvilMir HP（用于受击给龙加经验，C# EvilMir.ChangeHP → DragonSystem.GainExp）
     pub last_evil_mir_hp: i32,
+    /// #2571：升级所需经验表（C# DragonInfo.Exps；空 → C# 线性默认 (i+1)*10000）
+    pub exps: Vec<u64>,
+    /// #2571：上次运行态落库 tick（经验变化节流用；运行时，不持久化）
+    pub last_persist_tick: u64,
 }
 
 impl DragonState {
@@ -89,25 +93,46 @@ impl DragonState {
             active: true,
             evil_mir_oid: None,
             last_evil_mir_hp: 0,
+            exps: Vec::new(),
+            last_persist_tick: 0,
         }
     }
 
-    /// 升级所需经验表（C# Exps[12]）
-    pub fn xp_for_level(level: u8) -> u64 {
-        match level {
-            1 => 5000,
-            2 => 10000,
-            3 => 20000,
-            4 => 40000,
-            5 => 80000,
-            6 => 160000,
-            7 => 320000,
-            8 => 640000,
-            9 => 1280000,
-            10 => 2560000,
-            11 => 5120000,
-            _ => 0, // Level 12 is max
+    /// 缺省经验表常量（default_exps/xp_for_level 回退用）
+    const DEFAULT_EXPS: [u64; 11] = [
+        10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000, 110_000,
+    ];
+
+    /// C# 线性默认经验表（DragonInfo.cs:38-42：Exps[i] = (i+1)*10000）
+    pub fn default_exps() -> Vec<u64> {
+        Self::DEFAULT_EXPS.to_vec()
+    }
+
+    /// #2571：注入 DB 经验表（dragon_info.exps_json；缺省/空值回退线性默认）
+    pub fn set_exps_from_db(&mut self, db_exps: &[i64]) {
+        let table: Vec<u64> = db_exps
+            .iter()
+            .copied()
+            .filter(|e| *e > 0)
+            .map(|e| e as u64)
+            .collect();
+        if !table.is_empty() {
+            self.exps = table;
         }
+    }
+
+    /// 升级所需经验表（C# Dragon.GainExp 读 Info.Exps[min(11, Level-1)]）：
+    /// level → level+1 所需经验；0 = 已满级不升级
+    pub fn xp_for_level(&self, level: u8) -> u64 {
+        if level >= 12 {
+            return 0;
+        }
+        let table: &[u64] = if self.exps.is_empty() {
+            &Self::DEFAULT_EXPS
+        } else {
+            &self.exps
+        };
+        table.get((level - 1) as usize).copied().unwrap_or(0)
     }
 
     /// 加点经验，返回升级的次数（可能连升多级）。对应 C# Dragon.GainExp。
@@ -121,7 +146,7 @@ impl DragonState {
             if self.level >= 12 {
                 break;
             }
-            let needed = Self::xp_for_level(self.level);
+            let needed = self.xp_for_level(self.level);
             if needed == 0 || self.experience < needed {
                 break;
             }
@@ -254,8 +279,8 @@ mod tests {
     #[test]
     fn test_gain_exp_level_up() {
         let mut d = DragonState::new(1);
-        // Level 1 -> 2 needs 5000 xp
-        let n = d.gain_exp(5000);
+        // #2571：C# 线性默认表——Level 1 -> 2 needs 10000 xp（(1+1)*10000）
+        let n = d.gain_exp(10000);
         assert_eq!(n, 1);
         assert_eq!(d.level, 2);
         assert_eq!(d.experience, 0);
@@ -264,10 +289,23 @@ mod tests {
     #[test]
     fn test_gain_exp_multi_level() {
         let mut d = DragonState::new(1);
-        // 5000 + 10000 = 15000 → level 1->2 (cost 5000), 2->3 (cost 10000)
-        let n = d.gain_exp(15000);
+        // 线性默认：1->2 需 10000，2->3 需 20000 → 30000 连升两级
+        let n = d.gain_exp(30000);
         assert_eq!(n, 2);
         assert_eq!(d.level, 3);
+        assert_eq!(d.experience, 0);
+    }
+
+    #[test]
+    fn test_gain_exp_partial_progress_kept() {
+        let mut d = DragonState::new(1);
+        let n = d.gain_exp(15000);
+        assert_eq!(n, 1);
+        assert_eq!(d.level, 2);
+        assert_eq!(
+            d.experience, 5000,
+            "余量应保留（C# Experience -= Exps[Level-1]）"
+        );
     }
 
     #[test]
@@ -277,5 +315,37 @@ mod tests {
         d.max_level_time = 0;
         d.gain_exp(0); // no-op at max
         assert_eq!(d.level, 12);
+    }
+
+    /// #2571：经验表改读 DB dragon_info.exps——注入表优先生效
+    #[test]
+    fn test_exps_from_db_override() {
+        let mut d = DragonState::new(1);
+        // DB 表（仿 C# MirDB 存档值）
+        d.set_exps_from_db(&[50_000, 60_000, 0, -1, 70_000]);
+        assert_eq!(d.xp_for_level(1), 50_000, "非正值条目应被过滤");
+        assert_eq!(d.xp_for_level(2), 60_000);
+        assert_eq!(
+            d.xp_for_level(3),
+            70_000,
+            "过滤后的表按序对齐等级（3→4 取第 3 条）"
+        );
+        assert_eq!(d.xp_for_level(4), 0, "表外条目 = 不升级");
+        // 1->2 需 50000
+        assert_eq!(d.gain_exp(50_000), 1);
+        assert_eq!(d.level, 2);
+    }
+
+    /// #2571：DB 经验表空/全非正 → 回退 C# 线性默认 (i+1)*10000
+    #[test]
+    fn test_exps_empty_falls_back_to_csharp_linear() {
+        let mut d = DragonState::new(1);
+        d.set_exps_from_db(&[]);
+        assert_eq!(d.xp_for_level(1), 10_000);
+        d.set_exps_from_db(&[0, -5]);
+        assert_eq!(d.xp_for_level(1), 10_000, "全非正值不注入");
+        assert_eq!(d.xp_for_level(11), 110_000);
+        assert_eq!(d.xp_for_level(12), 0, "满级不升级");
+        assert_eq!(DragonState::default_exps().len(), 11);
     }
 }

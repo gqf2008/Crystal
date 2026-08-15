@@ -116,6 +116,9 @@ pub struct Guild {
     pub storage_items: Vec<Option<(mir2_shared::data::item::UserItem, u32)>>,
     /// 已激活的行会 Buff id 列表（C# GuildObject.BuffList）
     pub buffs: Vec<u32>,
+    /// #2571：时限 Buff 到期时间（unix 毫秒；C# Buff.ExpireTime 的存档形态，
+    /// 只含有时限的 buff，与 buffs 列表一起持久化到 guilds.buffs_json）
+    pub buff_expiries: std::collections::HashMap<u32, i64>,
     /// 行会经验（C# GuildInfo.Experience）
     pub experience: i64,
     /// 行会等级（C# GuildInfo.Level）
@@ -155,6 +158,7 @@ impl Guild {
             gold: 0,
             storage_items: vec![None; 100],
             buffs: Vec::new(),
+            buff_expiries: std::collections::HashMap::new(),
             experience: 0,
             level: 1,
             max_experience: 0,

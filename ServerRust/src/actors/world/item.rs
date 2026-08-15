@@ -1571,6 +1571,8 @@ impl Message<UseItemRequest> for WorldActor {
                                 .ask(crate::actors::social::NpcSetGuildBuffs {
                                     guild_name: guild_name.clone(),
                                     buffs: next,
+                                    // #2571：卷轴激活无时限（C# NewBuff charge=false），不改动时限表
+                                    expiry_updates: Vec::new(),
                                 })
                                 .await;
                             // C# NewBuff 尾部：给在线成员下发 S.GuildBuffList（ActiveBuffs=[新 buff]）
@@ -1679,26 +1681,8 @@ impl Message<UseItemRequest> for WorldActor {
                             {
                                 h.autopot = true;
                             }
-                            let db_heroes: Vec<db::DbHero> = self
-                                .player_heroes
-                                .get(&msg.session_id)
-                                .map(|hs| {
-                                    hs.iter()
-                                        .map(|h| db::DbHero {
-                                            index: h.index,
-                                            name: h.name.clone(),
-                                            level: h.level,
-                                            class: h.class as u8,
-                                            gender: h.gender as u8,
-                                            dead: h.dead,
-                                            sealed: h.sealed,
-                                            autopot: h.autopot,
-                                            experience: h.experience,
-                                            max_experience: h.max_experience,
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default();
+                            let db_heroes: Vec<db::DbHero> =
+                                self.db_heroes_snapshot(msg.session_id);
                             if !db_heroes.is_empty() {
                                 if let Err(e) =
                                     db::save_heroes(&self.db_pool, &player_state.name, &db_heroes)
@@ -2190,26 +2174,7 @@ impl Message<UseItemRequest> for WorldActor {
                     self.broadcast_hero_spawn(msg.session_id).await;
                     self.send_hero_information_packet(msg.session_id).await;
                     // 持久化
-                    let heroes = self
-                        .player_heroes
-                        .get(&msg.session_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    let db_heroes: Vec<db::DbHero> = heroes
-                        .iter()
-                        .map(|h| db::DbHero {
-                            index: h.index,
-                            name: h.name.clone(),
-                            level: h.level,
-                            class: h.class as u8,
-                            gender: h.gender as u8,
-                            dead: h.dead,
-                            sealed: h.sealed,
-                            autopot: h.autopot,
-                            experience: h.experience,
-                            max_experience: h.max_experience,
-                        })
-                        .collect();
+                    let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
                     if let Err(e) =
                         db::save_heroes(&self.db_pool, &player_state.name, &db_heroes).await
                     {

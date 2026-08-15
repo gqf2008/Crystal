@@ -1873,9 +1873,10 @@ pub struct WorldActor {
     pub(crate) fishing_drops: Vec<FishingDropInfo>,
     /// 行会 Buff 定义（id → info，C# Envir.FindGuildBuffInfo）
     pub(crate) guild_buff_infos: HashMap<u32, crate::util::ini::GuildBuffInfo>,
-    /// #2136：行会 Buff 到期 tick（guild → buff_id → expire_tick；C# GuildObject.Process 时限）
+    /// #2136：行会 Buff 到期时间（guild → buff_id → expire_at_ms unix 毫秒；
+    /// C# GuildObject.Process 时限。#2571：改为墙钟毫秒，重启后从 guilds.buffs_json 重建）
     pub(crate) guild_buff_expiries:
-        std::collections::HashMap<String, std::collections::HashMap<u32, u64>>,
+        std::collections::HashMap<String, std::collections::HashMap<u32, i64>>,
     /// 地面掉落物品
     pub(crate) ground_items: Vec<GroundItem>,
     /// #1434：召唤物 slave 归属索引（slave oid → master oid；C# MonsterObject.SlaveList）
@@ -2169,6 +2170,11 @@ pub struct HeroInfo {
     pub experience: u32,
     /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5）
     pub max_experience: u32,
+    /// #2571：持久化的当前 HP（C# HeroInfo.HP；-1 = 未持久化，召唤按满血。
+    /// 出战英雄的实时值在 HeroCombatAI，存档时由 db_heroes_snapshot 合并）
+    pub hp: i32,
+    /// #2571：持久化的当前 MP（C# HeroInfo.MP；-1 = 未持久化）
+    pub mp: i32,
 }
 
 /// 租赁会话状态
@@ -7838,7 +7844,7 @@ impl Actor for WorldActor {
         });
 
         // Load guilds from DB (SocialActor handles guild data now)
-        let _guilds = match db::load_guilds(&args.db_pool).await {
+        let loaded_guilds = match db::load_guilds(&args.db_pool).await {
             Ok(g) => {
                 info!("Loaded {} guilds from database", g.len());
                 g
@@ -7848,6 +7854,16 @@ impl Actor for WorldActor {
                 HashMap::new()
             }
         };
+        // #2571：重建行会 Buff 时限队列（load_guilds 已丢弃离线期间过期的条目；
+        // C# GuildInfo.Load 恢复 BuffList 后 GuildObject.Process 继续计时）
+        let guild_buff_expiries: std::collections::HashMap<
+            String,
+            std::collections::HashMap<u32, i64>,
+        > = loaded_guilds
+            .iter()
+            .filter(|(_, g)| !g.buff_expiries.is_empty())
+            .map(|(name, g)| (name.clone(), g.buff_expiries.clone()))
+            .collect();
 
         // Load game configs from DB (migrated from Server.MirDB)
         let map_infos_list = match db::load_map_infos(&args.db_pool).await {
@@ -8074,6 +8090,27 @@ impl Actor for WorldActor {
                 None
             }
         };
+
+        // #2571：恢复神龙运行态（level/experience 跨重启保留；经验表改读 DB dragon_info.exps）
+        let mut dragon_state: Option<dragon::DragonState> = None;
+        match db::load_dragon_state(&args.db_pool).await {
+            Ok(Some((level, experience, max_level_time))) => {
+                let mut ds = dragon::DragonState::new(0);
+                ds.level = level;
+                ds.experience = experience;
+                ds.max_level_time = max_level_time;
+                if let Some(ref di) = dragon_info {
+                    ds.set_exps_from_db(&di.exps);
+                }
+                info!(
+                    "Restored dragon state from DB: level={} experience={}",
+                    level, experience
+                );
+                dragon_state = Some(ds);
+            }
+            Ok(None) => {}
+            Err(e) => warn!("Failed to load dragon_state from DB: {}", e),
+        }
 
         let game_shop_items = match db::load_game_shop_items(&args.db_pool).await {
             Ok(m) => {
@@ -8472,7 +8509,7 @@ impl Actor for WorldActor {
                 .into_iter()
                 .map(|b| (b.id, b))
                 .collect(),
-            guild_buff_expiries: std::collections::HashMap::new(),
+            guild_buff_expiries,
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             slave_master: std::collections::HashMap::new(),
@@ -8590,7 +8627,7 @@ impl Actor for WorldActor {
             robot_tasks,
             robot_last_check: None,
             robot_script,
-            dragon_state: None,
+            dragon_state,
             conquest_instances,
             siege_structures,
             guild_wars: HashMap::new(),

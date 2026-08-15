@@ -662,6 +662,9 @@ fn hero_mana_percent(mp: i32, max_mp: i32) -> u8 {
 /// 英雄 AI 运行时状态（每个出战英雄一个实例）
 #[derive(Clone)]
 pub struct HeroCombatAI {
+    /// #2571：本 AI 对应的英雄索引（C# player.CurrentHero；存档时按此把实时 HP/MP
+    /// 合并进对应 HeroInfo）
+    pub hero_index: u8,
     /// 英雄当前模拟位置（x）
     pub x: i32,
     /// 英雄当前模拟位置（y）
@@ -704,11 +707,18 @@ pub struct HeroCombatAI {
 
 impl HeroCombatAI {
     /// 以主人状态初始化英雄 AI（主人后方 1 格出生）
-    fn new_for_owner(owner_x: i32, owner_y: i32, hero_max_hp: i32, hero_max_mp: i32) -> Self {
+    fn new_for_owner(
+        hero_index: u8,
+        owner_x: i32,
+        owner_y: i32,
+        hero_max_hp: i32,
+        hero_max_mp: i32,
+    ) -> Self {
         // #1180/#1186：英雄 HP/MP 用自身属性（C# Stats[HP]/Stats[MP]）
         let max_hp = hero_max_hp.max(1);
         let max_mp = hero_max_mp.max(1);
         Self {
+            hero_index,
             x: owner_x,
             y: owner_y.saturating_add(1),
             direction: 0,
@@ -739,6 +749,18 @@ fn hero_autopot_from_heroes(heroes: &[HeroInfo], hero_index: u8) -> bool {
         .find(|h| h.index as u8 == hero_index)
         .map(|h| h.autopot)
         .unwrap_or(false)
+}
+
+/// #2571：重召唤/重启后用存档 HP/MP 初始化（C# HeroInfo.HP/MP）：
+/// 存档值 clamp 到当前上限（防升级后越界）；-1 = 无存档保持满血。
+/// last_sent_* 不动——首个 tick 因与真实值差异自动下发 HeroHealthChanged
+fn restore_persisted_vitals(hero: &HeroInfo, ai: &mut HeroCombatAI) {
+    if hero.hp >= 0 {
+        ai.hp = hero.hp.min(ai.max_hp);
+    }
+    if hero.mp >= 0 {
+        ai.mp = hero.mp.min(ai.max_mp);
+    }
 }
 
 /// C# HumanObject.ProcessRegen：自然回血/回蓝 = (int)(Stats*0.03)+1，最少 1。
@@ -1023,20 +1045,24 @@ impl WorldActor {
                 .or_insert_with(|| {
                     is_new_ai = true;
                     HeroCombatAI::new_for_owner(
+                        snap.hero_index,
                         snap.owner_x,
                         snap.owner_y,
                         snap.hero_max_hp,
                         snap.hero_max_mp,
                     )
                 });
-            // 恢复持久化的 AutoPot 解锁（C# HeroInfo.AutoPot；重召唤/重启不丢）
+            // 恢复持久化状态（C# HeroInfo）：AutoPot 解锁 + #2571 残血/残蓝
             if is_new_ai {
-                let autopot = self
+                if let Some(h) = self
                     .player_heroes
                     .get(&snap.session_id)
-                    .map(|hs| hero_autopot_from_heroes(hs, snap.hero_index))
-                    .unwrap_or(false);
-                ai.autopot_unlocked = autopot;
+                    .and_then(|hs| hs.iter().find(|h| h.index as u8 == snap.hero_index))
+                {
+                    ai.autopot_unlocked = h.autopot;
+                    // last_sent 保持满值：首个 tick 因差异自动下发真实 HP/MP 给客户端
+                    restore_persisted_vitals(h, &mut *ai);
+                }
             }
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
@@ -3253,6 +3279,42 @@ impl WorldActor {
         }
     }
 
+    /// #2571：构建英雄持久化快照（C# HeroInfo.Save 的 HP/MP 段）：
+    /// 出战英雄取 HeroCombatAI 实时 HP/MP（按 hero_index 匹配），
+    /// 未出战/已阵亡用 HeroInfo 上的存档值（dead → 0，对齐 C# 死亡 HP=0）
+    pub(crate) fn db_heroes_snapshot(&self, session_id: u64) -> Vec<db::DbHero> {
+        let Some(heroes) = self.player_heroes.get(&session_id) else {
+            return Vec::new();
+        };
+        let ai = self.hero_ai_states.get(&session_id);
+        heroes
+            .iter()
+            .map(|h| {
+                let (hp, mp) = match ai {
+                    Some(ai) if !h.dead && ai.hero_index == h.index as u8 => {
+                        (ai.hp.max(0), ai.mp.max(0))
+                    }
+                    _ if h.dead => (0, 0),
+                    _ => (h.hp.max(-1), h.mp.max(-1)),
+                };
+                db::DbHero {
+                    index: h.index,
+                    name: h.name.clone(),
+                    level: h.level,
+                    class: h.class as u8,
+                    gender: h.gender as u8,
+                    dead: h.dead,
+                    sealed: h.sealed,
+                    autopot: h.autopot,
+                    experience: h.experience,
+                    max_experience: h.max_experience,
+                    hp,
+                    mp,
+                }
+            })
+            .collect()
+    }
+
     /// 英雄阵亡处理（#1134，对齐 C# HeroObject.Die 的最小实现）：
     /// 标记死亡（DB 持久化）+ 移除英雄对象 + 下发 S.HeroHealthChanged(0) + 系统消息。
     /// 复活复用现有 REVIVEHERO（npc.rs 已按 hero.dead / AI HP<=0 判定）。
@@ -3269,30 +3331,14 @@ impl WorldActor {
         if let Some(hs) = self.player_heroes.get_mut(&session_id) {
             if let Some(h) = hs.iter_mut().find(|h| h.index as u8 == state.hero_index) {
                 h.dead = true;
+                // #2571：C# HeroObject.Die → HP=0（存档形态）
+                h.hp = 0;
+                h.mp = 0;
                 died = true;
             }
         }
         if died {
-            let db_heroes: Vec<db::DbHero> = self
-                .player_heroes
-                .get(&session_id)
-                .map(|hs| {
-                    hs.iter()
-                        .map(|h| db::DbHero {
-                            index: h.index,
-                            name: h.name.clone(),
-                            level: h.level,
-                            class: h.class as u8,
-                            gender: h.gender as u8,
-                            dead: h.dead,
-                            sealed: h.sealed,
-                            autopot: h.autopot,
-                            experience: h.experience,
-                            max_experience: h.max_experience,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on hero death: {}", e);
             }
@@ -3406,26 +3452,7 @@ impl WorldActor {
                     .await;
             }
             // DB 持久化等级
-            let db_heroes: Vec<db::DbHero> = self
-                .player_heroes
-                .get(&session_id)
-                .map(|hs| {
-                    hs.iter()
-                        .map(|h| db::DbHero {
-                            index: h.index,
-                            name: h.name.clone(),
-                            level: h.level,
-                            class: h.class as u8,
-                            gender: h.gender as u8,
-                            dead: h.dead,
-                            sealed: h.sealed,
-                            autopot: h.autopot,
-                            experience: h.experience,
-                            max_experience: h.max_experience,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(session_id);
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on hero level up: {}", e);
             }
@@ -4317,8 +4344,43 @@ mod tests {
     #[test]
     fn hero_autopot_unlocked_defaults_false() {
         // C#：Scroll 13 解锁前自动喝药不可用（HeroInfo.AutoPot 默认 false）
-        let ai = HeroCombatAI::new_for_owner(0, 0, 100, 100);
+        let ai = HeroCombatAI::new_for_owner(1, 0, 0, 100, 100);
         assert!(!ai.autopot_unlocked);
+    }
+
+    /// #2571：重召唤恢复残血/残蓝（C# HeroInfo.HP/MP；-1 = 无存档按满血）
+    #[test]
+    fn hero_restore_persisted_vitals() {
+        let hero = |hp: i32, mp: i32| HeroInfo {
+            index: 1,
+            name: "H".to_string(),
+            level: 10,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+            dead: false,
+            sealed: false,
+            autopot: false,
+            experience: 0,
+            max_experience: 100,
+            hp,
+            mp,
+        };
+        // 残血/残蓝恢复
+        let mut ai = HeroCombatAI::new_for_owner(1, 0, 0, 100, 80);
+        restore_persisted_vitals(&hero(37, 12), &mut ai);
+        assert_eq!(ai.hp, 37);
+        assert_eq!(ai.mp, 12);
+        assert_eq!(ai.last_sent_hp, 100, "last_sent 保持满值以触发下发真实值");
+        // -1 = 无存档 → 保持满血
+        let mut ai = HeroCombatAI::new_for_owner(1, 0, 0, 100, 80);
+        restore_persisted_vitals(&hero(-1, -1), &mut ai);
+        assert_eq!(ai.hp, 100);
+        assert_eq!(ai.mp, 80);
+        // 存档值越界（升级后上限提高前的高值）→ clamp
+        let mut ai = HeroCombatAI::new_for_owner(1, 0, 0, 100, 80);
+        restore_persisted_vitals(&hero(500, 90), &mut ai);
+        assert_eq!(ai.hp, 100);
+        assert_eq!(ai.mp, 80);
     }
 
     #[test]
@@ -4336,6 +4398,8 @@ mod tests {
                 autopot: true,
                 experience: 0,
                 max_experience: 100,
+                hp: -1,
+                mp: -1,
             },
             HeroInfo {
                 index: 2,
@@ -4348,6 +4412,8 @@ mod tests {
                 autopot: false,
                 experience: 0,
                 max_experience: 100,
+                hp: -1,
+                mp: -1,
             },
         ];
         assert!(hero_autopot_from_heroes(&heroes, 1));
@@ -5077,7 +5143,7 @@ mod tests {
     #[test]
     fn hero_apply_potion_shapes() {
         // shape 0：累计持续回复池
-        let mut ai = HeroCombatAI::new_for_owner(0, 0, 100, 100);
+        let mut ai = HeroCombatAI::new_for_owner(1, 0, 0, 100, 100);
         hero_apply_potion(&mut ai, 0, 30, 20);
         assert_eq!(ai.pot_health, 30);
         assert_eq!(ai.pot_mana, 20);

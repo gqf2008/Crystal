@@ -433,6 +433,9 @@ impl Message<NpcSetGuildFlagAppearance> for SocialActor {
 pub struct NpcSetGuildBuffs {
     pub guild_name: String,
     pub buffs: Vec<u32>,
+    /// #2571：随本次变更同步的时限（buff_id → unix 毫秒；None = 移除时限记录）。
+    /// 激活时限 Buff 时置 Some，停用/到期时置 None；空表 = 不改动时限数据
+    pub expiry_updates: Vec<(u32, Option<i64>)>,
 }
 
 impl Message<NpcSetGuildBuffs> for SocialActor {
@@ -441,6 +444,16 @@ impl Message<NpcSetGuildBuffs> for SocialActor {
     async fn handle(&mut self, msg: NpcSetGuildBuffs, _ctx: &mut Context<Self, Self::Reply>) {
         if let Some(g) = self.guilds.get_mut(&msg.guild_name) {
             g.buffs = msg.buffs;
+            for (buff_id, expire_at_ms) in msg.expiry_updates {
+                match expire_at_ms {
+                    Some(ms) => {
+                        g.buff_expiries.insert(buff_id, ms);
+                    }
+                    None => {
+                        g.buff_expiries.remove(&buff_id);
+                    }
+                }
+            }
             self.save_guild_to_db(&msg.guild_name).await;
         }
     }
