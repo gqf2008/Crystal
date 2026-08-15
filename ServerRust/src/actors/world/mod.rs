@@ -7970,7 +7970,7 @@ impl Actor for WorldActor {
                 Vec::new()
             }
         };
-        let conquest_instances = if conquest_infos.is_empty() {
+        let mut conquest_instances = if conquest_infos.is_empty() {
             default_conquest_instances()
         } else {
             conquest_infos
@@ -7984,6 +7984,28 @@ impl Actor for WorldActor {
                     };
                     let mut inst =
                         conquest::ConquestInstance::new(c.index, c.map_index, c.palace_index, game);
+                    // #2568：时间表映射（C# ConquestInfo.StartHour/WarLength/Monday..Sunday/Type）
+                    let war_length = if c.war_length > 0 { c.war_length } else { 60 };
+                    inst.start_hour = c.start_hour.clamp(0, 23);
+                    inst.war_length = war_length;
+                    inst.days = c.days;
+                    inst.conquest_type = c.conquest_type;
+                    inst.war_duration_secs = war_length as i64 * 60;
+                    // #2568：control_points 从 conquest_flags 坐标填充
+                    // （C# ControlPoints = ConquestGuildFlagInfo，InRange 半径 3）
+                    inst.control_points = c
+                        .flags
+                        .iter()
+                        .map(|f| (f.x, f.y, conquest::CONTROL_POINT_RADIUS))
+                        .collect();
+                    inst.control_point_owners =
+                        vec![conquest::ControlPointState::default(); inst.control_points.len()];
+                    // #2568：king_zone 从 DB 王座矩形推导（C# Info.KingLocation/KingSize）
+                    if c.king_size > 0 || c.king_x != 0 || c.king_y != 0 {
+                        let s = c.king_size;
+                        inst.king_zone =
+                            Some((c.king_x - s, c.king_y - s, c.king_x + s, c.king_y + s));
+                    }
                     inst.guards = c
                         .guards
                         .into_iter()
@@ -8044,6 +8066,57 @@ impl Actor for WorldActor {
                         inst.id,
                     ),
                 );
+            }
+        }
+
+        // #2568：加载征服动态态回绑（C# Envir.LoadConquests——Owner/Attacker/金库/税率/结构HP/挂售/租期；
+        // 无行的领地保持默认，旧行 NULL → 默认态）
+        match db::load_conquest_states(&args.db_pool).await {
+            Ok(states) => {
+                let count = states.len();
+                for st in states {
+                    let Some(inst) = conquest_instances.iter_mut().find(|c| c.id == st.index)
+                    else {
+                        continue;
+                    };
+                    inst.owner_guild = st.owner_guild.clone();
+                    inst.attacker_guild = st.attacker_guild.clone();
+                    inst.gold_storage = st.gold_storage;
+                    inst.tax_rate = st.tax_rate;
+                    inst.for_sale = st.for_sale;
+                    inst.sale_price = st.sale_price;
+                    inst.rent_expire_tick = st.rent_expire_tick;
+                    // 结构 HP 回填（按 conquest_id + 结构 index 匹配）
+                    let damage_level_of = |hp: i32, max_hp: i32| {
+                        (((1.0 - hp as f32 / max_hp as f32) * 5.0).clamp(0.0, 4.0)) as u8
+                    };
+                    for s in siege_structures.values_mut() {
+                        if s.conquest_id != st.index {
+                            continue;
+                        }
+                        let entry = match s.structure_type {
+                            conquest::SiegeStructureType::CastleGate => {
+                                st.gates_hp.iter().find(|g| g.index == s.index)
+                            }
+                            conquest::SiegeStructureType::Wall => {
+                                st.walls_hp.iter().find(|w| w.index == s.index)
+                            }
+                            _ => continue,
+                        };
+                        if let Some(e) = entry {
+                            s.hp = e.hp.clamp(0, s.max_hp);
+                            s.damage_level = damage_level_of(s.hp, s.max_hp);
+                        }
+                        // 城门/城墙归属跟随领地 owner（C# Gate/Wall 属于 ConquestObject）
+                        s.owner_guild = st.owner_guild.clone();
+                    }
+                }
+                if count > 0 {
+                    info!("Restored {} conquest states from database", count);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to load conquest_state from DB: {}", e);
             }
         }
 
@@ -12416,6 +12489,63 @@ fn changeflag_colour(r: u8, g: u8, b: u8) -> i32 {
 }
 
 impl WorldActor {
+    /// #2568：持久化单个领地动态态（C# Envir.SaveConquests——NeedSave 时写 .mcd 的 DB 化）。
+    /// 写库成功清除 need_save；失败保留，等下一拍定期保存重试。
+    pub(crate) async fn persist_conquest_state(&mut self, conquest_id: i32) {
+        let Some(pos) = self
+            .conquest_instances
+            .iter()
+            .position(|c| c.id == conquest_id)
+        else {
+            return;
+        };
+        let row = {
+            let inst = &self.conquest_instances[pos];
+            let mut gates_hp = Vec::new();
+            let mut walls_hp = Vec::new();
+            for s in self.siege_structures.values() {
+                if s.conquest_id != conquest_id {
+                    continue;
+                }
+                match s.structure_type {
+                    conquest::SiegeStructureType::CastleGate => {
+                        gates_hp.push(db::ConquestStructureHp {
+                            index: s.index,
+                            hp: s.hp,
+                        });
+                    }
+                    conquest::SiegeStructureType::Wall => {
+                        walls_hp.push(db::ConquestStructureHp {
+                            index: s.index,
+                            hp: s.hp,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            db::ConquestStateRow {
+                index: inst.id,
+                owner_guild: inst.owner_guild.clone(),
+                attacker_guild: inst.attacker_guild.clone(),
+                gold_storage: inst.gold_storage,
+                tax_rate: inst.tax_rate,
+                gates_hp,
+                walls_hp,
+                for_sale: inst.for_sale,
+                sale_price: inst.sale_price,
+                rent_expire_tick: inst.rent_expire_tick,
+            }
+        };
+        match db::save_conquest_state(&self.db_pool, &row).await {
+            Ok(()) => {
+                self.conquest_instances[pos].need_save = false;
+            }
+            Err(e) => {
+                warn!("Failed to save conquest_state {}: {}", conquest_id, e);
+            }
+        }
+    }
+
     /// 领地易主：旗子外观更新广播（C# ConquestGuildFlagInfo.UpdateImage/UpdateColour
     /// → NPCImageUpdate；per-session 定向下发并同步运行时外观）
     async fn broadcast_conquest_flag_updates(&mut self, conquest_id: i32) {

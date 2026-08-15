@@ -1440,10 +1440,7 @@ async fn eval_one_check(
                     .conquest_instances
                     .iter()
                     .find(|c| c.id == index)
-                    .map(|c| {
-                        c.attacker_guild.is_none()
-                            && c.state == crate::actors::world::conquest::WarState::Idle
-                    })
+                    .map(|c| c.attacker_guild.is_none() && c.is_peace())
                     .unwrap_or(false)
             }
         }

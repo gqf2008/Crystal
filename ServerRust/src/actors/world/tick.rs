@@ -5928,15 +5928,49 @@ impl WorldActor {
             }
         }
 
-        // 1) 战争调度：开始/结束（每 tick 检查时间）
+        // 1) 战争调度：开始/结束（每 tick 检查时间；C# ConquestObject.AutoSchedule）
         //    先收集需要广播的消息，避免在借用 instance 时借用 gate_ref
+        let now = chrono::Local::now().naive_local();
         let mut messages: Vec<String> = Vec::new();
         // 易主广播（领地 id, 行会, 地图）——循环结束后统一调用避免借用冲突
         let mut owner_changes: Vec<(i32, String, i32)> = Vec::new();
+        // 城门/城墙归属跟随新 owner（C# Gate/Wall 属于 ConquestObject）
+        let mut struct_owner_updates: Vec<(i32, Option<String>)> = Vec::new();
+        // 需持久化的领地（开战/战终为变更点）
+        let mut persist_ids: Vec<i32> = Vec::new();
+
+        // 战末 Classic 宫殿判定需要玩家快照：仅当有 Classic 战争本 tick 到点结束时收集
+        let need_palace_snapshot = self.conquest_instances.iter().any(|i| {
+            i.state == conquest::WarState::InProgress
+                && i.game == conquest::ConquestGame::Classic
+                && chrono::Utc::now().timestamp() - i.war_start_time >= i.war_duration_secs
+        });
+        let palace_snaps: Vec<(i32, Option<String>)> = if need_palace_snapshot {
+            let mut out = Vec::new();
+            for record in self.players.values() {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if !state.is_dead {
+                        out.push((state.map_index as i32, state.guild_name.clone()));
+                    }
+                }
+            }
+            out
+        } else {
+            Vec::new()
+        };
 
         for instance in &mut self.conquest_instances {
-            let now = chrono::Local::now().naive_local();
             if instance.should_start_war(&now) {
+                // Request 型宣战门槛（C# AutoSchedule：AttackerID == -1 不开战）；
+                // 攻方读 npc_schedule_conquest 注册的宣战行会
+                let attacker = if instance.conquest_type == conquest::CONQUEST_TYPE_REQUEST {
+                    match instance.attacker_guild.clone() {
+                        Some(g) => g,
+                        None => continue, // 无人宣战，保持 Idle 等注册
+                    }
+                } else {
+                    "挑战者们".to_string() // Auto/Forced：无具体宣战方，攻方泛称
+                };
                 // 开战时重建 siege_structure_ids 关联（按 conquest_id 匹配）
                 instance.siege_structure_ids = self
                     .siege_structures
@@ -5944,22 +5978,32 @@ impl WorldActor {
                     .filter(|s| s.conquest_id == instance.id)
                     .map(|s| s.object_id)
                     .collect();
-                // 重置结构 HP
+                // 重置结构 HP + 归属跟随当前 owner
+                let owner = instance.owner_guild.clone();
                 for oid in &instance.siege_structure_ids {
                     if let Some(s) = self.siege_structures.get_mut(oid) {
                         s.hp = s.max_hp;
                         s.damage_level = 0;
+                        s.owner_guild = owner.clone();
                     }
                 }
-                instance.start_war("攻击方");
-                messages.push(format!("⚔️ 攻城战开始了！目标：区域 #{}", instance.id));
+                instance.start_war(&attacker);
+                messages.push(format!(
+                    "⚔️ 攻城战开始了！目标：区域 #{}（进攻方：{}）",
+                    instance.id, attacker
+                ));
+                persist_ids.push(instance.id);
             }
             if instance.state == conquest::WarState::InProgress {
                 let elapsed = chrono::Utc::now().timestamp() - instance.war_start_time;
                 if elapsed >= instance.war_duration_secs {
                     // 易主广播需要旧 owner（C# WinGame 对新旧行会都 UpdatePlayers）
                     let prev_owner = instance.owner_guild.clone();
-                    // 战争结束：根据模式判定胜者
+                    // 战末四模式判定（C# EndWar）：
+                    // - ControlPoints：控制点最多者为胜；
+                    // - KingOfHill：积分最高者（战中已实时易主，此处收口）；
+                    // - Classic：宫殿内唯一行会（战中亦实时判定，此处兜底）；
+                    // - CapturePalace：进殿即时易主（第 3 段），战末无额外判定。
                     let winner = match instance.game {
                         conquest::ConquestGame::ControlPoints => {
                             // 控制点最多者为胜
@@ -5969,31 +6013,44 @@ impl WorldActor {
                                 .max_by_key(|(_, c)| *c)
                                 .and_then(|(g, c)| if c > 0 { Some(g) } else { None })
                         }
-                        _ => instance.end_war(),
+                        conquest::ConquestGame::KingOfHill => instance
+                            .scores
+                            .iter()
+                            .filter(|(_, v)| **v > 0)
+                            .max_by_key(|(_, v)| **v)
+                            .map(|(g, _)| g.clone()),
+                        conquest::ConquestGame::Classic => {
+                            let players: Vec<Option<String>> = palace_snaps
+                                .iter()
+                                .filter(|(m, _)| *m == instance.palace_map)
+                                .map(|(_, g)| g.clone())
+                                .collect();
+                            conquest::classic_unique_guild(&players)
+                        }
+                        conquest::ConquestGame::CapturePalace => None,
                     };
-                    // 结束战争状态（end_war 已在 _ 分支调用；控制点分支需要手动重置）
-                    if instance.game == conquest::ConquestGame::ControlPoints {
-                        instance.state = conquest::WarState::Ended;
-                        if let Some(ref g) = winner {
-                            instance.owner_guild = Some(g.clone());
+                    // 统一收口（state=Ended + winner 经 take_conquest + 战末清宣战方）
+                    instance.end_war_with(winner);
+                    let new_owner = instance.owner_guild.clone();
+                    if new_owner != prev_owner {
+                        // 易主：新 owner 广播 + 旗子/行会名更新
+                        if let Some(ref g) = new_owner {
+                            messages.push(format!(
+                                "🏰 攻城战结束！{} 取得了区域 #{} 的控制权！",
+                                g, instance.id
+                            ));
+                            owner_changes.push((instance.id, g.clone(), instance.map_index));
                         }
-                        instance.attacker_guild = None;
-                    }
-                    if let Some(ref g) = winner {
-                        messages.push(format!(
-                            "🏰 攻城战结束！{} 取得了区域 #{} 的控制权！",
-                            g, instance.id
-                        ));
-                        // 易主广播：旗子外观 + 行会名（新 owner；旧 owner 不同则一并更新）
-                        owner_changes.push((instance.id, g.clone(), instance.map_index));
                         if let Some(ref p) = prev_owner {
-                            if p != g {
-                                owner_changes.push((instance.id, p.clone(), instance.map_index));
-                            }
+                            owner_changes.push((instance.id, p.clone(), instance.map_index));
                         }
+                        struct_owner_updates.push((instance.id, new_owner.clone()));
+                    } else if let Some(ref o) = new_owner {
+                        messages.push(format!("🏰 攻城战结束！{} 守住了区域 #{}", o, instance.id));
                     } else {
                         messages.push(format!("🏰 攻城战结束！区域 #{} 无人占领", instance.id));
                     }
+                    persist_ids.push(instance.id);
                 }
             }
         }
@@ -6005,6 +6062,30 @@ impl WorldActor {
             self.broadcast_conquest_flag_updates(*conquest_id).await;
             self.broadcast_conquest_guild_name_changed(guild, *map_index)
                 .await;
+        }
+        // 城门/城墙归属跟随新 owner
+        for (cid, guild) in &struct_owner_updates {
+            for s in self.siege_structures.values_mut() {
+                if s.conquest_id == *cid {
+                    s.owner_guild = guild.clone();
+                }
+            }
+        }
+        // 变更点持久化（开战/战终）
+        for cid in persist_ids {
+            self.persist_conquest_state(cid).await;
+        }
+        // 定期持久化（C# Envir.SaveConquests 周期写；10 分钟一拍，仅写 need_save 的）
+        if self.tick_count.is_multiple_of(6000) {
+            let dirty: Vec<i32> = self
+                .conquest_instances
+                .iter()
+                .filter(|i| i.need_save)
+                .map(|i| i.id)
+                .collect();
+            for cid in dirty {
+                self.persist_conquest_state(cid).await;
+            }
         }
 
         // 2) 攻城战斗：攻城器（Catapult）每 tick 对最近城墙/城门造成伤害。
@@ -6184,7 +6265,8 @@ impl WorldActor {
             }
         }
 
-        // 3) 控制点占领判定（ControlPoints 模式）：每 60 ticks 检查玩家位置
+        // 3) 四模式占领判定（C# ConquestObject.ScorePoints + PlayerObject.CheckConquest）：
+        //    每 60 ticks 检查玩家位置
         if !self.tick_count.is_multiple_of(60) {
             return;
         }
@@ -6218,75 +6300,141 @@ impl WorldActor {
             }
         }
 
-        // 对每个活跃的控制点模式区域执行占领判定
+        // 各行会已持有的领地（C# TakeConquest 门槛：Guild.Conquest != null && != this 不可夺）
+        let guild_owns: std::collections::HashMap<String, i32> = self
+            .conquest_instances
+            .iter()
+            .filter_map(|i| i.owner_guild.clone().map(|g| (g, i.id)))
+            .collect();
+
+        // 易主事件（战中即时判定：KingOfHill/Classic/CapturePalace）——循环后统一广播
+        let mut flip_events: Vec<(i32, String, i32)> = Vec::new();
+        let mut flip_messages: Vec<String> = Vec::new();
+        let mut flip_persist: Vec<i32> = Vec::new();
+
         for instance in &mut self.conquest_instances {
             if instance.state != conquest::WarState::InProgress {
                 continue;
             }
-            if instance.game != conquest::ConquestGame::ControlPoints {
-                continue;
-            }
-            if instance.control_points.is_empty() {
-                continue;
-            }
-
-            // 快照控制点坐标 + 地图索引，避免后续借用 instance
-            let cps: Vec<(i32, i32, i32)> = instance.control_points.clone();
-            let map_index = instance.map_index;
-
-            // 收集每个 idx 的占领结果，循环结束后统一应用 add_score
-            let mut newly_captured: Vec<String> = Vec::new();
-            for (idx, (cx, cy, r)) in cps.iter().enumerate() {
-                let cp_owner = &mut instance.control_point_owners[idx];
-                // 找在本区域地图上、站在该控制点范围内的公会
-                let mut guilds_here: Vec<String> = Vec::new();
-                for (_sid, px, py, guild, pmidx) in &player_snaps {
-                    if *pmidx != map_index {
+            match instance.game {
+                conquest::ConquestGame::ControlPoints => {
+                    // 控制点拉锯计分（C# ScorePoints ControlPoints）
+                    if instance.control_points.is_empty() {
                         continue;
                     }
-                    if let Some(ref g) = guild {
-                        let on_cp = (px - cx).abs() <= *r && (py - cy).abs() <= *r;
-                        if on_cp && !guilds_here.contains(g) {
-                            guilds_here.push(g.clone());
+                    let cps: Vec<(i32, i32, i32)> = instance.control_points.clone();
+                    let map_index = instance.map_index;
+                    for (idx, (cx, cy, r)) in cps.iter().enumerate() {
+                        // 收集在本区域地图上、站在该控制点范围内的行会（去重）
+                        let mut guilds_here: Vec<String> = Vec::new();
+                        for (_sid, px, py, guild, pmidx) in &player_snaps {
+                            if *pmidx != map_index {
+                                continue;
+                            }
+                            if let Some(ref g) = guild {
+                                let on_cp = (px - cx).abs() <= *r && (py - cy).abs() <= *r;
+                                if on_cp && !guilds_here.contains(g) {
+                                    guilds_here.push(g.clone());
+                                }
+                            }
                         }
+                        instance.tick_control_point(idx, &guilds_here);
                     }
                 }
-
-                if guilds_here.is_empty() {
-                    // 无人站点：进度缓慢回落
-                    if cp_owner.progress > 0 {
-                        cp_owner.progress -= 1;
-                    }
-                    cp_owner.contesting_guild = None;
-                    continue;
-                }
-
-                // 仅一个公会站点 → 增加其占领进度
-                if guilds_here.len() == 1 {
-                    let g = &guilds_here[0];
-                    cp_owner.contesting_guild = Some(g.clone());
-                    if cp_owner.owner_guild.as_deref() == Some(g.as_str()) {
-                        // 已是拥有者，维持
-                    } else {
-                        cp_owner.progress += 1;
-                        if cp_owner.progress >= conquest::MAX_CONTROL_POINTS {
-                            cp_owner.owner_guild = Some(g.clone());
-                            cp_owner.progress = 0;
-                            newly_captured.push(g.clone());
+                conquest::ConquestGame::KingOfHill => {
+                    // 王座圈计分（C# ScorePoints KingOfHill）：
+                    // - 已拥有其它领地的行会不计分（MyGuild.Conquest != this）；
+                    // - Request 型仅宣战行会计分。
+                    let map_index = instance.map_index;
+                    let is_request = instance.conquest_type == conquest::CONQUEST_TYPE_REQUEST;
+                    let attacker = instance.attacker_guild.clone();
+                    let mut zone: Vec<String> = Vec::new();
+                    for (_sid, px, py, guild, pmidx) in &player_snaps {
+                        if *pmidx != map_index {
+                            continue;
+                        }
+                        let Some(ref g) = guild else {
+                            continue;
+                        };
+                        if guild_owns.get(g).is_some_and(|&o| o != instance.id) {
+                            continue;
+                        }
+                        if is_request && attacker.as_deref() != Some(g.as_str()) {
+                            continue;
+                        }
+                        if instance.is_in_king_zone(*px, *py) && !zone.contains(g) {
+                            zone.push(g.clone());
                         }
                     }
-                } else {
-                    // 多公会争夺：进度互相抵消，无人增长
-                    cp_owner.contesting_guild = None;
-                    if cp_owner.progress > 0 {
-                        cp_owner.progress -= 1;
+                    if let Some(g) = instance.tick_king_of_hill(&zone) {
+                        flip_events.push((instance.id, g.clone(), instance.map_index));
+                        flip_messages.push(format!(
+                            "🏰 {} 占领了王座，取得区域 #{} 的控制权！",
+                            g, instance.id
+                        ));
+                        flip_persist.push(instance.id);
+                    }
+                }
+                conquest::ConquestGame::Classic => {
+                    // 宫殿唯一行会判定（C# ScorePoints Classic）
+                    let palace_map = instance.palace_map;
+                    let players: Vec<Option<String>> = player_snaps
+                        .iter()
+                        .filter(|(_, _, _, _, m)| *m == palace_map)
+                        .map(|(_, _, _, g, _)| g.clone())
+                        .collect();
+                    if let Some(g) = instance.tick_classic(&players) {
+                        flip_events.push((instance.id, g.clone(), instance.map_index));
+                        flip_messages.push(format!(
+                            "🏰 {} 占领了宫殿，取得区域 #{} 的控制权！",
+                            g, instance.id
+                        ));
+                        flip_persist.push(instance.id);
+                    }
+                }
+                conquest::ConquestGame::CapturePalace => {
+                    // 进宫殿即时易主（C# PlayerObject.CheckConquest(checkPalace=true)→TakeConquest）
+                    let palace_map = instance.palace_map;
+                    let mut in_palace: Vec<String> = Vec::new();
+                    for (_sid, _px, _py, guild, pmidx) in &player_snaps {
+                        if *pmidx != palace_map {
+                            continue;
+                        }
+                        let Some(ref g) = guild else {
+                            continue;
+                        };
+                        if guild_owns.get(g).is_some_and(|&o| o != instance.id) {
+                            continue;
+                        }
+                        in_palace.push(g.clone());
+                    }
+                    if let Some(g) = instance.tick_capture_palace(&in_palace) {
+                        flip_events.push((instance.id, g.clone(), instance.map_index));
+                        flip_messages
+                            .push(format!("🏰 {} 攻入皇宫，夺取了区域 #{}！", g, instance.id));
+                        flip_persist.push(instance.id);
                     }
                 }
             }
-            // 统一应用积分（避免在借用 control_point_owners 时可变借用 scores）
-            for g in newly_captured {
-                instance.add_score(&g, 1);
+        }
+        for msg in &flip_messages {
+            broadcast_system_message(&self.gate_ref, &self.players, msg);
+        }
+        for (conquest_id, guild, map_index) in &flip_events {
+            self.broadcast_conquest_flag_updates(*conquest_id).await;
+            self.broadcast_conquest_guild_name_changed(guild, *map_index)
+                .await;
+        }
+        // 城门/城墙归属跟随新 owner
+        for (cid, guild, _) in &flip_events {
+            for s in self.siege_structures.values_mut() {
+                if s.conquest_id == *cid {
+                    s.owner_guild = Some(guild.clone());
+                }
             }
+        }
+        for cid in flip_persist {
+            self.persist_conquest_state(cid).await;
         }
     }
 

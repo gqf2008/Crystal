@@ -5,6 +5,11 @@ use chrono::{Datelike, Timelike};
 /// 世界 tick 数/天（100ms/tick × 86400s）
 pub(crate) const TICKS_PER_DAY: u64 = 864_000;
 
+/// 征服类型（C# Shared/Enums.cs ConquestType : byte）
+pub const CONQUEST_TYPE_REQUEST: i32 = 0; // 宣战制：需 npc_schedule_conquest 注册攻方
+pub const CONQUEST_TYPE_AUTO: i32 = 1; // 自动：到点即开战
+pub const CONQUEST_TYPE_FORCED: i32 = 2; // 强制：脚本/GM 触发
+
 /// 征服游戏模式
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConquestGame {
@@ -44,10 +49,14 @@ pub struct ConquestInstance {
     pub war_start_time: i64,
     /// 战争持续时间（秒）
     pub war_duration_secs: i64,
-    /// 每周几开战（0=Sun..6=Sat）
-    pub war_day: u32,
-    /// 开战小时（0-23）
-    pub war_hour: u32,
+    /// 每周开战布尔（Mon..Sun；DB monday..sunday 列序）
+    pub days: [bool; 7],
+    /// 开战小时（0-23；C# ConquestInfo.StartHour）
+    pub start_hour: i32,
+    /// 战争时长（分钟；C# ConquestInfo.WarLength）
+    pub war_length: i32,
+    /// 征服类型（C# ConquestType：0=Request 宣战制 / 1=Auto 自动 / 2=Forced 强制）
+    pub conquest_type: i32,
     /// 各公会积分 (guild_name -> points)
     pub scores: std::collections::HashMap<String, i32>,
     /// 王座区域 (x1, y1, x2, y2) 用于 KingOfHill
@@ -78,6 +87,8 @@ pub struct ConquestInstance {
     pub sale_price: u64,
     /// 领地租期到期 tick（0=未拥有/已到期；C# GTRent > Now 语义）
     pub rent_expire_tick: u64,
+    /// 动态态脏标记（C# GuildInfo.NeedSave：变更置位，持久化时清除）
+    pub need_save: bool,
 }
 
 /// 领地守卫/箭塔落点（对应 C# ConquestArcherInfo / ConquestGuildArcherInfo）
@@ -114,6 +125,8 @@ pub struct ControlPointState {
 
 /// 控制点占领阈值（对应 C# MAX_CONTROL_POINTS = 6）
 pub const MAX_CONTROL_POINTS: i32 = 6;
+/// 控制点判定半径（C# ScorePoints：Functions.InRange(flag, player, 3)）
+pub const CONTROL_POINT_RADIUS: i32 = 3;
 /// KingOfHill 胜利阈值（对应 C# MAX_KING_POINTS = 18）
 pub const MAX_KING_POINTS: i32 = 18;
 
@@ -128,9 +141,11 @@ impl ConquestInstance {
             owner_guild: None,
             attacker_guild: None,
             war_start_time: 0,
-            war_duration_secs: 3600, // 1 hour default
-            war_day: 6,              // Saturday
-            war_hour: 20,            // 8 PM
+            war_duration_secs: 3600,           // 1 hour default
+            days: [true; 7],                   // C# CheckDay 未知星期默认 true
+            start_hour: 20,                    // 8 PM
+            war_length: 60,                    // C# ConquestInfo.WarLength 默认 60 分钟
+            conquest_type: CONQUEST_TYPE_AUTO, // 代码种子自动开战（C# 默认 Request，DB 行会覆盖）
             scores: std::collections::HashMap::new(),
             king_zone: None,
             control_points: Vec::new(),
@@ -146,6 +161,7 @@ impl ConquestInstance {
             for_sale: false,
             sale_price: 0,
             rent_expire_tick: 0,
+            need_save: false,
         }
     }
 
@@ -164,12 +180,26 @@ impl ConquestInstance {
         self
     }
 
-    /// 检查是否到开战时间
+    /// 是否处于非战争状态（C# !WarIsOn；Rust 侧 Idle=未开战/已复位，Ended=战毕待再武装）
+    pub fn is_peace(&self) -> bool {
+        self.state == WarState::Idle || self.state == WarState::Ended
+    }
+
+    /// 检查是否到开战时间（C# ConquestObject.AutoSchedule + CheckDay：
+    /// 星期布尔 + [StartHour, StartHour+WarLength) 分钟窗口内且未在战）
     pub fn should_start_war(&self, now: &chrono::NaiveDateTime) -> bool {
-        self.state == WarState::Idle
-            && now.weekday().num_days_from_sunday() == self.war_day
-            && now.hour() == self.war_hour
-            && now.minute() == 0
+        if !self.is_peace() {
+            return false;
+        }
+        // days 下标 Mon=0..Sun=6（与 DB monday..sunday 列序一致）
+        let day = now.weekday().num_days_from_monday() as usize;
+        if !self.days.get(day).copied().unwrap_or(true) {
+            return false;
+        }
+        let now_min = now.hour() as i32 * 60 + now.minute() as i32;
+        let start = self.start_hour * 60;
+        let finish = start + self.war_length;
+        start <= now_min && now_min < finish
     }
 
     /// 开始战争
@@ -186,20 +216,48 @@ impl ConquestInstance {
         }
     }
 
-    /// 结束战争
+    /// 结束战争（兼容入口：GM @STARTCONQUEST 停止等无玩家上下文的调用点，
+    /// 按当前积分最高者收口；模式化战末判定走 end_war_with）
     pub fn end_war(&mut self) -> Option<String> {
-        self.state = WarState::Ended;
-        // Find winner: highest score
         let winner = self
             .scores
             .iter()
+            .filter(|(_, score)| **score > 0)
             .max_by_key(|(_, score)| **score)
             .map(|(g, _)| g.clone());
-        if let Some(ref guild) = winner {
-            self.owner_guild = Some(guild.clone());
+        self.end_war_with(winner)
+    }
+
+    /// 战末统一收口（C# EndWar + AtWarChanged(false) + TakeConquest）：
+    /// 置 Ended；清宣战方；winner 经 take_conquest 易主（含 Request 门槛与前 owner 转攻方）
+    pub fn end_war_with(&mut self, winner: Option<String>) -> Option<String> {
+        self.state = WarState::Ended;
+        self.attacker_guild = None; // C# AtWarChanged(false)：Request 型战末清 AttackerID
+        if let Some(g) = winner {
+            self.take_conquest(&g);
         }
-        self.attacker_guild = None;
-        winner
+        self.need_save = true;
+        self.owner_guild.clone()
+    }
+
+    /// 易主（C# ConquestObject.TakeConquest 核心）：
+    /// - Request 型仅宣战行会可夺（AttackerID 门槛）；
+    /// - 前 owner 转为下一任宣战方（C# `GuildInfo.AttackerID = tmpPrevious.Guildindex`）；
+    /// - 返回是否实际变更（夺方已持有/门槛不满足 → false）
+    pub fn take_conquest(&mut self, guild: &str) -> bool {
+        if self.conquest_type == CONQUEST_TYPE_REQUEST
+            && self.attacker_guild.as_deref() != Some(guild)
+        {
+            return false;
+        }
+        if self.owner_guild.as_deref() == Some(guild) {
+            return false;
+        }
+        let prev = self.owner_guild.take();
+        self.owner_guild = Some(guild.to_string());
+        self.attacker_guild = prev;
+        self.need_save = true;
+        true
     }
 
     /// 重置领地（C# ConquestObject.Reset：清空占领/攻击方/积分/控制点，恢复 Idle）
@@ -214,6 +272,7 @@ impl ConquestInstance {
             cp.progress = 0;
             cp.contesting_guild = None;
         }
+        self.need_save = true;
     }
 
     /// 给指定公会加积分
@@ -267,6 +326,137 @@ impl ConquestInstance {
             }
         }
         out
+    }
+
+    /// ControlPoints 单点每跳拉锯判定（C# ScorePoints ControlPoints 分支的简化）：
+    /// guilds_here 为该点范围内行会去重列表——
+    /// - 空：进度回落；
+    /// - 单行会：进度 +1，满 MAX_CONTROL_POINTS(6) 完成占领并计 1 分；
+    /// - 多行会：进度互相抵消回落。
+    /// 返回本跳完成占领的行会（分数已在内部累加）。
+    pub fn tick_control_point(&mut self, idx: usize, guilds_here: &[String]) -> Option<String> {
+        let captured = {
+            let cp = self.control_point_owners.get_mut(idx)?;
+            if guilds_here.is_empty() {
+                if cp.progress > 0 {
+                    cp.progress -= 1;
+                }
+                cp.contesting_guild = None;
+                return None;
+            }
+            if guilds_here.len() == 1 {
+                let g = &guilds_here[0];
+                cp.contesting_guild = Some(g.clone());
+                if cp.owner_guild.as_deref() == Some(g.as_str()) {
+                    return None; // 已是拥有者，维持
+                }
+                cp.progress += 1;
+                if cp.progress >= MAX_CONTROL_POINTS {
+                    cp.owner_guild = Some(g.clone());
+                    cp.progress = 0;
+                    Some(g.clone())
+                } else {
+                    None
+                }
+            } else {
+                // 多行会争夺：进度互相抵消，无人增长
+                cp.contesting_guild = None;
+                if cp.progress > 0 {
+                    cp.progress -= 1;
+                }
+                None
+            }
+        };
+        if let Some(ref g) = captured {
+            self.add_score(g, 1);
+        }
+        captured
+    }
+
+    /// KingOfHill 每跳计分（C# ScorePoints KingOfHill：圈内行会每跳 +1 封顶
+    /// MAX_KING_POINTS(18)，圈外/被压制行会 -1；领先者 != 当前 owner → 即时易主）。
+    /// 返回本跳易主的新 owner（战争继续，可反复易主）。
+    pub fn tick_king_of_hill(&mut self, guilds_in_zone: &[String]) -> Option<String> {
+        if guilds_in_zone.is_empty() {
+            return None; // C#：圈内无人时不衰减
+        }
+        for g in guilds_in_zone {
+            let e = self.scores.entry(g.clone()).or_insert(0);
+            if *e < MAX_KING_POINTS {
+                *e += 1;
+            }
+        }
+        for (g, pts) in self.scores.iter_mut() {
+            if !guilds_in_zone.iter().any(|z| z == g) && *pts > 0 {
+                *pts -= 1;
+            }
+        }
+        let leader = self
+            .scores
+            .iter()
+            .filter(|(_, v)| **v > 0)
+            .max_by_key(|(_, v)| **v)
+            .map(|(g, _)| g.clone())?;
+        if self.owner_guild.as_deref() == Some(leader.as_str()) {
+            return None;
+        }
+        if self.take_conquest(&leader) {
+            Some(leader)
+        } else {
+            None
+        }
+    }
+
+    /// Classic 每跳判定（C# ScorePoints Classic：宫殿内全部玩家属于同一行会 → 即时易主）。
+    /// 返回本跳易主的新 owner。
+    pub fn tick_classic(&mut self, players_in_palace: &[Option<String>]) -> Option<String> {
+        let guild = classic_unique_guild(players_in_palace)?;
+        if self.owner_guild.as_deref() == Some(guild.as_str()) {
+            return None;
+        }
+        if self.take_conquest(&guild) {
+            Some(guild)
+        } else {
+            None
+        }
+    }
+
+    /// CapturePalace 进殿即时易主（C# PlayerObject.CheckConquest(checkPalace=true) →
+    /// TakeConquest(player)：玩家进宫殿图触发；CapturePalace 分支随后 EndWar）。
+    /// 返回易主的新 owner（战争立即结束）。
+    pub fn tick_capture_palace(&mut self, player_guilds_in_palace: &[String]) -> Option<String> {
+        for g in player_guilds_in_palace {
+            if self.take_conquest(g) {
+                // C# TakeConquest CapturePalace 分支：拿下宫殿即战争结束
+                self.state = WarState::Ended;
+                self.attacker_guild = None;
+                return Some(g.clone());
+            }
+        }
+        None
+    }
+}
+
+/// 宫殿内玩家的唯一行会判定（C# ScorePoints Classic 的 guildCounter 逻辑：
+/// 同行会多玩家只算 1 个单位，无行会玩家各算 1 个单位；counter==1 才有效）
+pub fn classic_unique_guild(players_in_palace: &[Option<String>]) -> Option<String> {
+    let mut taking: Option<String> = None;
+    let mut counter = 0usize;
+    for g in players_in_palace {
+        match g {
+            Some(name) => {
+                if taking.as_deref() != Some(name.as_str()) {
+                    counter += 1;
+                    taking = Some(name.clone());
+                }
+            }
+            None => counter += 1,
+        }
+    }
+    if counter == 1 {
+        taking
+    } else {
+        None
     }
 }
 
@@ -597,6 +787,197 @@ mod tests {
             conquest_flag_appearance(Some((1200, 0xFFFF0000u32 as i32))),
             (1200, 0xFFFF0000u32 as i32)
         );
+    }
+
+    #[test]
+    fn test_should_start_war_schedule() {
+        // #2568：C# AutoSchedule——星期布尔 + [StartHour, StartHour+WarLength) 分钟窗口
+        let mut inst = ConquestInstance::new(1, 0, 0, ConquestGame::Classic);
+        // 仅周一、20:00 开战、打 60 分钟
+        inst.days = [true, false, false, false, false, false, false];
+        inst.start_hour = 20;
+        inst.war_length = 60;
+        let at = |y: i32, m: u32, d: u32, h: u32, mi: u32| {
+            chrono::NaiveDate::from_ymd_opt(y, m, d)
+                .unwrap()
+                .and_hms_opt(h, mi, 0)
+                .unwrap()
+        };
+        // 2026-08-10 是周一；7 天 × 窗口内外
+        assert!(
+            inst.should_start_war(&at(2026, 8, 10, 20, 0)),
+            "周一开战时刻"
+        );
+        assert!(inst.should_start_war(&at(2026, 8, 10, 20, 59)), "窗口内");
+        assert!(
+            !inst.should_start_war(&at(2026, 8, 10, 21, 0)),
+            "窗口结束（左闭右开）"
+        );
+        assert!(
+            !inst.should_start_war(&at(2026, 8, 10, 19, 59)),
+            "窗口未开始"
+        );
+        for (d, name) in [
+            (11, "周二"),
+            (12, "周三"),
+            (13, "周四"),
+            (14, "周五"),
+            (15, "周六"),
+            (16, "周日"),
+        ] {
+            assert!(
+                !inst.should_start_war(&at(2026, 8, d, 20, 0)),
+                "{name} 不开战"
+            );
+        }
+        // 战争进行中即使到点也不重复开战
+        inst.start_war("攻方");
+        assert!(!inst.should_start_war(&at(2026, 8, 10, 20, 30)));
+        // 战毕（Ended）→ 同窗口可再开战（C# !WarIsOn；每周循环不断链）
+        inst.end_war();
+        assert_eq!(inst.state, WarState::Ended);
+        assert!(inst.should_start_war(&at(2026, 8, 10, 20, 45)));
+    }
+
+    #[test]
+    fn test_control_point_capture_and_tally() {
+        // #2568：control_points 填充后的拉锯计分（C# ScorePoints ControlPoints）
+        let mut inst = ConquestInstance::new(1, 0, 0, ConquestGame::ControlPoints);
+        // 从 conquest_flags 坐标填充（world 启动同款：半径 3）
+        inst.control_points = vec![(10, 10, 3), (50, 50, 3)];
+        inst.control_point_owners
+            .resize(inst.control_points.len(), ControlPointState::default());
+        inst.start_war("攻方");
+        // 攻方站 0 号点：6 跳完成占领
+        let attackers = vec!["攻方".to_string()];
+        let mut captured = None;
+        for _ in 0..MAX_CONTROL_POINTS {
+            captured = inst.tick_control_point(0, &attackers);
+        }
+        assert_eq!(captured.as_deref(), Some("攻方"), "满 6 跳占领");
+        assert_eq!(inst.scores.get("攻方"), Some(&1), "占领计 1 分");
+        assert_eq!(
+            inst.control_point_owners[0].owner_guild.as_deref(),
+            Some("攻方")
+        );
+        // 多行会争夺：进度回落，不产生占领
+        let contested = vec!["攻方".to_string(), "守方".to_string()];
+        inst.control_point_owners[1].progress = 3;
+        assert!(inst.tick_control_point(1, &contested).is_none());
+        assert_eq!(inst.control_point_owners[1].progress, 2, "争夺回落");
+        // 战末 tally：0 号点归攻方
+        let tally = inst.tally_control_points();
+        assert_eq!(tally.get("攻方"), Some(&1));
+        inst.end_war_with(Some("攻方".to_string()));
+        assert_eq!(inst.owner_guild.as_deref(), Some("攻方"));
+        assert_eq!(inst.state, WarState::Ended);
+    }
+
+    #[test]
+    fn test_king_of_hill_flip() {
+        // #2568：KingOfHill 王座圈计分（C# ScorePoints KingOfHill：18 分封顶、领先即易主）
+        let mut inst = ConquestInstance::new(1, 0, 0, ConquestGame::KingOfHill);
+        inst.king_zone = Some((40, 40, 60, 60));
+        assert!(inst.is_in_king_zone(50, 50));
+        assert!(!inst.is_in_king_zone(39, 50));
+        inst.owner_guild = Some("守方".to_string());
+        inst.start_war("攻方");
+        // 攻方持续占圈：每跳 +1，分数压过守方后即时易主（易主后攻方即 owner，后续跳不再变更）
+        let zone = vec!["攻方".to_string()];
+        let mut flipped = None;
+        for _ in 0..5 {
+            if let Some(g) = inst.tick_king_of_hill(&zone) {
+                flipped = Some(g);
+                break;
+            }
+        }
+        assert_eq!(flipped.as_deref(), Some("攻方"), "领先者即时易主");
+        assert_eq!(inst.owner_guild.as_deref(), Some("攻方"));
+        assert_eq!(
+            inst.attacker_guild.as_deref(),
+            Some("守方"),
+            "前 owner 转宣战方"
+        );
+        // 攻方已 5 分（守方 0 起步），封顶 18
+        assert!(inst.scores.get("攻方").copied().unwrap_or(0) <= MAX_KING_POINTS);
+        // 圈内无人：不衰减、不变更
+        assert!(inst.tick_king_of_hill(&[]).is_none());
+    }
+
+    #[test]
+    fn test_classic_unique_guild_in_palace() {
+        // #2568：Classic 宫殿唯一行会（C# ScorePoints Classic：guildCounter==1）
+        let mut inst = ConquestInstance::new(1, 0, 2, ConquestGame::Classic);
+        inst.owner_guild = Some("守方".to_string());
+        inst.start_war("攻方");
+        // 两名同行会玩家在宫殿 → 唯一行会 → 易主
+        let players = vec![Some("攻方".to_string()), Some("攻方".to_string())];
+        assert_eq!(inst.tick_classic(&players).as_deref(), Some("攻方"));
+        assert_eq!(inst.owner_guild.as_deref(), Some("攻方"));
+        // 两行会同在 → 不易主
+        let mixed = vec![Some("甲".to_string()), Some("乙".to_string())];
+        assert!(inst.tick_classic(&mixed).is_none());
+        // 无行会玩家算独立单位 → 不易主
+        let with_unguilded = vec![Some("攻方".to_string()), None];
+        assert!(inst.tick_classic(&with_unguilded).is_none());
+        // 空宫殿 → 不易主
+        assert!(inst.tick_classic(&[]).is_none());
+        // free fn：无行会玩家独占 → counter==1 但无行会可判
+        assert_eq!(
+            classic_unique_guild(&[None, None]),
+            None,
+            "两名无行会 counter=2"
+        );
+    }
+
+    #[test]
+    fn test_capture_palace_immediate_flip() {
+        // #2568：CapturePalace 进殿即时易主（C# PlayerObject.TakeConquest）
+        let mut inst = ConquestInstance::new(1, 0, 2, ConquestGame::CapturePalace);
+        inst.owner_guild = Some("守方".to_string());
+        inst.start_war("攻方");
+        assert_eq!(inst.state, WarState::InProgress);
+        // 攻方玩家进宫殿 → 立即易主并结束战争
+        let in_palace = vec!["攻方".to_string()];
+        assert_eq!(
+            inst.tick_capture_palace(&in_palace).as_deref(),
+            Some("攻方")
+        );
+        assert_eq!(inst.owner_guild.as_deref(), Some("攻方"));
+        assert_eq!(inst.state, WarState::Ended, "CapturePalace 拿宫殿即战终");
+        assert!(inst.attacker_guild.is_none());
+        assert!(inst.need_save, "易主置脏标记");
+    }
+
+    #[test]
+    fn test_request_type_attacker_gate() {
+        // #2568：C# AutoSchedule Request 型门槛——非宣战行会不能夺城
+        let mut inst = ConquestInstance::new(1, 0, 2, ConquestGame::CapturePalace);
+        inst.conquest_type = CONQUEST_TYPE_REQUEST;
+        inst.attacker_guild = Some("宣战方".to_string());
+        inst.state = WarState::InProgress;
+        // 未宣战行会进殿：不夺城
+        assert!(inst.tick_capture_palace(&["路过的".to_string()]).is_none());
+        assert_eq!(inst.owner_guild, None);
+        // 宣战行会进殿：夺城
+        assert_eq!(
+            inst.tick_capture_palace(&["宣战方".to_string()]).as_deref(),
+            Some("宣战方")
+        );
+        assert_eq!(inst.owner_guild.as_deref(), Some("宣战方"));
+    }
+
+    #[test]
+    fn test_take_conquest_prev_owner_becomes_attacker() {
+        // C# TakeConquest：GuildInfo.AttackerID = tmpPrevious.Guildindex（前 owner 转攻方）
+        let mut inst = ConquestInstance::new(1, 0, 0, ConquestGame::ControlPoints);
+        inst.owner_guild = Some("旧主".to_string());
+        assert!(inst.take_conquest("新王"));
+        assert_eq!(inst.owner_guild.as_deref(), Some("新王"));
+        assert_eq!(inst.attacker_guild.as_deref(), Some("旧主"));
+        assert!(inst.need_save);
+        // 夺方已持有 → 无变更
+        assert!(!inst.take_conquest("新王"));
     }
 }
 
