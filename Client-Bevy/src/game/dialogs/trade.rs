@@ -29,12 +29,12 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::controls::{spawn_item_cell, ItemCellData};
 use crate::ui::outlined_text::{outline_on, OutlineShadow};
 use crate::ui::sprite_ui::{
     spawn_ui_text_anchored, ui_button_system, ui_image, ButtonFrames, UiButton, UiFont,
     UiImageCache,
 };
-use crate::ui::controls::{spawn_item_cell, ItemCellData};
 
 /// 交易物品（槽内显示用）
 #[derive(Debug, Clone)]
@@ -212,10 +212,7 @@ pub struct TradePlugin;
 impl Plugin for TradePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TradeState>();
-        app.add_systems(
-            Update,
-            trade_server_events.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, trade_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(OnEnter(AppState::Game), spawn_trade);
         app.add_systems(OnExit(AppState::Game), cleanup_trade);
         app.add_systems(
@@ -255,15 +252,27 @@ fn spawn_trade(
     // ---- 我方窗（TradeDialog）----
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 389) {
         let e = crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, TRADE_X, TRADE_Y, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Trade), TradeWidget, Visibility::Hidden));
+        commands.entity(e).insert((
+            DialogRoot(DialogKind::Trade),
+            TradeWidget,
+            Visibility::Hidden,
+        ));
     }
     // 确认按钮 Title[520-522] @(135,120)
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 520, 521, 522,
-        TRADE_X + CONFIRM_X, TRADE_Y + CONFIRM_Y, 7.0, CONFIRM_W, CONFIRM_H,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        520,
+        521,
+        522,
+        TRADE_X + CONFIRM_X,
+        TRADE_Y + CONFIRM_Y,
+        7.0,
+        CONFIRM_W,
+        CONFIRM_H,
     ) {
         commands.entity(e).insert((
             TradeConfirmBtn,
@@ -274,9 +283,19 @@ fn spawn_trade(
     }
     // 关闭按钮 @(W-23, 3)
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        TRADE_X + CLOSE_DX, TRADE_Y + 3.0, 7.0, 24.0, 21.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        TRADE_X + CLOSE_DX,
+        TRADE_Y + 3.0,
+        7.0,
+        24.0,
+        21.0,
     ) {
         commands.entity(e).insert((
             TradeClose,
@@ -287,9 +306,15 @@ fn spawn_trade(
     }
     // 名字标签（框内居中，MirLabel 默认白字描边）
     let name = spawn_ui_text_anchored(
-        &mut commands, &font, "", Anchor::CENTER,
-        TRADE_X + NAME_X + NAME_W / 2.0, TRADE_Y + NAME_Y + NAME_H / 2.0,
-        12.0, Color::WHITE, 8.0,
+        &mut commands,
+        &font,
+        "",
+        Anchor::CENTER,
+        TRADE_X + NAME_X + NAME_W / 2.0,
+        TRADE_Y + NAME_Y + NAME_H / 2.0,
+        12.0,
+        Color::WHITE,
+        8.0,
     );
     commands.entity(name).insert((
         TradeLabel(TradeText::MyName),
@@ -297,12 +322,26 @@ fn spawn_trade(
         TradeWidget,
         Visibility::Hidden,
     ));
-    outline_on(&mut commands, name, "", font.clone(), 12.0, Anchor::CENTER, false);
+    outline_on(
+        &mut commands,
+        name,
+        "",
+        font.clone(),
+        12.0,
+        Anchor::CENTER,
+        false,
+    );
     // 金币标签（框内居中；可点击开数量框）
     let gold = spawn_ui_text_anchored(
-        &mut commands, &font, "", Anchor::CENTER,
-        TRADE_X + GOLD_X + GOLD_W / 2.0, TRADE_Y + GOLD_Y + GOLD_H / 2.0,
-        12.0, Color::WHITE, 8.0,
+        &mut commands,
+        &font,
+        "",
+        Anchor::CENTER,
+        TRADE_X + GOLD_X + GOLD_W / 2.0,
+        TRADE_Y + GOLD_Y + GOLD_H / 2.0,
+        12.0,
+        Color::WHITE,
+        8.0,
     );
     commands.entity(gold).insert((
         TradeLabel(TradeText::MyGold),
@@ -311,13 +350,28 @@ fn spawn_trade(
         TradeWidget,
         Visibility::Hidden,
     ));
-    outline_on(&mut commands, gold, "", font.clone(), 12.0, Anchor::CENTER, false);
+    outline_on(
+        &mut commands,
+        gold,
+        "",
+        font.clone(),
+        12.0,
+        Anchor::CENTER,
+        false,
+    );
     // 我方 5x2 格（列主序）
     for i in 0..TRADE_SLOTS {
         let (sx, sy) = trade_slot_pos(i);
         let cell = spawn_item_cell(
-            &mut commands, &mut images, &font,
-            TRADE_X + sx, TRADE_Y + sy, 6.3, CELL_W, CELL_H, i,
+            &mut commands,
+            &mut images,
+            &font,
+            TRADE_X + sx,
+            TRADE_Y + sy,
+            6.3,
+            CELL_W,
+            CELL_H,
+            i,
         );
         commands.entity(cell).insert((
             TradeSlot(0, i),
@@ -330,14 +384,22 @@ fn spawn_trade(
     // ---- 对方窗（GuestTradeDialog）----
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 390) {
         let e = crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, GUEST_X, GUEST_Y, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::GuestTrade), TradeWidget, Visibility::Hidden));
+        commands.entity(e).insert((
+            DialogRoot(DialogKind::GuestTrade),
+            TradeWidget,
+            Visibility::Hidden,
+        ));
     }
     let gname = spawn_ui_text_anchored(
-        &mut commands, &font, "", Anchor::CENTER,
-        GUEST_X + GUEST_NAME_X + TRADE_W / 2.0, GUEST_Y + NAME_Y + NAME_H / 2.0,
-        12.0, Color::WHITE, 8.0,
+        &mut commands,
+        &font,
+        "",
+        Anchor::CENTER,
+        GUEST_X + GUEST_NAME_X + TRADE_W / 2.0,
+        GUEST_Y + NAME_Y + NAME_H / 2.0,
+        12.0,
+        Color::WHITE,
+        8.0,
     );
     commands.entity(gname).insert((
         TradeLabel(TradeText::GuestName),
@@ -345,11 +407,25 @@ fn spawn_trade(
         TradeWidget,
         Visibility::Hidden,
     ));
-    outline_on(&mut commands, gname, "", font.clone(), 12.0, Anchor::CENTER, false);
+    outline_on(
+        &mut commands,
+        gname,
+        "",
+        font.clone(),
+        12.0,
+        Anchor::CENTER,
+        false,
+    );
     let ggold = spawn_ui_text_anchored(
-        &mut commands, &font, "", Anchor::CENTER,
-        GUEST_X + GOLD_X + GOLD_W / 2.0, GUEST_Y + GOLD_Y + GOLD_H / 2.0,
-        12.0, Color::WHITE, 8.0,
+        &mut commands,
+        &font,
+        "",
+        Anchor::CENTER,
+        GUEST_X + GOLD_X + GOLD_W / 2.0,
+        GUEST_Y + GOLD_Y + GOLD_H / 2.0,
+        12.0,
+        Color::WHITE,
+        8.0,
     );
     commands.entity(ggold).insert((
         TradeLabel(TradeText::GuestGold),
@@ -357,12 +433,27 @@ fn spawn_trade(
         TradeWidget,
         Visibility::Hidden,
     ));
-    outline_on(&mut commands, ggold, "", font.clone(), 12.0, Anchor::CENTER, false);
+    outline_on(
+        &mut commands,
+        ggold,
+        "",
+        font.clone(),
+        12.0,
+        Anchor::CENTER,
+        false,
+    );
     for i in 0..TRADE_SLOTS {
         let (sx, sy) = trade_slot_pos(i);
         let cell = spawn_item_cell(
-            &mut commands, &mut images, &font,
-            GUEST_X + sx, GUEST_Y + sy, 6.3, CELL_W, CELL_H, i,
+            &mut commands,
+            &mut images,
+            &font,
+            GUEST_X + sx,
+            GUEST_Y + sy,
+            6.3,
+            CELL_W,
+            CELL_H,
+            i,
         );
         commands.entity(cell).insert((
             TradeSlot(1, i),
@@ -374,30 +465,71 @@ fn spawn_trade(
 
     // ---- 邀请框（MirMessageBox YesNo；模态不可拖 → 无 DialogRoot）----
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, INVITE_X, INVITE_Y, 9.5, 1.0);
+        let e =
+            crate::ui::sprite_ui::spawn_ui_sprite(&mut commands, h, INVITE_X, INVITE_Y, 9.5, 1.0);
         commands
             .entity(e)
             .insert((TradeInviteWidget, Visibility::Hidden));
     }
     let it = crate::ui::sprite_ui::spawn_ui_text(
-        &mut commands, &font, "",
-        INVITE_X + 35.0, INVITE_Y + 35.0, 12.0, Color::WHITE, 9.6,
+        &mut commands,
+        &font,
+        "",
+        INVITE_X + 35.0,
+        INVITE_Y + 35.0,
+        12.0,
+        Color::WHITE,
+        9.6,
     );
-    commands.entity(it).insert((TradeInviteText, TradeInviteWidget, Visibility::Hidden));
-    outline_on(&mut commands, it, "", font.clone(), 12.0, Anchor::TOP_LEFT, false);
+    commands
+        .entity(it)
+        .insert((TradeInviteText, TradeInviteWidget, Visibility::Hidden));
+    outline_on(
+        &mut commands,
+        it,
+        "",
+        font.clone(),
+        12.0,
+        Anchor::TOP_LEFT,
+        false,
+    );
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        INVITE_X + 260.0, INVITE_Y + 157.0, 9.7, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        INVITE_X + 260.0,
+        INVITE_Y + 157.0,
+        9.7,
+        76.0,
+        25.0,
     ) {
-        commands.entity(e).insert((TradeInviteYes, TradeInviteWidget, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((TradeInviteYes, TradeInviteWidget, Visibility::Hidden));
     }
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        INVITE_X + 360.0, INVITE_Y + 157.0, 9.7, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
+        INVITE_X + 360.0,
+        INVITE_Y + 157.0,
+        9.7,
+        76.0,
+        25.0,
     ) {
-        commands.entity(e).insert((TradeInviteNo, TradeInviteWidget, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((TradeInviteNo, TradeInviteWidget, Visibility::Hidden));
     }
 }
 
@@ -459,7 +591,11 @@ fn trade_ui_system(
     mut labels: Query<(&mut Text2d, &TradeLabel, Option<&Children>)>,
     mut shadows: Query<
         &mut Text2d,
-        (With<OutlineShadow>, Without<TradeLabel>, Without<TradeInviteText>),
+        (
+            With<OutlineShadow>,
+            Without<TradeLabel>,
+            Without<TradeInviteText>,
+        ),
     >,
     mut invite_texts: Query<
         (&mut Text2d, &TradeInviteText, Option<&Children>),
@@ -602,9 +738,7 @@ fn trade_action_system(
     for r in result.read() {
         if let Some(n) = r.0 {
             if trade.visible && n > 0 {
-                net.send_packet(&mir2_shared::packets::client::trade::TradeGold {
-                    amount: n,
-                });
+                net.send_packet(&mir2_shared::packets::client::trade::TradeGold { amount: n });
                 trade.my_gold += n as u64;
                 tracing::info!("💰 交易金币: +{} (累计 {})", n, trade.my_gold);
             }
@@ -631,7 +765,9 @@ fn trade_action_system(
         }
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
@@ -644,7 +780,13 @@ fn trade_action_system(
         let x = tf.translation.x;
         let y = -tf.translation.y;
         if cursor.x >= x && cursor.x <= x + CELL_W && cursor.y >= y && cursor.y <= y + CELL_H {
-            if !trade.my_locked && trade.my_items.get(slot.1).and_then(|s| s.as_ref()).is_some() {
+            if !trade.my_locked
+                && trade
+                    .my_items
+                    .get(slot.1)
+                    .and_then(|s| s.as_ref())
+                    .is_some()
+            {
                 net.send_packet(&mir2_shared::packets::client::trade::RetrieveTradeItem {
                     from: slot.1 as i32,
                     to: 0,
@@ -721,9 +863,7 @@ fn trade_invite_system(
         }
     }
     if let Some(a) = accept {
-        net.send_packet(&mir2_shared::packets::client::trade::TradeReply {
-            accept_invite: a,
-        });
+        net.send_packet(&mir2_shared::packets::client::trade::TradeReply { accept_invite: a });
         tracing::info!("🤝 交易邀请回复: accept={}", a);
         if a {
             // 本地立即开窗（服务器随后发 TradeRequest open 包）
@@ -781,7 +921,12 @@ fn trade_server_events(
                     trade_reset(&mut trade);
                 }
             }
-            ServerEvent::TradeItemUpdate { uid, grid, count, is_add } => {
+            ServerEvent::TradeItemUpdate {
+                uid,
+                grid,
+                count,
+                is_add,
+            } => {
                 // C# GameScene.TradeItem（:6327-6332）：对方变动物品 → 我方解锁
                 trade.my_locked = false;
                 if *is_add {
@@ -799,7 +944,9 @@ fn trade_server_events(
                     if let Some(slot) = trade.their_items.get_mut(*grid) {
                         *slot = None;
                     }
-                    trade.their_items.retain(|s| s.as_ref().map(|i| i.uid) != Some(*uid));
+                    trade
+                        .their_items
+                        .retain(|s| s.as_ref().map(|i| i.uid) != Some(*uid));
                 }
             }
             ServerEvent::TradeDeposit { from, to, success } => {

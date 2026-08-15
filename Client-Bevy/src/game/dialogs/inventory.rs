@@ -10,12 +10,12 @@
 
 use bevy::prelude::*;
 
+use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::character;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::chat::{ChatChannel, ChatState};
-use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
 use crate::game::hud::HudState;
+use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -24,8 +24,7 @@ use mir2_shared::enums::MirGridType;
 
 use crate::ui::controls::{spawn_item_cell, ItemCellData};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont,
-    UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
 
 /// 背包物品条目（网络 UserInformation 写入）
@@ -122,13 +121,13 @@ impl InvItem {
                     return None;
                 }
             }
-            ItemType::Amulet => 9,   // Pendant
-            ItemType::Boots => 8,    // Shoes
-            ItemType::Mount => 10,   // Mount
+            ItemType::Amulet => 9, // Pendant
+            ItemType::Boots => 8,  // Shoes
+            ItemType::Mount => 10, // Mount
             // #1136：C# 补槽（SharedRust ItemType：Torch=15 / Belt=12 / Stone=14）
-            ItemType::Torch => 11,   // Torch
-            ItemType::Belt => 12,    // Belt
-            ItemType::Stone => 13,   // Stone
+            ItemType::Torch => 11, // Torch
+            ItemType::Belt => 12,  // Belt
+            ItemType::Stone => 13, // Stone
             _ => return None,
         };
         Some(s)
@@ -156,7 +155,6 @@ impl InvItem {
                 | Ok(ItemType::Fish)
         )
     }
-
 }
 
 /// 背包最大格数（C# Grid 8x10=80，扩容上限；超出部分不渲染）
@@ -181,7 +179,6 @@ pub struct InventoryState {
 impl InventoryState {
     /// 按服务端 ResizeInventory 调整格数（C# Array.Resize：截断/补空，上限 MAX_INV_SLOTS）
     pub fn resize(&mut self, size: usize) {
-
         let size = size.min(MAX_INV_SLOTS);
         if size < self.items.len() {
             self.items.truncate(size);
@@ -290,7 +287,12 @@ fn quest_inventory_events(
     for ev in events.read() {
         match ev {
             ServerEvent::QuestItemGained { item } => {
-                if let Some(slot) = hud.inventory.quest_inventory.iter_mut().find(|s| s.is_none()) {
+                if let Some(slot) = hud
+                    .inventory
+                    .quest_inventory
+                    .iter_mut()
+                    .find(|s| s.is_none())
+                {
                     *slot = Some(item.clone());
                 } else {
                     hud.inventory.quest_inventory.push(Some(item.clone()));
@@ -438,19 +440,43 @@ fn spawn_inventory_dialog(
 
     // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)，Size 72x23）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 483, 484, 485,
-        DIALOG_X + 235.0, DIALOG_Y + 5.0, 7.0, ADD_BTN_W, ADD_BTN_H,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        483,
+        484,
+        485,
+        DIALOG_X + 235.0,
+        DIALOG_Y + 5.0,
+        7.0,
+        ADD_BTN_W,
+        ADD_BTN_H,
     ) {
-        commands.entity(e).insert((InvAddBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
+        commands
+            .entity(e)
+            .insert((InvAddBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
     }
     // 删除模式按钮（C# InventoryDialog DelItemButton：Prguse2 366/367/368 @(291,212)）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 366, 367, 368,
-        DIALOG_X + 291.0, DIALOG_Y + 212.0, 7.0, 20.0, 20.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        366,
+        367,
+        368,
+        DIALOG_X + 291.0,
+        DIALOG_Y + 212.0,
+        7.0,
+        20.0,
+        20.0,
     ) {
-        commands.entity(e).insert((InvDelBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
+        commands
+            .entity(e)
+            .insert((InvDelBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
     }
 
     // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 InventoryState.items.len()
@@ -570,7 +596,6 @@ fn inventory_ui_system(
         (
             With<DialogWidget>,
             Or<(With<InvGoldText>, With<InvWeightText>)>,
-
             Without<InvSlot>,
         ),
     >,
@@ -625,7 +650,11 @@ fn inventory_ui_system(
                     item.image as usize,
                 );
                 data.icon = handle;
-                data.count = if item.count > 1 { Some(item.count as u32) } else { None };
+                data.count = if item.count > 1 {
+                    Some(item.count as u32)
+                } else {
+                    None
+                };
                 data.dura_ratio = if item.is_equipment() && item.max_dura > 0 {
                     Some((item.current_dura as f32 / item.max_dura as f32).clamp(0.0, 1.0))
                 } else {
@@ -669,7 +698,9 @@ fn inv_tooltip_system(
     slots: Query<&InvSlot>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
 
     let page = inv.inventory.page;
     let size = inv.inventory.items.len().min(MAX_INV_SLOTS);
@@ -692,7 +723,11 @@ fn inv_tooltip_system(
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
             hit = if page == 2 {
-                inv.inventory.quest_inventory.get(i).and_then(|s| s.as_ref()).cloned()
+                inv.inventory
+                    .quest_inventory
+                    .get(i)
+                    .and_then(|s| s.as_ref())
+                    .cloned()
             } else {
                 inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned()
             };
@@ -784,7 +819,13 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     }
     if item.required_class != 0 {
         let mut names = Vec::new();
-        for (bit, n) in [(1u8, "战士"), (2, "法师"), (4, "道士"), (8, "刺客"), (16, "弓箭手")] {
+        for (bit, n) in [
+            (1u8, "战士"),
+            (2, "法师"),
+            (4, "道士"),
+            (8, "刺客"),
+            (16, "弓箭手"),
+        ] {
             if item.required_class & bit != 0 {
                 names.push(n);
             }
@@ -847,7 +888,6 @@ pub fn item_type_name(t: u8) -> &'static str {
         Ok(ItemType::MonsterSpawn) => "召唤",
         _ => "其他",
     }
-
 }
 
 /// 背包动态格子同步（#276）：按 InventoryState.items.len() 生成/移除 InvSlot 格子。
@@ -913,10 +953,7 @@ fn inv_grid_sync_system(
 }
 
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
-fn inv_selection_system(
-    click: Res<InvClickState>,
-    mut slots: Query<(&mut Sprite, &InvSlot)>,
-) {
+fn inv_selection_system(click: Res<InvClickState>, mut slots: Query<(&mut Sprite, &InvSlot)>) {
     for (mut sprite, slot) in &mut slots {
         let selected = click.selected == Some(slot.0);
         let target = if selected {
@@ -929,8 +966,6 @@ fn inv_selection_system(
         }
     }
 }
-
-
 
 /// #1544：消费物品使用反馈队列（PlayItemSound 音效 + CanUseItem 拒绝提示）
 fn inv_sound_system(
@@ -946,7 +981,11 @@ fn inv_sound_system(
         play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, id);
     }
     for msg in std::mem::take(&mut feedback.messages) {
-        chat.add_line(msg, crate::game::chat::chat_color(mir2_shared::enums::ChatType::System), ChatChannel::System);
+        chat.add_line(
+            msg,
+            crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+            ChatChannel::System,
+        );
     }
 }
 /// #1544：物品使用反馈队列（音效 + CanUseItem 拒绝提示，合并减少系统参数）
@@ -983,35 +1022,35 @@ pub(crate) fn item_use_sound_id(item: &InvItem) -> Option<u32> {
     use mir2_shared::enums::ItemType;
     let t = ItemType::try_from(item.item_type).ok()?;
     Some(match t {
-        ItemType::Weapon => 10111,    // ClickWeapon
-        ItemType::Armour => 10112,    // ClickArmour
-        ItemType::Helmet => 10116,    // ClickHelmet
-        ItemType::Necklace => 10115,  // ClickNecklace
-        ItemType::Bracelet => 10114,  // ClickBracelet
-        ItemType::Ring => 10113,      // ClickRing
-        ItemType::Boots => 10117,     // ClickBoots
-        ItemType::Potion => 10108,    // ClickDrug
-        _ => 10118,                   // ClickItem
+        ItemType::Weapon => 10111,   // ClickWeapon
+        ItemType::Armour => 10112,   // ClickArmour
+        ItemType::Helmet => 10116,   // ClickHelmet
+        ItemType::Necklace => 10115, // ClickNecklace
+        ItemType::Bracelet => 10114, // ClickBracelet
+        ItemType::Ring => 10113,     // ClickRing
+        ItemType::Boots => 10117,    // ClickBoots
+        ItemType::Potion => 10108,   // ClickDrug
+        _ => 10118,                  // ClickItem
     })
 }
 
 /// #1544：CanUseItem 客户端检查（C# MirItemCell.CanUseItem：性别/职业/等级）
 /// 返回 Err(提示语) 时不应发包；服务端仍会二次校验（#576）。
-fn can_use_item_check(item: &InvItem, gender: u8, class: u8, level: u16) -> Result<(), &'static str> {
+fn can_use_item_check(
+    item: &InvItem,
+    gender: u8,
+    class: u8,
+    level: u16,
+) -> Result<(), &'static str> {
     // 性别：RequiredGender Male=1 Female=2；0/3(NONE=both) 视为不限制
     let gbit = 1u8 << gender; // MirGender Male=0→1, Female=1→2
-    if item.required_gender != 0
-        && item.required_gender != 3
-        && (item.required_gender & gbit) == 0
+    if item.required_gender != 0 && item.required_gender != 3 && (item.required_gender & gbit) == 0
     {
         return Err("性别不符");
     }
     // 职业：RequiredClass Warrior=1 Wizard=2 Taoist=4 Assassin=8 Archer=16
     let cbit = 1u8 << class; // MirClass Warrior=0 Wizard=1 Taoist=2 Assassin=3 Archer=4
-    if item.required_class != 0
-        && item.required_class != 31
-        && (item.required_class & cbit) == 0
-    {
+    if item.required_class != 0 && item.required_class != 31 && (item.required_class & cbit) == 0 {
         return Err("职业不符");
     }
     // 等级：RequiredType Level=3 / MaxLevel=9（SharedRust 枚举）
@@ -1053,7 +1092,10 @@ fn slot_item_ready(hud: &HudState, grid_to: MirGridType) -> bool {
     match grid_to {
         MirGridType::Mount => hud.equipment.get(10).and_then(|s| s.as_ref()).is_some(),
         MirGridType::Fishing => matches!(
-            hud.equipment.get(0).and_then(|s| s.as_ref()).map(|w| w.shape),
+            hud.equipment
+                .get(0)
+                .and_then(|s| s.as_ref())
+                .map(|w| w.shape),
             Some(49) | Some(50),
         ),
         _ => false,
@@ -1067,7 +1109,6 @@ pub(crate) enum UseOutcome {
     Confirm,
     Blocked,
 }
-
 
 /// #1546：UseItem 上下文（C# MirItemCell.UseItem 对 User/Hero/Storage 的差异）
 #[derive(Clone, Copy)]
@@ -1224,7 +1265,9 @@ pub(crate) fn use_item_core(
     }
     // 8. 装备/使用
     if item.is_equipment() {
-        if let Some(to) = item.equip_slot_occupied(|s| ctx.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
+        if let Some(to) =
+            item.equip_slot_occupied(|s| ctx.equipment.get(s).and_then(|x| x.as_ref()).is_some())
+        {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 grid: ctx.grid,
                 unique_id: item.unique_id,
@@ -1251,7 +1294,11 @@ pub(crate) fn use_item_core(
         feedback.last_use = now + 0.3;
         return UseOutcome::Sent;
     }
-    tracing::debug!("背包物品 {} 不可用/不可装备 (grid={:?})", item.name, ctx.grid);
+    tracing::debug!(
+        "背包物品 {} 不可用/不可装备 (grid={:?})",
+        item.name,
+        ctx.grid
+    );
     UseOutcome::Blocked
 }
 
@@ -1265,7 +1312,15 @@ fn use_or_equip(
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
 ) -> UseOutcome {
-    use_item_core(item, net, hud, UseItemCtx::player(hud), now, feedback, confirm)
+    use_item_core(
+        item,
+        net,
+        hud,
+        UseItemCtx::player(hud),
+        now,
+        feedback,
+        confirm,
+    )
 }
 /// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
 #[allow(clippy::too_many_arguments)]
@@ -1287,11 +1342,21 @@ fn inv_add_del_buttons_system(
     // 必须先判断背包对话框是否打开，否则关闭后按钮残留成屏幕上的孤按钮
     let can_expand = mgr.is_open(DialogKind::Inventory) && len < MAX_INV_EXPAND;
     for mut vis in &mut add_vis {
-        *vis = if can_expand { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if can_expand {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // 删除模式图标（C# DelItemButton.Index 366 ↔ 368）
     let del_idx = if click.delete_mode { 368 } else { 366 };
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, del_idx) {
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        del_idx,
+    ) {
         for mut s in &mut del_sprite {
             s.image = h.clone();
         }
@@ -1334,23 +1399,54 @@ fn spawn_inv_confirm(
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
         let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
-        commands.entity(e).insert((InvConfirmWidget, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((InvConfirmWidget, Visibility::Hidden));
     }
     let t = spawn_ui_text(
-        &mut commands, &font, "", bx + 35.0, by + 35.0, 12.0, Color::WHITE, 9.6,
+        &mut commands,
+        &font,
+        "",
+        bx + 35.0,
+        by + 35.0,
+        12.0,
+        Color::WHITE,
+        9.6,
     );
-    commands.entity(t).insert((InvConfirmWidget, Visibility::Hidden));
+    commands
+        .entity(t)
+        .insert((InvConfirmWidget, Visibility::Hidden));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        bx + 260.0, by + 157.0, 9.7, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        bx + 260.0,
+        by + 157.0,
+        9.7,
+        76.0,
+        25.0,
     ) {
         commands.entity(e).insert((InvConfirmYes, InvConfirmWidget));
     }
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        bx + 360.0, by + 157.0, 9.7, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
+        bx + 360.0,
+        by + 157.0,
+        9.7,
+        76.0,
+        25.0,
     ) {
         commands.entity(e).insert((InvConfirmNo, InvConfirmWidget));
     }
@@ -1386,7 +1482,11 @@ fn inv_confirm_system(
                         hero_inventory: false,
                     });
                     click.delete_mode = false;
-                    tracing::info!("🗑️ 确认删除 uid={} count={}", confirm.unique_id, confirm.count);
+                    tracing::info!(
+                        "🗑️ 确认删除 uid={} count={}",
+                        confirm.unique_id,
+                        confirm.count
+                    );
                 }
                 3 => {
                     // #1544：Potion Shape 4 确认后使用（C# AreYouWantUsePotion → UseItem）
@@ -1409,7 +1509,11 @@ fn inv_confirm_system(
                         count: confirm.count as u32,
                         hero_inventory: false,
                     });
-                    tracing::info!("🗑️ 确认丢弃 uid={} count={}", confirm.unique_id, confirm.count);
+                    tracing::info!(
+                        "🗑️ 确认丢弃 uid={} count={}",
+                        confirm.unique_id,
+                        confirm.count
+                    );
                 }
             }
             confirm.visible = false;
@@ -1437,7 +1541,9 @@ fn inv_socket_open_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let page = hud.inventory.page;
     let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
     let range: std::ops::Range<usize> = match page {
@@ -1488,7 +1594,9 @@ fn inv_item_action_system(
     mut last_modal: Local<bool>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
 
     // #1342：任务物品格只读（C# MirGridType.QuestInventory 不可移动/使用）
     if hud.inventory.page == 2 {
@@ -1611,54 +1719,72 @@ fn inv_item_action_system(
                 click.hero_selected = None;
                 tracing::info!("🎒 英雄取回物品 {} -> 背包 {}", hero_from, i);
             } else {
-            match click.selected {
-                Some(from) if from == i => click.selected = None,
-                Some(from) => {
-                    // #1604：拖到同类堆叠格 → C.MergeItem（C# MirItemCell.cs:815/906/980）；
-                    // ServerRust move_item 目标格有物品会失败，merge_item 只由 MergeItem 触发
-                    let same_stack = hud.inventory.items.get(i)
-                        .and_then(|s| s.as_ref())
-                        .zip(hud.inventory.items.get(from).and_then(|s| s.as_ref()))
-                        .map(|(t, f)| t.item_index == f.item_index && t.unique_id != f.unique_id)
-                        .unwrap_or(false);
-                    if same_stack {
-                        if let (Some(from_item), Some(to_item)) = (
-                            hud.inventory.items.get(from).and_then(|s| s.as_ref()),
-                            hud.inventory.items.get(i).and_then(|s| s.as_ref()),
-                        ) {
-                            net.send_packet(&mir2_shared::packets::client::item::MergeItem {
-                                grid_from: MirGridType::Inventory,
-                                grid_to: MirGridType::Inventory,
-                                id_from: from_item.unique_id,
-                                id_to: to_item.unique_id,
+                match click.selected {
+                    Some(from) if from == i => click.selected = None,
+                    Some(from) => {
+                        // #1604：拖到同类堆叠格 → C.MergeItem（C# MirItemCell.cs:815/906/980）；
+                        // ServerRust move_item 目标格有物品会失败，merge_item 只由 MergeItem 触发
+                        let same_stack = hud
+                            .inventory
+                            .items
+                            .get(i)
+                            .and_then(|s| s.as_ref())
+                            .zip(hud.inventory.items.get(from).and_then(|s| s.as_ref()))
+                            .map(|(t, f)| {
+                                t.item_index == f.item_index && t.unique_id != f.unique_id
+                            })
+                            .unwrap_or(false);
+                        if same_stack {
+                            if let (Some(from_item), Some(to_item)) = (
+                                hud.inventory.items.get(from).and_then(|s| s.as_ref()),
+                                hud.inventory.items.get(i).and_then(|s| s.as_ref()),
+                            ) {
+                                net.send_packet(&mir2_shared::packets::client::item::MergeItem {
+                                    grid_from: MirGridType::Inventory,
+                                    grid_to: MirGridType::Inventory,
+                                    id_from: from_item.unique_id,
+                                    id_to: to_item.unique_id,
+                                });
+                                tracing::info!(
+                                    "🔗 合并物品 {} -> {}（uid {} -> {}）",
+                                    from,
+                                    i,
+                                    from_item.unique_id,
+                                    to_item.unique_id
+                                );
+                            }
+                        } else {
+                            // 目标格子可空可满（服务端处理交换/移动）
+                            net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                                grid: MirGridType::Inventory,
+                                from: from as i32,
+                                to: i as i32,
                             });
-                            tracing::info!("🔗 合并物品 {} -> {}（uid {} -> {}）", from, i, from_item.unique_id, to_item.unique_id);
+                            tracing::info!("📦 移动物品 {} -> {}", from, i);
                         }
-                    } else {
-                        // 目标格子可空可满（服务端处理交换/移动）
-                        net.send_packet(&mir2_shared::packets::client::item::MoveItem {
-                            grid: MirGridType::Inventory,
-                            from: from as i32,
-                            to: i as i32,
-                        });
-                        tracing::info!("📦 移动物品 {} -> {}", from, i);
+                        click.selected = None;
                     }
-                    click.selected = None;
-                }
-                None => {
-                    // 只有物品格可选中（空格不选中）
-                    if hud.inventory.items.get(i).and_then(|s| s.as_ref()).is_some() {
-                        click.selected = Some(i);
+                    None => {
+                        // 只有物品格可选中（空格不选中）
+                        if hud
+                            .inventory
+                            .items
+                            .get(i)
+                            .and_then(|s| s.as_ref())
+                            .is_some()
+                        {
+                            click.selected = Some(i);
+                        }
                     }
                 }
-            }
             }
         }
     }
     // 双击：使用/装备
     if let Some(i) = dbl {
         if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-            if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+            if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm) == UseOutcome::Sent
+            {
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);
                 }
@@ -1671,12 +1797,13 @@ fn inv_item_action_system(
         return;
     }
 
-
     // 右键：使用/装备
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
             if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-            if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+                if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm)
+                    == UseOutcome::Sent
+                {
                     if let Some(sid) = item_use_sound_id(item) {
                         feedback.sounds.push(sid);
                     }
@@ -1777,13 +1904,14 @@ fn inv_item_action_system(
     }
 }
 
-
 /// #1592：自动喝 HP 药选药——优先 shape==0（C# ItemInfo Potion：0=HP 红药、1=MP 蓝药），
 /// 无 HP 药时退化为任意药水（保持旧行为）。
 pub fn pick_auto_hp_potion<'a>(items: impl Iterator<Item = &'a InvItem>) -> Option<&'a InvItem> {
     let mut fallback: Option<&InvItem> = None;
     for it in items {
-        if mir2_shared::enums::ItemType::try_from(it.item_type) == Ok(mir2_shared::enums::ItemType::Potion) {
+        if mir2_shared::enums::ItemType::try_from(it.item_type)
+            == Ok(mir2_shared::enums::ItemType::Potion)
+        {
             if it.shape == 0 {
                 return Some(it);
             }
@@ -1879,7 +2007,6 @@ mod tests {
         assert_eq!(item_with_type(ItemType::Weapon).equip_slot(), Some(0));
     }
 
-
     #[test]
     fn can_use_item_gender_class_level() {
         let mut it = item_with_type(ItemType::Weapon);
@@ -1970,9 +2097,18 @@ mod tests {
 
     #[test]
     fn item_use_sound_maps_types() {
-        assert_eq!(item_use_sound_id(&item_with_type(ItemType::Weapon)), Some(10111));
-        assert_eq!(item_use_sound_id(&item_with_type(ItemType::Potion)), Some(10108));
-        assert_eq!(item_use_sound_id(&item_with_type(ItemType::Food)), Some(10118));
+        assert_eq!(
+            item_use_sound_id(&item_with_type(ItemType::Weapon)),
+            Some(10111)
+        );
+        assert_eq!(
+            item_use_sound_id(&item_with_type(ItemType::Potion)),
+            Some(10108)
+        );
+        assert_eq!(
+            item_use_sound_id(&item_with_type(ItemType::Food)),
+            Some(10118)
+        );
     }
 
     #[test]
@@ -1998,7 +2134,6 @@ mod tests {
         inv.refresh_weight();
         assert_eq!(inv.weight, 5);
     }
-
 
     #[test]
     fn guard_hero_skips_fishing() {
@@ -2121,5 +2256,3 @@ mod tests {
         );
     }
 }
-
-
