@@ -7845,7 +7845,19 @@ impl Actor for WorldActor {
         let mut next_auction_id = 1u64;
         match db::load_all_auctions(&args.db_pool).await {
             Ok(rows) => {
-                for (id, seller, item_json, price, date, sold, item_type, buyer_name) in rows {
+                for (
+                    id,
+                    seller,
+                    item_json,
+                    price,
+                    date,
+                    sold,
+                    item_type,
+                    buyer_name,
+                    current_bid,
+                    current_buyer,
+                ) in rows
+                {
                     if let Ok(item) =
                         serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json)
                     {
@@ -7853,7 +7865,8 @@ impl Actor for WorldActor {
                         if aid >= next_auction_id {
                             next_auction_id = aid + 1;
                         }
-                        let starting_bid = if item_type == 1 { price as u64 } else { 0 };
+                        // #2566：恢复拍卖托管态（出价者金币已扣款），旧行 NULL 回退起拍价/无买家
+                        let bid = db::restore_auction_escrow(item_type as i32, price, current_bid);
                         auctions.push(AuctionListing {
                             auction_id: aid,
                             seller_name: seller,
@@ -7863,8 +7876,8 @@ impl Actor for WorldActor {
                             sold: sold != 0,
                             buyer_name,
                             item_type: item_type as u8,
-                            current_bid: starting_bid,
-                            current_buyer: None,
+                            current_bid: bid,
+                            current_buyer,
                             expired: false,
                         });
                     }

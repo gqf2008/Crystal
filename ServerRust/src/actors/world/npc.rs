@@ -3812,6 +3812,33 @@ pub struct GameshopBuyRequest {
     pub session_id: u64,
     pub item_id: u32,
     pub count: u32,
+    /// #2566：C# C.GameshopBuy.PType——0=Credit（账号信用点）/ 1=Gold（金币）
+    pub p_type: i32,
+}
+
+/// #2566：C# GameshopBuy 货币分支（PlayerObject.cs:13815-13833）：
+/// PType 0=Credit（CreditPrice×Quantity，需 CanBuyCredit）/ 1=Gold（GoldPrice×Quantity，需 CanBuyGold）；
+/// 其余 PType 或货币未开放 → None（C# ReceiveChat 后 return）
+/// 返回 (is_gold, 总花费)
+pub(crate) fn gameshop_currency_cost(
+    p_type: i32,
+    can_buy_credit: bool,
+    can_buy_gold: bool,
+    credit_price: u64,
+    gold_price: u64,
+    quantity: u64,
+) -> Option<(bool, u64)> {
+    match p_type {
+        0 if can_buy_credit => Some((false, credit_price.saturating_mul(quantity))),
+        1 if can_buy_gold => Some((true, gold_price.saturating_mul(quantity))),
+        _ => None,
+    }
+}
+
+/// #2566：C# GSpurchases 限购（PlayerObject.cs:13751-13768）——Stock!=0 时需
+/// Stock - purchased - Quantity >= 0；Stock==0 视为不限量
+pub(crate) fn gameshop_stock_available(stock: i32, purchased: i64, quantity: i64) -> bool {
+    stock == 0 || (stock as i64 - purchased - quantity) >= 0
 }
 
 impl Message<GameshopBuyRequest> for WorldActor {
@@ -3838,6 +3865,11 @@ impl Message<GameshopBuyRequest> for WorldActor {
             return;
         }
 
+        // #2566：C# Quantity 范围 1..=99（PlayerObject.cs:13720，越界直接丢弃）
+        if !(1..=99).contains(&msg.count) {
+            return;
+        }
+
         // 查找商品（优先 DB，fallback 硬编码）
         let db_item = self
             .game_shop_items
@@ -3846,39 +3878,107 @@ impl Message<GameshopBuyRequest> for WorldActor {
         let fallback = game_shop_catalog_fallback()
             .iter()
             .find(|i| i.item_index as u32 == msg.item_id);
-        let (item_price, item_count) = if let Some(di) = db_item {
-            (di.gold_price as u64, di.count as u32)
+        // #2566：统一商品视图（双货币价格 + 限购/购买开关；fallback 目录无开关数据，视为双币均可）
+        let (
+            item_index,
+            gindex,
+            credit_price,
+            gold_price,
+            item_count,
+            stock,
+            can_buy_credit,
+            can_buy_gold,
+        ) = if let Some(di) = db_item {
+            (
+                di.item_index,
+                di.gindex,
+                di.credit_price as u64,
+                di.gold_price as u64,
+                di.count as u32,
+                di.stock,
+                di.can_buy_credit,
+                di.can_buy_gold,
+            )
         } else if let Some(fi) = fallback {
-            (fi.gold_price as u64, fi.count as u32)
+            (
+                fi.item_index,
+                fi.item_index,
+                fi.credit_price as u64,
+                fi.gold_price as u64,
+                fi.count as u32,
+                fi.stock,
+                true,
+                true,
+            )
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "商品不存在");
             return;
         };
 
         let buy_count = msg.count.max(1).min(item_count);
-        let total_gold = item_price.saturating_mul(buy_count as u64);
 
-        debug!(
-            "GameshopBuy: {} item={} count={} gold={}",
-            state.name, msg.item_id, buy_count, total_gold
-        );
-
-        // 检查金币
-        if state.inventory.gold < total_gold {
-            send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+        // #2566：C# 邮件容量上限——(Quantity×Count)/StackSize > 5 直接丢弃（PlayerObject.cs:13748）
+        let stack_size = self
+            .item_infos
+            .get(&item_index)
+            .map(|i| i.stack_size.max(1) as u64)
+            .unwrap_or(1);
+        if (buy_count as u64 * item_count as u64) / stack_size > 5 {
             return;
         }
 
-        // 先构建邮件（在扣金币前，避免扣款后交付失败导致玩家损失）
-        let shop_item = self
-            .game_shop_items
-            .iter()
-            .find(|i| i.item_index as u32 == msg.item_id);
-        let item_index = if let Some(si) = shop_item {
-            si.item_index
-        } else {
-            msg.item_id as i32
+        // #2566：每账号限购（C# GSpurchases；Stock==0 不限）——超量拒绝
+        let username = record.account_username.clone();
+        let mut purchased = 0i64;
+        if stock != 0 {
+            purchased = db::get_gameshop_purchases(&self.db_pool, &username, gindex)
+                .await
+                .unwrap_or(0);
+            if !gameshop_stock_available(stock, purchased, buy_count as i64) {
+                send_system_message(&self.gate_ref, msg.session_id, "购买数量超过限购余量");
+                return;
+            }
+        }
+
+        // #2566：按 PType 分支货币（0=Credit 账号信用点 / 1=Gold 金币；非法值拒绝）
+        let Some((is_gold, total_cost)) = gameshop_currency_cost(
+            msg.p_type,
+            can_buy_credit,
+            can_buy_gold,
+            credit_price,
+            gold_price,
+            buy_count as u64,
+        ) else {
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "货币类型无效或该商品不支持此货币购买",
+            );
+            return;
         };
+
+        debug!(
+            "GameshopBuy: {} item={} count={} p_type={} cost={}",
+            state.name, msg.item_id, buy_count, msg.p_type, total_cost
+        );
+
+        // 检查余额（C#：cost <= Account.Credit / goldcost <= Account.Gold）
+        if is_gold {
+            if state.inventory.gold < total_cost {
+                send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+                return;
+            }
+        } else {
+            let credit = db::get_account_credit(&self.db_pool, &username)
+                .await
+                .unwrap_or(0);
+            if credit < total_cost {
+                send_system_message(&self.gate_ref, msg.session_id, "信用点不足");
+                return;
+            }
+        }
+
+        // 先构建邮件（在扣费前，避免扣款后交付失败导致玩家损失）
 
         let mail_items: Vec<mir2_shared::data::item::UserItem> =
             if let Some(item_db) = self.item_infos.get(&item_index) {
@@ -3925,11 +4025,55 @@ impl Message<GameshopBuyRequest> for WorldActor {
             items: mail_items,
         };
 
-        // 扣款
-        let _ = record
-            .actor_ref
-            .ask(DeductGold { amount: total_gold })
-            .await;
+        // 扣费：金币走背包；信用点原子扣账号（C# Account.Credit -= CreditCost）
+        if is_gold {
+            let _ = record
+                .actor_ref
+                .ask(DeductGold { amount: total_cost })
+                .await;
+        } else {
+            match db::try_deduct_account_credit(&self.db_pool, &username, total_cost as i64).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    send_system_message(&self.gate_ref, msg.session_id, "信用点不足");
+                    return;
+                }
+                Err(e) => {
+                    warn!("GameshopBuy credit deduct failed for {}: {}", username, e);
+                    send_system_message(&self.gate_ref, msg.session_id, "信用点扣除失败");
+                    return;
+                }
+            }
+            // C# S.LoseCredit（信用点扣除回包，PlayerObject.cs:13835）
+            let packet = mir2_shared::packets::server::drops::LoseCredit {
+                credit: total_cost as u32,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::LoseCredit as i16,
+                            &body,
+                        ),
+                    })
+                    .await;
+            }
+        }
+
+        // #2566：累加每账号限购计数（C# GSpurchases[GIndex] += Quantity，仅限量商品）
+        if stock != 0 {
+            if let Err(e) =
+                db::add_gameshop_purchases(&self.db_pool, &username, gindex, buy_count as i64).await
+            {
+                warn!(
+                    "GameshopBuy purchase counter update failed for {}: {}",
+                    username, e
+                );
+            }
+        }
 
         // 发送邮件
         send_mail_received_packet(&self.gate_ref, msg.session_id, &mail);
@@ -3941,11 +4085,19 @@ impl Message<GameshopBuyRequest> for WorldActor {
         send_system_message(
             &self.gate_ref,
             msg.session_id,
-            &format!("购买成功！已扣除金币 {}，物品已通过邮件发送", total_gold),
+            &format!(
+                "购买成功！已扣除{} {}，物品已通过邮件发送",
+                if is_gold { "金币" } else { "信用点" },
+                total_cost
+            ),
         );
 
-        // 发送库存更新
-        let stock_remaining = item_count.saturating_sub(buy_count);
+        // 发送库存更新（#2566：限量商品余量 = Stock - 已购 - 本次）
+        let stock_remaining = if stock != 0 {
+            (stock as i64 - purchased - buy_count as i64).max(0) as u32
+        } else {
+            item_count.saturating_sub(buy_count)
+        };
         let _ = self
             .gate_ref
             .tell(SendToClient {
@@ -4500,5 +4652,45 @@ mod tests {
         assert_eq!(shared_item_type(30), ItemType::Bait);
         assert_eq!(shared_item_type(31), ItemType::Finder);
         assert_eq!(shared_item_type(32), ItemType::Reel);
+    }
+
+    /// #2566：C# GameshopBuy 双货币分支（PType 0=Credit/1=Gold，PlayerObject.cs:13815-13833）
+    #[test]
+    fn gameshop_currency_cost_branches_by_ptype() {
+        // PType=0：CreditPrice×Quantity（需 CanBuyCredit）
+        assert_eq!(
+            gameshop_currency_cost(0, true, true, 100, 5_000, 3),
+            Some((false, 300))
+        );
+        // PType=1：GoldPrice×Quantity（需 CanBuyGold）
+        assert_eq!(
+            gameshop_currency_cost(1, true, true, 100, 5_000, 3),
+            Some((true, 15_000))
+        );
+        // 货币未开放 → None（C# YouDontHaveEnoughCurrency）
+        assert_eq!(gameshop_currency_cost(0, false, true, 100, 5_000, 3), None);
+        assert_eq!(gameshop_currency_cost(1, true, false, 100, 5_000, 3), None);
+        // 非法 PType → None
+        assert_eq!(gameshop_currency_cost(2, true, true, 100, 5_000, 3), None);
+        assert_eq!(gameshop_currency_cost(-1, true, true, 100, 5_000, 3), None);
+        // 饱和乘法不溢出
+        assert_eq!(
+            gameshop_currency_cost(1, true, true, 0, u64::MAX, 2),
+            Some((true, u64::MAX))
+        );
+    }
+
+    /// #2566：C# GSpurchases 限购（Stock!=0 时 Stock - purchased - Quantity >= 0）
+    #[test]
+    fn gameshop_stock_available_matches_csharp() {
+        // Stock==0 → 不限量
+        assert!(gameshop_stock_available(0, 1_000, 99));
+        // 恰好买满 → 允许
+        assert!(gameshop_stock_available(10, 5, 5));
+        // 超出余量 → 拒绝
+        assert!(!gameshop_stock_available(10, 5, 6));
+        assert!(!gameshop_stock_available(10, 11, 1));
+        // 未购买过 → 全额可用
+        assert!(gameshop_stock_available(10, 0, 10));
     }
 }

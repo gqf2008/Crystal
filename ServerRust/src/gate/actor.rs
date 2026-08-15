@@ -5253,20 +5253,29 @@ fn forward_npc_confirm_input(
         .try_send();
 }
 
-/// GameshopBuy: [g_index: i32][quantity: u8][p_type: i32]（C# C.GameshopBuy 线格式；Rust 仅金币购买，PType 忽略）
+/// GameshopBuy: [g_index: i32][quantity: u8][p_type: i32]（C# C.GameshopBuy 线格式；payload 已去包头）
+/// #2566：解析 PType（0=Credit 信用点 / 1=Gold 金币，i32 LE）透传 world 侧分支扣费
+fn parse_gameshop_buy_payload(payload: &[u8]) -> Option<(u32, u32, i32)> {
+    if payload.len() < 9 {
+        return None;
+    }
+    let item_id = i32::from_le_bytes(payload[0..4].try_into().ok()?) as u32;
+    let count = payload[4] as u32;
+    let p_type = i32::from_le_bytes(payload[5..9].try_into().ok()?);
+    Some((item_id, count, p_type))
+}
+
 fn forward_gameshop_buy(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 9 {
+    let Some((item_id, count, p_type)) = parse_gameshop_buy_payload(payload) else {
         return;
-    }
-    let item_id = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as u32;
-    let count = payload[4] as u32;
+    };
     debug!(
-        "GameshopBuy: session={} item={} count={}",
-        session_id, item_id, count
+        "GameshopBuy: session={} item={} count={} p_type={}",
+        session_id, item_id, count, p_type
     );
     let world_ref = match world_ref {
         Some(w) => w,
@@ -5277,6 +5286,7 @@ fn forward_gameshop_buy(
             session_id,
             item_id,
             count,
+            p_type,
         })
         .try_send();
 }
@@ -5466,6 +5476,30 @@ mod tests {
         let data = [0x80]; // says "more bytes coming" but none follow
         let result = parse_dotnet_string(&data);
         assert_eq!(result, "");
+    }
+
+    /// #2566：C# C.GameshopBuy 线格式 [g_index: i32][quantity: u8][p_type: i32]（LE，payload 已去包头）
+    #[test]
+    fn test_parse_gameshop_buy_payload_ptype() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&7i32.to_le_bytes()); // GIndex
+        payload.push(3); // Quantity
+        payload.extend_from_slice(&0i32.to_le_bytes()); // PType=0 (Credit)
+        assert_eq!(parse_gameshop_buy_payload(&payload), Some((7, 3, 0)));
+
+        let mut gold = Vec::new();
+        gold.extend_from_slice(&(-1i32).to_le_bytes());
+        gold.push(99);
+        gold.extend_from_slice(&1i32.to_le_bytes()); // PType=1 (Gold)
+        assert_eq!(parse_gameshop_buy_payload(&gold), Some((4294967295, 99, 1)));
+
+        // 不足 9 字节 → None（不 panic）
+        assert_eq!(parse_gameshop_buy_payload(&[]), None);
+        assert_eq!(parse_gameshop_buy_payload(&[1, 2, 3, 4, 5, 6, 7, 8]), None);
+        // 多余字节 → 只读前 9 字节
+        let mut extra = payload.clone();
+        extra.extend_from_slice(&[0xFF]);
+        assert_eq!(parse_gameshop_buy_payload(&extra), Some((7, 3, 0)));
     }
 
     #[test]
