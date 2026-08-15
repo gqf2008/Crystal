@@ -143,9 +143,18 @@ impl Message<NPCCallRequest> for WorldActor {
                     }
                 }
                 // Flag requirement check
+                // #2567：C# Flags 是同一数组（脚本 SET 与 NPC FlagNeeded 共用，
+                // NPCObject.cs:437 CheckVisible）；双键兼容——脚本 SET 写 NPC_FLAG_{n}
+                // 即时生效，NPC_VISIBLE_{n} 保留既有数据兼容
                 if npc_db.flag_needed > 0 {
-                    let flag_key = format!("NPC_VISIBLE_{}", npc_db.flag_needed);
-                    let has_flag = player_state.flags.get(&flag_key).copied().unwrap_or(0) > 0;
+                    let has_flag = ["NPC_VISIBLE_", "NPC_FLAG_"].iter().any(|prefix| {
+                        player_state
+                            .flags
+                            .get(&format!("{}{}", prefix, npc_db.flag_needed))
+                            .copied()
+                            .unwrap_or(0)
+                            > 0
+                    });
                     if !has_flag {
                         debug!("NPC {} requires flag {}", npc.name, npc_db.flag_needed);
                         return;
@@ -2897,10 +2906,30 @@ impl WorldActor {
         npc: &NpcState,
         player_state: &crate::actors::player::PlayerState,
     ) {
+        // #2567 C# NPCScript.ParseCrafting（NPCScript.cs:749-783）：NPC 脚本 [RECIPE] 段
+        // 收集该 NPC 可制作配方；SendNPCGoods 只发 CraftGoods 中 CanCraft 的（:978-981）。
+        // Rust：[RECIPE] 段存于 npc_scripts[(db_index, "[RECIPE]")]；段缺失或产物名全未
+        // 命中 → 回退全集保持兼容（旧数据无 [RECIPE] 段时不改变行为）
+        let allowed: Option<std::collections::HashSet<i32>> = self
+            .npc_scripts
+            .get(&(npc.db_index, "[RECIPE]".to_string()))
+            .map(|lines| {
+                npc_script::recipe_indices_for_names(
+                    &self.item_infos,
+                    &npc_script::parse_recipe_names(lines),
+                )
+            })
+            .filter(|set| !set.is_empty());
         let mut items = Vec::new();
         for recipe in &self.recipe_infos {
             if recipe.product_item_index <= 0 {
                 continue;
+            }
+            // #2567：该 NPC 的 [RECIPE] 列表命中才展示
+            if let Some(allowed) = &allowed {
+                if !allowed.contains(&recipe.product_item_index) {
+                    continue;
+                }
             }
             // C# RecipeInfo.CanCraft
             if let Some(lv) = recipe.required_level {

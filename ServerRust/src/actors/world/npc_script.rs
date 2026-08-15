@@ -108,7 +108,8 @@ struct FlowControl {
     goto: Option<String>,
     /// MAP/PARAM1/PARAM2/PARAM3 脚本上下文（MONGEN 等指令用，对齐 C# Param1/2/3）
     map_name: Option<String>,
-    param1: i32,
+    /// C# Param1=地图名字符串（NPCSegment.cs:3726-3733）；MONGEN 按 PARAM1 图名落图
+    param1_name: Option<String>,
     param2: i32,
     param3: i32,
     /// COMPOSEMAIL 暂存的邮件草稿（ADDMAILGOLD/ADDMAILITEM/SENDMAIL 链）
@@ -2328,26 +2329,58 @@ async fn exec_action(
         "RECALL" => {
             teleport_player(world, session_id, npc.map_index, npc.x, npc.y).await;
         }
-        // MOVE <map_index> <x> <y>（C# 格式；C# Move 要求 x>0 且 y>0 才传送）
+        // MOVE <map> <x> <y>（C# NPCSegment.cs:3074-3082：目标图按 file_name 名字解析
+        // （GetMapByNameAndInstance）；Rust 额外兼容纯数字形态按 DB index 解析；
+        // x/y 必须可解析且非正时走目标图随机落点（TeleportRandom(200, 0, targetmap)））
         "MOVE" | "MAPMOVE" | "TELEPORT" => {
-            let map_idx = arg0().parse::<u16>().unwrap_or(0);
-            let x = arg1().parse::<i32>().unwrap_or(0);
-            let y = arg2().parse::<i32>().unwrap_or(0);
-            if x > 0 && y > 0 {
-                teleport_player(world, session_id, map_idx, x, y).await;
+            let map_ref = arg0();
+            // C#：x/y TryParse 失败 → return（不传送）
+            let (Ok(x), Ok(y)) = (arg1().parse::<i32>(), arg2().parse::<i32>()) else {
+                return;
+            };
+            match resolve_map_ref(&world.map_infos, map_ref) {
+                Some(map_index) => {
+                    if x > 0 && y > 0 {
+                        teleport_player(world, session_id, map_index, x, y).await;
+                    } else {
+                        // C#：坐标非正 → 目标图随机可走点传送
+                        if !teleport_random_on_map(world, session_id, map_index).await {
+                            warn!("NPC MOVE: no walkable cell on map '{}'", map_ref);
+                        }
+                    }
+                }
+                None => {
+                    warn!("NPC MOVE: map '{}' not found", map_ref);
+                    send_system_message(
+                        &world.gate_ref,
+                        session_id,
+                        &format!("未知地图：{}", map_ref),
+                    );
+                }
             }
         }
-        // SET [flag] <value>
+        // SET [flag] <value>（C# NPCSegment.cs:3708-3725：写 flag 后触发旗标任务进度传播）
         "SET" => {
             if let Some(flag) = parse_flag(arg0()) {
                 let val = arg1().parse::<i32>().unwrap_or(1);
                 set_player_flag(world, session_id, format!("NPC_FLAG_{}", flag), val).await;
+                // C# 3724 `if (flagIsOn) CheckNeedQuestFlag(flagIndex)`：仅置位时传播。
+                // 可见性联动：C# 另对同图 DataRange 内 NPC CheckVisible(player)（对象级显隐 +
+                // ObjectRemove/ObjectNpc 广播）；Rust 的 NPC 对象是进图全量下发
+                // （session.rs spawn_npcs_and_monsters），显隐条件在 NPCCallRequest 交互时
+                // 拉取式判定（npc.rs flag_needed 已双键兼容 NPC_FLAG_），flag 写入即对
+                // 后续交互即时生效，无需独立重算/广播。
+                if val != 0 {
+                    propagate_flag_to_quests(world, session_id, flag).await;
+                }
             }
         }
-        // MONGEN <name> <count> —— 在目标坐标刷怪（坐标优先 PARAM2/PARAM3，缺省玩家/NPC 位置）
+        // MONGEN <name> <count> —— 在 PARAM1 目标图 (PARAM2, PARAM3) 刷怪
+        // （C# NPCSegment.cs:3753-3772：Param1 缺失或 Param2/3 为 0 → 严格 no-op；
+        // 目标图按名字解析，失败不回退玩家当前图；MAP 关键字路径保留兼容）
         "MONGEN" | "MAKEMON" | "MONSTER" => {
             let mob_name = arg0();
-            // C# Mongen：count 缺省 1，给定参数必须 byte.TryParse 成功（1..=255），否则不刷怪
+            // C# Mongen：count 缺省 1（parts.Length<3 → "1"），给定参数必须 byte.TryParse 成功（1..=255），否则不刷怪
             let count = match args.get(1) {
                 Some(s) => match s.parse::<u8>() {
                     Ok(c) if c > 0 => c as u32,
@@ -2360,35 +2393,30 @@ async fn exec_action(
             };
             if mob_name.is_empty() {
                 warn!("NPC action MONGEN: missing monster name");
-            } else {
-                let player_state = current_player_state(world, session_id).await;
-                let (tx, ty) = if flow.param2 > 0 && flow.param3 > 0 {
-                    (flow.param2, flow.param3)
-                } else if let Some(st) = &player_state {
-                    (st.x, st.y)
-                } else {
-                    (npc.x, npc.y)
-                };
-                let map_index = if let Some(map_name) = &flow.map_name {
-                    world
-                        .map_infos
-                        .values()
-                        .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
-                        .map(|m| m.index as u16)
-                        .unwrap_or(npc.map_index)
-                } else if let Some(st) = &player_state {
-                    st.map_index
-                } else {
-                    npc.map_index
-                };
-                let spawned = world
-                    .spawn_monster_named(mob_name, tx, ty, count, map_index)
-                    .await;
-                debug!(
-                    "NPC MONGEN: '{}' x{} at ({},{}) map {} spawned={}",
-                    mob_name, count, tx, ty, map_index, spawned
-                );
+                return;
             }
+            // C# 3755：PARAM2/3 未置或为 0 → no-op（不再回退玩家/NPC 坐标）
+            if flow.param2 <= 0 || flow.param3 <= 0 {
+                debug!("NPC MONGEN: PARAM2/PARAM3 not set, no-op (C# NPCSegment.cs:3755)");
+                return;
+            }
+            // C# Param1=地图名（优先）；MAP 关键字为 Rust 既有等价路径
+            let Some(map_name) = mongen_target_map_name(flow) else {
+                debug!("NPC MONGEN: PARAM1 map not set, no-op");
+                return;
+            };
+            let Some(map_index) = resolve_map_ref(&world.map_infos, map_name) else {
+                warn!("NPC MONGEN: map '{}' not found, skip", map_name);
+                return;
+            };
+            let (tx, ty) = (flow.param2, flow.param3);
+            let spawned = world
+                .spawn_monster_named(mob_name, tx, ty, count, map_index)
+                .await;
+            debug!(
+                "NPC MONGEN: '{}' x{} at ({},{}) map {} spawned={}",
+                mob_name, count, tx, ty, map_index, spawned
+            );
         }
         // MONCLEAR <map名|index> —— 清除指定地图所有怪物（对齐 C# ActionType.MonClear）
         "MONCLEAR" | "MONCLEARALL" => {
@@ -2757,8 +2785,12 @@ async fn exec_action(
             flow.map_name = Some(unquote(arg0()).to_string());
         }
         // PARAM1/PARAM2/PARAM3 <value> —— 脚本坐标参数（对齐 C# ActionType.Param1/2/3）
+        // C# Param1=地图名（param[0]，instance 参数 Rust 无副本实例忽略；NPCSegment.cs:3726-3733）
         "PARAM1" => {
-            flow.param1 = arg0().parse::<i32>().unwrap_or(0);
+            let name = unquote(arg0()).to_string();
+            if !name.is_empty() {
+                flow.param1_name = Some(name);
+            }
         }
         "PARAM2" => {
             flow.param2 = arg0().parse::<i32>().unwrap_or(0);
@@ -2987,24 +3019,19 @@ async fn exec_action(
                 }
             }
         }
-        // GROUPTELEPORT <map> <x> <y> —— 组队传送（对齐 C# ActionType.GroupTeleport：目标地图+坐标；x/y 缺省用玩家位置）
+        // GROUPTELEPORT <map> <x> <y> / <map> <instance> <x> <y> —— 组队传送
+        // （C# NPCSegment.cs:872-889 双形态解析 + 3862-3887：x/y 为 0 时组员各自在目标图随机落点）
         "GROUPTELEPORT" => {
             let map_name = arg0();
-            let tx = arg2().parse::<i32>().unwrap_or(0);
-            let ty = arg3().parse::<i32>().unwrap_or(0);
-            let target_map = world
-                .map_infos
-                .values()
-                .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
-                .map(|m| m.index as u16);
+            // C# 双形态：4-token（含关键字）= map x y；5-token = map instance x y；
+            // TryParse 失败 → return
+            let Some((tx, ty)) = group_teleport_coords(args) else {
+                return;
+            };
+            let target_map = resolve_map_ref(&world.map_infos, map_name);
             if let Some(map_index) = target_map {
                 if let Some(st) = current_player_state(world, session_id).await {
                     let gid = st.group_id;
-                    let (fx, fy) = if tx > 0 && ty > 0 {
-                        (tx, ty)
-                    } else {
-                        (st.x, st.y)
-                    };
                     // 先收集同组在线成员，避免借用冲突
                     let mut group_sessions = Vec::new();
                     for (sid, r) in &world.players {
@@ -3017,16 +3044,27 @@ async fn exec_action(
                             }
                         }
                     }
-                    teleport_player(world, session_id, map_index, fx, fy).await;
-                    for sid in &group_sessions {
-                        teleport_player(world, *sid, map_index, fx, fy).await;
+                    // C# 3876-3886：x/y 为 0 → 每个成员 TeleportRandom(200, 0, targetmap)
+                    if tx > 0 && ty > 0 {
+                        teleport_player(world, session_id, map_index, tx, ty).await;
+                        for sid in &group_sessions {
+                            teleport_player(world, *sid, map_index, tx, ty).await;
+                        }
+                    } else {
+                        let mut moved = teleport_random_on_map(world, session_id, map_index).await;
+                        for sid in &group_sessions {
+                            moved |= teleport_random_on_map(world, *sid, map_index).await;
+                        }
+                        if !moved {
+                            warn!("NPC GROUPTELEPORT: no walkable cell on map '{}'", map_name);
+                        }
                     }
                     debug!(
                         "NPC GROUPTELEPORT: {} members -> map {} ({},{})",
                         group_sessions.len() + 1,
                         map_index,
-                        fx,
-                        fy
+                        tx,
+                        ty
                     );
                 }
             } else {
@@ -3850,6 +3888,155 @@ async fn set_player_flag(world: &WorldActor, session_id: u64, key: String, val: 
     }
 }
 
+/// C# PlayerObject.CheckNeedQuestFlag（PlayerObject.cs:11562-11577）：flag 置位后，
+/// 对以该 flag 为任务的**已接任务**推进进度（ProcessFlag → SendUpdateQuest）。
+/// 复用 mod.rs SETFLAG / session.rs @setflag 的现成管道（ProcessFlagQuest → GetQuest →
+/// send_quest_change_packet）。
+async fn propagate_flag_to_quests(world: &WorldActor, session_id: u64, flag_number: i32) {
+    let Some(record) = world.players.get(&session_id) else {
+        return;
+    };
+    let updates = record
+        .actor_ref
+        .ask(crate::actors::player::ProcessFlagQuest { flag_number })
+        .await
+        .unwrap_or_default();
+    for (quest_index, _, _) in &updates {
+        if let Ok(Some(q)) = record
+            .actor_ref
+            .ask(crate::actors::player::GetQuest {
+                quest_index: *quest_index,
+            })
+            .await
+        {
+            crate::actors::social_packets::send_quest_change_packet(
+                &world.gate_ref,
+                session_id,
+                &q,
+            );
+        }
+    }
+}
+
+/// MOVE/MONGEN/GROUPTELEPORT 的地图参数解析：优先按 file_name 名字（大小写不敏感，
+/// 对齐 C# Envir.GetMapByNameAndInstance）；纯数字形态回退 DB index（兼容数字地图参数
+/// 的旧脚本）；找不到返回 None。
+fn resolve_map_ref(map_infos: &HashMap<i32, crate::db::MapInfo>, map_ref: &str) -> Option<u16> {
+    if let Some(m) = map_infos
+        .values()
+        .find(|m| m.file_name.eq_ignore_ascii_case(map_ref))
+    {
+        return Some(m.index as u16);
+    }
+    if let Ok(idx) = map_ref.parse::<u16>() {
+        if map_infos.contains_key(&(idx as i32)) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// C# MapObject.TeleportRandom（MapObject.cs:803-813）：目标图随机可走格传送。
+/// Rust 采样式实现（对齐 item.rs 随机传送卷：最多 attempts 次随机取点查可走性），
+/// 无可走格返回 None（C# 返回 false 不传送）。
+fn random_walkable_point(map: &crate::maps::loader::MapData, attempts: u32) -> Option<(i32, i32)> {
+    let (max_x, max_y) = (map.width as i32, map.height as i32);
+    for _ in 0..attempts {
+        let cx = fastrand::i32(0..max_x);
+        let cy = fastrand::i32(0..max_y);
+        if map.is_walkable(cx, cy) {
+            return Some((cx, cy));
+        }
+    }
+    None
+}
+
+/// C# TeleportRandom(200, 0, targetmap) 的 NPC 脚本侧封装：解析目标图数据并随机落点传送。
+/// 返回 false 表示图数据缺失或无可走格（未传送）。
+async fn teleport_random_on_map(world: &mut WorldActor, session_id: u64, map_index: u16) -> bool {
+    let Some(file) = world
+        .map_infos
+        .get(&(map_index as i32))
+        .map(|m| m.file_name.clone())
+    else {
+        return false;
+    };
+    let Some(point) = world
+        .get_or_load_map(&file, map_index)
+        .and_then(|map| random_walkable_point(map, 200))
+    else {
+        return false;
+    };
+    teleport_player(world, session_id, map_index, point.0, point.1).await;
+    true
+}
+
+/// C# GROUPTELEPORT 双形态参数解析（NPCSegment.cs:872-889）：
+/// 4-token（含关键字）`GROUPTELEPORT <map> <x> <y>`；5-token `GROUPTELEPORT <map> <instance> <x> <y>`。
+/// 5-token 缺 x/y 记 0（C# parts.Length<4/5 → "0"，动作侧走 TeleportRandom）；
+/// 存在但解析失败返回 None（C# TryParse 失败 → return）。
+fn group_teleport_coords(args: &[String]) -> Option<(i32, i32)> {
+    if args.len() == 3 {
+        Some((args[1].parse().ok()?, args[2].parse().ok()?))
+    } else {
+        let x = args
+            .get(2)
+            .map(|s| s.parse::<i32>().ok())
+            .unwrap_or(Some(0))?;
+        let y = args
+            .get(3)
+            .map(|s| s.parse::<i32>().ok())
+            .unwrap_or(Some(0))?;
+        Some((x, y))
+    }
+}
+
+/// MONGEN 目标图名（C# Param1=地图名优先，NPCSegment.cs:3759；MAP 关键字为 Rust 既有
+/// 等价路径保留兼容）；None → 严格 no-op（C# 3755 Param1==null → return）
+fn mongen_target_map_name(flow: &FlowControl) -> Option<&str> {
+    flow.param1_name.as_deref().or(flow.map_name.as_deref())
+}
+
+/// [RECIPE] 产物名 → item index 集合（C# ParseCrafting：Envir.GetItemInfo(data[0]) 按
+/// 名字查物品；未知名跳过等价于 C# 记录告警后 continue）
+pub(crate) fn recipe_indices_for_names(
+    item_infos: &HashMap<i32, crate::db::ItemInfo>,
+    names: &[String],
+) -> std::collections::HashSet<i32> {
+    names
+        .iter()
+        .filter_map(|name| {
+            item_infos
+                .iter()
+                .find(|(_, info)| info.name.eq_ignore_ascii_case(name))
+                .map(|(idx, _)| *idx)
+        })
+        .collect()
+}
+
+/// 解析 NPC 脚本 [RECIPE] 段的产物名列表（C# NPCScript.ParseCrafting，NPCScript.cs:749-783：
+/// 跳过空行；遇到 `[` 段头终止；每行取首个空格分词为产物名，未知名在调用侧过滤）。
+pub(crate) fn parse_recipe_names(lines: &[String]) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in lines {
+        let t = line.trim();
+        if t.starts_with('[') {
+            break;
+        }
+        if t.is_empty() {
+            continue;
+        }
+        // 注释行（C# 侧 GetItemInfo(";...") 失败跳过，此处等价提前过滤）
+        if t.starts_with(';') {
+            continue;
+        }
+        if let Some(first) = t.split_whitespace().next() {
+            names.push(first.to_string());
+        }
+    }
+    names
+}
+
 /// C# ApplyMapEntryRules：地图变更后应用 NoGroup/NoPets/NoIntelligentCreatures/NoHero 规则
 pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u64) {
     let Some(record) = world.players.get(&session_id).cloned() else {
@@ -4332,7 +4519,9 @@ mod tests {
         assert!(script.find("_useitem(3)").is_some());
         assert!(script.find("_die").is_none());
         // 扩展段：Daily/MapEnter/OnAcceptQuest/OnFinishQuest/Trigger
-        let ext = ParsedScript::parse("[@_Daily]\n#ACT\nBREAK\n\n[@_MapEnter(0)]\n#ACT\nBREAK\n\n[@_OnAcceptQuest(5)]\n#ACT\nBREAK\n\n[@_OnFinishQuest(5)]\n#ACT\nBREAK\n\n[@_Trigger(3)]\n#ACT\nBREAK\n");
+        let ext = ParsedScript::parse(
+            "[@_Daily]\n#ACT\nBREAK\n\n[@_MapEnter(0)]\n#ACT\nBREAK\n\n[@_OnAcceptQuest(5)]\n#ACT\nBREAK\n\n[@_OnFinishQuest(5)]\n#ACT\nBREAK\n\n[@_Trigger(3)]\n#ACT\nBREAK\n",
+        );
         assert!(ext.find("_daily").is_some());
         assert!(ext.find("_mapenter(0)").is_some());
         assert!(ext.find("_onacceptquest(5)").is_some());
@@ -4348,7 +4537,9 @@ mod tests {
             "; CUSTOMCOMMAND(vip)\n#CUSTOMCOMMAND(HELP)\ncustomcommand ( Vip )\n",
         );
         // MapCoord：[@_MapCoord(map,x,y)] 注册活动坐标（去重）
-        let mc = extract_map_coords("[@_MapCoord(0,5,5)]\n#ACT\nBREAK\n\n[@_MapCoord(3,10,20)]\n#ACT\nBREAK\n\n[@_MapCoord(0,5,5)]\n");
+        let mc = extract_map_coords(
+            "[@_MapCoord(0,5,5)]\n#ACT\nBREAK\n\n[@_MapCoord(3,10,20)]\n#ACT\nBREAK\n\n[@_MapCoord(0,5,5)]\n",
+        );
         assert_eq!(mc.len(), 2);
         assert!(mc.contains(&("0".to_string(), 5, 5)));
         assert!(mc.contains(&("3".to_string(), 10, 20)));
@@ -4864,6 +5055,160 @@ You don't have enough Gold!
         assert!(or_groups_pass(&[true, false, false]));
         assert!(!or_groups_pass(&[false]));
         assert!(!or_groups_pass(&[false, false]));
+    }
+
+    // ===== #2567：NPC 脚本语义批次（MOVE 名字解析/SET 副作用/PARAM1-MONGEN 落图）=====
+
+    fn test_map_infos() -> HashMap<i32, crate::db::MapInfo> {
+        let mut infos = HashMap::new();
+        let mut sg = crate::db::MapInfo::default();
+        sg.index = 5;
+        sg.file_name = "SG003".to_string();
+        infos.insert(5, sg);
+        let mut m1 = crate::db::MapInfo::default();
+        m1.index = 12;
+        m1.file_name = "M001".to_string();
+        infos.insert(12, m1);
+        infos
+    }
+
+    #[test]
+    fn resolve_map_ref_by_name_case_insensitive() {
+        // #2567：MOVE 地图参数优先按 file_name 名字解析（C# GetMapByNameAndInstance）
+        let infos = test_map_infos();
+        assert_eq!(resolve_map_ref(&infos, "SG003"), Some(5));
+        assert_eq!(resolve_map_ref(&infos, "sg003"), Some(5));
+        assert_eq!(resolve_map_ref(&infos, "m001"), Some(12));
+    }
+
+    #[test]
+    fn resolve_map_ref_numeric_falls_back_to_db_index() {
+        let infos = test_map_infos();
+        // 纯数字形态回退 DB index（旧脚本兼容）
+        assert_eq!(resolve_map_ref(&infos, "12"), Some(12));
+        // 数字不在 DB / 名字不存在 → None（调用侧提示未知地图）
+        assert_eq!(resolve_map_ref(&infos, "99"), None);
+        assert_eq!(resolve_map_ref(&infos, "hell301s"), None);
+        assert_eq!(resolve_map_ref(&infos, ""), None);
+    }
+
+    #[test]
+    fn random_walkable_point_hits_walkable_and_fails_on_blocked_map() {
+        use crate::maps::loader::{CellInfo, MapData};
+        let blocked = |w: i16, h: i16| MapData {
+            file_name: String::new(),
+            title: String::new(),
+            width: w,
+            height: h,
+            cells: vec![
+                vec![
+                    CellInfo {
+                        back_image: 0,
+                        walkable: false,
+                        fishing_attribute: -1
+                    };
+                    h as usize
+                ];
+                w as usize
+            ],
+            safe_zone_rects: Vec::new(),
+            no_experience: false,
+        };
+        // 全不可走 → None（C# TeleportRandom WalkableCells.Count==0 → false 不传送）
+        let m = blocked(2, 2);
+        assert_eq!(random_walkable_point(&m, 200), None);
+        // 2x2 仅 (1,0) 可走 → 必然命中（未命中概率 (3/4)^200≈1e-25）
+        let mut m = blocked(2, 2);
+        m.cells[1][0].walkable = true;
+        assert_eq!(random_walkable_point(&m, 200), Some((1, 0)));
+    }
+
+    #[test]
+    fn group_teleport_coords_dual_forms() {
+        // #2567：4-token（含关键字）`GROUPTELEPORT <map> <x> <y>`（C# parts.Length==4）
+        let args4: Vec<String> = ["bichon", "289", "617"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(group_teleport_coords(&args4), Some((289, 617)));
+        // 5-token `GROUPTELEPORT <map> <instance> <x> <y>`（原实现仅支持此形态）
+        let args5: Vec<String> = ["bichon", "1", "300", "600"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(group_teleport_coords(&args5), Some((300, 600)));
+        // 只有 map → x/y 记 0（动作侧走目标图随机落点）
+        let args1: Vec<String> = vec!["bichon".to_string()];
+        assert_eq!(group_teleport_coords(&args1), Some((0, 0)));
+        // 4-token 坐标不可解析 → None（C# TryParse 失败 no-op）
+        let bad: Vec<String> = ["bichon", "x", "617"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(group_teleport_coords(&bad), None);
+    }
+
+    #[test]
+    fn mongen_target_map_name_param1_first_map_compat() {
+        // #2567：无参 → None → MONGEN 严格 no-op（C# NPCSegment.cs:3755）
+        assert_eq!(mongen_target_map_name(&FlowControl::default()), None);
+        // PARAM1 设图名 → 优先（C# Param1）
+        let mut flow = FlowControl::default();
+        flow.param1_name = Some("SG003".into());
+        assert_eq!(mongen_target_map_name(&flow), Some("SG003"));
+        // 仅 MAP 关键字 → 既有等价路径保留
+        let mut flow = FlowControl::default();
+        flow.map_name = Some("M001".into());
+        assert_eq!(mongen_target_map_name(&flow), Some("M001"));
+        // PARAM1 优先于 MAP
+        let mut flow = FlowControl::default();
+        flow.map_name = Some("M001".into());
+        flow.param1_name = Some("SG003".into());
+        assert_eq!(mongen_target_map_name(&flow), Some("SG003"));
+    }
+
+    #[test]
+    fn parse_recipe_names_extracts_first_tokens_until_header() {
+        // #2567：[RECIPE] 段逐行取首 token；空行/注释跳过；`[` 段头终止
+        let lines: Vec<String> = [
+            "强效金创药",
+            "",
+            "  修复油 2 ",
+            "; 注释行",
+            "[@MAIN] ",
+            "普通剑",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let names = parse_recipe_names(&lines);
+        assert_eq!(names, vec!["强效金创药", "修复油"]);
+    }
+
+    #[test]
+    fn recipe_indices_for_names_resolves_and_skips_unknown() {
+        // #2567：[RECIPE] 产物名按 item_infos 名字（大小写不敏感）解析 index；
+        // 未知名跳过（C# GetItemInfo==null → continue）
+        let mut items = HashMap::new();
+        for (idx, name) in [(101, "强效金创药"), (102, "修复油"), (103, "普通剑")] {
+            let mut info = crate::db::ItemInfo::default();
+            info.index = idx;
+            info.name = name.to_string();
+            items.insert(idx, info);
+        }
+        let names: Vec<String> = ["强效金创药", "修复油", "不存在"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let set = recipe_indices_for_names(&items, &names);
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&101) && set.contains(&102));
+        // 大小写不敏感
+        let lower: Vec<String> = vec!["修复油".to_lowercase()];
+        assert!(recipe_indices_for_names(&items, &lower).contains(&102));
+        // 全未命中 → 空集（调用侧回退全集保持兼容）
+        let none: Vec<String> = vec!["未知物品".to_string()];
+        assert!(recipe_indices_for_names(&items, &none).is_empty());
     }
 
     const OR_SAMPLE: &str = r#"[@MAIN]
