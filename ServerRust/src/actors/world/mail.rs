@@ -19,6 +19,68 @@ pub struct SendMailRequest {
     pub body: String,
     pub gold: u32,
     pub item_uids: Vec<u64>,
+    /// #2538：贴票（C# C.SendMail.Stamped；消耗一张邮票并解锁 5 附件格）
+    pub stamped: bool,
+}
+
+/// #2538：查询邮资（C# C.MailCost → S.MailCost；写信面板邮资显示）
+pub struct MailCostRequest {
+    pub session_id: u64,
+    pub gold: u32,
+    pub item_uids: Vec<u64>,
+    pub stamped: bool,
+}
+
+/// #2538：邮票判定（C# ItemType.Nothing && Shape==1；C# 枚举 0-based，db item_type==0）
+pub(crate) fn is_stamp_item(info: &db::ItemInfo) -> bool {
+    info.item_type == 0 && info.shape == 1
+}
+
+/// #2538：C# PlayerObject.GetMailCost（11926-11957）——
+/// 免费条件 MailFreeWithStamp && stamped；否则金币费 floor(gold/1000)*Per1K
+/// + 附件保险 floor(price/100)*Pct（item_uids 调用方已按 stamped?5:1 截断）
+pub(crate) fn compute_mail_cost(
+    state: &crate::actors::player::PlayerState,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+    item_uids: &[u64],
+    gold: u32,
+    stamped: bool,
+    per_1k: u32,
+    insurance_pct: u32,
+    free_with_stamp: bool,
+) -> u64 {
+    if free_with_stamp && stamped {
+        return 0;
+    }
+    let mut prices = Vec::new();
+    for uid in item_uids {
+        if let Some(item) = state.inventory.get_item(*uid) {
+            if let Some(info) = item_infos.get(&item.item_index) {
+                // C# GetMailCost：item.Price()（含耐久比例/附加属性）× Count
+                prices.push(
+                    super::item::compute_item_price_per_unit(item, info)
+                        .saturating_mul(item.count as u64),
+                );
+            }
+        }
+    }
+    mail_cost_from_prices(&prices, gold, per_1k, insurance_pct)
+}
+
+/// #2538：计费核心（金币费 + 每件保险费；纯函数便于测试）
+pub(crate) fn mail_cost_from_prices(
+    item_prices: &[u64],
+    gold: u32,
+    per_1k: u32,
+    insurance_pct: u32,
+) -> u64 {
+    let gold_fee = (gold as u64 / 1000) * per_1k as u64;
+    let item_fee: u64 = item_prices
+        .iter()
+        .copied()
+        .map(|p| p / 100 * insurance_pct as u64)
+        .sum();
+    gold_fee + item_fee
 }
 
 /// 读取邮件
@@ -106,6 +168,66 @@ impl Message<MailLockedItemRequest> for WorldActor {
         debug!(
             "MailLockedItem: session={} uid={} locked={}",
             msg.session_id, msg.unique_id, msg.locked
+        );
+    }
+}
+
+impl Message<MailCostRequest> for WorldActor {
+    type Reply = ();
+
+    /// #2538：C# MirConnection.MailCost（2055）→ PlayerObject.GetMailCost → S.MailCost
+    async fn handle(&mut self, msg: MailCostRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let (per_1k, insurance_pct, free_with_stamp, ..) = self
+            .social_ref
+            .ask(crate::actors::social::NpcGetMailSettings)
+            .await
+            .unwrap_or((100, 5, true, 100, false, false));
+        // C# GetMailCost：物品保险仅计 stamped ? 5 : 1 格
+        let uids: Vec<u64> = if msg.stamped {
+            msg.item_uids.clone()
+        } else {
+            msg.item_uids.iter().take(1).copied().collect()
+        };
+        let cost = compute_mail_cost(
+            &state,
+            &self.item_infos,
+            &uids,
+            msg.gold,
+            msg.stamped,
+            per_1k,
+            insurance_pct,
+            free_with_stamp,
+        ) as u32;
+        let mut body = Vec::new();
+        if mir2_shared::packets::base::serialize_packet(
+            &mut std::io::Cursor::new(&mut body),
+            &mir2_shared::packets::server::mail_system::MailCost { cost },
+        )
+        .is_ok()
+        {
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: body,
+                })
+                .await;
+        }
+        debug!(
+            "MailCost: session={} gold={} items={} stamped={} cost={}",
+            msg.session_id,
+            msg.gold,
+            uids.len(),
+            msg.stamped,
+            cost
         );
     }
 }
@@ -246,24 +368,50 @@ impl Message<SendMailRequest> for WorldActor {
             .ask(crate::actors::social::NpcGetMailSettings)
             .await
             .unwrap_or((100, 5, true, 100, false, false));
-        // Rust 暂无邮票系统：无邮票 → 不免费（对齐 C# 无 stamp 时收费）
-        let mail_cost: u64 = if mail_free_with_stamp {
-            0
+        // #2538：C# PlayerObject.SendMail（11758-11792）——贴票消耗一张邮票（Nothings/Shape==1）
+        let stamp_uid: Option<u64> = if msg.stamped {
+            sender_state
+                .inventory
+                .backpack
+                .iter()
+                .flatten()
+                .find(|s| {
+                    self.item_infos
+                        .get(&s.item.item_index)
+                        .is_some_and(is_stamp_item)
+                })
+                .map(|s| s.item.unique_id)
         } else {
-            let gold_fee = (msg.gold as u64 / 1000) * mail_cost_per_1k as u64;
-            let mut item_fee: u64 = 0;
-            for uid in &msg.item_uids {
-                if let Some(item) = sender_state.inventory.get_item(*uid) {
-                    if let Some(info) = self.item_infos.get(&item.item_index) {
-                        // C# GetMailCost：item.Price()（含耐久比例/附加属性）× Count
-                        let price = super::item::compute_item_price_per_unit(item, info)
-                            .saturating_mul(item.count as u64);
-                        item_fee += price / 100 * mail_insurance_pct as u64;
-                    }
-                }
-            }
-            gold_fee + item_fee
+            None
         };
+        let has_stamp = stamp_uid.is_some();
+        if let Some(uid) = stamp_uid {
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: uid,
+                    count: 1,
+                })
+                .await;
+            send_system_message(&self.gate_ref, msg.session_id, "消耗一张邮票");
+        }
+        // #2538：C# hasStamp ? 5 : 1——未贴票仅寄第 1 格附件
+        let item_uids: Vec<u64> = if has_stamp {
+            msg.item_uids.clone()
+        } else {
+            msg.item_uids.iter().take(1).copied().collect()
+        };
+        // #2538：C# GetMailCost——免费条件 MailFreeWithStamp && stamped（原实现恒免费）
+        let mail_cost: u64 = compute_mail_cost(
+            &sender_state,
+            &self.item_infos,
+            &item_uids,
+            msg.gold,
+            msg.stamped,
+            mail_cost_per_1k,
+            mail_insurance_pct,
+            mail_free_with_stamp,
+        );
 
         // 检查金币是否足够（附件金币 + 寄送费用）
         let total_gold = msg.gold as u64;
@@ -273,9 +421,9 @@ impl Message<SendMailRequest> for WorldActor {
             return;
         }
 
-        // 从发送者扣除物品
+        // 从发送者扣除物品（#2538：按贴票门控后的槽位）
         let mut items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
-        for uid in &msg.item_uids {
+        for uid in &item_uids {
             if let Some(item) = sender_state.inventory.get_item(*uid) {
                 items.push(item.clone());
             }
@@ -290,7 +438,7 @@ impl Message<SendMailRequest> for WorldActor {
                 })
                 .await;
         }
-        for uid in &msg.item_uids {
+        for uid in &item_uids {
             let _ = record
                 .actor_ref
                 .ask(RemoveItemFromInventory { unique_id: *uid })
@@ -486,5 +634,29 @@ impl Message<DeleteMailRequest> for WorldActor {
         if deleted {
             send_system_message(&self.gate_ref, msg.session_id, "邮件已删除");
         }
+    }
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+
+    /// #2538：金币费 floor(gold/1000)*Per1K（C# GetMailCost 11932-11935）
+    #[test]
+    fn mail_cost_gold_fee_floors_per_1k() {
+        // 1500 金 × 每 1K 2 → floor(1500/1000)*2 = 2
+        assert_eq!(mail_cost_from_prices(&[], 1500, 2, 5), 2);
+        // 999 金 → 0；2000 金 × 3 → 6
+        assert_eq!(mail_cost_from_prices(&[], 999, 3, 5), 0);
+        assert_eq!(mail_cost_from_prices(&[], 2000, 3, 5), 6);
+    }
+
+    /// #2538：附件保险 floor(price/100)*Pct（C# GetMailCost 11937-11953）
+    #[test]
+    fn mail_cost_item_insurance_per_piece() {
+        // 价格 10000 保险 5% → 500
+        assert_eq!(mail_cost_from_prices(&[10000], 0, 0, 5), 500);
+        // 两件 10000 + 250 → 100*5 + 2*5 = 510
+        assert_eq!(mail_cost_from_prices(&[10000, 250], 0, 0, 5), 510);
     }
 }

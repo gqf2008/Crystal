@@ -629,6 +629,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         x if x == ServerPacketIds::MailCost as i16 => {
             if let Ok(p) = mail_system::MailCost::read_body(&mut cur) {
                 tracing::debug!("📧 邮寄费用: {}", p.cost);
+                server_events.write(ServerEvent::MailCost { cost: p.cost });
             }
         }
         x if x == ServerPacketIds::RemoveDelayedExplosion as i16 => {

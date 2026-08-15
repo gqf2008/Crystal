@@ -1093,7 +1093,7 @@ impl Message<ClientData> for GateActor {
                 forward_mail_locked_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MailCost as i16 => {
-                handle_mail_cost(&gate_ref, msg.session_id, payload).await;
+                forward_mail_cost(&self.world_ref, msg.session_id, payload);
             }
             // 轮回
             x if x == ClientPacketIds::ShareQuest as i16 => {
@@ -3232,20 +3232,21 @@ fn handle_send_mail(
         }
     }
     let mut stamped_buf = [0u8; 1];
-    let _stamped = if std::io::Read::read_exact(&mut cur, &mut stamped_buf).is_ok() {
-        stamped_buf[0]
+    let stamped = if std::io::Read::read_exact(&mut cur, &mut stamped_buf).is_ok() {
+        stamped_buf[0] != 0
     } else {
-        0
+        false
     };
 
     let subject = message.lines().next().unwrap_or("").to_string();
     debug!(
-        "SendMail: session={} to={} subject={} gold={} items={}",
+        "SendMail: session={} to={} subject={} gold={} items={} stamped={}",
         session_id,
         receiver_name,
         subject,
         gold,
-        item_uids.len()
+        item_uids.len(),
+        stamped
     );
     let _ = world_ref
         .tell(crate::actors::world::SendMailRequest {
@@ -3255,6 +3256,7 @@ fn handle_send_mail(
             body: message,
             gold,
             item_uids,
+            stamped,
         })
         .try_send();
 }
@@ -4914,18 +4916,43 @@ fn forward_mail_locked_item(
         .try_send();
 }
 
-/// MailCost: [items_count: u32][gold: u32]
-async fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("MailCost: session={}", session_id);
-    // 返回计算结果（免费）
-    let mut body = Vec::new();
-    body.extend_from_slice(&0u32.to_le_bytes());
-    let _ = gate_ref
-        .tell(SendToClient {
+/// MailCost: [gold: u32][items: 5*u64][stamped: bool]（C#/SharedRust wire；#2538）
+fn forward_mail_cost(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    // 派发前已剥 4 字节帧头（与 handle_send_mail 同一入口）
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(p) = mir2_shared::packets::client::mail::MailCost::read_body(&mut cur) else {
+        debug!("MailCost: session={} 解析失败", session_id);
+        return;
+    };
+    let item_uids: Vec<u64> = p
+        .items_idx
+        .iter()
+        .copied()
+        .filter(|&uid| uid != 0)
+        .collect();
+    let world_ref = match world_ref {
+        Some(w) => w,
+        None => return,
+    };
+    debug!(
+        "MailCost: session={} gold={} items={} stamped={}",
+        session_id,
+        p.gold,
+        item_uids.len(),
+        p.stamped
+    );
+    let _ = world_ref
+        .tell(crate::actors::world::MailCostRequest {
             session_id,
-            data: build_packet_bytes(ServerPacketIds::MailCost as i16, &body),
+            gold: p.gold,
+            item_uids,
+            stamped: p.stamped,
         })
-        .await;
+        .try_send();
 }
 
 /// ShareQuest: [quest_id: u32]
