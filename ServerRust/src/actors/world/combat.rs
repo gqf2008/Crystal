@@ -147,38 +147,45 @@ impl WorldActor {
                 match spell {
                     mir2_shared::enums::Spell::Blizzard if fastrand::i32(0..8) == 0 => {
                         let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
+                        let mut poison = crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::SLOW,
+                            dur,
+                            0,
+                            2000,
+                        );
+                        // #2573：PvP 施毒带施毒者（ownerBrowns 灰名钩子用）
+                        poison.owner_session = caster_session;
                         let _ = other_actor
                             .actor_ref
                             .ask(crate::actors::player::ApplyCombatPoisons {
-                                poisons: vec![crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::SLOW,
-                                    dur,
-                                    0,
-                                    2000,
-                                )],
+                                poisons: vec![poison],
                             })
                             .await;
                     }
                     mir2_shared::enums::Spell::PoisonCloud => {
                         let poison_value = (raw_damage / 4).min(10);
+                        let mut poison = crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::GREEN,
+                            12,
+                            poison_value,
+                            1000,
+                        );
+                        poison.owner_session = caster_session;
                         let _ = other_actor
                             .actor_ref
                             .ask(crate::actors::player::ApplyCombatPoisons {
-                                poisons: vec![crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::GREEN,
-                                    12,
-                                    poison_value,
-                                    1000,
-                                )],
+                                poisons: vec![poison],
                             })
                             .await;
                     }
                     _ => {}
                 }
                 for p in &attack_result.applied_poisons {
+                    let mut p = *p;
+                    p.owner_session = caster_session;
                     let _ = other_actor
                         .actor_ref
-                        .ask(crate::actors::player::ApplyCombatPoisons { poisons: vec![*p] })
+                        .ask(crate::actors::player::ApplyCombatPoisons { poisons: vec![p] })
                         .await;
                 }
                 // PvP 受击广播 + 装备耐久（C# Struck → DamageDura）
@@ -804,6 +811,13 @@ impl Message<WorldAttackRequest> for WorldActor {
                     data: packet.clone(),
                 })
                 .await;
+            // #2573：观战镜像（C# BroadcastObservePackets: ObjectAttack）
+            self.mirror_to_observers(
+                msg.session_id,
+                mir2_shared::enums::ServerPacketIds::ObjectAttack as i16,
+                &attack_body,
+            )
+            .await;
 
             // --- 检测是否命中怪物 ---
             // 计算攻击方向的前方位置
@@ -1358,10 +1372,18 @@ impl Message<WorldAttackRequest> for WorldActor {
                             let damage = attack_result.damage;
                             // 施加战斗触发的 Poison 给目标玩家
                             if !attack_result.applied_poisons.is_empty() {
-                                let _ = other_actor
-                                    .ask(crate::actors::player::ApplyCombatPoisons {
-                                        poisons: attack_result.applied_poisons,
+                                // #2573：PvP 施毒带施毒者（ownerBrowns 灰名钩子用）
+                                let poisons = attack_result
+                                    .applied_poisons
+                                    .iter()
+                                    .map(|p| {
+                                        let mut p = *p;
+                                        p.owner_session = msg.session_id;
+                                        p
                                     })
+                                    .collect();
+                                let _ = other_actor
+                                    .ask(crate::actors::player::ApplyCombatPoisons { poisons })
                                     .await;
                             }
                             // C#：PvP 命中广播 ObjectStruck + DamageIndicator 给同图其他玩家
@@ -1400,14 +1422,16 @@ impl Message<WorldAttackRequest> for WorldActor {
                                         && self.pvp_cfg.can_resist_poison
                                         && fastrand::i32(0..40) <= lv as i32 + 1
                                     {
+                                        let mut stun = crate::combat::poison::Poison::new(
+                                            mir2_shared::enums::PoisonType::STUN,
+                                            2 + lv as u32,
+                                            0,
+                                            1000,
+                                        );
+                                        stun.owner_session = msg.session_id;
                                         let _ = other_actor
                                             .ask(crate::actors::player::ApplyCombatPoisons {
-                                                poisons: vec![crate::combat::poison::Poison::new(
-                                                    mir2_shared::enums::PoisonType::STUN,
-                                                    2 + lv as u32,
-                                                    0,
-                                                    1000,
-                                                )],
+                                                poisons: vec![stun],
                                             })
                                             .await;
                                         debug!(
@@ -1957,6 +1981,20 @@ impl Message<HarvestRequest> for WorldActor {
                 })
                 .await;
         }
+        // #2573：观战镜像（C# BroadcastObservePackets: ObjectHarvest）
+        {
+            let mut hb = Vec::new();
+            hb.extend_from_slice(&state.object_id.to_le_bytes());
+            hb.extend_from_slice(&(target_x as i32).to_le_bytes());
+            hb.extend_from_slice(&(target_y as i32).to_le_bytes());
+            hb.push(msg.direction);
+            self.mirror_to_observers(
+                msg.session_id,
+                mir2_shared::enums::ServerPacketIds::ObjectHarvest as i16,
+                &hb,
+            )
+            .await;
+        }
 
         // 矿脉储量：取/初始化（C# MineSpot.StonesLeft），枯竭则等待再生（per-mine MaxStones/SpotRegenRate）
         let spot_key = (state.map_index, target_x, target_y);
@@ -2223,6 +2261,47 @@ pub struct ObservePlayerRequest {
 }
 
 impl WorldActor {
+    /// #2573：观战镜像——把目标玩家自身动作包转发给其观察者
+    /// （C# PlayerObject.Broadcast 覆写 + BroadcastObservePackets 7 类包）
+    pub(crate) async fn mirror_to_observers(&self, target_session: u64, opcode: i16, body: &[u8]) {
+        let Some(observers) = self.observe_links.get(&target_session) else {
+            return;
+        };
+        if observers.is_empty() {
+            return;
+        }
+        let data = build_packet_bytes(opcode, body);
+        for obs in observers {
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: *obs,
+                    data: data.clone(),
+                })
+                .await;
+        }
+    }
+
+    /// #2573：注册观战（C# MirConnection.AddObserver：换目标时先从旧目标观察者列表移除）
+    pub(crate) fn add_observe_link(&mut self, observer: u64, target: u64) {
+        if observer == target {
+            return;
+        }
+        for obs_list in self.observe_links.values_mut() {
+            obs_list.retain(|s| *s != observer);
+        }
+        self.observe_links.entry(target).or_default().push(observer);
+    }
+
+    /// #2573：会话断开清理观战链接（该会话作为观察者或目标的任一角色）
+    pub(crate) fn remove_observe_links(&mut self, session_id: u64) {
+        for obs_list in self.observe_links.values_mut() {
+            obs_list.retain(|s| *s != session_id);
+        }
+        self.observe_links.remove(&session_id);
+        self.observe_links.retain(|_, v| !v.is_empty());
+    }
+
     /// 观察玩家（C# C.Observe / @OBSERVE 共用）：目标 AllowObserve 校验 → AllowObserve(true) + PlayerInspect
     pub(crate) async fn observe_player(&mut self, observer_session: u64, target_name: &str) {
         let mut target_state: Option<crate::actors::player::PlayerState> = None;
@@ -2239,7 +2318,11 @@ impl WorldActor {
             return;
         };
 
-        // #1671：C# Envir.Observe——目标 AllowObserve 设置校验（Envir.cs:5183）
+        // #1671/#2573：C# Envir.Observe——双重门槛：全局 Settings.AllowObserve + 目标玩家 AllowObserve
+        if !self.setup_cfg.allow_observe {
+            debug!("Observe rejected: server AllowObserve off");
+            return;
+        }
         if !target.allow_observe {
             debug!(
                 "Observe rejected: target {} has AllowObserve off",
@@ -2247,6 +2330,14 @@ impl WorldActor {
             );
             return;
         }
+
+        // #2573：注册观战镜像链接（C# MirConnection.AddObserver；换目标自动摘旧链接）
+        let target_session = target.session_id;
+        self.add_observe_link(observer_session, target_session);
+        debug!(
+            "Observe: session {} now observing {} (session {})",
+            observer_session, target.name, target_session
+        );
 
         // Send AllowObserve(true)
         let allow_body = vec![1u8];
@@ -2518,6 +2609,13 @@ impl Message<RangeAttackRequest> for WorldActor {
                 data: range_packet.clone(),
             })
             .await;
+        // #2573：观战镜像（C# BroadcastObservePackets: ObjectRangeAttack）
+        self.mirror_to_observers(
+            msg.session_id,
+            mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16,
+            &range_body,
+        )
+        .await;
         // S.RangeAttack 弹道（客户端 PendingEffect::Projectile：从玩家飞向目标）
         let mut proj_body = Vec::new();
         proj_body.extend_from_slice(&msg.target_id.to_le_bytes());
@@ -3013,6 +3111,10 @@ pub struct MagicRequest {
     pub target_id: u32,
     pub target_x: i32,
     pub target_y: i32,
+    /// #2573：C# Magic.ObjectID——等于已召唤英雄 OID 时由英雄施法（随英雄真实对象化启用）
+    pub object_id: u32,
+    /// #2573：C# Magic.SpellTargetLock——锁定施法：AoE 中心改用目标当前实时位置
+    pub spell_target_lock: bool,
 }
 
 /// #306 HellFire：C# HumanObject.HellFire —— 前向直线 + Lv3 两条对角线，各 4 格
@@ -3217,7 +3319,7 @@ fn magic_get_power(p: i64, level: i64, power_base: i32, power_bonus: i32, roll: 
 impl Message<MagicRequest> for WorldActor {
     type Reply = ();
 
-    async fn handle(&mut self, msg: MagicRequest, _ctx: &mut Context<Self, Self::Reply>) {
+    async fn handle(&mut self, mut msg: MagicRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
             None => return,
@@ -3298,6 +3400,38 @@ impl Message<MagicRequest> for WorldActor {
         if cast_out_of_range(state.x, state.y, msg.target_x, msg.target_y, spell_range) {
             send_system_message(&self.gate_ref, msg.session_id, "目标超出施法范围");
             return;
+        }
+        // #2573：C# Magic.SpellTargetLock——锁定施法时 AoE 中心改为目标当前实时位置
+        // （C# HumanObject.Magic 的 7 处三元：FireBang/MassHiding/SoulShield/FireWall/
+        //   MassHealing/Blizzard/MeteorStrike `spellTargetLock ? target.CurrentLocation : location`；
+        //   范围校验仍按客户端原始点击格，与 C# 顺序一致）
+        if msg.spell_target_lock
+            && msg.target_id != 0
+            && matches!(
+                msg.spell,
+                SPELL_FIREBANG
+                    | SPELL_MASS_HIDING
+                    | SPELL_SOUL_SHIELD
+                    | SPELL_FIREWALL
+                    | SPELL_MASS_HEALING
+                    | SPELL_BLIZZARD
+                    | SPELL_METEOR_STRIKE
+            )
+        {
+            if let Some(m) = self.monsters.get(&msg.target_id) {
+                msg.target_x = m.x;
+                msg.target_y = m.y;
+            } else {
+                for r in self.players.values() {
+                    if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                        if os.object_id == msg.target_id {
+                            msg.target_x = os.x;
+                            msg.target_y = os.y;
+                            break;
+                        }
+                    }
+                }
+            }
         }
         let power = spell_db.map(|m| m.power_base).unwrap_or(10); // for buff/heal scaling
                                                                   // Use spell level from PlayerMagic if learned
@@ -3530,6 +3664,13 @@ impl Message<MagicRequest> for WorldActor {
                     })
                     .await;
             }
+            // #2573：观战镜像（C# BroadcastObservePackets: ObjectMagic）
+            self.mirror_to_observers(
+                msg.session_id,
+                mir2_shared::enums::ServerPacketIds::ObjectMagic as i16,
+                &om_body,
+            )
+            .await;
             // #1580：本地玩家自己的施法动画（self_broadcast=true；C# 本地 ActionFeed，Bevy 依赖回显）
             let mut self_om = object_magic.clone();
             self_om.self_broadcast = true;

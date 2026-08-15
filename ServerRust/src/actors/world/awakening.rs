@@ -523,6 +523,11 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
             Some(r) => r.clone(),
             None => return,
         };
+        // #2573：页 key 门槛（C# PlayerObject.cs:8808 觉醒要求 AwakeningKey，防远程发包）
+        if !self.npc_page_allows(msg.session_id, &["[@AWAKENING]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开觉醒页");
+            return;
+        }
 
         let _awake_type = match mir2_shared::enums::AwakeType::try_from(msg.awake_type) {
             Ok(t) => t,
@@ -674,6 +679,11 @@ impl Message<AwakeningRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        // #2573：页 key 门槛（C# PlayerObject.cs:8808 觉醒要求 AwakeningKey，防远程发包）
+        if !self.npc_page_allows(msg.session_id, &["[@AWAKENING]"]) {
+            self.send_awakening_result(msg.session_id, AWAKE_RESULT_FAIL, -1);
+            return;
+        }
 
         let awake_type = match mir2_shared::enums::AwakeType::try_from(msg.awake_type) {
             Ok(t) => t,

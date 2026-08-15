@@ -585,8 +585,9 @@ pub(crate) fn auto_craft_test(
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Craft);
             }
             net.send_packet(&client_bevy::network::CraftItemWire {
-                recipe_id: 1,
-                materials: 0,
+                unique_id: 1,
+                count: 1,
+                slots: Vec::new(),
             });
             tracing::info!("[CRAFTTEST] 合成配方 1（木材x3+铁矿石x2）");
             *stage = 1;
@@ -1141,6 +1142,8 @@ pub(crate) fn auto_item_state_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1266,6 +1269,8 @@ pub(crate) fn auto_repair_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1324,6 +1329,8 @@ pub(crate) fn auto_resize_test(
                 return; // 等 UserInformation 完成
             }
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: mir2_shared::enums::MirDirection::Down,
                 target_id: 101,
@@ -1504,6 +1511,8 @@ pub(crate) fn auto_storage_resize_test(
             }
             // mock 的 ResizeStorage(80) 在施法演示批次里回发
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: mir2_shared::enums::MirDirection::Down,
                 target_id: 101,

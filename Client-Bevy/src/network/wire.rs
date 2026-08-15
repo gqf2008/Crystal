@@ -5,6 +5,8 @@ pub struct GuildStorageItemChangeWire {
     pub grid: u8,
     pub unique_id: u64,
     pub count: u32,
+    // #2573：注意——本 wire 为历史自造布局，与 C#/SharedRust 的 [type u8][from i32][to i32] 不同；
+    // type=2 移动编码：grid=from 格、count=to 格（服务端 social.rs 按此解析）。统一待后续任务。
 }
 
 impl Packet for GuildStorageItemChangeWire {

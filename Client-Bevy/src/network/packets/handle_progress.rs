@@ -22,12 +22,13 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
     match opcode {
         // ---- M41: 合成 ----
         x if x == ServerPacketIds::CraftItem as i16 => {
-            // 服务端实际 wire：[recipe_id u32][count u16][success u8]
+            // #2573：SharedRust canonical wire [unique_id u64][count u16][success u8] = 11B
             let body = &payload[PacketHeader::HEADER_SIZE..];
-            if body.len() >= 7 {
-                let recipe_id = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                let count = u16::from_le_bytes(body[4..6].try_into().unwrap_or([0; 2]));
-                let success = body[6] != 0;
+            if body.len() >= 11 {
+                let unique_id = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
+                let count = u16::from_le_bytes(body[8..10].try_into().unwrap_or([0; 2]));
+                let success = body[10] != 0;
+                let recipe_id = unique_id as u32;
                 server_events.write(ServerEvent::CraftResult { recipe_id, count, success });
                 tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
             }

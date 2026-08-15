@@ -533,20 +533,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(&to_client, &mock_map_info(p.map_index));
                                     }
                                 }
-                                // #503：合成 → 回发 S.CraftItem（client 按 [recipe_id u32][count u16][success u8] 解码）
+                                // #503/#2573：合成 → 回发 S.CraftItem（SharedRust canonical
+                                // [unique_id u64][count u16][success u8] = 11B）
                                 x if x == ClientPacketIds::CraftItem as i16 => {
-                                    let mut inner = Vec::new();
-                                    let header = mir2_shared::packets::base::PacketHeader::new(
-                                        (mir2_shared::packets::base::PacketHeader::HEADER_SIZE + 7) as u16,
-                                        mir2_shared::enums::ServerPacketIds::CraftItem as i16,
-                                    );
-                                    if header.write_to(&mut inner).is_ok() {
-                                        inner.extend_from_slice(&1u32.to_le_bytes()); // recipe_id
-                                        inner.extend_from_slice(&1u16.to_le_bytes()); // count
-                                        inner.push(1u8); // success
-                                        let mut framed = Vec::new();
-                                        crate::network::codec::encode(&inner, &mut framed);
-                                        let _ = to_client.send(framed);
+                                    let mut body = Vec::new();
+                                    let resp = mir2_shared::packets::server::item::CraftItem {
+                                        unique_id: 1,
+                                        count: 1,
+                                        success: true,
+                                    };
+                                    if resp.write_body(&mut body).is_ok() {
+                                        let mut inner = Vec::new();
+                                        let header = mir2_shared::packets::base::PacketHeader::new(
+                                            (mir2_shared::packets::base::PacketHeader::HEADER_SIZE + body.len()) as u16,
+                                            mir2_shared::enums::ServerPacketIds::CraftItem as i16,
+                                        );
+                                        if header.write_to(&mut inner).is_ok() {
+                                            inner.extend_from_slice(&body);
+                                            let mut framed = Vec::new();
+                                            crate::network::codec::encode(&inner, &mut framed);
+                                            let _ = to_client.send(framed);
+                                        }
                                     }
                                     tracing::info!("🔧 [MOCK] 合成结果回发 recipe=1 count=1 success=true");
                                 }

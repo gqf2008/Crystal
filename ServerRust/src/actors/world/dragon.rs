@@ -161,41 +161,34 @@ impl DragonState {
         levelled
     }
 
-    /// 生成龙身 24 个部件的位置偏移（C# BodyLocations）
+    /// 龙身 24 个部件的位置偏移（C# Dragon.cs BodyLocations 原样数据）
     pub fn body_part_offsets() -> Vec<(i32, i32)> {
         vec![
-            (0, -2),
-            (1, -1),
-            (2, 0),
-            (1, 1),
-            (0, 2),
-            (-1, 1),
-            (-2, 0),
-            (-1, -1), // 外圈8个
-            (0, -1),
-            (1, 0),
-            (0, 1),
-            (-1, 0), // 内圈4个
-            (0, -3),
-            (2, -2),
-            (3, 0),
-            (2, 2),
-            (0, 3),
-            (-2, 2),
+            (-3, -1),
             (-3, 0),
-            (-2, -2), // 更外圈8个
-            (1, -2),
-            (2, -1),
-            (2, 1),
-            (1, 2),
-            (-1, 2),
-            (-2, 1),
+            (-2, -3),
+            (-2, -2),
             (-2, -1),
-            (-1, -2), // 交错8个
+            (-2, 0),
+            (-2, 1),
+            (-1, -2),
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+            (-1, 2),
+            (0, -2),
+            (0, -1),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, -2),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (2, 1),
+            (2, 2),
         ]
-        .into_iter()
-        .take(24)
-        .collect()
     }
 }
 
@@ -273,7 +266,12 @@ mod tests {
     #[test]
     fn body_part_offsets_count_24() {
         // C# Dragon.BodyLocations 24 个身体部件偏移
-        assert_eq!(super::DragonState::body_part_offsets().len(), 24);
+        let offsets = super::DragonState::body_part_offsets();
+        assert_eq!(offsets.len(), 24);
+        // 锚定 C# Dragon.cs:28-54 首尾数据，防止再次漂移成自造环形布局
+        assert_eq!(offsets[0], (-3, -1));
+        assert_eq!(offsets[1], (-3, 0));
+        assert_eq!(offsets[23], (2, 2));
     }
 
     #[test]

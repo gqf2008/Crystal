@@ -178,11 +178,13 @@ impl Packet for RefineDepositWire {
     }
 }
 
-/// 合成请求（M41：gate 解析 [recipe_id u32][materials_count u32]）
-#[derive(Debug, Clone, Copy)]
+/// 合成请求（#2573：对齐 C# C.CraftItem wire
+/// [UniqueID u64][Count u16][slots_len i32][slots i32×N]）
+#[derive(Debug, Clone)]
 pub struct CraftItemWire {
-    pub recipe_id: u32,
-    pub materials: u32,
+    pub unique_id: u64,
+    pub count: u16,
+    pub slots: Vec<i32>,
 }
 
 impl Packet for CraftItemWire {
@@ -192,9 +194,17 @@ impl Packet for CraftItemWire {
         reader: &mut R,
     ) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
+        let unique_id = reader.read_u64::<LittleEndian>()?;
+        let count = reader.read_u16::<LittleEndian>()?;
+        let slots_len = reader.read_i32::<LittleEndian>()?;
+        let mut slots = Vec::new();
+        for _ in 0..slots_len.max(0).min(64) {
+            slots.push(reader.read_i32::<LittleEndian>()?);
+        }
         Ok(Self {
-            recipe_id: reader.read_u32::<LittleEndian>()?,
-            materials: reader.read_u32::<LittleEndian>()?,
+            unique_id,
+            count,
+            slots,
         })
     }
 
@@ -203,8 +213,12 @@ impl Packet for CraftItemWire {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.recipe_id)?;
-        writer.write_u32::<LittleEndian>(self.materials)?;
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u16::<LittleEndian>(self.count)?;
+        writer.write_i32::<LittleEndian>(self.slots.len() as i32)?;
+        for s in &self.slots {
+            writer.write_i32::<LittleEndian>(*s)?;
+        }
         Ok(())
     }
 }

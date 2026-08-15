@@ -93,18 +93,26 @@ impl Packet for Harvest {
 }
 
 /// Client requests to cast a spell/magic
+///
+/// #2573：对齐 C# C.Magic wire（ClientPackets.cs:1111-1141）
+/// `[ObjectID u32][Spell u8][Direction u8][TargetID u32][X i32][Y i32][SpellTargetLock u8]`
+/// - ObjectID：施法者对象——等于已召唤英雄 OID 时由英雄施法（客户端主动触发英雄技能）
+/// - SpellTargetLock：锁定施法——开启时 AoE 中心改为目标当前实时位置
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Magic {
+    pub object_id: u32,
     pub spell: Spell,
     pub direction: MirDirection,
     pub target_id: u32,
     pub location: Point,
+    pub spell_target_lock: bool,
 }
 
 impl Packet for Magic {
     const OPCODE: i16 = ClientPacketIds::Magic as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
         let spell = Spell::try_from(reader.read_u8()?).unwrap_or(Spell::None);
         let direction = MirDirection::try_from(reader.read_u8()?).unwrap_or(MirDirection::Up);
         let target_id = reader.read_u32::<LittleEndian>()?;
@@ -112,20 +120,25 @@ impl Packet for Magic {
             x: reader.read_i32::<LittleEndian>()?,
             y: reader.read_i32::<LittleEndian>()?,
         };
+        let spell_target_lock = reader.read_u8()? != 0;
         Ok(Self {
+            object_id,
             spell,
             direction,
             target_id,
             location,
+            spell_target_lock,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
         writer.write_u8(self.spell as u8)?;
         writer.write_u8(self.direction as u8)?;
         writer.write_u32::<LittleEndian>(self.target_id)?;
         writer.write_i32::<LittleEndian>(self.location.x)?;
         writer.write_i32::<LittleEndian>(self.location.y)?;
+        writer.write_u8(if self.spell_target_lock { 1 } else { 0 })?;
         Ok(())
     }
 }

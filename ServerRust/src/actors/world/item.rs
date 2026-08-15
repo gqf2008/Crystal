@@ -209,10 +209,15 @@ pub struct TakeBackItemRequest {
     pub to: i32,
 }
 
-/// 合成物品请求
+/// 合成物品请求（C# ClientPackets.CraftItem wire：UniqueID + Count + Slots）
 pub struct CraftItemRequest {
     pub session_id: u64,
-    pub recipe_id: u32,
+    /// C# UniqueID——本服合成面板以 recipe_id 作为该标识下发（#2573 修 gate 丢字段）
+    pub unique_id: u64,
+    /// 合成数量（C# Count；材料/金币/产物按此倍率结算，1..=StackSize）
+    pub count: u16,
+    /// 玩家点选的材料背包格（C# Slots；本服客户端暂无选格 UI，空=按背包自动扣）
+    pub slots: Vec<i32>,
 }
 
 /// 回购物品请求（从 NPC 回购最近卖出的物品）
@@ -3426,6 +3431,23 @@ impl Message<BuyItemRequest> for WorldActor {
             }
         };
 
+        // #2573：C# BuyItem 页 key 门槛（PlayerObject.cs:7944-7955）
+        if !self.npc_page_allows(
+            msg.session_id,
+            &[
+                "[@BUYSELL]",
+                "[@BUY]",
+                "[@BUYBACK]",
+                "[@BUYUSED]",
+                "[@PEARLBUY]",
+                "[@BUYNEW]",
+                "[@BUYSELLNEW]",
+            ],
+        ) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开购买页");
+            return;
+        }
+
         // 查找 NPC 并验证商品是否在销售列表中（客户端 BuyItem 不含 npc_id）
         let (npc_oid, npc_db_index) = match self.session_npc.get(&msg.session_id) {
             Some(npc_oid) => match self.npcs.get(npc_oid) {
@@ -3778,6 +3800,11 @@ impl Message<SellItemRequest> for WorldActor {
         };
 
         // C# SellItem：需先与买卖 NPC 对话（NPCPage）+ InRange(NPC, DataRange=16)
+        // #2573：页 key 门槛（PlayerObject.cs:7998——BuySellKey 或 SellKey）
+        if !self.npc_page_allows(msg.session_id, &["[@BUYSELL]", "[@SELL]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开出售页");
+            return;
+        }
         let npc_oid = match self.session_npc.get(&msg.session_id) {
             Some(o) => *o,
             None => {
@@ -3908,6 +3935,18 @@ impl Message<RepairItemRequest> for WorldActor {
         };
 
         // C# RepairItem：需先与修理 NPC 对话（NPCPage）+ InRange(NPC, DataRange=16)
+        // #2573：页 key 门槛（PlayerObject.cs:8098——普通 RepairKey / 特修 SRepairKey）
+        if !self.npc_page_allows(
+            msg.session_id,
+            &[if msg.special {
+                "[@SREPAIR]"
+            } else {
+                "[@REPAIR]"
+            }],
+        ) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开修理页");
+            return;
+        }
         let npc_oid = match self.session_npc.get(&msg.session_id) {
             Some(o) => *o,
             None => {
@@ -4139,6 +4178,11 @@ impl Message<ReplaceWedRingRequest> for WorldActor {
         };
 
         // #2036：C# ReplaceWeddingRing（13052-13058）——需先与 NPC 对话（ReplaceWedRingKey 页面）
+        // #2573：页 key 门槛（C# ReplaceWedRingKey）
+        if !self.npc_page_allows(msg.session_id, &["[@REPLACEWEDDINGRING]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开更换婚戒页");
+            return;
+        }
         if !self.session_npc.contains_key(&msg.session_id) {
             send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
             return;
@@ -4221,6 +4265,11 @@ impl Message<StoreItemRequest> for WorldActor {
         };
 
         // #1641：C# StoreItem（PlayerObject.cs:5376）——需先与仓库 NPC 对话且同图范围内（InRange DataRange=16）
+        // #2573：页 key 门槛（C# StorageKey）
+        if !self.npc_page_allows(msg.session_id, &["[@STORAGE]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开仓库页");
+            return;
+        }
         let npc_ok = match self
             .session_npc
             .get(&msg.session_id)
@@ -4307,6 +4356,11 @@ impl Message<TakeBackItemRequest> for WorldActor {
         };
 
         // #1641：C# TakeBackItem（PlayerObject.cs:5457）——需先与仓库 NPC 对话且同图范围内（InRange DataRange=16）
+        // #2573：页 key 门槛（C# StorageKey）
+        if !self.npc_page_allows(msg.session_id, &["[@STORAGE]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开仓库页");
+            return;
+        }
         let npc_ok = match self
             .session_npc
             .get(&msg.session_id)
@@ -4362,18 +4416,24 @@ impl Message<TakeBackItemRequest> for WorldActor {
     }
 }
 
-/// 合成失败响应（S.CraftItem { recipe_id, 0, false } + 系统消息）
+/// 合成失败响应（S.CraftItem { unique_id, 0, false } + 系统消息）
 async fn send_craft_fail(
     gate_ref: &kameo::actor::ActorRef<crate::gate::actor::GateActor>,
     session_id: u64,
-    recipe_id: u32,
+    unique_id: u64,
     reason: &str,
 ) {
     send_system_message(gate_ref, session_id, reason);
+    let packet = mir2_shared::packets::server::item::CraftItem {
+        unique_id,
+        count: 0,
+        success: false,
+    };
     let mut body = Vec::new();
-    body.extend_from_slice(&recipe_id.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.push(0u8);
+    if let Err(e) = packet.write_body(&mut body) {
+        warn!("Failed to serialize CraftItem fail: {}", e);
+        return;
+    }
     let _ = gate_ref
         .tell(SendToClient {
             session_id,
@@ -4401,6 +4461,13 @@ impl Message<CraftItemRequest> for WorldActor {
         };
 
         // #1643：C# CraftItem（PlayerObject.cs:7970-7984）——需先与合成 NPC 对话且同图范围内（InRange DataRange=16）
+        // #2573：页 key 门槛（C# 仅要求 NPCPage != null，任意页即可）
+        if !self.session_npc_page.contains_key(&msg.session_id) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
+            return;
+        }
+        // #2573：合成数量（C# Count，材料/金币/产物按此倍率结算）
+        let craft_count = msg.count.max(1) as i32;
         let npc_ok = match self
             .session_npc
             .get(&msg.session_id)
@@ -4418,15 +4485,21 @@ impl Message<CraftItemRequest> for WorldActor {
         let recipe = match self
             .recipe_infos
             .iter()
-            .find(|r| r.recipe_id == msg.recipe_id as i32)
+            .find(|r| r.recipe_id == msg.unique_id as i32)
         {
             Some(r) => r.clone(),
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "未知配方");
+                let packet = mir2_shared::packets::server::item::CraftItem {
+                    unique_id: msg.unique_id,
+                    count: 0,
+                    success: false,
+                };
                 let mut body = Vec::new();
-                body.extend_from_slice(&msg.recipe_id.to_le_bytes());
-                body.extend_from_slice(&0u16.to_le_bytes());
-                body.push(0u8); // success = false
+                if let Err(e) = packet.write_body(&mut body) {
+                    warn!("Failed to serialize CraftItem: {}", e);
+                    return;
+                }
                 let _ = self
                     .gate_ref
                     .tell(SendToClient {
@@ -4444,7 +4517,7 @@ impl Message<CraftItemRequest> for WorldActor {
         // 等级/性别/职业/任务/flag 需求（C# RecipeInfo 需求）
         if let Some(req_level) = recipe.required_level {
             if (state.level as u16) < req_level {
-                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "等级不足").await;
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.unique_id, "等级不足").await;
                 return;
             }
         }
@@ -4453,7 +4526,7 @@ impl Message<CraftItemRequest> for WorldActor {
                 send_craft_fail(
                     &self.gate_ref,
                     msg.session_id,
-                    msg.recipe_id,
+                    msg.unique_id,
                     "性别不符合要求",
                 )
                 .await;
@@ -4466,7 +4539,7 @@ impl Message<CraftItemRequest> for WorldActor {
             send_craft_fail(
                 &self.gate_ref,
                 msg.session_id,
-                msg.recipe_id,
+                msg.unique_id,
                 "职业不符合要求",
             )
             .await;
@@ -4474,7 +4547,7 @@ impl Message<CraftItemRequest> for WorldActor {
         }
         for q in &recipe.required_quests {
             if !state.quest_log.completed_indices.contains(q) {
-                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "任务未完成").await;
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.unique_id, "任务未完成").await;
                 return;
             }
         }
@@ -4486,7 +4559,7 @@ impl Message<CraftItemRequest> for WorldActor {
                 .unwrap_or(0)
                 < 1
             {
-                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "条件未满足").await;
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.unique_id, "条件未满足").await;
                 return;
             }
         }
@@ -4501,20 +4574,21 @@ impl Message<CraftItemRequest> for WorldActor {
                 .await
                 .unwrap_or(false);
             if !has {
-                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "缺少工具").await;
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.unique_id, "缺少工具").await;
                 return;
             }
         }
         // 金币费用
         if recipe.gold_cost > 0 {
-            if state.inventory.gold < recipe.gold_cost as u64 {
-                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "金币不足").await;
+            let gold_cost = recipe.gold_cost as i64 * craft_count as i64;
+            if (state.inventory.gold as i64) < gold_cost {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.unique_id, "金币不足").await;
                 return;
             }
             let _ = record
                 .actor_ref
                 .ask(crate::actors::player::DeductGold {
-                    amount: recipe.gold_cost as u64,
+                    amount: gold_cost as u64,
                 })
                 .await;
         }
@@ -4522,7 +4596,7 @@ impl Message<CraftItemRequest> for WorldActor {
         // 检查背包空间（C# GainItem：结果可叠入已有堆叠）
         let mut result_item = mir2_shared::data::item::UserItem {
             item_index: recipe.product_item_index,
-            count: recipe.product_count,
+            count: recipe.product_count.saturating_mul(craft_count as u16),
             ..Default::default()
         };
         if let Some(info) = self.item_infos.get(&recipe.product_item_index) {
@@ -4530,26 +4604,33 @@ impl Message<CraftItemRequest> for WorldActor {
             result_item.current_dura = info.durability as u16;
         }
         if !state.inventory.can_gain_item(&result_item) {
-            send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "背包已满").await;
+            send_craft_fail(&self.gate_ref, msg.session_id, msg.unique_id, "背包已满").await;
             return;
         }
 
         // 检查材料
         for ing in &recipe.ingredients {
+            let need = ing.count.saturating_mul(craft_count as u16);
             let has = record
                 .actor_ref
                 .ask(crate::actors::player::HasItem {
                     item_index: ing.item_index,
-                    count: ing.count,
+                    count: need,
                 })
                 .await
                 .unwrap_or(false);
             if !has {
                 send_system_message(&self.gate_ref, msg.session_id, "材料不足");
+                let packet = mir2_shared::packets::server::item::CraftItem {
+                    unique_id: msg.unique_id,
+                    count: 0,
+                    success: false,
+                };
                 let mut body = Vec::new();
-                body.extend_from_slice(&msg.recipe_id.to_le_bytes());
-                body.extend_from_slice(&0u16.to_le_bytes());
-                body.push(0u8);
+                if let Err(e) = packet.write_body(&mut body) {
+                    warn!("Failed to serialize CraftItem: {}", e);
+                    return;
+                }
                 let _ = self
                     .gate_ref
                     .tell(SendToClient {
@@ -4566,11 +4647,12 @@ impl Message<CraftItemRequest> for WorldActor {
 
         // 扣除材料
         for ing in &recipe.ingredients {
+            let need = ing.count.saturating_mul(craft_count as u16);
             let _ = record
                 .actor_ref
                 .ask(crate::actors::player::RemoveItemByIndex {
                     item_index: ing.item_index,
-                    count: ing.count,
+                    count: need,
                 })
                 .await;
         }
@@ -4588,17 +4670,27 @@ impl Message<CraftItemRequest> for WorldActor {
                 .ask(crate::actors::player::AddItemToInventory { item: result_item })
                 .await;
             send_system_message(&self.gate_ref, msg.session_id, "合成成功！");
-            debug!("CraftItem: {} recipe={} success", state.name, msg.recipe_id);
+            debug!("CraftItem: {} recipe={} success", state.name, msg.unique_id);
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "合成失败，材料已消耗");
-            debug!("CraftItem: {} recipe={} failed", state.name, msg.recipe_id);
+            debug!("CraftItem: {} recipe={} failed", state.name, msg.unique_id);
         }
 
-        // 发送 CraftItem 响应
+        // 发送 CraftItem 响应（S.CraftItem { UniqueID, Count, Success }）
+        let packet = mir2_shared::packets::server::item::CraftItem {
+            unique_id: msg.unique_id,
+            count: if success {
+                recipe.product_count.saturating_mul(craft_count as u16)
+            } else {
+                0
+            },
+            success,
+        };
         let mut body = Vec::new();
-        body.extend_from_slice(&msg.recipe_id.to_le_bytes());
-        body.extend_from_slice(&(if success { recipe.product_count } else { 0 }).to_le_bytes());
-        body.push(if success { 1u8 } else { 0u8 });
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize CraftItem: {}", e);
+            return;
+        }
         let _ = self
             .gate_ref
             .tell(SendToClient {

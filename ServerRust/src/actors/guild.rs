@@ -97,6 +97,8 @@ pub struct GuildMember {
     pub rank: GuildRank,
     /// 职务索引（rank_defs 下标，显示/改名/分组用；默认与档位一致）
     pub rank_index: u8,
+    /// 最后上线时间（unix 毫秒；0=未知。C# MemberInfo.LastLogin，下线时写入）
+    pub last_login_ms: i64,
 }
 
 /// 行会
@@ -154,6 +156,7 @@ impl Guild {
                 session_id: Some(leader_session),
                 rank: GuildRank::Leader,
                 rank_index: 0,
+                last_login_ms: 0,
             }],
             gold: 0,
             storage_items: vec![None; 100],
@@ -235,6 +238,7 @@ impl Guild {
                 session_id,
                 rank: GuildRank::Member,
                 rank_index: 2,
+                last_login_ms: 0,
             });
         }
     }
@@ -328,10 +332,11 @@ impl Guild {
         }
     }
 
-    /// 设置成员离线
-    pub fn set_offline(&mut self, name: &str) {
+    /// 设置成员离线（#2573：记录 LastLogin，C# GuildObject.PlayerLogged :162-192）
+    pub fn set_offline(&mut self, name: &str, now_ms: i64) {
         if let Some(m) = self.members.iter_mut().find(|m| m.name == name) {
             m.session_id = None;
+            m.last_login_ms = now_ms;
         }
     }
 
@@ -459,7 +464,7 @@ mod tests {
     fn test_online_status() {
         let mut g = make_guild();
         g.add_member("Bob".into(), Some(2));
-        g.set_offline("Bob");
+        g.set_offline("Bob", 0);
         assert!(g.members[1].session_id.is_none());
 
         g.set_online("Bob", 3);

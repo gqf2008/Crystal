@@ -3010,6 +3010,8 @@ impl Message<SocialPlayerLeft> for SocialActor {
         }
 
         // 行会成员离线标记（保持 session 为空，行会广播/在线显示正确）
+        // #2573：记录 LastLogin（C# GuildObject.PlayerLogged :162-192）并落库
+        let left_now_ms = crate::db::now_unix_ms();
         for guild in self.guilds.values_mut() {
             if let Some(member) = guild
                 .members
@@ -3017,6 +3019,14 @@ impl Message<SocialPlayerLeft> for SocialActor {
                 .find(|m| m.session_id == Some(msg.session_id))
             {
                 member.session_id = None;
+                member.last_login_ms = left_now_ms;
+                let _ = crate::db::update_guild_member_last_login(
+                    &self.db_pool,
+                    &guild.name,
+                    &member.name,
+                    left_now_ms,
+                )
+                .await;
                 debug!("SocialActor: guild member {} offline", member.name);
             }
         }
@@ -5615,6 +5625,72 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
             3 => {
                 // 请求仓库列表（C# GuildStorageItemChange type=3 语义）
                 send_guild_storage_list_packet(&self.gate_ref, msg.session_id, guild);
+            }
+            2 => {
+                // #2573：C# type=2 移动（PlayerObject.cs:10224-10266）——
+                // 本服自创 wire 中 from=msg.grid、to=msg.count（C# 原生 From/To i32）
+                if guild.member_options(&state.name)
+                    & crate::actors::guild::GuildRank::CAN_STORE_ITEM
+                    == 0
+                {
+                    send_system_message(&self.gate_ref, msg.session_id, "权限不足");
+                    return;
+                }
+                let from = msg.grid as usize;
+                let to = msg.count as usize;
+                if from >= guild.storage_items.len() || to >= guild.storage_items.len() {
+                    return;
+                }
+                if guild.storage_items[from].is_none() {
+                    return;
+                }
+                // C#：DontStore 物品不可移动
+                let moved_bind = guild.storage_items[from]
+                    .as_ref()
+                    .map(|(it, _)| it.item_index)
+                    .and_then(|idx| {
+                        self.config
+                            .item_infos
+                            .try_read()
+                            .ok()
+                            .and_then(|infos| infos.get(&idx).map(|i| i.bind_mode))
+                    })
+                    .unwrap_or(0);
+                if (moved_bind & 0x0008) != 0 {
+                    send_system_message(&self.gate_ref, msg.session_id, "该物品无法存入仓库");
+                    return;
+                }
+                // 交换两格（C#：from/to 互换，空位照常）
+                // 交换两格（C#：from/to 互换，空位照常）——先取快照再调 self，避开借用冲突
+                let item_to = guild.storage_items[to]
+                    .as_ref()
+                    .map(|(it, _)| (state.object_id as i64, it.clone()));
+                let item_from = guild.storage_items[from]
+                    .as_ref()
+                    .map(|(it, _)| (state.object_id as i64, it.clone()));
+                guild.storage_items.swap(from, to);
+                self.send_guild_storage_item_change(
+                    msg.session_id,
+                    2,
+                    to as i32,
+                    from as i32,
+                    state.object_id as i32,
+                    item_to,
+                )
+                .await;
+                if item_from.is_some() {
+                    self.send_guild_storage_item_change(
+                        msg.session_id,
+                        2,
+                        from as i32,
+                        to as i32,
+                        state.object_id as i32,
+                        item_from,
+                    )
+                    .await;
+                }
+                self.save_guild_to_db(&guild_name).await;
+                self.broadcast_guild_storage_list(&guild_name).await;
             }
             _ => {}
         }

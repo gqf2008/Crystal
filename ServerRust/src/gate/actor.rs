@@ -1860,7 +1860,7 @@ fn forward_range_attack(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 21 {
+    if payload.len() < 19 {
         return;
     }
     let world_ref = match world_ref {
@@ -1894,7 +1894,9 @@ fn forward_magic(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 14 {
+    // #2573：C# C.Magic wire（ClientPackets.cs:1122-1130）
+    // [ObjectID u32][Spell u8][Direction u8][TargetID u32][X i32][Y i32][SpellTargetLock u8] = 19B
+    if payload.len() < 19 {
         return;
     }
     let world_ref = match world_ref {
@@ -1903,14 +1905,16 @@ fn forward_magic(
             return;
         }
     };
-    let spell = payload[0];
-    let dir = payload[1];
-    let target_id = u32::from_le_bytes(payload[2..6].try_into().unwrap_or([0; 4]));
-    let target_x = i32::from_le_bytes(payload[6..10].try_into().unwrap_or([0; 4]));
-    let target_y = i32::from_le_bytes(payload[10..14].try_into().unwrap_or([0; 4]));
+    let object_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let spell = payload[4];
+    let dir = payload[5];
+    let target_id = u32::from_le_bytes(payload[6..10].try_into().unwrap_or([0; 4]));
+    let target_x = i32::from_le_bytes(payload[10..14].try_into().unwrap_or([0; 4]));
+    let target_y = i32::from_le_bytes(payload[14..18].try_into().unwrap_or([0; 4]));
+    let spell_target_lock = payload[18] != 0;
     debug!(
-        "Magic: session={} spell={} dir={} target={} pos=({}, {})",
-        session_id, spell, dir, target_id, target_x, target_y
+        "Magic: session={} object={} spell={} dir={} target={} pos=({}, {}) lock={}",
+        session_id, object_id, spell, dir, target_id, target_x, target_y, spell_target_lock
     );
     let _ = world_ref
         .tell(crate::actors::world::MagicRequest {
@@ -1920,6 +1924,8 @@ fn forward_magic(
             target_id,
             target_x,
             target_y,
+            object_id,
+            spell_target_lock,
         })
         .try_send();
 }
@@ -1951,13 +1957,14 @@ fn forward_harvest(
 // NPC 商店 / 合成 handlers
 // ============================================================================
 
-/// CraftItem: [recipe_id: u32][materials_count: u32]
+/// CraftItem: [unique_id: u64][count: u16][slots_len: i32][slots: i32×N]
+/// （C# ClientPackets.CraftItem wire；#2573 修——此前只取前 4 字节丢 Count+Slots）
 fn forward_craft_item(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 8 {
+    if payload.len() < 14 {
         return;
     }
     let world_ref = match world_ref {
@@ -1966,12 +1973,29 @@ fn forward_craft_item(
             return;
         }
     };
-    let recipe_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("CraftItem: session={} recipe={}", session_id, recipe_id);
+    let unique_id = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
+    let slots_len =
+        i32::from_le_bytes(payload[10..14].try_into().unwrap_or([0; 4])).max(0) as usize;
+    // 防御：slots 超长包截断（正常 ≤ 背包 46 格）
+    let slots: Vec<i32> = payload[14..]
+        .chunks_exact(4)
+        .take(slots_len.min(64))
+        .map(|c| i32::from_le_bytes(c.try_into().unwrap_or([0; 4])))
+        .collect();
+    debug!(
+        "CraftItem: session={} unique={} count={} slots={}",
+        session_id,
+        unique_id,
+        count,
+        slots.len()
+    );
     let _ = world_ref
         .tell(crate::actors::world::CraftItemRequest {
             session_id,
-            recipe_id,
+            unique_id,
+            count,
+            slots,
         })
         .try_send();
 }

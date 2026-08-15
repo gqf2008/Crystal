@@ -466,6 +466,8 @@ fn skill_bar_system(
     anim.frame_index = 0;
 
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+        spell_target_lock: false,
         spell: magic.spell,
         direction: cast_dir,
         target_id,
