@@ -223,6 +223,16 @@ const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# Q
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
+/// 背包背景 Title[196] 真实尺寸（C# InventoryDialog.Size 即背景图尺寸；
+/// 探针实测 316x236，缺失回退同值）。交易开窗推位公式用（TradeDialogs.cs:154
+/// `ScreenWidth - InventoryDialog.Size.Width`）。
+pub fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
+    match libs.0.get_image(LibraryName::Title, 196) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => (316.0, 236.0),
+    }
+}
+
 #[derive(Component)]
 pub struct InventoryPanel;
 
