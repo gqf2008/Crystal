@@ -22,7 +22,12 @@ use crystal_server::util::config;
 
 fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .thread_stack_size(8 * 1024 * 1024)
+        // debug 构建下巨型 async handler 的 poll 栈帧会叠加（Tick 万行处理器 →
+        // npc_script::exec_action 两千行 match，各自帧达 MB 级）；#2583 robot 首个
+        // tick 触发 execute_robot_section → exec_action 时 8MB 被打爆导致启动即崩。
+        // Box::pin 只省堆上 future 状态、不减小 poll 栈帧，救不了；直接抬高 worker 栈
+        // （release 帧小得多，不受影响；RUST_MIN_STACK 对显式 thread_stack_size 无效）
+        .thread_stack_size(32 * 1024 * 1024)
         .enable_all()
         .build()?;
     rt.block_on(async_main())
