@@ -15,10 +15,166 @@ use crate::resources::libraries::LibraryName;
 #[derive(Resource, Clone, Default)]
 pub struct UiFont(pub Handle<Font>);
 
-pub fn load_ui_font(assets: &mut Assets<Font>) -> Handle<Font> {
-    assets.add(Font::from_bytes(
+// ---------------------------------------------------------------------------
+// UI 字体链（对齐 C# GDI：Settings.cs:72 FontName = "Arial"；中文经 GDI 字体链接
+// 落到宋体）。主字体 = 系统 Arial（Latin/数字），Han 字形回退 = 系统宋体（setup_han_fallback_system）。
+// 两者都从用户机器字体目录**运行时读取**（与 C# 走系统 GDI 同源，不打包进二进制，规避
+// Arial/宋体的再分发许可）；系统字体缺失（非 Windows / 精简系统）回退内置 PuHuiTi 保底。
+// ---------------------------------------------------------------------------
+/// Windows 字体目录（%SystemRoot% 重定位的机器也正确；环境变量缺失回退 C:\Windows）
+#[cfg(windows)]
+fn system_fonts_dir() -> std::path::PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join("Fonts")
+}
+
+/// 选 UI 主字体字节：Windows 有系统 Arial 用之；否则回退内置 PuHuiTi。
+/// 返回 (字节, 来源标签)。TTF magic 校验防字体目录里混入坏文件后整屏 tofu。
+fn pick_ui_font_bytes() -> (Vec<u8>, &'static str) {
+    #[cfg(windows)]
+    {
+        let path = system_fonts_dir().join("arial.ttf");
+        if let Ok(bytes) = std::fs::read(&path) {
+            if bytes.len() >= 4 && bytes[..4] == [0x00, 0x01, 0x00, 0x00] {
+                return (bytes, "system-arial");
+            }
+        }
+    }
+    (
         include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf").to_vec(),
-    ))
+        "builtin-puhuiti",
+    )
+}
+
+pub fn load_ui_font(assets: &mut Assets<Font>) -> Handle<Font> {
+    let (bytes, kind) = pick_ui_font_bytes();
+    tracing::info!("UI 主字体 = {kind}（C# Settings.FontName=Arial + GDI 链中文→宋体）");
+    assets.add(Font::from_bytes(bytes))
+}
+
+/// 注册系统宋体并设为 Han 字形回退（复刻 GDI 字体链接：Arial 无中文 → 宋体）。
+/// Startup 一次；SimSun 家族已在集合（重复注册）时仅确保 fallback 指向它。
+/// 非 Windows / 无宋体：打 warn 后跳过（中文由主字体自带 CJK 或 tofu，与现状一致）。
+pub fn setup_han_fallback_system(mut font_cx: ResMut<bevy::text::FontCx>) {
+    #[cfg(windows)]
+    {
+        use parley::fontique::{FallbackKey, Script};
+
+        let han = FallbackKey::new(Script::from_bytes(*b"Hani"), None);
+        // 集合里已有 SimSun 家族（如重复调用）直接复用，避免重复注册字体数据
+        let existing = font_cx.collection.family_id("SimSun");
+        let target = match existing {
+            Some(id) => id,
+            None => {
+                let path = system_fonts_dir().join("simsun.ttc");
+                let Ok(bytes) = std::fs::read(&path) else {
+                    tracing::warn!("未找到系统宋体（{}），中文回退沿用默认链", path.display());
+                    return;
+                };
+                let registered = font_cx
+                    .collection
+                    .register_fonts(parley::fontique::Blob::from(bytes), None);
+                // simsun.ttc 面序：face0=SimSun、face1=NSimSun；按名精确挑 SimSun
+                let picked = registered.iter().find_map(|(fid, _)| {
+                    font_cx
+                        .collection
+                        .family_name(*fid)
+                        .filter(|n| n.eq_ignore_ascii_case("SimSun"))
+                        .map(|_| *fid)
+                });
+                match picked.or_else(|| registered.first().map(|(fid, _)| *fid)) {
+                    Some(id) => id,
+                    None => {
+                        tracing::warn!("系统宋体注册失败（simsun.ttc 解析为空）");
+                        return;
+                    }
+                }
+            }
+        };
+        font_cx
+            .collection
+            .set_fallbacks(han, std::iter::once(target));
+        tracing::info!("Han 字形回退 = 系统 SimSun（对齐 C# GDI 字体链接）");
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = &mut font_cx;
+    }
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+
+    /// 主字体选取：Windows 有系统 Arial 时必须选中它。
+    /// C# Settings.cs:72 FontName="Arial" —— 本测试锚定「用系统 Arial」这一行为本身：
+    /// 镜像 fs 读取 + magic 判定，文件有效时**强制**断言 kind=="system-arial"（若实现
+    /// 回归为永不选系统字体，本测试必须失败，而非静默走回退分支）。
+    #[test]
+    fn ui_font_prefers_system_arial() {
+        let (bytes, kind) = pick_ui_font_bytes();
+        #[cfg(windows)]
+        {
+            // 镜像实现的前置条件：字体目录里有合法 arial.ttf（TTF magic 头）
+            let file_valid = std::fs::read(system_fonts_dir().join("arial.ttf"))
+                .map(|b| b.len() >= 4 && b[..4] == [0x00, 0x01, 0x00, 0x00])
+                .unwrap_or(false);
+            if file_valid {
+                assert_eq!(kind, "system-arial", "有合法系统 Arial 却未选中");
+                assert!(bytes.len() > 4, "Arial 字节非空");
+                assert_eq!(&bytes[..4], &[0x00, 0x01, 0x00, 0x00], "TTF magic");
+                let builtin: &[u8] =
+                    include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+                assert_ne!(
+                    bytes.as_slice(),
+                    builtin,
+                    "选中的应是系统 Arial 而非内置字体"
+                );
+                return;
+            }
+        }
+        // 无系统 Arial 的环境（非 Windows / 字体目录被清）：回退内置 PuHuiTi保底
+        assert_eq!(kind, "builtin-puhuiti");
+        assert!(!bytes.is_empty());
+    }
+
+    /// Han 回退注册行为：setup 后 fontique 集合存在 SimSun 家族，且 Script(Hani)
+    /// 的 fallback 列表指向它（Windows 有 simsun.ttc 时；缺失环境跳过断言）。
+    #[test]
+    #[cfg(windows)]
+    fn han_fallback_registers_simsun() {
+        use parley::fontique::{FallbackKey, Script};
+
+        let mut app = bevy::app::App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::text::TextPlugin,
+        ));
+        app.add_systems(Startup, setup_han_fallback_system);
+        app.update();
+
+        let world = app.world_mut();
+        let mut font_cx = world
+            .get_resource_mut::<bevy::text::FontCx>()
+            .expect("TextPlugin 应初始化 FontCx");
+        if !system_fonts_dir().join("simsun.ttc").exists() {
+            return; // 精简 Windows 无宋体：行为=打 warn 跳过，不断言
+        }
+        let simsun = font_cx
+            .collection
+            .family_id("SimSun")
+            .expect("注册后集合应含 SimSun 家族");
+        let han = FallbackKey::new(Script::from_bytes(*b"Hani"), None);
+        let fallbacks: Vec<_> = font_cx.collection.fallback_families(han).collect();
+        assert!(
+            fallbacks.contains(&simsun),
+            "Script(Hani) 回退应包含 SimSun（实际 {:?}）",
+            fallbacks
+        );
+    }
 }
 
 /// 调试用 UI 子系统开关（UI_BITS 环境变量，逗号分隔，如 "hud,chat"）。
@@ -42,12 +198,11 @@ pub struct UiImageCache {
 pub struct UiEntity;
 
 /// 给所有 UI 实体加渲染层 1（只被 UI 相机渲染，避免 UI 相机重画地图）
-pub fn mark_ui_render_layers(
-    q: Query<Entity, Added<UiEntity>>,
-    mut commands: Commands,
-) {
+pub fn mark_ui_render_layers(q: Query<Entity, Added<UiEntity>>, mut commands: Commands) {
     for e in &q {
-        commands.entity(e).try_insert(bevy::camera::visibility::RenderLayers::layer(1));
+        commands
+            .entity(e)
+            .try_insert(bevy::camera::visibility::RenderLayers::layer(1));
     }
 }
 
@@ -263,8 +418,15 @@ pub fn spawn_ui_button(
     let pressed = ui_image(libs, images, cache, name, pressed_idx)?;
     let e = spawn_ui_sprite(commands, normal.clone(), x, y, z, 1.0);
     commands.entity(e).insert((
-        UiButton { rect: (x, y, w, h), clicked: false },
-        ButtonFrames { normal, hover, pressed },
+        UiButton {
+            rect: (x, y, w, h),
+            clicked: false,
+        },
+        ButtonFrames {
+            normal,
+            hover,
+            pressed,
+        },
     ));
     Some(e)
 }
@@ -312,10 +474,6 @@ pub fn ui_button_system(
     }
 }
 
-
-
-
-
 /// 按钮点击音效覆盖（#91）：默认 ButtonB=10104，可指定 C# SoundList 音效 id
 #[derive(Component)]
 pub struct ButtonSound(pub u32);
@@ -333,7 +491,12 @@ pub fn ui_button_sound_system(
     bank: Res<crate::game::sound::SoundBank>,
     mut cache: ResMut<crate::game::sound::SoundCache>,
     windows: Query<&Window>,
-    buttons: Query<(Entity, &UiButton, Option<&ButtonSound>, Option<&ButtonHoverSound>)>,
+    buttons: Query<(
+        Entity,
+        &UiButton,
+        Option<&ButtonSound>,
+        Option<&ButtonHoverSound>,
+    )>,
     mut hovered_prev: Local<std::collections::HashSet<Entity>>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
 ) {
@@ -361,12 +524,24 @@ pub fn ui_button_sound_system(
         // 点击音效
         if btn.clicked {
             let id = sound.map(|s| s.0).unwrap_or(10104); // C# SoundList.ButtonB
-            crate::game::sound::play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, id);
+            crate::game::sound::play_sound_cached(
+                &mut commands,
+                &mut assets,
+                &bank,
+                &mut cache,
+                id,
+            );
         }
         // 悬停进入音效（可选）
         if over && !hovered_prev.contains(&e) {
             if let Some(hs) = hover_sound {
-                crate::game::sound::play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, hs.0);
+                crate::game::sound::play_sound_cached(
+                    &mut commands,
+                    &mut assets,
+                    &bank,
+                    &mut cache,
+                    hs.0,
+                );
             }
         }
     }
