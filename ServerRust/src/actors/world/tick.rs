@@ -3610,7 +3610,8 @@ impl WorldActor {
         if !self.tick_count.is_multiple_of(10) || self.guild_buff_expiries.is_empty() {
             return;
         }
-        let now = self.tick_count;
+        // #2571：到期时间为墙钟 unix 毫秒（重启后可恢复剩余时限）
+        let now = crate::db::now_unix_ms();
         let mut expired_guilds: Vec<(String, Vec<u32>)> = Vec::new();
         for (guild, exp) in &mut self.guild_buff_expiries {
             let expired: Vec<u32> = exp
@@ -3626,12 +3627,15 @@ impl WorldActor {
             }
         }
         for (guild_name, expired) in expired_guilds {
-            // 从 SocialActor 激活列表移除（停用）
+            // 从 SocialActor 激活列表移除（停用）并同步清除时限记录（#2571 随 buffs_json 落库）
             let mut buffs = self.guild_buffs(&guild_name).await;
             let before = buffs.len();
             buffs.retain(|b| !expired.contains(b));
             if buffs.len() != before {
-                self.set_guild_buffs(&guild_name, &buffs).await;
+                let expiry_updates: Vec<(u32, Option<i64>)> =
+                    expired.iter().map(|id| (*id, None)).collect();
+                self.set_guild_buffs(&guild_name, &buffs, &expiry_updates)
+                    .await;
             }
             // 通知在线成员（GuildBuffList 更新）
             let online: Vec<u64> = self.players.keys().copied().collect();
@@ -4948,23 +4952,10 @@ impl WorldActor {
                     } else {
                         saved += 1;
                     }
-                    // 英雄列表同步保存（避免崩溃丢失新建/变更的英雄；C# 英雄随角色一起持久化）
-                    if let Some(heroes) = self.player_heroes.get(&record.session_id) {
-                        let db_heroes: Vec<db::DbHero> = heroes
-                            .iter()
-                            .map(|h| db::DbHero {
-                                index: h.index,
-                                name: h.name.clone(),
-                                level: h.level,
-                                class: h.class as u8,
-                                gender: h.gender as u8,
-                                dead: h.dead,
-                                sealed: h.sealed,
-                                autopot: h.autopot,
-                                experience: h.experience,
-                                max_experience: h.max_experience,
-                            })
-                            .collect();
+                    // 英雄列表同步保存（避免崩溃丢失新建/变更的英雄；C# 英雄随角色一起持久化；
+                    // #2571：db_heroes_snapshot 合并出战英雄实时 HP/MP，残血/残蓝自动存档）
+                    if self.player_heroes.contains_key(&record.session_id) {
+                        let db_heroes = self.db_heroes_snapshot(record.session_id);
                         if let Err(e) =
                             db::save_heroes(&self.db_pool, &record.name, &db_heroes).await
                         {
@@ -5528,6 +5519,12 @@ impl WorldActor {
     pub(crate) async fn tick_dragon(&mut self) {
         use crate::actors::world::dragon::DragonState;
 
+        // #2571：变更前快照（落库判定用）
+        let before = self
+            .dragon_state
+            .as_ref()
+            .map(|d| (d.level, d.experience, d.max_level_time));
+
         // 先决定是否需要降级检查（无借用冲突）
         if let Some(ref mut dragon) = self.dragon_state {
             crate::actors::world::dragon::tick_dragon_delevel(
@@ -5564,15 +5561,43 @@ impl WorldActor {
                 }
             }
         }
+
+        // #2571：神龙运行态落库——等级/满级时间变化即时写；
+        // 纯经验变化每 600 ticks（~1 分钟）节流写，避免 Boss 战每击一写
+        let after = self
+            .dragon_state
+            .as_ref()
+            .map(|d| (d.level, d.experience, d.max_level_time));
+        if let (Some((bl, be, bm)), Some((al, ae, am))) = (before, after) {
+            let structural_change = bl != al || bm != am;
+            let now_tick = self.tick_count;
+            let exp_throttled = be != ae
+                && self
+                    .dragon_state
+                    .as_ref()
+                    .map(|d| now_tick.saturating_sub(d.last_persist_tick) >= 600)
+                    .unwrap_or(true);
+            if structural_change || exp_throttled {
+                if let Some(dragon) = self.dragon_state.as_mut() {
+                    dragon.last_persist_tick = now_tick;
+                }
+                if let Err(e) = db::save_dragon_state(&self.db_pool, al, ae, am).await {
+                    warn!("Failed to save dragon_state to DB: {}", e);
+                }
+            }
+        }
+
         // Dragon 系统：根据 dragon_info 配置在龙地图上有玩家时生成/维持 EvilMir 作为世界Boss。
         // 简化：当 dragon_info 存在、玩家在龙地图上、且当前无活跃 EvilMir → 生成。
         let dragon_info = match self.dragon_info.clone() {
             Some(di) => di,
             None => return,
         };
-        // 确保 dragon_state 存在（懒初始化，body_object_id 占位）
+        // 确保 dragon_state 存在（懒初始化，body_object_id 占位；#2571 注入 DB 经验表）
         if self.dragon_state.is_none() {
-            self.dragon_state = Some(DragonState::new(0));
+            let mut ds = DragonState::new(0);
+            ds.set_exps_from_db(&dragon_info.exps);
+            self.dragon_state = Some(ds);
         }
 
         // #2344：升级掉落（C# Dragon.LevelUp → Drop(level)）——延迟到 dragon_info 可用后执行

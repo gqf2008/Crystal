@@ -155,6 +155,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             autopot INTEGER NOT NULL DEFAULT 0,
             experience INTEGER NOT NULL DEFAULT 0,
             max_experience INTEGER NOT NULL DEFAULT 100,
+            hp INTEGER NOT NULL DEFAULT -1,
+            mp INTEGER NOT NULL DEFAULT -1,
             PRIMARY KEY (character_name, hero_index),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
@@ -245,7 +247,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             member_cap INTEGER NOT NULL DEFAULT 50,
             rank_defs_json TEXT NOT NULL DEFAULT '[]',
             flag_image INTEGER NOT NULL DEFAULT 1000,
-            flag_colour INTEGER NOT NULL DEFAULT -1
+            flag_colour INTEGER NOT NULL DEFAULT -1,
+            buffs_json TEXT NOT NULL DEFAULT '[]'
         );
         CREATE TABLE IF NOT EXISTS guild_members (
             guild_name TEXT NOT NULL,
@@ -470,6 +473,14 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             drop_area_bottom_x INTEGER NOT NULL,
             drop_area_bottom_y INTEGER NOT NULL,
             exps_json TEXT NOT NULL DEFAULT '[]'
+        );
+        -- #2571：神龙运行态（level/experience 跨重启保留；dragon_info 为配置表，
+        -- 被 migrate_mirdb 的 INSERT OR REPLACE 重写，运行态独立存放）
+        CREATE TABLE IF NOT EXISTS dragon_state (
+            id INTEGER PRIMARY KEY DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
+            experience INTEGER NOT NULL DEFAULT 0,
+            max_level_time INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS magic_infos (
             name TEXT PRIMARY KEY,
@@ -1016,6 +1027,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         sqlx::query("ALTER TABLE heroes ADD COLUMN max_experience INTEGER NOT NULL DEFAULT 100")
             .execute(&pool)
             .await;
+    // #2571：英雄当前 HP/MP（C# HeroInfo.HP/MP；-1=未持久化，重召唤按满血处理）
+    let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN hp INTEGER NOT NULL DEFAULT -1")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN mp INTEGER NOT NULL DEFAULT -1")
+        .execute(&pool)
+        .await;
     let _ =
         sqlx::query("ALTER TABLE characters ADD COLUMN can_gain_exp INTEGER NOT NULL DEFAULT 1")
             .execute(&pool)
@@ -1111,6 +1129,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool)
         .await;
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN flag_colour INTEGER NOT NULL DEFAULT -1")
+        .execute(&pool)
+        .await;
+    // #2571：行会激活 Buff 持久化（C# GuildInfo 存档含 BuffList；JSON: [{buff_id, expire_at_ms}]）
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN buffs_json TEXT NOT NULL DEFAULT '[]'")
         .execute(&pool)
         .await;
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
@@ -1511,6 +1533,8 @@ async fn test_save_load_heroes_roundtrip() {
                 autopot INTEGER NOT NULL DEFAULT 0,
                 experience INTEGER NOT NULL DEFAULT 0,
                 max_experience INTEGER NOT NULL DEFAULT 100,
+                hp INTEGER NOT NULL DEFAULT -1,
+                mp INTEGER NOT NULL DEFAULT -1,
                 PRIMARY KEY (character_name, hero_index)
             )",
     )
@@ -1528,6 +1552,9 @@ async fn test_save_load_heroes_roundtrip() {
         autopot: true,
         experience: 150,
         max_experience: 100,
+        // #2571：残血/残蓝持久化（C# HeroInfo.HP/MP）
+        hp: 37,
+        mp: 12,
     }];
     save_heroes(&pool, "TestChar", &heroes).await.unwrap();
     let loaded = load_heroes(&pool, "TestChar").await.unwrap();
@@ -1538,6 +1565,8 @@ async fn test_save_load_heroes_roundtrip() {
     assert!(loaded[0].autopot);
     assert_eq!(loaded[0].experience, 150);
     assert_eq!(loaded[0].max_experience, 100);
+    assert_eq!(loaded[0].hp, 37);
+    assert_eq!(loaded[0].mp, 12);
     // 覆盖保存（清空）
     save_heroes(&pool, "TestChar", &[]).await.unwrap();
     assert!(load_heroes(&pool, "TestChar").await.unwrap().is_empty());
@@ -2777,6 +2806,10 @@ pub struct DbHero {
     pub experience: u32,
     /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5，持久化保持一致）
     pub max_experience: u32,
+    /// #2571：当前 HP（C# HeroInfo.HP；-1=未持久化，召唤按满血）
+    pub hp: i32,
+    /// #2571：当前 MP（C# HeroInfo.MP；-1=未持久化，召唤按满蓝）
+    pub mp: i32,
 }
 
 /// 保存角色英雄列表（DELETE + INSERT，事务内）
@@ -2792,7 +2825,7 @@ pub async fn save_heroes(
         .await?;
     for h in heroes {
         sqlx::query(
-            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender, dead, sealed, autopot, experience, max_experience) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender, dead, sealed, autopot, experience, max_experience, hp, mp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(character_name)
         .bind(h.index)
@@ -2805,6 +2838,8 @@ pub async fn save_heroes(
         .bind(if h.autopot { 1 } else { 0 })
         .bind(h.experience as i32)
         .bind(h.max_experience as i32)
+        .bind(h.hp)
+        .bind(h.mp)
         .execute(&mut *tx)
         .await?;
     }
@@ -2815,7 +2850,7 @@ pub async fn save_heroes(
 /// 加载角色英雄列表
 pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<DbHero>> {
     let rows = sqlx::query(
-        "SELECT hero_index, name, level, class, gender, dead, sealed, autopot, experience, max_experience FROM heroes WHERE character_name = ? ORDER BY hero_index",
+        "SELECT hero_index, name, level, class, gender, dead, sealed, autopot, experience, max_experience, hp, mp FROM heroes WHERE character_name = ? ORDER BY hero_index",
     )
     .bind(character_name)
     .fetch_all(pool)
@@ -2833,6 +2868,8 @@ pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<
             autopot: r.try_get::<i32, _>("autopot").unwrap_or(0) != 0,
             experience: r.try_get::<i32, _>("experience").unwrap_or(0).max(0) as u32,
             max_experience: r.try_get::<i32, _>("max_experience").unwrap_or(100).max(0) as u32,
+            hp: r.try_get::<i32, _>("hp").unwrap_or(-1),
+            mp: r.try_get::<i32, _>("mp").unwrap_or(-1),
         })
         .collect())
 }
@@ -2974,11 +3011,38 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
 // Guild save/load
 // ============================================================
 
+/// #2571：行会 Buff 存档条目（C# GuildInfo.Save 的 BuffList 段；
+/// expire_at_ms = Unix 毫秒，None = 无时限 buff）
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct GuildBuffRecord {
+    buff_id: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expire_at_ms: Option<i64>,
+}
+
+/// 当前 Unix 毫秒（buff/时限存档与过期判定共用）
+pub fn now_unix_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
     let notice_json = serde_json::to_string(&guild.notice)?;
     let storage_items_json = serde_json::to_string(&guild.storage_items)?;
     let rank_defs_json = serde_json::to_string(&guild.rank_defs)?;
-    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json, flag_image, flag_colour) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    let buffs_json = serde_json::to_string(
+        &guild
+            .buffs
+            .iter()
+            .map(|id| GuildBuffRecord {
+                buff_id: *id,
+                expire_at_ms: guild.buff_expiries.get(id).copied(),
+            })
+            .collect::<Vec<GuildBuffRecord>>(),
+    )?;
+    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json, flag_image, flag_colour, buffs_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&guild.name)
         .bind(&notice_json)
         .bind(guild.gold as i64)
@@ -2991,6 +3055,7 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
         .bind(&rank_defs_json)
         .bind(guild.flag_image as i32)
         .bind(guild.flag_colour)
+        .bind(&buffs_json)
         .execute(pool)
         .await?;
 
@@ -3032,7 +3097,7 @@ pub async fn delete_guild(pool: &DbPool, guild_name: &str) -> anyhow::Result<()>
 pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>> {
     let mut guilds = HashMap::new();
 
-    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json, flag_image, flag_colour FROM guilds")
+    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json, flag_image, flag_colour, buffs_json FROM guilds")
         .fetch_all(pool)
         .await?;
 
@@ -3052,6 +3117,23 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
         let rank_defs: Vec<crate::actors::guild::GuildRankDef> =
             serde_json::from_str(&row.get::<String, _>("rank_defs_json"))
                 .unwrap_or_else(|_| crate::actors::guild::default_rank_defs());
+
+        // #2571：恢复行会 Buff（C# GuildInfo.Load 的 BuffList 段）；
+        // 离线期间到期的时限 buff 直接丢弃（对齐 player_buffs 的过期处理）
+        let now_ms = now_unix_ms();
+        let mut buffs: Vec<u32> = Vec::new();
+        let mut buff_expiries: std::collections::HashMap<u32, i64> =
+            std::collections::HashMap::new();
+        let buff_records: Vec<GuildBuffRecord> =
+            serde_json::from_str(&row.get::<String, _>("buffs_json")).unwrap_or_default();
+        for record in buff_records {
+            match record.expire_at_ms {
+                Some(expire_ms) if expire_ms <= now_ms => continue,
+                Some(expire_ms) => buff_expiries.insert(record.buff_id, expire_ms),
+                None => None,
+            };
+            buffs.push(record.buff_id);
+        }
 
         let member_rows = sqlx::query(
             "SELECT member_name, rank, rank_index FROM guild_members WHERE guild_name = ?",
@@ -3082,7 +3164,8 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
                 rank_defs,
                 gold: gold as u64,
                 storage_items,
-                buffs: Vec::new(),
+                buffs,
+                buff_expiries,
                 experience,
                 level: level.clamp(1, 255) as u8,
                 max_experience,
@@ -5456,6 +5539,40 @@ pub async fn load_dragon_info(
     }
 }
 
+/// #2571：加载神龙运行态（level/experience；C# Dragon 运行态字段，无行 → None）
+pub async fn load_dragon_state(pool: &DbPool) -> anyhow::Result<Option<(u8, u64, i64)>> {
+    let row = sqlx::query(
+        "SELECT level, experience, max_level_time FROM dragon_state WHERE id = 0 LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| {
+        (
+            r.get::<i64, _>("level").clamp(1, 255) as u8,
+            r.get::<i64, _>("experience").max(0) as u64,
+            r.get::<i64, _>("max_level_time"),
+        )
+    }))
+}
+
+/// #2571：保存神龙运行态（单行 id=0，INSERT OR REPLACE）
+pub async fn save_dragon_state(
+    pool: &DbPool,
+    level: u8,
+    experience: u64,
+    max_level_time: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO dragon_state (id, level, experience, max_level_time) VALUES (0, ?, ?, ?)",
+    )
+    .bind(level as i64)
+    .bind(experience as i64)
+    .bind(max_level_time)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Load all craft recipes from DB, joining ingredients/tools.
 ///
 /// NOTE on data source: C# `Server.MirDatabase.RecipeInfo` does NOT read from the
@@ -6331,6 +6448,74 @@ mod tests {
             0
         );
         assert_eq!(get_gameshop_purchases(&pool, "other", 42).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_guild_buffs_roundtrip_with_expiry() {
+        // #2571：行会 Buff 持久化——时限 buff 剩余时间 + 无时限 buff 往返（C# GuildInfo BuffList）
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        let mut guild = Guild::new("Buff行会".to_string(), "Alice".to_string(), 1);
+        guild.buffs = vec![7, 9];
+        // #7：30 分钟后到期（unix ms）；#9：无时限（None）
+        let expire_ms = now_unix_ms() + 30 * 60 * 1000;
+        guild.buff_expiries.insert(7, expire_ms);
+        save_guild(&pool, &guild).await.unwrap();
+        let loaded = load_guilds(&pool).await.unwrap();
+        let g = loaded.get("Buff行会").expect("guild exists");
+        assert_eq!(g.buffs, vec![7, 9], "激活列表应完整恢复");
+        let restored = g.buff_expiries.get(&7).expect("时限 buff 到期时间应恢复");
+        // save→load 之间的毫秒级流逝：剩余时间在 29:59..30:00 内
+        let remaining = restored - now_unix_ms();
+        assert!(
+            (29 * 60 * 1000..=30 * 60 * 1000).contains(&remaining),
+            "剩余时限应保持 ~30 分钟，实际 {} ms",
+            remaining
+        );
+        assert!(
+            !g.buff_expiries.contains_key(&9),
+            "无时限 buff 不应有时限记录"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_guild_buffs_expired_dropped_on_load() {
+        // #2571：离线期间到期的时限 buff 加载时丢弃
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        let mut guild = Guild::new("过期行会".to_string(), "Alice".to_string(), 1);
+        guild.buffs = vec![7, 8];
+        guild.buff_expiries.insert(7, now_unix_ms() - 1000); // 已过期
+        guild.buff_expiries.insert(8, now_unix_ms() + 60_000); // 未过期
+        save_guild(&pool, &guild).await.unwrap();
+        let loaded = load_guilds(&pool).await.unwrap();
+        let g = loaded.get("过期行会").expect("guild exists");
+        assert_eq!(g.buffs, vec![8], "过期 buff 应从激活列表移除");
+        assert!(!g.buff_expiries.contains_key(&7));
+        assert!(g.buff_expiries.contains_key(&8));
+    }
+
+    #[tokio::test]
+    async fn test_dragon_state_roundtrip() {
+        // #2571：神龙运行态 level/experience/max_level_time 保存/加载往返
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        assert!(
+            load_dragon_state(&pool).await.unwrap().is_none(),
+            "无行时应返回 None"
+        );
+        save_dragon_state(&pool, 3, 12345, 1_800_000_000)
+            .await
+            .unwrap();
+        let (level, exp, max_lv_time) =
+            load_dragon_state(&pool).await.unwrap().expect("row exists");
+        assert_eq!(level, 3);
+        assert_eq!(exp, 12345);
+        assert_eq!(max_lv_time, 1_800_000_000);
+        // 更新覆盖
+        save_dragon_state(&pool, 4, 0, 0).await.unwrap();
+        let (level, exp, max_lv_time) =
+            load_dragon_state(&pool).await.unwrap().expect("row exists");
+        assert_eq!(level, 4);
+        assert_eq!(exp, 0);
+        assert_eq!(max_lv_time, 0);
     }
 }
 
