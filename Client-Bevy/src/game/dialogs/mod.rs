@@ -24,8 +24,8 @@ pub mod guild;
 pub mod guild_territory;
 pub mod help;
 pub mod hero;
-pub mod hero_inventory;
 pub mod hero_equipment;
+pub mod hero_inventory;
 pub mod hero_skills;
 pub mod inspect;
 pub mod inventory;
@@ -33,8 +33,8 @@ pub mod item_rental;
 pub mod keyboard_layout;
 pub mod mail;
 pub mod market;
-pub mod menu;
 pub mod mentor;
+pub mod menu;
 pub mod minimap;
 pub mod mount;
 pub mod notice;
@@ -46,15 +46,15 @@ pub mod option;
 pub mod potion_belt;
 pub mod quest_log;
 pub mod quest_tracking;
-pub mod settings_file;
 pub mod ranking;
 pub mod refine;
 pub mod relationship;
 pub mod report;
 pub mod roll;
- pub mod sell_panel;
+pub mod sell_panel;
+pub mod settings_file;
 pub mod socket;
- pub mod storage;
+pub mod storage;
 pub mod text_input;
 pub mod timer;
 pub mod trade;
@@ -181,8 +181,7 @@ mod tests {
         let mut assets = Assets::<Image>::default();
         let sprite = Sprite::sized(Vec2::new(100.0, 50.0));
         let tf = Transform::from_xyz(200.0, -150.0, 5.0);
-        let (x0, y0, x1, y1) =
-            ui_sprite_rect(&tf, Some(&sprite), Some(&Anchor::TOP_LEFT), &assets);
+        let (x0, y0, x1, y1) = ui_sprite_rect(&tf, Some(&sprite), Some(&Anchor::TOP_LEFT), &assets);
         assert_eq!((x0, y0, x1, y1), (200.0, 150.0, 300.0, 200.0));
     }
 
@@ -191,8 +190,7 @@ mod tests {
         let mut assets = Assets::<Image>::default();
         let sprite = Sprite::sized(Vec2::new(100.0, 50.0));
         let tf = Transform::from_xyz(200.0, -150.0, 5.0);
-        let (x0, y0, x1, y1) =
-            ui_sprite_rect(&tf, Some(&sprite), Some(&Anchor::CENTER), &assets);
+        let (x0, y0, x1, y1) = ui_sprite_rect(&tf, Some(&sprite), Some(&Anchor::CENTER), &assets);
         assert_eq!((x0, y0, x1, y1), (150.0, 125.0, 250.0, 175.0));
     }
 
@@ -204,7 +202,6 @@ mod tests {
         assert_eq!(rect, (200.0, 150.0, 200.0, 150.0));
     }
 }
-
 
 /// 对话框根标记（OnExit(Game) 统一清理）
 #[derive(Component)]
@@ -225,6 +222,8 @@ pub struct DialogDrag {
     pub text_origins: std::collections::HashMap<Entity, (f32, f32)>,
     /// 拖动开始时下拉框命中矩形的原始位置（box_rect + popup_pos）
     pub dd_origins: std::collections::HashMap<Entity, ((f32, f32), (f32, f32))>,
+    /// 拖动开始时的背包命中原点（仅拖 Inventory 时 Some）
+    pub inv_origin_start: Option<(f32, f32)>,
 }
 
 /// 对话框置顶层级（front 系统维护单调递增的 z 顶值）
@@ -283,11 +282,19 @@ pub fn dialog_drag_system(
     mut ui_buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
     mut text_rects: Query<(Entity, &mut TextInputRect, Option<&DialogRoot>)>,
     mut drop_downs: Query<(Entity, &mut DropDown, Option<&DialogRoot>)>,
+    // 背包拖动时同步 InventoryOrigin（inv_slot_at/仓库/交易命中依赖它）
+    mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok((ui_camera, cam_tf)) = ui_cameras.single() else { return };
-    let Ok(world) = ui_camera.viewport_to_world_2d(cam_tf, cursor) else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let Ok((ui_camera, cam_tf)) = ui_cameras.single() else {
+        return;
+    };
+    let Ok(world) = ui_camera.viewport_to_world_2d(cam_tf, cursor) else {
+        return;
+    };
     let cursor = Vec2::new(world.x, -world.y);
 
     let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, f32)> =
@@ -297,7 +304,9 @@ pub fn dialog_drag_system(
             continue;
         }
         let (x0, y0, x1, y1) = ui_sprite_rect(tf, sprite, anchor, &image_assets);
-        let b = boxes.entry(root.0).or_insert((x0, y0, x1, y1, tf.translation.z));
+        let b = boxes
+            .entry(root.0)
+            .or_insert((x0, y0, x1, y1, tf.translation.z));
         b.0 = b.0.min(x0);
         b.1 = b.1.min(y0);
         b.2 = b.2.max(x1);
@@ -313,7 +322,8 @@ pub fn dialog_drag_system(
         if !on_button {
             let mut top: Option<(DialogKind, f32)> = None;
             for (kind, (minx, miny, maxx, maxy, maxz)) in &boxes {
-                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy {
+                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy
+                {
                     if top.map(|(_, z)| *maxz > z).unwrap_or(true) {
                         top = Some((*kind, *maxz));
                     }
@@ -328,6 +338,8 @@ pub fn dialog_drag_system(
                 drag.dragging = Some(kind);
                 drag.start_cursor = cursor;
                 drag.origins = origins;
+                drag.inv_origin_start =
+                    (kind == DialogKind::Inventory).then(|| (inv_origin.0, inv_origin.1));
                 drag.btn_origins = ui_buttons
                     .iter()
                     .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
@@ -341,7 +353,15 @@ pub fn dialog_drag_system(
                 drag.dd_origins = drop_downs
                     .iter()
                     .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
-                    .map(|(e, dd, _)| (e, ((dd.box_rect.0, dd.box_rect.1), (dd.popup_pos.0, dd.popup_pos.1))))
+                    .map(|(e, dd, _)| {
+                        (
+                            e,
+                            (
+                                (dd.box_rect.0, dd.box_rect.1),
+                                (dd.popup_pos.0, dd.popup_pos.1),
+                            ),
+                        )
+                    })
                     .collect();
                 tracing::info!("🖱️ 拖动对话框 {:?}", kind);
             }
@@ -372,11 +392,16 @@ pub fn dialog_drag_system(
             }
             for (e, mut dd, _) in drop_downs.iter_mut() {
                 if let Some(o) = drag.dd_origins.get(&e) {
-                    dd.box_rect.0 = o.0.0 + delta.x;
-                    dd.box_rect.1 = o.0.1 + delta.y;
-                    dd.popup_pos.0 = o.1.0 + delta.x;
-                    dd.popup_pos.1 = o.1.1 + delta.y;
+                    dd.box_rect.0 = o.0 .0 + delta.x;
+                    dd.box_rect.1 = o.0 .1 + delta.y;
+                    dd.popup_pos.0 = o.1 .0 + delta.x;
+                    dd.popup_pos.1 = o.1 .1 + delta.y;
                 }
+            }
+            // 背包拖动 → 命中用原点同步平移（与实体/rect 同一 delta）
+            if let Some(o) = drag.inv_origin_start {
+                *inv_origin =
+                    crate::game::dialogs::inventory::InventoryOrigin(o.0 + delta.x, o.1 + delta.y);
             }
         } else {
             drag.dragging = None;
@@ -384,6 +409,7 @@ pub fn dialog_drag_system(
             drag.btn_origins.clear();
             drag.text_origins.clear();
             drag.dd_origins.clear();
+            drag.inv_origin_start = None;
         }
     }
 }
@@ -419,9 +445,15 @@ pub fn dialog_front_system(
 
     if mouse.just_pressed(MouseButton::Left) {
         let Ok(window) = windows.single() else { return };
-        let Some(cursor) = window.cursor_position() else { return };
-        let Ok((cam, gtf)) = ui_cameras.single() else { return };
-        let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
+        let Some(cursor) = window.cursor_position() else {
+            return;
+        };
+        let Ok((cam, gtf)) = ui_cameras.single() else {
+            return;
+        };
+        let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else {
+            return;
+        };
         let cursor = Vec2::new(world.x, -world.y);
 
         let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, f32)> =
@@ -431,7 +463,9 @@ pub fn dialog_front_system(
                 continue;
             }
             let (x0, y0, x1, y1) = ui_sprite_rect(tf, sprite, anchor, &image_assets);
-            let b = boxes.entry(root.0).or_insert((x0, y0, x1, y1, tf.translation.z));
+            let b = boxes
+                .entry(root.0)
+                .or_insert((x0, y0, x1, y1, tf.translation.z));
             b.0 = b.0.min(x0);
             b.1 = b.1.min(y0);
             b.2 = b.2.max(x1);
@@ -486,7 +520,6 @@ fn bump_dialog_z(
     tracing::info!("📌 置顶对话框 {:?}（z={}）", kind, top);
 }
 
-
 pub struct DialogsPlugin;
 
 impl Plugin for DialogsPlugin {
@@ -497,19 +530,61 @@ impl Plugin for DialogsPlugin {
         app.add_plugins(hero_equipment::HeroEquipmentPlugin);
         app.add_plugins(hero_skills::HeroSkillPlugin);
         // 先置顶再开始拖动：点击重叠窗口时，先让被点窗口到最前，再由 drag 选中它。
-        app.add_systems(Update, (dialog_front_system, dialog_drag_system).chain().run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            (dialog_front_system, dialog_drag_system)
+                .chain()
+                .run_if(in_state(AppState::Game)),
+        );
         // #182 登出：清理对话框与会话状态
-        app.add_systems(Update, logout_server_events.run_if(in_state(AppState::Game)));
-        app.add_systems(Update, crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)));
-        app.add_systems(Update, (crate::ui::controls::checkbox_system, crate::ui::controls::dropdown_system, crate::ui::controls::scrolling_label_system, crate::ui::controls::item_cell_system, crate::ui::controls::animated_button_system).run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            logout_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
+            crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
+            (
+                crate::ui::controls::checkbox_system,
+                crate::ui::controls::dropdown_system,
+                crate::ui::controls::scrolling_label_system,
+                crate::ui::controls::item_cell_system,
+                crate::ui::controls::animated_button_system,
+            )
+                .run_if(in_state(AppState::Game)),
+        );
         app.init_resource::<crate::ui::keyboard_nav::KeyboardNav>();
         app.init_resource::<crate::ui::scroll_list::ScrollDrag>();
-        app.add_systems(Update, (crate::ui::keyboard_nav::esc_close_dialogs_system, crate::ui::keyboard_nav::keyboard_scroll_lists_system, crate::ui::keyboard_nav::tab_focus_system).run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            (
+                crate::ui::keyboard_nav::esc_close_dialogs_system,
+                crate::ui::keyboard_nav::keyboard_scroll_lists_system,
+                crate::ui::keyboard_nav::tab_focus_system,
+            )
+                .run_if(in_state(AppState::Game)),
+        );
         // #93 通用 Tooltip
         app.init_resource::<crate::ui::tooltip::TooltipState>();
-        app.add_systems(OnEnter(AppState::Game), crate::ui::tooltip::spawn_tooltip_panel_system);
-        app.add_systems(OnExit(AppState::Game), crate::ui::tooltip::despawn_tooltip_panel);
-        app.add_systems(Update, (crate::ui::tooltip::tooltip_hint_system, crate::ui::tooltip::tooltip_panel_system).run_if(in_state(AppState::Game)));
+        app.add_systems(
+            OnEnter(AppState::Game),
+            crate::ui::tooltip::spawn_tooltip_panel_system,
+        );
+        app.add_systems(
+            OnExit(AppState::Game),
+            crate::ui::tooltip::despawn_tooltip_panel,
+        );
+        app.add_systems(
+            Update,
+            (
+                crate::ui::tooltip::tooltip_hint_system,
+                crate::ui::tooltip::tooltip_panel_system,
+            )
+                .run_if(in_state(AppState::Game)),
+        );
         app.init_resource::<inventory::InventoryState>();
         app.add_plugins(text_input::TextInputPlugin);
         app.init_resource::<character::CharacterState>();
@@ -602,4 +677,3 @@ fn logout_server_events(
         }
     }
 }
-

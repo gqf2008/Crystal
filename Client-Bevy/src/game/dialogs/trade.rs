@@ -20,11 +20,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::controls::{spawn_item_cell, ItemCellCount, ItemCellData, ItemCellIcon};
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
     UiImageCache,
 };
-use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCellIcon, ItemCellCount};
 
 /// 交易物品（槽内显示用）
 #[derive(Debug, Clone)]
@@ -125,11 +125,8 @@ pub struct TradePlugin;
 impl Plugin for TradePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TradeState>();
-                app.add_systems(
-            Update,
-            trade_server_events.run_if(in_state(AppState::Game)),
-        );
-app.add_systems(OnEnter(AppState::Game), spawn_trade);
+        app.add_systems(Update, trade_server_events.run_if(in_state(AppState::Game)));
+        app.add_systems(OnEnter(AppState::Game), spawn_trade);
         app.add_systems(OnExit(AppState::Game), cleanup_trade);
         app.add_systems(
             Update,
@@ -168,63 +165,95 @@ fn spawn_trade(
     // 背景 Title[22]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 22) {
         let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Trade), TradeWidget, Visibility::Hidden));
+        commands.entity(e).insert((
+            DialogRoot(DialogKind::Trade),
+            TradeWidget,
+            Visibility::Hidden,
+        ));
     }
     // 标题 Title[18]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 18) {
         let e = spawn_ui_sprite(&mut commands, h, DIALOG_X + 18.0, DIALOG_Y + 9.0, 6.2, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Trade), TradeWidget, Visibility::Hidden));
+        commands.entity(e).insert((
+            DialogRoot(DialogKind::Trade),
+            TradeWidget,
+            Visibility::Hidden,
+        ));
     }
     // 关闭
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        DIALOG_X + 520.0, DIALOG_Y + 3.0, 7.0, 20.0, 20.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        DIALOG_X + 520.0,
+        DIALOG_Y + 3.0,
+        7.0,
+        20.0,
+        20.0,
     ) {
-        commands.entity(e).insert((
-            TradeClose,
-            DialogRoot(DialogKind::Trade),
-            TradeWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((TradeClose, DialogRoot(DialogKind::Trade), TradeWidget));
     }
     // 金币输入按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 198, 199, 199,
-        DIALOG_X + 120.0, DIALOG_Y + 300.0, 7.0, 60.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        198,
+        199,
+        199,
+        DIALOG_X + 120.0,
+        DIALOG_Y + 300.0,
+        7.0,
+        60.0,
+        23.0,
     ) {
-        commands.entity(e).insert((
-            TradeGoldBtn,
-            DialogRoot(DialogKind::Trade),
-            TradeWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((TradeGoldBtn, DialogRoot(DialogKind::Trade), TradeWidget));
     }
     // 锁定按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 200, 201, 202,
-        DIALOG_X + 230.0, DIALOG_Y + 320.0, 7.0, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        200,
+        201,
+        202,
+        DIALOG_X + 230.0,
+        DIALOG_Y + 320.0,
+        7.0,
+        76.0,
+        25.0,
     ) {
-        commands.entity(e).insert((
-            TradeLock,
-            DialogRoot(DialogKind::Trade),
-            TradeWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((TradeLock, DialogRoot(DialogKind::Trade), TradeWidget));
     }
     // 金币文本
     let g = spawn_ui_text(
-        &mut commands, &font, "金币: 0 | 对方: 0",
-        DIALOG_X + 30.0, DIALOG_Y + 305.0, 12.0, Color::srgb(1.0, 0.85, 0.3), 8.0,
+        &mut commands,
+        &font,
+        "金币: 0 | 对方: 0",
+        DIALOG_X + 30.0,
+        DIALOG_Y + 305.0,
+        12.0,
+        Color::srgb(1.0, 0.85, 0.3),
+        8.0,
     );
-    commands.entity(g).insert((
-        TradeGoldText,
-        DialogRoot(DialogKind::Trade),
-        TradeWidget,
-    ));
+    commands
+        .entity(g)
+        .insert((TradeGoldText, DialogRoot(DialogKind::Trade), TradeWidget));
 
     // 双方物品槽（左 5x4 自己，右 5x4 对方；36x32，#106 通用 ItemCell）
     for side in 0..2usize {
@@ -259,7 +288,14 @@ fn trade_ui_system(
         ),
     >,
     mut cells: Query<(&mut ItemCellData, &TradeSlot)>,
-    mut gold_texts: Query<(&mut Text2d, &mut Visibility, &TradeGoldText), (Without<ItemCellCount>, Without<TradeInviteText>, Without<TradeInviteWidget>)>,
+    mut gold_texts: Query<
+        (&mut Text2d, &mut Visibility, &TradeGoldText),
+        (
+            Without<ItemCellCount>,
+            Without<TradeInviteText>,
+            Without<TradeInviteWidget>,
+        ),
+    >,
     mut invite_widgets: Query<
         &mut Visibility,
         (
@@ -270,7 +306,10 @@ fn trade_ui_system(
             Without<TradeGoldText>,
         ),
     >,
-    mut invite_texts: Query<(&mut Text2d, &TradeInviteText), (Without<ItemCellCount>, Without<TradeGoldText>)>,
+    mut invite_texts: Query<
+        (&mut Text2d, &TradeInviteText),
+        (Without<ItemCellCount>, Without<TradeGoldText>),
+    >,
 ) {
     for (mut vis, _slot) in &mut widgets {
         *vis = if trade.visible {
@@ -354,6 +393,7 @@ fn trade_action_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    inv_origin: Res<crate::game::dialogs::inventory::InventoryOrigin>,
     close: Query<&UiButton, With<TradeClose>>,
     lock: Query<&UiButton, With<TradeLock>>,
     gold_btn: Query<&UiButton, With<TradeGoldBtn>>,
@@ -364,9 +404,7 @@ fn trade_action_system(
     for r in result.read() {
         if let Some(n) = r.0 {
             if trade.visible && n > 0 {
-                net.send_packet(&mir2_shared::packets::client::trade::TradeGold {
-                    amount: n,
-                });
+                net.send_packet(&mir2_shared::packets::client::trade::TradeGold { amount: n });
                 trade.my_gold = n as u64;
                 trade.my_locked = false;
                 tracing::info!("💰 交易金币: {}", n);
@@ -401,7 +439,9 @@ fn trade_action_system(
         }
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
@@ -430,6 +470,7 @@ fn trade_action_system(
             cursor.y,
             hud.inventory.page,
             hud.inventory.items.len(),
+            (inv_origin.0, inv_origin.1),
         ) {
             if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
                 if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
@@ -473,9 +514,7 @@ fn trade_invite_system(
         }
     }
     if let Some(a) = accept {
-        net.send_packet(&mir2_shared::packets::client::trade::TradeReply {
-            accept_invite: a,
-        });
+        net.send_packet(&mir2_shared::packets::client::trade::TradeReply { accept_invite: a });
         tracing::info!("🤝 交易邀请回复: accept={}", a);
         if a {
             // 本地立即开窗（服务器随后发 TradeRequest open 包）
@@ -487,7 +526,6 @@ fn trade_invite_system(
         trade.invite = None;
     }
 }
-
 
 /// 消费服务端交易事件（网络层只广播 ServerEvent；关闭/金币由本模块应用）
 fn trade_server_events(
@@ -532,7 +570,12 @@ fn trade_server_events(
                     trade.pending_deposit = None;
                 }
             }
-            ServerEvent::TradeItemUpdate { uid, grid, count, is_add } => {
+            ServerEvent::TradeItemUpdate {
+                uid,
+                grid,
+                count,
+                is_add,
+            } => {
                 if *is_add {
                     if let Some(slot) = trade.their_items.get_mut(*grid) {
                         let prev = slot.take();
@@ -548,7 +591,9 @@ fn trade_server_events(
                     if let Some(slot) = trade.their_items.get_mut(*grid) {
                         *slot = None;
                     }
-                    trade.their_items.retain(|s| s.as_ref().map(|i| i.uid) != Some(*uid));
+                    trade
+                        .their_items
+                        .retain(|s| s.as_ref().map(|i| i.uid) != Some(*uid));
                 }
             }
             ServerEvent::TradeDeposit { from, to, success } => {
