@@ -14,6 +14,9 @@
 //     （Shift 单按切换中/英；中文模式按非密码聚焦框时消费字母/数字/空格/退格/Esc）。
 //   - 各文本框系统跑在 Update：先 ime.consumes_key(key) 判断 IME 是否接管该键，
 //     接管则跳过；再 ime.take_commit() 注入已选汉字；并回填 ImeFocus（聚焦框矩形）。
+//   - pinyin_mode_chip_system 跑在 PostUpdate：聚焦框右侧常显「中/英」模式 chip。
+//     系统 IME 被禁用后 OS 输入法工具条不再出现——chip 是它的游戏内等价物
+//     （手心/搜狗用户的「中/英指示 + Shift 切换」通用约定），否则内置 IME 无从发现。
 // ============================================================================
 
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -181,7 +184,10 @@ impl PinyinDict {
             };
             if let Some(py) = key.strip_prefix('@') {
                 if !val.is_empty() {
-                    words.entry(py.to_string()).or_default().push(val.to_string());
+                    words
+                        .entry(py.to_string())
+                        .or_default()
+                        .push(val.to_string());
                 }
             } else if let Some(py) = key.strip_prefix('$') {
                 let v: Vec<char> = val.chars().collect();
@@ -461,6 +467,45 @@ struct PinyinBarBg;
 struct PinyinBarText;
 
 // ----------------------------------------------------------------------------
+// 中/英模式 chip 实体（聚焦框右侧）
+// ----------------------------------------------------------------------------
+
+#[derive(Component)]
+struct PinyinModeChip;
+
+/// chip 与聚焦框右缘的间距（屏幕像素）
+const MODE_CHIP_GAP: f32 = 4.0;
+/// chip 单字宽 + 余量：聚焦框贴画布右缘时内缩，保证不出 1024 画布
+const MODE_CHIP_RIGHT_MARGIN: f32 = 14.0;
+/// 画布宽（项目 UI 世界坐标 0..1024×0..768，y 向下）
+const MODE_CHIP_CANVAS_W: f32 = 1024.0;
+
+/// chip 文本：中文模式「中」、英文模式「英」（对齐系统输入法指示条的单字约定）
+fn mode_chip_text(enabled: bool) -> &'static str {
+    if enabled {
+        "中"
+    } else {
+        "英"
+    }
+}
+
+/// chip 颜色：中文=金（醒目，输入中文的主模式）、英文=灰
+fn mode_chip_color(enabled: bool) -> Color {
+    if enabled {
+        Color::srgb(1.0, 0.85, 0.3)
+    } else {
+        Color::srgb(0.55, 0.55, 0.55)
+    }
+}
+
+/// chip 屏幕坐标（左上角，y 向下）：聚焦框右侧、垂直居中；贴右缘时内缩进框内
+fn mode_chip_pos(x: f32, y: f32, w: f32, h: f32) -> (f32, f32) {
+    let cx = (x + w + MODE_CHIP_GAP).min(MODE_CHIP_CANVAS_W - MODE_CHIP_RIGHT_MARGIN);
+    let cy = y + h * 0.5 - 6.0;
+    (cx, cy)
+}
+
+// ----------------------------------------------------------------------------
 // 系统
 // ----------------------------------------------------------------------------
 
@@ -491,7 +536,10 @@ fn pinyin_ime_system(
             } else if key.state == ButtonState::Released {
                 if shift.down && shift.clean {
                     ime.toggle();
-                    tracing::info!("[IME] 切换: {}", if ime.enabled() { "中文" } else { "英文" });
+                    tracing::info!(
+                        "[IME] 切换: {}",
+                        if ime.enabled() { "中文" } else { "英文" }
+                    );
                 }
                 shift.down = false;
                 shift.clean = false;
@@ -626,7 +674,11 @@ fn pinyin_candidate_ui_system(
         }
     }
 
-    let vis = if show { Visibility::Visible } else { Visibility::Hidden };
+    let vis = if show {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
 
     if let Some((x, y, _w, h)) = focus.rect {
         let bar_y = y + h + 2.0; // 屏幕坐标 y 向下：输入框下方
@@ -647,6 +699,55 @@ fn pinyin_candidate_ui_system(
     }
 }
 
+/// PostUpdate：聚焦框右侧的中/英模式 chip。与候选条同帧契约（Update 回填 ImeFocus
+/// 之后）。无聚焦框时隐藏；文本/颜色变化才更新（避免每帧重排文本，见候选条 #31 注）。
+fn pinyin_mode_chip_system(
+    mut commands: Commands,
+    ime: Res<PinyinIme>,
+    focus: Res<ImeFocus>,
+    ui_font: Res<UiFont>,
+    mut chips: Query<
+        (&mut Text2d, &mut TextColor, &mut Transform, &mut Visibility),
+        With<PinyinModeChip>,
+    >,
+) {
+    // 确保 chip 实体存在（字体就绪后；UiFont 补强由候选条系统负责）
+    if chips.is_empty() && ui_font.0.is_strong() {
+        commands.spawn((
+            UiEntity,
+            PinyinModeChip,
+            Text2d::new(""),
+            Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(ui_font.0.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(mode_chip_color(ime.enabled())),
+            Transform::from_xyz(0.0, 0.0, 50.2),
+            Visibility::Hidden,
+        ));
+    }
+
+    let Some((x, y, w, h)) = focus.rect else {
+        for (_t, _c, _tf, mut v) in &mut chips {
+            *v = Visibility::Hidden;
+        }
+        return;
+    };
+    let (cx, cy) = mode_chip_pos(x, y, w, h);
+    let want = mode_chip_text(ime.enabled());
+    for (mut text, mut color, mut tf, mut v) in &mut chips {
+        if text.0 != want {
+            text.0 = want.to_string();
+            color.0 = mode_chip_color(ime.enabled());
+        }
+        tf.translation.x = cx;
+        tf.translation.y = -cy;
+        *v = Visibility::Visible;
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Plugin
 // ----------------------------------------------------------------------------
@@ -660,6 +761,8 @@ impl Plugin for PinyinImePlugin {
         app.add_systems(PreUpdate, (pinyin_ime_system, clear_ime_focus).chain());
         // 候选条必须在 Update 所有输入框回填 ImeFocus 之后渲染；否则聚焦框尚未设置，候选条不会显示。
         app.add_systems(PostUpdate, pinyin_candidate_ui_system);
+        // 模式 chip 同契约（PostUpdate、读 Update 回填的 ImeFocus）
+        app.add_systems(PostUpdate, pinyin_mode_chip_system);
     }
 }
 
@@ -849,5 +952,99 @@ mod tests {
         assert_eq!(d.segment("nihao"), Some(vec!["ni", "hao"]));
         // 无效串切不出来
         assert_eq!(d.segment("zzz"), None);
+    }
+
+    // ---- 中/英模式 chip ----
+
+    #[test]
+    fn mode_chip_text_and_pos() {
+        assert_eq!(mode_chip_text(true), "中");
+        assert_eq!(mode_chip_text(false), "英");
+        // 常规：框右侧 + 4px、垂直居中（12px 字高的一半）
+        assert_eq!(mode_chip_pos(100.0, 200.0, 120.0, 16.0), (224.0, 202.0));
+        // 贴右缘：内缩进 1024-14=1010，不出画布
+        assert_eq!(mode_chip_pos(1000.0, 10.0, 30.0, 16.0), (1010.0, 12.0));
+    }
+
+    /// chip 行为：默认英、聚焦才显示、Shift 翻转文本+颜色（用户可发现性）。
+    /// 强字体句柄走真实 spawn 路径；Update 阶段回填 focus（对齐生产契约）。
+    #[test]
+    fn mode_chip_shows_and_flips() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.add_plugins(bevy::asset::AssetPlugin::default()); // Assets::add 需 AssetServer
+        app.init_asset::<Font>();
+        // 强句柄：内置 TTF（chip/候选条 spawn 都要求 is_strong）
+        let bytes = include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+        let font = Font::from_bytes(bytes.to_vec());
+        let handle = app.world_mut().resource_mut::<Assets<Font>>().add(font);
+        app.insert_resource(crate::ui::sprite_ui::UiFont(handle));
+        // 生产契约：Update 阶段由各文本框回填 ImeFocus（PreUpdate 会被 clear_ime_focus 清掉）
+        app.add_systems(Update, |mut f: ResMut<ImeFocus>| {
+            f.rect = Some((100.0, 200.0, 120.0, 16.0));
+        });
+
+        // 1) 首帧 spawn（Commands 下一帧生效）、次帧设文本（默认英文模式）
+        app.update();
+        app.update();
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(&Text2d, &Visibility), With<PinyinModeChip>>();
+            let (t, v) = q.single(app.world()).expect("字体强句柄后 chip 已 spawn");
+            assert_eq!(t.0, "英");
+            assert_eq!(*v, Visibility::Visible);
+        }
+
+        // 2) Shift 单按 → 中文：文本与颜色同帧翻转
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(&Text2d, &TextColor, &Transform), With<PinyinModeChip>>();
+            let (t, c, tf) = q.single(app.world()).unwrap();
+            assert_eq!(t.0, "中");
+            let Color::Srgba(s) = c.0 else {
+                panic!("srgb 颜色")
+            };
+            assert!((s.red - 1.0).abs() < 1e-3 && (s.blue - 0.3).abs() < 1e-3);
+            // 位置：框右 (100+120+4, -(200+8-6))
+            assert_eq!(tf.translation.x, 224.0);
+            assert_eq!(tf.translation.y, -202.0);
+        }
+
+        // 3) 仍聚焦：保持显示（隐藏路径由 mode_chip_hidden_without_focus 覆盖）
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<PinyinModeChip>>();
+        assert_eq!(*q.single(app.world()).unwrap(), Visibility::Visible);
+    }
+
+    /// 无聚焦帧：chip 隐藏（spawn 存在性由上一测试覆盖，这里弱句柄也行——不 spawn 即无实体，
+    /// 故同样用强句柄确保实体存在后走 focus=None 分支）
+    #[test]
+    fn mode_chip_hidden_without_focus() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.add_plugins(bevy::asset::AssetPlugin::default()); // Assets::add 需 AssetServer
+        app.init_asset::<Font>();
+        let bytes = include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+        let font = Font::from_bytes(bytes.to_vec());
+        let handle = app.world_mut().resource_mut::<Assets<Font>>().add(font);
+        app.insert_resource(crate::ui::sprite_ui::UiFont(handle));
+
+        app.update(); // spawn（Hidden）
+        app.update(); // 无回填 → focus=None 路径
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<PinyinModeChip>>();
+        assert_eq!(*q.single(app.world()).unwrap(), Visibility::Hidden);
     }
 }
