@@ -1145,14 +1145,8 @@ fn chat_server_events(
                 chat.add_line(text.clone(), chat_color(*chat_type), chat_channel(*chat_type));
             }
         }
-        if let ServerEvent::ServerMessage { message, .. } = ev {
-            // #258：服务端输出消息（系统提示）
-            chat.add_line(
-                message.clone(),
-                Color::srgb(0.4, 1.0, 0.4),
-                ChatChannel::System,
-            );
-        }
+        // #2563：SendOutputMessage 不再进聊天——C# GameScene.cs:5621 只路由到顶部
+        // 浮动 OutputLines（game/output_lines.rs 消费 ServerEvent::OutputMessage）
     }
 }
 

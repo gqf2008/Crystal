@@ -183,8 +183,9 @@ pub enum ServerEvent {
     ItemUpgraded { item: InvItem },
     /// #258 RemoveMagic：移除技能
     MagicRemoved { spell: mir2_shared::enums::Spell },
-    /// #258 SendOutputMessage：服务端输出消息
-    ServerMessage { message: String, message_type: u8 },
+    /// #258/#2563 SendOutputMessage：顶部浮动系统消息（C# GameScene.cs:5621 只进
+    /// OutputLines 浮动行不进聊天；message_type = OutputMessageType：3=Normal/4=Quest/5=Guild）
+    OutputMessage { message: String, message_type: u8 },
     /// #260/#2535 NewQuestInfo：任务定义（全量目录，登录下发；入 QuestCatalog 而非任务日志）
     QuestInfo {
         info: mir2_shared::data::client_data::ClientQuestInfo,

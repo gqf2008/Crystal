@@ -658,7 +658,8 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::SendOutputMessage as i16 => {
             if let Ok(p) = ui_events::SendOutputMessage::read_body(&mut cur) {
-                server_events.write(ServerEvent::ServerMessage {
+                // #2563：C# 只进顶部浮动行（GameScene.cs:5621），不进聊天
+                server_events.write(ServerEvent::OutputMessage {
                     message: p.message,
                     message_type: p.message_type,
                 });
