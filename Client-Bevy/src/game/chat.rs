@@ -370,7 +370,6 @@ impl Plugin for ChatPlugin {
         app.init_resource::<ChatItemCache>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
         app.add_systems(OnEnter(AppState::Game), chat_apply_persisted_tab);
-        app.add_systems(OnEnter(AppState::Game), chat_welcome);
         app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
@@ -1043,16 +1042,6 @@ fn chat_input_ui_system(
     }
 }
 
-/// 进入游戏时显示欢迎消息（mock/服务器通常不主动发欢迎语，让聊天框有可见内容）
-fn chat_welcome(mut chat: ResMut<ChatState>) {
-    tracing::info!("💬 欢迎消息系统运行");
-    chat.add_line(
-        "欢迎来到传奇 2！按 Enter 开始聊天，/s 喊话、/guild 行会、/g 队伍、/w 私聊。",
-        Color::srgb(0.1, 0.1, 0.15),
-        ChatChannel::System,
-    );
-}
-
 /// 进入游戏时恢复持久化页签（C# Settings 无此字段，客户端增强）
 fn chat_apply_persisted_tab(mut chat: ResMut<ChatState>, filter: Res<ChatFilter>) {
     if chat.tab != filter.tab {
@@ -1182,6 +1171,18 @@ mod tests {
         assert_eq!(chat_channel(ChatType::Group), ChatChannel::Group);
         assert_eq!(chat_channel(ChatType::WhisperIn), ChatChannel::Whisper);
         assert_eq!(chat_channel(ChatType::WhisperOut), ChatChannel::Whisper);
+    }
+
+    /// #UI-align 回归锚点：C# 客户端无任何本地伪造欢迎语（全 Client/MirScenes
+    /// 无「欢迎」字样；聊天内容只来自服务器包）。曾有的 chat_welcome 系统已删——
+    /// ChatState 初始必须为空，进入游戏不注入任何行。
+    #[test]
+    fn chat_state_initially_empty_no_fabricated_welcome() {
+        let chat = ChatState::default();
+        assert!(
+            chat.lines.is_empty(),
+            "ChatState 初始不应有伪造聊天行（C# 无本地欢迎语）"
+        );
     }
 
     #[test]
