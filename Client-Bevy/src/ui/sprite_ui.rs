@@ -21,18 +21,23 @@ pub struct UiFont(pub Handle<Font>);
 // 两者都从用户机器字体目录**运行时读取**（与 C# 走系统 GDI 同源，不打包进二进制，规避
 // Arial/宋体的再分发许可）；系统字体缺失（非 Windows / 精简系统）回退内置 PuHuiTi 保底。
 // ---------------------------------------------------------------------------
+/// Windows 字体目录（%SystemRoot% 重定位的机器也正确；环境变量缺失回退 C:\Windows）
 #[cfg(windows)]
-const SYSTEM_ARIAL_PATH: &str = r"C:\Windows\Fonts\arial.ttf";
-#[cfg(windows)]
-const SYSTEM_SIMSUN_PATH: &str = r"C:\Windows\Fonts\simsun.ttc";
+fn system_fonts_dir() -> std::path::PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join("Fonts")
+}
 
 /// 选 UI 主字体字节：Windows 有系统 Arial 用之；否则回退内置 PuHuiTi。
 /// 返回 (字节, 来源标签)。TTF magic 校验防字体目录里混入坏文件后整屏 tofu。
 fn pick_ui_font_bytes() -> (Vec<u8>, &'static str) {
     #[cfg(windows)]
     {
-        if let Ok(bytes) = std::fs::read(SYSTEM_ARIAL_PATH) {
-            if bytes.len() > 4 && bytes[..4] == [0x00, 0x01, 0x00, 0x00] {
+        let path = system_fonts_dir().join("arial.ttf");
+        if let Ok(bytes) = std::fs::read(&path) {
+            if bytes.len() >= 4 && bytes[..4] == [0x00, 0x01, 0x00, 0x00] {
                 return (bytes, "system-arial");
             }
         }
@@ -63,11 +68,9 @@ pub fn setup_han_fallback_system(mut font_cx: ResMut<bevy::text::FontCx>) {
         let target = match existing {
             Some(id) => id,
             None => {
-                let Ok(bytes) = std::fs::read(SYSTEM_SIMSUN_PATH) else {
-                    tracing::warn!(
-                        "未找到系统宋体（{}），中文回退沿用默认链",
-                        SYSTEM_SIMSUN_PATH
-                    );
+                let path = system_fonts_dir().join("simsun.ttc");
+                let Ok(bytes) = std::fs::read(&path) else {
+                    tracing::warn!("未找到系统宋体（{}），中文回退沿用默认链", path.display());
                     return;
                 };
                 let registered = font_cx
@@ -105,26 +108,36 @@ pub fn setup_han_fallback_system(mut font_cx: ResMut<bevy::text::FontCx>) {
 mod font_tests {
     use super::*;
 
-    /// 主字体选取：Windows 有系统 Arial 时必须选中它（TTF magic + 与内置 PuHuiTi 字节不同）。
-    /// C# Settings.cs:72 FontName="Arial" —— 本测试锚定「用系统 Arial」这一行为本身。
+    /// 主字体选取：Windows 有系统 Arial 时必须选中它。
+    /// C# Settings.cs:72 FontName="Arial" —— 本测试锚定「用系统 Arial」这一行为本身：
+    /// 镜像 fs 读取 + magic 判定，文件有效时**强制**断言 kind=="system-arial"（若实现
+    /// 回归为永不选系统字体，本测试必须失败，而非静默走回退分支）。
     #[test]
     fn ui_font_prefers_system_arial() {
         let (bytes, kind) = pick_ui_font_bytes();
-        if kind == "system-arial" {
-            assert!(bytes.len() > 4, "Arial 字节非空");
-            assert_eq!(&bytes[..4], &[0x00, 0x01, 0x00, 0x00], "TTF magic");
-            let builtin: &[u8] =
-                include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
-            assert_ne!(
-                bytes.as_slice(),
-                builtin,
-                "选中的应是系统 Arial 而非内置字体"
-            );
-        } else {
-            // 无系统 Arial 的环境（非 Windows）：回退内置 PuHuiTi，保证中文可渲染
-            assert_eq!(kind, "builtin-puhuiti");
-            assert!(!bytes.is_empty());
+        #[cfg(windows)]
+        {
+            // 镜像实现的前置条件：字体目录里有合法 arial.ttf（TTF magic 头）
+            let file_valid = std::fs::read(system_fonts_dir().join("arial.ttf"))
+                .map(|b| b.len() >= 4 && b[..4] == [0x00, 0x01, 0x00, 0x00])
+                .unwrap_or(false);
+            if file_valid {
+                assert_eq!(kind, "system-arial", "有合法系统 Arial 却未选中");
+                assert!(bytes.len() > 4, "Arial 字节非空");
+                assert_eq!(&bytes[..4], &[0x00, 0x01, 0x00, 0x00], "TTF magic");
+                let builtin: &[u8] =
+                    include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+                assert_ne!(
+                    bytes.as_slice(),
+                    builtin,
+                    "选中的应是系统 Arial 而非内置字体"
+                );
+                return;
+            }
         }
+        // 无系统 Arial 的环境（非 Windows / 字体目录被清）：回退内置 PuHuiTi保底
+        assert_eq!(kind, "builtin-puhuiti");
+        assert!(!bytes.is_empty());
     }
 
     /// Han 回退注册行为：setup 后 fontique 集合存在 SimSun 家族，且 Script(Hani)
@@ -147,7 +160,7 @@ mod font_tests {
         let mut font_cx = world
             .get_resource_mut::<bevy::text::FontCx>()
             .expect("TextPlugin 应初始化 FontCx");
-        if !std::path::Path::new(SYSTEM_SIMSUN_PATH).exists() {
+        if !system_fonts_dir().join("simsun.ttc").exists() {
             return; // 精简 Windows 无宋体：行为=打 warn 跳过，不断言
         }
         let simsun = font_cx

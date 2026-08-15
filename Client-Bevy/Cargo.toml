@@ -10,8 +10,10 @@ bevy = { version = "0.19", features = ["wav"] }
 # B0001 调试：显示冲突系统/组件名
 bevy_ecs = { version = "0.19", features = ["debug"] }
 # 排版库（bevy_text 同版传递依赖）：直接访问 fontique Collection 注册系统宋体并设
-# Han 字形回退（复刻 C# GDI 字体链接 Arial→宋体；见 ui/sprite_ui.rs setup_han_fallback_system）
-parley = "0.9"
+# Han 字形回退（复刻 C# GDI 字体链接 Arial→宋体；见 ui/sprite_ui.rs setup_han_fallback_system）。
+# default-features=false：只要核心 Collection API——默认特性 system 会在 Linux 拉
+# fontconfig 硬依赖，弄红 CI（bevy_text 用 fontique 时本就没启用这些）
+parley = { version = "0.9", default-features = false, features = ["std"] }
 
 # 共享库 (游戏协议和数据结构)
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
