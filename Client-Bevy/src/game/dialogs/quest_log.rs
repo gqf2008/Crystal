@@ -49,6 +49,9 @@ pub struct QuestLogState {
     /// #2535 可选奖励当前选择（下标属 ClientQuestInfo.rewards_select_item；换行时重置）
     pub selected_reward: Option<usize>,
     pub message: String,
+    /// #2535 子批2：展开的组（C# QuestDiaryDialog.ExpandedGroups；空集=全部展开，
+    /// 跨开合面板持久，对齐 C# 字段生命周期）
+    pub expanded_groups: HashSet<String>,
 }
 
 /// #2535 任务定义目录（S.NewQuestInfo 登录全量下发；C# QuestInfo 缓存）
@@ -167,6 +170,79 @@ pub fn upsert_catalog_info(infos: &mut Vec<ClientQuestInfo>, info: &ClientQuestI
     } else {
         infos.push(info.clone());
     }
+}
+
+/// #2535 子批2：C# QuestDiaryDialog.DisplayQuests L710——已接任务按 QuestInfo.Group 分组。
+/// 组序=首次出现序（C# GroupBy 保持 encounter order）；QuestEntry 下标 → 目录组名，
+/// 目录缺失回退空串（C# QuestInfo 常驻内存，此为包未到时的兜底）
+pub fn diary_groups(quests: &[QuestEntry], infos: &[ClientQuestInfo]) -> Vec<(String, Vec<usize>)> {
+    let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+    for (idx, q) in quests.iter().enumerate() {
+        let group = infos
+            .iter()
+            .find(|c| c.index == q.id)
+            .map(|c| c.group.clone())
+            .unwrap_or_default();
+        match groups.iter_mut().find(|(g, _)| *g == group) {
+            Some((_, list)) => list.push(idx),
+            None => groups.push((group, vec![idx])),
+        }
+    }
+    groups
+}
+
+/// #2535 子批2：C# L718 展开判定——ExpandedGroups 空集=全部展开
+pub fn group_expanded(expanded: &HashSet<String>, group: &str) -> bool {
+    expanded.is_empty() || expanded.contains(group)
+}
+
+/// #2535 子批2：C# QuestGroupQuestItem.ChangeExpand + ExpandedChanged L726-742——
+/// 翻转目标组后物化全量展开集（空集语义下首次收起会把其余组记为展开）
+pub fn toggle_group(
+    groups: &[(String, Vec<usize>)],
+    expanded: &HashSet<String>,
+    target: &str,
+) -> HashSet<String> {
+    groups
+        .iter()
+        .map(|(g, _)| (g, group_expanded(expanded, g)))
+        .map(|(g, was)| (g, if g == target { !was } else { was }))
+        .filter(|(_, on)| *on)
+        .map(|(g, _)| g.clone())
+        .collect()
+}
+
+/// #2535 子批2：日记行模型——组头 + 展开组内任务 + 可接段（C# 组头 15px/行 15px 纵排）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiaryRow {
+    /// 组头（下标属 diary_groups 结果）
+    Header(usize),
+    /// 已接任务（下标属 QuestLogState.quests）
+    Quest(usize),
+    /// 可接任务（下标属 available_quests 结果）
+    Avail(usize),
+}
+
+/// #2535 子批2：行模型扁平化（收起组仅留组头；供 8 行视窗取前 N）
+pub fn diary_rows(
+    quests: &[QuestEntry],
+    infos: &[ClientQuestInfo],
+    avail_len: usize,
+    expanded: &HashSet<String>,
+) -> Vec<DiaryRow> {
+    let mut rows = Vec::new();
+    for (gi, (group, list)) in diary_groups(quests, infos).iter().enumerate() {
+        rows.push(DiaryRow::Header(gi));
+        if group_expanded(expanded, group) {
+            for &qi in list {
+                rows.push(DiaryRow::Quest(qi));
+            }
+        }
+    }
+    for k in 0..avail_len {
+        rows.push(DiaryRow::Avail(k));
+    }
+    rows
 }
 
 #[derive(Component)]
@@ -304,6 +380,22 @@ fn spawn_quest_log(
             QuestLogWidget,
         ));
     }
+    // #2535 子批2：已接计数标签（C# _takenQuestsLabel @标题栏 (210,7)）
+    let e = spawn_ui_text(
+        &mut commands,
+        &font,
+        "",
+        298.0,
+        100.0,
+        12.0,
+        Color::WHITE,
+        8.0,
+    );
+    commands.entity(e).insert((
+        QuestLogLine(14),
+        DialogRoot(DialogKind::QuestLog),
+        QuestLogWidget,
+    ));
     // 放弃按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands,
@@ -436,6 +528,14 @@ fn quest_log_ui_system(
 
     // #2535 可接任务段（已接在前、可接在后）
     let avail = available_quests(&catalog, &state, hud.level, hud.class);
+    // #2535 子批2：日记行模型（组头+展开组内已接+可接，前 8 行入视窗）
+    let groups = diary_groups(&state.quests, &catalog.infos);
+    let diary = diary_rows(
+        &state.quests,
+        &catalog.infos,
+        avail.len(),
+        &state.expanded_groups,
+    );
     // 当前选中任务的定义（已接行 → 目录按 id 反查；可接行 → avail 下标）
     let sel_info: Option<&ClientQuestInfo> = state
         .selected
@@ -445,37 +545,61 @@ fn quest_log_ui_system(
 
     for (mut text, mut color, line) in &mut lines {
         let (s, c) = match line.0 {
-            // 行 0-7：已接（进行中/完成）在前、可接在后
-            i if i < 8 => {
-                let taken_len = state.quests.len();
-                if i < taken_len {
-                    let q = &state.quests[i];
+            // 行 0-7：#2535 子批2 日记行模型——组头（展开/收起）/已接（展开组内）/可接
+            i if i < 8 => match diary.get(i) {
+                Some(DiaryRow::Header(gi)) => {
+                    let (group, _) = &groups[*gi];
                     (
                         format!(
-                            "{}: {}{}",
-                            q.id,
-                            q.name,
-                            if q.completed {
-                                "（完成）"
+                            "{} {}",
+                            if group_expanded(&state.expanded_groups, group) {
+                                "▼"
                             } else {
-                                "（进行中）"
+                                "▶"
+                            },
+                            if group.is_empty() {
+                                "未分组"
+                            } else {
+                                group.as_str()
                             }
                         ),
-                        if q.completed {
-                            Color::srgb(0.5, 1.0, 0.5)
-                        } else {
-                            Color::WHITE
-                        },
+                        // C# 组头 LimeGreen（QuestGroupQuestItem._groupLabel）
+                        Color::srgb(0.2, 0.8, 0.2),
                     )
-                } else if let Some(info) = avail.get(i - taken_len) {
-                    (
-                        format!("{}: {}（可接）", info.index, info.name),
-                        Color::srgb(1.0, 0.9, 0.4),
-                    )
-                } else {
-                    (String::new(), Color::WHITE)
                 }
-            }
+                Some(DiaryRow::Quest(qi)) => {
+                    let q = &state.quests[*qi];
+                    let info = catalog.infos.iter().find(|c| c.index == q.id);
+                    // C# L1900/1919 颜色优先级：低级任务灰 > 新任务黄 > 白（完成绿为沿用）
+                    let low_level = info
+                        .map(|c| (hud.level as i32 - c.min_level_needed) > 10)
+                        .unwrap_or(false);
+                    let c = if low_level {
+                        Color::srgb(0.5, 0.5, 0.5)
+                    } else if q.is_new {
+                        Color::srgb(1.0, 0.9, 0.3)
+                    } else if q.completed {
+                        Color::srgb(0.5, 1.0, 0.5)
+                    } else {
+                        Color::WHITE
+                    };
+                    // C# L1916 "{0,-4} {1}"：等级 + 名称；状态后缀（完成/进行中）
+                    (
+                        format!(
+                            "Lv{} {}（{}）",
+                            info.map(|c| c.min_level_needed).unwrap_or(0),
+                            q.name,
+                            if q.completed { "完成" } else { "进行中" }
+                        ),
+                        c,
+                    )
+                }
+                Some(DiaryRow::Avail(k)) => (
+                    format!("{}: {}（可接）", avail[*k].index, avail[*k].name),
+                    Color::srgb(1.0, 0.9, 0.4),
+                ),
+                None => (String::new(), Color::WHITE),
+            },
             8 => (
                 if sel_info.is_some() {
                     format!("详情: {}", sel_info.map(|i| i.name.as_str()).unwrap_or(""))
@@ -541,6 +665,11 @@ fn quest_log_ui_system(
                 Color::srgb(1.0, 0.95, 0.6),
             ),
             13 => (state.message.clone(), Color::srgb(0.8, 0.9, 1.0)),
+            // #2535 子批2：已接计数（C# _takenQuestsLabel，中文资源 "任务：{0}/{1}"）
+            14 => (
+                format!("任务：{}/{}", state.quests.len(), MAX_CONCURRENT_QUESTS),
+                Color::srgb(0.9, 0.95, 1.0),
+            ),
             _ => (String::new(), Color::WHITE),
         };
         text.0 = s;
@@ -548,7 +677,7 @@ fn quest_log_ui_system(
             color.0 = c;
         }
     }
-    // 行点击选中（已接段/可接段；换行重置奖励选择）
+    // #2535 子批2：行点击——组头展开/收起（C# ChangeExpand）、任务选中（DeselectQuests 单选）
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
@@ -559,17 +688,34 @@ fn quest_log_ui_system(
                         && cursor.y >= y
                         && cursor.y <= y + 18.0
                     {
-                        let taken_len = state.quests.len();
-                        if i < taken_len {
-                            state.selected = Some(i);
-                            state.selected_avail = None;
-                            state.selected_reward = None;
-                            tracing::info!("📜 选中任务: {}", state.quests[i].name);
-                        } else if i - taken_len < avail.len() {
-                            state.selected = None;
-                            state.selected_avail = Some(i - taken_len);
-                            state.selected_reward = None;
-                            tracing::info!("📜 选中可接任务: {}", avail[i - taken_len].name);
+                        match diary.get(i) {
+                            Some(DiaryRow::Header(gi)) => {
+                                let group = groups[*gi].0.clone();
+                                state.expanded_groups =
+                                    toggle_group(&groups, &state.expanded_groups, &group);
+                                state.message = format!(
+                                    "{}分组 {}",
+                                    if group_expanded(&state.expanded_groups, &group) {
+                                        "展开"
+                                    } else {
+                                        "收起"
+                                    },
+                                    group
+                                );
+                            }
+                            Some(DiaryRow::Quest(qi)) => {
+                                state.selected = Some(*qi);
+                                state.selected_avail = None;
+                                state.selected_reward = None;
+                                tracing::info!("📜 选中任务: {}", state.quests[*qi].name);
+                            }
+                            Some(DiaryRow::Avail(k)) => {
+                                state.selected = None;
+                                state.selected_avail = Some(*k);
+                                state.selected_reward = None;
+                                tracing::info!("📜 选中可接任务: {}", avail[*k].name);
+                            }
+                            None => {}
                         }
                         break;
                     }
@@ -593,9 +739,16 @@ fn quest_log_ui_system(
             }
         }
     }
-    // 追踪按钮：标签（追踪/取消）+ 点击切换（C# QuestRow Track，上限 5）
+    // 追踪按钮：标签（追踪/取消）+ 点击切换（C# QuestRow Track，上限 5）；
+    // #2535 子批2：行模型映射——仅任务行显示，组头/可接行/空行置空
     for (mut text, btn, track) in &mut track_btns {
-        let quest = state.quests.get(track.0).cloned();
+        let quest = diary
+            .get(track.0)
+            .and_then(|r| match r {
+                DiaryRow::Quest(qi) => state.quests.get(*qi),
+                _ => None,
+            })
+            .cloned();
         let tracked = quest
             .as_ref()
             .map(|q| tracking.is_tracked(q.id))
@@ -803,6 +956,14 @@ mod tests {
         }
     }
 
+    /// #2535 子批2：带组名的任务定义（info() 的 group 变体）
+    fn grouped_info(index: i32, group: &str) -> ClientQuestInfo {
+        ClientQuestInfo {
+            group: group.to_string(),
+            ..info(index, 1, RequiredClass::from_bits_truncate(0))
+        }
+    }
+
     fn entry(id: i32, completed: bool) -> QuestEntry {
         QuestEntry {
             id,
@@ -923,5 +1084,79 @@ mod tests {
         // 日志侧不由目录驱动
         let log = QuestLogState::default();
         assert!(log.quests.is_empty());
+    }
+
+    /// #2535 子批2：分组——按目录 Group 聚类、组序=首次出现序、目录缺失回退空组
+    #[test]
+    fn diary_groups_cluster_by_group() {
+        let mut infos = vec![
+            grouped_info(1, "比奇省"),
+            grouped_info(2, "毒蛇山谷"),
+            grouped_info(3, "比奇省"),
+        ];
+        let quests = vec![entry(3, false), entry(1, false), entry(2, true)];
+        let groups = diary_groups(&quests, &infos);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0], ("比奇省".to_string(), vec![0, 1]));
+        assert_eq!(groups[1], ("毒蛇山谷".to_string(), vec![2]));
+        // 目录缺失（包未到）→ 空组兜底，不丢任务
+        infos.clear();
+        let groups = diary_groups(&quests, &infos);
+        assert_eq!(groups, vec![("".to_string(), vec![0, 1, 2])]);
+    }
+
+    /// #2535 子批2：展开语义——空集=全部展开（C# L718）
+    #[test]
+    fn group_expanded_empty_means_all() {
+        let empty = HashSet::new();
+        assert!(group_expanded(&empty, "A"));
+        assert!(group_expanded(&empty, ""));
+        let mut set = HashSet::new();
+        set.insert("A".to_string());
+        assert!(group_expanded(&set, "A"));
+        assert!(!group_expanded(&set, "B"));
+    }
+
+    /// #2535 子批2：切换组——物化全量展开集（空集语义下首次收起保留其余组展开）
+    #[test]
+    fn toggle_group_materializes_full_set() {
+        let groups = vec![
+            ("A".to_string(), vec![0usize]),
+            ("B".to_string(), vec![1usize]),
+        ];
+        // 初始空集=全展开；收起 A → {B}
+        let set = toggle_group(&groups, &HashSet::new(), "A");
+        assert_eq!(set, HashSet::from(["B".to_string()]));
+        assert!(!group_expanded(&set, "A"));
+        assert!(group_expanded(&set, "B"));
+        // 再展开 A → {A,B}（全展开的物化形态，语义等同空集）
+        let set = toggle_group(&groups, &set, "A");
+        assert_eq!(set, HashSet::from(["A".to_string(), "B".to_string()]));
+    }
+
+    /// #2535 子批2：行模型——组头+展开组内任务+可接段；收起组仅留组头
+    #[test]
+    fn diary_rows_layout() {
+        let infos = vec![grouped_info(1, "A"), grouped_info(2, "B")];
+        let quests = vec![entry(1, false), entry(2, true)];
+        let all = HashSet::new();
+        let rows = diary_rows(&quests, &infos, 1, &all);
+        assert_eq!(
+            rows,
+            vec![
+                DiaryRow::Header(0),
+                DiaryRow::Quest(0),
+                DiaryRow::Header(1),
+                DiaryRow::Quest(1),
+                DiaryRow::Avail(0),
+            ]
+        );
+        // 收起 A → 组头 A 保留、任务 0 隐藏
+        let collapsed = HashSet::from(["B".to_string()]);
+        let rows = diary_rows(&quests, &infos, 0, &collapsed);
+        assert_eq!(
+            rows,
+            vec![DiaryRow::Header(0), DiaryRow::Header(1), DiaryRow::Quest(1)]
+        );
     }
 }
