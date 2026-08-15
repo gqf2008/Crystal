@@ -923,6 +923,86 @@ fn random_spawn_pos(map: Option<&MapData>, cx: i32, cy: i32, spread: i32) -> (i3
     (cx, cy)
 }
 
+/// #2570：C# RespawnTimer.BaseSpawnRate（20 分钟/RespawnTick，无人次加成基准）
+/// 换算为服务器 tick（100ms/tick）。
+pub const RESPAWN_TICK_SPAN_TICKS: u64 = 20 * 60 * 10;
+
+/// #2570：长周期重生延迟（C# RespawnInfo.RespawnTicks ≠ 0 双轨：
+/// Map.cs:761-763 `NextSpawnTick = CurrentTickcounter + RespawnTicks`，
+/// 绝对到期 tick = 死亡时刻 + RespawnTicks × 20min，不吃 random_delay）。
+/// respawn_ticks<=0 视为未启用（C# "leave 0 if not using this system"），返回 0。
+pub fn long_respawn_delay_ticks(respawn_ticks: i32) -> u64 {
+    if respawn_ticks <= 0 {
+        return 0;
+    }
+    (respawn_ticks as u64) * RESPAWN_TICK_SPAN_TICKS
+}
+
+/// #2570：常规轨重生延迟（C# Map.cs:759 `max(1, Delay - RandomDelay + rand(0, RandomDelay*2))`，
+/// 单位秒 → tick；`roll` 为 [0, RandomDelay*2) 的随机数，抽出参数便于单测）。
+pub fn regular_respawn_delay_ticks(delay_secs: i64, random_delay_secs: i64, roll: i64) -> u64 {
+    let base = delay_secs.max(1);
+    let rd = random_delay_secs.max(0);
+    let secs = if rd > 0 {
+        (base - rd + roll.clamp(0, rd * 2)).max(1)
+    } else {
+        base
+    };
+    (secs as u64) * 10
+}
+
+#[cfg(test)]
+mod respawn_schedule_tests {
+    use super::*;
+
+    /// #2570：长周期换算——RespawnTicks 单位是 20 分钟的 RespawnTick
+    #[test]
+    fn long_respawn_delay_conversion() {
+        // 未启用（0/负）→ 0（走常规轨）
+        assert_eq!(long_respawn_delay_ticks(0), 0);
+        assert_eq!(long_respawn_delay_ticks(-1), 0);
+        // 1 个 RespawnTick = 20 分钟 = 12000 tick（100ms/tick）
+        assert_eq!(long_respawn_delay_ticks(1), 12_000);
+        // 重生日：72 × 20min = 24h = 864_000 tick
+        assert_eq!(long_respawn_delay_ticks(72), 864_000);
+        // 7 天
+        assert_eq!(long_respawn_delay_ticks(72 * 7), 864_000 * 7);
+    }
+
+    /// #2570：到期判定——长周期绝对 tick 双轨（C# Map.cs:746-747 语义：
+    /// RespawnTicks≠0 比 NextSpawnTick；==0 比 RespawnTime）
+    #[test]
+    fn long_respawn_due_check() {
+        let death_tick = 1_000u64;
+        let due = death_tick + long_respawn_delay_ticks(72); // 24h 后
+        assert_eq!(due, 865_000);
+        // 死后 23h59m：未到期
+        assert!(death_tick + 863_900 < due);
+        // 到点整/之后：到期
+        assert!(death_tick + 864_000 >= due);
+        // 常规轨（如 5 分钟）远早于长周期轨
+        assert!(regular_respawn_delay_ticks(300, 0, 0) < long_respawn_delay_ticks(1));
+    }
+
+    /// #2570：常规轨换算（秒 ± random，钳 [1, ...]，×10 转 tick）
+    #[test]
+    fn regular_respawn_delay_conversion() {
+        // 无 random：直接 delay 秒
+        assert_eq!(regular_respawn_delay_ticks(300, 0, 0), 3_000);
+        // 有 random：base - rd + roll（C# Map.cs:759）
+        assert_eq!(regular_respawn_delay_ticks(300, 60, 0), (300 - 60) * 10);
+        assert_eq!(
+            regular_respawn_delay_ticks(300, 60, 119),
+            (300 - 60 + 119) * 10
+        );
+        // 下限钳 1 秒（delay 太小被 random 拉负）
+        assert_eq!(regular_respawn_delay_ticks(1, 60, 0), 10);
+        // delay 钳 1（非法 0/负配置）
+        assert_eq!(regular_respawn_delay_ticks(0, 0, 0), 10);
+        assert_eq!(regular_respawn_delay_ticks(-5, 0, 0), 10);
+    }
+}
+
 /// 征服旗子 NPC 运行时状态（对应 C# ConquestGuildFlagInfo；per-session 生成，
 /// 供下一批易主时按会话定向下发 NPCImageUpdate/ObjectGuildNameChanged）
 #[derive(Debug, Clone)]

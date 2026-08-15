@@ -187,6 +187,26 @@ pub struct DelayedAttack {
     pub map_index: u16,
 }
 
+/// #2570：召唤物吸取/镜像主人 MP（C# HumanWizard.ProcessAI 每秒 ChangeMP(-10)、
+/// ChangeHP 覆写镜像受击；amount 为负=消耗）。主人 MP<=0 时宠物死亡（tick.rs 消费判定）。
+#[derive(Debug, Clone, Copy)]
+pub struct MasterMpDrain {
+    pub pet_oid: u32,
+    pub master_session: u64,
+    /// 正=回复主人 MP，负=消耗（常规吸取 -10；受击镜像为负伤害累计）
+    pub amount: i32,
+}
+
+/// #2570：C# ZumaMonster.WakeAll(dist)——石化唤醒扩散：以 (center_x, center_y) 为中心
+/// dist 格内的同类石化怪一并唤醒并共享 target_session。
+#[derive(Debug, Clone, Copy)]
+pub struct GroupWake {
+    pub center_x: i32,
+    pub center_y: i32,
+    pub dist: i32,
+    pub target_session: u64,
+}
+
 /// AI 上下文（每 tick 每怪构建一次）
 pub struct AiCtx<'a> {
     pub tick_count: u64,
@@ -256,6 +276,10 @@ pub struct AiCtx<'a> {
     pub out_player_purges: &'a mut Vec<u64>,
     /// 输出：对玩家回血（session, amount；C# MasterVampire / Healer 治疗玩家）
     pub out_player_heals: &'a mut Vec<(u64, i32)>,
+    /// 输出：#2570 召唤物吸取/镜像主人 MP（C# HumanWizard.ProcessAI/ChangeHP）
+    pub out_master_mp_drains: &'a mut Vec<MasterMpDrain>,
+    /// 输出：#2570 石化群体唤醒（C# ZumaMonster.WakeAll(14)）
+    pub out_group_wakes: &'a mut Vec<GroupWake>,
     /// 当前怪物的宠物等级（C# MonsterObject.PetLevel；非宠物=0）
     pub pet_level: i32,
     /// 主人宠物模式（C# Master.PMode；非宠物=None）

@@ -58,9 +58,23 @@ impl MonsterBehavior for KingScorpionBehavior {
         }
         monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
-        // 前方 2 格有目标 or 1/5 → MC 直线；否则 DC 直线
-        let use_mc = fastrand::i32(0..5) == 0;
+        // #2570：C# KingScorpion.Attack（:42-52）——前方 2 格（朝目标方向 PointMove(dir,2)）
+        // 有可攻击目标（玩家或怪物）→ MC 直线；否则 1/5 概率 MC；其余 DC 直线
         let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+        let fx = monster.x + DIR_DX[dir as usize] * 2;
+        let fy = monster.y + DIR_DY[dir as usize] * 2;
+        let front_has_target = ctx
+            .players
+            .iter()
+            .any(|p| p.map_index == monster.map_index && p.hp > 0 && p.x == fx && p.y == fy)
+            || ctx.monsters.iter().any(|m| {
+                m.object_id != monster.object_id
+                    && m.map_index == monster.map_index
+                    && m.hp > 0
+                    && m.x == fx
+                    && m.y == fy
+            });
+        let use_mc = front_has_target || fastrand::i32(0..5) == 0;
         let cx = monster.x + DIR_DX[dir as usize] * 2;
         let cy = monster.y + DIR_DY[dir as usize] * 2;
         let hits: Vec<crate::actors::world::ai::PlayerSnap> = ctx

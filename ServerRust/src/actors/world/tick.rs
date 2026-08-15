@@ -2898,6 +2898,8 @@ impl WorldActor {
         let mut die_effects: Vec<(u32, mir2_shared::enums::SpellEffect, u32, u32)> = Vec::new();
         let mut die_player_purges: Vec<u64> = Vec::new();
         let mut die_player_heals: Vec<(u64, i32)> = Vec::new();
+        let mut die_master_mp_drains: Vec<ai::MasterMpDrain> = Vec::new();
+        let mut die_group_wakes: Vec<ai::GroupWake> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions
@@ -2962,6 +2964,8 @@ impl WorldActor {
                 out_effects: &mut die_effects,
                 out_player_purges: &mut die_player_purges,
                 out_player_heals: &mut die_player_heals,
+                out_master_mp_drains: &mut die_master_mp_drains,
+                out_group_wakes: &mut die_group_wakes,
                 pet_level: self
                     .pet_levels
                     .get(&monster.object_id)
@@ -7971,6 +7975,9 @@ impl Message<Tick> for WorldActor {
                 Vec::new();
             let mut boss_player_purges: Vec<u64> = Vec::new();
             let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
+            // #2570：召唤物吸主人 MP / 石化群体唤醒（HumanWizard/ZumaMonster）
+            let mut boss_master_mp_drains: Vec<ai::MasterMpDrain> = Vec::new();
+            let mut boss_group_wakes: Vec<ai::GroupWake> = Vec::new();
             // #1441：每个 master 当前存活 slave 数（C# SlaveList.Count；slave_master 预统计）
             let slave_counts: std::collections::HashMap<u32, usize> = {
                 let mut m = std::collections::HashMap::new();
@@ -8102,6 +8109,8 @@ impl Message<Tick> for WorldActor {
                         out_effects: &mut boss_effects,
                         out_player_purges: &mut boss_player_purges,
                         out_player_heals: &mut boss_player_heals,
+                        out_master_mp_drains: &mut boss_master_mp_drains,
+                        out_group_wakes: &mut boss_group_wakes,
                         pet_level: self.pet_levels.get(&monster_oid).copied().unwrap_or(0),
                         master_pet_mode,
                         master_target,
@@ -9589,6 +9598,76 @@ impl Message<Tick> for WorldActor {
                         .await;
                 }
             }
+            // #2570：C# HumanWizard.ProcessAI/ChangeHP——召唤物（含 Clone 分身）吸取/镜像主人 MP；
+            // 主人 MP<=0 宠物死亡（ObjectDied 广播 + 移除，不掉落不重生，对齐 C# Die 宠物分支）
+            for drain in boss_master_mp_drains.drain(..) {
+                let Some(record) = self.players.get(&drain.master_session) else {
+                    continue; // 主人已离线（宠物另有清理路径），跳过本次吸取
+                };
+                let new_mp = record
+                    .actor_ref
+                    .ask(crate::actors::player::ChangeMp {
+                        amount: drain.amount,
+                    })
+                    .await
+                    .unwrap_or(i32::MAX); // 询问失败按 MP 充裕处理，不误杀
+                if new_mp <= 0 {
+                    if let Some(monster) = self.monsters.remove(&drain.pet_oid) {
+                        self.monster_poison_flags.remove(&drain.pet_oid);
+                        let died_packet = Self::build_object_died_packet(
+                            drain.pet_oid,
+                            monster.x,
+                            monster.y,
+                            monster.direction,
+                            Self::monster_death_type(&monster.name, true),
+                        );
+                        broadcast_to_map(
+                            &self.gate_ref,
+                            &self.players,
+                            monster.map_index,
+                            &died_packet,
+                        )
+                        .await;
+                        let remove_packet = Self::build_object_remove_packet(drain.pet_oid);
+                        broadcast_to_map(
+                            &self.gate_ref,
+                            &self.players,
+                            monster.map_index,
+                            &remove_packet,
+                        )
+                        .await;
+                        debug!(
+                            "MP-link pet '{}' (#{}) died: master session {} MP exhausted",
+                            monster.name, drain.pet_oid, drain.master_session
+                        );
+                    }
+                }
+            }
+            // #2570：C# ZumaMonster.WakeAll(dist)——石化唤醒扩散：
+            // 范围内同类（downcast 命中 ZumaMonsterBehavior）一并唤醒并共享目标 + ObjectShow
+            for wake in boss_group_wakes.drain(..) {
+                let mut woken: Vec<u32> = Vec::new();
+                for (woid, m) in self.monsters.iter_mut() {
+                    if ai::max_distance(m.x, m.y, wake.center_x, wake.center_y) > wake.dist {
+                        continue;
+                    }
+                    let woke = m
+                        .behavior
+                        .as_any_mut()
+                        .and_then(|a| {
+                            a.downcast_mut::<crate::actors::world::ai::bosses::zuma_monster::ZumaMonsterBehavior>()
+                        })
+                        .map(|b| b.force_wake())
+                        .unwrap_or(false);
+                    if woke {
+                        m.target_session = Some(wake.target_session);
+                        woken.push(*woid);
+                    }
+                }
+                for woid in woken {
+                    self.broadcast_object_show_hide(woid, true).await;
+                }
+            }
             // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {
                 // #1777：C# CanMove——Boss 受控制毒禁移动
@@ -9617,6 +9696,33 @@ impl Message<Tick> for WorldActor {
                     .unwrap_or(true);
                 if walkable {
                     moved_monsters.push((oid, nx, ny, dir));
+                    continue;
+                }
+                // #2570：C# MoveTo 绕障（MonsterObject.cs:2050-2070）——落点不可走不再直接丢弃：
+                // 随机选顺/逆时针，从目标方向起旋转尝试其余 7 个邻格，取首个可走格；全堵才放弃
+                let Some((sx, sy)) = self.monsters.get(&oid).map(|m| (m.x, m.y)) else {
+                    continue;
+                };
+                let d = (dir as usize) % 8;
+                // 仅对邻格移动（step_toward/step_away 契约）做侧移；非邻格来源维持原丢弃
+                if nx != sx + ai::helpers::DIR_DX[d] || ny != sy + ai::helpers::DIR_DY[d] {
+                    continue;
+                }
+                let map = self.maps.get(&map_idx);
+                let table: [bool; 8] = std::array::from_fn(|k| {
+                    map.map(|m| {
+                        m.is_walkable(sx + ai::helpers::DIR_DX[k], sy + ai::helpers::DIR_DY[k])
+                    })
+                    .unwrap_or(false)
+                });
+                if let Some(side) = ai::helpers::sidestep_direction(dir, table, fastrand::bool()) {
+                    let s = side as usize;
+                    moved_monsters.push((
+                        oid,
+                        sx + ai::helpers::DIR_DX[s],
+                        sy + ai::helpers::DIR_DY[s],
+                        side,
+                    ));
                 }
             }
             // Boss 后跳（#1801：C# SepHighArcher.BackStep——ObjectBackStep 广播 + 直接落位）
@@ -11181,8 +11287,12 @@ impl Message<Tick> for WorldActor {
                         }
                     }
 
-                    // 加入重生队列（延迟从 map_respawns.delay（秒）读取；C# RespawnInfo.Delay）
-                    // #1017：C# Map.cs——delay = max(1, Delay - RandomDelay + Random.Next(RandomDelay*2))
+                    // 加入重生队列；延迟双轨（C# Map.cs:746-763 ProcessRespawns）：
+                    // - #2570 RespawnTicks>0：长周期轨——绝对到期 tick = 死亡时刻 + RespawnTicks×20min
+                    //   （C# RespawnTimer.BaseSpawnRate=20min/RespawnTick；按日重生的 Boss 不再分钟级复活，
+                    //   不吃 random_delay；respawn_queue 按绝对 tick 到期，两轨共用 tick_respawn）
+                    // - RespawnTicks==0：常规轨 delay（秒）± random_delay（#1017：
+                    //   delay = max(1, Delay - RandomDelay + Random.Next(RandomDelay*2))）
                     let respawn_delay_ticks: u64 = self
                         .map_infos
                         .get(&(monster.map_index as i32))
@@ -11194,14 +11304,14 @@ impl Message<Tick> for WorldActor {
                             })
                         })
                         .map(|r| {
-                            let base = r.delay.max(1) as i64;
-                            let rd = r.random_delay.max(0) as i64;
-                            let secs = if rd > 0 {
-                                (base - rd + fastrand::i64(0..(rd * 2))).max(1)
+                            if r.respawn_ticks > 0 {
+                                long_respawn_delay_ticks(r.respawn_ticks)
                             } else {
-                                base
-                            };
-                            (secs as u64) * 10
+                                let rd = r.random_delay.max(0) as i64;
+                                // rd=0 时空区间会 panic，守卫为 0（函数内该分支不消费 roll）
+                                let roll = if rd > 0 { fastrand::i64(0..rd * 2) } else { 0 };
+                                regular_respawn_delay_ticks(r.delay as i64, rd, roll)
+                            }
                         })
                         .unwrap_or(1800);
                     let respawn_tick = self.tick_count + respawn_delay_ticks;

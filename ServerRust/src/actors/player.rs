@@ -2210,6 +2210,59 @@ impl Message<Heal> for PlayerActor {
     }
 }
 
+/// #2570：修改玩家 MP（C# HumanObject.ChangeMP：正=回复不超上限、负=消耗不下穿 0；
+/// 广播 HealthChanged）。召唤物 MP 维系（HumanWizard/Clone 吸蓝）用。
+pub struct ChangeMp {
+    pub amount: i32,
+}
+
+impl Message<ChangeMp> for PlayerActor {
+    type Reply = i32; // 变更后 MP（供枯竭判定 MP<=0）
+
+    async fn handle(
+        &mut self,
+        msg: ChangeMp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let amount = msg.amount;
+        if amount == 0 {
+            return self.state.mp;
+        }
+        // C# ChangeMP：MP + amount > MaxMP 时截到 MaxMP
+        let max_mp = self.state.effective_max_mp();
+        let amount = if self.state.mp + amount > max_mp {
+            max_mp - self.state.mp
+        } else {
+            amount
+        };
+        if amount == 0 {
+            return self.state.mp;
+        }
+        self.state.mp = (self.state.mp + amount).max(0);
+
+        // 发送 HealthChanged 给客户端（C# SendHealthChanged）
+        let mut body = Vec::new();
+        body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+        body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                    &body,
+                ),
+            })
+            .await;
+
+        debug!(
+            "Player {} MP changed by {} (now {})",
+            self.state.name, amount, self.state.mp
+        );
+        self.state.mp
+    }
+}
+
 /// #1290：使用 NormalPotion 累计药水池（C# PotHealthAmount/PotManaAmount 累加）
 pub struct AddPotionPool {
     pub hp: u32,

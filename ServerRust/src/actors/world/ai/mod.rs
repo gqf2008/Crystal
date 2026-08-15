@@ -13,8 +13,8 @@ pub mod registry;
 
 pub use behavior::MonsterBehavior;
 pub use ctx::{
-    AiCtx, AttackAction, BossSummon, ChildRockSpawn, DelayedAttack, DelayedSingleDamage,
-    MonsterSnap, PlayerSnap, PoisonPlayer, PushPlayer, SpellFieldSpawn,
+    AiCtx, AttackAction, BossSummon, ChildRockSpawn, DelayedAttack, DelayedSingleDamage, GroupWake,
+    MasterMpDrain, MonsterSnap, PlayerSnap, PoisonPlayer, PushPlayer, SpellFieldSpawn,
 };
 pub use default::DefaultBehavior;
 pub use helpers::{direction_towards, manhattan, max_distance};

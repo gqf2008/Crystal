@@ -16,6 +16,8 @@ use crate::combat::poison::Poison;
 
 /// 石化判定：玩家靠近几格内唤醒（C# FindNearby(2)）
 const WAKE_RANGE: i32 = 2;
+/// #2570：唤醒扩散半径（C# ZumaMonster.ProcessAI：Wake() + WakeAll(14)）
+const WAKE_ALL_RANGE: i32 = 14;
 /// 视野范围
 const VIEW_RANGE: i32 = 15;
 /// 近战范围
@@ -35,6 +37,16 @@ impl Default for ZumaMonsterBehavior {
 impl ZumaMonsterBehavior {
     pub fn new() -> Self {
         Self { stoned: true }
+    }
+
+    /// #2570：外部强制唤醒（C# WakeAll 对 Stoned 同类调 Wake），返回是否发生石化→活跃转换
+    pub fn force_wake(&mut self) -> bool {
+        if self.stoned {
+            self.stoned = false;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -63,18 +75,29 @@ impl MonsterBehavior for ZumaMonsterBehavior {
         !self.stoned
     }
 
+    /// #2570：downcast 支持——WakeAll 扩散时由 tick.rs 强制唤醒同类
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // ---- 石化/唤醒切换（C# ProcessAI：FindNearby(2)）----
         if self.stoned {
-            let has_near = ctx
-                .nearest_target(monster.x, monster.y, WAKE_RANGE, monster.map_index)
-                .is_some();
-            if has_near {
-                // C# Wake() + WakeAll(14)：自身唤醒（同伴唤醒由各怪自身检测完成）
+            if let Some(trigger) =
+                ctx.nearest_target(monster.x, monster.y, WAKE_RANGE, monster.map_index)
+            {
+                // C# Wake() + WakeAll(14)：自身唤醒 + 14 格内同类石化怪一并唤醒并共享目标
                 self.stoned = false;
-                return;
+                monster.target_session = Some(trigger.session_id);
+                ctx.out_group_wakes
+                    .push(crate::actors::world::ai::ctx::GroupWake {
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        dist: WAKE_ALL_RANGE,
+                        target_session: trigger.session_id,
+                    });
             }
-            return; // 石化期无动作
+            return; // 石化期无动作（唤醒后下一 tick 起活跃）
         }
 
         // ---- 活跃期：标准近战追击+攻击 ----
