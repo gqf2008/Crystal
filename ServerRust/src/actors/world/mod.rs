@@ -2113,10 +2113,13 @@ pub struct WorldActor {
     pub(crate) hero_paths: HashMap<u64, Vec<(i32, i32)>>,
     /// 英雄寻路缓存目标（hero session -> (kind, tx, ty)；kind 1=跟随主人 2=追击怪物）
     pub(crate) hero_path_targets: HashMap<u64, (u8, i32, i32)>,
-    /// 定时机器人任务
+    /// 定时机器人任务（#2572：启动时从 00Robot.txt 的 [@_TIME(...)] 行加载）
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
-    /// 机器人上次检查的分钟值
-    pub(crate) robot_last_check_minute: u32,
+    /// 机器人上次检查的时间边界键 (年内日, 时, 分)——粒度由任务集决定
+    /// （C# Robot.SetNextCheck：任一任务有分钟→分钟边界；有小时→小时边界；否则日边界）
+    pub(crate) robot_last_check: Option<(u32, u32, u32)>,
+    /// 机器人 NPC 脚本（C# Envir.RobotNPC；00Robot.txt 解析结果，触发时按页 Key 执行段）
+    pub(crate) robot_script: Option<npc_script::ParsedScript>,
     /// 龙系统状态
     pub(crate) dragon_state: Option<dragon::DragonState>,
     /// 龙等级掉落表（C# DragonInfo.Drops；DragonItem.txt 解析，按等级索引）
@@ -2654,7 +2657,8 @@ impl WorldActor {
             hero_paths: HashMap::new(),
             hero_path_targets: HashMap::new(),
             robot_tasks: Vec::new(),
-            robot_last_check_minute: 0,
+            robot_last_check: None,
+            robot_script: None,
             dragon_state: None,
             conquest_instances: default_conquest_instances(),
             siege_structures: HashMap::new(),
@@ -8394,6 +8398,17 @@ impl Actor for WorldActor {
             ac
         };
 
+        // #2572：定时机器人（C# Envir.RobotNPC）——00Robot.txt 的 [@_TIME(...)] 行
+        // 注册触发窗，页内容解析为 ParsedScript 供到点执行（对齐 C# NPCScript.ParseDefault
+        // 的 Robot 分支 + Robot.AddRobot；文件缺失 = 未配置，不注册任务）
+        let (robot_tasks, robot_script) = match robot::load_robot_script(&args.npc_script_dir) {
+            Some((tasks, script)) => {
+                info!("Loaded {} robot tasks from 00Robot.txt", tasks.len());
+                (tasks, Some(script))
+            }
+            None => (Vec::new(), None),
+        };
+
         Ok(Self {
             tick_count: 0,
             current_day: std::time::SystemTime::now()
@@ -8572,8 +8587,9 @@ impl Actor for WorldActor {
             boss_delayed_single_pending: Vec::new(),
             hero_paths: HashMap::new(),
             hero_path_targets: HashMap::new(),
-            robot_tasks: Vec::new(),
-            robot_last_check_minute: 0,
+            robot_tasks,
+            robot_last_check: None,
+            robot_script,
             dragon_state: None,
             conquest_instances,
             siege_structures,
