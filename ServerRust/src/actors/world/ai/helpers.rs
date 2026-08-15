@@ -169,6 +169,24 @@ pub fn step_away(from_x: i32, from_y: i32, tx: i32, ty: i32) -> (i32, i32, u8) {
     )
 }
 
+/// #2570：C# MoveTo 绕障（MonsterObject.cs:2050-2070）——目标方向不可走时的旋转重试。
+///
+/// C# 语义：先 `Walk(dir)` 试目标方向；失败后随机选顺（NextDir）/逆（PreviousDir）时针，
+/// 从目标方向起旋转尝试其余 7 个邻格，取首个可走方向；全不可走放弃（返回 None）。
+/// `walkable` 按 8 方向索引给出邻格可走性；本函数把直行尝试与旋转序列合并为完整决策序
+/// `[dir, dir±1, dir±2, ...]`（调用处 walkable[dir] 已为 false，i=0 自然跳过）。
+pub fn sidestep_direction(dir: u8, walkable: [bool; 8], clockwise: bool) -> Option<u8> {
+    let start = (dir as usize) % 8;
+    let step = if clockwise { 1 } else { 7 }; // 7 ≡ -1 (mod 8)
+    for i in 0..8 {
+        let d = (start + i * step) % 8;
+        if walkable[d] {
+            return Some(d as u8);
+        }
+    }
+    None
+}
+
 /// 切比雪夫距离（对齐 C# MaxDistance）
 pub fn max_distance(x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
     (x1 - x2).abs().max((y1 - y2).abs())
@@ -190,8 +208,48 @@ mod tests {
     use super::eight_dir_rings;
     use super::ice_thrust_cells;
     use super::line_cells;
+    use super::sidestep_direction;
     use super::slave_spawn_count;
     use super::triangle_cells;
+
+    /// #2570：C# MoveTo 绕障——凹形（L 形）障碍下顺/逆时针旋转取到不同出口
+    #[test]
+    fn sidestep_direction_concave_obstacle() {
+        // 怪在 (5,5) 朝上（dir=0）；北 (5,4)、西北 (4,4)、西 (4,5) 三格构成凹形墙：
+        //   dir=0 北 ✗  dir=7 西北 ✗  dir=6 西 ✗  dir=5 西南 ✓  dir=1 东北 ✓
+        let mut walkable = [true; 8];
+        walkable[0] = false; // 北 (5,4)
+        walkable[7] = false; // 西北 (4,4)
+        walkable[6] = false; // 西 (4,5)
+                             // 顺时针（NextDir：0→1→2…）：首个可走 = 1（东北）
+        assert_eq!(sidestep_direction(0, walkable, true), Some(1));
+        // 逆时针（PreviousDir：0→7→6→5…）：首个可走 = 5（西南）
+        assert_eq!(sidestep_direction(0, walkable, false), Some(5));
+        // 直行可走时优先直行（C# 先 Walk(dir)）
+        let mut open = [false; 8];
+        open[0] = true;
+        assert_eq!(sidestep_direction(0, open, true), Some(0));
+        assert_eq!(sidestep_direction(0, open, false), Some(0));
+    }
+
+    /// #2570：全堵 → None（C# 7 次旋转全失败即放弃本次移动）
+    #[test]
+    fn sidestep_direction_all_blocked_gives_up() {
+        let blocked = [false; 8];
+        for dir in 0..8u8 {
+            assert_eq!(sidestep_direction(dir, blocked, true), None);
+            assert_eq!(sidestep_direction(dir, blocked, false), None);
+        }
+        // 单一出口：任意起点旋转一周必命中（8 邻格全覆盖，不重复）
+        for exit in 0..8usize {
+            let mut w = [false; 8];
+            w[exit] = true;
+            for dir in 0..8u8 {
+                assert_eq!(sidestep_direction(dir, w, true), Some(exit as u8));
+                assert_eq!(sidestep_direction(dir, w, false), Some(exit as u8));
+            }
+        }
+    }
 
     #[test]
     fn slave_spawn_count_caps_at_slave_list_room() {
