@@ -9,6 +9,7 @@
 //   interact {object_id} 与指定 NPC 对话
 //   pickup {object_id}  拾取指定地面物品
 //   chat {message}    发送聊天/GM 命令（@MAKE 等）
+//   dialog {kind,action?}  打开/关闭/切换对话框（默认 toggle；验收截图巡回用，#2586）
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -23,6 +24,7 @@ use crate::actor::{
     ActorAnim, GroundItem, LocalPlayer, Monster, MonsterName, NetObjectId, Npc, NpcName, Player,
     PlayerName,
 };
+use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::game::movement::{world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::game::player_control::ControlState;
@@ -32,14 +34,43 @@ use crate::scenes::AppState;
 
 /// 控制命令（控制线程 → Bevy 主循环）
 enum ControlCommand {
-    Move { dx: i32, dy: i32, run: bool },
-    Screenshot { path: String },
-    GetState { reply: Sender<String> },
-    Nearby { reply: Sender<String> },
-    Attack { object_id: u32 },
-    Interact { object_id: u32 },
-    Pickup { object_id: u32 },
-    Chat { message: String },
+    Move {
+        dx: i32,
+        dy: i32,
+        run: bool,
+    },
+    Screenshot {
+        path: String,
+    },
+    GetState {
+        reply: Sender<String>,
+    },
+    Nearby {
+        reply: Sender<String>,
+    },
+    Attack {
+        object_id: u32,
+    },
+    Interact {
+        object_id: u32,
+    },
+    Pickup {
+        object_id: u32,
+    },
+    Chat {
+        message: String,
+    },
+    Dialog {
+        kind: DialogKind,
+        action: DialogAction,
+    },
+}
+
+/// dialog 命令的动作（#2586）
+enum DialogAction {
+    Open,
+    Close,
+    Toggle,
 }
 
 #[derive(Resource)]
@@ -185,6 +216,44 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "missing object_id"})
                 }
             }
+            "dialog" => {
+                let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                let action = params
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("toggle")
+                    .to_ascii_lowercase();
+                match (parse_dialog_kind(kind), action.as_str()) {
+                    (Some(k), "open") => {
+                        let _ = tx.send(ControlCommand::Dialog {
+                            kind: k,
+                            action: DialogAction::Open,
+                        });
+                        json!({"ok": true, "kind": kind, "action": "open"})
+                    }
+                    (Some(k), "close") => {
+                        let _ = tx.send(ControlCommand::Dialog {
+                            kind: k,
+                            action: DialogAction::Close,
+                        });
+                        json!({"ok": true, "kind": kind, "action": "close"})
+                    }
+                    (Some(k), "toggle") => {
+                        let _ = tx.send(ControlCommand::Dialog {
+                            kind: k,
+                            action: DialogAction::Toggle,
+                        });
+                        json!({"ok": true, "kind": kind, "action": "toggle"})
+                    }
+                    (Some(_), a) => {
+                        json!({"error": format!("unknown action: {a} (open/close/toggle)")})
+                    }
+                    (None, _) if kind.is_empty() => {
+                        json!({"error": "missing kind (snake_case, e.g. inventory)"})
+                    }
+                    (None, _) => json!({"error": format!("unknown dialog kind: {kind}")}),
+                }
+            }
             _ => json!({"error": format!("unknown method: {method}")}),
         };
 
@@ -194,10 +263,129 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
     }
 }
 
+/// snake_case 对话框名 → DialogKind（#2586）。
+///
+/// 覆盖除 `GuestTrade` 外的全部 46 个变体（`DialogKind` 共 47 个）——
+/// `GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs），无独立开关语义，
+/// 故不做 RPC 映射（调用会回 unknown dialog kind）。
+/// **新增 DialogKind 变体时必须同步本函数、[`has_rpc_mapping`] 与测试名单**
+/// （[`has_rpc_mapping`] 的穷尽 match 会让漏改编译失败）。
+fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
+    use DialogKind as D;
+    Some(match s {
+        "inventory" => D::Inventory,
+        "character" => D::Character,
+        "quest_log" => D::QuestLog,
+        "settings" => D::Settings,
+        "menu" => D::Menu,
+        "game_shop" => D::GameShop,
+        "minimap" => D::Minimap,
+        "npc" => D::Npc,
+        "group" => D::Group,
+        "friend" => D::Friend,
+        "trade" => D::Trade,
+        "inspect" => D::Inspect,
+        "npc_goods" => D::NpcGoods,
+        "guild" => D::Guild,
+        "mail" => D::Mail,
+        "ranking" => D::Ranking,
+        "mentor" => D::Mentor,
+        "relationship" => D::Relationship,
+        "mount" => D::Mount,
+        "report" => D::Report,
+        "hero" => D::Hero,
+        "hero_inventory" => D::HeroInventory,
+        "hero_equipment" => D::HeroEquipment,
+        "hero_skill" => D::HeroSkill,
+        "creature" => D::Creature,
+        "trust_merchant" => D::TrustMerchant,
+        "item_rental" => D::ItemRental,
+        "guild_territory" => D::GuildTerritory,
+        "help" => D::Help,
+        "notice" => D::Notice,
+        "buff" => D::Buff,
+        "fishing" => D::Fishing,
+        "socket" => D::Socket,
+        "refine" => D::Refine,
+        "craft" => D::Craft,
+        "dura_status" => D::DuraStatus,
+        "npc_drop" => D::NpcDrop,
+        "roll" => D::Roll,
+        "npc_awake" => D::NpcAwake,
+        "timer" => D::Timer,
+        "keyboard_layout" => D::KeyboardLayout,
+        "big_map" => D::BigMap,
+        "chat_notice" => D::ChatNotice,
+        "market" => D::Market,
+        "storage" => D::Storage,
+        "skills" => D::Skills,
+        _ => return None,
+    })
+}
+
+/// 该 DialogKind 是否有 RPC 映射（= parse_dialog_kind 可达）。
+///
+/// **无通配臂的穷尽 match**：新增 DialogKind 变体而漏改这里会编译失败，堵住
+/// 「测试名单自证互异、测不出枚举遗漏」的盲区（批M 审查发现 GuestTrade 即因此漏掉）。
+fn has_rpc_mapping(kind: DialogKind) -> bool {
+    use DialogKind as D;
+    match kind {
+        D::Inventory
+        | D::Character
+        | D::QuestLog
+        | D::Settings
+        | D::Menu
+        | D::GameShop
+        | D::Minimap
+        | D::Npc
+        | D::Group
+        | D::Friend
+        | D::Trade
+        | D::Inspect
+        | D::NpcGoods
+        | D::Guild
+        | D::Mail
+        | D::Ranking
+        | D::Mentor
+        | D::Relationship
+        | D::Mount
+        | D::Report
+        | D::Hero
+        | D::HeroInventory
+        | D::HeroEquipment
+        | D::HeroSkill
+        | D::Creature
+        | D::TrustMerchant
+        | D::ItemRental
+        | D::GuildTerritory
+        | D::Help
+        | D::Notice
+        | D::Buff
+        | D::Fishing
+        | D::Socket
+        | D::Refine
+        | D::Craft
+        | D::DuraStatus
+        | D::NpcDrop
+        | D::Roll
+        | D::NpcAwake
+        | D::Timer
+        | D::KeyboardLayout
+        | D::BigMap
+        | D::ChatNotice
+        | D::Market
+        | D::Storage
+        | D::Skills => true,
+        // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
+        D::GuestTrade => false,
+    }
+}
+
 fn apply_control_commands(
     mut commands: Commands,
     control: Res<ControlRx>,
     mut control_state: ResMut<ControlState>,
+    mut mgr: ResMut<DialogManager>,
     net: Res<NetConnection>,
     time: Res<Time>,
     game_data: Res<GameData>,
@@ -256,6 +444,14 @@ fn apply_control_commands(
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(path));
+            }
+            ControlCommand::Dialog { kind, action } => {
+                match action {
+                    DialogAction::Open => mgr.open(kind),
+                    DialogAction::Close => mgr.close(kind),
+                    DialogAction::Toggle => mgr.toggle(kind),
+                }
+                tracing::info!("🎮 control dialog: {kind:?} -> open={}", mgr.is_open(kind));
             }
             ControlCommand::Nearby { reply } => {
                 let Ok((_, ptf, _)) = players.single() else {
@@ -375,5 +571,90 @@ fn apply_control_commands(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// parse_dialog_kind 覆盖除 GuestTrade 外全部变体 + 未知返回 None（#2586）
+    /// GuestTrade 由网络 trade 会话驱动无独立开关，刻意不做 RPC 映射（批M 审查）
+    #[test]
+    fn parse_dialog_kind_covers_all_variants() {
+        let all = [
+            "inventory",
+            "character",
+            "quest_log",
+            "settings",
+            "menu",
+            "game_shop",
+            "minimap",
+            "npc",
+            "group",
+            "friend",
+            "trade",
+            "inspect",
+            "npc_goods",
+            "guild",
+            "mail",
+            "ranking",
+            "mentor",
+            "relationship",
+            "mount",
+            "report",
+            "hero",
+            "hero_inventory",
+            "hero_equipment",
+            "hero_skill",
+            "creature",
+            "trust_merchant",
+            "item_rental",
+            "guild_territory",
+            "help",
+            "notice",
+            "buff",
+            "fishing",
+            "socket",
+            "refine",
+            "craft",
+            "dura_status",
+            "npc_drop",
+            "roll",
+            "npc_awake",
+            "timer",
+            "keyboard_layout",
+            "big_map",
+            "chat_notice",
+            "market",
+            "storage",
+            "skills",
+        ];
+        // 全部可解析且互不相同（46 个名字一一对应；DialogKind 共 47 个变体，
+        // GuestTrade 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
+        let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
+        let uniq: Vec<&DialogKind> = {
+            let mut seen: Vec<&DialogKind> = parsed.iter().collect();
+            seen.sort_by_key(|k| format!("{k:?}"));
+            seen.dedup_by_key(|k| format!("{k:?}"));
+            seen
+        };
+        assert_eq!(all.len(), 46);
+        assert_eq!(uniq.len(), all.len(), "46 个名字应映射到 46 个不同变体");
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射
+        assert!(
+            parsed.iter().all(|k| has_rpc_mapping(*k)),
+            "名单内全部变体应 has_rpc_mapping"
+        );
+        // GuestTrade 刻意排除（网络会话驱动）
+        assert!(!has_rpc_mapping(DialogKind::GuestTrade));
+
+        // 未知/空/大小写敏感
+        assert!(parse_dialog_kind("").is_none());
+        assert!(parse_dialog_kind("nope").is_none());
+        assert!(
+            parse_dialog_kind("Inventory").is_none(),
+            "snake_case 小写约定"
+        );
     }
 }
