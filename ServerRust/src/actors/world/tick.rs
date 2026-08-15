@@ -1815,15 +1815,12 @@ impl WorldActor {
                             m.take_damage(counter_dmg);
                             m.provoked = true;
                             m.target_session = Some(hit.target_session);
-                            crate::combat::poison::apply_poison(
-                                &mut m.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::STUN,
-                                    lv as u32 + 1,
-                                    0,
-                                    1000,
-                                ),
-                            );
+                            m.apply_poison_defended(crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::STUN,
+                                lv as u32 + 1,
+                                0,
+                                1000,
+                            ));
                             debug!(
                                 "Player {} counter-attacked boss {} ({} dmg)",
                                 hit.target_session, hit.attacker_oid, counter_dmg
@@ -2074,48 +2071,45 @@ impl WorldActor {
                     continue;
                 }
                 if self.tick_count.is_multiple_of(20) {
-                    let mut remove_delayed = false;
-                    if let Some(p) = monster
+                    // #2569：三阶段状态机收敛到 poison.rs::advance_delayed_explosion
+                    // （与玩家侧共用）；怪物侧时间基为世界 tick（100ms/tick），3s 等待 = 30 ticks
+                    let has_delayed = monster
                         .poison_list
-                        .iter_mut()
-                        .find(|p| p.p_type == mir2_shared::enums::PoisonType::DELAYED_EXPLOSION)
-                    {
-                        if monster.hp <= 0 {
-                            // 目标已死：C# ProcessDelayedExplosion 在 Dead 时直接结束
-                            remove_delayed = true;
-                        } else {
-                            if p.delayed_stage == 0 || self.tick_count >= p.delayed_next_tick {
-                                p.delayed_stage = p.delayed_stage.saturating_add(1);
-                            }
-                            match p.delayed_stage {
-                                1 => {
-                                    if p.delayed_next_tick == 0 {
-                                        p.delayed_next_tick = self.tick_count + 30;
-                                    }
-                                    delayed_effects.push((monster.object_id, 1, monster.map_index));
-                                }
-                                2 => {
-                                    delayed_effects.push((monster.object_id, 2, monster.map_index));
-                                    pending_explosions.push((
-                                        p.owner_session,
-                                        monster.map_index,
-                                        monster.x,
-                                        monster.y,
-                                        p.value,
-                                    ));
-                                    remove_delayed = true;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    if remove_delayed {
-                        // C# HumanObject.cs:6261-6272：移除延迟爆炸时广播 S.RemoveDelayedExplosion（清理客户端特效）
+                        .iter()
+                        .any(|p| p.p_type == mir2_shared::enums::PoisonType::DELAYED_EXPLOSION);
+                    if has_delayed && monster.hp <= 0 {
+                        // 目标已死：C# ProcessDelayedExplosion 在 Dead 时直接结束
                         delayed_removals.push((monster.object_id, monster.map_index));
                         crate::combat::poison::remove_poison(
                             &mut monster.poison_list,
                             mir2_shared::enums::PoisonType::DELAYED_EXPLOSION,
                         );
+                    } else if has_delayed {
+                        match crate::combat::poison::advance_delayed_explosion(
+                            &mut monster.poison_list,
+                            self.tick_count,
+                            30,
+                        ) {
+                            Some(crate::combat::poison::DelayedExplosionEvent::Stage1) => {
+                                delayed_effects.push((monster.object_id, 1, monster.map_index));
+                            }
+                            Some(crate::combat::poison::DelayedExplosionEvent::Explode {
+                                owner_session,
+                                value,
+                            }) => {
+                                delayed_effects.push((monster.object_id, 2, monster.map_index));
+                                pending_explosions.push((
+                                    owner_session,
+                                    monster.map_index,
+                                    monster.x,
+                                    monster.y,
+                                    value,
+                                ));
+                                // 状态机已移除毒（C# PoisonList.RemoveAt），补清理广播
+                                delayed_removals.push((monster.object_id, monster.map_index));
+                            }
+                            None => {}
+                        }
                     }
                 }
                 // BindingShot 定身解除检测（C# ReleaseBindingShot：ShockTime 到期清除效果）
@@ -6538,8 +6532,7 @@ impl WorldActor {
                             if let Some(monster) = self.monsters.get_mut(mid) {
                                 if spell_obj.spell == Spell::PoisonCloud {
                                     // 绿毒 12s，Value = (MinSC+MaxSC)/2 + BonusDmg ≈ magic_stat
-                                    crate::combat::poison::apply_poison(
-                                        &mut monster.poison_list,
+                                        monster.apply_poison_defended(
                                         crate::combat::poison::Poison::new(
                                             mir2_shared::enums::PoisonType::GREEN,
                                             12,
@@ -6551,8 +6544,7 @@ impl WorldActor {
                                 if spell_obj.spell == Spell::Blizzard && fastrand::i32(0..8) == 0 {
                                     // Slow：5 + Random(Freezing) 秒，TickSpeed 2000
                                     let freeze = caster_freezing.unwrap_or(0).max(1);
-                                    crate::combat::poison::apply_poison(
-                                        &mut monster.poison_list,
+                                        monster.apply_poison_defended(
                                         crate::combat::poison::Poison::new(
                                             mir2_shared::enums::PoisonType::SLOW,
                                             (5 + fastrand::i32(0..freeze)) as u32,
@@ -6723,7 +6715,7 @@ impl WorldActor {
                                         p.owner_session = spell_obj.caster_session;
                                         // delayed_stage/delayed_next_tick 保持 0：首次 %20 推进时
                                         // 进入阶段 1 并设置 +30 ticks（3s）的引爆窗口
-                                        poison::apply_poison(&mut t.poison_list, p);
+                                        t.apply_poison_defended(p);
                                     }
                                 }
                             }
@@ -6787,26 +6779,30 @@ impl WorldActor {
                             Spell::Blizzard if fastrand::i32(0..8) == 0 => {
                                 let dur =
                                     (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
-                                poison::apply_poison(
-                                    &mut monster.poison_list,
-                                    poison::Poison::new(PoisonType::SLOW, dur, 0, 2000),
-                                );
+                                monster.apply_poison_defended(poison::Poison::new(
+                                    PoisonType::SLOW,
+                                    dur,
+                                    0,
+                                    2000,
+                                ));
                             }
                             // PoisonCloud：绿毒强度基于 tick_value（创建时按 magic_stat 算出，道士=SC）
                             Spell::PoisonCloud => {
                                 let sc_approx = tick_value; // tick_value 基于 magic_stat（道士 SC）
                                 let poison_value = (sc_approx / 4).min(10);
-                                poison::apply_poison(
-                                    &mut monster.poison_list,
-                                    poison::Poison::new(PoisonType::GREEN, 12, poison_value, 1000),
-                                );
+                                monster.apply_poison_defended(poison::Poison::new(
+                                    PoisonType::GREEN,
+                                    12,
+                                    poison_value,
+                                    1000,
+                                ));
                             }
                             // FireWall / MeteorStrike：纯伤害无附加
                             _ => {}
                         }
                         // 战斗触发的 Poison（攻击者 freezing/poison_attack）
                         for p in &r.applied_poisons {
-                            poison::apply_poison(&mut monster.poison_list, *p);
+                            monster.apply_poison_defended(*p);
                         }
                     }
                 }
@@ -7077,7 +7073,7 @@ impl WorldActor {
                             monster.target_session = Some(c.session_id);
                         }
                         for p in &attack_result.applied_poisons {
-                            crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                            monster.apply_poison_defended(*p);
                         }
                         // #1582：C# MonsterObject.Attacked——受击时转向攻击者（PointDirection）
                         monster.direction = crate::actors::world::ai::direction_towards(
@@ -7474,29 +7470,35 @@ impl WorldActor {
                         // Slow：Random(100) <= magic.Level（玩家目标）或 Random(20) <= level（怪物）
                         if fastrand::i32(0..20) <= magic_level as i32 {
                             let duration = (5 + fastrand::i32(0..5)) as u32;
-                            poison::apply_poison(
-                                &mut monster.poison_list,
-                                poison::Poison::new(PoisonType::SLOW, duration, 0, 1000),
-                            );
+                            monster.apply_poison_defended(poison::Poison::new(
+                                PoisonType::SLOW,
+                                duration,
+                                0,
+                                1000,
+                            ));
                         }
                         // Frozen：Random(40) <= level
                         if fastrand::i32(0..40) <= magic_level as i32 {
                             let duration =
                                 (5 + fastrand::i32(0..caster_state.freezing.max(1))) as u32;
-                            poison::apply_poison(
-                                &mut monster.poison_list,
-                                poison::Poison::new(PoisonType::FROZEN, duration, 0, 1000),
-                            );
+                            monster.apply_poison_defended(poison::Poison::new(
+                                PoisonType::FROZEN,
+                                duration,
+                                0,
+                                1000,
+                            ));
                         }
                     }
 
                     // BindingShot：命中后施加 Paralysis（定身 3s）+ 效果广播
                     // （C# centerTarget.Broadcast(SetBindingShot Enabled=true, Value=ShockTime ms)）
                     if spell == Spell::BindingShot {
-                        poison::apply_poison(
-                            &mut monster.poison_list,
-                            poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000),
-                        );
+                        monster.apply_poison_defended(poison::Poison::new(
+                            PoisonType::PARALYSIS,
+                            3,
+                            0,
+                            1000,
+                        ));
                         let bs_packet =
                             build_set_binding_shot_packet(monster.object_id, true, 3000);
                         broadcast_to_map(
@@ -7517,10 +7519,12 @@ impl WorldActor {
                             + 1
                             + fastrand::i32(0..caster_state.poison_attack.max(1)))
                         .max(1);
-                        poison::apply_poison(
-                            &mut monster.poison_list,
-                            poison::Poison::new(PoisonType::GREEN, dur, val, 2000),
-                        );
+                        monster.apply_poison_defended(poison::Poison::new(
+                            PoisonType::GREEN,
+                            dur,
+                            val,
+                            2000,
+                        ));
                         let _ = self.players.get(&pending.session_id).map(|r| {
                             r.actor_ref
                                 .tell(crate::actors::player::SetSpecialShotArmed { armed: 0 })
@@ -7534,23 +7538,22 @@ impl WorldActor {
                     }
                     if spell == Spell::CrippleShot {
                         let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
-                        poison::apply_poison(
-                            &mut monster.poison_list,
-                            poison::Poison::new(PoisonType::SLOW, dur, 0, 1000),
-                        );
+                        monster.apply_poison_defended(poison::Poison::new(
+                            PoisonType::SLOW,
+                            dur,
+                            0,
+                            1000,
+                        ));
                         debug!("CrippleShot slowed monster {} ({}s)", target_id, dur);
                     }
                     // CatTongue：20% 概率冰冻（C# CompleteMagic：Random(10)>=8，Duration=(Lv+1)*3s）
                     if spell == Spell::CatTongue && fastrand::i32(0..10) >= 8 {
-                        poison::apply_poison(
-                            &mut monster.poison_list,
-                            poison::Poison::new(
-                                PoisonType::FROZEN,
-                                (pending.spell_level as u32 + 1) * 3,
-                                0,
-                                1000,
-                            ),
-                        );
+                        monster.apply_poison_defended(poison::Poison::new(
+                            PoisonType::FROZEN,
+                            (pending.spell_level as u32 + 1) * 3,
+                            0,
+                            1000,
+                        ));
                         debug!(
                             "CatTongue froze monster {} ({}s)",
                             target_id,
@@ -7586,7 +7589,7 @@ impl WorldActor {
 
                     // 施加战斗触发的 Poison（冰冻攻击/毒物攻击，来自攻击者 Stats）
                     for p in &result.applied_poisons {
-                        poison::apply_poison(&mut monster.poison_list, *p);
+                        monster.apply_poison_defended(*p);
                     }
 
                     debug!(
@@ -7688,7 +7691,7 @@ impl WorldActor {
                             monster.provoked = true;
                             monster.target_session = Some(pending.session_id);
                             for p in &r.applied_poisons {
-                                poison::apply_poison(&mut monster.poison_list, *p);
+                                monster.apply_poison_defended(*p);
                             }
                         }
                     }
@@ -10457,8 +10460,7 @@ impl Message<Tick> for WorldActor {
                                         m.take_damage(counter_dmg);
                                         m.provoked = true;
                                         m.target_session = Some(*sid);
-                                        crate::combat::poison::apply_poison(
-                                            &mut m.poison_list,
+                                        m.apply_poison_defended(
                                             crate::combat::poison::Poison::new(
                                                 mir2_shared::enums::PoisonType::STUN,
                                                 lv as u32 + 1,

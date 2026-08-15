@@ -3102,10 +3102,9 @@ impl WorldActor {
         // 3e. 应用毒意图（#1192/#1196：C# ApplyPoison；道士 Poisoning/弓箭手毒箭 TickSpeed 2000、道士 Curse 1000）
         for (session_id, target_oid, p_type, duration, value, tick_ms) in &poison_intents {
             if let Some(monster) = self.monsters.get_mut(target_oid) {
-                crate::combat::poison::apply_poison(
-                    &mut monster.poison_list,
-                    crate::combat::poison::Poison::new(*p_type, *duration, *value, *tick_ms),
-                );
+                monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                    *p_type, *duration, *value, *tick_ms,
+                ));
                 monster.provoked = true;
                 monster.register_hit(*session_id, self.tick_count);
                 if monster.target_session.is_none() {
@@ -3208,7 +3207,7 @@ impl WorldActor {
                             monster.target_session = Some(*session_id);
                         }
                         for p in &r.applied_poisons {
-                            crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                            monster.apply_poison_defended(*p);
                         }
                     }
                 }
