@@ -102,7 +102,14 @@ impl Plugin for OutputLinesPlugin {
     }
 }
 
-fn cleanup_output_lines(mut commands: Commands, roots: Query<Entity, With<OutputWidget>>) {
+fn cleanup_output_lines(
+    mut commands: Commands,
+    mut state: ResMut<OutputState>,
+    roots: Query<Entity, With<OutputWidget>>,
+) {
+    // 队列随场景清空（C# 每次 GameScene 新建 OutputMessages 列表——
+    // 审查观察：不清空则 5s 内重进 Game 会短暂重现旧消息）
+    state.messages.clear();
     for e in roots.iter() {
         commands.entity(e).despawn();
     }
@@ -366,5 +373,29 @@ mod tests {
             .iter(app.world())
             .find(|v| **v == Visibility::Visible);
         assert!(vis.is_none(), "过期后全部隐藏");
+
+        // 退出 Game：实体清空 + 队列清空（C# 每场景新建列表——重进不重现旧消息）
+        app.world_mut()
+            .resource_mut::<NextState<crate::scenes::AppState>>()
+            .set(crate::scenes::AppState::Login);
+        app.world_mut()
+            .resource_mut::<OutputState>()
+            .messages
+            .push(OutputMsg {
+                message: "残留".to_string(),
+                message_type: 3,
+                expire_at: f32::MAX,
+            });
+        app.update();
+        let mains = app
+            .world_mut()
+            .query_filtered::<Entity, With<OutputWidget>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(mains, 0, "退出 Game 实体应清空");
+        assert!(
+            app.world().resource::<OutputState>().messages.is_empty(),
+            "退出 Game 队列应清空"
+        );
     }
 }
