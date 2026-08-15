@@ -248,6 +248,9 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     (Some(_), a) => {
                         json!({"error": format!("unknown action: {a} (open/close/toggle)")})
                     }
+                    (None, _) if kind.is_empty() => {
+                        json!({"error": "missing kind (snake_case, e.g. inventory)"})
+                    }
                     (None, _) => json!({"error": format!("unknown dialog kind: {kind}")}),
                 }
             }
@@ -260,7 +263,13 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
     }
 }
 
-/// snake_case 对话框名 → DialogKind（覆盖全部变体，#2586）
+/// snake_case 对话框名 → DialogKind（#2586）。
+///
+/// 覆盖除 `GuestTrade` 外的全部 46 个变体（`DialogKind` 共 47 个）——
+/// `GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs），无独立开关语义，
+/// 故不做 RPC 映射（调用会回 unknown dialog kind）。
+/// **新增 DialogKind 变体时必须同步本函数、[`has_rpc_mapping`] 与测试名单**
+/// （[`has_rpc_mapping`] 的穷尽 match 会让漏改编译失败）。
 fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
     use DialogKind as D;
     Some(match s {
@@ -312,6 +321,64 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "skills" => D::Skills,
         _ => return None,
     })
+}
+
+/// 该 DialogKind 是否有 RPC 映射（= parse_dialog_kind 可达）。
+///
+/// **无通配臂的穷尽 match**：新增 DialogKind 变体而漏改这里会编译失败，堵住
+/// 「测试名单自证互异、测不出枚举遗漏」的盲区（批M 审查发现 GuestTrade 即因此漏掉）。
+fn has_rpc_mapping(kind: DialogKind) -> bool {
+    use DialogKind as D;
+    match kind {
+        D::Inventory
+        | D::Character
+        | D::QuestLog
+        | D::Settings
+        | D::Menu
+        | D::GameShop
+        | D::Minimap
+        | D::Npc
+        | D::Group
+        | D::Friend
+        | D::Trade
+        | D::Inspect
+        | D::NpcGoods
+        | D::Guild
+        | D::Mail
+        | D::Ranking
+        | D::Mentor
+        | D::Relationship
+        | D::Mount
+        | D::Report
+        | D::Hero
+        | D::HeroInventory
+        | D::HeroEquipment
+        | D::HeroSkill
+        | D::Creature
+        | D::TrustMerchant
+        | D::ItemRental
+        | D::GuildTerritory
+        | D::Help
+        | D::Notice
+        | D::Buff
+        | D::Fishing
+        | D::Socket
+        | D::Refine
+        | D::Craft
+        | D::DuraStatus
+        | D::NpcDrop
+        | D::Roll
+        | D::NpcAwake
+        | D::Timer
+        | D::KeyboardLayout
+        | D::BigMap
+        | D::ChatNotice
+        | D::Market
+        | D::Storage
+        | D::Skills => true,
+        // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
+        D::GuestTrade => false,
+    }
 }
 
 fn apply_control_commands(
@@ -511,7 +578,8 @@ fn apply_control_commands(
 mod tests {
     use super::*;
 
-    /// parse_dialog_kind 覆盖 DialogKind 全部变体 + 未知返回 None（#2586）
+    /// parse_dialog_kind 覆盖除 GuestTrade 外全部变体 + 未知返回 None（#2586）
+    /// GuestTrade 由网络 trade 会话驱动无独立开关，刻意不做 RPC 映射（批M 审查）
     #[test]
     fn parse_dialog_kind_covers_all_variants() {
         let all = [
@@ -562,7 +630,8 @@ mod tests {
             "storage",
             "skills",
         ];
-        // 全部可解析且互不相同（46 个变体一一对应）
+        // 全部可解析且互不相同（46 个名字一一对应；DialogKind 共 47 个变体，
+        // GuestTrade 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
         let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
         let uniq: Vec<&DialogKind> = {
             let mut seen: Vec<&DialogKind> = parsed.iter().collect();
@@ -572,6 +641,13 @@ mod tests {
         };
         assert_eq!(all.len(), 46);
         assert_eq!(uniq.len(), all.len(), "46 个名字应映射到 46 个不同变体");
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射
+        assert!(
+            parsed.iter().all(|k| has_rpc_mapping(*k)),
+            "名单内全部变体应 has_rpc_mapping"
+        );
+        // GuestTrade 刻意排除（网络会话驱动）
+        assert!(!has_rpc_mapping(DialogKind::GuestTrade));
 
         // 未知/空/大小写敏感
         assert!(parse_dialog_kind("").is_none());
