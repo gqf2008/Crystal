@@ -807,10 +807,12 @@ mod tests {
     #[test]
     fn roundtrip_magic() -> SharedResult<()> {
         roundtrip(&client::combat::Magic {
+            object_id: 777,
             spell: Spell::FireBall,
             direction: MirDirection::Left,
             target_id: 12345,
             location: Point::new(100, 200),
+            spell_target_lock: true,
         })
     }
 
@@ -821,6 +823,31 @@ mod tests {
             key: 5,
             old_key: 3,
         })
+    }
+
+    /// #2573：C.Magic wire 对齐 C#（ClientPackets.cs:1131-1140）
+    /// [ObjectID u32][Spell u8][Direction u8][TargetID u32][X i32][Y i32][SpellTargetLock u8]
+    #[test]
+    fn magic_wire_layout_matches_csharp() -> SharedResult<()> {
+        let p = client::combat::Magic {
+            object_id: 0x11223344,
+            spell: Spell::FireBall,
+            direction: MirDirection::Left,
+            target_id: 1000,
+            location: Point::new(-5, 7),
+            spell_target_lock: true,
+        };
+        let mut buf = Vec::new();
+        p.write_body(&mut buf)?;
+        assert_eq!(buf.len(), 19);
+        assert_eq!(&buf[0..4], &0x11223344u32.to_le_bytes()); // ObjectID
+        assert_eq!(buf[4], Spell::FireBall as u8);
+        assert_eq!(buf[5], MirDirection::Left as u8);
+        assert_eq!(&buf[6..10], &1000u32.to_le_bytes()); // TargetID
+        assert_eq!(&buf[10..14], &(-5i32).to_le_bytes()); // X
+        assert_eq!(&buf[14..18], &7i32.to_le_bytes()); // Y
+        assert_eq!(buf[18], 1); // SpellTargetLock
+        Ok(())
     }
 
     #[test]

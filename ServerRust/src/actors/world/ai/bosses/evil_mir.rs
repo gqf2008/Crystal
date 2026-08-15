@@ -97,8 +97,14 @@ impl MonsterBehavior for EvilMirBehavior {
         monster.next_attack_tick = ctx.tick_count + EVIL_MIR_ATTACK_COOLDOWN;
         monster.ai_state = crate::actors::world::MonsterAiState::Attack;
 
-        // 1/8 概率全屏大招 vs 普攻（C# EvilMir.cs:115）
-        let is_mass = fastrand::i32(0..8) == 0;
+        // 大招概率（C# EvilMir.cs:118）：DragonLink 时 random = MaxLevel(13) + 3 - Level，
+        // 未链接 8 → 大招概率 1/random（龙等级越高大招越频繁）
+        let mass_random = if ctx.dragon_level > 0 {
+            (13 + 3 - ctx.dragon_level as i32).max(1)
+        } else {
+            8
+        };
+        let is_mass = fastrand::i32(0..mass_random) == 0;
         self.mass_attack = is_mass;
 
         // C# EvilMir.Attack：DragonLink 时 MaxDC + (DragonLevel-1)*10（按意图修正 C# 运算符优先级）

@@ -813,6 +813,12 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         sqlx::query("ALTER TABLE guild_members ADD COLUMN rank_index INTEGER NOT NULL DEFAULT 2")
             .execute(&pool)
             .await;
+    // #2573：成员最后上线时间（C# MemberInfo.LastLogin）
+    let _ = sqlx::query(
+        "ALTER TABLE guild_members ADD COLUMN last_login_ms INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(&pool)
+    .await;
     // #932: 无经验地图（C# MapInfo.NoExperience，safe to re-run）
     let _ =
         sqlx::query("ALTER TABLE map_infos ADD COLUMN no_experience INTEGER NOT NULL DEFAULT 0")
@@ -3077,6 +3083,24 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// #2573：成员最后上线时间落库（C# MemberInfo.LastLogin，下线时写）
+pub async fn update_guild_member_last_login(
+    pool: &DbPool,
+    guild_name: &str,
+    member_name: &str,
+    last_login_ms: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE guild_members SET last_login_ms = ? WHERE guild_name = ? AND member_name = ?",
+    )
+    .bind(last_login_ms)
+    .bind(guild_name)
+    .bind(member_name)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// 删除行会（C# Envir.DeleteGuild）：清成员角色 guild_name + 删 guild_members + 删 guilds 行
 pub async fn delete_guild(pool: &DbPool, guild_name: &str) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET guild_name = NULL WHERE guild_name = ?")
@@ -3136,7 +3160,7 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
         }
 
         let member_rows = sqlx::query(
-            "SELECT member_name, rank, rank_index FROM guild_members WHERE guild_name = ?",
+            "SELECT member_name, rank, rank_index, last_login_ms FROM guild_members WHERE guild_name = ?",
         )
         .bind(&name)
         .fetch_all(pool)
@@ -3149,6 +3173,7 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
                 session_id: None, // Loaded as offline
                 rank: GuildRank::from_u8(r.get::<i32, _>("rank") as u8),
                 rank_index: r.get::<i32, _>("rank_index").clamp(0, 255) as u8,
+                last_login_ms: r.get::<i64, _>("last_login_ms"),
             })
             .collect();
 

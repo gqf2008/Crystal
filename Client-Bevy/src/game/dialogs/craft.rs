@@ -196,9 +196,12 @@ fn craft_ui_system(
     for btn in &craft_btn {
         if btn.clicked {
             if let Some(r) = state.selected.clone() {
+                // #2573：C# C.CraftItem wire（UniqueID/Count/Slots；暂无材料槽选择 UI，
+                // 槽位空 → 服务端按 DB 配方自动扣材）
                 net.send_packet(&crate::network::CraftItemWire {
-                    recipe_id: r.recipe_id,
-                    materials: 0,
+                    unique_id: r.recipe_id as u64,
+                    count: 1,
+                    slots: Vec::new(),
                 });
                 state.message = format!("合成 {} 中…", r.name);
                 tracing::info!("🔧 合成配方 {}（{}）", r.recipe_id, r.name);

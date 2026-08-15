@@ -170,6 +170,9 @@ impl Message<NPCCallRequest> for WorldActor {
 
         // 记录会话当前 NPC（BuyItem 等包不含 npc_id，按会话解析）
         self.session_npc.insert(msg.session_id, npc.object_id);
+        // #2573：记录当前对话页 key（C# NPCPage 语义，大写规范化），供物品动作门槛校验
+        self.session_npc_page
+            .insert(msg.session_id, msg.key.to_uppercase());
         // 新对话页 → 退出珍珠购买模式（C# NPCPage.Key 变化语义）
         self.session_pearl_shop.remove(&msg.session_id);
 

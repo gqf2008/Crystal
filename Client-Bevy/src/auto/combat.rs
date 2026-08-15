@@ -344,6 +344,8 @@ pub(crate) fn auto_combat_test(
                 )
                 .unwrap_or(mir2_shared::enums::MirDirection::Down);
                 net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                    object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                    spell_target_lock: false,
                     spell: mir2_shared::enums::Spell::FireBall,
                     direction: dir,
                     target_id: target.unwrap_or(0),
@@ -396,6 +398,8 @@ pub(crate) fn auto_cast_system(
         return;
     };
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+        spell_target_lock: false,
         spell: m.spell,
         direction: mir2_shared::enums::MirDirection::Up,
         target_id: 101,
@@ -535,6 +539,8 @@ pub(crate) fn auto_cast_loop_system(
         return;
     };
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+        spell_target_lock: false,
         spell: m.spell,
         direction: mir2_shared::enums::MirDirection::Up,
         target_id: 101,
@@ -710,6 +716,8 @@ pub(crate) fn auto_spell_verify(
     // #328：Plague/Trap/DelayedExplosion 以玩家所在格为目标（3×3 覆盖附近怪物，规避位置漂移）
     let (tx, ty) = if *stage >= 11 { (px, py) } else { (mx, my) };
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+        spell_target_lock: false,
         spell,
         direction: dir,
         target_id: oid,
@@ -901,6 +909,8 @@ pub(crate) fn auto_battle_vfx_test(
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             *before = effects.spawned;
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1012,6 +1022,8 @@ pub(crate) fn auto_action_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1164,6 +1176,8 @@ pub(crate) fn auto_poison_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1291,6 +1305,8 @@ pub(crate) fn auto_mana_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1401,6 +1417,8 @@ pub(crate) fn auto_toggle_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1522,6 +1540,8 @@ pub(crate) fn auto_gold_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),
@@ -1625,6 +1645,8 @@ pub(crate) fn auto_harvest_test(
             )
             .unwrap_or(mir2_shared::enums::MirDirection::Down);
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                object_id: 0, // #2573：C# Magic.ObjectID（0=本人；英雄派发待真实对象化）
+                spell_target_lock: false,
                 spell: mir2_shared::enums::Spell::FireBall,
                 direction: dir,
                 target_id: target.unwrap_or(0),

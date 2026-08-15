@@ -773,6 +773,9 @@ pub struct SetupIniSettings {
     pub freezing_attack_weight: u8,
     /// C# Settings.PoisonAttackWeight（[Items] PoisonAttackWeight = 10）
     pub poison_attack_weight: u8,
+    /// #2573：C# Settings.AllowObserve（[Observe] AllowObserve）
+    /// 全局观战总开关；与目标玩家 AllowObserve 双重校验（C# Envir.Observe）
+    pub allow_observe: bool,
 }
 
 impl Default for SetupIniSettings {
@@ -797,6 +800,7 @@ impl Default for SetupIniSettings {
             critical_damage_weight: 50,
             freezing_attack_weight: 10,
             poison_attack_weight: 10,
+            allow_observe: true,
         }
     }
 }
@@ -900,6 +904,10 @@ pub fn load_setup_settings(configs_dir: &Path) -> SetupIniSettings {
         out.poison_attack_weight as i64,
     )
     .max(1) as u8;
+    // #2573：观战全局开关（C# Settings.[Observe] AllowObserve）
+    if let Some(v) = ini_get(&parsed, "Observe", "AllowObserve") {
+        out.allow_observe = v == "1" || v.eq_ignore_ascii_case("true");
+    }
     out
 }
 
@@ -1167,7 +1175,7 @@ BuffExpRate=0
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("Setup.ini"),
-            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\nMaxLuck=10\nMagicResistWeight=10\nPoisonResistWeight=10\nCriticalRateWeight=5\nCriticalDamageWeight=50\nFreezingAttackWeight=10\nPoisonAttackWeight=10\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n",
+            "[Optional]\nGatherOrbsPerLevel=True\nLineMessageTimer=10\n\n[Items]\nSealDelay=60\nMaxLuck=10\nMagicResistWeight=10\nPoisonResistWeight=10\nCriticalRateWeight=5\nCriticalDamageWeight=50\nFreezingAttackWeight=10\nPoisonAttackWeight=10\n\n[Game]\nPKDelay=12\nTeleportToNPCCost=3000\nGroupInviteDelay=2000\nTradeDelay=2000\nMaxBossTames=1\n\n[Bonus]\nRangeAccuracyBonus=0\n\n[PKTown]\nPKTownMapName=3\nPKTownPositionX=848\nPKTownPositionY=677\n\n[Observe]\nAllowObserve=False\n",
         ).unwrap();
         let s = load_setup_settings(&dir);
         assert!(s.gather_orbs_per_level);
@@ -1192,6 +1200,8 @@ BuffExpRate=0
         assert_eq!(s.critical_damage_weight, 50);
         assert_eq!(s.freezing_attack_weight, 10);
         assert_eq!(s.poison_attack_weight, 10);
+        // #2573：观战全局开关（显式 False 生效；缺省默认 true）
+        assert!(!s.allow_observe);
         std::fs::remove_dir_all(&dir).ok();
 
         // 文件缺失 → C# 默认

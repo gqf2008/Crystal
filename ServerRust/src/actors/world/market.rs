@@ -75,6 +75,21 @@ impl Message<MarketSearchRequest> for WorldActor {
             _ => return,
         };
 
+        // #2573：页 key 门槛（C# PlayerObject.cs:8436 MarketSearch 要求 MarketKey）
+        if !self.npc_page_allows(msg.session_id, &["[@MARKET]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开市场页");
+            return;
+        }
+        // #2573：搜索节流（C# PlayerObject.cs:8329 SearchTime；Globals.SearchDelay=500ms）
+        let now_ms = crate::db::now_unix_ms();
+        if let Some(next) = self.market_search_next_ms.get(&msg.session_id) {
+            if now_ms < *next {
+                return;
+            }
+        }
+        self.market_search_next_ms
+            .insert(msg.session_id, now_ms + 500);
+
         // Collect indices of unsold auctions matching criteria（C# MarketSearch：名称 Contains + 编号兼容）
         let kw = msg.keyword.trim().to_lowercase();
         let kw_index = kw.parse::<u32>().ok();
@@ -197,6 +212,10 @@ impl Message<MarketRefreshRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketRefreshRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("MarketRefresh: session={}", msg.session_id);
+        // #2573：页 key 门槛（C# 市场操作要求 MarketKey）
+        if !self.npc_page_allows(msg.session_id, &["[@MARKET]"]) {
+            return;
+        }
 
         // Collect all unsold auctions
         let mut results: Vec<usize> = Vec::new();
@@ -286,6 +305,19 @@ impl Message<MarketPageRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("MarketPage: session={} page={}", msg.session_id, msg.page);
+        // #2573：页 key 门槛（C# PlayerObject.cs:8335 翻页要求 MarketKey）
+        if !self.npc_page_allows(msg.session_id, &["[@MARKET]"]) {
+            return;
+        }
+        // #2573：翻页同受搜索节流（C# :8426-8428 MarketPageNext 复用 SearchTime）
+        let now_ms = crate::db::now_unix_ms();
+        if let Some(next) = self.market_search_next_ms.get(&msg.session_id) {
+            if now_ms < *next {
+                return;
+            }
+        }
+        self.market_search_next_ms
+            .insert(msg.session_id, now_ms + 500);
 
         let cache = match self.market_search_cache.get(&msg.session_id) {
             Some(c) => c.clone(),
@@ -376,6 +408,11 @@ impl Message<MarketBuyRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        // #2573：页 key 门槛（C# 市场购买要求 MarketKey）
+        if !self.npc_page_allows(msg.session_id, &["[@MARKET]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开市场页");
+            return;
+        }
 
         if buyer_state.is_dead {
             send_system_message(&self.gate_ref, msg.session_id, "死亡状态下无法购买");
@@ -629,6 +666,11 @@ impl Message<MarketGetBackRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        // #2573：页 key 门槛（C# PlayerObject.cs:8489 MarketGetBack 要求 MarketKey）
+        if !self.npc_page_allows(msg.session_id, &["[@MARKET]"]) {
+            self.send_market_fail(msg.session_id, 0);
+            return;
+        }
         if state.is_dead {
             self.send_market_fail(msg.session_id, 0);
             return;
@@ -965,6 +1007,12 @@ impl Message<MarketSellNowRequest> for WorldActor {
             _ => return,
         };
 
+        // #2573：页 key 门槛（C# PlayerObject.cs:8599 MarketSellNow 要求 MarketKey）
+        if !self.npc_page_allows(msg.session_id, &["[@MARKET]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开市场页");
+            return;
+        }
+
         if state.is_dead {
             send_system_message(&self.gate_ref, msg.session_id, "死亡状态下无法操作");
             return;
@@ -1096,6 +1144,12 @@ impl Message<ConsignItemRequest> for WorldActor {
 
         if state.is_dead {
             send_system_message(&self.gate_ref, msg.session_id, "死亡状态下无法寄售");
+            return;
+        }
+
+        // #2573：页 key 门槛（C# ConsignItem 仅要求 NPCPage != null，任意对话页即可）
+        if !self.session_npc_page.contains_key(&msg.session_id) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
             return;
         }
 

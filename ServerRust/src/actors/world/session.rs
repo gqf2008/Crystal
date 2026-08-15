@@ -973,12 +973,19 @@ impl Message<StartGameRequest> for WorldActor {
             .filter(|n| n.map_index == loaded_state.map_index)
             .cloned()
             .collect();
-        if !map_npcs.is_empty() {
+        let map_movements = self
+            .map_infos
+            .get(&map_info_idx)
+            .map(|m| m.movements.clone())
+            .unwrap_or_default();
+        if !map_npcs.is_empty() || !map_movements.is_empty() {
             let new_map_info = super::build_new_map_info_packet(
                 map_info_idx,
                 &map_title,
+                &map_movements,
                 &map_npcs,
                 &self.npc_infos,
+                &self.map_infos,
             );
             let _ = self
                 .gate_ref
@@ -987,7 +994,12 @@ impl Message<StartGameRequest> for WorldActor {
                     data: new_map_info,
                 })
                 .await;
-            info!("NewMapInfo: map={} npcs={}", map_info_idx, map_npcs.len());
+            info!(
+                "NewMapInfo: map={} npcs={} movements={}",
+                map_info_idx,
+                map_npcs.len(),
+                map_movements.len()
+            );
         }
         // #302：世界地图配置（C# CheckMapInfo 每连接下发一次）
         if let Some(rec) = self.players.get_mut(&msg.session_id) {
@@ -1499,6 +1511,20 @@ impl Message<WorldMoveRequest> for WorldActor {
                         })
                         .await;
                 }
+                // #2573：观战镜像（C# BroadcastObservePackets: ObjectWalk/ObjectRun，
+                // 隐身玩家移动同样不镜像）
+                let mut mb = Vec::new();
+                mb.extend_from_slice(&state.object_id.to_le_bytes());
+                mb.extend_from_slice(&state.x.to_le_bytes());
+                mb.extend_from_slice(&state.y.to_le_bytes());
+                mb.push(state.direction);
+                let opcode = match move_type {
+                    MoveType::Walk => mir2_shared::enums::ServerPacketIds::ObjectWalk,
+                    MoveType::Run => mir2_shared::enums::ServerPacketIds::ObjectRun,
+                    MoveType::Turn => mir2_shared::enums::ServerPacketIds::ObjectTurn,
+                };
+                self.mirror_to_observers(msg.session_id, opcode as i16, &mb)
+                    .await;
             }
 
             // 检查是否踩到地图传送点（Movement）— O(1) index lookup
@@ -2142,6 +2168,18 @@ impl Message<WorldTurnRequest> for WorldActor {
                     })
                     .await;
             }
+            // #2573：观战镜像（C# BroadcastObservePackets: ObjectTurn）
+            let mut tb = Vec::new();
+            tb.extend_from_slice(&state.object_id.to_le_bytes());
+            tb.extend_from_slice(&state.x.to_le_bytes());
+            tb.extend_from_slice(&state.y.to_le_bytes());
+            tb.push(state.direction);
+            self.mirror_to_observers(
+                msg.session_id,
+                mir2_shared::enums::ServerPacketIds::ObjectTurn as i16,
+                &tb,
+            )
+            .await;
         }
     }
 }
@@ -2227,6 +2265,10 @@ impl Message<PlayerDisconnected> for WorldActor {
             None => return,
         };
         self.invisible_sessions.remove(&msg.session_id);
+        // #2573：离线清理观战链接（该会话作为观察者或目标的任一角色）
+        self.remove_observe_links(msg.session_id);
+        self.session_npc_page.remove(&msg.session_id);
+        self.market_search_next_ms.remove(&msg.session_id);
         self.market_search_cache.remove(&msg.session_id);
         self.player_stacking.remove(&msg.session_id);
         self.slaying_armed.remove(&msg.session_id);
@@ -2348,6 +2390,10 @@ impl Message<PlayerLogOut> for WorldActor {
             }
         };
         self.invisible_sessions.remove(&msg.session_id);
+        // #2573：离线清理观战链接（该会话作为观察者或目标的任一角色）
+        self.remove_observe_links(msg.session_id);
+        self.session_npc_page.remove(&msg.session_id);
+        self.market_search_next_ms.remove(&msg.session_id);
         self.market_search_cache.remove(&msg.session_id);
         self.player_stacking.remove(&msg.session_id);
         self.slaying_armed.remove(&msg.session_id);

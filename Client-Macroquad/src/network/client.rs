@@ -882,10 +882,13 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             use mir2_shared::{enums::Spell, Point};
             let (x, y) = location.unwrap_or((0, 0));
             let packet = client::combat::Magic {
+                // #2573：ObjectID=0 表示本人施法（英雄派发待英雄真实对象化）；客户端暂无锁定键位
+                object_id: 0,
                 spell: Spell::try_from(spell).unwrap_or(Spell::None),
                 direction,
                 target_id,
                 location: Point { x, y },
+                spell_target_lock: false,
             };
             serialize_packet(stream, &packet)?;
         }

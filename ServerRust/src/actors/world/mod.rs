@@ -1903,6 +1903,10 @@ pub struct WorldActor {
     pub(crate) npc_goods: HashMap<i32, Vec<db::NpcGoodsInfo>>,
     /// 会话当前对话的 NPC（BuyItem 用，客户端协议不含 npc_id）
     pub(crate) session_npc: HashMap<u64, u32>,
+    /// #2573：会话当前 NPC 对话页 key（大写规范化；C# NPCPage.Key 语义）
+    pub(crate) session_npc_page: HashMap<u64, String>,
+    /// #2573：市场搜索节流（C# PlayerObject.cs:8329 SearchTime = now + Globals.SearchDelay=500ms）
+    pub(crate) market_search_next_ms: HashMap<u64, i64>,
     /// #珍珠商店：会话当前处于珍珠购买页（[@PEARLBUY] 置位，下次 CallNPC 清除）
     pub(crate) session_pearl_shop: std::collections::HashSet<u64>,
     /// 游戏配置：NPC 脚本 ((npc_index, page_name) -> lines)
@@ -2010,6 +2014,9 @@ pub struct WorldActor {
     pub(crate) global_event_name: Option<String>,
     /// 隐身中的玩家 session 集合（用于视野管理）
     pub(crate) invisible_sessions: std::collections::HashSet<u64>,
+    /// #2573：观战镜像链接（C# Connection.Observers）：目标 session → 观察者 session 列表。
+    /// 观察者接收目标自身动作包（Turn/Walk/Run/Attack/RangeAttack/Magic/Harvest）
+    pub(crate) observe_links: std::collections::HashMap<u64, Vec<u64>>,
     /// #1465：GM 保护模式（C# GMGameMaster；@GAMEMASTER 切换，PvP 不可攻击）
     pub(crate) gm_protected: std::collections::HashSet<u64>,
     /// #940：@MOVE 传送冷却（C# LastTeleportTime=10s，session -> ms）
@@ -2562,6 +2569,8 @@ impl WorldActor {
             npc_infos: HashMap::new(),
             npc_goods: HashMap::new(),
             session_npc: HashMap::new(),
+            session_npc_page: HashMap::new(),
+            market_search_next_ms: HashMap::new(),
             session_pearl_shop: std::collections::HashSet::new(),
             npc_scripts: HashMap::new(),
             quest_infos: HashMap::new(),
@@ -2617,6 +2626,7 @@ impl WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            observe_links: std::collections::HashMap::new(),
             gm_protected: HashSet::new(),
             last_teleport_time: std::collections::HashMap::new(),
             last_probe_time: std::collections::HashMap::new(),
@@ -2845,9 +2855,19 @@ impl WorldActor {
                                 map.height as i32 - 1,
                             ));
                         }
+                        // #2573：DB safe_zones 并入战斗判定（C# Map.GetSafeZone：
+                        // InRange(Location, pos, Size) 即以 (x,y) 为中心、Size 为半径的方形）
+                        for sz in &mi.safe_zones {
+                            map.safe_zone_rects.push(safe_zone_rect(
+                                sz.x,
+                                sz.y,
+                                sz.size,
+                                map.width as i32,
+                                map.height as i32,
+                            ));
+                        }
                         map.no_experience = mi.no_experience;
                     }
-                    Self::apply_hardcoded_safe_zones(file_name, &mut map);
                     self.maps.insert(map_index, map);
                 }
                 Err(e) => {
@@ -2859,24 +2879,20 @@ impl WorldActor {
         self.maps.get(&map_index)
     }
 
-    /// 为已知地图注入默认安全区（坐标为 Mir2 经典值）
-    pub(crate) fn apply_hardcoded_safe_zones(file_name: &str, map: &mut MapData) {
-        let name = file_name.to_lowercase();
-        if name.contains("0") || name.contains("bichon") {
-            // 比奇省安全区（新手村附近）
-            map.safe_zone_rects.push((260, 245, 295, 285));
-        }
-        if name.contains("3") || name.contains("mongchon") || name.contains("pranja") {
-            // 盟重省安全区
-            map.safe_zone_rects.push((325, 255, 360, 295));
-        }
-    }
-
     /// 分配下一个对象 ID
     pub(crate) fn alloc_object_id(&mut self) -> u32 {
         let id = self.next_object_id;
         self.next_object_id += 1;
         id
+    }
+
+    /// #2573：C# NPCPage.Key 门槛（PlayerObject 各物品动作按页 key 校验）；
+    /// false = 未开对话或当前页不在允许集（对齐 C# NPCPage == null / Key 不匹配即拒绝）
+    pub(crate) fn npc_page_allows(&self, session_id: u64, allowed: &[&str]) -> bool {
+        match self.session_npc_page.get(&session_id) {
+            Some(k) => allowed.iter().any(|a| k.eq_ignore_ascii_case(a)),
+            None => false,
+        }
     }
 
     /// 获取所有其他玩家的引用（排除指定 session）
@@ -5085,6 +5101,34 @@ impl WorldActor {
         true
     }
 
+    /// #2573：死亡租赁物品邮寄返还（C# PlayerObject 死亡 → RentalInformation 物品邮件还主人）
+    async fn mail_rental_return(
+        &self,
+        owner_name: &str,
+        dead_name: &str,
+        item: mir2_shared::data::item::UserItem,
+    ) {
+        let mail = crate::actors::mail::MailMessage {
+            mail_id: crate::actors::mail::generate_mail_id(),
+            sender_name: "系统".to_string(),
+            receiver_name: owner_name.to_string(),
+            subject: "租赁物品返还".to_string(),
+            body: format!("{} 死亡，其租用的物品已自动返还。", dead_name),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            read: false,
+            collected: false,
+            locked: false,
+            gold: 0,
+            items: vec![item],
+        };
+        if let Err(e) = db::insert_mail(&self.db_pool, owner_name, &mail).await {
+            warn!("Failed to mail rental return to {}: {}", owner_name, e);
+        }
+    }
+
     /// 玩家死亡时随机掉落背包物品和金币（安全区不掉落）
     pub(crate) async fn handle_player_death_drop(
         &mut self,
@@ -5198,8 +5242,14 @@ impl WorldActor {
             ) {
                 continue;
             }
-            // 租赁物品：C# 返还主人；Rust 简化不参与死亡掉落
-            if item.rental_information.is_some() {
+            // 租赁物品：C# 邮件返还主人（#2573；原 Rust 永久滞留装备栏）
+            if let Some(rental) = &item.rental_information {
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::TakeEquipmentOnDeath { slot })
+                    .await;
+                self.mail_rental_return(&rental.owner_name, &state.name, item.clone())
+                    .await;
                 continue;
             }
 
@@ -5275,7 +5325,20 @@ impl WorldActor {
             ) {
                 continue;
             }
-            if item.rental_information.is_some() {
+            // 租赁物品：邮件返还主人（#2573）
+            if let Some(rental) = &item.rental_information {
+                if let Some(removed) = record
+                    .actor_ref
+                    .ask(crate::actors::player::RemoveItemFromInventoryCount {
+                        unique_id: item.unique_id,
+                        count: item.count,
+                    })
+                    .await
+                    .unwrap_or(None)
+                {
+                    self.mail_rental_return(&rental.owner_name, &state.name, removed)
+                        .await;
+                }
                 continue;
             }
 
@@ -5325,6 +5388,25 @@ impl WorldActor {
 
         // 落地物品（C# 死亡不掉金币；散落 + Meat 掉 2000 耐久）
         for mut item in dropped_items {
+            // #2573：C# PlayerObject.cs:735-739——GlobalDropNotify 物品死亡掉落全服公告（System2）
+            if self
+                .item_infos
+                .get(&item.item_index)
+                .map(|i| (i.bool_flags & 0x20) != 0)
+                .unwrap_or(false)
+            {
+                let item_name = self
+                    .item_infos
+                    .get(&item.item_index)
+                    .map(|i| i.name.clone())
+                    .unwrap_or_default();
+                broadcast_chat(
+                    &self.gate_ref,
+                    &self.players,
+                    &format!("{} 掉落了 {}", state.name, item_name),
+                    mir2_shared::enums::ChatType::System2,
+                );
+            }
             // C# HumanObject.DropItem：Meat 落地 current_dura -= 2000
             if self
                 .item_infos
@@ -8523,6 +8605,8 @@ impl Actor for WorldActor {
             npc_infos,
             npc_goods,
             session_npc: HashMap::new(),
+            session_npc_page: HashMap::new(),
+            market_search_next_ms: HashMap::new(),
             session_pearl_shop: std::collections::HashSet::new(),
             npc_scripts,
             quest_infos,
@@ -8579,6 +8663,7 @@ impl Actor for WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            observe_links: std::collections::HashMap::new(),
             gm_protected: HashSet::new(),
             last_teleport_time: std::collections::HashMap::new(),
             last_probe_time: std::collections::HashMap::new(),
@@ -8641,6 +8726,22 @@ impl Actor for WorldActor {
             active_coords,
         })
     }
+}
+
+/// #2573：DB 安全区 → 地图矩形（C# Map.GetSafeZone 的 InRange(Location, pos, Size) 方形，钳位到地图边界）
+pub(crate) fn safe_zone_rect(
+    x: i32,
+    y: i32,
+    size: i32,
+    map_width: i32,
+    map_height: i32,
+) -> (i32, i32, i32, i32) {
+    (
+        (x - size).max(0),
+        (y - size).max(0),
+        (x + size).min(map_width - 1),
+        (y + size).min(map_height - 1),
+    )
 }
 
 /// 默认行会领地实例（conquest_infos 表为空时种子；对应 C# Envir 默认沙巴克等 8 个领地）
@@ -11440,8 +11541,10 @@ fn build_map_information_packet(
 fn build_new_map_info_packet(
     map_index: i32,
     title: &str,
+    movements: &[db::MapMovementInfo],
     npcs: &[NpcState],
     npc_infos: &std::collections::HashMap<i32, db::NPCInfo>,
+    map_infos: &std::collections::HashMap<i32, db::MapInfo>,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -11452,8 +11555,24 @@ fn build_new_map_info_packet(
     body.extend_from_slice(&0i32.to_le_bytes());
     body.extend_from_slice(&0i32.to_le_bytes());
     body.extend_from_slice(&0i32.to_le_bytes());
-    // movements：暂无传送点数据，发空
-    body.extend_from_slice(&0i32.to_le_bytes());
+    // #2573：大地图传送点（C# PlayerObject.cs:1030-1044——ShowOnBigMap 的 movement：
+    // Destination=目的图 / Location=源坐标 / Icon / Title=目的图标题；目的图缺失跳过）
+    let big_map_movements: Vec<&db::MapMovementInfo> = movements
+        .iter()
+        .filter(|m| m.show_on_big_map && map_infos.contains_key(&m.map_index))
+        .collect();
+    body.extend_from_slice(&(big_map_movements.len() as i32).to_le_bytes());
+    for m in big_map_movements {
+        body.extend_from_slice(&m.map_index.to_le_bytes());
+        let dest_title = map_infos
+            .get(&m.map_index)
+            .map(|mi| mi.title.clone())
+            .unwrap_or_default();
+        write_dotnet_string(&mut body, &dest_title);
+        body.extend_from_slice(&m.source_x.to_le_bytes());
+        body.extend_from_slice(&m.source_y.to_le_bytes());
+        body.extend_from_slice(&m.icon.to_le_bytes());
+    }
     // npcs
     body.extend_from_slice(&(npcs.len() as i32).to_le_bytes());
     for n in npcs {
@@ -14983,6 +15102,23 @@ mod set_bonus_tests {
             0,
             mir2_shared::enums::BindMode::BIND_ON_EQUIP.bits()
         ));
+    }
+
+    /// #2573：DB 安全区矩形换算（C# InRange 方形 + 地图边界钳位）
+    #[test]
+    fn test_safe_zone_rect_clamps_to_map() {
+        use super::safe_zone_rect;
+        // 常规：中心 ± size
+        assert_eq!(
+            safe_zone_rect(267, 256, 10, 1000, 1000),
+            (257, 246, 277, 266)
+        );
+        // 左上越界钳 0
+        assert_eq!(safe_zone_rect(3, 4, 10, 1000, 1000), (0, 0, 13, 14));
+        // 右下越界钳地图边界（宽 300 → 最大 299）
+        assert_eq!(safe_zone_rect(295, 298, 10, 300, 300), (285, 288, 299, 299));
+        // size=0 退化为单格
+        assert_eq!(safe_zone_rect(50, 60, 0, 100, 100), (50, 60, 50, 60));
     }
 }
 

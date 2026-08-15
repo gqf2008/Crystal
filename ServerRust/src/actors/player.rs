@@ -2567,7 +2567,21 @@ impl Message<ApplyCombatPoisons> for PlayerActor {
         // PoisonResist 掷骰豁免 / 绿毒 MAC 减免 / PoisonRecovery 缩时 / 强度与永冻保护
         let def = self.state.poison_defence();
         for p in msg.poisons {
-            crate::combat::poison::apply_poison(&mut self.state.poison_list, p, &def);
+            let owner_session = p.owner_session;
+            if crate::combat::poison::apply_poison(&mut self.state.poison_list, p, &def) {
+                // #2573：C# ApplyPoison ownerBrowns（HumanObject.cs:7400-7408）——
+                // 玩家施毒命中 → 施毒者灰名 1 分钟（世界侧复用 MarkBrown 的
+                // PK>=200/已灰名/行会开战豁免校验；WarZone 豁免 Rust 无战区标记暂缺）
+                if owner_session != 0 {
+                    let _ = self
+                        .world_ref
+                        .tell(crate::actors::world::partners::MarkBrown {
+                            attacker_session: owner_session,
+                            victim_session: self.state.session_id,
+                        })
+                        .try_send();
+                }
+            }
         }
     }
 }
