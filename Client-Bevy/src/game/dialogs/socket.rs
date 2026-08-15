@@ -10,18 +10,13 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::inventory::{
-    InvItem, DIALOG_X as INV_DIALOG_X, DIALOG_Y as INV_DIALOG_Y,
-};
+use crate::game::dialogs::inventory::{InvItem, InventoryOrigin};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache};
 
-/// 背包对话框原点（用于定位镶嵌面板，跟随背包原点常量防漂移）
-const INV_X: f32 = INV_DIALOG_X;
-const INV_Y: f32 = INV_DIALOG_Y;
 /// 背包背景 Title[196] 缺失时的兜底尺寸（真实值运行时从库读取）
 const INV_W_FALLBACK: f32 = 316.0;
 const INV_H_FALLBACK: f32 = 236.0;
@@ -29,10 +24,12 @@ const INV_H_FALLBACK: f32 = 236.0;
 /// C# SocketDialog.Show(Inventory) 定位公式（SocketDialog.cs:108-110）：
 /// x = inv.X + (inv.W - sock.W)/2，y = inv.Y + inv.H + 5 —— 全部用背包**真实**尺寸；
 /// C# Point 是 int，除法整除截断（floor 复刻）。
-fn socket_origin(inv_w: f32, inv_h: f32, sock_w: f32) -> (f32, f32) {
+/// 原点由调用方传入（背包**当前**位置——C# 动态读 InventoryDialog.Location，
+/// 仓库/交易推位或拖动后跟随；初始位 = InventoryOrigin 默认 (0,0)）。
+fn socket_origin(inv: (f32, f32), inv_w: f32, inv_h: f32, sock_w: f32) -> (f32, f32) {
     (
-        INV_X + ((inv_w - sock_w) / 2.0).floor(),
-        INV_Y + inv_h + 5.0,
+        inv.0 + ((inv_w - sock_w) / 2.0).floor(),
+        inv.1 + inv_h + 5.0,
     )
 }
 
@@ -91,6 +88,7 @@ fn spawn_socket(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
+    inv_origin: Res<InventoryOrigin>,
 ) {
     libs.0.ensure_initialized();
 
@@ -100,7 +98,7 @@ fn spawn_socket(
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
         None => (81.0, 62.0),
     };
-    let (px, py) = socket_origin(inv_w, inv_h, pw);
+    let (px, py) = socket_origin((inv_origin.0, inv_origin.1), inv_w, inv_h, pw);
 
     let white = images.add(crate::map_renderer::make_image(
         vec![255, 255, 255, 255],
@@ -175,6 +173,7 @@ fn spawn_socket(
 fn socket_ui_system(
     mut mgr: ResMut<DialogManager>,
     state: Res<SocketState>,
+    inv_origin: Res<InventoryOrigin>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -221,7 +220,7 @@ fn socket_ui_system(
         .get_image(LibraryName::Prguse3, idx)
         .map(|i| i.width.max(0) as f32)
         .unwrap_or(81.0); // Prguse3 缺失兜底：1 孔面板宽（最小情形）
-    let (px, py) = socket_origin(inv_w, inv_h, w);
+    let (px, py) = socket_origin((inv_origin.0, inv_origin.1), inv_w, inv_h, w);
     if let Ok((mut sprite, mut tf)) = panel.single_mut() {
         if let Some(h) = ui_image(
             &mut libs,
@@ -311,12 +310,28 @@ mod tests {
     /// 旧实现 y=207（格子底 +5）、x 用硬编码 280 —— 均与 C# 不符。
     #[test]
     fn socket_origin_matches_csharp_show() {
+        // 原点 (0,0)（默认背包原点，InventoryOrigin 初始值）
         // 1 孔面板宽 81（Prguse3[20] 实测）
-        assert_eq!(socket_origin(316.0, 236.0, 81.0), (117.0, 241.0));
+        assert_eq!(
+            socket_origin((0.0, 0.0), 316.0, 236.0, 81.0),
+            (117.0, 241.0)
+        );
         // 12 孔面板宽 268（Prguse3[31]）
-        assert_eq!(socket_origin(316.0, 236.0, 268.0), (24.0, 241.0));
+        assert_eq!(
+            socket_origin((0.0, 0.0), 316.0, 236.0, 268.0),
+            (24.0, 241.0)
+        );
         // 关闭钮跟随实际宽度：w-23（spawn 与运行时同步该公式）
-        assert_eq!(socket_origin(316.0, 236.0, 81.0).0 + 81.0 - 23.0, 175.0);
+        assert_eq!(
+            socket_origin((0.0, 0.0), 316.0, 236.0, 81.0).0 + 81.0 - 23.0,
+            175.0
+        );
+        // 背包被推位后（仓库推位 STORAGE_W+5=393 或交易推位 1024-316=708）面板跟随：
+        // 仓库推位 x=393+117=510；交易推位 x=708+24=732（12 孔面板）
+        assert_eq!(socket_origin((393.0, 0.0), 316.0, 236.0, 81.0).0, 510.0);
+        assert_eq!(socket_origin((708.0, 0.0), 316.0, 236.0, 268.0).0, 732.0);
+        // 拖动背包 (100,50) 后 y=50+236+5=291
+        assert_eq!(socket_origin((100.0, 50.0), 316.0, 236.0, 81.0).1, 291.0);
     }
 
     /// B0001 冒烟（PR #2553 审查实证：close_tf 与 panel 双写 Transform 若 filter 不互斥，
@@ -340,6 +355,8 @@ mod tests {
             ),
         ));
         app.init_resource::<DialogManager>();
+        // socket_ui_system/spawn_socket 读 InventoryOrigin（背包推位/拖动原点）
+        app.init_resource::<crate::game::dialogs::inventory::InventoryOrigin>();
         app.add_plugins(SocketPlugin);
         // 非 Game 状态 + 切到 Game 各跑一帧（两阶段都做：B0001 检查发生在
         // schedule 初始化，与 run_if 是否命中无关）

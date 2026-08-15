@@ -1548,6 +1548,7 @@ fn inv_socket_open_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
+    origin: Res<InventoryOrigin>,
     mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
 ) {
     if !mouse.just_pressed(MouseButton::Right) || !keys.pressed(KeyCode::ControlLeft) {
@@ -1567,8 +1568,9 @@ fn inv_socket_open_system(
     for i in range {
         let x = i % GRID_COLS;
         let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        // 命中用 InventoryOrigin——背包可能已被仓库/交易推位或拖动
+        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
             if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
                 if !item.slots.is_empty() {
