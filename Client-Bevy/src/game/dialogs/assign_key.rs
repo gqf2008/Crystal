@@ -97,6 +97,14 @@ fn cleanup_assign_key_panel(mut commands: Commands, roots: Query<Entity, With<As
     }
 }
 
+/// Assign 面板按钮标签（#2584）：C# AssignKeyPanel 按钮文本带
+/// Environment.NewLine（MainDialogs.cs:3302-3309 Shift、:3325-3332 Ctrl）——
+/// "Ctrl\nF1" 双行；1..8 无前缀不受换行影响。技能列表行内后缀
+/// （skills.rs " [Ctrl F1]"）仍是单行空格格式，二者是不同 C# 站点。
+pub fn assign_key_label(key: u8) -> String {
+    crate::game::skills::skill_key_name(key).replace(' ', "\n")
+}
+
 fn spawn_assign_key_panel(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
@@ -263,8 +271,8 @@ fn spawn_assign_key_panel(
                     Visibility::Hidden,
                 ))
                 .with_children(|c| {
-                    // 键名文本（F1..F8 / Ctrl F1..F8；统一走 skill_key_name）
-                    let label = crate::game::skills::skill_key_name(i as u8 + 1);
+                    // 键名文本：F1..F8 / "Ctrl↵F1" 双行（#2584）
+                    let label = assign_key_label(i as u8 + 1);
                     c.spawn((
                         AssignKeyWidget,
                         Text2d::new(label),
@@ -388,5 +396,23 @@ fn assign_key_system(
         if sprite.image != *frame {
             sprite.image = frame.clone();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C# AssignKeyPanel 按钮标签双行（MainDialogs.cs:3302-3333，#2584）
+    #[test]
+    fn assign_key_labels_two_line_like_csharp() {
+        assert_eq!(assign_key_label(0), "");
+        assert_eq!(assign_key_label(1), "F1");
+        assert_eq!(assign_key_label(8), "F8");
+        assert_eq!(assign_key_label(9), "Ctrl\nF1");
+        assert_eq!(assign_key_label(16), "Ctrl\nF8");
+        assert_eq!(assign_key_label(17), "Shift\nF1");
+        assert_eq!(assign_key_label(24), "Shift\nF8");
+        assert_eq!(assign_key_label(25), "");
     }
 }

@@ -913,11 +913,18 @@ fn char_skill_system(
 }
 
 /// C# KeyLabel：Key=0 空；1..8 "F1..F8"；9..16 "CTRL\nF1.."；17..24 "Shift\nF1.."
+/// （MainDialogs.cs:3422-3425：`Key > 8 ? Environment.NewLine : ""`）
+/// 越界防御：key≥25 时 C# 会 IndexOutOfRange——Bevy 返回空串（skill_key_name
+/// 的 `_ => ""` 同款防御），不让整客户端 panic（#2584）
 fn key_label(key: u8) -> String {
     if key == 0 {
         return String::new();
     }
-    let prefix = ["", "CTRL", "Shift"][((key - 1) / 8) as usize];
+    let idx = ((key - 1) / 8) as usize;
+    if idx >= 3 {
+        return String::new();
+    }
+    let prefix = ["", "CTRL", "Shift"][idx];
     let f = (key - 1) % 8 + 1;
     if key > 8 {
         format!("{}\nF{}", prefix, f)
@@ -954,6 +961,21 @@ mod tests {
     fn server_slot_mapping_covers_all() {
         assert_eq!(SERVER_SLOT_TO_POS.len(), 14);
         assert_eq!(EQUIP_SLOTS.len(), 14);
+    }
+
+    /// 键名标签双行格式 + 越界不 panic（#2584；C# MainDialogs.cs:3422-3425）
+    #[test]
+    fn key_label_two_line_and_out_of_range_safe() {
+        assert_eq!(key_label(0), "");
+        assert_eq!(key_label(1), "F1");
+        assert_eq!(key_label(8), "F8");
+        assert_eq!(key_label(9), "CTRL\nF1");
+        assert_eq!(key_label(16), "CTRL\nF8");
+        assert_eq!(key_label(17), "Shift\nF1");
+        assert_eq!(key_label(24), "Shift\nF8");
+        // key≥25：C# IndexOutOfRange——Bevy 防御返回空串
+        assert_eq!(key_label(25), "");
+        assert_eq!(key_label(255), "");
     }
 
     /// 页门控护栏（#2505）：跑真实 spawn，断言状态/State 数值标签挂在正确页背景组件上。
