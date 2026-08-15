@@ -3643,14 +3643,33 @@ impl Message<TradeAddGold> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TradeAddGold, _ctx: &mut Context<Self, Self::Reply>) {
-        // 先检查金币（避免可变借用冲突）
-        let has_enough_gold = {
+        // C# PlayerObject.TradeGold（PlayerObject.cs:10744-10760）：
+        // - amount<1 拒绝（:10750）
+        // - TradeGoldAmount **累计**（:10755 +=，客户端 my_gold += n 同语义）
+        // - 余额按已押+本次校验（C# 押金即时扣款故按剩余额查；本服押金
+        //   成交时统一结算，故改为已押总额+本次 ≤ 持有）
+        if msg.amount < 1 {
+            return;
+        }
+
+        // 先读已押金币与余额（ask 跨 await 不能持有交易借用，与原注释同理）
+        let (committed, has_enough_gold) = {
+            let committed = match self.find_trade_mut(msg.session_id) {
+                Some(t) => match t.side_of_mut(msg.session_id) {
+                    Some(s) => s.gold,
+                    None => return,
+                },
+                None => {
+                    send_system_message(&self.gate_ref, msg.session_id, "你不在交易中");
+                    return;
+                }
+            };
             let record = match self.players.get(&msg.session_id) {
                 Some(r) => r,
                 None => return,
             };
             match record.ask(GetPlayerState).await {
-                Ok(Some(s)) => s.inventory.gold >= msg.amount as u64,
+                Ok(Some(s)) => (committed, s.inventory.gold >= committed + msg.amount as u64),
                 _ => return,
             }
         };
@@ -3671,12 +3690,14 @@ impl Message<TradeAddGold> for SocialActor {
             Some(s) => s,
             None => return,
         };
-        side.gold = msg.amount as u64;
+        side.gold = committed + msg.amount as u64;
         side.unlock();
 
+        // 对方看到**累计总额**（C# :10759 S.TradeGold{Amount=TradeGoldAmount}）
+        let total = side.gold;
         let other_session = trade.other_session(msg.session_id);
         if let Some(other) = other_session {
-            send_trade_gold_update_packet(&self.gate_ref, other, msg.session_id, msg.amount as u64);
+            send_trade_gold_update_packet(&self.gate_ref, other, msg.session_id, total);
         }
     }
 }

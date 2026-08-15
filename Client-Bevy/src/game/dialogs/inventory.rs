@@ -219,6 +219,16 @@ const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# Q
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
+/// 背包背景 Title[196] 真实尺寸（C# InventoryDialog.Size 即背景图尺寸；
+/// 探针实测 316x236，缺失回退同值）。交易开窗推位公式用（TradeDialogs.cs:154
+/// `ScreenWidth - InventoryDialog.Size.Width`）。
+pub fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
+    match libs.0.get_image(LibraryName::Title, 196) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => (316.0, 236.0),
+    }
+}
+
 #[derive(Component)]
 pub struct InventoryPanel;
 
@@ -703,9 +713,11 @@ fn inventory_ui_system(
 }
 
 /// 悬停提示系统（#93/#106 通用 Tooltip）：物品格上显示 名称 + 类型/数量/耐久
+/// 命中用 InventoryOrigin（#2560：背包推位/拖动后 tooltip 跟随）
 fn inv_tooltip_system(
     inv: Res<crate::game::hud::HudState>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    origin: Res<InventoryOrigin>,
     windows: Query<&Window>,
     slots: Query<&InvSlot>,
 ) {
@@ -731,8 +743,8 @@ fn inv_tooltip_system(
         }
         let x = i % GRID_COLS;
         let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
             hit = if page == 2 {
                 inv.inventory
@@ -904,10 +916,12 @@ pub fn item_type_name(t: u8) -> &'static str {
 
 /// 背包动态格子同步（#276）：按 InventoryState.items.len() 生成/移除 InvSlot 格子。
 /// 对齐 C# InventoryDialog.Grid（8x10，位置 y%5 复用）；缩容时移除多余格子。
+/// 扩容补格按 InventoryOrigin 生成（#2560：背包不在 (0,0) 时新格与已平移格对齐）。
 #[allow(clippy::too_many_arguments)]
 fn inv_grid_sync_system(
     mut commands: Commands,
     hud: Res<HudState>,
+    origin: Res<InventoryOrigin>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
@@ -945,8 +959,8 @@ fn inv_grid_sync_system(
         }
         let x = i % GRID_COLS;
         let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         let cell = spawn_item_cell(
             &mut commands,
             &mut images,
@@ -1983,6 +1997,44 @@ mod tests {
             (InventoryOrigin::default().0, InventoryOrigin::default().1),
             (DIALOG_X, DIALOG_Y)
         );
+    }
+
+    /// #2560：扩容补格按 InventoryOrigin 生成——背包推位/拖动后新格与既有格对齐
+    /// （否则按常量 spawn 在 (0,0) 基准处，与已平移格子错位）
+    #[test]
+    fn inv_grid_sync_spawns_cells_at_inventory_origin() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        let mut hud = HudState::default();
+        hud.inventory.items = vec![None, None]; // 2 格（既有 0，扩容补 1）
+        world.insert_resource(hud);
+        // 背包被推位到 (393,50)
+        world.insert_resource(InventoryOrigin(393.0, 50.0));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        // 既有格 0（已在推位位置）
+        world.spawn((
+            InvSlot(0),
+            Transform::from_xyz(393.0 + 9.0, -(50.0 + 37.0), 6.5),
+        ));
+
+        world
+            .run_system_once(inv_grid_sync_system)
+            .expect("grid sync 应成功");
+
+        let mut q = world.query_filtered::<(&InvSlot, &Transform), ()>();
+        let (sx, sy) = (
+            393.0 + 9.0 + 1.0 * (CELL_W + 1.0),
+            -(50.0 + 37.0 + 0.0 * (CELL_H + 1.0)),
+        );
+        let cell1 = q
+            .iter(&world)
+            .find(|(s, _)| s.0 == 1)
+            .map(|(_, tf)| (tf.translation.x, tf.translation.y))
+            .expect("扩容应补出格 1");
+        assert_eq!(cell1, (sx, sy), "新格应在推位原点基准处（列 1）");
     }
 
     fn item_with_type(t: ItemType) -> InvItem {

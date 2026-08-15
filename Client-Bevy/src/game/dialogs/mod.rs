@@ -82,6 +82,8 @@ pub enum DialogKind {
     Group,
     Friend,
     Trade,
+    /// 对方交易窗（C# GuestTradeDialog——独立窗、独立拖动，与 Trade 成对显隐）
+    GuestTrade,
     Inspect,
     NpcGoods,
     Guild,
