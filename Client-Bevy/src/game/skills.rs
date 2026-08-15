@@ -28,6 +28,20 @@ pub const TOGGLE_SPELLS: [Spell; 4] = [
     Spell::DoubleSlash,
 ];
 
+/// 技能键名（C# MainDialogs.cs:3279/3423-3426 KeyLabel 公式）：
+/// `Prefixes[(key-1)/8]` = {"", "CTRL", "Shift"} +（key>8 时换行）`F{(key-1)%8+1}`。
+/// Bevy 列表/快捷栏为单行文本，C# 的 "CTRL␊F1" 两行形式单行化为 "Ctrl F1"。
+/// key=0 → 空（未绑定）；key≥25 超 C# Prefixes 范围 → 空（防御）。
+pub fn skill_key_name(key: u8) -> String {
+    match key {
+        0 => String::new(),
+        1..=8 => format!("F{}", key),
+        9..=16 => format!("Ctrl F{}", key - 8),
+        17..=24 => format!("Shift F{}", key - 16),
+        _ => String::new(),
+    }
+}
+
 /// #1610：C# PlayerObject.cs Attack1 动作——按开关状态选择随 C.Attack 发送的 Spell
 /// （HalfMoon → Spell.HalfMoon、CrossHalfMoon → Spell.CrossHalfMoon、DoubleSlash → Spell.DoubleSlash；否则 None）
 pub fn toggled_attack_spell(spell_toggles: &[(Spell, bool)]) -> Spell {
@@ -68,7 +82,13 @@ impl MagicCooldowns {
         self.map
             .iter()
             .find(|(s, _, _)| *s == spell)
-            .map(|(_, r, t)| if *t > 0.0 { (*r / *t).clamp(0.0, 1.0) } else { 0.0 })
+            .map(|(_, r, t)| {
+                if *t > 0.0 {
+                    (*r / *t).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
             .unwrap_or(0.0)
     }
 
@@ -243,10 +263,14 @@ impl SkillBarState {
         use crate::game::dialogs::settings_file::ini_str;
         let mut s = Self::default();
         for bar in 0..2usize {
-            if let Some(v) = ini_str(content, "Game", &format!("Skillbar{bar}X")).and_then(|v| v.parse::<f32>().ok()) {
+            if let Some(v) = ini_str(content, "Game", &format!("Skillbar{bar}X"))
+                .and_then(|v| v.parse::<f32>().ok())
+            {
                 s.pos[bar].0 = v;
             }
-            if let Some(v) = ini_str(content, "Game", &format!("Skillbar{bar}Y")).and_then(|v| v.parse::<f32>().ok()) {
+            if let Some(v) = ini_str(content, "Game", &format!("Skillbar{bar}Y"))
+                .and_then(|v| v.parse::<f32>().ok())
+            {
                 s.pos[bar].1 = v;
             }
             // C# GameScene.DialogProcess（L1328-1331）：存档越界（x > Resolution-100=924 或
@@ -317,12 +341,15 @@ impl Plugin for SkillsPlugin {
             )
                 .run_if(in_state(AppState::Game)),
         );
-                app.add_systems(
+        app.add_systems(
             Update,
             skills_server_events.run_if(in_state(crate::scenes::AppState::Game)),
         );
-app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
-app.add_systems(Update, magic_cooldown_system.run_if(in_state(AppState::Game)));
+        app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            magic_cooldown_system.run_if(in_state(AppState::Game)),
+        );
         app.add_systems(
             Update,
             skill_bar_pointer_system.run_if(in_state(AppState::Game)),
@@ -344,7 +371,13 @@ fn skill_bar_system(
     control: Res<crate::game::player_control::ControlState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
     actors: Query<(&crate::actor::NetObjectId, &Transform), Without<crate::actor::LocalPlayer>>,
-    mut players: Query<(Entity, &Transform, &mut ActorAnim), (With<crate::actor::LocalPlayer>, With<crate::actor::NetObjectId>)>,
+    mut players: Query<
+        (Entity, &Transform, &mut ActorAnim),
+        (
+            With<crate::actor::LocalPlayer>,
+            With<crate::actor::NetObjectId>,
+        ),
+    >,
 ) {
     const F_KEYS: [KeyCode; 8] = [
         KeyCode::F1,
@@ -363,8 +396,7 @@ fn skill_bar_system(
     if hud.fishing || hud.paralysis {
         return;
     }
-    let ctrl_held =
-        keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let ctrl_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let slot = pending.or_else(|| {
         F_KEYS
             .iter()
@@ -414,7 +446,8 @@ fn skill_bar_system(
     .unwrap_or(mir2_shared::enums::MirDirection::Down);
     if let Some(tid) = control.attack_target {
         if let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == tid) {
-            let (ttx, tty) = crate::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+            let (ttx, tty) =
+                crate::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
             target_id = tid;
             tx = ttx;
             ty = tty;
@@ -426,7 +459,9 @@ fn skill_bar_system(
         }
     }
     // #1596：C# 施法替代移动动作（CanMove=false）——清除寻路路径并回站立
-    commands.entity(pe).remove::<crate::game::movement::LocalMove>();
+    commands
+        .entity(pe)
+        .remove::<crate::game::movement::LocalMove>();
     anim.action = mir2_shared::enums::MirAction::Standing;
     anim.frame_index = 0;
 
@@ -453,6 +488,23 @@ fn skill_bar_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C# 技能键名公式锚点（MainDialogs.cs:3279 Prefixes={"","CTRL","Shift"} +
+    /// :3423-3426 `Prefixes[(key-1)/8] + (key>8?换行:"") + F{(key-1)%8+1}`）：
+    /// 1..8="F*"；9..16="Ctrl F*"（C# 两行 "CTRL␊F*" 的单行化）；17..24="Shift F*"。
+    /// 旧实现技能列表只认 1..8，9..16 显示为无键（#2550）。
+    #[test]
+    fn skill_key_name_matches_csharp() {
+        assert_eq!(skill_key_name(0), "");
+        assert_eq!(skill_key_name(1), "F1");
+        assert_eq!(skill_key_name(8), "F8");
+        assert_eq!(skill_key_name(9), "Ctrl F1");
+        assert_eq!(skill_key_name(16), "Ctrl F8");
+        assert_eq!(skill_key_name(17), "Shift F1");
+        assert_eq!(skill_key_name(24), "Shift F8");
+        // ≥25 超 C# Prefixes 下标（C# 会越界）→ 防御性空串
+        assert_eq!(skill_key_name(25), "");
+    }
 
     #[test]
     fn skill_bar_state_parse() {
@@ -496,7 +548,9 @@ mod tests {
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=100\nSkillbar0Y=-10\n");
         assert_eq!(s.pos[0], (0.0, 0.0), "负 y 应回落默认");
         // bar1 越界 → 回落 bar1 构造默认 (0,20)，且不影响 bar0
-        let s = SkillBarState::from_ini("[Game]\nSkillbar0X=100\nSkillbar0Y=50\nSkillbar1X=999\nSkillbar1Y=50\n");
+        let s = SkillBarState::from_ini(
+            "[Game]\nSkillbar0X=100\nSkillbar0Y=50\nSkillbar1X=999\nSkillbar1Y=50\n",
+        );
         assert_eq!(s.pos[0], (100.0, 50.0), "bar0 有效值不受 bar1 影响");
         assert_eq!(s.pos[1], (0.0, 20.0), "bar1 越界回落构造默认 (0,20)");
     }
@@ -708,7 +762,6 @@ mod tests {
     }
 }
 
-
 /// 消费服务端技能事件（网络层只广播 ServerEvent）
 fn skills_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -772,7 +825,6 @@ fn skills_server_events(
     }
 }
 
-
 // ============================================================================
 // 技能窗口（#136 C# MagicWindow）：显示已学技能列表（名称/等级/快捷键）
 // ============================================================================
@@ -795,53 +847,94 @@ fn spawn_skills_window(
     let font = ui_font.0.clone();
 
     // 面板背景 Title[508]（C# CharacterDialog 技能页背景；248x284）
-    let panel = if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 508) {
-        commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Skills),
-                SkillsWidget,
-                Sprite::from_image(h),
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
-                Visibility::Hidden,
-            ))
-            .id()
-    } else {
-        // 兜底：纹理缺失时退回半透明深色面板
-        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-        commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Skills),
-                SkillsWidget,
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.12, 0.12, 0.16, 0.95),
-                    custom_size: Some(Vec2::new(300.0, 360.0)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
-                Visibility::Hidden,
-            ))
-            .id()
-    };
+    let panel =
+        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 508) {
+            commands
+                .spawn((
+                    UiEntity,
+                    DialogRoot(DialogKind::Skills),
+                    SkillsWidget,
+                    Sprite::from_image(h),
+                    bevy::sprite::Anchor::TOP_LEFT,
+                    Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
+                    Visibility::Hidden,
+                ))
+                .id()
+        } else {
+            // 兜底：纹理缺失时退回半透明深色面板
+            let white = images.add(crate::map_renderer::make_image(
+                vec![255, 255, 255, 255],
+                1,
+                1,
+            ));
+            commands
+                .spawn((
+                    UiEntity,
+                    DialogRoot(DialogKind::Skills),
+                    SkillsWidget,
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgba(0.12, 0.12, 0.16, 0.95),
+                        custom_size: Some(Vec2::new(300.0, 360.0)),
+                        ..default()
+                    },
+                    bevy::sprite::Anchor::TOP_LEFT,
+                    Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
+                    Visibility::Hidden,
+                ))
+                .id()
+        };
     // 标题
-    let t = spawn_ui_text(&mut commands, &font, "技能", SKILLS_DX + 12.0, SKILLS_DY + 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 6.2);
-    commands.entity(t).insert((DialogRoot(DialogKind::Skills), SkillsWidget));
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "技能",
+        SKILLS_DX + 12.0,
+        SKILLS_DY + 8.0,
+        15.0,
+        Color::srgb(1.0, 0.9, 0.3),
+        6.2,
+    );
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Skills), SkillsWidget));
     // 关闭
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        SKILLS_DX + 272.0, SKILLS_DY + 3.0, 6.3, 20.0, 20.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        SKILLS_DX + 272.0,
+        SKILLS_DY + 3.0,
+        6.3,
+        20.0,
+        20.0,
     ) {
-        commands.entity(e).insert((SkillsClose, DialogRoot(DialogKind::Skills), SkillsWidget));
+        commands
+            .entity(e)
+            .insert((SkillsClose, DialogRoot(DialogKind::Skills), SkillsWidget));
     }
     // 列表（10 行 × 20px + 滚动条）
-    let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (SKILLS_DX + 288.0, SKILLS_DY + 36.0, 4.0, 200.0), 6.3);
-    commands.entity(track).insert((DialogRoot(DialogKind::Skills), SkillsWidget, Visibility::Visible));
-    commands.entity(thumb).insert((DialogRoot(DialogKind::Skills), SkillsWidget, Visibility::Visible));
+    let (track, thumb) = spawn_scroll_bar(
+        &mut commands,
+        &mut images,
+        (SKILLS_DX + 288.0, SKILLS_DY + 36.0, 4.0, 200.0),
+        6.3,
+    );
+    commands.entity(track).insert((
+        DialogRoot(DialogKind::Skills),
+        SkillsWidget,
+        Visibility::Visible,
+    ));
+    commands.entity(thumb).insert((
+        DialogRoot(DialogKind::Skills),
+        SkillsWidget,
+        Visibility::Visible,
+    ));
     commands.entity(panel).insert(ScrollList {
         rect_rel: (12.0, 36.0, 270.0, 200.0),
         row_h: 20.0,
@@ -855,15 +948,18 @@ fn spawn_skills_window(
     });
     for i in 0..10usize {
         let e = spawn_ui_text(
-            &mut commands, &font, "",
-            SKILLS_DX + 12.0, SKILLS_DY + 36.0 + i as f32 * 20.0,
-            12.0, Color::WHITE, 8.0,
+            &mut commands,
+            &font,
+            "",
+            SKILLS_DX + 12.0,
+            SKILLS_DY + 36.0 + i as f32 * 20.0,
+            12.0,
+            Color::WHITE,
+            8.0,
         );
-        commands.entity(e).insert((
-            SkillsLine(i),
-            DialogRoot(DialogKind::Skills),
-            SkillsWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((SkillsLine(i), DialogRoot(DialogKind::Skills), SkillsWidget));
     }
 }
 
@@ -884,7 +980,11 @@ fn skills_window_system(
 ) {
     let open = mgr.is_open(DialogKind::Skills);
     for mut vis in &mut widgets {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -904,10 +1004,10 @@ fn skills_window_system(
     for (mut text, line) in &mut lines {
         text.0 = match magics.magics.get(off + line.0) {
             Some(m) => {
-                let key = if m.key >= 1 && m.key <= 8 {
-                    format!(" [F{}]", m.key)
-                } else {
-                    String::new()
+                // 键名后缀（C# KeyLabel：0=无、1..8="F*"、9..16="Ctrl F*"、17..24="Shift F*"）
+                let key = match skill_key_name(m.key) {
+                    k if k.is_empty() => k,
+                    k => format!(" [{}]", k),
                 };
                 // #242：开关技能显示当前状态
                 let toggle = if is_toggle_spell(m.spell) {
@@ -926,7 +1026,6 @@ fn skills_window_system(
         };
     }
 }
-
 
 // ============================================================================
 // 技能快捷栏（#2487 源码级对齐 C# SkillBarDialog，MainDialogs.cs L1516-1744；重做被回滚的 #2483）
@@ -1054,13 +1153,7 @@ fn spawn_one_skill_bar(
         // mark_ui_render_layers 挂到 layer 1，而 UI 相机只画 layer 1/2。漏挂 → 子控件留在
         // 默认 layer 0 → 被 UI 相机剔除、只被地图相机画到世界原点，整栏不可见（#2517）。
         // C# BeforeDraw（L1659）：格网 Prguse[2193] @(+12,0) 50% 透明，画在底图之下
-        if let Some(h) = ui_image(
-            libs,
-            images,
-            cache,
-            LibraryName::Prguse,
-            2193,
-        ) {
+        if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 2193) {
             p.spawn((
                 UiEntity,
                 Sprite {
@@ -1073,13 +1166,7 @@ fn spawn_one_skill_bar(
             ));
         }
         // 底图 Prguse[2190] @(0,0)
-        if let Some(h) = ui_image(
-            libs,
-            images,
-            cache,
-            LibraryName::Prguse,
-            2190,
-        ) {
+        if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 2190) {
             p.spawn((
                 UiEntity,
                 Sprite::from_image(h),
@@ -1088,13 +1175,7 @@ fn spawn_one_skill_bar(
             ));
         }
         // 切换绑定按钮 Prguse[2247]=16x28 @(0,0)（L1542-1550；C# 点击仅重绘，切换逻辑已注释）
-        if let Some(h) = ui_image(
-            libs,
-            images,
-            cache,
-            LibraryName::Prguse,
-            2247,
-        ) {
+        if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 2247) {
             p.spawn((
                 UiEntity,
                 Sprite::from_image(h),
