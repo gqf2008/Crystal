@@ -12,7 +12,6 @@ use bevy::prelude::*;
 
 use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::character;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
@@ -1584,6 +1583,31 @@ fn inv_socket_open_system(
     }
 }
 
+/// 点是否落在任一可见对话框实体精灵 bbox 内（丢弃门用）。
+/// C# 语义：MirImageControl 构造器 `AutoSize = true`（MirImageControl.cs:170）
+/// → `Size = Library.GetTrueSize(Index)`——对话框按背景图全幅吞掉点击，
+/// 不落到地图 MouseDown（GameScene.cs:11361 的丢弃流程）。实体 bbox 取
+/// 实际 Transform+精灵尺寸，推位/拖动/换图后恒准（#2575：旧静态矩形失准）。
+fn cursor_over_dialog<'a>(
+    cursor: Vec2,
+    mut dialogs: impl Iterator<
+        Item = (
+            &'a Visibility,
+            &'a Transform,
+            Option<&'a Sprite>,
+            Option<&'a bevy::sprite::Anchor>,
+        ),
+    >,
+    image_assets: &Assets<Image>,
+) -> bool {
+    dialogs.any(|(vis, tf, sprite, anchor)| {
+        *vis == Visibility::Visible && {
+            let (x0, y0, x1, y1) = super::ui_sprite_rect(tf, sprite, anchor, image_assets);
+            cursor.x >= x0 && cursor.x <= x1 && cursor.y >= y0 && cursor.y <= y1
+        }
+    })
+}
+
 /// 物品高级交互：
 ///   - 右键 → 使用/装备（原版 C# MouseButtons.Right → UseItem）
 ///   - Shift+左键 → 拆分堆叠（MirAmountBox → SplitItem）
@@ -1591,7 +1615,6 @@ fn inv_socket_open_system(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inv_item_action_system(
     hud: Res<HudState>,
-    mut mgr: ResMut<DialogManager>,
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -1603,11 +1626,22 @@ fn inv_item_action_system(
     mut confirm: ResMut<InvDropConfirm>,
     npc_goods: Res<crate::game::dialogs::npc_goods::NpcGoodsState>,
     mut pending: ResMut<InvPendingAmount>,
-    // 元组参数折叠（系统参数上限 16）：全部按钮 / 数量框结果 / 背包命中原点
+    // 元组参数折叠（系统参数上限 16）：全部按钮 / 数量框结果 / 背包命中原点 /
+    // 对话框实体（丢弃门 bbox，#2575）/ 图像尺寸
     mut misc: (
         Query<&UiButton>,
         MessageReader<AmountBoxResult>,
         Res<InventoryOrigin>,
+        Query<
+            (
+                &Visibility,
+                &Transform,
+                Option<&Sprite>,
+                Option<&bevy::sprite::Anchor>,
+            ),
+            With<DialogRoot>,
+        >,
+        Res<Assets<Image>>,
     ),
     // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
     mut last_modal: Local<bool>,
@@ -1870,33 +1904,20 @@ fn inv_item_action_system(
         }
     }
 
-    // 选中物品 + 左键点场景（非背包格/非装备格/非按钮/非背包面板）→ 丢弃流程
+    // 选中物品 + 左键点场景（非背包格/非任何对话框/非按钮）→ 丢弃流程
     if mouse.just_pressed(MouseButton::Left) {
         let Some(sel) = click.selected else { return };
         if slot_at(cursor.x, cursor.y).is_some() {
             return;
         }
-        // 背包面板背景内不触发（原版：点对话框不丢物品）
-        if cursor.x >= DIALOG_X
-            && cursor.x <= DIALOG_X + 318.0
-            && cursor.y >= DIALOG_Y
-            && cursor.y <= DIALOG_Y + 256.0
-        {
+        // 点在任一可见对话框精灵 bbox 内不触发——C# 控件路由：对话框
+        // （MirImageControl 构造器 AutoSize=true → Size=背景图 TrueSize）
+        // 吞掉点击不落到地图 MouseDown（GameScene.cs:11361 才处理丢弃）。
+        // 实体 bbox 覆盖一切对话框（背包面板/角色装备区等），推位/拖动后
+        // 恒准——旧两处静态矩形（DIALOG+318x256 / character::DIALOG_X）
+        // 在推位/拖动后失准（#2575）
+        if cursor_over_dialog(cursor, misc.3.iter(), &misc.4) {
             return;
-        }
-        // 角色对话框装备格区域不触发
-        if mgr.is_open(DialogKind::Character) {
-            let in_eq = character::EQUIP_SLOTS.iter().any(|(ox, oy)| {
-                let sx = character::DIALOG_X + character::PAGE_X + ox;
-                let sy = character::DIALOG_Y + character::PAGE_Y + oy;
-                cursor.x >= sx
-                    && cursor.x <= sx + character::SLOT_W
-                    && cursor.y >= sy
-                    && cursor.y <= sy + character::SLOT_H
-            });
-            if in_eq {
-                return;
-            }
         }
         // 任意 UI 按钮上不触发
         let over_btn = misc.0.iter().any(|b| {
@@ -2043,6 +2064,108 @@ mod tests {
         assert_eq!(item_with_type(ItemType::Belt).equip_slot(), Some(12));
         assert_eq!(item_with_type(ItemType::Stone).equip_slot(), Some(13));
         assert_eq!(item_with_type(ItemType::Weapon).equip_slot(), Some(0));
+    }
+
+    /// #2575：丢弃门用对话框实体 bbox——推位/拖动后旧静态矩形（背包
+    /// DIALOG+318x256 / character::DIALOG_X 装备格）失准
+    #[test]
+    fn drop_gate_uses_dialog_entity_bbox() {
+        let mut world = World::new();
+        // 精灵均带 custom_size，无需真实图像句柄——空 Assets 即可
+        let assets = Assets::<Image>::default();
+
+        let mut q = world.query_filtered::<(
+            &Visibility,
+            &Transform,
+            Option<&Sprite>,
+            Option<&bevy::sprite::Anchor>,
+        ), With<DialogRoot>>();
+
+        // 背包被推位到 (393,50)（交易/仓库推位），bg Title[196] 316x236。
+        // Sprite 会按 Bevy required-components 自动插入 Anchor（默认 CENTER），
+        // 显式 TOP_LEFT 与 spawn_ui_sprite 的真实 UI 精灵一致
+        let inv = world
+            .spawn((
+                DialogRoot(DialogKind::Inventory),
+                Visibility::Visible,
+                Transform::from_xyz(393.0, -50.0, 0.0),
+                Sprite {
+                    custom_size: Some(Vec2::new(316.0, 236.0)),
+                    ..default()
+                },
+                bevy::sprite::Anchor::TOP_LEFT,
+            ))
+            .id();
+        // 旧位置 (150,150)：旧静态门（0,0+318x256）会吞掉 → 误判不丢弃；
+        // 推位后不在实体 bbox 内 → 放行（丢弃流程应触发）
+        assert!(!cursor_over_dialog(
+            Vec2::new(150.0, 150.0),
+            q.iter(&world),
+            &assets
+        ));
+        // 推位后面板内 (500,150) 命中
+        assert!(cursor_over_dialog(
+            Vec2::new(500.0, 150.0),
+            q.iter(&world),
+            &assets
+        ));
+
+        // 关闭（Hidden）的对话框不吞
+        world.entity_mut(inv).insert(Visibility::Hidden);
+        assert!(!cursor_over_dialog(
+            Vec2::new(500.0, 150.0),
+            q.iter(&world),
+            &assets
+        ));
+        world.entity_mut(inv).insert(Visibility::Visible);
+
+        // 角色对话框拖动到 (300,180)：装备区随实体命中（旧静态
+        // character::DIALOG_X 失准——#2575 装备区门）
+        world.spawn((
+            DialogRoot(DialogKind::Character),
+            Visibility::Visible,
+            Transform::from_xyz(300.0, -180.0, 0.0),
+            Sprite {
+                custom_size: Some(Vec2::new(280.0, 340.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+        ));
+        assert!(cursor_over_dialog(
+            Vec2::new(340.0, 200.0),
+            q.iter(&world),
+            &assets
+        ));
+        // 旧角色对话框原点处不再命中
+        assert!(!cursor_over_dialog(
+            Vec2::new(60.0, 200.0),
+            q.iter(&world),
+            &assets
+        ));
+
+        // 无 Sprite 的对话框实体退化为点（ui_sprite_rect 既有行为），不吞区域
+        world.spawn((
+            DialogRoot(DialogKind::Menu),
+            Visibility::Visible,
+            Transform::from_xyz(600.0, -400.0, 0.0),
+        ));
+        assert!(!cursor_over_dialog(
+            Vec2::new(650.0, 450.0),
+            q.iter(&world),
+            &assets
+        ));
+
+        // 边界含端点（与旧门一致：>= / <=）
+        assert!(cursor_over_dialog(
+            Vec2::new(393.0, 50.0),
+            q.iter(&world),
+            &assets
+        ));
+        assert!(cursor_over_dialog(
+            Vec2::new(393.0 + 316.0, 50.0 + 236.0),
+            q.iter(&world),
+            &assets
+        ));
     }
 
     #[test]
