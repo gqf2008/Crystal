@@ -115,7 +115,10 @@ fn spawn_assign_key_panel(
     let Some(bg) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 710) else {
         return;
     };
-    let size = images.get(&bg).map(|i| i.size()).unwrap_or(UVec2::new(350, 150));
+    let size = images
+        .get(&bg)
+        .map(|i| i.size())
+        .unwrap_or(UVec2::new(350, 150));
     let (w, h) = (size.x as f32, size.y as f32);
     let (px, py) = ((1024.0 - w) / 2.0, (768.0 - h) / 2.0);
     let panel = commands
@@ -161,7 +164,10 @@ fn spawn_assign_key_panel(
             ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 288),
             ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 289),
         ) {
-            let sz = images.get(&n).map(|i| i.size()).unwrap_or(UVec2::new(40, 20));
+            let sz = images
+                .get(&n)
+                .map(|i| i.size())
+                .unwrap_or(UVec2::new(40, 20));
             p.spawn((
                 AssignKeyWidget,
                 AssignKeyNone,
@@ -186,7 +192,10 @@ fn spawn_assign_key_panel(
             ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 157),
             ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 158),
         ) {
-            let sz = images.get(&n).map(|i| i.size()).unwrap_or(UVec2::new(40, 20));
+            let sz = images
+                .get(&n)
+                .map(|i| i.size())
+                .unwrap_or(UVec2::new(40, 20));
             p.spawn((
                 AssignKeyWidget,
                 AssignKeySave,
@@ -207,11 +216,32 @@ fn spawn_assign_key_panel(
         }
         // 16 个 F 键按钮（Prguse 1656/1657/1658）
         if let (Some(n), Some(hov), Some(pre)) = (
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1656),
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1657),
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1658),
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Prguse,
+                1656,
+            ),
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Prguse,
+                1657,
+            ),
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Prguse,
+                1658,
+            ),
         ) {
-            let sz = images.get(&n).map(|i| i.size()).unwrap_or(UVec2::new(32, 32));
+            let sz = images
+                .get(&n)
+                .map(|i| i.size())
+                .unwrap_or(UVec2::new(32, 32));
             for i in 0..16usize {
                 let rx = 17.0 + 32.0 * (i % 8) as f32 + 5.0 * ((i % 8) / 4) as f32;
                 let ry = 58.0 + 37.0 * (i / 8) as f32;
@@ -233,12 +263,8 @@ fn spawn_assign_key_panel(
                     Visibility::Hidden,
                 ))
                 .with_children(|c| {
-                    // 键名文本（F1..F8 / Ctrl F1..F8）
-                    let label = if i < 8 {
-                        format!("F{}", i + 1)
-                    } else {
-                        format!("Ctrl F{}", i - 7)
-                    };
+                    // 键名文本（F1..F8 / Ctrl F1..F8；统一走 skill_key_name）
+                    let label = crate::game::skills::skill_key_name(i as u8 + 1);
                     c.spawn((
                         AssignKeyWidget,
                         Text2d::new(label),
