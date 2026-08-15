@@ -234,7 +234,12 @@ impl PinyinDict {
     }
 
     /// 查候选：① 精确词 ② 单音节→完整单字列表 ③ 多音节→各音节 top1 拼接 + 末音节变体。
+    /// 空组合（Backspace 删尽后 recompute）直接返回空——segment("") 切出空音节表，
+    /// ③ 的 `syls.len() - 1` 会 usize 下溢 panic（登录界面输入字母再退格可稳定复现）。
     fn lookup(&self, composing: &str) -> Vec<String> {
+        if composing.is_empty() {
+            return Vec::new();
+        }
         let mut out: Vec<String> = Vec::new();
         // ① 词
         if let Some(ws) = self.words.get(composing) {
@@ -952,6 +957,28 @@ mod tests {
         assert_eq!(d.segment("nihao"), Some(vec!["ni", "hao"]));
         // 无效串切不出来
         assert_eq!(d.segment("zzz"), None);
+    }
+
+    /// 空组合回归：segment("") 返回空音节表，旧实现 ③ 的 `syls.len() - 1`
+    /// usize 下溢 panic（登录界面输入字母再 Backspace 删尽可稳定复现）。
+    #[test]
+    fn lookup_empty_composing_no_panic() {
+        let d = PinyinDict::load();
+        assert!(d.lookup("").is_empty());
+        // segment("") 是 Some(vec![])（while 不进循环）——正是下溢的输入
+        assert_eq!(d.segment(""), Some(Vec::<&str>::new()));
+    }
+
+    /// Backspace 删尽组合后 recompute 不再 panic，状态回到未组合。
+    #[test]
+    fn backspace_to_empty_no_panic() {
+        let mut ime = PinyinIme::new(PinyinDict::minimal());
+        ime.toggle(); // 中文模式
+        ime.feed_letter('n');
+        assert!(ime.is_composing());
+        ime.backspace(); // 删到空 → 旧实现此处 panic
+        assert!(!ime.is_composing());
+        assert!(ime.candidates.is_empty());
     }
 
     // ---- 中/英模式 chip ----
