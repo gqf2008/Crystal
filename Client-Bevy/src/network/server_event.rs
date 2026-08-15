@@ -348,6 +348,8 @@ pub enum ServerEvent {
     MailReceived { entry: MailEntry, detail: Option<MailDetail> },
     /// ParcelCollected：收取邮件附件结果（C# sbyte：-1=无 0=已全部收取 1=成功）
     ParcelCollected { result: i8 },
+    /// #2538 MailCost：邮资查询结果（写信面板邮资显示，C# ParcelCostLabel）
+    MailCost { cost: u32 },
     /// TradeRequest：交易请求/打开（状态机由消费端根据自身状态应用）
     TradeRequested { name: String },
     /// TradeConfirm：锁定状态（a=发起者）

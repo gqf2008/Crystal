@@ -1316,6 +1316,7 @@ fn hud_server_events(
             | ServerEvent::TradeGold { .. }
             | ServerEvent::TradeCancelled
             | ServerEvent::MailReceived { .. }
+            | ServerEvent::MailCost { .. }
             | ServerEvent::ParcelCollected { .. }
             | ServerEvent::TradeRequested { .. }
             | ServerEvent::TradeConfirm { .. }
