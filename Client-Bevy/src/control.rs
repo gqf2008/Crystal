@@ -390,6 +390,8 @@ fn apply_control_commands(
     time: Res<Time>,
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
+    chat: Res<crate::game::chat::ChatState>,
+    ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     players: Query<(Entity, &Transform, &ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
     monsters: Query<
         (&Transform, &MonsterName, &NetObjectId),
@@ -498,12 +500,18 @@ fn apply_control_commands(
                     continue;
                 };
                 let tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+                // #2595：聊天/IME 真值——e2e 验证中文输入链路的地面真值（像素比对
+                // 对细字/黑条不可靠，注入激活路径又有 ToUnicode 退化问题）
                 let s = json!({
                     "x": ptf.translation.x,
                     "y": ptf.translation.y,
                     "tile_x": tile.0,
                     "tile_y": tile.1,
                     "direction": anim.direction,
+                    "chat_input_active": chat.input_active,
+                    "chat_input_text": chat.input_text,
+                    "ime_enabled": ime.enabled(),
+                    "ime_composing": ime.composing_text(),
                 })
                 .to_string();
                 let _ = reply.send(s);
