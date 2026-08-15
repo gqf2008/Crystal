@@ -13,7 +13,9 @@
 //   - pinyin_ime_system 跑在 PreUpdate，读 KeyboardInput 更新 IME 状态
 //     （Shift 单按切换中/英；中文模式按非密码聚焦框时消费字母/数字/空格/退格/Esc）。
 //   - 各文本框系统跑在 Update：先 ime.consumes_key(key) 判断 IME 是否接管该键，
-//     接管则跳过；再 ime.take_commit() 注入已选汉字；并回填 ImeFocus（聚焦框矩形）。
+//     接管则跳过；再 ime.take_commit() 注入已选汉字；并回填 ImeFocus（聚焦框矩形，
+//     须每帧重写——PreUpdate 会被 clear_ime_focus 清空，而候选条失焦帧即隐藏，
+//     只在聚焦变化时写一次的框会让候选条在聚焦期间闪烁/消失）。
 //   - pinyin_mode_chip_system 跑在 PostUpdate：聚焦框右侧常显「中/英」模式 chip。
 //     系统 IME 被禁用后 OS 输入法工具条不再出现——chip 是它的游戏内等价物
 //     （手心/搜狗用户的「中/英指示 + Shift 切换」通用约定），否则内置 IME 无从发现。
@@ -206,7 +208,12 @@ impl PinyinDict {
 
     /// 把输入串切成有效音节序列（贪心最长匹配）；无法整串切分返回 None。
     /// 输入假定纯 ASCII 小写（来自 feed_letter）。
+    /// 不变式：Some 结果必含 ≥1 个音节——空串返回 None 而非 Some(vec![])，
+    /// 否则空表会让调用方的 `syls.len() - 1` 类索引 usize 下溢 panic（#2594 曾因此崩溃）。
     fn segment<'s>(&self, s: &'s str) -> Option<Vec<&'s str>> {
+        if s.is_empty() {
+            return None;
+        }
         let bytes = s.as_bytes();
         let mut out = Vec::new();
         let mut pos = 0;
@@ -230,12 +237,16 @@ impl PinyinDict {
                 None => return None,
             }
         }
+        // 出口钉死不变式（Some ⇒ ≥1 音节）：违反时在此炸出，
+        // 而不是等调用方 `syls.len() - 1` 类索引下溢才崩（#2594 类 panic 的根因位）
+        debug_assert!(!out.is_empty());
         Some(out)
     }
 
     /// 查候选：① 精确词 ② 单音节→完整单字列表 ③ 多音节→各音节 top1 拼接 + 末音节变体。
-    /// 空组合（Backspace 删尽后 recompute）直接返回空——segment("") 切出空音节表，
-    /// ③ 的 `syls.len() - 1` 会 usize 下溢 panic（登录界面输入字母再退格可稳定复现）。
+    /// 空组合（Backspace 删尽后 recompute）直接返回空——曾因 segment("") 切出空音节表，
+    /// ③ 的 `syls.len() - 1` usize 下溢 panic（登录界面输入字母再退格可稳定复现）；
+    /// 如今 segment 对空串也返回 None（根因修复），此处守卫保留作双保险。
     fn lookup(&self, composing: &str) -> Vec<String> {
         if composing.is_empty() {
             return Vec::new();
@@ -667,40 +678,50 @@ fn pinyin_candidate_ui_system(
         ));
     }
 
-    // 决定是否显示：中文模式 + 正在组合 + 有聚焦框
-    let show = ime.enabled() && ime.is_composing() && focus.rect.is_some();
-
-    // 文本：拼音串 + 候选 1.xxx 2.xxx ...
-    let mut label = ime.composing.clone();
-    if !ime.page_candidates().is_empty() {
-        label.push_str("  ");
-        for (i, c) in ime.page_candidates().iter().enumerate() {
-            label.push_str(&format!("{}.{} ", i + 1, c));
+    // 可见性无条件应用：失焦帧（focus=None）也要把上一帧的 Visible 落回 Hidden，
+    // 否则组合中途失焦（如点进密码框）候选条会滞留旧位置（对齐 mode chip 的隐藏路径）。
+    // 此处写死 Hidden 而非复用下方 vis：失焦分支的 Hidden 不应依赖可见性条件的合取项
+    // （vis 若含 focus 判定，将来「去冗余」删掉该项会把失焦帧写成 Visible，复发本 bug）。
+    let Some((x, y, _w, h)) = focus.rect else {
+        for (_sprite, _tf, mut v) in bars.p0().iter_mut() {
+            *v = Visibility::Hidden;
         }
-    }
-
-    let vis = if show {
+        for (_text, _tf, mut v) in bars.p1().iter_mut() {
+            *v = Visibility::Hidden;
+        }
+        return;
+    };
+    // 决定是否显示：中文模式 + 正在组合（聚焦已由上方 let-else 保证）
+    let vis = if ime.enabled() && ime.is_composing() {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
 
-    if let Some((x, y, _w, h)) = focus.rect {
-        let bar_y = y + h + 2.0; // 屏幕坐标 y 向下：输入框下方
-        for (mut _sprite, mut tf, mut v) in bars.p0().iter_mut() {
-            tf.translation.x = x + 160.0; // 背景以中心定位 → 加半宽
-            tf.translation.y = -(bar_y + 9.0); // 加半高后取负转世界坐标
-            *v = vis;
+    // 文本：拼音串 + 候选 1.xxx 2.xxx ...（只在聚焦帧构建——失焦帧上面已提前返回）
+    let mut label = ime.composing.clone();
+    let cands = ime.page_candidates();
+    if !cands.is_empty() {
+        label.push_str("  ");
+        for (i, c) in cands.iter().enumerate() {
+            label.push_str(&format!("{}.{} ", i + 1, c));
         }
-        for (mut text, mut tf, mut v) in bars.p1().iter_mut() {
-            // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
-            if text.0 != label {
-                text.0 = label.clone();
-            }
-            tf.translation.x = x + 4.0;
-            tf.translation.y = -(bar_y + 2.0);
-            *v = vis;
+    }
+
+    let bar_y = y + h + 2.0; // 屏幕坐标 y 向下：输入框下方
+    for (mut _sprite, mut tf, mut v) in bars.p0().iter_mut() {
+        tf.translation.x = x + 160.0; // 背景以中心定位 → 加半宽
+        tf.translation.y = -(bar_y + 9.0); // 加半高后取负转世界坐标
+        *v = vis;
+    }
+    for (mut text, mut tf, mut v) in bars.p1().iter_mut() {
+        // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
+        if text.0 != label {
+            text.0 = label.clone();
         }
+        tf.translation.x = x + 4.0;
+        tf.translation.y = -(bar_y + 2.0);
+        *v = vis;
     }
 }
 
@@ -959,14 +980,15 @@ mod tests {
         assert_eq!(d.segment("zzz"), None);
     }
 
-    /// 空组合回归：segment("") 返回空音节表，旧实现 ③ 的 `syls.len() - 1`
+    /// 空组合回归：旧实现 segment("") 返回 Some(vec![])，③ 的 `syls.len() - 1`
     /// usize 下溢 panic（登录界面输入字母再 Backspace 删尽可稳定复现）。
     #[test]
     fn lookup_empty_composing_no_panic() {
-        let d = PinyinDict::load();
+        let d = PinyinDict::minimal();
         assert!(d.lookup("").is_empty());
-        // segment("") 是 Some(vec![])（while 不进循环）——正是下溢的输入
-        assert_eq!(d.segment(""), Some(Vec::<&str>::new()));
+        // 根因契约：空串不构成有效切分（Some ⇒ ≥1 个音节），
+        // 调用方对结果做 len()-1 类索引才不会再下溢
+        assert_eq!(d.segment(""), None);
     }
 
     /// Backspace 删尽组合后 recompute 不再 panic，状态回到未组合。
@@ -975,6 +997,16 @@ mod tests {
         let mut ime = PinyinIme::new(PinyinDict::minimal());
         ime.toggle(); // 中文模式
         ime.feed_letter('n');
+        ime.feed_letter('i');
+        assert!(ime.is_composing());
+        // "ni" 是有效音节：候选非空——保证后面「删尽后候选复位」断言有区分度
+        // （旧用例喂单个 'n'（无效音节），候选删前删后都是空，测不出残留）
+        assert!(
+            !ime.candidates.is_empty(),
+            "前置：minimal() 词典须含音节 ni（候选非空，后续复位断言才有区分度）"
+        );
+        ime.backspace(); // 删到 "n"（无效音节 → 候选清空，仍在组合）
+        assert!(ime.candidates.is_empty()); // 钉死中间态：无效音节的候选确已清空
         assert!(ime.is_composing());
         ime.backspace(); // 删到空 → 旧实现此处 panic
         assert!(!ime.is_composing());
@@ -1073,5 +1105,68 @@ mod tests {
             .world_mut()
             .query_filtered::<&Visibility, With<PinyinModeChip>>();
         assert_eq!(*q.single(app.world()).unwrap(), Visibility::Hidden);
+    }
+
+    // ---- 候选条失焦滞留（候选条可见性失焦帧落地的回归）----
+
+    /// Update 阶段可控回填 ImeFocus（对齐生产契约：文本框每帧 Update 重写 focus.rect）
+    #[derive(Resource, Default)]
+    struct BackfillFocus(bool);
+
+    /// 组合中途失焦（focus=None）当帧候选条必须落回 Hidden：
+    /// 旧实现可见性只写在 `if let Some(focus.rect)` 内，失焦帧算出的 Hidden 永不落地，
+    /// 候选条带着旧组合（"ni 1.你 …"）无限悬浮在失焦的界面上（对齐 mode chip 测法）。
+    #[test]
+    fn candidate_bar_hidden_without_focus() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.add_plugins(bevy::asset::AssetPlugin::default()); // Assets::add 需 AssetServer
+        app.init_asset::<Font>();
+        // 强句柄：候选条 spawn 要求 is_strong（对齐 mode chip 测试）
+        let bytes = include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+        let font = Font::from_bytes(bytes.to_vec());
+        let handle = app.world_mut().resource_mut::<Assets<Font>>().add(font);
+        app.insert_resource(crate::ui::sprite_ui::UiFont(handle));
+        app.insert_resource(BackfillFocus(true));
+        app.add_systems(
+            Update,
+            |flag: Res<BackfillFocus>, mut f: ResMut<ImeFocus>| {
+                if flag.0 {
+                    f.rect = Some((10.0, 10.0, 100.0, 16.0));
+                }
+            },
+        );
+
+        // 切中文（Shift 单按，无需聚焦）
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+
+        // 聚焦 + 喂 n,i → 组合中：候选条应 Visible（spawn 的 Commands 下一帧生效）
+        send(&mut app, char_key("n"));
+        app.update();
+        send(&mut app, char_key("i"));
+        app.update();
+        app.update();
+        let mut bg = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<PinyinBarBg>>();
+        let mut txt = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<PinyinBarText>>();
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+        assert_eq!(*bg.single(app.world()).unwrap(), Visibility::Visible);
+        assert_eq!(*txt.single(app.world()).unwrap(), Visibility::Visible);
+
+        // 失焦帧（组合仍在）：候选条当帧必须落回 Hidden
+        app.world_mut().resource_mut::<BackfillFocus>().0 = false;
+        app.update();
+        // 组合未被取消——上面的 Hidden 只能来自失焦路径，而非组合结束
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+        assert_eq!(*bg.single(app.world()).unwrap(), Visibility::Hidden);
+        assert_eq!(*txt.single(app.world()).unwrap(), Visibility::Hidden);
     }
 }
