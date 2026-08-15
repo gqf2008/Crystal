@@ -1595,7 +1595,7 @@ impl Message<UseItemRequest> for WorldActor {
                             };
                             let Some(conq) = self.conquest_instances.iter().find(|c| {
                                 c.owner_guild.as_deref() == Some(guild_name.as_str())
-                                    && c.state == crate::actors::world::conquest::WarState::Idle
+                                    && c.is_peace()
                             }) else {
                                 send_system_message(
                                     &self.gate_ref,

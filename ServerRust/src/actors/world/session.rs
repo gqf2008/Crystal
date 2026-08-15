@@ -6067,6 +6067,8 @@ impl Message<ChatRequest> for WorldActor {
                                     &self.players,
                                     &format!("攻城战 {} 已停止", conquest_id),
                                 );
+                                // #2568：战终状态持久化
+                                self.persist_conquest_state(conquest_id).await;
                             } else {
                                 inst.start_war(&guild);
                                 broadcast_system_message(
@@ -6074,6 +6076,8 @@ impl Message<ChatRequest> for WorldActor {
                                     &self.players,
                                     &format!("攻城战 {} 已开始（攻击方：{}）", conquest_id, guild),
                                 );
+                                // #2568：开战状态持久化
+                                self.persist_conquest_state(conquest_id).await;
                             }
                         } else if inst.state != crate::actors::world::conquest::WarState::InProgress
                         {
@@ -6083,6 +6087,8 @@ impl Message<ChatRequest> for WorldActor {
                                 msg.session_id,
                                 &format!("领地 {} 已重置", conquest_id),
                             );
+                            // #2568：重置持久化（清归属）
+                            self.persist_conquest_state(conquest_id).await;
                         } else {
                             send_system_message(
                                 &self.gate_ref,

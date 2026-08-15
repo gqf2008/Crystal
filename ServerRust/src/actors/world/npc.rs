@@ -2176,6 +2176,8 @@ impl WorldActor {
             "NPC TakeConquestGold: conquest={} gold={}",
             conquest_index, amount
         );
+        // #2568：金库变更持久化
+        self.persist_conquest_state(conquest_index).await;
     }
 
     /// NPC 脚本 SETCONQUESTRATE：所有者设置税率（对齐 C# ActionType.SetConquestRate / NPCRate）
@@ -2209,6 +2211,8 @@ impl WorldActor {
                 "NPC SetConquestRate: conquest={} rate={}",
                 conquest_index, rate
             );
+            // #2568：税率变更持久化
+            self.persist_conquest_state(conquest_index).await;
         }
     }
 
@@ -2249,6 +2253,8 @@ impl WorldActor {
             "NPC StartConquest: conquest={} state={:?}",
             conquest_index, conquest.state
         );
+        // #2568：开战/战终状态持久化
+        self.persist_conquest_state(conquest_index).await;
     }
 
     /// NPC 脚本 SCHEDULECONQUEST：宣战（对齐 C# ActionType.ScheduleConquest：非所有者且未开战 → 设 Attacker）
@@ -2271,9 +2277,7 @@ impl WorldActor {
         else {
             return;
         };
-        if conquest.owner_guild.as_deref() != Some(guild_name.as_str())
-            && conquest.state == crate::actors::world::conquest::WarState::Idle
-        {
+        if conquest.owner_guild.as_deref() != Some(guild_name.as_str()) && conquest.is_peace() {
             conquest.attacker_guild = Some(guild_name.clone());
             send_system_message(
                 &self.gate_ref,
@@ -2284,6 +2288,9 @@ impl WorldActor {
                 "NPC ScheduleConquest: conquest={} attacker={}",
                 conquest_index, guild_name
             );
+            // #2568：宣战方注册持久化（Request 型开战读取）
+            let cid = conquest.id;
+            self.persist_conquest_state(cid).await;
         }
     }
 }
@@ -2356,6 +2363,8 @@ impl WorldActor {
             "NPC RepairSiege: conquest={} id={} kind={:?} cost={}",
             conquest_index, id, kind, cost
         );
+        // #2568：结构 HP 修复持久化
+        self.persist_conquest_state(conquest_index).await;
     }
 
     /// NPC 脚本 OPENGATE/CLOSEGATE：城门开关
@@ -2401,6 +2410,8 @@ impl WorldActor {
             }
         }
         debug!("NPC RepairAll: conquest={}", conquest_index);
+        // #2568：结构 HP 修复持久化
+        self.persist_conquest_state(conquest_index).await;
     }
 }
 
@@ -2613,6 +2624,9 @@ impl WorldActor {
             "NPC BuyGT: {} bought conquest {}",
             guild_name, self.conquest_instances[idx].id
         );
+        // #2568：购买（owner/租期）变更持久化
+        let cid = self.conquest_instances[idx].id;
+        self.persist_conquest_state(cid).await;
     }
 
     /// NPC 脚本 TELEPORTGT：传送到行会领地（对齐 C# ActionType.TeleportGT）
@@ -2707,6 +2721,9 @@ impl WorldActor {
             &format!("领地租期延长 {} 天（剩余 {} 天）", days, left),
         );
         debug!("NPC ExtendGT: {} +{}d (left {})", guild_name, days, left);
+        // #2568：租期延长持久化
+        let cid = self.conquest_instances[gt].id;
+        self.persist_conquest_state(cid).await;
     }
 
     /// NPC 脚本 DISPLAYGTRENTALDAYS：显示剩余天数（对齐 C# ActionType.DisplayGTRentalDays）
@@ -2863,6 +2880,9 @@ impl WorldActor {
             &format!("领地已挂售，价格 {}", price),
         );
         debug!("NPC GTSale: {} price={}", guild_name, price);
+        // #2568：挂售变更持久化
+        let cid = self.conquest_instances[gt].id;
+        self.persist_conquest_state(cid).await;
     }
 
     /// NPC 脚本 GTCANCELSALE：取消挂售（对齐 C# ActionType.GTCancelSale）
@@ -2894,6 +2914,9 @@ impl WorldActor {
         self.conquest_instances[gt].sale_price = 0;
         send_system_message(&self.gate_ref, session_id, "已取消领地挂售");
         debug!("NPC GTCancelSale: {}", guild_name);
+        // #2568：取消挂售持久化
+        let cid = self.conquest_instances[gt].id;
+        self.persist_conquest_state(cid).await;
     }
 }
 

@@ -579,6 +579,19 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             file_name TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (conquest_idx, idx)
         );
+        -- #2568：征服动态态（C# Envir.SaveConquests/.mcd 的 DB 化——Owner/Attacker/金库/税率/结构HP/挂售/租期）
+        CREATE TABLE IF NOT EXISTS conquest_state (
+            idx INTEGER PRIMARY KEY,
+            owner_guild TEXT,
+            attacker_guild TEXT,
+            gold_storage INTEGER NOT NULL DEFAULT 0,
+            tax_rate INTEGER NOT NULL DEFAULT 0,
+            gates_hp_json TEXT NOT NULL DEFAULT '[]',
+            walls_hp_json TEXT NOT NULL DEFAULT '[]',
+            for_sale INTEGER NOT NULL DEFAULT 0,
+            sale_price INTEGER NOT NULL DEFAULT 0,
+            rent_expire_tick INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS monster_drops (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             monster_index INTEGER NOT NULL,
@@ -4348,6 +4361,77 @@ pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestIn
     Ok(out)
 }
 
+/// 征服结构动态 HP（#2568：城门/城墙按 (conquest_id, 结构 index) 匹配回填）
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ConquestStructureHp {
+    pub index: i32,
+    pub hp: i32,
+}
+
+/// 征服领地动态态（#2568：对应 C# ConquestGuildInfo 持久化字段——
+/// Owner/AttackerID/GoldStorage/NPCRate/Gate/Wall HP/挂售/GTRent）
+#[derive(Debug, Clone, Default)]
+pub struct ConquestStateRow {
+    /// 征服区域 ID（conquest_infos.idx）
+    pub index: i32,
+    pub owner_guild: Option<String>,
+    pub attacker_guild: Option<String>,
+    pub gold_storage: u64,
+    pub tax_rate: u8,
+    pub gates_hp: Vec<ConquestStructureHp>,
+    pub walls_hp: Vec<ConquestStructureHp>,
+    pub for_sale: bool,
+    pub sale_price: u64,
+    pub rent_expire_tick: u64,
+}
+
+/// 保存单个领地动态态（UPSERT；C# Envir.SaveConquests——NeedSave 时写 .mcd 的 DB 化）
+pub async fn save_conquest_state(pool: &DbPool, row: &ConquestStateRow) -> anyhow::Result<()> {
+    let gates_hp_json = serde_json::to_string(&row.gates_hp)?;
+    let walls_hp_json = serde_json::to_string(&row.walls_hp)?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO conquest_state (idx, owner_guild, attacker_guild, gold_storage, tax_rate, gates_hp_json, walls_hp_json, for_sale, sale_price, rent_expire_tick) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(row.index)
+    .bind(&row.owner_guild)
+    .bind(&row.attacker_guild)
+    .bind(row.gold_storage as i64)
+    .bind(row.tax_rate as i32)
+    .bind(&gates_hp_json)
+    .bind(&walls_hp_json)
+    .bind(row.for_sale as i32)
+    .bind(row.sale_price as i64)
+    .bind(row.rent_expire_tick as i64)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 加载全部领地动态态（C# Envir.LoadConquests 启动回绑；无行的领地保持默认态）
+pub async fn load_conquest_states(pool: &DbPool) -> anyhow::Result<Vec<ConquestStateRow>> {
+    let rows = sqlx::query("SELECT * FROM conquest_state ORDER BY idx")
+        .fetch_all(pool)
+        .await?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(ConquestStateRow {
+            index: r.get("idx"),
+            owner_guild: r.get("owner_guild"),
+            attacker_guild: r.get("attacker_guild"),
+            gold_storage: r.get::<i64, _>("gold_storage").max(0) as u64,
+            tax_rate: r.get::<i64, _>("tax_rate").clamp(0, 255) as u8,
+            gates_hp: serde_json::from_str(&r.get::<String, _>("gates_hp_json"))
+                .unwrap_or_default(),
+            walls_hp: serde_json::from_str(&r.get::<String, _>("walls_hp_json"))
+                .unwrap_or_default(),
+            for_sale: r.get::<i64, _>("for_sale") != 0,
+            sale_price: r.get::<i64, _>("sale_price").max(0) as u64,
+            rent_expire_tick: r.get::<i64, _>("rent_expire_tick").max(0) as u64,
+        });
+    }
+    Ok(out)
+}
+
 /// Load all item infos from DB
 pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
     let rows = sqlx::query("SELECT * FROM item_infos ORDER BY idx")
@@ -6068,6 +6152,69 @@ mod tests {
         assert_eq!(list[0].flags[0].y, 6);
         assert_eq!(list[0].flags[0].name, "旗子");
         assert_eq!(list[0].flags[0].file_name, "flag.txt");
+    }
+
+    #[tokio::test]
+    async fn test_conquest_state_roundtrip() {
+        // #2568：conquest_state 动态态 save→load 往返（C# Envir.SaveConquests/LoadConquests 语义）
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        // 新库无行 → 空（旧行 NULL → 默认态由调用方处理）
+        assert!(load_conquest_states(&pool).await.unwrap().is_empty());
+
+        let row = ConquestStateRow {
+            index: 3,
+            owner_guild: Some("沙巴克盟".to_string()),
+            attacker_guild: Some("挑战者".to_string()),
+            gold_storage: 12345,
+            tax_rate: 8,
+            gates_hp: vec![ConquestStructureHp {
+                index: 1,
+                hp: 25000,
+            }],
+            walls_hp: vec![
+                ConquestStructureHp { index: 2, hp: 0 },
+                ConquestStructureHp {
+                    index: 3,
+                    hp: 30000,
+                },
+            ],
+            for_sale: true,
+            sale_price: 2_000_000,
+            rent_expire_tick: 30 * 864_000,
+        };
+        save_conquest_state(&pool, &row).await.unwrap();
+        let list = load_conquest_states(&pool).await.unwrap();
+        assert_eq!(list.len(), 1);
+        let st = &list[0];
+        assert_eq!(st.index, 3);
+        assert_eq!(st.owner_guild.as_deref(), Some("沙巴克盟"));
+        assert_eq!(st.attacker_guild.as_deref(), Some("挑战者"));
+        assert_eq!(st.gold_storage, 12345);
+        assert_eq!(st.tax_rate, 8);
+        assert_eq!(st.gates_hp.len(), 1);
+        assert_eq!((st.gates_hp[0].index, st.gates_hp[0].hp), (1, 25000));
+        assert_eq!(st.walls_hp.len(), 2);
+        assert_eq!((st.walls_hp[1].index, st.walls_hp[1].hp), (3, 30000));
+        assert!(st.for_sale);
+        assert_eq!(st.sale_price, 2_000_000);
+        assert_eq!(st.rent_expire_tick, 30 * 864_000);
+
+        // 覆盖写（易主 + 清挂售 + NULL owner）
+        let mut row2 = row.clone();
+        row2.owner_guild = None;
+        row2.attacker_guild = None;
+        row2.for_sale = false;
+        row2.sale_price = 0;
+        row2.gold_storage = 0;
+        save_conquest_state(&pool, &row2).await.unwrap();
+        let list = load_conquest_states(&pool).await.unwrap();
+        assert_eq!(list.len(), 1, "UPSERT 不新增行");
+        assert!(list[0].owner_guild.is_none());
+        assert!(list[0].attacker_guild.is_none());
+        assert!(!list[0].for_sale);
+        assert_eq!(list[0].gold_storage, 0);
+        // 结构 HP 保持
+        assert_eq!(list[0].gates_hp.len(), 1);
     }
 
     #[tokio::test]
