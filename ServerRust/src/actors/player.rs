@@ -566,6 +566,30 @@ impl PlayerState {
         (v + v * self.max_mac_rate_percent / 100).max(self.effective_min_mac())
     }
 
+    /// #2569：apply 侧四层保护快照（C# HumanObject.ApplyPoison :7380-7410）——
+    /// PoisonResist 掷骰豁免 / 绿毒 MAC 减免 / PoisonRecovery 缩短 Green/Red 时长
+    pub fn poison_defence(&self) -> crate::combat::poison::PoisonDefence {
+        crate::combat::poison::PoisonDefence {
+            poison_resist: self.poison_resist,
+            poison_recovery: self.poison_recovery,
+            mac_range: Some((self.effective_min_mac(), self.effective_max_mac())),
+        }
+    }
+
+    /// #2569：毒 tick 推进与结算（C# HumanObject.ProcessPoison :678-693）。
+    /// 推进 1 秒 duration 并按 GREEN/RED/BLEEDING 掉血；毒伤写入 `last_damage_ms`，
+    /// 使 tick.rs 的 10s 自然回血窗口在中毒期间持续被推开
+    /// （C# :692 `RegenTime = Envir.Time + RegenDelay`）。返回本次毒伤（0=无毒伤）。
+    /// 仅毒伤走此路径，不影响其他伤害来源。
+    pub fn tick_poisons_damage(&mut self, now_ms: i64) -> i32 {
+        let dmg = crate::combat::poison::tick_poisons(&mut self.poison_list, 1);
+        if dmg > 0 {
+            self.hp = (self.hp - dmg).max(0);
+            self.last_damage_ms = now_ms;
+        }
+        dmg
+    }
+
     /// 最大 HP（基础+装备+MaxHpBoost buff；C# Stats[Stat.HP]，HealthAid/MaxHpBoost 计入）
     pub fn effective_max_hp(&self) -> i32 {
         let total = self.max_hp
@@ -2486,8 +2510,11 @@ impl Message<ApplyCombatPoisons> for PlayerActor {
         msg: ApplyCombatPoisons,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // #2569：过四层保护再入列（C# HumanObject.ApplyPoison :7380-7458）——
+        // PoisonResist 掷骰豁免 / 绿毒 MAC 减免 / PoisonRecovery 缩时 / 强度与永冻保护
+        let def = self.state.poison_defence();
         for p in msg.poisons {
-            crate::combat::poison::apply_poison(&mut self.state.poison_list, p);
+            crate::combat::poison::apply_poison(&mut self.state.poison_list, p, &def);
         }
     }
 }
@@ -2824,7 +2851,8 @@ impl Message<TickBuff> for PlayerActor {
                 }
             }
         }
-        if self.state.buffs.is_empty() {
+        // #2569：无 buff 但带毒的玩家也必须继续（否则毒 tick/阶段推进永不执行）
+        if self.state.buffs.is_empty() && self.state.poison_list.is_empty() {
             return;
         }
         let results = crate::combat::buff::tick_buffs(&mut self.state.buffs, 1);
@@ -2902,15 +2930,59 @@ impl Message<TickBuff> for PlayerActor {
 
         // Poison tick（每 5 ticks 触发一次，推进 1 秒的 duration/伤害，略快于真实时间但可接受）
         if !self.state.poison_list.is_empty() {
-            let poison_dmg = crate::combat::poison::tick_poisons(&mut self.state.poison_list, 1);
+            // #2569：毒伤统一走 tick_poisons_damage——掉血 + 写 last_damage_ms 阻断
+            // 自然回血窗口（C# ProcessPoison :692 RegenTime = now + RegenDelay）
+            let poison_dmg = self.state.tick_poisons_damage(now_ms);
             if poison_dmg > 0 {
-                self.state.hp = (self.state.hp - poison_dmg).max(0);
                 total_hp -= poison_dmg;
                 // 中毒致死
                 if self.state.hp == 0 && !self.state.is_dead {
                     self.state.is_dead = true;
                     // #1319：C# Die()——中毒致死同样清 Buff + PoisonList + 灰名，并逐 buff 下发 S.RemoveBuff
                     self.clear_death_state();
+                }
+            }
+            // #2569：DelayedExplosion 三阶段推进（C# ProcessDelayedExplosion :695-769）——
+            // 状态机在 poison.rs（与怪物侧共用），玩家侧毫秒时间基；
+            // 死亡则不推进（C# Dead 直接结束，毒由 clear_death_state 清理）
+            if !self.state.is_dead {
+                if let Some(ev) = crate::combat::poison::advance_delayed_explosion(
+                    &mut self.state.poison_list,
+                    now_ms as u64,
+                    crate::combat::poison::DELAYED_EXPLOSION_STAGE_WAIT_MS,
+                ) {
+                    match ev {
+                        crate::combat::poison::DelayedExplosionEvent::Stage1 => {
+                            // 阶段 1：广播 ObjectEffect(DelayedExplosion, EffectType=1)
+                            let _ = self
+                                .world_ref
+                                .tell(crate::actors::world::BroadcastDelayedExplosionStage {
+                                    object_id: self.state.object_id,
+                                    stage: 1,
+                                    map_index: self.state.map_index,
+                                })
+                                .try_send();
+                        }
+                        crate::combat::poison::DelayedExplosionEvent::Explode {
+                            owner_session,
+                            value,
+                        } => {
+                            // 阶段 2：引爆（广播 EffectType=2 + RemoveDelayedExplosion +
+                            // 以施法者数据在当前位置结算 3×3 AoE），由世界 actor 处理
+                            let _ = self
+                                .world_ref
+                                .tell(crate::actors::world::PlayerDelayedExplosionBlast {
+                                    target_session: self.state.session_id,
+                                    object_id: self.state.object_id,
+                                    map_index: self.state.map_index,
+                                    x: self.state.x,
+                                    y: self.state.y,
+                                    owner_session,
+                                    value,
+                                })
+                                .try_send();
+                        }
+                    }
                 }
             }
         }
@@ -7745,6 +7817,48 @@ mod tests {
         assert!(movement_blocked_by_poison(&list(PoisonType::FROZEN)));
         assert!(!movement_blocked_by_poison(&list(PoisonType::GREEN)));
         assert!(!movement_blocked_by_poison(&[]));
+    }
+
+    #[test]
+    fn poison_tick_damage_blocks_regen_window() {
+        // #2569：C# ProcessPoison :688-692——毒跳伤后 RegenTime = now + RegenDelay(10s)，
+        // 中毒期间自然回血窗口持续被推开（tick.rs 以 now - last_damage_ms < 10_000 判定）
+        use crate::combat::poison::Poison;
+        use mir2_shared::enums::PoisonType;
+        let mut st = make_state();
+        st.poison_list = vec![Poison::new(PoisonType::GREEN, 5, 3, 1000)];
+        st.hp = 100;
+        let t0 = 1_000_000i64;
+        assert_eq!(st.tick_poisons_damage(t0), 3);
+        assert_eq!(st.hp, 97);
+        assert_eq!(st.last_damage_ms, t0);
+        // tick.rs:regen_blocked 同款窗口判定：t0+9999 仍阻断，t0+10_000 起恢复
+        assert!(t0 + 9_999 - st.last_damage_ms < 10_000);
+        assert!(!(t0 + 10_000 - st.last_damage_ms < 10_000));
+        // 连续跳伤把窗口持续推开
+        assert_eq!(st.tick_poisons_damage(t0 + 4_000), 3);
+        assert_eq!(st.last_damage_ms, t0 + 4_000);
+        assert!(t0 + 13_000 - st.last_damage_ms < 10_000);
+        // 无毒伤路径（SLOW value=0）不写 last_damage_ms——仅毒伤阻断回血
+        let mut st2 = make_state();
+        st2.poison_list = vec![Poison::new(PoisonType::SLOW, 5, 0, 1000)];
+        st2.last_damage_ms = 42;
+        assert_eq!(st2.tick_poisons_damage(t0), 0);
+        assert_eq!(st2.last_damage_ms, 42);
+    }
+
+    #[test]
+    fn player_poison_defence_wires_stats() {
+        // #2569：PlayerState::poison_defence 接入 resist/recovery/MAC（C# :7384/:7390/:7410）
+        let mut st = make_state();
+        st.poison_resist = 5;
+        st.poison_recovery = 3;
+        st.min_mac = 4;
+        st.max_mac = 8;
+        let def = st.poison_defence();
+        assert_eq!(def.poison_resist, 5);
+        assert_eq!(def.poison_recovery, 3);
+        assert_eq!(def.mac_range, Some((4, 8)));
     }
 
     #[test]

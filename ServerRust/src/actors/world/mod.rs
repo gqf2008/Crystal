@@ -293,6 +293,151 @@ impl Message<BroadcastObjectEffect> for WorldActor {
     }
 }
 
+/// #2569：广播 DelayedExplosion 阶段特效（C# ObjectEffect EffectType=1/2，
+/// HumanObject.cs:748-755）。玩家携带毒的阶段推进在 PlayerActor 内进行，
+/// 经此消息回世界侧广播。
+pub struct BroadcastDelayedExplosionStage {
+    pub object_id: u32,
+    pub stage: u8,
+    pub map_index: u16,
+}
+
+impl Message<BroadcastDelayedExplosionStage> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: BroadcastDelayedExplosionStage,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.broadcast_object_effect(
+            msg.object_id,
+            mir2_shared::enums::SpellEffect::DelayedExplosion,
+            msg.stage as u32,
+            0,
+            msg.map_index,
+        )
+        .await;
+    }
+}
+
+/// #2569：玩家携带的 DelayedExplosion 到期引爆（C# ProcessDelayedExplosion 阶段 2，
+/// HumanObject.cs:752-772）。广播 ObjectEffect(EffectType=2) + RemoveDelayedExplosion，
+/// 并以施法者（owner_session）属性在炸弹当前位置结算 3×3 AoE。
+/// 简化：不反查施法者 GetMagic(Spell.DelayedExplosion) 法术明细，以毒自带 value
+/// 配合施法者 MC/等级走 resolve_attack（MAC）做等价伤害——与怪物侧引爆结算一致；
+/// AoE 命中 3×3 内怪物与携带者本人，不波及其他玩家。
+pub struct PlayerDelayedExplosionBlast {
+    /// 携带炸弹的玩家
+    pub target_session: u64,
+    pub object_id: u32,
+    pub map_index: u16,
+    pub x: i32,
+    pub y: i32,
+    /// 施法者（挂毒者）
+    pub owner_session: u64,
+    /// 引爆伤害参数（挂毒时的毒 value）
+    pub value: i32,
+}
+
+impl Message<PlayerDelayedExplosionBlast> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: PlayerDelayedExplosionBlast,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        // 引爆特效（EffectType=2）
+        self.broadcast_object_effect(
+            msg.object_id,
+            mir2_shared::enums::SpellEffect::DelayedExplosion,
+            2,
+            0,
+            msg.map_index,
+        )
+        .await;
+        // 移除清理广播（C# HumanObject.cs:6261-6272 RemoveDelayedExplosion）
+        let mut rb = Vec::new();
+        rb.extend_from_slice(&msg.object_id.to_le_bytes());
+        let pkt = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::RemoveDelayedExplosion as i16,
+            &rb,
+        );
+        broadcast_to_map(&self.gate_ref, &self.players, msg.map_index, &pkt).await;
+
+        // 施法者属性（离线/死亡则仅特效，对齐怪物侧引爆的既有跳过行为）
+        let (attacker_stats, caster_level, caster_oid) = match self.players.get(&msg.owner_session)
+        {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) if !s.is_dead => (s.to_combat_stats(), s.level, s.object_id),
+                _ => return,
+            },
+            None => return,
+        };
+
+        // 3×3 AoE——怪物（与怪物侧引爆同款 resolve_attack/MAC 结算）
+        let hit_ids: Vec<u32> = self
+            .monsters
+            .iter()
+            .filter(|(_, m)| {
+                let dist = (m.x - msg.x).abs() + (m.y - msg.y).abs();
+                dist <= 1 && m.hp > 0 && m.map_index == msg.map_index
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for mid in hit_ids {
+            if let Some(monster) = self.monsters.get_mut(&mid) {
+                let defender_stats = monster.to_combat_stats();
+                // #1452：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                let level_offset =
+                    crate::combat::attack::level_offset(caster_level, monster.level.max(0) as u16);
+                let r = crate::combat::attack::resolve_attack(
+                    &attacker_stats,
+                    &defender_stats,
+                    msg.value.max(1),
+                    mir2_shared::enums::DefenceType::Mac,
+                    level_offset,
+                );
+                if r.is_hit && r.damage > 0 {
+                    monster.take_damage(r.damage);
+                    monster.register_hit(msg.owner_session, self.tick_count);
+                    self.pending_gather.push(msg.owner_session);
+                    monster.provoked = true;
+                    monster.target_session = Some(msg.owner_session);
+                }
+            }
+        }
+
+        // 携带者本人（C# 引爆不分敌我，炸弹在身上）：以施法者数据对其结算 MAC 伤害
+        if let Some(r) = self.players.get(&msg.target_session) {
+            let ts = match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) if !s.is_dead => s,
+                _ => return,
+            };
+            let defender_stats = ts.to_combat_stats();
+            let level_offset = crate::combat::attack::level_offset(caster_level, ts.level);
+            let hit = crate::combat::attack::resolve_attack(
+                &attacker_stats,
+                &defender_stats,
+                msg.value.max(1),
+                mir2_shared::enums::DefenceType::Mac,
+                level_offset,
+            );
+            if hit.is_hit && hit.damage > 0 {
+                let _ = r
+                    .actor_ref
+                    .ask(crate::actors::player::TakeDamage {
+                        attacker_id: caster_oid,
+                        attacker_session: msg.owner_session,
+                        damage: hit.damage,
+                    })
+                    .await;
+            }
+        }
+    }
+}
+
 /// C# MonsterObject.DeadDelay 默认：180s（100ms/tick = 1800）
 pub(crate) const CORPSE_DEFAULT_TICKS: u64 = 1800;
 /// C# HarvestMonster RemainingSkinCount=2
@@ -1196,6 +1341,23 @@ impl MonsterState {
         self.max_sc = scale_monster_stat(self.max_sc, dmg_m);
     }
 
+    /// #2569：怪物侧毒防御快照（C# MonsterObject.ApplyPoison :2782-2810——
+    /// 怪物无 PoisonResist/PoisonRecovery 属性，两层以 0 空转；保留 MAC 减免与强度/永冻保护）
+    pub fn poison_defence(&self) -> crate::combat::poison::PoisonDefence {
+        crate::combat::poison::PoisonDefence {
+            poison_resist: 0,
+            poison_recovery: 0,
+            mac_range: Some((self.min_mac, self.max_mac)),
+        }
+    }
+
+    /// #2569：过四层保护施加毒（C# MonsterObject.ApplyPoison）；返回是否实际生效。
+    /// 所有对怪物施毒的入口统一走此方法（替代裸 `apply_poison(&mut monster.poison_list, ..)`）。
+    pub fn apply_poison_defended(&mut self, p: crate::combat::poison::Poison) -> bool {
+        let def = self.poison_defence();
+        crate::combat::poison::apply_poison(&mut self.poison_list, p, &def)
+    }
+
     /// 中毒：经 behavior.on_poison 过滤。
     pub fn try_apply_poison(&mut self, poison: crate::combat::poison::Poison) {
         let mut behavior = std::mem::replace(
@@ -1203,7 +1365,7 @@ impl MonsterState {
             Box::new(crate::actors::world::ai::DefaultBehavior::new()),
         );
         if behavior.on_poison(poison) {
-            crate::combat::poison::apply_poison(&mut self.poison_list, poison);
+            self.apply_poison_defended(poison);
         }
         self.behavior = behavior;
     }
@@ -13147,6 +13309,53 @@ mod tests {
         assert!(boss.is_boss);
         assert!(!boss.is_elite);
         assert_eq!(boss.ai_profile.ai_type, MonsterAiType::Boss);
+    }
+
+    /// #2569：怪物侧 apply 四层保护（C# MonsterObject.ApplyPoison :2782-2810——
+    /// 无 resist/recovery，保留 MAC 减免 + 强度/永冻保护）
+    #[test]
+    fn monster_apply_poison_defended_layers() {
+        use mir2_shared::enums::PoisonType;
+        let mut m = test_monster_state();
+        m.min_mac = 5;
+        m.max_mac = 5;
+        // ② 绿毒 MAC 减免：value 3 < armour 5 → 整条丢弃
+        assert!(!m.apply_poison_defended(crate::combat::poison::Poison::new(
+            PoisonType::GREEN,
+            5,
+            3,
+            1000
+        )));
+        // value 8 ≥ 5 → 生效且 value 减 5
+        assert!(m.apply_poison_defended(crate::combat::poison::Poison::new(
+            PoisonType::GREEN,
+            5,
+            8,
+            1000
+        )));
+        assert_eq!(m.poison_list[0].value, 3);
+        // ④ 弱绿毒不覆盖强绿毒（value 2 < 3）
+        assert!(!m.apply_poison_defended(crate::combat::poison::Poison::new(
+            PoisonType::GREEN,
+            99,
+            2,
+            1000
+        )));
+        assert_eq!(m.poison_list[0].value, 3);
+        // ④ 永冻保护：FROZEN 持续期内不可重复施加（即使时长更长）
+        assert!(m.apply_poison_defended(crate::combat::poison::Poison::new(
+            PoisonType::FROZEN,
+            3,
+            0,
+            1000
+        )));
+        assert!(!m.apply_poison_defended(crate::combat::poison::Poison::new(
+            PoisonType::FROZEN,
+            99,
+            0,
+            1000
+        )));
+        assert_eq!(m.poison_list[1].duration_s, 3);
     }
 
     fn test_monster_state() -> MonsterState {

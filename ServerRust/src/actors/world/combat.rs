@@ -956,15 +956,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                             monster.register_hit(msg.session_id, self.tick_count);
                             // TwinDrakeBlade 最终击：概率 Stun（C# HumanObject.cs:6803，Random(20)<=Lv+1）
                             if kind == 0 && fastrand::i32(0..20) <= lv as i32 + 1 {
-                                crate::combat::poison::apply_poison(
-                                    &mut monster.poison_list,
-                                    crate::combat::poison::Poison::new(
-                                        mir2_shared::enums::PoisonType::STUN,
-                                        2 + lv as u32,
-                                        0,
-                                        1000,
-                                    ),
-                                );
+                                monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::STUN,
+                                    2 + lv as u32,
+                                    0,
+                                    1000,
+                                ));
                                 debug!(
                                     "Player {} TwinDrakeBlade stunned '{}' ({}s)",
                                     result.object_id,
@@ -1052,15 +1049,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                             // C#：武装命中 → 施放流血毒 + 复位
                             let duration = hemorrhage_duration(lv, state.luck).max(1) as u32;
                             let value = hemorrhage_value(state.effective_max_attack());
-                            crate::combat::poison::apply_poison(
-                                &mut monster.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::BLEEDING,
-                                    duration,
-                                    value,
-                                    1000,
-                                ),
-                            );
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::BLEEDING,
+                                duration,
+                                value,
+                                1000,
+                            ));
                             *count = 0;
                             debug!(
                                 "Player {} Hemorrhage bleeding on '{}' (dur={}s value={})",
@@ -3870,15 +3864,12 @@ impl Message<MagicRequest> for WorldActor {
                             + 1
                             + fastrand::i32(0..state.poison_attack.max(1)))
                         .max(1);
-                        crate::combat::poison::apply_poison(
-                            &mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::GREEN,
-                                duration,
-                                poison_value,
-                                2000,
-                            ),
-                        );
+                        monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::GREEN,
+                            duration,
+                            poison_value,
+                            2000,
+                        ));
                         monster.provoked = true;
                         // C# MonsterObject.ApplyPoison：仅当无目标时锁定施毒者（Target == null 才设置）
                         if monster.target_session.is_none() {
@@ -3920,15 +3911,12 @@ impl Message<MagicRequest> for WorldActor {
                 let duration = (spell_level as u32 * 5 + 10) as u32;
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
-                        crate::combat::poison::apply_poison(
-                            &mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::PARALYSIS,
-                                duration,
-                                0,
-                                1000,
-                            ),
-                        );
+                        monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::PARALYSIS,
+                            duration,
+                            0,
+                            1000,
+                        ));
                     }
                 }
                 debug!(
@@ -4090,15 +4078,12 @@ impl Message<MagicRequest> for WorldActor {
                 let duration = (((spell_level as i32 + 1) as f64) * 0.8).round() as u32;
                 if duration > 0 {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
-                        crate::combat::poison::apply_poison(
-                            &mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::PARALYSIS,
-                                duration,
-                                0,
-                                1000,
-                            ),
-                        );
+                        monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::PARALYSIS,
+                            duration,
+                            0,
+                            1000,
+                        ));
                     }
                 }
                 // 拉拽方向 = 施法者朝向的反方向（C# (Direction - 4) % 8）
@@ -4563,7 +4548,7 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.target_session = Some(msg.session_id);
                             }
                             for p in &r.applied_poisons {
-                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                                monster.apply_poison_defended(*p);
                             }
                         }
                     }
@@ -4650,10 +4635,7 @@ impl Message<MagicRequest> for WorldActor {
                                     monster.target_session = Some(msg.session_id);
                                 }
                                 for p in &r.applied_poisons {
-                                    crate::combat::poison::apply_poison(
-                                        &mut monster.poison_list,
-                                        *p,
-                                    );
+                                    monster.apply_poison_defended(*p);
                                 }
                             }
                         }
@@ -4763,7 +4745,7 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.target_session = Some(msg.session_id);
                             }
                             for p in &r.applied_poisons {
-                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                                monster.apply_poison_defended(*p);
                             }
                         }
                     }
@@ -4846,7 +4828,7 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.target_session = Some(msg.session_id);
                             }
                             for p in &r.applied_poisons {
-                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                                monster.apply_poison_defended(*p);
                             }
                             spell_hits.push((
                                 mid,
@@ -4985,15 +4967,12 @@ impl Message<MagicRequest> for WorldActor {
                     }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         // Slow 毒（C# Duration=damage 秒，Value=value2）
-                        crate::combat::poison::apply_poison(
-                            &mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::SLOW,
-                                duration,
-                                value2,
-                                1000,
-                            ),
-                        );
+                        monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::SLOW,
+                            duration,
+                            value2,
+                            1000,
+                        ));
                         monster.provoked = true;
                         monster.target_session = Some(msg.session_id);
                         // 减伤：value2%（C# 降低 MaxDC/MaxMC/MaxSC 输出百分比），持续 damage 秒
@@ -5813,7 +5792,7 @@ impl Message<MagicRequest> for WorldActor {
                                 m.target_session = Some(msg.session_id);
                             }
                             for p in &r.applied_poisons {
-                                crate::combat::poison::apply_poison(&mut m.poison_list, *p);
+                                m.apply_poison_defended(*p);
                             }
                         }
                     }
@@ -6088,15 +6067,12 @@ impl Message<MagicRequest> for WorldActor {
                             }
                             // C# FlashDash 毒掷骰：Random(15) <= Lv+1 → Stun（duration=Lv+1s）+ TwinDrakeBlade 特效
                             if fastrand::i32(0..15) <= spell_level as i32 + 1 {
-                                crate::combat::poison::apply_poison(
-                                    &mut monster.poison_list,
-                                    crate::combat::poison::Poison::new(
-                                        mir2_shared::enums::PoisonType::STUN,
-                                        spell_level as u32 + 1,
-                                        0,
-                                        1000,
-                                    ),
-                                );
+                                monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::STUN,
+                                    spell_level as u32 + 1,
+                                    0,
+                                    1000,
+                                ));
                                 stunned.push((monster.object_id, monster.map_index));
                                 debug!(
                                     "Player {} FlashDash stunned '{}' ({}s)",
@@ -6814,15 +6790,12 @@ impl Message<MagicRequest> for WorldActor {
                         continue;
                     }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
-                        crate::combat::poison::apply_poison(
-                            &mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::LR_PARALYSIS,
-                                (spell_level as u32 + 2).max(1),
-                                0,
-                                1000,
-                            ),
-                        );
+                        monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::LR_PARALYSIS,
+                            (spell_level as u32 + 2).max(1),
+                            0,
+                            1000,
+                        ));
                         monster.provoked = true;
                         paralyzed += 1;
                     }
@@ -7150,10 +7123,9 @@ impl Message<MagicRequest> for WorldActor {
                         let temp_value = plague_temp_value(value, spell_level, ptype);
                         if ptype != mir2_shared::enums::PoisonType::NONE {
                             let dur = plague_duration(spell_level, value).max(1) as u32;
-                            crate::combat::poison::apply_poison(
-                                &mut monster.poison_list,
-                                crate::combat::poison::Poison::new(ptype, dur, temp_value, 1000),
-                            );
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                ptype, dur, temp_value, 1000,
+                            ));
                         }
                         let defender_stats = monster.to_combat_stats();
                         // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
@@ -7225,15 +7197,12 @@ impl Message<MagicRequest> for WorldActor {
                         return;
                     }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
-                        crate::combat::poison::apply_poison(
-                            &mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::PARALYSIS,
-                                60,
-                                0,
-                                1000,
-                            ),
-                        );
+                        monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::PARALYSIS,
+                            60,
+                            0,
+                            1000,
+                        ));
                         monster.provoked = true;
                         monster.target_session = Some(msg.session_id);
                         debug!(
@@ -7477,15 +7446,12 @@ impl Message<MagicRequest> for WorldActor {
                                 + 1
                                 + fastrand::i32(0..state.poison_attack.max(1)))
                             .max(1);
-                            crate::combat::poison::apply_poison(
-                                &mut monster.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::GREEN,
-                                    dur,
-                                    val,
-                                    2000,
-                                ),
-                            );
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::GREEN,
+                                dur,
+                                val,
+                                2000,
+                            ));
                         }
                     }
                 }
@@ -7858,15 +7824,12 @@ impl Message<MagicRequest> for WorldActor {
                         .unwrap_or(false)
                     {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
-                            crate::combat::poison::apply_poison(
-                                &mut monster.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::STUN,
-                                    spell_level as u32 * 5 + 10,
-                                    0,
-                                    1000,
-                                ),
-                            );
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::STUN,
+                                spell_level as u32 * 5 + 10,
+                                0,
+                                1000,
+                            ));
                             monster.target_session = None;
                             debug!(
                                 "Magic: {} ElectricShock stunned own pet {}",
@@ -7892,15 +7855,12 @@ impl Message<MagicRequest> for WorldActor {
                     // 4) 50% 眩晕（C# :4029 Random(2) > 0 → ShockTime + Target=null）
                     if fastrand::i32(0..2) > 0 {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
-                            crate::combat::poison::apply_poison(
-                                &mut monster.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::STUN,
-                                    spell_level as u32 * 5 + 10,
-                                    0,
-                                    1000,
-                                ),
-                            );
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::STUN,
+                                spell_level as u32 * 5 + 10,
+                                0,
+                                1000,
+                            ));
                             monster.target_session = None;
                         }
                         debug!(
@@ -8211,15 +8171,12 @@ impl Message<MagicRequest> for WorldActor {
                                 + 1
                                 + fastrand::i32(0..state.poison_attack.max(1)))
                             .max(1);
-                            crate::combat::poison::apply_poison(
-                                &mut monster.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::GREEN,
-                                    duration,
-                                    value,
-                                    1000,
-                                ),
-                            );
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::GREEN,
+                                duration,
+                                value,
+                                1000,
+                            ));
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             poisoned += 1;
@@ -8275,7 +8232,7 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.target_session = Some(msg.session_id);
                             }
                             for p in &r.applied_poisons {
-                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                                monster.apply_poison_defended(*p);
                             }
                         }
                         debug!(
