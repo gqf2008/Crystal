@@ -1,7 +1,8 @@
 // ============================================================================
 // 仓库对话框（M18）
 // 布局参考：C# NPCDialogs.cs StorageDialog（10 列 x 8 行，cell 36x32 间隔 1）
-//   - 背景 Prguse[586]（本移植用半透明底板），位置右侧 (600, 60)，避免与 NPC/背包重叠
+//   - 背景 Prguse[586]（实测 388x346），原点 (0,0)（C# StorageDialog
+//     Location = new Point(0, 0)，NPCDialogs.cs:2807；格子/按钮偏移同 C#）
 //   - 关闭按钮 Prguse2[360-362]
 //   - 交互（原版 C# MirItemCell 拖放语义，选中+点击）：
 //       选中背包物品 → 点仓库格 → C.StoreItem{From=背包格, To=仓库格}
@@ -13,20 +14,21 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::inventory::{
-    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm,
-    InvItem, ItemUseFeedback, UseItemCtx, UseOutcome,
+    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, InvItem,
+    ItemUseFeedback, UseItemCtx, UseOutcome,
 };
+use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
-};
 use crate::ui::controls::{spawn_item_cell, ItemCell, ItemCellData, ItemCellIcon};
-use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
+use crate::ui::sprite_ui::{
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    UiImageCache,
+};
 
 /// 仓库数据（网络 UserStorage 写入）
 #[derive(Resource, Default)]
@@ -58,8 +60,13 @@ impl StorageState {
     }
 }
 
-const DIALOG_X: f32 = 600.0;
-const DIALOG_Y: f32 = 60.0;
+/// 窗口原点 (0,0)：C# StorageDialog 显式 `Location = new Point(0, 0)`（NPCDialogs.cs:2812）。
+/// 旧值 (600,60) 是移植期自定右置，与 C# 左上角原点不符。
+const DIALOG_X: f32 = 0.0;
+const DIALOG_Y: f32 = 0.0;
+/// 仓库宽（Prguse[586] 实测 388x346）。C# Show 时背包推到 (仓宽+5, 仓Y)=(393,0) 并排
+/// （NPCDialogs.cs:2967/2990）——避免仓库完全罩住背包
+const STORAGE_W: f32 = 388.0;
 const COLS: usize = 10;
 const ROWS: usize = 8;
 const CELL_W: f32 = 36.0;
@@ -149,6 +156,14 @@ fn spawn_storage_dialog(
     }
     let font = ui_font.0.clone();
 
+    // 背景 Prguse[586]（C# StorageDialog.Index=586，实测 388x346；移植期曾无底板悬浮格子）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 586) {
+        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
+        commands
+            .entity(e)
+            .insert((DialogRoot(DialogKind::Storage), StorageWidget));
+    }
+
     // 关闭按钮（Prguse2 360/361/362），右上角
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands,
@@ -165,11 +180,9 @@ fn spawn_storage_dialog(
         20.0,
         20.0,
     ) {
-        commands.entity(e).insert((
-            StorageClose,
-            DialogRoot(DialogKind::Storage),
-            StorageWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((StorageClose, DialogRoot(DialogKind::Storage), StorageWidget));
     }
 
     // 标题文字（原版 Title[0]：仓库）
@@ -189,9 +202,19 @@ fn spawn_storage_dialog(
 
     // 仓库密码按钮（C# StorageDialog ProtectButton）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        DIALOG_X + 18.0, DIALOG_Y + 330.0, 7.0, 76.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        DIALOG_X + 18.0,
+        DIALOG_Y + 330.0,
+        7.0,
+        76.0,
+        23.0,
     ) {
         commands.entity(e).insert((
             StoragePwdBtn,
@@ -199,11 +222,26 @@ fn spawn_storage_dialog(
             StorageWidget,
         ));
     }
-    let pwd_label = spawn_ui_text(&mut commands, &font, "仓库密码", DIALOG_X + 34.0, DIALOG_Y + 334.0, 12.0, Color::WHITE, 8.2);
-    commands.entity(pwd_label).insert((DialogRoot(DialogKind::Storage), StorageWidget));
+    let pwd_label = spawn_ui_text(
+        &mut commands,
+        &font,
+        "仓库密码",
+        DIALOG_X + 34.0,
+        DIALOG_Y + 334.0,
+        12.0,
+        Color::WHITE,
+        8.2,
+    );
+    commands
+        .entity(pwd_label)
+        .insert((DialogRoot(DialogKind::Storage), StorageWidget));
 
     // 密码面板（当前密码/新密码 + 设置/移除/关闭 + 结果提示）
-    let white2 = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white2 = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     commands.spawn((
         UiEntity,
         DialogRoot(DialogKind::Storage),
@@ -223,8 +261,19 @@ fn spawn_storage_dialog(
         (1, "新密码:", DIALOG_Y + 400.0),
     ];
     for (id, label, y) in fields {
-        let t = spawn_ui_text(&mut commands, &font, label, DIALOG_X + 28.0, y, 12.0, Color::WHITE, 9.1);
-        commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
+        let t = spawn_ui_text(
+            &mut commands,
+            &font,
+            label,
+            DIALOG_X + 28.0,
+            y,
+            12.0,
+            Color::WHITE,
+            9.1,
+        );
+        commands
+            .entity(t)
+            .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
         let box_e = commands
             .spawn((
                 UiEntity,
@@ -259,13 +308,36 @@ fn spawn_storage_dialog(
         });
     }
     // 结果提示
-    let msg = spawn_ui_text(&mut commands, &font, "", DIALOG_X + 28.0, DIALOG_Y + 430.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 9.2);
-    commands.entity(msg).insert((StoragePwdMsg, DialogRoot(DialogKind::Storage), StoragePwdPanel));
+    let msg = spawn_ui_text(
+        &mut commands,
+        &font,
+        "",
+        DIALOG_X + 28.0,
+        DIALOG_Y + 430.0,
+        12.0,
+        Color::srgb(1.0, 0.9, 0.4),
+        9.2,
+    );
+    commands.entity(msg).insert((
+        StoragePwdMsg,
+        DialogRoot(DialogKind::Storage),
+        StoragePwdPanel,
+    ));
     // 设置/修改 / 移除 / 关闭
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        DIALOG_X + 28.0, DIALOG_Y + 455.0, 9.3, 70.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        DIALOG_X + 28.0,
+        DIALOG_Y + 455.0,
+        9.3,
+        70.0,
+        23.0,
     ) {
         commands.entity(e).insert((
             StoragePwdSet,
@@ -273,12 +345,33 @@ fn spawn_storage_dialog(
             StoragePwdPanel,
         ));
     }
-    let t = spawn_ui_text(&mut commands, &font, "设置", DIALOG_X + 43.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
-    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "设置",
+        DIALOG_X + 43.0,
+        DIALOG_Y + 459.0,
+        12.0,
+        Color::WHITE,
+        9.4,
+    );
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        DIALOG_X + 108.0, DIALOG_Y + 455.0, 9.3, 70.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        DIALOG_X + 108.0,
+        DIALOG_Y + 455.0,
+        9.3,
+        70.0,
+        23.0,
     ) {
         commands.entity(e).insert((
             StoragePwdRemove,
@@ -286,12 +379,33 @@ fn spawn_storage_dialog(
             StoragePwdPanel,
         ));
     }
-    let t = spawn_ui_text(&mut commands, &font, "移除", DIALOG_X + 123.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
-    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "移除",
+        DIALOG_X + 123.0,
+        DIALOG_Y + 459.0,
+        12.0,
+        Color::WHITE,
+        9.4,
+    );
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        DIALOG_X + 188.0, DIALOG_Y + 455.0, 9.3, 70.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
+        DIALOG_X + 188.0,
+        DIALOG_Y + 455.0,
+        9.3,
+        70.0,
+        23.0,
     ) {
         commands.entity(e).insert((
             StoragePwdClose,
@@ -299,8 +413,19 @@ fn spawn_storage_dialog(
             StoragePwdPanel,
         ));
     }
-    let t = spawn_ui_text(&mut commands, &font, "关闭", DIALOG_X + 203.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
-    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "关闭",
+        DIALOG_X + 203.0,
+        DIALOG_Y + 459.0,
+        12.0,
+        Color::WHITE,
+        9.4,
+    );
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
     // 解锁面板（#200：C# PromptStorageUnlock —— 输入密码 → C.UnlockStorage）
     commands.spawn((
         UiEntity,
@@ -326,7 +451,9 @@ fn spawn_storage_dialog(
         Color::WHITE,
         9.6,
     );
-    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
     let unlock_input = commands
         .spawn((
             UiEntity,
@@ -405,7 +532,9 @@ fn spawn_storage_dialog(
         Color::WHITE,
         9.8,
     );
-    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands,
         &mut libs,
@@ -437,7 +566,9 @@ fn spawn_storage_dialog(
         Color::WHITE,
         9.8,
     );
-    commands.entity(t).insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
 
     // 格子底板不在此预生成：#281 由 storage_grid_sync_system 按 StorageState.items.len()
     // 动态生成/移除（进图 UserStorage 到达前 items 为空，避免先建后删抖动）
@@ -472,7 +603,11 @@ fn storage_ui_system(
 ) {
     let open = state.visible && mgr.is_open(DialogKind::Storage);
     for (mut vis, _slot) in &mut all_vis {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // 物品图标 + 数量（#90 通用 ItemCell：只写数据，渲染由 item_cell_system 处理）
@@ -528,6 +663,7 @@ fn storage_action_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     time: Res<Time>,
+    inv_origin: Res<crate::game::dialogs::inventory::InventoryOrigin>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_storage_click: Local<Option<(usize, f64)>>,
@@ -536,7 +672,9 @@ fn storage_action_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
 
     let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len());
     let inv_slot = inv_slot_at(
@@ -544,6 +682,7 @@ fn storage_action_system(
         cursor.y,
         hud.inventory.page,
         hud.inventory.items.len(),
+        (inv_origin.0, inv_origin.1),
     );
 
     // #1546：仓库格双击 → 装备（C# MirItemCell.OnMouseDoubleClick → UseItem；消耗品要求 Grid==Inventory/HeroInventory 故仓库拦截）
@@ -562,7 +701,11 @@ fn storage_action_system(
         }
     }
     if dbl_storage {
-        if let Some(item) = state.items.get(storage_slot.unwrap()).and_then(|s| s.as_ref()) {
+        if let Some(item) = state
+            .items
+            .get(storage_slot.unwrap())
+            .and_then(|s| s.as_ref())
+        {
             let ctx = UseItemCtx {
                 grid: mir2_shared::enums::MirGridType::Storage,
                 equipment: &hud.equipment,
@@ -572,7 +715,9 @@ fn storage_action_system(
                 check_fishing: true,
                 allow_consumable: false,
             };
-            if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+            if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
+                == UseOutcome::Sent
+            {
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);
                 }
@@ -581,7 +726,6 @@ fn storage_action_system(
         state.selected = None;
         return;
     }
-
 
     // 1) 选中了背包物品 → 点仓库格：存入（原版 C# SelectedCell Inventory → Storage 拖放）
     if let Some(from) = inv_click.selected {
@@ -630,20 +774,52 @@ fn storage_action_system(
     }
 }
 
-
 /// 消费服务端仓库事件（网络层只广播 ServerEvent；仓库/背包打开逻辑归本模块）
 fn storage_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut storage: ResMut<StorageState>,
     mut hud: ResMut<HudState>,
     mut mgr: ResMut<DialogManager>,
+    mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
+    mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
+    // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
+    // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
+    mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         if let ServerEvent::StorageOpened { items, visible } = ev {
             storage.items = items.clone();
             storage.visible = *visible;
-            // 原版 C#：仓库打开时同时显示背包
+            // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
+            // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
+            // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
+            // min 取**屏幕**坐标（-tf.y；tf.y 是世界系、越往下越负，直接 min 会取到底缘）
+            let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+            for (tf, root) in inv_entities.iter() {
+                if root.0 == DialogKind::Inventory {
+                    min_x = min_x.min(tf.translation.x);
+                    min_y = min_y.min(-tf.translation.y);
+                }
+            }
+            if min_x < f32::MAX {
+                let dx = STORAGE_W + 5.0 - min_x;
+                let dy_screen = 0.0 - min_y;
+                for (mut tf, root) in &mut inv_entities {
+                    if root.0 == DialogKind::Inventory {
+                        tf.translation.x += dx;
+                        tf.translation.y -= dy_screen;
+                    }
+                }
+                for (mut btn, root) in &mut inv_buttons {
+                    if root.0 == DialogKind::Inventory {
+                        btn.rect.0 += dx;
+                        btn.rect.1 += dy_screen;
+                    }
+                }
+                *inv_origin =
+                    crate::game::dialogs::inventory::InventoryOrigin(STORAGE_W + 5.0, 0.0);
+            }
             if !mgr.is_open(DialogKind::Storage) {
                 mgr.open.push(DialogKind::Storage);
             }
@@ -670,7 +846,11 @@ fn storage_server_events(
             storage.resize(*size);
             tracing::info!("📦 仓库扩容 -> {} 格", storage.items.len());
         }
-        if let ServerEvent::StorageUnlockResult { result, has_password } = ev {
+        if let ServerEvent::StorageUnlockResult {
+            result,
+            has_password,
+        } = ev
+        {
             // C# result：0=成功 1=格式错 2=密码错 3=不可用 4=无密码直接解锁
             let _ = has_password;
             match *result {
@@ -721,7 +901,6 @@ fn storage_server_events(
     }
 }
 
-
 /// 悬停提示（#93 通用 Tooltip）：光标在仓库物品格上显示 名称 x数量
 fn storage_tooltip_system(
     state: Res<StorageState>,
@@ -733,7 +912,9 @@ fn storage_tooltip_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
     if let Some(i) = storage_slot_at(cursor.x, cursor.y, state.items.len()) {
         hit = state.items.get(i).and_then(|s| s.as_ref()).cloned();
@@ -761,7 +942,11 @@ fn storage_pwd_system(
 ) {
     let open = storage.pwd_panel;
     for mut vis in &mut panel {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut t in &mut msg {
         if t.0 != storage.pwd_msg {
@@ -792,9 +977,11 @@ fn storage_pwd_system(
     for btn in &remove_btn {
         if btn.clicked && open {
             let current = input.texts.get(0).cloned().unwrap_or_default();
-            net.send_packet(&mir2_shared::packets::client::storage::RemoveStoragePassword {
-                current_password: current,
-            });
+            net.send_packet(
+                &mir2_shared::packets::client::storage::RemoveStoragePassword {
+                    current_password: current,
+                },
+            );
             tracing::info!("🔓 移除仓库密码");
         }
     }
@@ -818,7 +1005,11 @@ fn storage_unlock_system(
 ) {
     let open = storage.unlock_panel;
     for mut vis in &mut panel {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut t in &mut msg {
         if t.0 != storage.unlock_msg {
@@ -903,9 +1094,28 @@ fn storage_grid_sync_system(
             CELL_H,
             i,
         );
-        commands
-            .entity(cell)
-            .insert((StorageSlot(i), DialogRoot(DialogKind::Storage), StorageWidget));
+        commands.entity(cell).insert((
+            StorageSlot(i),
+            DialogRoot(DialogKind::Storage),
+            StorageWidget,
+        ));
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C# StorageDialog `Location = new Point(0, 0)`（NPCDialogs.cs:2807）→ 左上角原点。
+    /// 旧值 (600,60) 是移植期自定右置。
+    #[test]
+    fn storage_origin_matches_csharp() {
+        assert_eq!(DIALOG_X, 0.0);
+        assert_eq!(DIALOG_Y, 0.0);
+        // 格网起点 (9,60)、步进 (37,33)（C# x*36+9+x, y%8*32+60+y%8，NPCDialogs.cs:2945）
+        assert_eq!(DIALOG_X + 9.0 + 0.0 * (CELL_W + 1.0), 9.0);
+        assert_eq!(DIALOG_Y + 60.0 + 0.0 * (CELL_H + 1.0), 60.0);
+        assert_eq!(DIALOG_X + 9.0 + 9.0 * (CELL_W + 1.0), 342.0);
+        assert_eq!(DIALOG_Y + 60.0 + 7.0 * (CELL_H + 1.0), 291.0);
+    }
+}
