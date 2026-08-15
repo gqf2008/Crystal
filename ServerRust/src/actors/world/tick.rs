@@ -6290,24 +6290,60 @@ impl WorldActor {
         }
     }
 
+    /// #2572 定时机器人（C# Envir 每分钟驱动 Robot.Process；RobotNPC 页到点执行）。
+    ///
+    /// 节流对齐 C# Robot.SetNextCheck：任一任务指定分钟 → 分钟边界才检查；
+    /// 否则任一指定小时 → 小时边界；否则日边界（避免时/日级任务在窗内每分钟重复触发）。
+    /// 匹配 (月,日,时,分,星期) 的任务执行其 NPC 页（无玩家系统级动作，如 GLOBALMESSAGE）。
     pub(crate) async fn tick_robots(&mut self) {
-        let now = chrono::Local::now().naive_local();
-        let current_minute = now.minute();
-        if self.robot_tasks.is_empty() || current_minute == self.robot_last_check_minute {
+        use chrono::Datelike;
+
+        if self.robot_tasks.is_empty() {
             return;
         }
-        self.robot_last_check_minute = current_minute;
-        let mut task_indices: Vec<usize> = vec![];
+        let now = chrono::Local::now().naive_local();
+        // C# 静态 CheckMinute/CheckHour：按全部任务的最高时间粒度计算检查边界
+        let check_minute = self.robot_tasks.iter().any(|t| t.minute.is_some());
+        let check_hour = self.robot_tasks.iter().any(|t| t.hour.is_some());
+        let boundary = if check_minute {
+            (now.ordinal(), now.hour(), now.minute())
+        } else if check_hour {
+            (now.ordinal(), now.hour(), 0)
+        } else {
+            (now.ordinal(), 0, 0)
+        };
+        if self.robot_last_check == Some(boundary) {
+            return;
+        }
+        self.robot_last_check = Some(boundary);
+
+        let mut fired: Vec<usize> = Vec::new();
         for (i, task) in self.robot_tasks.iter().enumerate() {
             if task.should_fire(&now) {
-                task_indices.push(i);
+                fired.push(i);
             }
         }
-        for idx in &task_indices {
-            let page = self.robot_tasks[*idx].page.clone();
-            self.robot_tasks[*idx].mark_fired(&now);
-            let msg = format!("[机器人] 定时事件触发: {}", page);
-            broadcast_system_message(&self.gate_ref, &self.players, &msg);
+        for idx in fired {
+            let page = self.robot_tasks[idx].page.clone();
+            self.robot_tasks[idx].mark_fired(&now);
+            // C# script.Call(page)：按页 Key（整行大写）执行对应脚本段
+            let key = page.trim_start_matches('[').trim_end_matches(']');
+            let section = self
+                .robot_script
+                .as_ref()
+                .and_then(|s| s.find(key))
+                .cloned();
+            match section {
+                Some(section) => {
+                    // execute_robot_section 内嵌 exec_action 的 Future 极大，
+                    // 直接内联会把 tick 任务栈打爆（同 eval_npc_script 的 Box::pin 模式）
+                    Box::pin(super::npc_script::execute_robot_section(self, &section)).await;
+                    info!("[机器人] 定时页触发: {}", page);
+                }
+                None => {
+                    warn!("[机器人] 定时页在 00Robot.txt 中无对应段: {}", page);
+                }
+            }
         }
     }
 

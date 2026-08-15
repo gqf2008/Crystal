@@ -442,6 +442,48 @@ impl ParsedScript {
     }
 }
 
+/// #2572 机器人定时页执行（对齐 C# Robot.Process → NPCScript.Call(无玩家重载) →
+/// NPCSegment.Check() 无参重调 → Act(IList<NPCActions>) 无参重载）。
+///
+/// 与玩家对话路径（execute_section）的差异：
+/// - 无玩家会话：以哨兵 session（u64::MAX，不可能是真实会话）驱动，玩家绑定动作
+///   （发金币/背包/传送等）经 current_player_state 判空自然 no-op；系统级动作
+///   （GLOBALMESSAGE/MONGEN/MONCLEAR 等，即 C# 无参 Act 支持的集合）正常执行；
+/// - 含 #IF 条件的段跳过（C# 无参 Check 仅支持时间类条件且官方 00Robot 数据只有
+///   无条件 #ACT 段；玩家绑定条件在无玩家上下文无法求值），记 debug 日志。
+pub(crate) async fn execute_robot_section(world: &mut WorldActor, section: &Section) {
+    /// 无玩家哨兵会话：world.players 中恒不存在，玩家绑定动作 no-op
+    const ROBOT_SESSION: u64 = u64::MAX;
+    // 合成 NPC 上下文：MONGEN 无 MAP/PARAM 时退回该坐标（C# RobotNPC 无实体，
+    // 对应 C# Mongen 在 Param 缺失时直接 return 的保守行为）
+    let npc = NpcState {
+        object_id: 0,
+        name: "Robot".to_string(),
+        x: 0,
+        y: 0,
+        direction: 0,
+        db_index: 0,
+        map_index: 0,
+    };
+    let mut custom_vars: HashMap<String, String> = HashMap::new();
+    for seg in &section.segments {
+        if !seg.checks.is_empty() || !seg.or_groups.is_empty() {
+            debug!(
+                "robot section '{}' has #IF checks, skipped in player-less execution",
+                section.name
+            );
+            continue;
+        }
+        let mut flow = FlowControl::default();
+        for act in &seg.actions {
+            exec_action(world, ROBOT_SESSION, &npc, act, &mut flow, &mut custom_vars).await;
+            if flow.break_loop || flow.goto.is_some() {
+                break;
+            }
+        }
+    }
+}
+
 /// 把当前 segment 提交进所属 section（非空才提交）
 fn flush_segment(seg: &mut Segment, cur_sec: &mut Option<usize>, script: &mut ParsedScript) {
     let nonempty = !seg.checks.is_empty()
