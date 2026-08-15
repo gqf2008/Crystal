@@ -139,12 +139,15 @@ fn over_chat_panel(screen: Vec2) -> bool {
     screen.x <= 380.0 && screen.y >= 768.0 - 150.0 - 190.0
 }
 
-/// 技能快捷栏区域（C# SkillBarDialog 是对话框控件：落在其上的鼠标事件被控件吃掉，不透传地图）
+/// 技能快捷栏区域（C# SkillBarDialog 是对话框控件：落在其上的鼠标事件被控件吃掉，不透传地图；
+/// 两条栏各自判定）
 fn over_skill_bar(screen: Vec2, bar: &crate::game::skills::SkillBarState) -> bool {
-    screen.x >= bar.pos.0
-        && screen.x <= bar.pos.0 + crate::game::skills::SKILL_BAR_W
-        && screen.y >= bar.pos.1
-        && screen.y <= bar.pos.1 + crate::game::skills::SKILL_BAR_H
+    (0..2usize).any(|b| {
+        screen.x >= bar.pos[b].0
+            && screen.x <= bar.pos[b].0 + crate::game::skills::SKILL_BAR_W
+            && screen.y >= bar.pos[b].1
+            && screen.y <= bar.pos[b].1 + crate::game::skills::SKILL_BAR_H
+    })
 }
 
 /// 打包 UI 锁定资源（数量框/确认框/选中物品），避免系统参数超 Bevy 16 上限

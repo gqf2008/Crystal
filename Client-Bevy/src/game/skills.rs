@@ -180,11 +180,13 @@ pub struct SkillsClose;
 #[derive(Component)]
 pub struct SkillsLine(usize);
 
-/// 技能快捷栏根实体（整栏随拖动移动、随设置开关显隐；对齐 C# SkillBarDialog 整体 Show/Hide）
+/// 技能快捷栏根实体（整栏随拖动移动、随设置开关显隐；对齐 C# SkillBarDialog 整体 Show/Hide）。
+/// .0 = 栏号（C# BarIndex 0/1；C# 共两条栏，Settings.SkillBar=true 时全部显示）
 #[derive(Component)]
-pub struct SkillBarRoot;
+pub struct SkillBarRoot(pub usize);
 
-/// 技能快捷栏格子锚点（子实体挂图标/冷却/键名标签）
+/// 技能快捷栏格子锚点（子实体挂图标/冷却/键名标签）。
+/// .0 = 绝对格号 bar*8+i（0..15）；对应 C# m.Key = 值+1（bar1:1..8、bar2:9..16）
 #[derive(Component)]
 pub struct SkillBarSlot(pub usize);
 
@@ -200,25 +202,34 @@ pub struct SkillBarCooldown(pub usize);
 #[derive(Component)]
 pub struct SkillBarKey(pub usize);
 
-/// 技能栏位置状态（C# SkillBarDialog：Movable + SkillbarLocation 持久化）
+/// 技能栏位置状态（C# SkillBarDialog ×2：Movable + SkillbarLocation[2,2] 持久化）
 #[derive(Resource)]
 pub struct SkillBarState {
-    /// 栏左上角屏幕坐标（C# SkillbarLocation[0]，默认 {0,0}）
-    pub pos: (f32, f32),
-    /// 拖动中：按下点与 pos 的偏移
-    pub drag_offset: Option<(f32, f32)>,
-    /// 按下时命中的格子（C# 格子是子控件：按在格子上走点击流程，不触发拖动）
+    /// 各栏左上角屏幕坐标（C# Settings.SkillbarLocation，默认 bar0={0,0}、bar1={216,0}，
+    /// Settings.cs:163；DialogProcess 每帧应用 L1325-1332）
+    pub pos: [(f32, f32); 2],
+    /// 拖动中：(栏号, 按下点与该栏 pos 的偏移)
+    pub drag_offset: Option<(usize, (f32, f32))>,
+    /// 按下时命中的格子（绝对 0..15 = bar*8+i；C# 格子是子控件：按在格子上走点击流程，不触发拖动）
     pub pressed_slot: Option<usize>,
-    /// 格子点击施法请求（C# Cells[i].Click → UseSpell(i+1)），由 skill_bar_system 消费
+    /// 格子点击施法请求（C# Cells[i].Click → UseSpell(i+1+8*BarIndex)，键位即 C# m.Key 1..16），
+    /// 绝对 0..15，由 skill_bar_system 消费（键 = 值+1）
     pub pending_cast: Option<usize>,
 }
 
+/// 无 INI 时的默认位置（C# Settings.cs:163 `SkillbarLocation = {{0,0},{216,0}}`）
+pub const SKILLBAR_DEFAULT_POS: [(f32, f32); 2] = [(0.0, 0.0), (216.0, 0.0)];
+/// 某栏存档无效时的回落位置。C# 源码字面：DialogProcess L1329 `continue` 跳过赋值 →
+/// 栏保持构造器 Location=(0, BarIndex*20)（MainDialogs.cs:1533）。但 C# 对象初始化器
+/// `new SkillBarDialog { BarIndex = 1 }` 的 BarIndex 赋值发生在构造器**之后**，构造器
+/// 执行时恒为 0，故 C# 运行时两栏实际都回落 (0,0)（重叠）。此处取 (0, bar*20) 是
+/// **有意偏离**字面运行语义，避免两栏完全重叠不可用；仅 bar1 存档越界的极端场景可见差异。
+const SKILLBAR_CTOR_POS: [(f32, f32); 2] = [(0.0, 0.0), (0.0, 20.0)];
+
 impl Default for SkillBarState {
     fn default() -> Self {
-        // C# Settings.SkillbarLocation[0] = {0, 0}（左上角）。
-        // 之前默认放底部中央 (360,726) 会与左下聊天面板 (230,671)-(862,739) 重叠 → 界面“乱”。
         Self {
-            pos: (0.0, 0.0),
+            pos: SKILLBAR_DEFAULT_POS,
             drag_offset: None,
             pressed_slot: None,
             pending_cast: None,
@@ -227,30 +238,32 @@ impl Default for SkillBarState {
 }
 
 impl SkillBarState {
-    /// 从 Mir2Config.ini 解析（C# [Game] Skillbar0X/Skillbar0Y）
+    /// 从 Mir2Config.ini 解析（C# [Game] Skillbar{i}X/Skillbar{i}Y，i∈{0,1}，Settings.cs:267-270）
     pub fn from_ini(content: &str) -> Self {
         use crate::game::dialogs::settings_file::ini_str;
         let mut s = Self::default();
-        if let Some(v) = ini_str(content, "Game", "Skillbar0X").and_then(|v| v.parse::<f32>().ok()) {
-            s.pos.0 = v;
-        }
-        if let Some(v) = ini_str(content, "Game", "Skillbar0Y").and_then(|v| v.parse::<f32>().ok()) {
-            s.pos.1 = v;
-        }
-        // C# GameScene.DialogProcess（L1329-1331）：存档越界则丢弃，回落构造默认 (0,0)。
-        // 判定为严格大于：x > Resolution-100（逻辑分辨率 1024 → 924）或 y > 700。
-        // 负值兜底：C# 运行时拖动钳制（OnMouseMove L910-913）保证永不产生负坐标，故其加载不查负；
-        // Bevy 旧版本无钳制可能存过负值 → 一并按无效处理回落默认（与越界同一语义，永不可见的栏不可留）。
-        // 非有限值兜底："NaN"/"inf" 能被 parse::<f32>() 成功解析，而 NaN 的全序比较全为 false，
-        // 单靠下面的越界判定拦不住 → 栏会被定位到 NaN 永不可见（#2517）。NaN/±inf 一并回落默认。
-        if !s.pos.0.is_finite()
-            || !s.pos.1.is_finite()
-            || s.pos.0 > 924.0
-            || s.pos.1 > 700.0
-            || s.pos.0 < 0.0
-            || s.pos.1 < 0.0
-        {
-            s.pos = (0.0, 0.0);
+        for bar in 0..2usize {
+            if let Some(v) = ini_str(content, "Game", &format!("Skillbar{bar}X")).and_then(|v| v.parse::<f32>().ok()) {
+                s.pos[bar].0 = v;
+            }
+            if let Some(v) = ini_str(content, "Game", &format!("Skillbar{bar}Y")).and_then(|v| v.parse::<f32>().ok()) {
+                s.pos[bar].1 = v;
+            }
+            // C# GameScene.DialogProcess（L1328-1331）：存档越界（x > Resolution-100=924 或
+            // y > 700，严格大于）则 continue 跳过赋值 → 栏保持构造器 Location=(0, BarIndex*20)。
+            // 负值兜底：C# 运行时拖动钳制（OnMouseMove L910-913）保证永不产生负坐标；
+            // Bevy 旧版本无钳制可能存过负值 → 一并按无效处理回落（与越界同一语义）。
+            // 非有限值兜底："NaN"/"inf" 能被 parse::<f32>() 成功解析，而 NaN 的全序比较全为
+            // false，单靠越界判定拦不住 → 栏会被定位到 NaN 永不可见（#2517）。
+            if !s.pos[bar].0.is_finite()
+                || !s.pos[bar].1.is_finite()
+                || s.pos[bar].0 > 924.0
+                || s.pos[bar].1 > 700.0
+                || s.pos[bar].0 < 0.0
+                || s.pos[bar].1 < 0.0
+            {
+                s.pos[bar] = SKILLBAR_CTOR_POS[bar];
+            }
         }
         s
     }
@@ -260,12 +273,24 @@ impl SkillBarState {
         Self::from_ini(&crate::game::dialogs::settings_file::load_ini())
     }
 
-    /// 保存（C# Settings.Save：SkillbarLocation → [Game] Skillbar0X/Y，merge 写回）
+    /// 保存（C# Settings.Save：SkillbarLocation → [Game] Skillbar{i}X/Y 两栏，merge 写回）
     pub fn save(&self) {
         use crate::game::dialogs::settings_file::{set_ini_value, write_ini};
         let mut content = crate::game::dialogs::settings_file::load_ini();
-        content = set_ini_value(&content, "Game", "Skillbar0X", &self.pos.0.round().to_string());
-        content = set_ini_value(&content, "Game", "Skillbar0Y", &self.pos.1.round().to_string());
+        for bar in 0..2usize {
+            content = set_ini_value(
+                &content,
+                "Game",
+                &format!("Skillbar{bar}X"),
+                &self.pos[bar].0.round().to_string(),
+            );
+            content = set_ini_value(
+                &content,
+                "Game",
+                &format!("Skillbar{bar}Y"),
+                &self.pos[bar].1.round().to_string(),
+            );
+        }
         write_ini(&content);
         tracing::debug!("⚙️ 技能栏位置已保存到 Mir2Config.ini");
     }
@@ -331,13 +356,22 @@ fn skill_bar_system(
         KeyCode::F7,
         KeyCode::F8,
     ];
-    // 格子点击施法请求（C# Cells[i].Click → UseSpell(i+1)）与 F 键同一路径
+    // 格子点击施法请求（C# Cells[i].Click → UseSpell(i+1+8*BarIndex)）与 F 键同一路径。
+    // 键位（C# KeyBindSettings:242-276）：bar1 = F1..F8；bar2 = Ctrl+F1..F8 → 键 9..16
     let pending = bar.pending_cast.take();
     // #1600/#1616：C# GameScene.CheckInput——钓鱼/麻痹/冰冻锁定施法输入
     if hud.fishing || hud.paralysis {
         return;
     }
-    let Some(slot) = pending.or_else(|| F_KEYS.iter().position(|k| keys.just_pressed(*k))) else {
+    let ctrl_held =
+        keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let slot = pending.or_else(|| {
+        F_KEYS
+            .iter()
+            .position(|k| keys.just_pressed(*k))
+            .map(|i| if ctrl_held { i + 8 } else { i })
+    });
+    let Some(slot) = slot else {
         return;
     };
     let Some(magic) = magics.by_key(slot as u8 + 1).cloned() else {
@@ -403,8 +437,12 @@ fn skill_bar_system(
         location: mir2_shared::Point { x: tx, y: ty },
     });
     tracing::info!(
-        "✨ F{} 施放 {} ({:?}) 目标={} @ ({},{})",
-        slot + 1,
+        "✨ {} 施放 {} ({:?}) 目标={} @ ({},{})",
+        if slot >= 8 {
+            format!("Ctrl + F{}", slot - 7)
+        } else {
+            format!("F{}", slot + 1)
+        },
         magic.name,
         magic.spell,
         target_id,
@@ -418,9 +456,9 @@ mod tests {
 
     #[test]
     fn skill_bar_state_parse() {
-        let content = "[Game]\nSkillbar0X=123\nSkillbar0Y=456\n";
+        let content = "[Game]\nSkillbar0X=123\nSkillbar0Y=456\nSkillbar1X=300\nSkillbar1Y=40\n";
         let s = SkillBarState::from_ini(content);
-        assert_eq!(s.pos, (123.0, 456.0));
+        assert_eq!(s.pos, [(123.0, 456.0), (300.0, 40.0)]);
     }
 
     #[test]
@@ -428,24 +466,49 @@ mod tests {
         let s = SkillBarState::from_ini("");
         let d = SkillBarState::default();
         assert_eq!(s.pos, d.pos);
-        assert_eq!(d.pos.0, 0.0);
-        assert_eq!(d.pos.1, 0.0);
+        // C# Settings.cs:163 SkillbarLocation = {{0,0},{216,0}}（两栏并排左上角）
+        assert_eq!(d.pos[0], (0.0, 0.0));
+        assert_eq!(d.pos[1], (216.0, 0.0));
     }
 
-    /// C# GameScene.DialogProcess（L1329-1331）：存档越界丢弃，回落默认 (0,0)；严格大于
+    /// 旧版（单栏）存档只有 Skillbar0X/Y：bar0 旧值原样保留，bar1 缺失用默认 (216,0)。
+    /// 键名未变（git 历史旧版就是 Skillbar0X/Skillbar0Y）→ 旧存档无损升级。
+    #[test]
+    fn legacy_single_bar_ini_upgrades_losslessly() {
+        let s = SkillBarState::from_ini("[Game]\nSkillbar0X=182\nSkillbar0Y=64\n");
+        assert_eq!(s.pos[0], (182.0, 64.0), "旧 bar0 存档保留");
+        assert_eq!(s.pos[1], (216.0, 0.0), "bar1 无存档用默认");
+    }
+
+    /// C# GameScene.DialogProcess（L1325-1332）：某栏存档越界 → continue 跳过赋值，
+    /// 该栏保持构造器 Location=(0, BarIndex*20)（MainDialogs.cs:1533）；另一栏不受影响
     #[test]
     fn skill_bar_state_out_of_bounds_falls_back() {
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=925\nSkillbar0Y=100\n");
-        assert_eq!(s.pos, (0.0, 0.0), "x>924 应回落默认");
+        assert_eq!(s.pos[0], (0.0, 0.0), "x>924 回落 bar0 构造默认 (0,0)");
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=100\nSkillbar0Y=701\n");
-        assert_eq!(s.pos, (0.0, 0.0), "y>700 应回落默认");
+        assert_eq!(s.pos[0], (0.0, 0.0), "y>700 回落 bar0 构造默认 (0,0)");
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=924\nSkillbar0Y=700\n");
-        assert_eq!(s.pos, (924.0, 700.0), "边界值保留（C# 为严格 >）");
+        assert_eq!(s.pos[0], (924.0, 700.0), "边界值保留（C# 为严格 >）");
         // 负值兜底：旧版本无拖动钳制可能存过负坐标 → 视为无效回落默认（栏永不可拖出屏幕）
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=-50\nSkillbar0Y=100\n");
-        assert_eq!(s.pos, (0.0, 0.0), "负 x 应回落默认");
+        assert_eq!(s.pos[0], (0.0, 0.0), "负 x 应回落默认");
         let s = SkillBarState::from_ini("[Game]\nSkillbar0X=100\nSkillbar0Y=-10\n");
-        assert_eq!(s.pos, (0.0, 0.0), "负 y 应回落默认");
+        assert_eq!(s.pos[0], (0.0, 0.0), "负 y 应回落默认");
+        // bar1 越界 → 回落 bar1 构造默认 (0,20)，且不影响 bar0
+        let s = SkillBarState::from_ini("[Game]\nSkillbar0X=100\nSkillbar0Y=50\nSkillbar1X=999\nSkillbar1Y=50\n");
+        assert_eq!(s.pos[0], (100.0, 50.0), "bar0 有效值不受 bar1 影响");
+        assert_eq!(s.pos[1], (0.0, 20.0), "bar1 越界回落构造默认 (0,20)");
+    }
+
+    /// 键名标签文本 = C# GetKey(BarIndex, i)（默认键位：bar1 F1..F8；bar2 Ctrl+F1..F8，
+    /// 格式 "修饰符 + 键名"，KeyBindSettings.cs:383-407）
+    #[test]
+    fn skill_key_labels_match_csharp_defaults() {
+        assert_eq!(skill_key_label(0, 0), "F1");
+        assert_eq!(skill_key_label(0, 7), "F8");
+        assert_eq!(skill_key_label(1, 0), "Ctrl + F1");
+        assert_eq!(skill_key_label(1, 7), "Ctrl + F8");
     }
 
     /// C# MirControl.OnMouseMove（L901-913）：拖动位置钳制在父容器（全屏）内，栏不可拖出屏幕。
@@ -501,7 +564,7 @@ mod tests {
         );
     }
 
-    /// C# Cells[i] bbox：@(i*25+15, 3) 24x22；命中格子不触发拖动
+    /// C# Cells[i] bbox：@(i*25+15, 3) 24x22；命中格子不触发拖动；两栏绝对格号 bar*8+i
     #[test]
     fn skill_slot_hit_test() {
         let bar = SkillBarState::default();
@@ -511,6 +574,10 @@ mod tests {
         assert_eq!(skill_slot_at(&bar, Vec2::new(52.0, 14.0)), Some(1));
         // 第 7 格 @(190,3) 右缘
         assert_eq!(skill_slot_at(&bar, Vec2::new(213.0, 24.0)), Some(7));
+        // bar2 默认 (216,0)：第 0 格 @(216+15,3)=(231,3) → 绝对格号 8
+        assert_eq!(skill_slot_at(&bar, Vec2::new(243.0, 14.0)), Some(8));
+        // bar2 第 7 格 @(216+190,3)=(406,3) → 绝对格号 15
+        assert_eq!(skill_slot_at(&bar, Vec2::new(429.0, 24.0)), Some(15));
         // 格间缝隙（x=39 在第0格右缘与第1格左缘之间）不命中
         assert_eq!(skill_slot_at(&bar, Vec2::new(39.5, 14.0)), None);
         // 格子上方（y<3，按钮/标签带）不命中格子
@@ -571,21 +638,28 @@ mod tests {
     }
 
     /// #2517："NaN"/"inf" 能被 parse::<f32>() 成功解析，而 NaN 的全序比较全为 false，
-    /// 单靠越界判定拦不住 → 栏会被定位到 NaN 永不可见。非有限值必须回落默认 (0,0)。
+    /// 单靠越界判定拦不住 → 栏会被定位到 NaN 永不可见。非有限值必须回落默认。
     #[test]
     fn skill_bar_state_non_finite_falls_back() {
         for v in ["NaN", "nan", "inf", "-inf", "Infinity"] {
             let cx = format!("[Game]\nSkillbar0X={v}\nSkillbar0Y=100\n");
             assert_eq!(
-                SkillBarState::from_ini(&cx).pos,
+                SkillBarState::from_ini(&cx).pos[0],
                 (0.0, 0.0),
                 "Skillbar0X={v} 非有限/越界应回落默认"
             );
             let cy = format!("[Game]\nSkillbar0X=100\nSkillbar0Y={v}\n");
             assert_eq!(
-                SkillBarState::from_ini(&cy).pos,
+                SkillBarState::from_ini(&cy).pos[0],
                 (0.0, 0.0),
                 "Skillbar0Y={v} 非有限/越界应回落默认"
+            );
+            // bar1 同样防护，回落其构造默认 (0,20)
+            let c1 = format!("[Game]\nSkillbar1X={v}\nSkillbar1Y=100\n");
+            assert_eq!(
+                SkillBarState::from_ini(&c1).pos[1],
+                (0.0, 20.0),
+                "Skillbar1X={v} 非有限/越界应回落 bar1 构造默认"
             );
         }
     }
@@ -616,8 +690,8 @@ mod tests {
             .query_filtered::<Entity, With<SkillBarRoot>>();
         assert_eq!(
             root_q.iter(app.world()).count(),
-            1,
-            "应生成 1 个技能栏根实体"
+            2,
+            "应生成 2 个技能栏根实体（C# 两条 SkillBarDialog）"
         );
 
         let mut q = app
@@ -929,12 +1003,48 @@ fn spawn_skill_bar(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // C# GameScene:346-349 创建两条 SkillBarDialog（BarIndex 0/1），Settings.SkillBar=true
+    // 时 DialogProcess 全部显示；默认位置 Settings.SkillbarLocation {{0,0},{216,0}} 并排左上角
+    for bar_idx in 0..2usize {
+        spawn_one_skill_bar(
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            &font,
+            bar_idx,
+            bar.pos[bar_idx],
+        );
+    }
+}
+
+/// C# SkillBarDialog.Update()（L1661-1707）：键名标签文本 = GetKey(BarIndex, i)。
+/// 默认键位（KeyBindSettings.cs:242-276）：bar1 = F1..F8 无修饰；bar2 = Ctrl+F1..F8。
+/// GetKey 格式（:383-407）：修饰符 + " + " + 键名 → "Ctrl + F1"。
+pub fn skill_key_label(bar_idx: usize, i: usize) -> String {
+    if bar_idx == 0 {
+        format!("F{}", i + 1)
+    } else {
+        format!("Ctrl + F{}", i + 1)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_one_skill_bar(
+    commands: &mut Commands,
+    libs: &mut crate::map_renderer::GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut crate::ui::sprite_ui::UiImageCache,
+    font: &Handle<Font>,
+    bar_idx: usize,
+    pos: (f32, f32),
+) {
     // 根实体：整栏随拖动移动、随设置开关显隐（子控件全部挂在根下，z 相对叠加）
     let root = commands
         .spawn((
             UiEntity,
-            SkillBarRoot,
-            Transform::from_xyz(bar.pos.0, -bar.pos.1, 2.4),
+            SkillBarRoot(bar_idx),
+            Transform::from_xyz(pos.0, -pos.1, 2.4),
             Visibility::Visible,
         ))
         .id();
@@ -945,9 +1055,9 @@ fn spawn_skill_bar(
         // 默认 layer 0 → 被 UI 相机剔除、只被地图相机画到世界原点，整栏不可见（#2517）。
         // C# BeforeDraw（L1659）：格网 Prguse[2193] @(+12,0) 50% 透明，画在底图之下
         if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
+            libs,
+            images,
+            cache,
             LibraryName::Prguse,
             2193,
         ) {
@@ -964,9 +1074,9 @@ fn spawn_skill_bar(
         }
         // 底图 Prguse[2190] @(0,0)
         if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
+            libs,
+            images,
+            cache,
             LibraryName::Prguse,
             2190,
         ) {
@@ -979,9 +1089,9 @@ fn spawn_skill_bar(
         }
         // 切换绑定按钮 Prguse[2247]=16x28 @(0,0)（L1542-1550；C# 点击仅重绘，切换逻辑已注释）
         if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
+            libs,
+            images,
+            cache,
             LibraryName::Prguse,
             2247,
         ) {
@@ -992,10 +1102,11 @@ fn spawn_skill_bar(
                 Transform::from_xyz(0.0, 0.0, 0.05),
             ));
         }
-        // 栏位数字 "1" 8pt 白 @(0,1)（L1584-1593；C# 8pt ≈ 11px）
+        // 栏位数字（C# BindNumberLabel：Text = (BarIndex+1)，Update L1670 → "1"/"2"）
+        // 8pt 白 @(0,1)（L1584-1593；C# 8pt ≈ 11px）
         p.spawn((
             UiEntity,
-            Text2d::new("1"),
+            Text2d::new((bar_idx + 1).to_string()),
             bevy::sprite::Anchor::TOP_LEFT,
             TextFont {
                 font: FontSource::Handle(font.clone()),
@@ -1011,10 +1122,12 @@ fn spawn_skill_bar(
             1,
         ));
         for i in 0..8usize {
+            // 绝对格号 = bar*8 + i（键位 = +1；C# m.Key bar1:1..8、bar2:9..16，Update L1690/1697）
+            let abs = bar_idx * 8 + i;
             // 技能格锚点 @(i*25+15, 3)（L1565）：空槽无暗盒，视觉来自 2193 格网
             p.spawn((
                 UiEntity,
-                SkillBarSlot(i),
+                SkillBarSlot(abs),
                 Transform::from_xyz(skill_slot_x(i), -SKILL_SLOT_Y, 0.1),
                 Visibility::Visible,
             ))
@@ -1022,7 +1135,7 @@ fn spawn_skill_bar(
                 // 技能图标：MagIcon[icon*2] 自然尺寸（由 skill_bar_icon_system 填图，不设 custom_size）
                 c.spawn((
                     UiEntity,
-                    SkillBarIcon(i),
+                    SkillBarIcon(abs),
                     Sprite {
                         image: white.clone(),
                         ..default()
@@ -1034,7 +1147,7 @@ fn spawn_skill_bar(
                 // 冷却遮罩：Prguse2[1260+frame] 60% 透明（由 skill_bar_cooldown_system 驱动）
                 c.spawn((
                     UiEntity,
-                    SkillBarCooldown(i),
+                    SkillBarCooldown(abs),
                     Sprite {
                         image: white.clone(),
                         color: Color::srgba(1.0, 1.0, 1.0, 0.6),
@@ -1044,11 +1157,12 @@ fn spawn_skill_bar(
                     Transform::from_xyz(0.0, 0.0, 0.2),
                     Visibility::Hidden,
                 ));
-                // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)；8pt 白；有技能时隐藏
+                // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)；8pt 白；有技能时隐藏。
+                // 文本 = GetKey(BarIndex, i)：bar1 "F1".."F8"、bar2 "Ctrl + F1".."Ctrl + F8"
                 c.spawn((
                     UiEntity,
-                    SkillBarKey(i),
-                    Text2d::new(format!("F{}", i + 1)),
+                    SkillBarKey(abs),
+                    Text2d::new(skill_key_label(bar_idx, i)),
                     bevy::sprite::Anchor::TOP_LEFT,
                     TextFont {
                         font: FontSource::Handle(font.clone()),
@@ -1063,16 +1177,23 @@ fn spawn_skill_bar(
     });
 }
 
-/// 命中技能格索引（C# Cells[i] bbox：@(i*25+15, 3) 24x22）
+/// 命中技能格绝对格号（C# Cells[i] bbox：@(i*25+15, 3) 24x22；两条栏各自检测，
+/// 返回 bar*8+i）
 fn skill_slot_at(bar: &SkillBarState, cursor: Vec2) -> Option<usize> {
-    (0..8).find(|&i| {
-        let x = bar.pos.0 + skill_slot_x(i);
-        let y = bar.pos.1 + SKILL_SLOT_Y;
-        cursor.x >= x
-            && cursor.x <= x + SKILL_SLOT_W
-            && cursor.y >= y
-            && cursor.y <= y + SKILL_SLOT_H
-    })
+    for b in 0..2usize {
+        for i in 0..8usize {
+            let x = bar.pos[b].0 + skill_slot_x(i);
+            let y = bar.pos[b].1 + SKILL_SLOT_Y;
+            if cursor.x >= x
+                && cursor.x <= x + SKILL_SLOT_W
+                && cursor.y >= y
+                && cursor.y <= y + SKILL_SLOT_H
+            {
+                return Some(b * 8 + i);
+            }
+        }
+    }
+    None
 }
 
 /// 技能栏指针交互（C# SkillBarDialog Movable + Cells[i].Click→UseSpell）：
@@ -1085,7 +1206,7 @@ fn skill_bar_pointer_system(
     windows: Query<&Window>,
     opt: Res<crate::game::dialogs::option::OptionState>,
     magics: Res<MagicsState>,
-    mut roots: Query<&mut Transform, With<SkillBarRoot>>,
+    mut roots: Query<(&mut Transform, &SkillBarRoot)>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
 ) {
     // 与 spawn_skill_bar 同一道门：UI_BITS 关掉 skill 时栏未生成，指针系统不应空转/误存（#2517）
@@ -1120,33 +1241,38 @@ fn skill_bar_pointer_system(
             // 仅占用格（绑定技能、显示图标）才走点击流程。故按下点命中空格时按“未命中格”处理 → 拖动。
             bar.pressed_slot =
                 skill_slot_at(&bar, cursor).filter(|&i| magics.by_key(i as u8 + 1).is_some());
-            let in_bar = cursor.x >= bar.pos.0
-                && cursor.x <= bar.pos.0 + SKILL_BAR_W
-                && cursor.y >= bar.pos.1
-                && cursor.y <= bar.pos.1 + SKILL_BAR_H;
-            if bar.pressed_slot.is_none() && in_bar {
-                bar.drag_offset = Some((cursor.x - bar.pos.0, cursor.y - bar.pos.1));
-                tracing::debug!("⚙️ 技能栏开始拖动");
+            // 命中哪条栏的栏体（非格子区）→ 拖那条栏（C# Movable 每条独立）
+            let hit_bar = (0..2usize).find(|&b| {
+                cursor.x >= bar.pos[b].0
+                    && cursor.x <= bar.pos[b].0 + SKILL_BAR_W
+                    && cursor.y >= bar.pos[b].1
+                    && cursor.y <= bar.pos[b].1 + SKILL_BAR_H
+            });
+            if bar.pressed_slot.is_none() {
+                if let Some(b) = hit_bar {
+                    bar.drag_offset = Some((b, (cursor.x - bar.pos[b].0, cursor.y - bar.pos[b].1)));
+                    tracing::debug!("⚙️ 技能栏{b} 开始拖动");
+                }
             }
         }
     }
-    if let Some(off) = bar.drag_offset {
+    if let Some((b, off)) = bar.drag_offset {
         if mouse.pressed(MouseButton::Left) {
             // C# OnMouseMove：拖动位置钳制在父容器（全屏）内，栏永远不可拖出屏幕（修复：拖出后丢失）
             if let Some(cursor) = cursor {
-                bar.pos = (
+                bar.pos[b] = (
                     (cursor.x - off.0).clamp(0.0, SKILL_BAR_MAX_X),
                     (cursor.y - off.1).clamp(0.0, SKILL_BAR_MAX_Y),
                 );
             }
         } else {
-            // 松开（含光标已拖出窗口的松开）：结束拖动并保存
+            // 松开（含光标已拖出窗口的松开）：结束拖动并保存（C# OnMoving 每帧写 Settings，退出统一落盘）
             bar.drag_offset = None;
             bar.save();
             tracing::info!(
-                "⚙️ 技能栏位置 -> ({:.0},{:.0}) 已保存",
-                bar.pos.0,
-                bar.pos.1
+                "⚙️ 技能栏{b} 位置 -> ({:.0},{:.0}) 已保存",
+                bar.pos[b].0,
+                bar.pos[b].1
             );
         }
     }
@@ -1158,10 +1284,11 @@ fn skill_bar_pointer_system(
             }
         }
     }
-    // 整栏跟随拖动（根实体移动，子控件随层级联动）
-    for mut tf in &mut roots {
-        tf.translation.x = bar.pos.0;
-        tf.translation.y = -bar.pos.1;
+    // 整栏跟随拖动（根实体移动，子控件随层级联动；按 SkillBarRoot.0 栏号对位）
+    for (mut tf, root) in &mut roots {
+        let pos = bar.pos[root.0];
+        tf.translation.x = pos.0;
+        tf.translation.y = -pos.1;
     }
 }
 
