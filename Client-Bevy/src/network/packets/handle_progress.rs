@@ -283,8 +283,14 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             }
         }
         x if x == ServerPacketIds::GuildBuffList as i16 => {
+            // #2537：行会技能——激活列表 + Buff 目录入 GuildState（原仅打日志）
             if let Ok(p) = special_systems::GuildBuffList::read_body(&mut cur) {
-                tracing::info!("🏴 行会技能 Buff: {:?}", p.active_buffs.len());
+                let (n_active, n_catalog) = (p.active_buffs.len(), p.guild_buffs.len());
+                server_events.write(ServerEvent::GuildBuffList {
+                    active: p.active_buffs,
+                    catalog: p.guild_buffs,
+                });
+                tracing::info!("🏴 行会技能: 激活 {} / 目录 {}", n_active, n_catalog);
             }
         }
         x if x == ServerPacketIds::NPCPearlGoods as i16 => {

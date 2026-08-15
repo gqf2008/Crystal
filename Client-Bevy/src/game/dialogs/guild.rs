@@ -66,6 +66,14 @@ pub struct GuildState {
     pub show_offline: bool,
     /// #1395：职务定义（name, options；服务端 GuildStatus 下发，C# GuildObject.Ranks）
     pub rank_defs: Vec<(String, u8)>,
+    /// #2537：Buff 定义目录（S.GuildBuffList 第三段，服务端 ini GuildSettings 全量）
+    pub buff_catalog: Vec<mir2_shared::data::client_data::GuildBuffInfo>,
+    /// #2537：已激活 Buff id（S.GuildBuffList ActiveBuffs）
+    pub active_buffs: Vec<i32>,
+    /// #2537：Buff 页显示开关（C# BuffButton/BuffPage 切换）
+    pub show_buff_page: bool,
+    /// #2537：Buff 页滚动起点（C# StartIndex，8 行/页）
+    pub buff_start: usize,
 }
 
 impl GuildState {
@@ -86,6 +94,28 @@ impl GuildState {
             .cloned()
             .unwrap_or_else(|| format!("#{}", index))
     }
+
+    /// #2537 Buff 是否已激活
+    pub fn buff_active(&self, buff_id: i32) -> bool {
+        self.active_buffs.contains(&buff_id)
+    }
+}
+
+/// #2537 Buff 行文本（C# GuildBuffButton：名称 + 等级/点数/费用 + 状态；纯函数便于头测）
+pub fn buff_row_text(info: &mir2_shared::data::client_data::GuildBuffInfo, active: bool) -> String {
+    format!(
+        "{}  Lv{} 点{} 金{}{}",
+        info.name,
+        info.level_requirement,
+        info.points_requirement,
+        info.activation_cost,
+        if active { " [已激活]" } else { "" }
+    )
+}
+
+/// #2537 Buff 页数（C# 8 个 GuildBuffButton/页；空目录仍算 1 页，C# Count<8 不翻页）
+pub fn buff_page_count(catalog_len: usize) -> usize {
+    catalog_len.div_ceil(8).max(1)
 }
 
 #[derive(Component)]
@@ -134,6 +164,17 @@ pub struct GuildPromoteBtn;
 /// #1348：显示离线成员切换（C# MembersShowOfflineButton）
 #[derive(Component)]
 pub struct GuildShowOfflineBtn;
+
+/// #2537：Buff 页开关（C# BuffButton）
+#[derive(Component)]
+pub struct GuildBuffToggleBtn;
+
+/// #2537：Buff 页翻页（C# UpButton/DownButton，8 行/页）
+#[derive(Component)]
+pub struct GuildBuffUp;
+
+#[derive(Component)]
+pub struct GuildBuffDown;
 
 /// 踢出选中成员
 #[derive(Component)]
@@ -191,14 +232,12 @@ impl Plugin for GuildPlugin {
         app.init_resource::<GuildState>();
         app.add_systems(OnEnter(AppState::Game), spawn_guild);
         app.add_systems(OnExit(AppState::Game), cleanup_guild);
-        app.add_systems(
-            Update,
-            guild_server_events.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, guild_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
             (
                 guild_ui_system,
+                guild_buff_system,
                 guild_storage_system,
                 guild_invite_system,
                 guild_show_offline_system,
@@ -313,6 +352,65 @@ fn spawn_guild(
         GuildShowOfflineBtn,
         UiButton {
             rect: (545.0, 390.0, 70.0, 20.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Guild),
+        GuildWidget,
+    ));
+
+    // #2537：Buff 页开关（C# BuffButton）+ 翻页（C# UpButton/DownButton，列区右侧）
+    let buff_toggle = spawn_ui_text(
+        &mut commands,
+        &font,
+        "技能",
+        470.0,
+        390.0,
+        12.0,
+        Color::WHITE,
+        8.0,
+    );
+    commands.entity(buff_toggle).insert((
+        GuildBuffToggleBtn,
+        UiButton {
+            rect: (470.0, 390.0, 60.0, 20.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Guild),
+        GuildWidget,
+    ));
+    let buff_up = spawn_ui_text(
+        &mut commands,
+        &font,
+        "▲",
+        505.0,
+        140.0,
+        11.0,
+        Color::WHITE,
+        8.1,
+    );
+    commands.entity(buff_up).insert((
+        GuildBuffUp,
+        UiButton {
+            rect: (505.0, 140.0, 16.0, 14.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Guild),
+        GuildWidget,
+    ));
+    let buff_down = spawn_ui_text(
+        &mut commands,
+        &font,
+        "▼",
+        505.0,
+        324.0,
+        11.0,
+        Color::WHITE,
+        8.1,
+    );
+    commands.entity(buff_down).insert((
+        GuildBuffDown,
+        UiButton {
+            rect: (505.0, 324.0, 16.0, 14.0),
             clicked: false,
         },
         DialogRoot(DialogKind::Guild),
@@ -766,10 +864,13 @@ fn guild_ui_system(
     // 打开瞬间请求行会信息（原版 C# GuildDialog.Show → RequestGuildInfo）
     if !*requested {
         *requested = true;
-        net.send_packet(&mir2_shared::packets::client::guild::RequestGuildInfo {
-            info_type: 0,
+        net.send_packet(&mir2_shared::packets::client::guild::RequestGuildInfo { info_type: 0 });
+        // #2537：Buff 列表（C.GuildBuffUpdate action=0，C# RequestGuildBuffList；每次打开刷新）
+        net.send_packet(&mir2_shared::packets::client::guild::GuildBuffUpdate {
+            action: 0,
+            buff_id: 0,
         });
-        tracing::info!("🏰 请求行会信息");
+        tracing::info!("🏰 请求行会信息 + 行会技能列表");
     }
     for btn in &close {
         if btn.clicked {
@@ -786,7 +887,14 @@ fn guild_ui_system(
     for (mut text, mut color, line) in &mut lines {
         text.0 = match line.0 {
             0 => {
-                if guild.in_guild {
+                if guild.show_buff_page {
+                    // #2537：Buff 页头（C# BuffPage + PointsLeft；行会等级/剩余点数服务端未同步，显示激活计数）
+                    format!(
+                        "行会技能（已激活 {}/{}）",
+                        guild.active_buffs.len(),
+                        guild.buff_catalog.len()
+                    )
+                } else if guild.in_guild {
                     let notice = guild.notice.first().cloned().unwrap_or_default();
                     if notice.is_empty() {
                         format!(
@@ -809,10 +917,28 @@ fn guild_ui_system(
                 }
             }
             i if (1..=10).contains(&i) => {
-                let idx = scroll_offset + i - 1;
-                // #1348：按 show_offline 过滤后的可见成员映射
-                match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
-                Some(m) => {
+                // #2537：Buff 页模式——行 1-8 Buff 目录（buff_start 起 8 项）、行 9 页码
+                if guild.show_buff_page {
+                    if i <= 8 {
+                        let idx = guild.buff_start + (i - 1);
+                        match guild.buff_catalog.get(idx) {
+                            Some(info) => buff_row_text(info, guild.buff_active(info.id)),
+                            None => String::new(),
+                        }
+                    } else if i == 9 {
+                        format!(
+                            "技能 第{}/{}页",
+                            guild.buff_start / 8 + 1,
+                            buff_page_count(guild.buff_catalog.len())
+                        )
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    let idx = scroll_offset + i - 1;
+                    // #1348：按 show_offline 过滤后的可见成员映射
+                    match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
+                    Some(m) => {
                     // #1395：按 rank_index 显示职务名（C# 按职务分组）
                     let rank = guild
                         .rank_defs
@@ -826,8 +952,9 @@ fn guild_ui_system(
                         rank
                     )
                 }
-                None => String::new(),
-            }
+                    None => String::new(),
+                }
+                }
             },
             i if (11..=18).contains(&i) => {
                 let slot = guild.storage_page * 8 + (i - 11);
@@ -844,10 +971,22 @@ fn guild_ui_system(
             19 => format!("仓库 第{}/13页", guild.storage_page + 1),
             _ => String::new(),
         };
-        // #140 成员选中行高亮（踢出目标可见）
-        let selected = matches!(line.0, 1..=10)
-            && guild.selected_member == Some(scroll_offset + line.0 - 1);
-        let c = if selected {
+        // #140 成员选中行高亮（踢出目标可见）；#2537 Buff 页已激活行绿色
+        let c = if guild.show_buff_page {
+            let active = matches!(line.0, 1..=8)
+                && guild
+                    .buff_catalog
+                    .get(guild.buff_start + (line.0 - 1))
+                    .map(|info| guild.buff_active(info.id))
+                    .unwrap_or(false);
+            if active {
+                Color::srgb(0.5, 1.0, 0.5)
+            } else {
+                Color::WHITE
+            }
+        } else if matches!(line.0, 1..=10)
+            && guild.selected_member == Some(scroll_offset + line.0 - 1)
+        {
             Color::srgb(1.0, 0.9, 0.3)
         } else {
             Color::WHITE
@@ -953,20 +1092,22 @@ fn guild_ui_system(
             }
         }
     }
-    // 点击成员行选中（踢出目标）
+    // 点击成员行选中（踢出目标）；Buff 页模式下由 guild_buff_system 处理点击
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
-                let visible = guild.visible_member_indices();
-                for i in 1..=10usize {
-                    let y = 140.0 + (i - 1) as f32 * 20.0;
-                    if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 18.0 {
-                        let idx = scroll_offset + i - 1;
-                        if let Some(&mi) = visible.get(idx) {
-                            guild.selected_member = Some(idx);
-                            tracing::info!("🏰 选中行会成员: {}", guild.members[mi].name);
+                if !guild.show_buff_page {
+                    let visible = guild.visible_member_indices();
+                    for i in 1..=10usize {
+                        let y = 140.0 + (i - 1) as f32 * 20.0;
+                        if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                            let idx = scroll_offset + i - 1;
+                            if let Some(&mi) = visible.get(idx) {
+                                guild.selected_member = Some(idx);
+                                tracing::info!("🏰 选中行会成员: {}", guild.members[mi].name);
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
                 // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
@@ -982,6 +1123,68 @@ fn guild_ui_system(
                     }
                 }
             }
+        }
+    }
+}
+
+/// #2537 Buff 页交互（独立系统：guild_ui_system 已满 16 参 Bevy SystemParam 上限）
+/// 开关/翻页 + 行点击（C# BuffButton/RequestBuff/UpButton/DownButton）
+fn guild_buff_system(
+    mut guild: ResMut<GuildState>,
+    net: Res<NetConnection>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    buff_toggle_btn: Query<&UiButton, With<GuildBuffToggleBtn>>,
+    buff_up_btn: Query<&UiButton, With<GuildBuffUp>>,
+    buff_down_btn: Query<&UiButton, With<GuildBuffDown>>,
+) {
+    // Buff 页开关（C# BuffButton 切换 BuffPage）
+    for btn in &buff_toggle_btn {
+        if btn.clicked {
+            guild.show_buff_page = !guild.show_buff_page;
+            tracing::info!(
+                "🏴 行会技能页: {}",
+                if guild.show_buff_page { "开" } else { "关" }
+            );
+        }
+    }
+    for btn in &buff_up_btn {
+        if btn.clicked {
+            guild.buff_start = guild.buff_start.saturating_sub(8);
+        }
+    }
+    for btn in &buff_down_btn {
+        if btn.clicked && guild.buff_start + 8 < guild.buff_catalog.len() {
+            guild.buff_start += 8;
+        }
+    }
+    if !guild.show_buff_page || !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    // 行点击 → C.GuildBuffUpdate；服务端 toggle 语义（未激活→激活收费校验，已激活→停用），结果走系统消息
+    for i in 1..=8usize {
+        let y = 140.0 + (i - 1) as f32 * 20.0;
+        if cursor.x >= 298.0 && cursor.x <= 498.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+            if let Some(info) = guild.buff_catalog.get(guild.buff_start + i - 1) {
+                net.send_packet(&mir2_shared::packets::client::guild::GuildBuffUpdate {
+                    action: 2,
+                    buff_id: info.id,
+                });
+                tracing::info!(
+                    "🏴 行会技能: {} #{}（服务端 toggle）",
+                    if guild.buff_active(info.id) {
+                        "停用"
+                    } else {
+                        "激活"
+                    },
+                    info.id
+                );
+            }
+            break;
         }
     }
 }
@@ -1398,6 +1601,21 @@ fn guild_server_events(
             ServerEvent::GuildInvited { name } => {
                 guild.invite = Some(name.clone());
             }
+            ServerEvent::GuildBuffList { active, catalog } => {
+                // #2537：行会技能同步（目录 + 激活列表；打开对话框/他人变更时刷新）
+                guild.active_buffs = active.clone();
+                guild.buff_catalog = catalog.clone();
+                // 目录变短时夹紧到最后一页起点（8 行/页）
+                let max_start = guild.buff_catalog.len().saturating_sub(1) / 8 * 8;
+                if guild.buff_start > max_start {
+                    guild.buff_start = max_start;
+                }
+                tracing::info!(
+                    "🏴 行会技能已同步: 目录 {} 项（激活 {}）",
+                    catalog.len(),
+                    active.len()
+                );
+            }
             ServerEvent::UserInformation { item_names, .. } => {
                 for (idx, name) in item_names {
                     guild.item_names.insert(*idx, name.clone());
@@ -1405,5 +1623,74 @@ fn guild_server_events(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn buff_info(id: i32, name: &str) -> mir2_shared::data::client_data::GuildBuffInfo {
+        mir2_shared::data::client_data::GuildBuffInfo {
+            id,
+            icon: 24,
+            name: name.to_string(),
+            level_requirement: 3,
+            points_requirement: 2,
+            time_limit: 60,
+            activation_cost: 500,
+            stats: mir2_shared::data::stats::Stats::new(),
+        }
+    }
+
+    /// #2537 Buff 行文本（激活态标记，C# GuildBuffButton Name/Info）
+    #[test]
+    fn buff_row_text_marks_active() {
+        let info = buff_info(1, "经验加成");
+        assert!(buff_row_text(&info, true).contains("[已激活]"));
+        assert!(!buff_row_text(&info, false).contains("[已激活]"));
+        assert!(buff_row_text(&info, false).contains("Lv3"));
+        assert!(buff_row_text(&info, false).contains("点2"));
+        assert!(buff_row_text(&info, false).contains("金500"));
+    }
+
+    /// #2537 页数（C# 8 GuildBuffButton/页）：0/8 → 1 页，9/16 → 2 页
+    #[test]
+    fn buff_page_count_rounds_up() {
+        assert_eq!(buff_page_count(0), 1);
+        assert_eq!(buff_page_count(8), 1);
+        assert_eq!(buff_page_count(9), 2);
+        assert_eq!(buff_page_count(16), 2);
+    }
+
+    /// #2537 目录同步夹紧：buff_start 超出末页回夹（8 行/页）
+    #[test]
+    fn buff_start_clamped_on_sync() {
+        let mut guild = GuildState::default();
+        guild.buff_catalog = vec![buff_info(1, "a"); 16];
+        guild.buff_start = 8;
+        guild.active_buffs = vec![1];
+        // 复现 GuildBuffList arm 的夹紧逻辑
+        let max_start = guild.buff_catalog.len().saturating_sub(1) / 8 * 8;
+        if guild.buff_start > max_start {
+            guild.buff_start = max_start;
+        }
+        assert_eq!(guild.buff_start, 8);
+        assert!(guild.buff_active(1));
+        assert!(!guild.buff_active(2));
+        // 目录缩到 9 项 → 末页起点 0…wait 9 项末页起点 = 8/8*8 = 8? (9-1)/8*8 = 8
+        guild.buff_catalog.truncate(9);
+        let max_start = guild.buff_catalog.len().saturating_sub(1) / 8 * 8;
+        if guild.buff_start > max_start {
+            guild.buff_start = max_start;
+        }
+        assert_eq!(guild.buff_start, 8);
+        // 目录缩到 8 项 → 末页起点 0
+        guild.buff_catalog.truncate(8);
+        let max_start = guild.buff_catalog.len().saturating_sub(1) / 8 * 8;
+        if guild.buff_start > max_start {
+            guild.buff_start = max_start;
+        }
+        assert_eq!(guild.buff_start, 0);
     }
 }

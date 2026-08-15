@@ -647,7 +647,7 @@ impl Message<StartGameRequest> for WorldActor {
         // 广播 ObjectLevelEffects（覆盖初始 ObjectPlayer 的 0 特效；C# Enqueue + Broadcast）
         self.broadcast_level_effects(msg.session_id).await;
 
-        // C# StartGame：下发玩家所属行会的激活 Buff 列表（S.GuildBuffList）
+        // C# StartGame：下发玩家所属行会的激活 Buff 列表（S.GuildBuffList；#2537 含 Buff 目录）
         if let Some(guild_name) = &loaded_state.guild_name {
             let buffs = self
                 .social_ref
@@ -656,22 +656,7 @@ impl Message<StartGameRequest> for WorldActor {
                 })
                 .await
                 .unwrap_or_default();
-            let packet = mir2_shared::packets::server::special_systems::GuildBuffList {
-                active_buffs: buffs.iter().map(|b| *b as i32).collect(),
-            };
-            let mut body = Vec::new();
-            if packet.write_body(&mut body).is_ok() {
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id: msg.session_id,
-                        data: build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::GuildBuffList as i16,
-                            &body,
-                        ),
-                    })
-                    .await;
-            }
+            self.send_guild_buff_list(msg.session_id, &buffs).await;
         }
 
         // #188：下发英雄列表（ManageHeroes）

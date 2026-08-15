@@ -687,9 +687,28 @@ impl WorldActor {
     }
 
     /// 发送 GuildBuffList 完整包（C# S.GuildBuffList：Remove + ActiveBuffs + GuildBuffs）
+    /// #2537：目录段带全量 Buff 定义（C# GuildObject 下发 GuildBuffs——客户端 Buff 页数据源）
     pub(crate) async fn send_guild_buff_list(&self, session_id: u64, buffs: &[u32]) {
+        // ini 定义（HashMap 无序）按 id 排序保证稳定展示
+        let mut infos: Vec<&crate::util::ini::GuildBuffInfo> =
+            self.guild_buff_infos.values().collect();
+        infos.sort_by_key(|i| i.id);
+        let guild_buffs: Vec<mir2_shared::data::client_data::GuildBuffInfo> = infos
+            .iter()
+            .map(|info| mir2_shared::data::client_data::GuildBuffInfo {
+                id: info.id as i32,
+                icon: info.icon as i32,
+                name: info.name.clone(),
+                level_requirement: info.level_req.min(255) as u8,
+                points_requirement: info.points_req.min(255) as u8,
+                time_limit: info.time_limit_minutes as i32,
+                activation_cost: info.activation_cost.min(i32::MAX as u64) as i32,
+                stats: super::guild_buff_stats(info),
+            })
+            .collect();
         let packet = mir2_shared::packets::server::special_systems::GuildBuffList {
             active_buffs: buffs.iter().map(|b| *b as i32).collect(),
+            guild_buffs,
         };
         let mut body = Vec::new();
         if packet
