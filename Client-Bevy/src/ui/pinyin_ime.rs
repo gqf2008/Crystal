@@ -206,7 +206,12 @@ impl PinyinDict {
 
     /// 把输入串切成有效音节序列（贪心最长匹配）；无法整串切分返回 None。
     /// 输入假定纯 ASCII 小写（来自 feed_letter）。
+    /// 不变式：Some 结果必含 ≥1 个音节——空串返回 None 而非 Some(vec![])，
+    /// 否则空表会让调用方的 `syls.len() - 1` 类索引 usize 下溢 panic（#2594 曾因此崩溃）。
     fn segment<'s>(&self, s: &'s str) -> Option<Vec<&'s str>> {
+        if s.is_empty() {
+            return None;
+        }
         let bytes = s.as_bytes();
         let mut out = Vec::new();
         let mut pos = 0;
@@ -234,8 +239,9 @@ impl PinyinDict {
     }
 
     /// 查候选：① 精确词 ② 单音节→完整单字列表 ③ 多音节→各音节 top1 拼接 + 末音节变体。
-    /// 空组合（Backspace 删尽后 recompute）直接返回空——segment("") 切出空音节表，
-    /// ③ 的 `syls.len() - 1` 会 usize 下溢 panic（登录界面输入字母再退格可稳定复现）。
+    /// 空组合（Backspace 删尽后 recompute）直接返回空——曾因 segment("") 切出空音节表，
+    /// ③ 的 `syls.len() - 1` usize 下溢 panic（登录界面输入字母再退格可稳定复现）；
+    /// 如今 segment 对空串也返回 None（根因修复），此处守卫保留作双保险。
     fn lookup(&self, composing: &str) -> Vec<String> {
         if composing.is_empty() {
             return Vec::new();
@@ -685,22 +691,31 @@ fn pinyin_candidate_ui_system(
         Visibility::Hidden
     };
 
-    if let Some((x, y, _w, h)) = focus.rect {
-        let bar_y = y + h + 2.0; // 屏幕坐标 y 向下：输入框下方
-        for (mut _sprite, mut tf, mut v) in bars.p0().iter_mut() {
-            tf.translation.x = x + 160.0; // 背景以中心定位 → 加半宽
-            tf.translation.y = -(bar_y + 9.0); // 加半高后取负转世界坐标
+    // 可见性无条件应用：失焦帧（focus=None）也要把上一帧的 Visible 落回 Hidden，
+    // 否则组合中途失焦（如点进密码框）候选条会滞留旧位置（对齐 mode chip 的隐藏路径）
+    let Some((x, y, _w, h)) = focus.rect else {
+        for (_sprite, _tf, mut v) in bars.p0().iter_mut() {
             *v = vis;
         }
-        for (mut text, mut tf, mut v) in bars.p1().iter_mut() {
-            // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
-            if text.0 != label {
-                text.0 = label.clone();
-            }
-            tf.translation.x = x + 4.0;
-            tf.translation.y = -(bar_y + 2.0);
+        for (_text, _tf, mut v) in bars.p1().iter_mut() {
             *v = vis;
         }
+        return;
+    };
+    let bar_y = y + h + 2.0; // 屏幕坐标 y 向下：输入框下方
+    for (mut _sprite, mut tf, mut v) in bars.p0().iter_mut() {
+        tf.translation.x = x + 160.0; // 背景以中心定位 → 加半宽
+        tf.translation.y = -(bar_y + 9.0); // 加半高后取负转世界坐标
+        *v = vis;
+    }
+    for (mut text, mut tf, mut v) in bars.p1().iter_mut() {
+        // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
+        if text.0 != label {
+            text.0 = label.clone();
+        }
+        tf.translation.x = x + 4.0;
+        tf.translation.y = -(bar_y + 2.0);
+        *v = vis;
     }
 }
 
@@ -959,14 +974,15 @@ mod tests {
         assert_eq!(d.segment("zzz"), None);
     }
 
-    /// 空组合回归：segment("") 返回空音节表，旧实现 ③ 的 `syls.len() - 1`
+    /// 空组合回归：旧实现 segment("") 返回 Some(vec![])，③ 的 `syls.len() - 1`
     /// usize 下溢 panic（登录界面输入字母再 Backspace 删尽可稳定复现）。
     #[test]
     fn lookup_empty_composing_no_panic() {
-        let d = PinyinDict::load();
+        let d = PinyinDict::minimal();
         assert!(d.lookup("").is_empty());
-        // segment("") 是 Some(vec![])（while 不进循环）——正是下溢的输入
-        assert_eq!(d.segment(""), Some(Vec::<&str>::new()));
+        // 根因契约：空串不构成有效切分（Some ⇒ ≥1 个音节），
+        // 调用方对结果做 len()-1 类索引才不会再下溢
+        assert_eq!(d.segment(""), None);
     }
 
     /// Backspace 删尽组合后 recompute 不再 panic，状态回到未组合。
@@ -975,6 +991,12 @@ mod tests {
         let mut ime = PinyinIme::new(PinyinDict::minimal());
         ime.toggle(); // 中文模式
         ime.feed_letter('n');
+        ime.feed_letter('i');
+        assert!(ime.is_composing());
+        // "ni" 是有效音节：候选非空——保证后面「删尽后候选复位」断言有区分度
+        // （旧用例喂单个 'n'（无效音节），候选删前删后都是空，测不出残留）
+        assert!(!ime.candidates.is_empty());
+        ime.backspace(); // 删到 "n"（无效音节 → 候选清空，仍在组合）
         assert!(ime.is_composing());
         ime.backspace(); // 删到空 → 旧实现此处 panic
         assert!(!ime.is_composing());
