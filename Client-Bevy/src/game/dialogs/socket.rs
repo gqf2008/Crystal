@@ -10,18 +10,35 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::inventory::{DIALOG_X as INV_DIALOG_X, DIALOG_Y as INV_DIALOG_Y, InvItem};
+use crate::game::dialogs::inventory::{
+    InvItem, DIALOG_X as INV_DIALOG_X, DIALOG_Y as INV_DIALOG_Y,
+};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache,
-};
+use crate::ui::sprite_ui::{spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache};
 
-/// 背包对话框位置（用于定位镶嵌面板，跟随背包原点常量防漂移）
+/// 背包对话框原点（用于定位镶嵌面板，跟随背包原点常量防漂移）
 const INV_X: f32 = INV_DIALOG_X;
-const INV_BOTTOM: f32 = INV_DIALOG_Y + 37.0 + 5.0 * 33.0;
+const INV_Y: f32 = INV_DIALOG_Y;
+/// 背包背景 Title[196] 缺失时的兜底尺寸（真实值运行时从库读取）
+const INV_W_FALLBACK: f32 = 316.0;
+const INV_H_FALLBACK: f32 = 236.0;
+
+/// C# SocketDialog.Show(Inventory) 定位公式（SocketDialog.cs:108-110）：
+/// x = inv.X + (inv.W - sock.W)/2，y = inv.Y + inv.H + 5 —— 全部用背包**真实**尺寸。
+fn socket_origin(inv_w: f32, inv_h: f32, sock_w: f32) -> (f32, f32) {
+    (INV_X + (inv_w - sock_w) / 2.0, INV_Y + inv_h + 5.0)
+}
+
+/// 背包背景 Title[196] 真实尺寸（缺失回退 316x236 实测值）
+fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
+    match libs.0.get_image(LibraryName::Title, 196) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => (INV_W_FALLBACK, INV_H_FALLBACK),
+    }
+}
 
 /// 镶嵌状态（当前展示的物品）
 #[derive(Resource, Default)]
@@ -73,15 +90,19 @@ fn spawn_socket(
 ) {
     libs.0.ensure_initialized();
 
-    // 面板（初始 1 孔，打开时按孔数换图）
+    // 面板（初始 1 孔，打开时按孔数换图并按背包真实尺寸重定位）
+    let (inv_w, inv_h) = inventory_real_size(&mut libs);
     let (pw, ph) = match libs.0.get_image(LibraryName::Prguse3, 20) {
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
         None => (81.0, 62.0),
     };
-    let px = INV_X + (0.0); // 打开时按孔数重算
-    let py = INV_BOTTOM + 5.0;
+    let (px, py) = socket_origin(inv_w, inv_h, pw);
 
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let panel = spawn_ui_sprite(&mut commands, white.clone(), px, py, 6.0, 1.0);
     commands.entity(panel).insert((
         Sprite {
@@ -97,9 +118,19 @@ fn spawn_socket(
 
     // 关闭按钮（W-23, 3）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        px + pw - 23.0, py + 3.0, 7.0, 24.0, 21.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        px + pw - 23.0,
+        py + 3.0,
+        7.0,
+        24.0,
+        21.0,
     ) {
         commands.entity(e).insert((
             SocketClose,
@@ -144,14 +175,19 @@ fn socket_ui_system(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     close: Query<&UiButton, With<SocketClose>>,
+    mut close_tf: Query<&mut Transform, (With<SocketClose>, Without<SocketCell>)>,
     mut widgets: Query<&mut Visibility, (With<SocketWidget>, Without<SocketCell>)>,
-    mut cells: Query<(&mut Visibility, &mut Sprite, &SocketCell)>,
+    mut cells: Query<(&mut Visibility, &mut Sprite, &mut Transform, &SocketCell)>,
     mut panel: Query<(&mut Sprite, &mut Transform), (With<SocketPanel>, Without<SocketCell>)>,
     mut logged: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::Socket);
     for mut vis in &mut widgets {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *logged = false;
@@ -164,37 +200,46 @@ fn socket_ui_system(
         }
     }
 
-    let slots = state
-        .item
-        .as_ref()
-        .map(|i| i.slots.len())
-        .unwrap_or(0);
+    let slots = state.item.as_ref().map(|i| i.slots.len()).unwrap_or(0);
     let slot_count = slots.clamp(1, 12);
 
-    // 面板按孔数换图 + 重新定位（背包下方居中）
+    // 面板按孔数换图 + 按背包真实尺寸重定位（C# SocketDialog.Show：
+    // x = inv.X+(inv.W-w)/2、y = inv.Y+inv.H+5、CloseButton = w-23 —— 关闭钮随实际宽度）
+    let (inv_w, inv_h) = inventory_real_size(&mut libs);
+    let idx = 20 + slot_count - 1;
+    let w = libs
+        .0
+        .get_image(LibraryName::Prguse3, idx)
+        .map(|i| i.width.max(0) as f32)
+        .unwrap_or(INV_W_FALLBACK);
+    let (px, py) = socket_origin(inv_w, inv_h, w);
     if let Ok((mut sprite, mut tf)) = panel.single_mut() {
-        let idx = 20 + slot_count - 1;
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse3, idx) {
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse3,
+            idx,
+        ) {
             if sprite.image != h {
                 sprite.image = h.clone();
                 sprite.custom_size = None;
             }
         }
-        let pw = match sprite.custom_size {
-            Some(s) => s.x,
-            None => 268.0,
-        };
-        let w = libs
-            .0
-            .get_image(LibraryName::Prguse3, idx)
-            .map(|i| i.width.max(0) as f32)
-            .unwrap_or(pw);
-        let x = INV_X + (280.0 - w) / 2.0;
-        tf.translation.x = x;
+        tf.translation.x = px;
+        tf.translation.y = -py;
+    }
+    for mut tf in &mut close_tf {
+        tf.translation.x = px + w - 23.0;
+        tf.translation.y = -(py + 3.0);
     }
 
-    // 镶嵌格：idx < 孔数 且 有宝石 → 显示宝石图标；否则隐藏
-    for (mut vis, mut sprite, cell) in &mut cells {
+    // 镶嵌格：idx < 孔数 且 有宝石 → 显示宝石图标；否则隐藏；位置随面板原点
+    for (mut vis, mut sprite, mut tf, cell) in &mut cells {
+        let gx = (cell.0 % 6) as f32;
+        let gy = (cell.0 / 6) as f32;
+        tf.translation.x = px + gx * 36.0 + 23.0 + gx;
+        tf.translation.y = -(py + gy * 33.0 + 15.0 + gy);
         let gem = state
             .item
             .as_ref()
@@ -216,7 +261,11 @@ fn socket_ui_system(
                 }
             }
         }
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // 打开时日志（E2E 证据）
@@ -240,5 +289,23 @@ fn socket_ui_system(
             );
         }
         *logged = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C# SocketDialog.Show(Inventory)（SocketDialog.cs:108-110）公式锚点：
+    /// 背包 Title[196] 实测 316x236、原点 (0,0) → 面板 y=241（inv.Y+inv.H+5）、x 随宽度居中。
+    /// 旧实现 y=207（格子底 +5）、x 用硬编码 280 —— 均与 C# 不符。
+    #[test]
+    fn socket_origin_matches_csharp_show() {
+        // 1 孔面板宽 81（Prguse3[20] 实测）
+        assert_eq!(socket_origin(316.0, 236.0, 81.0), (117.5, 241.0));
+        // 12 孔面板宽 268（Prguse3[31]）
+        assert_eq!(socket_origin(316.0, 236.0, 268.0), (24.0, 241.0));
+        // 关闭钮跟随实际宽度：w-23（spawn 与运行时同步该公式）
+        assert_eq!(socket_origin(316.0, 236.0, 81.0).0 + 81.0 - 23.0, 175.5);
     }
 }
