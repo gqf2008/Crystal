@@ -9,6 +9,7 @@
 //   interact {object_id} 与指定 NPC 对话
 //   pickup {object_id}  拾取指定地面物品
 //   chat {message}    发送聊天/GM 命令（@MAKE 等）
+//   dialog {kind,action?}  打开/关闭/切换对话框（默认 toggle；验收截图巡回用，#2586）
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -23,6 +24,7 @@ use crate::actor::{
     ActorAnim, GroundItem, LocalPlayer, Monster, MonsterName, NetObjectId, Npc, NpcName, Player,
     PlayerName,
 };
+use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::game::movement::{world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::game::player_control::ControlState;
@@ -32,14 +34,43 @@ use crate::scenes::AppState;
 
 /// 控制命令（控制线程 → Bevy 主循环）
 enum ControlCommand {
-    Move { dx: i32, dy: i32, run: bool },
-    Screenshot { path: String },
-    GetState { reply: Sender<String> },
-    Nearby { reply: Sender<String> },
-    Attack { object_id: u32 },
-    Interact { object_id: u32 },
-    Pickup { object_id: u32 },
-    Chat { message: String },
+    Move {
+        dx: i32,
+        dy: i32,
+        run: bool,
+    },
+    Screenshot {
+        path: String,
+    },
+    GetState {
+        reply: Sender<String>,
+    },
+    Nearby {
+        reply: Sender<String>,
+    },
+    Attack {
+        object_id: u32,
+    },
+    Interact {
+        object_id: u32,
+    },
+    Pickup {
+        object_id: u32,
+    },
+    Chat {
+        message: String,
+    },
+    Dialog {
+        kind: DialogKind,
+        action: DialogAction,
+    },
+}
+
+/// dialog 命令的动作（#2586）
+enum DialogAction {
+    Open,
+    Close,
+    Toggle,
 }
 
 #[derive(Resource)]
@@ -185,6 +216,41 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "missing object_id"})
                 }
             }
+            "dialog" => {
+                let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                let action = params
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("toggle")
+                    .to_ascii_lowercase();
+                match (parse_dialog_kind(kind), action.as_str()) {
+                    (Some(k), "open") => {
+                        let _ = tx.send(ControlCommand::Dialog {
+                            kind: k,
+                            action: DialogAction::Open,
+                        });
+                        json!({"ok": true, "kind": kind, "action": "open"})
+                    }
+                    (Some(k), "close") => {
+                        let _ = tx.send(ControlCommand::Dialog {
+                            kind: k,
+                            action: DialogAction::Close,
+                        });
+                        json!({"ok": true, "kind": kind, "action": "close"})
+                    }
+                    (Some(k), "toggle") => {
+                        let _ = tx.send(ControlCommand::Dialog {
+                            kind: k,
+                            action: DialogAction::Toggle,
+                        });
+                        json!({"ok": true, "kind": kind, "action": "toggle"})
+                    }
+                    (Some(_), a) => {
+                        json!({"error": format!("unknown action: {a} (open/close/toggle)")})
+                    }
+                    (None, _) => json!({"error": format!("unknown dialog kind: {kind}")}),
+                }
+            }
             _ => json!({"error": format!("unknown method: {method}")}),
         };
 
@@ -194,10 +260,65 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
     }
 }
 
+/// snake_case 对话框名 → DialogKind（覆盖全部变体，#2586）
+fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
+    use DialogKind as D;
+    Some(match s {
+        "inventory" => D::Inventory,
+        "character" => D::Character,
+        "quest_log" => D::QuestLog,
+        "settings" => D::Settings,
+        "menu" => D::Menu,
+        "game_shop" => D::GameShop,
+        "minimap" => D::Minimap,
+        "npc" => D::Npc,
+        "group" => D::Group,
+        "friend" => D::Friend,
+        "trade" => D::Trade,
+        "inspect" => D::Inspect,
+        "npc_goods" => D::NpcGoods,
+        "guild" => D::Guild,
+        "mail" => D::Mail,
+        "ranking" => D::Ranking,
+        "mentor" => D::Mentor,
+        "relationship" => D::Relationship,
+        "mount" => D::Mount,
+        "report" => D::Report,
+        "hero" => D::Hero,
+        "hero_inventory" => D::HeroInventory,
+        "hero_equipment" => D::HeroEquipment,
+        "hero_skill" => D::HeroSkill,
+        "creature" => D::Creature,
+        "trust_merchant" => D::TrustMerchant,
+        "item_rental" => D::ItemRental,
+        "guild_territory" => D::GuildTerritory,
+        "help" => D::Help,
+        "notice" => D::Notice,
+        "buff" => D::Buff,
+        "fishing" => D::Fishing,
+        "socket" => D::Socket,
+        "refine" => D::Refine,
+        "craft" => D::Craft,
+        "dura_status" => D::DuraStatus,
+        "npc_drop" => D::NpcDrop,
+        "roll" => D::Roll,
+        "npc_awake" => D::NpcAwake,
+        "timer" => D::Timer,
+        "keyboard_layout" => D::KeyboardLayout,
+        "big_map" => D::BigMap,
+        "chat_notice" => D::ChatNotice,
+        "market" => D::Market,
+        "storage" => D::Storage,
+        "skills" => D::Skills,
+        _ => return None,
+    })
+}
+
 fn apply_control_commands(
     mut commands: Commands,
     control: Res<ControlRx>,
     mut control_state: ResMut<ControlState>,
+    mut mgr: ResMut<DialogManager>,
     net: Res<NetConnection>,
     time: Res<Time>,
     game_data: Res<GameData>,
@@ -256,6 +377,14 @@ fn apply_control_commands(
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(path));
+            }
+            ControlCommand::Dialog { kind, action } => {
+                match action {
+                    DialogAction::Open => mgr.open(kind),
+                    DialogAction::Close => mgr.close(kind),
+                    DialogAction::Toggle => mgr.toggle(kind),
+                }
+                tracing::info!("🎮 control dialog: {kind:?} -> open={}", mgr.is_open(kind));
             }
             ControlCommand::Nearby { reply } => {
                 let Ok((_, ptf, _)) = players.single() else {
@@ -375,5 +504,81 @@ fn apply_control_commands(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// parse_dialog_kind 覆盖 DialogKind 全部变体 + 未知返回 None（#2586）
+    #[test]
+    fn parse_dialog_kind_covers_all_variants() {
+        let all = [
+            "inventory",
+            "character",
+            "quest_log",
+            "settings",
+            "menu",
+            "game_shop",
+            "minimap",
+            "npc",
+            "group",
+            "friend",
+            "trade",
+            "inspect",
+            "npc_goods",
+            "guild",
+            "mail",
+            "ranking",
+            "mentor",
+            "relationship",
+            "mount",
+            "report",
+            "hero",
+            "hero_inventory",
+            "hero_equipment",
+            "hero_skill",
+            "creature",
+            "trust_merchant",
+            "item_rental",
+            "guild_territory",
+            "help",
+            "notice",
+            "buff",
+            "fishing",
+            "socket",
+            "refine",
+            "craft",
+            "dura_status",
+            "npc_drop",
+            "roll",
+            "npc_awake",
+            "timer",
+            "keyboard_layout",
+            "big_map",
+            "chat_notice",
+            "market",
+            "storage",
+            "skills",
+        ];
+        // 全部可解析且互不相同（46 个变体一一对应）
+        let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
+        let uniq: Vec<&DialogKind> = {
+            let mut seen: Vec<&DialogKind> = parsed.iter().collect();
+            seen.sort_by_key(|k| format!("{k:?}"));
+            seen.dedup_by_key(|k| format!("{k:?}"));
+            seen
+        };
+        assert_eq!(all.len(), 46);
+        assert_eq!(uniq.len(), all.len(), "46 个名字应映射到 46 个不同变体");
+
+        // 未知/空/大小写敏感
+        assert!(parse_dialog_kind("").is_none());
+        assert!(parse_dialog_kind("nope").is_none());
+        assert!(
+            parse_dialog_kind("Inventory").is_none(),
+            "snake_case 小写约定"
+        );
     }
 }
