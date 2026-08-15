@@ -219,8 +219,11 @@ pub struct SkillBarState {
 
 /// 无 INI 时的默认位置（C# Settings.cs:163 `SkillbarLocation = {{0,0},{216,0}}`）
 pub const SKILLBAR_DEFAULT_POS: [(f32, f32); 2] = [(0.0, 0.0), (216.0, 0.0)];
-/// 某栏存档无效时的回落位置（C# DialogProcess L1329 `continue` 跳过赋值 → 栏保持构造器
-/// Location=(0, BarIndex*20)，MainDialogs.cs:1533）
+/// 某栏存档无效时的回落位置。C# 源码字面：DialogProcess L1329 `continue` 跳过赋值 →
+/// 栏保持构造器 Location=(0, BarIndex*20)（MainDialogs.cs:1533）。但 C# 对象初始化器
+/// `new SkillBarDialog { BarIndex = 1 }` 的 BarIndex 赋值发生在构造器**之后**，构造器
+/// 执行时恒为 0，故 C# 运行时两栏实际都回落 (0,0)（重叠）。此处取 (0, bar*20) 是
+/// **有意偏离**字面运行语义，避免两栏完全重叠不可用；仅 bar1 存档越界的极端场景可见差异。
 const SKILLBAR_CTOR_POS: [(f32, f32); 2] = [(0.0, 0.0), (0.0, 20.0)];
 
 impl Default for SkillBarState {
@@ -434,8 +437,12 @@ fn skill_bar_system(
         location: mir2_shared::Point { x: tx, y: ty },
     });
     tracing::info!(
-        "✨ F{} 施放 {} ({:?}) 目标={} @ ({},{})",
-        slot + 1,
+        "✨ {} 施放 {} ({:?}) 目标={} @ ({},{})",
+        if slot >= 8 {
+            format!("Ctrl + F{}", slot - 7)
+        } else {
+            format!("F{}", slot + 1)
+        },
         magic.name,
         magic.spell,
         target_id,
@@ -462,6 +469,15 @@ mod tests {
         // C# Settings.cs:163 SkillbarLocation = {{0,0},{216,0}}（两栏并排左上角）
         assert_eq!(d.pos[0], (0.0, 0.0));
         assert_eq!(d.pos[1], (216.0, 0.0));
+    }
+
+    /// 旧版（单栏）存档只有 Skillbar0X/Y：bar0 旧值原样保留，bar1 缺失用默认 (216,0)。
+    /// 键名未变（git 历史旧版就是 Skillbar0X/Skillbar0Y）→ 旧存档无损升级。
+    #[test]
+    fn legacy_single_bar_ini_upgrades_losslessly() {
+        let s = SkillBarState::from_ini("[Game]\nSkillbar0X=182\nSkillbar0Y=64\n");
+        assert_eq!(s.pos[0], (182.0, 64.0), "旧 bar0 存档保留");
+        assert_eq!(s.pos[1], (216.0, 0.0), "bar1 无存档用默认");
     }
 
     /// C# GameScene.DialogProcess（L1325-1332）：某栏存档越界 → continue 跳过赋值，
