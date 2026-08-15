@@ -7,7 +7,8 @@ use bevy::prelude::*;
 use crate::map_renderer::{make_image, GameLibraries};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::theme::{colors, load_cn_font};
+use crate::ui::sprite_ui::load_ui_font;
+use crate::ui::theme::colors;
 
 pub struct IntroPlugin;
 
@@ -29,7 +30,8 @@ fn setup_intro(
     mut fonts: ResMut<Assets<Font>>,
 ) {
     libs.0.ensure_initialized();
-    let font = FontSource::Handle(load_cn_font(&mut fonts));
+    // #2544：开场屏字体接上 UI 字体链（系统 Arial + 宋体 Han 回退，C# FontName=Arial）
+    let font = FontSource::Handle(load_ui_font(&mut fonts));
 
     commands
         .spawn((
