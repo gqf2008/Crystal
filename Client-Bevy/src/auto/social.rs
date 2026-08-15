@@ -453,7 +453,7 @@ pub(crate) fn auto_mail_compose_test(
                 return;
             }
             // 与发送按钮相同的代码路径
-            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input, 100, &[]);
+            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input, 100, &[], false);
             mail.compose = false;
             tracing::info!("[MAILCOMPOSE] 发送邮件");
             *stage = 9;

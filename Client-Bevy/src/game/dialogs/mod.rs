@@ -224,6 +224,8 @@ pub struct DialogDrag {
     pub text_origins: std::collections::HashMap<Entity, (f32, f32)>,
     /// 拖动开始时下拉框命中矩形的原始位置（box_rect + popup_pos）
     pub dd_origins: std::collections::HashMap<Entity, ((f32, f32), (f32, f32))>,
+    /// 拖动开始时的背包命中原点（仅拖 Inventory 时 Some）
+    pub inv_origin_start: Option<(f32, f32)>,
 }
 
 /// 对话框置顶层级（front 系统维护单调递增的 z 顶值）
@@ -282,6 +284,8 @@ pub fn dialog_drag_system(
     mut ui_buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
     mut text_rects: Query<(Entity, &mut TextInputRect, Option<&DialogRoot>)>,
     mut drop_downs: Query<(Entity, &mut DropDown, Option<&DialogRoot>)>,
+    // 背包拖动时同步 InventoryOrigin（inv_slot_at/仓库/交易命中依赖它）
+    mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else {
@@ -336,6 +340,8 @@ pub fn dialog_drag_system(
                 drag.dragging = Some(kind);
                 drag.start_cursor = cursor;
                 drag.origins = origins;
+                drag.inv_origin_start =
+                    (kind == DialogKind::Inventory).then(|| (inv_origin.0, inv_origin.1));
                 drag.btn_origins = ui_buttons
                     .iter()
                     .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
@@ -394,12 +400,18 @@ pub fn dialog_drag_system(
                     dd.popup_pos.1 = o.1 .1 + delta.y;
                 }
             }
+            // 背包拖动 → 命中用原点同步平移（与实体/rect 同一 delta）
+            if let Some(o) = drag.inv_origin_start {
+                *inv_origin =
+                    crate::game::dialogs::inventory::InventoryOrigin(o.0 + delta.x, o.1 + delta.y);
+            }
         } else {
             drag.dragging = None;
             drag.origins.clear();
             drag.btn_origins.clear();
             drag.text_origins.clear();
             drag.dd_origins.clear();
+            drag.inv_origin_start = None;
         }
     }
 }

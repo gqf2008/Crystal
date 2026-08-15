@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::inventory::{inventory_real_size, InvItem, InvSlot};
+use crate::game::dialogs::inventory::{inventory_real_size, InvItem, InventoryOrigin, InvSlot};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
@@ -540,6 +540,7 @@ fn push_inventory_right(
     libs: &mut GameLibraries,
     inv_entities: &mut Query<(&mut Transform, &DialogRoot), With<Visibility>>,
     inv_buttons: &mut Query<(&mut UiButton, &DialogRoot)>,
+    inv_origin: &mut ResMut<InventoryOrigin>,
 ) {
     let (inv_w, _) = inventory_real_size(libs);
     let target_x = 1024.0 - inv_w;
@@ -573,6 +574,9 @@ fn push_inventory_right(
         btn.rect.0 += dx;
         btn.rect.1 += dy_screen;
     }
+    // 同步 InventoryOrigin（批E 资源：镶嵌面板锚定 / Ctrl+右键入口等
+    // 读背包当前原点的系统跟随推位；与 storage 推位同款义务）
+    **inv_origin = InventoryOrigin(target_x, 0.0);
 }
 
 /// C# TradeDialog.TradeReset（TradeDialogs.cs:163-177）：清双方物品/金币并解锁
@@ -619,6 +623,8 @@ fn trade_ui_system(
     mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
     // 推位同步背包按钮命中区（屏幕坐标 rect；同上无 B0001）
     mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
+    // 推位同步 InventoryOrigin（批E 资源：镶嵌锚定/入口等读背包原点的系统跟随）
+    mut inv_origin: ResMut<InventoryOrigin>,
     mut was_visible: Local<bool>,
 ) {
     for mut vis in &mut widgets {
@@ -630,7 +636,7 @@ fn trade_ui_system(
     }
     // 开窗瞬间推背包（C# TradeAccept；服务器开窗与本地邀请接受两条路都汇聚于此）
     if trade.visible && !*was_visible {
-        push_inventory_right(&mut libs, &mut inv_entities, &mut inv_buttons);
+        push_inventory_right(&mut libs, &mut inv_entities, &mut inv_buttons, &mut inv_origin);
     }
     *was_visible = trade.visible;
 

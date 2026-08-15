@@ -2940,6 +2940,9 @@ impl WorldActor {
             let mut item = mir2_shared::data::item::UserItem {
                 item_index: recipe.product_item_index,
                 count: recipe.product_count,
+                // #2536：合成产物 unique_id = recipe_id（Rust C.CraftItem 按 recipe_id 寻址；
+                // C# 客户端按 ItemIndex 匹配配方，不受影响）
+                unique_id: recipe.recipe_id as u64,
                 ..Default::default()
             };
             if let Some(info) = self.item_infos.get(&recipe.product_item_index) {

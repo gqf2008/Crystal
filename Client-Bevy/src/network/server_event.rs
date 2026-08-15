@@ -185,11 +185,9 @@ pub enum ServerEvent {
     MagicRemoved { spell: mir2_shared::enums::Spell },
     /// #258 SendOutputMessage：服务端输出消息
     ServerMessage { message: String, message_type: u8 },
-    /// #260 NewQuestInfo：任务完整信息
+    /// #260/#2535 NewQuestInfo：任务定义（全量目录，登录下发；入 QuestCatalog 而非任务日志）
     QuestInfo {
-        id: i32,
-        name: String,
-        tasks: Vec<String>,
+        info: mir2_shared::data::client_data::ClientQuestInfo,
     },
     /// #260 ShareQuest：共享任务
     QuestShared { quest_id: i32 },
@@ -348,6 +346,8 @@ pub enum ServerEvent {
     MailReceived { entry: MailEntry, detail: Option<MailDetail> },
     /// ParcelCollected：收取邮件附件结果（C# sbyte：-1=无 0=已全部收取 1=成功）
     ParcelCollected { result: i8 },
+    /// #2538 MailCost：邮资查询结果（写信面板邮资显示，C# ParcelCostLabel）
+    MailCost { cost: u32 },
     /// TradeRequest：交易请求/打开（状态机由消费端根据自身状态应用）
     TradeRequested { name: String },
     /// TradeConfirm：锁定状态（a=发起者）
@@ -366,6 +366,11 @@ pub enum ServerEvent {
     },
     /// GuildInvite：收到行会邀请
     GuildInvited { name: String },
+    /// #2537 GuildBuffList：行会技能（激活列表 + Buff 定义目录）
+    GuildBuffList {
+        active: Vec<i32>,
+        catalog: Vec<mir2_shared::data::client_data::GuildBuffInfo>,
+    },
     /// Rankings 解析失败：清空排行
     RankingsCleared,
     /// MapChanged：天气更新
@@ -431,8 +436,8 @@ pub enum ServerEvent {
     },
     /// CraftItem：合成结果
     CraftResult { recipe_id: u32, count: u16, success: bool },
-    /// NPCGoods：商品对话框（Buy/Craft 等）
-    NpcGoods { goods: Vec<GoodsEntry>, rate: f32 },
+    /// NPCGoods：商品对话框（Buy/BuySub/Craft 等；Craft → 联动合成对话框）
+    NpcGoods { goods: Vec<GoodsEntry>, rate: f32, panel: mir2_shared::enums::PanelType },
     /// #珍珠商店：NPC 珍珠商品（S.NPCPearlGoods → 商品对话框珍珠模式）
     PearlShop { goods: Vec<GoodsEntry>, rate: f32 },
     /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板

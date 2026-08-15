@@ -254,6 +254,7 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvDropConfirm>();
         app.init_resource::<InvPendingAmount>();
         app.init_resource::<ItemUseFeedback>();
+        app.init_resource::<InventoryOrigin>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
         app.add_systems(OnEnter(AppState::Game), spawn_inv_confirm);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
@@ -332,12 +333,15 @@ fn spawn_inventory_dialog(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut origin: ResMut<InventoryOrigin>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 场景重入重置原点（实体按常量重生成；资源若残留上局的推位/拖动偏移会脱节）
+    *origin = InventoryOrigin(DIALOG_X, DIALOG_Y);
 
     // 背景 Title[196]
     if let Some(h) = ui_image(
@@ -493,10 +497,29 @@ struct InvAddBtn;
 #[derive(Component)]
 struct InvDelBtn;
 
+/// 背包对话框**当前**原点（屏幕坐标）。静态常量 DIALOG_X/Y 是初始位；仓库/交易
+/// 开窗推位（C# NPCDialogs.cs:2967、TradeDialogs.cs:154）与拖动都会移动对话框，
+/// 命中计算必须用本资源（spawn 时重置为初始位防场景重入残留）。
+#[derive(Resource)]
+pub struct InventoryOrigin(pub f32, pub f32);
+
+impl Default for InventoryOrigin {
+    fn default() -> Self {
+        Self(DIALOG_X, DIALOG_Y)
+    }
+}
+
 /// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
 /// 位置 (i%8, (i/8)%5) 复用同一 8x5 区域（C# Grid Location = y%5）。
-pub fn inv_slot_at(cx: f32, cy: f32, page: usize, size: usize) -> Option<usize> {
+/// origin 取 [`InventoryOrigin`]——背包可能已被推位/拖动。
+pub fn inv_slot_at(
+    cx: f32,
+    cy: f32,
+    page: usize,
+    size: usize,
+    origin: (f32, f32),
+) -> Option<usize> {
     let size = size.min(MAX_INV_SLOTS);
     let range: std::ops::Range<usize> = match page {
         0 => 0..size.min(GRID_COLS * GRID_ROWS),
@@ -506,8 +529,8 @@ pub fn inv_slot_at(cx: f32, cy: f32, page: usize, size: usize) -> Option<usize> 
     for i in range {
         let x = i % GRID_COLS;
         let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
             return Some(i);
         }
@@ -1535,6 +1558,7 @@ fn inv_socket_open_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
+    origin: Res<InventoryOrigin>,
     mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
 ) {
     if !mouse.just_pressed(MouseButton::Right) || !keys.pressed(KeyCode::ControlLeft) {
@@ -1554,8 +1578,9 @@ fn inv_socket_open_system(
     for i in range {
         let x = i % GRID_COLS;
         let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        // 命中用 InventoryOrigin——背包可能已被仓库/交易推位或拖动
+        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
             if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
                 if !item.slots.is_empty() {
@@ -1588,8 +1613,12 @@ fn inv_item_action_system(
     mut confirm: ResMut<InvDropConfirm>,
     npc_goods: Res<crate::game::dialogs::npc_goods::NpcGoodsState>,
     mut pending: ResMut<InvPendingAmount>,
-    mut result: MessageReader<AmountBoxResult>,
-    all_buttons: Query<&UiButton>,
+    // 元组参数折叠（系统参数上限 16）：全部按钮 / 数量框结果 / 背包命中原点
+    mut misc: (
+        Query<&UiButton>,
+        MessageReader<AmountBoxResult>,
+        Res<InventoryOrigin>,
+    ),
     // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
     mut last_modal: Local<bool>,
 ) {
@@ -1604,7 +1633,7 @@ fn inv_item_action_system(
     }
 
     // 数量框结果：拆分/丢弃
-    for r in result.read() {
+    for r in misc.1.read() {
         let Some(n) = r.0 else {
             pending.split_uid = None;
             pending.drop_uid = None;
@@ -1639,9 +1668,10 @@ fn inv_item_action_system(
         }
     }
 
-    // 光标下的背包格（按当前页与格数，#276）
+    // 光标下的背包格（按当前页与格数，#276；原点取 InventoryOrigin——推位/拖动后仍准确）
     let page = hud.inventory.page;
     let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
+    let (ox, oy) = (misc.2 .0, misc.2 .1);
     let slot_at = |cx: f32, cy: f32| -> Option<usize> {
         let range: std::ops::Range<usize> = match page {
             0 => 0..size.min(GRID_COLS * GRID_ROWS),
@@ -1651,8 +1681,8 @@ fn inv_item_action_system(
         for i in range {
             let x = i % GRID_COLS;
             let y = (i / GRID_COLS) % GRID_ROWS;
-            let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-            let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+            let sx = ox + 9.0 + x as f32 * (CELL_W + 1.0);
+            let sy = oy + 37.0 + y as f32 * (CELL_H + 1.0);
             if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
                 return Some(i);
             }
@@ -1879,7 +1909,7 @@ fn inv_item_action_system(
             }
         }
         // 任意 UI 按钮上不触发
-        let over_btn = all_buttons.iter().any(|b| {
+        let over_btn = misc.0.iter().any(|b| {
             let (x, y, w, h) = b.rect;
             cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
         });
@@ -1925,6 +1955,24 @@ pub fn pick_auto_hp_potion<'a>(items: impl Iterator<Item = &'a InvItem>) -> Opti
 mod tests {
     use super::*;
     use mir2_shared::enums::ItemType;
+
+    /// 推位/拖动后 inv_slot_at 必须用 InventoryOrigin（PR #2553 审查：仓库开仓把背包
+    /// 推到 (393,0)，静态原点 0,0 的命中全部落空——存取/使用/选择失效）。
+    #[test]
+    fn inv_slot_at_follows_inventory_origin() {
+        // 初始位 (0,0)：首格左上 (9,37)
+        assert_eq!(inv_slot_at(10.0, 38.0, 0, 80, (0.0, 0.0)), Some(0));
+        assert_eq!(inv_slot_at(10.0, 38.0, 0, 80, (393.0, 0.0)), None);
+        // 推位 (393,0) 后：首格命中移到 (393+9, 37)
+        assert_eq!(inv_slot_at(402.0, 38.0, 0, 80, (393.0, 0.0)), Some(0));
+        // 拖动到任意位 (100,50)
+        assert_eq!(inv_slot_at(109.0, 88.0, 0, 80, (100.0, 50.0)), Some(0));
+        // 默认原点 = 初始常量位
+        assert_eq!(
+            (InventoryOrigin::default().0, InventoryOrigin::default().1),
+            (DIALOG_X, DIALOG_Y)
+        );
+    }
 
     fn item_with_type(t: ItemType) -> InvItem {
         InvItem {

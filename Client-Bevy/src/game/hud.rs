@@ -1316,6 +1316,7 @@ fn hud_server_events(
             | ServerEvent::TradeGold { .. }
             | ServerEvent::TradeCancelled
             | ServerEvent::MailReceived { .. }
+            | ServerEvent::MailCost { .. }
             | ServerEvent::ParcelCollected { .. }
             | ServerEvent::TradeRequested { .. }
             | ServerEvent::TradeConfirm { .. }
@@ -1371,6 +1372,7 @@ fn hud_server_events(
             | ServerEvent::BuffPaused { .. }
             | ServerEvent::ObjectName { .. }
             | ServerEvent::NpcInputRequest { .. }
+            | ServerEvent::GuildBuffList { .. }
             | ServerEvent::CreatureAcquired { .. }
             | ServerEvent::CreatureRenameEnabled { .. }
             | ServerEvent::CreaturePickupToggled { .. }

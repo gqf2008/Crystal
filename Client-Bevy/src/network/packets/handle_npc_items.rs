@@ -324,7 +324,11 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                                 .collect();
                             let rate = p.rate;
                             tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), rate);
-                            server_events.write(ServerEvent::NpcGoods { goods, rate });
+                            server_events.write(ServerEvent::NpcGoods {
+                                goods,
+                                rate,
+                                panel: p.panel_type,
+                            });
                         }
                         Err(e) => {
                             tracing::warn!("⚠️ NPCGoods 解析失败: {} (len={})", e, payload.len())

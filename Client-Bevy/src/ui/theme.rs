@@ -7,14 +7,6 @@ use bevy::prelude::*;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 
-/// 编译期内嵌中文字体（Bevy 默认字体不支持中文）。
-/// 用 include_bytes 保证任何启动目录/资产路径下都能加载。
-pub fn load_cn_font(assets: &mut Assets<Font>) -> Handle<Font> {
-    assets.add(Font::from_bytes(
-        include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf").to_vec(),
-    ))
-}
-
 /// 常用配色（传奇 UI 风格）
 pub mod colors {
     use bevy::prelude::*;

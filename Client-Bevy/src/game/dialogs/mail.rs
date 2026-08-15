@@ -59,6 +59,10 @@ pub struct MailState {
     pub compose_gold: u32,
     /// 写邮件附件（最多 5 个背包 unique_id，C# items_idx[5]）
     pub attach: Vec<Option<u64>>,
+    /// #2538：贴票（C# MailComposeParcelDialog Stamped；true 时解锁 5 附件格）
+    pub stamped: bool,
+    /// #2538：邮资（C# ParcelCostLabel ← S.MailCost）
+    pub parcel_cost: u32,
 }
 
 impl Default for MailState {
@@ -70,8 +74,25 @@ impl Default for MailState {
             selected: None,
             compose_gold: 0,
             attach: vec![None; 5],
+            stamped: false,
+            parcel_cost: 0,
         }
     }
+}
+
+/// #2538：可用附件格数（C# SendMail hasStamp?5:1；客户端按 Stamped 估计）
+pub fn stamp_slots(stamped: bool) -> usize {
+    if stamped {
+        5
+    } else {
+        1
+    }
+}
+
+/// #2538：邮票判定（C# ItemType.Nothing && Shape==1；客户端 InvItem.item_type 为
+/// SharedRust 枚举值 Nothing=3）
+pub fn is_stamp_item(it: &crate::game::dialogs::inventory::InvItem) -> bool {
+    it.item_type == mir2_shared::enums::ItemType::Nothing as u8 && it.shape == 1
 }
 
 #[derive(Component)]
@@ -114,6 +135,18 @@ pub struct MailSendBtn;
 #[derive(Component)]
 pub struct MailCancelBtn;
 
+/// #2538：邮票按钮（C# StampButton Prguse2[203]，点击切换贴票）
+#[derive(Component)]
+pub struct MailStampBtn;
+
+/// #2538：贴票状态覆层（C# UpdateParcel StampButton.Index=204）
+#[derive(Component)]
+pub struct MailStampOn;
+
+/// #2538：邮资标签（C# ParcelCostLabel ← S.MailCost）
+#[derive(Component)]
+pub struct MailCostLabel;
+
 pub struct MailPlugin;
 
 impl Plugin for MailPlugin {
@@ -127,7 +160,12 @@ app.add_systems(OnEnter(AppState::Game), spawn_mail);
         app.add_systems(OnExit(AppState::Game), cleanup_mail);
         app.add_systems(
             Update,
-            (mail_ui_system, mail_compose_system, ui_button_system)
+            (
+                mail_ui_system,
+                mail_compose_system,
+                mail_stamp_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -176,10 +214,14 @@ fn mail_compose_system(
             mail.detail = None;
             mail.attach = vec![None; 5];
             mail.compose_gold = 0;
+            mail.stamped = false;
+            mail.parcel_cost = 0;
             if input.texts.len() < 4 {
                 input.texts.resize(4, String::new());
             }
             tracing::info!("✉️ 打开写邮件");
+            // #2538：C# ComposeMail → CalculatePostage（打开时查询邮资）
+            request_mail_cost(&net, 0, &mail.attach, false);
         }
     }
 
@@ -252,12 +294,27 @@ fn mail_compose_system(
         if mouse.just_pressed(MouseButton::Left) {
             let Ok(window) = windows.single() else { return };
             let Some(cursor) = window.cursor_position() else { return };
+            let mut attach_changed = false;
             for i in 0..5usize {
                 let x = 300.0 + i as f32 * 46.0;
                 let y = 226.0;
                 if cursor.x >= x && cursor.x <= x + 40.0 && cursor.y >= y && cursor.y <= y + 40.0 {
                     if mail.attach.get(i).is_some_and(|s| s.is_some()) {
                         mail.attach[i] = None;
+                        attach_changed = true;
+                    }
+                    if attach_changed {
+                        // #2538：C# CalculatePostage（附件变化重查邮资）
+                        let gold = input
+                            .texts
+                            .get(3)
+                            .cloned()
+                            .unwrap_or_default()
+                            .trim()
+                            .parse::<u32>()
+                            .unwrap_or(0);
+                        mail.compose_gold = gold;
+                        request_mail_cost(&net, gold, &mail.attach, mail.stamped);
                     }
                     return;
                 }
@@ -270,8 +327,22 @@ fn mail_compose_system(
                     let y = 282.0 + row * 46.0;
                     if cursor.x >= x && cursor.x <= x + 40.0 && cursor.y >= y && cursor.y <= y + 40.0 {
                         if let Some(it) = hud.inventory.items.get(*slot_idx).and_then(|s| s.as_ref()) {
-                            if let Some(empty) = mail.attach.iter_mut().find(|s| s.is_none()) {
+                            // #2538：未贴票仅第 1 格可用（C# UpdateParcel Cells[1..] Enabled=false）
+                            let slots = stamp_slots(mail.stamped);
+                            if let Some(empty) =
+                                mail.attach.iter_mut().take(slots).find(|s| s.is_none())
+                            {
                                 *empty = Some(it.unique_id);
+                                let gold = input
+                                    .texts
+                                    .get(3)
+                                    .cloned()
+                                    .unwrap_or_default()
+                                    .trim()
+                                    .parse::<u32>()
+                                    .unwrap_or(0);
+                                mail.compose_gold = gold;
+                                request_mail_cost(&net, gold, &mail.attach, mail.stamped);
                             }
                         }
                         break;
@@ -291,10 +362,12 @@ fn mail_compose_system(
                 .trim()
                 .parse::<u32>()
                 .unwrap_or(0);
-            send_composed_mail(&net, &input, gold, &mail.attach);
+            send_composed_mail(&net, &input, gold, &mail.attach, mail.stamped);
             mail.compose = false;
             mail.attach = vec![None; 5];
             mail.compose_gold = gold;
+            mail.stamped = false;
+            mail.parcel_cost = 0;
             input.active = None;
         }
     }
@@ -302,17 +375,76 @@ fn mail_compose_system(
         if btn.clicked && mail.compose {
             mail.compose = false;
             mail.attach = vec![None; 5];
+            mail.stamped = false;
+            mail.parcel_cost = 0;
             input.active = None;
         }
     }
 }
 
-/// 发送写好的邮件（C# MailComposeParcelDialog 发送 → C.SendMail{Name, Message, Gold, ItemsIdx[5]}；subject 由正文首行派生）
+/// #2538：邮票交互（C# StampParcel/UpdateParcel）+ 贴票覆层/邮资显示
+fn mail_stamp_system(
+    mut mail: ResMut<MailState>,
+    hud: Res<crate::game::hud::HudState>,
+    net: Res<NetConnection>,
+    stamp_btn: Query<&UiButton, With<MailStampBtn>>,
+    mut stamp_on: Query<&mut Visibility, With<MailStampOn>>,
+    mut cost_label: Query<&mut Text2d, With<MailCostLabel>>,
+) {
+    for mut vis in &mut stamp_on {
+        *vis = if mail.stamped && mail.compose {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for mut text in &mut cost_label {
+        text.0 = format!("邮资: {}", mail.parcel_cost);
+    }
+    for btn in &stamp_btn {
+        if btn.clicked && mail.compose {
+            if !mail.stamped {
+                // C# StampParcel：背包须有邮票（Nothing/Shape==1）
+                if hud.inventory.items.iter().flatten().any(is_stamp_item) {
+                    mail.stamped = true;
+                } else {
+                    tracing::info!("✉️ 背包无邮票，无法贴票");
+                }
+            } else {
+                mail.stamped = false;
+                // C# UpdateParcel：未贴票仅第 1 格 → 清空多余槽位
+                for slot in mail.attach.iter_mut().skip(1) {
+                    *slot = None;
+                }
+            }
+            // C# StampParcel → CalculatePostage
+            request_mail_cost(&net, mail.compose_gold, &mail.attach, mail.stamped);
+        }
+    }
+}
+
+/// #2538：C# CalculatePostage —— C.MailCost{Gold, ItemsIdx[5], Stamped}（邮资查询）
+pub fn request_mail_cost(net: &NetConnection, gold: u32, attach: &[Option<u64>], stamped: bool) {
+    let mut items_idx = [0u64; 5];
+    for (i, slot) in attach.iter().enumerate().take(5) {
+        if let Some(uid) = slot {
+            items_idx[i] = *uid;
+        }
+    }
+    net.send_packet(&mir2_shared::packets::client::mail::MailCost {
+        gold,
+        items_idx,
+        stamped,
+    });
+}
+
+/// 发送写好的邮件（C# MailComposeParcelDialog 发送 → C.SendMail{Name, Message, Gold, ItemsIdx[5], Stamped}；subject 由正文首行派生）
 pub fn send_composed_mail(
     net: &NetConnection,
     input: &crate::game::dialogs::text_input::TextInputState,
     gold: u32,
     attach: &[Option<u64>],
+    stamped: bool,
 ) {
     let to = input.texts.get(0).cloned().unwrap_or_default();
     let subject = input.texts.get(1).cloned().unwrap_or_default();
@@ -337,14 +469,15 @@ pub fn send_composed_mail(
         message,
         gold,
         items_idx,
-        stamped: false,
+        stamped,
     });
     tracing::info!(
-        "✉️ 发送邮件: {} - {}（金币 {}，附件 {}）",
+        "✉️ 发送邮件: {} - {}（金币 {}，附件 {}，贴票 {}）",
         to,
         subject,
         gold,
-        attach.iter().flatten().count()
+        attach.iter().flatten().count(),
+        stamped
     );
 }
 
@@ -554,6 +687,72 @@ fn spawn_mail(
             Visibility::Visible,
         ));
     }
+    // #2538：邮票按钮（C# StampButton Prguse2[203] 20x20 @(73,56)）+ 贴票覆层 [204]
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        203,
+        203,
+        203,
+        540.0,
+        224.0,
+        8.3,
+        20.0,
+        20.0,
+    ) {
+        commands.entity(e).insert((
+            MailStampBtn,
+            DialogRoot(DialogKind::Mail),
+            MailComposeWidget,
+        ));
+    }
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        204,
+    ) {
+        let e = spawn_ui_sprite(&mut commands, h, 540.0, 224.0, 8.4, 1.0);
+        commands.entity(e).insert((
+            MailStampOn,
+            DialogRoot(DialogKind::Mail),
+            MailComposeWidget,
+            Visibility::Hidden,
+        ));
+    }
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "邮票",
+        566.0,
+        232.0,
+        11.0,
+        Color::WHITE,
+        8.1,
+    );
+    commands
+        .entity(t)
+        .insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
+    // #2538：邮资标签（C# ParcelCostLabel）
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "邮资: 0",
+        590.0,
+        232.0,
+        11.0,
+        Color::WHITE,
+        8.1,
+    );
+    commands.entity(t).insert((
+        MailCostLabel,
+        DialogRoot(DialogKind::Mail),
+        MailComposeWidget,
+    ));
     // 背包物品选择（最多 20 格）
     let t = spawn_ui_text(&mut commands, &font, "背包物品:", 300.0, 274.0, 12.0, Color::WHITE, 8.1);
     commands.entity(t).insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
@@ -751,6 +950,11 @@ fn mail_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
+        // #2538：S.MailCost → 邮资标签
+        if let ServerEvent::MailCost { cost } = ev {
+            mail.parcel_cost = *cost;
+            tracing::debug!("✉️ 邮资更新: {}", cost);
+        }
         if let ServerEvent::ParcelCollected { result } = ev {
             match *result {
                 1 => {
@@ -821,5 +1025,34 @@ mod tests {
         // 超过 5 个只取前 5
         let long: Vec<Option<u64>> = (1..=7u64).map(Some).collect();
         assert_eq!(build_mail_items_idx(&long), [1, 2, 3, 4, 5]);
+    }
+}
+
+#[cfg(test)]
+mod stamp_tests {
+    use super::*;
+    use crate::game::dialogs::inventory::InvItem;
+
+    fn inv(item_type: u8, shape: i16) -> InvItem {
+        InvItem {
+            item_type,
+            shape,
+            ..Default::default()
+        }
+    }
+
+    /// #2538：可用附件格数（未贴票 1 格 / 贴票 5 格；C# hasStamp?5:1）
+    #[test]
+    fn stamp_slots_gates_attach_count() {
+        assert_eq!(stamp_slots(false), 1);
+        assert_eq!(stamp_slots(true), 5);
+    }
+
+    /// #2538：邮票判定（C# ItemType.Nothing && Shape==1；客户端为 Shared 值 3）
+    #[test]
+    fn stamp_item_detection() {
+        assert!(is_stamp_item(&inv(3, 1)));
+        assert!(!is_stamp_item(&inv(3, 2))); // Shape!=1
+        assert!(!is_stamp_item(&inv(4, 1))); // 非 Nothing
     }
 }

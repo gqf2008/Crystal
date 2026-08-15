@@ -283,8 +283,14 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             }
         }
         x if x == ServerPacketIds::GuildBuffList as i16 => {
+            // #2537：行会技能——激活列表 + Buff 目录入 GuildState（原仅打日志）
             if let Ok(p) = special_systems::GuildBuffList::read_body(&mut cur) {
-                tracing::info!("🏴 行会技能 Buff: {:?}", p.active_buffs.len());
+                let (n_active, n_catalog) = (p.active_buffs.len(), p.guild_buffs.len());
+                server_events.write(ServerEvent::GuildBuffList {
+                    active: p.active_buffs,
+                    catalog: p.guild_buffs,
+                });
+                tracing::info!("🏴 行会技能: 激活 {} / 目录 {}", n_active, n_catalog);
             }
         }
         x if x == ServerPacketIds::NPCPearlGoods as i16 => {
@@ -358,12 +364,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // #260：任务数据包
         x if x == ServerPacketIds::NewQuestInfo as i16 => {
             if let Ok(p) = quest::NewQuestInfo::read_body(&mut cur) {
-                server_events.write(ServerEvent::QuestInfo {
-                    id: p.quest.index,
-                    name: p.quest.name.clone(),
-                    tasks: p.quest.task_description,
-                });
-                tracing::info!("📜 任务信息: #{} {}", p.quest.index, p.quest.name);
+                // #2535：完整定义交 QuestCatalog（可接任务/奖励由目录推导），不再当已接任务写日志
+                server_events.write(ServerEvent::QuestInfo { info: p.quest });
             }
         }
         x if x == ServerPacketIds::ShareQuest as i16 => {
