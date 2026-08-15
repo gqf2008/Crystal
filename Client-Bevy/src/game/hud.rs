@@ -388,6 +388,8 @@ fn mode_visibility(mode_view: bool) -> Visibility {
 }
 
 /// 生成单个模式标签（S/A/P 共用：x=MiniMap.X-3，y=小地图高+dy，12px，z=4，挂 marker + 门控可见性）
+/// 黑描边（C# MainDialogs.cs:356/366/376 仅设 OutLineColour 未关 OutLine → 构造默认
+/// OutLine=true（MirLabel.cs:181-182）= 有描边，#2563）
 fn spawn_mode_label(
     commands: &mut Commands,
     font: &Handle<Font>,
@@ -409,6 +411,15 @@ fn spawn_mode_label(
         4.0,
     );
     commands.entity(e).insert((marker, vis));
+    crate::ui::outlined_text::outline_on(
+        commands,
+        e,
+        text,
+        font.clone(),
+        12.0,
+        bevy::sprite::Anchor::TOP_LEFT,
+        false,
+    );
     e
 }
 
@@ -913,9 +924,32 @@ fn auto_potion_system(
 }
 
 /// 模式标签单条更新：文本变化即写 + y 偏离目标 >0.5 才重定位（C# Process 每帧重定位的 0.5px 阈值版本）
-fn update_mode_label(t: &mut Text2d, tf: &mut Transform, want: &str, y: f32) {
+/// 文本变化时同帧同步 4 个描边副本（#2563；写方直同步，规避 sync_outline_system 排序依赖）
+fn update_mode_label(
+    t: &mut Text2d,
+    tf: &mut Transform,
+    children: Option<&Children>,
+    shadows: &mut Query<
+        &mut Text2d,
+        (
+            With<crate::ui::outlined_text::OutlineShadow>,
+            Without<AttackModeText>,
+            Without<PModeText>,
+            Without<SModeText>,
+        ),
+    >,
+    want: &str,
+    y: f32,
+) {
     if t.0 != want {
         t.0 = want.to_string();
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok(mut shadow) = shadows.get_mut(child) {
+                    shadow.0 = want.to_string();
+                }
+            }
+        }
     }
     if (tf.translation.y - y).abs() > 0.5 {
         tf.translation.y = y;
@@ -930,22 +964,32 @@ fn attack_mode_text_system(
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
     mut am: Query<
-        (&mut Text2d, &mut Transform),
+        (&mut Text2d, &mut Transform, Option<&Children>),
         (With<AttackModeText>, Without<PModeText>, Without<SModeText>),
     >,
     mut pm: Query<
-        (&mut Text2d, &mut Transform),
+        (&mut Text2d, &mut Transform, Option<&Children>),
         (With<PModeText>, Without<AttackModeText>, Without<SModeText>),
     >,
     mut sm: Query<
-        (&mut Text2d, &mut Transform),
+        (&mut Text2d, &mut Transform, Option<&Children>),
         (With<SModeText>, Without<AttackModeText>, Without<PModeText>),
+    >,
+    // 描边副本（#2563：With<OutlineShadow> 且无三 marker，与 am/pm/sm 可证互斥）
+    mut shadows: Query<
+        &mut Text2d,
+        (
+            With<crate::ui::outlined_text::OutlineShadow>,
+            Without<AttackModeText>,
+            Without<PModeText>,
+            Without<SModeText>,
+        ),
     >,
 ) {
     let a = format!("模式:{}", crate::game::combat::attack_mode_name(mode.mode));
     let ay = -mode_label_y(mmap.big, A_MODE_DY);
-    for (mut t, mut tf) in &mut am {
-        update_mode_label(&mut t, &mut tf, &a, ay);
+    for (mut t, mut tf, children) in &mut am {
+        update_mode_label(&mut t, &mut tf, children, &mut shadows, &a, ay);
     }
     let p = match hud.pet_mode {
         mir2_shared::enums::PetMode::Both => "宠物:攻击和跟随".to_string(),
@@ -956,13 +1000,13 @@ fn attack_mode_text_system(
         _ => "宠物:未知".to_string(),
     };
     let py = -mode_label_y(mmap.big, P_MODE_DY);
-    for (mut t, mut tf) in &mut pm {
-        update_mode_label(&mut t, &mut tf, &p, py);
+    for (mut t, mut tf, children) in &mut pm {
+        update_mode_label(&mut t, &mut tf, children, &mut shadows, &p, py);
     }
     let s = if opt.skill_mode_ctrl { "技能:Ctrl".to_string() } else { "技能:~".to_string() };
     let sy = -mode_label_y(mmap.big, S_MODE_DY);
-    for (mut t, mut tf) in &mut sm {
-        update_mode_label(&mut t, &mut tf, &s, sy);
+    for (mut t, mut tf, children) in &mut sm {
+        update_mode_label(&mut t, &mut tf, children, &mut shadows, &s, sy);
     }
 }
 
@@ -1365,7 +1409,7 @@ fn hud_server_events(
             | ServerEvent::MemberLocation { .. }
             | ServerEvent::NoticeUpdated { .. }
             | ServerEvent::MagicRemoved { .. }
-            | ServerEvent::ServerMessage { .. }
+            | ServerEvent::OutputMessage { .. }
             | ServerEvent::QuestInfo { .. }
             | ServerEvent::QuestShared { .. }
             | ServerEvent::RecipeLearned { .. }
@@ -1889,5 +1933,74 @@ mod tests {
         assert_eq!(ty(&world, sm), -43.0, "小模式 SMode y");
         assert_eq!(ty(&world, am), -58.0, "小模式 AMode y");
         assert_eq!(ty(&world, pm), -73.0, "小模式 PMode y");
+    }
+
+    /// 模式标签描边（#2563：C# MainDialogs.cs:356/366/376 仅设 OutLineColour 未关
+    /// OutLine → MirLabel 构造默认 OutLine=true = 有描边）：spawn 挂 4 个黑色副本，
+    /// 文本更新系统同帧同步副本
+    #[test]
+    fn mode_labels_have_outline_shadows() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::ecs::world::CommandQueue;
+
+        // 无子实体的裸标签：系统安全（Option<&Children> = None）
+        let mut world = World::new();
+        world.insert_resource(crate::game::combat::AttackModeState::default());
+        world.insert_resource(HudState::default());
+        world.insert_resource(OptionState::default());
+        world.insert_resource(MiniMapMode::default());
+        let bare = world
+            .spawn((
+                AttackModeText,
+                Text2d::new("模式:和平"),
+                Transform::from_xyz(MODE_LABEL_X, 0.0, 4.0),
+            ))
+            .id();
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("裸标签系统应成功");
+
+        // spawn 路径：4 个描边副本 + 文本一致
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let e = spawn_mode_label(
+            &mut commands,
+            &Handle::default(),
+            "技能:Ctrl",
+            true,
+            S_MODE_DY,
+            Color::WHITE,
+            Visibility::Visible,
+            SModeText,
+        );
+        queue.apply(&mut world);
+        let children: Vec<Entity> = world
+            .entity(e)
+            .get::<Children>()
+            .expect("应有描边子实体")
+            .iter()
+            .collect();
+        assert_eq!(children.len(), 4, "4 方向描边副本");
+        let mut shadows =
+            world.query_filtered::<&Text2d, With<crate::ui::outlined_text::OutlineShadow>>();
+        for c in &children {
+            let t = shadows.get(&world, *c).expect("子实体应为描边副本");
+            assert_eq!(t.0, "技能:Ctrl", "副本文本与正文一致");
+        }
+        let _ = bare;
+
+        // 文本更新 → 副本同帧同步（attack_mode_text_system 直同步路径：
+        // 切 skill_mode_ctrl 使 SMode 文本变化）
+        world.resource_mut::<OptionState>().skill_mode_ctrl = false;
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("更新应成功");
+        for c in &children {
+            assert_eq!(
+                shadows.get(&world, *c).unwrap().0,
+                "技能:~",
+                "副本同步新文本"
+            );
+        }
     }
 }

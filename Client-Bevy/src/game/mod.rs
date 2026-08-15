@@ -12,6 +12,7 @@ pub mod dialogs;
 pub mod hud;
 pub mod movement;
 pub mod object_state;
+pub mod output_lines;
 pub mod player_menu;
 pub mod pathfinding;
 pub mod player_control;
@@ -46,6 +47,7 @@ impl Plugin for GamePlugin {
             dialogs::quest_tracking::QuestTrackingPlugin,
             movement::MovementPlugin,
             object_state::ObjectStatePlugin,
+            output_lines::OutputLinesPlugin,
             player_menu::PlayerMenuPlugin,
             player_control::PlayerControlPlugin,
             skills::SkillsPlugin,
