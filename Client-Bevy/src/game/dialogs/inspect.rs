@@ -7,9 +7,11 @@
 //   C: Inspect[object_id u32]
 //   S: PlayerInspect[oid u32][name dotnet][guild dotnet][level u16][class u8]
 //      [gender u8][count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
-// 有意偏差（附 #2607 记录）：纸娃娃（StateItems 画甲/武器/头盔+发型）、
-//   Group/Friend/Mail/Trade/Observe 五动作按钮（按钮精灵索引待 probe）、
-//   ClassImage（Prguse[100+class]@(15,33)）、行会标签无 rank 数据只显示名
+// 有意偏差（附 #2607/#2609 记录）：纸娃娃 GetRealItem 等级/职业换图、翅膀
+//   Effect、发型（Hair 不在 InspectPlayer 协议内）；Observe 无 AllowObserve
+//   守卫（协议未携带该字段，服务端兜底）；Group 无队伍满员/队长预检
+//   （C# 满员不发包、非队长仅警告后仍发包——移植直接发包由服务端裁决）；
+//   行会标签无 rank 数据只显示名
 // ============================================================================
 
 use bevy::prelude::*;
@@ -217,8 +219,11 @@ fn spawn_inspect(
     // 14 格装备图标（格位坐标 = character::EQUIP_SLOTS，页内 @(8,70) 偏移；
     // C# :2362-2469 MirItemCell GridType=Inspect）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    // 纸娃娃层（C# :2166-2206：StateItems 画护甲→武器→头盔 @ 页原点+(0,-20)；
-    // z 按层叠 7.3/7.35/7.4 在角色页(6.1)之上、格图标(7.5)之下）
+    // 纸娃娃层（C# :2166-2206：StateItems 画护甲→武器→头盔。锚点=**对话框**
+    // 原点+(0,-20)=(536,-20)——λ 里的 DisplayLocation 词法上是 InspectDialog
+    // 自身而非 CharacterPage（审查 MAJOR 修正误读；交叉验证 CharacterDialog
+    // 纸娃娃相对页同为 (-8,-90)）；offSet:true 的图库内偏移在渲染时叠加）
+    // z 按层叠 7.3/7.35/7.4 在角色页(6.1)之上、格图标(7.5)之下
     for (slot, z) in [(1u8, 7.3), (0u8, 7.35), (2u8, 7.4)] {
         commands.spawn((
             UiEntity,
@@ -230,7 +235,7 @@ fn spawn_inspect(
                 ..default()
             },
             bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(BG_X + PAGE_REL.0, -(BG_Y + PAGE_REL.1 - 20.0), z),
+            Transform::from_xyz(BG_X, -(BG_Y - 20.0), z),
             Visibility::Hidden,
         ));
     }
@@ -419,7 +424,7 @@ fn inspect_icon_system(
     >,
     // 纸娃娃层
     mut dolls: Query<
-        (&mut Sprite, &mut Visibility, &InspectDoll),
+        (&mut Sprite, &mut Transform, &mut Visibility, &InspectDoll),
         (
             Without<InspectCellIcon>,
             Without<InspectPage>,
@@ -431,7 +436,7 @@ fn inspect_icon_system(
         for (_, mut vis, _) in &mut icons {
             *vis = Visibility::Hidden;
         }
-        for (_, mut vis, _) in &mut dolls {
+        for (_, _, mut vis, _) in &mut dolls {
             *vis = Visibility::Hidden;
         }
         return;
@@ -456,15 +461,16 @@ fn inspect_icon_system(
             &mut images,
             &mut cache,
             LibraryName::Prguse,
-            100 + state.class as usize,
+            100 + (state.class as usize).min(4),
         ) {
             sp.image = h;
             sp.custom_size = None;
         }
     }
-    // 纸娃娃（C# :2166-2206：StateItems[RealItem.Image]；偏差附 #2609——
-    // GetRealItem 按等级/职业换 image 与翅膀 Effect/发型不在包内，直接用 image）
-    for (mut sp, mut vis, doll) in &mut dolls {
+    // 纸娃娃（C# :2166-2206：StateItems[RealItem.Image]，锚点=对话框原点+(0,-20)
+    // + 图库内偏移 offSet:true（MLibrary.cs:732）；偏差附 #2609——GetRealItem
+    // 按等级/职业换 image 与翅膀 Effect/发型不在包内，直接用 image）
+    for (mut sp, mut tf, mut vis, doll) in &mut dolls {
         let it = state.items.iter().find(|i| i.slot == doll.0 && i.image > 0);
         match it {
             Some(it) => {
@@ -477,6 +483,14 @@ fn inspect_icon_system(
                 ) {
                     sp.image = h;
                     sp.custom_size = None;
+                    // 图库内偏移并入位置（C# offSet:true：DisplayLocation += mi 偏移）
+                    let (ox, oy) = libs
+                        .0
+                        .get_image(LibraryName::StateItems, it.image as usize)
+                        .map(|i| (i.offset_x as f32, i.offset_y as f32))
+                        .unwrap_or((0.0, 0.0));
+                    tf.translation.x = BG_X + ox;
+                    tf.translation.y = -(BG_Y - 20.0) - oy;
                     *vis = Visibility::Visible;
                     continue;
                 }
