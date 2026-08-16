@@ -1,13 +1,15 @@
 // ============================================================================
 // 查看玩家对话框（M46 → #2607 批T 对齐 C# InspectDialog 14 格装备网格）
-// C# MainDialogs.cs:2113-2526：背景 Prguse[430]@(536,0)、角色页 Prguse[340]@(8,70)、
-//   14 格装备网格（EQUIP_SLOTS 同角色对话框坐标）、名字/行会标签、Close@(509,3)。
+// C# MainDialogs.cs:2113-2526：背景 Prguse[430]@(536,0)、角色页 Prguse[340/341]@(8,70)
+//   （男/女换帧）、14 格装备网格（EQUIP_SLOTS 同角色对话框坐标）、名字/行会标签
+//   （框心 (145,22)/(145,48)）、Close@(241,3)。
 // 网络（#2607 协议加 slot+image）：
 //   C: Inspect[object_id u32]
 //   S: PlayerInspect[oid u32][name dotnet][guild dotnet][level u16][class u8]
 //      [gender u8][count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
-// 有意偏差（附 #2607 记录）：纸娃娃（StateItems 画甲/武器/头盔+发型）与
-//   Group/Friend/Mail/Trade/Observe 五动作按钮（按钮精灵索引待 probe）后续批
+// 有意偏差（附 #2607 记录）：纸娃娃（StateItems 画甲/武器/头盔+发型）、
+//   Group/Friend/Mail/Trade/Observe 五动作按钮（按钮精灵索引待 probe）、
+//   ClassImage（Prguse[100+class]@(15,33)）、行会标签无 rank 数据只显示名
 // ============================================================================
 
 use bevy::prelude::*;
