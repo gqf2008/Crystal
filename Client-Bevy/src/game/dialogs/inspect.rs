@@ -68,8 +68,8 @@ pub struct InspectPage;
 #[derive(Component)]
 pub struct InspectClassImage;
 
-/// 纸娃娃层（C# :2166-2206 StateItems 画装备 @ 页原点+(0,-20)；
-/// .0 = 服务端旧序槽位（0 武器/1 护甲/2 头盔），绘制顺序=枚举序）
+/// 纸娃娃层（C# :2166-2206 StateItems 画装备，锚点=对话框原点+(0,-20)+
+/// 图库内偏移；.0 = 服务端旧序槽位（0 武器/1 护甲/2 头盔），绘制顺序=枚举序）
 #[derive(Component)]
 pub struct InspectDoll(pub u8);
 

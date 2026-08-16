@@ -217,7 +217,12 @@ pub(crate) fn amount_box_system(
                 }
             }
         } else if key.logical_key == Key::Backspace {
-            state.value.pop();
+            // 预填全选态下 Backspace 整体清空（C# 全选删除语义，复审 NIT）
+            if state.fresh {
+                state.value.clear();
+            } else {
+                state.value.pop();
+            }
             state.fresh = false;
         }
     }
