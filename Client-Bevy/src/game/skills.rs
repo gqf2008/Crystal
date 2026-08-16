@@ -335,6 +335,7 @@ impl Plugin for SkillsPlugin {
             // #148 技能快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
             (
                 skills_window_system,
+                skill_bar_show_system,
                 skill_bar_icon_system,
                 skill_bar_cooldown_system,
                 ui_button_system,
@@ -1372,6 +1373,27 @@ fn skill_bar_pointer_system(
         let pos = bar.pos[root.0];
         tf.translation.x = pos.0;
         tf.translation.y = -pos.1;
+    }
+}
+
+/// #2604：设置开关 SkillBar 应用到双栏根实体（C# GameScene.DialogProcess
+/// 整体 Show/Hide，:1325-1332）。子控件继承根的 InheritedVisibility——
+/// 图标/键名系统无需各自判断（曾无任何系统应用该设置，R 键还误接已删的
+/// belt.rs 显隐资源空转）
+fn skill_bar_show_system(
+    opt: Res<crate::game::dialogs::option::OptionState>,
+    mut roots: Query<&mut Visibility, With<SkillBarRoot>>,
+) {
+    let show = if crate::game::dialogs::option::view_should_show(
+        crate::game::dialogs::option::OptionViewKind::SkillBar,
+        &opt,
+    ) {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut vis in &mut roots {
+        *vis = show;
     }
 }
 

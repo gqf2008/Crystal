@@ -7,7 +7,6 @@
 
 pub mod amount_box;
 pub mod assign_key;
-pub mod belt;
 pub mod big_map;
 pub mod buff;
 pub mod character;
@@ -597,7 +596,6 @@ impl Plugin for DialogsPlugin {
                 character::CharacterDialogPlugin,
                 menu::MenuDialogPlugin,
                 minimap::MiniMapPlugin,
-                belt::BeltPlugin,
                 potion_belt::PotionBeltPlugin,
                 compass::CompassPlugin,
                 npc::NpcDialogPlugin,

@@ -158,10 +158,22 @@ fn amount_box_system(
         return;
     }
 
-    // 数字键盘输入
+    // 数字键盘输入 + Esc/Enter（C# MirAmountBox：Esc=Cancel、Enter=OK；
+    // #2604——Esc 由此消费，esc_close_dialogs_system 检查 amount.visible 让路）
     for key in keys.read() {
 
         if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        if key.logical_key == Key::Escape {
+            state.visible = false;
+            result.write(AmountBoxResult(None));
+            continue;
+        }
+        if key.logical_key == Key::Enter {
+            let amount = state.value.parse::<u32>().ok().map(|v| v.min(state.max));
+            state.visible = false;
+            result.write(AmountBoxResult(amount));
             continue;
         }
         if key.logical_key == Key::Backspace {

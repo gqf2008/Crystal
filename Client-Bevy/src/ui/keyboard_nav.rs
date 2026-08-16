@@ -24,15 +24,22 @@ pub struct KeyboardNav {
     pub highlight: Option<Entity>,
 }
 
-/// ESC 三级优先级（#2595，C# WinForms 焦点路由 + MirTextBox.cs:386-395）：
+/// ESC 优先级层级（#2595/#2604，C# WinForms 焦点路由 + MirTextBox.cs:386-395：
+/// 模态最顶层先消费 Esc 且 e.Handled，不向底下层传导）：
 /// 1. 聊天输入开 → 本系统让路（chat_input_system 同帧关闭输入行；
 ///    注册处 .before(chat_input_system) 保证这里先看到 input_active=true）；
 ///    C# TextBox_KeyPress Escape → ActiveControl=null 且 e.Handled，不触发 Closeall
-/// 2. 通用输入框聚焦 → 只取消聚焦（对话框不动）
-/// 3. 无输入聚焦 → Closeall（C# KeyBindSettings Closeall）
+/// 2. 数量输入框（AmountBox 模态）开 → 让路（amount_box_system 自己消费
+///    Esc=Cancel/Enter=OK；旧实现不检查 → Esc 把数量框后面的全部对话框
+///    关掉而数量框还开着，#2598 审查遗留）
+/// 3. 通用输入框聚焦 → 只取消聚焦（对话框不动）
+/// 4. 玩家右键菜单开着 → 让路（player_menu_ui_system 自己关；同理不叠发）
+/// 5. 无输入聚焦 → Closeall（C# KeyBindSettings Closeall）
 pub fn esc_close_dialogs_system(
     keys: Res<ButtonInput<KeyCode>>,
     chat: Res<crate::game::chat::ChatState>,
+    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
+    player_menu: Res<crate::game::player_menu::PlayerMenuState>,
     mut mgr: ResMut<DialogManager>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
 ) {
@@ -42,8 +49,14 @@ pub fn esc_close_dialogs_system(
     if chat.input_active {
         return;
     }
+    if amount.visible {
+        return;
+    }
     if input.active.is_some() {
         input.active = None;
+        return;
+    }
+    if player_menu.visible {
         return;
     }
     if !mgr.open.is_empty() {
@@ -206,6 +219,16 @@ mod tests {
     use bevy::input::ButtonInput;
 
     fn esc_app(chat_open: bool, text_active: Option<usize>) -> App {
+        esc_app_ext(chat_open, text_active, false, false)
+    }
+
+    /// #2604：扩展 Esc 层级测试——amount/player_menu 开关
+    fn esc_app_ext(
+        chat_open: bool,
+        text_active: Option<usize>,
+        amount_open: bool,
+        menu_open: bool,
+    ) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<ButtonInput<KeyCode>>();
@@ -215,6 +238,8 @@ mod tests {
         });
         app.init_resource::<TextInputState>();
         app.init_resource::<DialogManager>();
+        app.init_resource::<crate::game::dialogs::amount_box::AmountBoxState>();
+        app.init_resource::<crate::game::player_menu::PlayerMenuState>();
         app.add_systems(Update, esc_close_dialogs_system);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -223,6 +248,16 @@ mod tests {
         mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
         if let Some(id) = text_active {
             app.world_mut().resource_mut::<TextInputState>().active = Some(id);
+        }
+        if amount_open {
+            app.world_mut()
+                .resource_mut::<crate::game::dialogs::amount_box::AmountBoxState>()
+                .visible = true;
+        }
+        if menu_open {
+            app.world_mut()
+                .resource_mut::<crate::game::player_menu::PlayerMenuState>()
+                .visible = true;
         }
         app
     }
@@ -268,6 +303,43 @@ mod tests {
         assert!(
             app.world().resource::<DialogManager>().open.is_empty(),
             "无输入聚焦时 Esc 应关闭全部对话框"
+        );
+    }
+
+    /// #2604：数量输入框（模态）开着 → Esc 让路（amount_box_system 自己消费
+    /// Esc=Cancel），对话框不动。回归：去掉 amount.visible 让路则对话框被清空
+    #[test]
+    fn esc_yields_to_amount_box() {
+        let mut app = esc_app_ext(false, None, true, false);
+        app.update();
+        assert_eq!(
+            app.world().resource::<DialogManager>().open.len(),
+            1,
+            "数量框开着时 Esc 不应关其后面的对话框"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::game::dialogs::amount_box::AmountBoxState>()
+                .visible,
+            "esc_close 不动数量框（由 amount_box_system 同帧消费 Esc=Cancel）"
+        );
+    }
+
+    /// #2604：玩家右键菜单开着 → 让路（player_menu_ui_system 自己关）
+    #[test]
+    fn esc_yields_to_player_menu() {
+        let mut app = esc_app_ext(false, None, false, true);
+        app.update();
+        assert_eq!(
+            app.world().resource::<DialogManager>().open.len(),
+            1,
+            "玩家菜单开着时 Esc 不应连坐关对话框"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::game::player_menu::PlayerMenuState>()
+                .visible,
+            "esc_close 不动玩家菜单（由 player_menu_ui_system 自己关）"
         );
     }
 }

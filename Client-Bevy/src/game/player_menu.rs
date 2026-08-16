@@ -159,12 +159,14 @@ fn player_menu_ui_system(
     mut chat: ResMut<ChatState>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     windows: Query<&Window>,
     mut options: Query<(&mut Transform, &mut UiButton, &mut Visibility, &PlayerMenuOption)>,
     mut widgets: Query<(&mut Transform, &mut Visibility), (With<PlayerMenuWidget>, Without<PlayerMenuOption>)>,
 ) {
-    // ESC 关闭（#146）
-    if state.visible && keys.just_pressed(KeyCode::Escape) {
+    // ESC 关闭（#146）。#2604：输入态（聊天/数量框/通用输入框）激活时不抢
+    // Esc——那些模态自己消费（否则同帧 Esc 既关菜单又关输入框，层级穿透）
+    if state.visible && !gate.0 && keys.just_pressed(KeyCode::Escape) {
         state.visible = false;
     }
     // 点击菜单外关闭
