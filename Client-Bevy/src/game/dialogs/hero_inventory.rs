@@ -513,7 +513,8 @@ fn hero_inv_data_system(
     >,
 ) {
     for (slot, mut data) in &mut cells {
-        let item = hero.inventory.get(slot.0).and_then(|s| s.as_ref());
+        // #2602：网格格 → 英雄背包槽 2+idx（前 2 槽是英雄腰带，不进网格）
+        let item = hero.inventory.get(2 + slot.0).and_then(|s| s.as_ref());
         match item {
             Some(item) => {
                 data.icon = ui_image(
@@ -541,9 +542,9 @@ fn hero_inv_data_system(
             }
         }
     }
-    // 选中高亮（黄色半透明，C# SelectedCell 语义）
+    // 选中高亮（黄色半透明，C# SelectedCell 语义；hero_selected 存原始槽位 2+idx）
     for (mut sprite, slot) in &mut cell_sprites {
-        let target = if click.hero_selected == Some(slot.0) {
+        let target = if click.hero_selected == Some(2 + slot.0) {
             Color::srgba(1.0, 0.9, 0.2, 0.35)
         } else {
             Color::srgba(0.0, 0.0, 0.0, 0.18)
@@ -599,8 +600,14 @@ fn hero_inv_click_system(
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_hero_click: Local<Option<(usize, f64)>>,
+    belt_visible: Res<crate::game::dialogs::hero_belt::HeroBeltVisible>,
+    belt_vertical: Res<crate::game::dialogs::hero_belt::HeroBeltVertical>,
 ) {
-    if !mgr.is_open(DialogKind::HeroInventory) {
+    // 网格格交互要求英雄背包开；腰带格独立（C# HeroBeltDialog 的 MirItemCell
+    // 腰带可见即可点，审查 m3——网格格坐标区 (0..309, 0..190) 覆盖世界点击，
+    // 背包关着时不得命中）
+    let grid_open = mgr.is_open(DialogKind::HeroInventory);
+    if !grid_open && !belt_visible.0 {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -622,15 +629,35 @@ fn hero_inv_click_system(
     {
         return;
     }
-    let Some(i) = hero_slot_at(cursor.x, cursor.y) else {
+    // #2602 命中目标 → 英雄背包原始槽位：8x5 网格格 = 2+idx（C# ItemSlot = 2+idx，
+    // HeroDialogs.cs:53，前 2 槽是腰带不进网格）；英雄腰带格 = 0/1（HeroBeltDialog，
+    // 独立渲染/命中，横纵布局随其 Flip）
+    let slot = if let Some(i) = hero_slot_at(cursor.x, cursor.y).filter(|_| grid_open) {
+        Some(2 + i)
+    } else if belt_visible.0 {
+        (0..crate::game::dialogs::hero_belt::BELT_SLOTS).find(|&j| {
+            let (x, y) = if belt_vertical.0 {
+                crate::game::dialogs::hero_belt::v_slot(j)
+            } else {
+                crate::game::dialogs::hero_belt::h_slot(j)
+            };
+            cursor.x >= x
+                && cursor.x <= x + crate::game::dialogs::hero_belt::CELL_SIZE
+                && cursor.y >= y
+                && cursor.y <= y + crate::game::dialogs::hero_belt::CELL_SIZE
+        })
+    } else {
+        None
+    };
+    let Some(slot) = slot else {
         return;
     };
-    // #206：双击英雄背包格 → 使用/装备（C# MirItemCell OnMouseDoubleClick → UseItem；#1546 守卫链）
+    // #206：双击英雄格 → 使用/装备（C# MirItemCell OnMouseDoubleClick → UseItem；#1546 守卫链）
     let now = time.elapsed_secs_f64();
-    if let Some((last_i, last_t)) = *last_hero_click {
-        if last_i == i && now - last_t < 0.4 {
+    if let Some((last_slot, last_t)) = *last_hero_click {
+        if last_slot == slot && now - last_t < 0.4 {
             *last_hero_click = None;
-            if let Some(item) = hero.inventory.get(i).and_then(|s| s.as_ref()) {
+            if let Some(item) = hero.inventory.get(slot).and_then(|s| s.as_ref()) {
                 // C# UseItem HeroGridType：actor=Hero，CanUseItem 用英雄性别/职业/等级；
                 // 钓鱼限制英雄格跳过（!HeroGridType && User.Fishing）；槽物品/坐骑检查用 User 装备
                 let (gender, class, level) = hero
@@ -658,22 +685,23 @@ fn hero_inv_click_system(
             return;
         }
     }
-    *last_hero_click = Some((i, now));
+    *last_hero_click = Some((slot, now));
     if let Some(main_from) = click.selected {
         net.send_packet(&crate::network::TransferHeroItemWire {
             from: main_from as i32,
-            to: i as i32,
+            to: slot as i32,
         });
         click.selected = None;
         click.hero_selected = None;
-        tracing::info!("🎒 转移物品 主背包{} -> 英雄{}", main_from, i);
+        tracing::info!("🎒 转移物品 主背包{} -> 英雄{}", main_from, slot);
     } else {
-        // 选中/取消选中英雄格（空格不选中）
-        if hero.inventory.get(i).and_then(|s| s.as_ref()).is_some() {
-            click.hero_selected = if click.hero_selected == Some(i) {
+        // 选中/取消选中英雄格（空格不选中；hero_selected 存原始背包槽位，
+        // 主背包取回路径 TakeBackHeroItem from 直接消费它）
+        if hero.inventory.get(slot).and_then(|s| s.as_ref()).is_some() {
+            click.hero_selected = if click.hero_selected == Some(slot) {
                 None
             } else {
-                Some(i)
+                Some(slot)
             };
         } else {
             click.hero_selected = None;

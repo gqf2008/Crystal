@@ -6,6 +6,14 @@ use mir2_shared::data::item::UserItem;
 /// 装备槽位索引（14 个槽位，#1136：补 C# Torch/Belt/Stone，保持既有编号）
 /// 客户端 UI 已按 C# 14 槽布局（EQUIP_SLOTS），经 SERVER_SLOT_TO_POS 映射；
 /// 本批次仅补齐缺失槽位，不做全量重编号（客户端与服务端编号一致即可）。
+///
+/// ⚠ 同名异序（#2602）：`mir2_shared::enums::EquipmentSlot`（SharedRust，
+/// 对齐 C# Enums.cs 序：Torch=3/Necklace=4/Belt=10/Boots=11/Mount=13）与
+/// 本枚举（旧序：Necklace=3/Mount=10/Torch=11/Belt=12/Stone=13）**同名不同值**。
+/// 客户端 hero/装备数组的线序 = 本枚举序（HeroInformation.equipment 直接序列化
+/// state.hero_inventory.equipment）。若未来把服务端装备数组统一切到 SharedRust
+/// 枚举序，必须同步改客户端 `character.rs` 的 `SERVER_SLOT_TO_POS`（否则
+/// 10 个槽位静默错位：Necklace/Torch/Belt/Boots/Mount 互换）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentSlot {
     Weapon = 0,

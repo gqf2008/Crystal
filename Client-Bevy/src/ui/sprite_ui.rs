@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
-use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ScalingMode;
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::map_renderer::{make_image, GameLibraries};
+use crate::map_renderer::{GameLibraries, make_image};
 use crate::resources::libraries::LibraryName;
 
 #[derive(Resource, Clone, Default)]
@@ -81,6 +81,19 @@ pub fn load_cjk_font(assets: &mut Assets<Font>) -> Handle<Font> {
     let (bytes, kind) = pick_cjk_font_bytes();
     tracing::info!("CJK 主字体 = {kind}（动态文本主字体，规避 #2599 重排版回退失效）");
     assets.add(Font::from_bytes(bytes))
+}
+
+/// 共享 CJK 主字体资源（#2602 批R）：多个对话框（NPC/公告/…）动态文本共用
+/// 同一宋体资产——各自调 load_cjk_font 会重复 assets.add ~10MB 字节
+#[derive(Resource, Clone, Default)]
+pub struct UiCjkFont(pub Handle<Font>);
+
+/// 惰性取共享 CJK 字体句柄（首个调用方加载，其余复用）
+pub fn shared_cjk_font(assets: &mut Assets<Font>, res: &mut UiCjkFont) -> Handle<Font> {
+    if !res.0.is_strong() {
+        res.0 = load_cjk_font(assets);
+    }
+    res.0.clone()
 }
 
 /// 注册系统宋体并设为 Han 字形回退（复刻 GDI 字体链接：Arial 无中文 → 宋体）。

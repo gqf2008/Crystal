@@ -272,6 +272,9 @@ pub struct CharacterDialogPlugin;
 /// ServerRust equipment 槽位(0..13) → C# EQUIP_SLOTS 位置索引
 /// 服务端: 0Weapon 1Armour 2Helmet 3Necklace 4BraceletL 5BraceletR 6RingL 7RingR 8Shoes 9Pendant 10Mount 11Torch 12Belt 13Stone
 /// #1136：补 Torch(pos3)/Belt(pos10)/Stone(pos12)
+/// ⚠ #2602：线序是 ServerRust `actors::inventory::EquipmentSlot` 旧序（非
+/// SharedRust `enums::EquipmentSlot` 的 C# 序——两枚举同名异序，见各自
+/// 互指注释）。服务端切到 SharedRust 序时本表必须同步改。
 pub(crate) const SERVER_SLOT_TO_POS: [usize; 14] = [0, 1, 2, 4, 5, 6, 7, 8, 11, 9, 13, 3, 10, 12];
 
 impl Plugin for CharacterDialogPlugin {

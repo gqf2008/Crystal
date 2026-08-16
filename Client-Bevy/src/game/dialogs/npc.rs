@@ -19,11 +19,11 @@ use bevy::sprite::Anchor;
 use crate::game::dialogs::text_input::{
     TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
 };
+use crate::ui::scroll_list::{ScrollList, spawn_scroll_bar};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
+    ui_image,
 };
-use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// NPC 对话框状态（网络写入）
 #[derive(Resource, Default)]
@@ -92,6 +92,7 @@ pub struct NpcDialogPlugin;
 impl Plugin for NpcDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NpcDialogState>();
+        app.init_resource::<crate::ui::sprite_ui::UiCjkFont>();
         app.add_systems(OnEnter(AppState::Game), spawn_npc_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_dialog);
         app.add_systems(
@@ -128,6 +129,7 @@ fn spawn_npc_dialog(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<crate::ui::sprite_ui::UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -135,14 +137,16 @@ fn spawn_npc_dialog(
     }
     let font = ui_font.0.clone();
     if !npc.cjk_font.is_strong() {
-        npc.cjk_font = crate::ui::sprite_ui::load_cjk_font(&mut fonts);
+        // 共享宋体资产（#2602 批R：与公告等对话框复用同一 Handle）
+        npc.cjk_font = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
     }
 
     // 背景 Prguse[384]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 384) {
         let e = spawn_ui_sprite(&mut commands, h, 0.0, 0.0, 6.0, 1.0);
         // #118 长对话页滚轮滚动（C# NPC 对话框支持 MouseWheel）
-        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (420.0, 34.0, 4.0, 144.0), 6.3);
+        let (track, thumb) =
+            spawn_scroll_bar(&mut commands, &mut images, (420.0, 34.0, 4.0, 144.0), 6.3);
         commands.entity(track).insert((
             DialogRoot(crate::game::dialogs::DialogKind::Npc),
             NpcDialogWidget,
@@ -173,9 +177,19 @@ fn spawn_npc_dialog(
 
     // 关闭按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        413.0, 3.0, 7.0, 20.0, 20.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        413.0,
+        3.0,
+        7.0,
+        20.0,
+        20.0,
     ) {
         commands.entity(e).insert((
             NpcClose,
@@ -221,9 +235,14 @@ fn spawn_npc_dialog(
     // 8 行文本
     for i in 0..8usize {
         let e = spawn_ui_text(
-            &mut commands, &font, "",
-            8.0, 34.0 + i as f32 * 18.0,
-            NPC_LINE_FONT_PX, Color::WHITE, 8.0,
+            &mut commands,
+            &font,
+            "",
+            8.0,
+            34.0 + i as f32 * 18.0,
+            NPC_LINE_FONT_PX,
+            Color::WHITE,
+            8.0,
         );
         commands.entity(e).insert((
             NpcLine(i),
@@ -253,16 +272,15 @@ fn npc_ui_system(
     close: Query<&UiButton, With<NpcClose>>,
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
     mut quest_btns: Query<(&UiButton, &mut Visibility), (With<NpcQuest>, Without<NpcDialogWidget>)>,
-    mut lines: Query<
-        (
-            Entity,
-            &mut Text2d,
-            &mut TextColor,
-            &mut TextFont,
-            &NpcLine,
-            &mut NpcLineSrc,
-        ),
-    >,
+    mut lines: Query<(
+        Entity,
+        &mut Text2d,
+        &mut TextColor,
+        &mut TextFont,
+        &Transform,
+        &NpcLine,
+        &mut NpcLineSrc,
+    )>,
     mut scroll: Query<&mut ScrollList, With<NpcDialogWidget>>,
 ) {
     for mut vis in widgets.iter_mut() {
@@ -325,9 +343,15 @@ fn npc_ui_system(
     // 原实现在此 early-return，鼠标离开窗口后 NPC 文字永不渲染/更新（master 既有 bug）
     let Ok(window) = windows.single() else { return };
     let cursor = window.cursor_position();
-    for (_ent, mut text, mut color, mut font, line, mut src_cache) in &mut lines {
+    // 各行实体当前屏幕原点（拖动后偏离初始 (8, 34+i*18)）——悬停/点击/
+    // 叠加标签都以它为基准，对话框拖动后命中与定位不脱节（#2602 批R 修复）
+    let mut line_pos: Vec<Option<(f32, f32)>> = vec![None; npc.lines.len().max(8)];
+    for (_ent, mut text, mut color, mut font, tf, line, mut src_cache) in &mut lines {
         let src = npc.lines.get(off + line.0).cloned().unwrap_or_default();
-        let y = 34.0 + line.0 as f32 * 18.0;
+        let (lx, ly) = (tf.translation.x, -tf.translation.y);
+        if line.0 < line_pos.len() {
+            line_pos[line.0] = Some((lx, ly));
+        }
         let clickable = is_clickable_npc_line(&src);
         let FontSize::Px(font_px) = font.font_size else {
             continue;
@@ -339,18 +363,18 @@ fn npc_ui_system(
         let mut hover = LineHover::None;
         if clickable {
             if let Some(c) = cursor {
-                if c.y >= y && c.y <= y + 16.0 {
+                if c.y >= ly && c.y <= ly + 16.0 {
                     if has_markup {
                         let mut px = 0.0f32;
                         for (idx, seg) in segs.iter().enumerate() {
                             let w = est_text_width(&seg.text, font_px);
-                            if seg.link.is_some() && c.x >= 8.0 + px && c.x <= 8.0 + px + w {
+                            if seg.link.is_some() && c.x >= lx + px && c.x <= lx + px + w {
                                 hover = LineHover::Link(idx);
                                 break;
                             }
                             px += w;
                         }
-                    } else if c.x >= 8.0 && c.x <= 400.0 {
+                    } else if c.x >= lx && c.x <= lx + 392.0 {
                         hover = LineHover::Menu;
                     }
                 }
@@ -428,7 +452,8 @@ fn npc_ui_system(
                     },
                     TextColor(seg_col),
                     FontHinting::Enabled,
-                    Transform::from_xyz(8.0 + x_off, -y, 8.05),
+                    // 锚定行实体当前变换（拖动后重建的叠加段不落回初始坐标）
+                    Transform::from_xyz(lx + x_off, tf.translation.y, tf.translation.z + 0.05),
                     Visibility::Visible,
                     DialogRoot(crate::game::dialogs::DialogKind::Npc),
                     NpcDialogWidget,
@@ -448,8 +473,11 @@ fn npc_ui_system(
     for (i, l) in npc.lines.iter().enumerate() {
         if i >= off && i < off + 8 && is_clickable_npc_line(l) {
             let row = i - off;
-            let y = 34.0 + row as f32 * 18.0;
-            if cursor.y >= y && cursor.y <= y + 16.0 {
+            // 行实体当前屏幕原点（拖动后命中不脱节）
+            let Some((lx, ly)) = line_pos.get(row).copied().flatten() else {
+                continue;
+            };
+            if cursor.y >= ly && cursor.y <= ly + 16.0 {
                 let segs = parse_npc_line(l);
                 let has_markup = segs.iter().any(|s| s.color.is_some() || s.link.is_some());
                 let key = if has_markup {
@@ -457,13 +485,14 @@ fn npc_ui_system(
                     let mut px = 0.0f32;
                     segs.iter().find_map(|seg| {
                         let w = est_text_width(&seg.text, NPC_LINE_FONT_PX);
-                        let hit = seg.link.as_ref().filter(|_| {
-                            cursor.x >= 8.0 + px && cursor.x <= 8.0 + px + w
-                        });
+                        let hit = seg
+                            .link
+                            .as_ref()
+                            .filter(|_| cursor.x >= lx + px && cursor.x <= lx + px + w);
                         px += w;
                         hit.map(|k| format!("[@{k}]"))
                     })
-                } else if cursor.x >= 8.0 && cursor.x <= 400.0 {
+                } else if cursor.x >= lx && cursor.x <= lx + 392.0 {
                     Some(extract_npc_key(l))
                 } else {
                     None
@@ -581,15 +610,8 @@ fn push_plain(out: &mut Vec<NpcSeg>, plain: &mut String) {
     }
 }
 
-/// 文本估宽（逻辑 px）：宋体是双宽度量字体——CJK/全角 advance 恒为 1.00em
-/// （=字号，估即精确），ASCII（含空格）恒为 0.50em（实测 upem 256/advance 128）。
-/// 基础白字与叠加标签同用宋体排版，估宽与实际度量一致，叠加段定位无累积漂移；
-/// 对应 C# MeasureText(prefix)-10 的定位职责
-fn est_text_width(s: &str, size: f32) -> f32 {
-    s.chars()
-        .map(|c| if (c as u32) >= 0x2E80 { size } else { size * 0.5 })
-        .sum()
-}
+/// 文本估宽 / KnownColor 映射移至 [`crate::ui::text_markup`]（#2602 批R 公告复用）
+use crate::ui::text_markup::{est_text_width, known_color};
 
 fn find_char(chars: &[char], from: usize, target: char, max: usize) -> Option<usize> {
     let end = (from + max).min(chars.len());
@@ -601,58 +623,6 @@ fn find_seq(chars: &[char], from: usize, seq: &[char]) -> Option<usize> {
         return None;
     }
     (from..=chars.len().saturating_sub(seq.len())).find(|&i| chars[i..].starts_with(seq))
-}
-
-/// C# Color.FromName KnownColor 真值 → srgb（脚本实际使用的子集 + 常见色）
-fn known_color(name: &str) -> Option<Color> {
-    let rgb = match name.to_ascii_lowercase().as_str() {
-        "red" => (1.0, 0.0, 0.0),
-        "darkred" => (0.55, 0.0, 0.0),
-        "crimson" => (0.86, 0.08, 0.24),
-        "indianred" => (0.8, 0.36, 0.36),
-        "tomato" => (1.0, 0.39, 0.28),
-        "orangered" => (1.0, 0.27, 0.0),
-        "orange" => (1.0, 0.65, 0.0),
-        "coral" => (1.0, 0.5, 0.31),
-        "gold" => (1.0, 0.84, 0.0),
-        "goldenrod" => (0.86, 0.65, 0.13),
-        "greenyellow" => (0.68, 1.0, 0.18),
-        "yellow" => (1.0, 1.0, 0.0),
-        "khaki" => (0.94, 0.9, 0.55),
-        "wheat" => (0.96, 0.87, 0.7),
-        "green" => (0.0, 0.5, 0.0),
-        "darkgreen" => (0.0, 0.39, 0.0),
-        "seagreen" => (0.18, 0.55, 0.34),
-        "forestgreen" => (0.13, 0.55, 0.13),
-        "limegreen" => (0.2, 0.8, 0.2),
-        "springgreen" => (0.0, 1.0, 0.5),
-        "cyan" | "aqua" => (0.0, 1.0, 1.0),
-        "teal" => (0.0, 0.5, 0.5),
-        "blue" => (0.0, 0.0, 1.0),
-        "darkblue" => (0.0, 0.0, 0.55),
-        "dodgerblue" => (0.12, 0.56, 1.0),
-        "skyblue" => (0.53, 0.81, 0.92),
-        "deepskyblue" => (0.0, 0.75, 1.0),
-        "royalblue" => (0.25, 0.41, 0.88),
-        "lightsteelblue" => (0.69, 0.77, 0.87),
-        "steelblue" => (0.27, 0.51, 0.71),
-        "purple" => (0.5, 0.0, 0.5),
-        "violet" => (0.93, 0.51, 0.93),
-        "magenta" | "fuchsia" => (1.0, 0.0, 1.0),
-        "plum" => (0.87, 0.63, 0.87),
-        "pink" => (1.0, 0.75, 0.8),
-        "hotpink" => (1.0, 0.41, 0.71),
-        "brown" => (0.65, 0.16, 0.16),
-        "chocolate" => (0.82, 0.41, 0.12),
-        "gray" | "grey" => (0.5, 0.5, 0.5),
-        "darkgray" | "darkgrey" => (0.66, 0.66, 0.66),
-        "silver" => (0.75, 0.75, 0.75),
-        "lightgray" | "lightgrey" => (0.83, 0.83, 0.83),
-        "black" => (0.0, 0.0, 0.0),
-        "white" => (1.0, 1.0, 1.0),
-        _ => return None,
-    };
-    Some(Color::srgb(rgb.0, rgb.1, rgb.2))
 }
 
 /// 提取菜单键（统一为 "[@XXX]" 格式，服务端按该格式匹配）
@@ -674,7 +644,6 @@ pub fn extract_npc_key(line: &str) -> String {
     }
 }
 
-
 /// 消费服务端 NPC 对话事件（网络层只广播 ServerEvent）
 fn npc_dialog_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -688,7 +657,6 @@ fn npc_dialog_server_events(
         }
     }
 }
-
 
 /// #272：NPC 输入覆盖层——S.NPCRequestInput → 弹输入框；确定/Enter → C.NPCConfirmInput
 #[allow(clippy::too_many_arguments)]
@@ -806,8 +774,14 @@ fn spawn_npc_input_overlay(
 
     // 提示
     let prompt = spawn_ui_text(
-        commands, &font, &format!("请输入（{}）:", page_name),
-        300.0, 100.0, 14.0, Color::WHITE, 8.1,
+        commands,
+        &font,
+        &format!("请输入（{}）:", page_name),
+        300.0,
+        100.0,
+        14.0,
+        Color::WHITE,
+        8.1,
     );
     commands.entity(prompt).insert(NpcInputRoot);
 
@@ -847,9 +821,19 @@ fn spawn_npc_input_overlay(
 
     // 确定
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        560.0, 175.0, 8.2, 50.0, 22.0,
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        560.0,
+        175.0,
+        8.2,
+        50.0,
+        22.0,
     ) {
         commands.entity(e).insert(NpcInputOk);
     }
@@ -872,7 +856,8 @@ mod tests {
     /// 引号剔除 + 链接段 + 着色段
     #[test]
     fn parse_real_script_line() {
-        let segs = parse_npc_line("\"Dungeon of the Ancient <Ones/@omacavea>\" {Level10~22./KHAKI}");
+        let segs =
+            parse_npc_line("\"Dungeon of the Ancient <Ones/@omacavea>\" {Level10~22./KHAKI}");
         assert_eq!(
             segs,
             vec![
@@ -938,7 +923,9 @@ mod tests {
     /// is_clickable_npc_line 与链接行兼容（点击路径不变）
     #[test]
     fn clickable_line_with_markup() {
-        assert!(is_clickable_npc_line("\"Dungeon of the Ancient <Ones/@omacavea>\" {x/KHAKI}"));
+        assert!(is_clickable_npc_line(
+            "\"Dungeon of the Ancient <Ones/@omacavea>\" {x/KHAKI}"
+        ));
         assert!(is_clickable_npc_line("[@main]"));
         assert!(!is_clickable_npc_line("plain text"));
     }
