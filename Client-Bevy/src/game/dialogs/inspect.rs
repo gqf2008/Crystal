@@ -62,6 +62,28 @@ pub struct InspectClose;
 #[derive(Component)]
 pub struct InspectPage;
 
+/// 职业图标（Prguse[100+class]@(15,33)，C# :2352-2359/:2480-2494）
+#[derive(Component)]
+pub struct InspectClassImage;
+
+/// 纸娃娃层（C# :2166-2206 StateItems 画装备 @ 页原点+(0,-20)；
+/// .0 = 服务端旧序槽位（0 武器/1 护甲/2 头盔），绘制顺序=枚举序）
+#[derive(Component)]
+pub struct InspectDoll(pub u8);
+
+/// 五动作按钮（C# :2223-2315）：组队/加友/邮件/交易/观察
+#[derive(Component)]
+pub struct InspectBtn(pub InspectBtnKind);
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum InspectBtnKind {
+    Group,
+    Friend,
+    Mail,
+    Trade,
+    Observe,
+}
+
 /// 名字/行会标签（C# NameLabel/GuildLabel）
 #[derive(Component)]
 pub struct InspectNameText;
@@ -195,6 +217,73 @@ fn spawn_inspect(
     // 14 格装备图标（格位坐标 = character::EQUIP_SLOTS，页内 @(8,70) 偏移；
     // C# :2362-2469 MirItemCell GridType=Inspect）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    // 纸娃娃层（C# :2166-2206：StateItems 画护甲→武器→头盔 @ 页原点+(0,-20)；
+    // z 按层叠 7.3/7.35/7.4 在角色页(6.1)之上、格图标(7.5)之下）
+    for (slot, z) in [(1u8, 7.3), (0u8, 7.35), (2u8, 7.4)] {
+        commands.spawn((
+            UiEntity,
+            InspectDoll(slot),
+            DialogRoot(DialogKind::Inspect),
+            InspectWidget,
+            Sprite {
+                image: white.clone(),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(BG_X + PAGE_REL.0, -(BG_Y + PAGE_REL.1 - 20.0), z),
+            Visibility::Hidden,
+        ));
+    }
+    // 职业图标 Prguse[100]@(15,33)（按 class 换帧在 icon_system）
+    {
+        let e = spawn_ui_sprite(
+            &mut commands,
+            white.clone(),
+            BG_X + 15.0,
+            BG_Y + 33.0,
+            7.2,
+            1.0,
+        );
+        commands.entity(e).insert((
+            InspectClassImage,
+            DialogRoot(DialogKind::Inspect),
+            InspectWidget,
+            Visibility::Hidden,
+        ));
+    }
+    // 五动作按钮（C# :2223-2315；库/帧/坐标逐字：Group Prguse[431-433]@(55,357)、
+    // Friend [434-436]@(85,357)、Mail [437-439]@(115,357)、Trade [523-525]@(145,357)、
+    // Observe Title[854-856]@(175,357)）
+    let buttons: [(InspectBtnKind, LibraryName, usize, usize, usize, f32); 5] = [
+        (InspectBtnKind::Group, LibraryName::Prguse, 431, 432, 433, 55.0),
+        (InspectBtnKind::Friend, LibraryName::Prguse, 434, 435, 436, 85.0),
+        (InspectBtnKind::Mail, LibraryName::Prguse, 437, 438, 439, 115.0),
+        (InspectBtnKind::Trade, LibraryName::Prguse, 523, 524, 525, 145.0),
+        (InspectBtnKind::Observe, LibraryName::Title, 854, 855, 856, 175.0),
+    ];
+    for (kind, lib, n, h, p, rx) in buttons {
+        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            lib,
+            n,
+            h,
+            p,
+            BG_X + rx,
+            BG_Y + 357.0,
+            7.0,
+            28.0,
+            24.0,
+        ) {
+            commands.entity(e).insert((
+                InspectBtn(kind),
+                DialogRoot(DialogKind::Inspect),
+                InspectWidget,
+            ));
+        }
+    }
     for (pos, (cx, cy)) in EQUIP_SLOTS.iter().enumerate() {
         commands.spawn((
             UiEntity,
@@ -212,12 +301,17 @@ fn spawn_inspect(
     }
 }
 
-/// 显隐 + 标签 + 关闭（图标显隐完全由 inspect_icon_system 管理——审查
-/// MAJOR：两系统都写图标 Visibility 会在关闭后每帧互相打架，图标悬浮不消失）
+/// 显隐 + 标签 + 关闭 + 五动作按钮（图标显隐完全由 inspect_icon_system 管理——
+/// 审查 MAJOR：两系统都写图标 Visibility 会在关闭后每帧互相打架，图标悬浮不消失）
 fn inspect_ui_system(
     mut mgr: ResMut<DialogManager>,
     state: Res<InspectState>,
-    close: Query<&UiButton, With<InspectClose>>,
+    net: Res<crate::network::NetConnection>,
+    mut mail: ResMut<crate::game::dialogs::mail::MailState>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    close: Query<&UiButton, (With<InspectClose>, Without<InspectBtn>)>,
+    // 单查询分发（多 With<marker> 查询有 B0001 风险）；接线同 player_menu 既有实现
+    btns: Query<(&UiButton, &InspectBtn)>,
     mut widgets: Query<&mut Visibility, (With<InspectWidget>, Without<InspectCellIcon>)>,
     mut names: Query<
         &mut Text2d,
@@ -238,6 +332,54 @@ fn inspect_ui_system(
     for btn in &close {
         if btn.clicked {
             mgr.close(DialogKind::Inspect);
+        }
+    }
+    for (b, k) in btns.iter() {
+        if !b.clicked {
+            continue;
+        }
+        match k.0 {
+            // C# :2234-2250：C.AddMember{Name}
+            InspectBtnKind::Group => {
+                net.send_packet(&mir2_shared::packets::client::group::AddMember {
+                    name: state.name.clone(),
+                });
+                tracing::info!("👥 [查看] 邀请组队: {}", state.name);
+            }
+            // C# :2263-2266：C.AddFriend{Name, Blocked=false}
+            InspectBtnKind::Friend => {
+                net.send_packet(&mir2_shared::packets::client::friend::AddFriend {
+                    name: state.name.clone(),
+                    blocked: false,
+                });
+                tracing::info!("👥 [查看] 添加好友 {}", state.name);
+            }
+            // C# :2279：MailComposeLetterDialog.ComposeMail(Name)（同 player_menu 邮件路径）
+            InspectBtnKind::Mail => {
+                mgr.open.push(DialogKind::Mail);
+                mail.compose = true;
+                mail.detail = None;
+                mail.attach = vec![None; 5];
+                mail.compose_gold = 0;
+                if input.texts.len() < 4 {
+                    input.texts.resize(4, String::new());
+                }
+                input.texts[0] = state.name.clone();
+                input.active = None;
+                tracing::info!("✉️ [查看] 给 {} 写邮件", state.name);
+            }
+            // C# :2292：C.TradeRequest
+            InspectBtnKind::Trade => {
+                net.send_packet(&mir2_shared::packets::client::trade::TradeRequest);
+                tracing::info!("🤝 [查看] 请求交易");
+            }
+            // C# :2305-2315：C.Observe{Name}
+            InspectBtnKind::Observe => {
+                net.send_packet(&crate::network::ObserveWire {
+                    name: state.name.clone(),
+                });
+                tracing::info!("👁️ [查看] 观察玩家 {}", state.name);
+            }
         }
     }
     for mut t in &mut names {
@@ -264,10 +406,32 @@ fn inspect_icon_system(
     mut cache: ResMut<UiImageCache>,
     mut icons: Query<(&mut Sprite, &mut Visibility, &InspectCellIcon)>,
     // 角色页性别换帧（C# RefreshInferface :2474-2476：340 男 / 341 女）
-    mut page: Query<&mut Sprite, (With<InspectPage>, Without<InspectCellIcon>)>,
+    mut page: Query<&mut Sprite, (With<InspectPage>, Without<InspectCellIcon>, Without<InspectClassImage>, Without<InspectDoll>)>,
+    // 职业图标
+    mut class_img: Query<
+        &mut Sprite,
+        (
+            With<InspectClassImage>,
+            Without<InspectCellIcon>,
+            Without<InspectPage>,
+            Without<InspectDoll>,
+        ),
+    >,
+    // 纸娃娃层
+    mut dolls: Query<
+        (&mut Sprite, &mut Visibility, &InspectDoll),
+        (
+            Without<InspectCellIcon>,
+            Without<InspectPage>,
+            Without<InspectClassImage>,
+        ),
+    >,
 ) {
     if !mgr.is_open(DialogKind::Inspect) {
         for (_, mut vis, _) in &mut icons {
+            *vis = Visibility::Hidden;
+        }
+        for (_, mut vis, _) in &mut dolls {
             *vis = Visibility::Hidden;
         }
         return;
@@ -283,6 +447,42 @@ fn inspect_icon_system(
         ) {
             sp.image = h;
             sp.custom_size = None;
+        }
+    }
+    // 职业图标（C# :2480-2494：Index = 100 + Class）
+    for mut sp in &mut class_img {
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            100 + state.class as usize,
+        ) {
+            sp.image = h;
+            sp.custom_size = None;
+        }
+    }
+    // 纸娃娃（C# :2166-2206：StateItems[RealItem.Image]；偏差附 #2609——
+    // GetRealItem 按等级/职业换 image 与翅膀 Effect/发型不在包内，直接用 image）
+    for (mut sp, mut vis, doll) in &mut dolls {
+        let it = state.items.iter().find(|i| i.slot == doll.0 && i.image > 0);
+        match it {
+            Some(it) => {
+                if let Some(h) = ui_image(
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    LibraryName::StateItems,
+                    it.image as usize,
+                ) {
+                    sp.image = h;
+                    sp.custom_size = None;
+                    *vis = Visibility::Visible;
+                    continue;
+                }
+                *vis = Visibility::Hidden;
+            }
+            None => *vis = Visibility::Hidden,
         }
     }
     let mut by_pos = [None::<&InspectItem>; 14];

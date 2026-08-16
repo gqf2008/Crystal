@@ -65,12 +65,13 @@ impl Plugin for AmountBoxPlugin {
 }
 
 impl AmountBoxState {
-    /// 弹出数量输入框
+    /// 弹出数量输入框。默认文本 = MaxAmount（C# MirAmountBox.cs:91，
+    /// Amount 初值=max——空 Enter 即以最后有效值确认，#2609）
     pub fn ask(&mut self, title: impl Into<String>, max: u32) {
         self.visible = true;
         self.title = title.into();
         self.max = max.max(1);
-        self.value = String::new();
+        self.value = self.max.to_string();
     }
 }
 
@@ -174,7 +175,14 @@ pub(crate) fn amount_box_system(
             continue;
         }
         if key.logical_key == Key::Enter {
-            let amount = state.value.parse::<u32>().ok().map(|v| v.min(state.max));
+            // 空/非法文本以 MaxAmount 兜底（C# Amount 属性=最后有效值，
+            // 初值即 max；#2609）；MinAmount 语义=下限 1
+            let amount = state
+                .value
+                .parse::<u32>()
+                .ok()
+                .or(Some(state.max))
+                .map(|v| v.clamp(1, state.max));
             state.visible = false;
             result.write(AmountBoxResult(amount));
             continue;

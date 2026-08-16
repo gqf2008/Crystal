@@ -793,7 +793,10 @@ pub(crate) fn chat_input_system(
 
     // C# ChatPanel_KeyPress：@ / ! / 空格 / 斜杠 也能直接打开输入框——
     // 只在**未聚焦**时开框（#2604：旧循环不判 input_active，输入中按 @/空格
-    // 会把已输入文本整体重置成前缀；C# ActiveControl 非 null 时按键进文本框）
+    // 会把已输入文本整体重置成前缀；C# ActiveControl 非 null 时按键进文本框）。
+    // #2609：开框帧记录触发键，下方文本循环跳过之——否则 '@' 开框后同帧
+    // 再进文本循环得 "@@"（C# MainDialogs.cs:1096-1123 开框字符不进框）
+    let mut opened_trigger: Option<Key> = None;
     if !chat.input_active {
         for key in &key_list {
             if key.state != bevy::input::ButtonState::Pressed || ime.consumes_key(key) {
@@ -811,6 +814,7 @@ pub(crate) fn chat_input_system(
             if let Some(prefix) = prefix {
                 chat.input_active = true;
                 chat.input_text = prefix;
+                opened_trigger = Some(key.logical_key.clone());
             }
         }
     }
@@ -824,6 +828,11 @@ pub(crate) fn chat_input_system(
             continue;
         }
         if ime.consumes_key(key) {
+            continue;
+        }
+        // 开框触发键本帧不进文本（只跳第一个匹配）
+        if opened_trigger.as_ref() == Some(&key.logical_key) {
+            opened_trigger = None;
             continue;
         }
         if key.logical_key == Key::Backspace {
