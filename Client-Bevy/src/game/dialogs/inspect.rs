@@ -56,6 +56,10 @@ pub struct InspectWidget;
 #[derive(Component)]
 pub struct InspectClose;
 
+/// 角色页精灵（性别换帧 340/341 用，C# RefreshInferface :2474-2476）
+#[derive(Component)]
+pub struct InspectPage;
+
 /// 名字/行会标签（C# NameLabel/GuildLabel）
 #[derive(Component)]
 pub struct InspectNameText;
@@ -125,11 +129,14 @@ fn spawn_inspect(
             6.1,
             1.0,
         );
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Inspect), InspectWidget, Visibility::Hidden));
+        commands.entity(e).insert((
+            InspectPage,
+            DialogRoot(DialogKind::Inspect),
+            InspectWidget,
+            Visibility::Hidden,
+        ));
     }
-    // 关闭 @(509,3)（C# :2472-2482 同格式）
+    // 关闭 @(241,3)（C# MainDialogs.cs:2213；509 是 HelpDialog 宽面板坐标，审查 MAJOR）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands,
         &mut libs,
@@ -139,7 +146,7 @@ fn spawn_inspect(
         360,
         361,
         362,
-        BG_X + 509.0,
+        BG_X + 241.0,
         BG_Y + 3.0,
         7.0,
         20.0,
@@ -151,16 +158,18 @@ fn spawn_inspect(
             InspectWidget,
         ));
     }
-    // 名字（加粗 10F 居中 150x20 @(30,45)，C# :2210-2220）+ 行会（同 @(30,60)）
-    // 名字（加粗 10F 居中 150x20 @(30,45)，C# :2210-2220）+ 行会（@(30,60)）
-    for (is_name, ry) in [(true, 45.0), (false, 60.0)] {
+    // 名字（8F HCenter|VCenter 190x20 @(50,12) → 框心 (145,22)，C# :2317-2324；
+    // C# 文本=Name 纯名字，等级/职业不进此标签——对齐）
+    // 行会（190x30 @(50,33) → 框心 (145,48)，C# :2343-2350；C# 文本=GuildName+" "
+    // +GuildRank，无 rank 数据只显示名——有意偏差附 #2607）
+    for (is_name, cx, cy) in [(true, 145.0, 22.0), (false, 145.0, 48.0)] {
         let t = spawn_ui_text(
             &mut commands,
             &font,
             "",
-            BG_X + 105.0,
-            BG_Y + ry,
-            10.0,
+            BG_X + cx,
+            BG_Y + cy,
+            8.0,
             Color::WHITE,
             8.0,
         );
@@ -168,14 +177,14 @@ fn spawn_inspect(
         if is_name {
             ec.insert((
                 InspectNameText,
-                bevy::sprite::Anchor::TOP_CENTER,
+                bevy::sprite::Anchor::CENTER,
                 DialogRoot(DialogKind::Inspect),
                 InspectWidget,
             ));
         } else {
             ec.insert((
                 InspectGuildText,
-                bevy::sprite::Anchor::TOP_CENTER,
+                bevy::sprite::Anchor::CENTER,
                 DialogRoot(DialogKind::Inspect),
                 InspectWidget,
             ));
@@ -185,32 +194,29 @@ fn spawn_inspect(
     // C# :2362-2469 MirItemCell GridType=Inspect）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     for (pos, (cx, cy)) in EQUIP_SLOTS.iter().enumerate() {
-        let e = commands
-            .spawn((
-                UiEntity,
-                InspectCellIcon(pos),
-                DialogRoot(DialogKind::Inspect),
-                InspectWidget,
-                Sprite {
-                    image: white.clone(),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(BG_X + PAGE_REL.0 + cx, -(BG_Y + PAGE_REL.1 + cy), 7.5),
-                Visibility::Hidden,
-            ))
-            .id();
-        let _ = e;
+        commands.spawn((
+            UiEntity,
+            InspectCellIcon(pos),
+            DialogRoot(DialogKind::Inspect),
+            InspectWidget,
+            Sprite {
+                image: white.clone(),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(BG_X + PAGE_REL.0 + cx, -(BG_Y + PAGE_REL.1 + cy), 7.5),
+            Visibility::Hidden,
+        ));
     }
 }
 
-/// 显隐 + 标签 + 关闭
+/// 显隐 + 标签 + 关闭（图标显隐完全由 inspect_icon_system 管理——审查
+/// MAJOR：两系统都写图标 Visibility 会在关闭后每帧互相打架，图标悬浮不消失）
 fn inspect_ui_system(
     mut mgr: ResMut<DialogManager>,
     state: Res<InspectState>,
     close: Query<&UiButton, With<InspectClose>>,
     mut widgets: Query<&mut Visibility, (With<InspectWidget>, Without<InspectCellIcon>)>,
-    mut icons: Query<&mut Visibility, (With<InspectCellIcon>, Without<InspectWidget>)>,
     mut names: Query<
         &mut Text2d,
         (With<InspectNameText>, Without<InspectGuildText>),
@@ -224,9 +230,6 @@ fn inspect_ui_system(
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
-    for mut vis in icons.iter_mut() {
-        *vis = Visibility::Hidden;
-    }
     if !open {
         return;
     }
@@ -235,34 +238,51 @@ fn inspect_ui_system(
             mgr.close(DialogKind::Inspect);
         }
     }
-    let class = match state.class {
-        0 => "战士",
-        1 => "法师",
-        2 => "道士",
-        3 => "刺客",
-        4 => "弓箭手",
-        _ => "未知",
-    };
     for mut t in &mut names {
-        t.0 = format!("{}（{}）Lv.{}", state.name, class, state.level);
+        // C# NameLabel.Text = Name（纯名字，:2317-2324；等级/职业不进此标签）
+        t.0 = state.name.clone();
     }
     for mut t in &mut guilds {
+        // C# = GuildName+" "+GuildRank（:2343-2350）；无 rank 数据只显示名（偏差附 #2607）
         t.0 = if state.guild.is_empty() {
             String::new()
         } else {
-            format!("<{}>", state.guild)
+            state.guild.clone()
         };
     }
 }
 
-/// 图标渲染：服务端槽位（旧序）→ C# 格位（SERVER_SLOT_TO_POS）→ Items[image]
+/// 图标渲染：服务端槽位（旧序）→ C# 格位（SERVER_SLOT_TO_POS）→ Items[image]。
+/// 关闭时整体隐藏（审查 MAJOR：缺 is_open 门控则关闭后已装备图标悬浮不消失）
 fn inspect_icon_system(
     state: Res<InspectState>,
+    mgr: Res<DialogManager>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut icons: Query<(&mut Sprite, &mut Visibility, &InspectCellIcon)>,
+    // 角色页性别换帧（C# RefreshInferface :2474-2476：340 男 / 341 女）
+    mut page: Query<&mut Sprite, (With<InspectPage>, Without<InspectCellIcon>)>,
 ) {
+    if !mgr.is_open(DialogKind::Inspect) {
+        for (_, mut vis, _) in &mut icons {
+            *vis = Visibility::Hidden;
+        }
+        return;
+    }
+    let page_idx = if state.gender == 1 { 341 } else { 340 };
+    for mut sp in &mut page {
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            page_idx,
+        ) {
+            sp.image = h;
+            sp.custom_size = None;
+        }
+    }
     let mut by_pos = [None::<&InspectItem>; 14];
     for it in &state.items {
         let pos = crate::game::dialogs::character::SERVER_SLOT_TO_POS

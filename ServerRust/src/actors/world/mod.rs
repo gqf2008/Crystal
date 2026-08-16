@@ -11025,8 +11025,9 @@ fn send_inspect_packet(
         body.extend_from_slice(&eq.unique_id.to_le_bytes());
         body.extend_from_slice(&eq.item_index.to_le_bytes());
         // #2607：图标索引（ItemInfo.Image，Items 库位）——客户端无 item_index→image
-        // 信息表，服务端带上才能渲染 14 格网格图标（C# 客户端本地有 ItemInfos）
-        let image = eq.info.as_ref().map(|i| i.image).unwrap_or(0);
+        // 信息表，服务端带上才能渲染 14 格网格图标（C# 客户端本地有 ItemInfos）。
+        // ⚠ ItemInfo.image 是 u16——必须显式 as i32（客户端按 i32 读，审查 BLOCKER）
+        let image = eq.info.as_ref().map(|i| i.image).unwrap_or(0) as i32;
         body.extend_from_slice(&image.to_le_bytes());
         body.extend_from_slice(&(eq.current_dura as i32).to_le_bytes());
         body.extend_from_slice(&(eq.max_dura as i32).to_le_bytes());
