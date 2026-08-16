@@ -56,7 +56,11 @@ enum ControlCommand {
         object_id: u32,
     },
     /// e2e：直接对当前 NPC 发 CallNPC(key)——实机鼠标点击在后台窗口不可注入
-    /// （winit 丢弃注入的 WM_MOUSEMOVE → cursor=None），页面跳转只能走 RPC 驱动
+    /// （winit 丢弃注入的 WM_MOUSEMOVE → cursor=None），页面跳转只能走 RPC 驱动。
+    /// key 必须是 "[@SECTION]" 括号全格式（与实机点击路径 extract_npc_key 产物
+    /// 一致；服务端/mock 按该格式匹配，裸 "main" 会静默无效）。
+    /// 有意绕过 interact 路径的 C# 5 秒 NPCTime 冷却（player_control.rs
+    /// npc_call_allowed）——e2e 驱动不受游戏节奏限制
     NpcCall {
         object_id: u32,
         key: String,
@@ -560,11 +564,11 @@ fn apply_control_commands(
                 tracing::info!("🎮 control interact: {object_id}");
             }
             ControlCommand::NpcCall { object_id, key } => {
+                tracing::info!("🎮 control npc_call: {object_id} {key}");
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                     object_id,
-                    key: key.clone(),
+                    key,
                 });
-                tracing::info!("🎮 control npc_call: {object_id} {key}");
             }
             ControlCommand::Pickup { object_id } => {
                 let Ok((pe, ptf, _)) = players.single() else {
