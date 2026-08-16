@@ -62,6 +62,13 @@ fn text_input_system(
     mut displays: Query<(&mut Text2d, &TextInputDisplay)>,
     mut submit: MessageWriter<TextInputSubmit>,
     mut focus: ResMut<ImeFocus>,
+    // #2596-5 输入互斥：聚焦通用输入框即收起聊天输入（双活跃会让两系统
+    // 无序双写 ImeFocus、抢 take_commit，提交入错框）
+    mut chat: ResMut<crate::game::chat::ChatState>,
+    // 数量框是模态输入——打开期间不聚焦新输入框
+    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
+    // 互斥上升沿跟踪（#2596-5 编程式激活点兜底）
+    mut active_prev: Local<bool>,
 ) {
     // 输入框数量对齐
     let max_id = fields.iter().map(|(_, f, _)| f.0).max().unwrap_or(0);
@@ -71,6 +78,18 @@ fn text_input_system(
 
     // 一帧键盘事件只读一次（MessageReader::read() 推进游标，二次 read 为空）
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    // 未被 IME 用掉的事件（同值重复按用掉次数配给，#2596-10）
+    let pass_through = ime.unconsumed(&key_list);
+
+    // #2596-5 互斥上升沿（编程式激活点兜底）：好友添加/组队邀请/NPC 输入等
+    // 直接置 active=Some(n) 的入口不经过点击路径——「聚焦从无到有」时收起
+    // 聊天输入。无条件收起：同帧双升时通用输入框为唯一胜者
+    // （chat_input_system 侧带「上一帧已激活」守卫，两边规则合流不会两败俱伤）
+    let ti_rising = state.active.is_some() && !*active_prev;
+    *active_prev = state.active.is_some();
+    if ti_rising {
+        chat.input_active = false;
+    }
 
     // 点击聚焦（原版 C# MirInputBox：点击输入框激活）
     if mouse.just_pressed(MouseButton::Left) {
@@ -92,7 +111,11 @@ fn text_input_system(
                     }
                 }
                 if clicked.is_some() {
-                    state.active = clicked;
+                    // 数量框打开时不聚焦（模态）；聚焦即收起聊天输入（互斥，#2596-5）
+                    if !amount.visible {
+                        state.active = clicked;
+                        chat.input_active = false;
+                    }
                 }
             }
         }
@@ -110,11 +133,8 @@ fn text_input_system(
     }
 
     // Enter 提交 / 激活逻辑
-    for key in &key_list {
+    for key in &pass_through {
         if key.state != bevy::input::ButtonState::Pressed {
-            continue;
-        }
-        if ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Enter {
@@ -126,11 +146,8 @@ fn text_input_system(
     }
 
     if let Some(active) = state.active {
-        for key in &key_list {
+        for key in &pass_through {
             if key.state != bevy::input::ButtonState::Pressed {
-                continue;
-            }
-            if ime.consumes_key(key) {
                 continue;
             }
             let text = &mut state.texts[active];
@@ -202,6 +219,9 @@ mod tests {
         app.init_resource::<ButtonInput<MouseButton>>();
         // 弱字体句柄：候选条实体不 spawn（纯逻辑测试）
         app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        // text_input_system 的互斥/模态门参数（#2596：聊天/数量框状态）
+        app.init_resource::<crate::game::chat::ChatState>();
+        app.init_resource::<crate::game::dialogs::amount_box::AmountBoxState>();
 
         // 直接置 Game 态资源：in_state 只读 Res<State<AppState>>，无需
         // StatesPlugin/StateTransition（MinimalPlugins 不含 StatesPlugin）

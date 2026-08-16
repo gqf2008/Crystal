@@ -29,8 +29,18 @@ impl Plugin for NewCharacterPlugin {
         app.init_resource::<NewCharState>();
         app.add_systems(
             Update,
-            (new_char_ui_system, new_char_ime_system)
+            (
+                new_char_ui_system,
+                new_char_ime_system,
+                nc_modal_focus_exclusive,
+            )
                 .chain()
+                // #2596-6 定序：仲裁必须在 modal_ui_system 读 input_focused/
+                // take_commit 之前跑（同帧「点名字框 + 选候选键」的焦点转移帧，
+                // 不定序时 modal 可能仍持旧焦点把提交取进用户刚放弃的框）。
+                // 经 ModalUi 集合定序而非直接 .before(modal_ui_system)：
+                // 系统签名含私有组件标记，pub(crate) 化会触发 E0446
+                .before(crate::ui::modal_box::ModalUi)
                 .run_if(in_state(AppState::Select)),
         );
         app.add_systems(
@@ -551,13 +561,11 @@ fn new_char_ui_system(
     }
 
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    // 未被 IME 用掉的事件（同值重复按用掉次数配给，#2596-10）
+    let pass_through = ime.unconsumed(&key_list);
     if state.name_focused {
-        for key in &key_list {
+        for key in &pass_through {
             if key.state != bevy::input::ButtonState::Pressed {
-                continue;
-            }
-            // 内置 IME 接管该键（拼音/选候选/编辑）→ 跳过原始插入
-            if ime.consumes_key(key) {
                 continue;
             }
             match key.logical_key {
@@ -659,12 +667,8 @@ fn new_char_ui_system(
     }
     // ESC 关闭 / Enter 提交（对齐 C# NewCharacterDialog：Esc 隐藏，TextBox_KeyPress 中
     // Enter 且 OKButton.Enabled → CreateCharacter）
-    for key in &key_list {
+    for key in &pass_through {
         if key.state != bevy::input::ButtonState::Pressed {
-            continue;
-        }
-        // 内置 IME 接管该键（如组合中按 Enter 提交候选）→ 不触发提交
-        if ime.consumes_key(key) {
             continue;
         }
         match key.logical_key {
@@ -711,17 +715,31 @@ fn new_char_ime_system(
     if state.visible && state.name_focused {
         // 名字输入框屏幕矩形（候选条定位 + 判定字母是否进 IME）
         focus.rect = Some((DLG_X + 325.0, DLG_Y + 268.0, 240.0, 20.0));
-    }
 
-    // 内置拼音 IME 提交的汉字 → 追加到名字（≤15 字）
-    if let Some(c) = ime.take_commit() {
-        if state.visible && state.name_focused {
+        // 只在自己持有输入焦点时 take：take_commit 是破坏性读取，非持有者
+        // 抢先取走会让真正的持有者丢失提交（#2596-6）
+        if let Some(c) = ime.take_commit() {
             for ch in c.chars() {
                 if state.name.chars().count() < 15 {
                     state.name.push(ch);
                 }
             }
         }
+    }
+}
+
+/// #2596-6 焦点互斥（Select 态双输入框）：新建角色名框获得焦点时，让出删除
+/// 确认输入框——双焦点会让 ImeFocus（候选条/chip 定位）在两框间跳动，且
+/// modal 可能仍持旧焦点把提交取进用户刚放弃的框。
+/// 反方向天然成立：new_char_ui_system 的 lclick 点到名字框外即置
+/// name_focused=false。本链已 .before(ModalUi) 定序：仲裁先于 modal 的
+/// take_commit 落地，焦点转移帧无抢先取走的窗口。
+fn nc_modal_focus_exclusive(
+    state: Res<NewCharState>,
+    mut modal: ResMut<crate::ui::modal_box::ModalState>,
+) {
+    if state.visible && state.name_focused {
+        modal.input_focused = false;
     }
 }
 
@@ -775,6 +793,34 @@ fn new_char_anim_system(
                 s.1.translation.y = -by;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2596-6 仲裁回归：新建角色名框聚焦 → 删除确认框让出输入焦点
+    /// （modal 持旧焦点会把 IME 提交取进用户刚放弃的框；链上 .before(ModalUi)
+    /// 保证仲裁先于 modal 的 take_commit 落地，此处钉仲裁本身的行为）
+    #[test]
+    fn nc_modal_focus_exclusive_clears_modal_focus() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(NewCharState {
+            visible: true,
+            name_focused: true,
+            ..Default::default()
+        });
+        app.init_resource::<crate::ui::modal_box::ModalState>();
+        app.add_systems(Update, nc_modal_focus_exclusive);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<crate::ui::modal_box::ModalState>()
+                .input_focused,
+            "名字框聚焦时删除确认框应让出焦点"
+        );
     }
 }
 

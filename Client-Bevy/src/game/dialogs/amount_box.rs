@@ -136,10 +136,19 @@ fn spawn_amount_box(
 }
 
 /// 显示/隐藏 + 数字输入 + OK/Cancel/Close
+#[allow(clippy::too_many_arguments)]
 fn amount_box_system(
     mut state: ResMut<AmountBoxState>,
     mut result: MessageWriter<AmountBoxResult>,
     mut keys: MessageReader<KeyboardInput>,
+    // #2596-3 接入 IME 契约：组合中的数字在选候选、退格在删拼音——数量框跳过，
+    // 不再同帧双写（聊天输入激活时弹数量框，输入 "50" 会同时进两个缓冲）
+    ime: Res<crate::ui::pinyin_ime::PinyinIme>,
+    // 模态抢占（C# MirAmountBox 独立窗体夺走焦点）：打开瞬间收起聊天输入与
+    // 通用输入框，数字/退格不再写进它们的缓冲
+    mut chat: ResMut<crate::game::chat::ChatState>,
+    mut text_input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    mut was_open: Local<bool>,
     ok: Query<&UiButton, (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>)>,
     cancel: Query<&UiButton, (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
     close: Query<&UiButton, (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
@@ -154,13 +163,19 @@ fn amount_box_system(
             Visibility::Hidden
         };
     }
+    // 打开瞬间收起其它输入框（模态抢占，#2596-3）
+    if state.visible && !*was_open {
+        chat.input_active = false;
+        text_input.active = None;
+    }
+    *was_open = state.visible;
     if !state.visible {
         return;
     }
 
-    // 数字键盘输入
-    for key in keys.read() {
-
+    // 数字键盘输入（一帧事件只读一次；未被 IME 用掉的事件按用掉次数配给，#2596-10）
+    let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    for key in ime.unconsumed(&key_list) {
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
@@ -203,5 +218,125 @@ fn amount_box_system(
     }
     if let Ok(mut v) = values.single_mut() {
         v.0 = state.value.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::chat::ChatState;
+    use crate::game::dialogs::text_input::TextInputState;
+    use crate::ui::pinyin_ime::{ImeFocus, PinyinIme, PinyinImePlugin};
+    use bevy::ecs::message::Messages;
+    use bevy::input::keyboard::KeyCode;
+    use bevy::input::ButtonState;
+
+    fn char_key(ch: &str) -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: Key::Character(ch.into()),
+            state: ButtonState::Pressed,
+            text: Some(ch.into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    fn shift_key(state: ButtonState) -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::ShiftLeft,
+            logical_key: Key::Shift,
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    fn send(app: &mut App, ev: KeyboardInput) {
+        app.world_mut()
+            .resource_mut::<Messages<KeyboardInput>>()
+            .write(ev);
+    }
+
+    /// 最小 harness：数量框可见 + IME 聚焦回填 + amount_box_system 真实调度
+    fn app_with_amount_box() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.add_message::<AmountBoxResult>();
+        app.init_resource::<ButtonInput<MouseButton>>();
+        app.init_resource::<ChatState>();
+        app.init_resource::<TextInputState>();
+        app.init_resource::<AmountBoxState>();
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.insert_resource(State::new(AppState::Game));
+        app.add_systems(Update, amount_box_system);
+        app.add_systems(Update, |mut f: ResMut<ImeFocus>| {
+            f.rect = Some((10.0, 10.0, 100.0, 16.0));
+        });
+        {
+            let mut st = app.world_mut().resource_mut::<AmountBoxState>();
+            st.visible = true;
+        }
+        app.update();
+        app
+    }
+
+    /// #2596-3 回归：IME 组合中的数字在选候选——数量框跳过，不再同帧双写
+    /// （旧实现聊天输入激活 + 弹数量框时，"50" 同时进聊天缓冲和数量框）。
+    /// 普通数字（无组合）照常进数量框。
+    #[test]
+    fn ime_composing_digits_do_not_enter_amount_box() {
+        let mut app = app_with_amount_box();
+        // 切中文
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        // 组合 "ni"
+        for c in "ni".chars() {
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+
+        // 组合中的数字 1 = 选首候选（被 IME 消费）→ 数量框不接收
+        send(&mut app, char_key("1"));
+        app.update();
+        assert_eq!(
+            app.world().resource::<AmountBoxState>().value,
+            "",
+            "组合中的数字在选候选，不应写进数量框"
+        );
+
+        // 组合已提交（无组合）→ 后续数字照常进数量框
+        send(&mut app, char_key("5"));
+        app.update();
+        assert_eq!(app.world().resource::<AmountBoxState>().value, "5");
+    }
+
+    /// #2596-3 回归：数量框是模态输入——打开瞬间收起聊天输入与通用输入框，
+    /// 数字/退格不再同时写进它们的缓冲。
+    #[test]
+    fn amount_box_open_closes_chat_and_text_input() {
+        let mut app = app_with_amount_box();
+        // 模拟聊天输入激活 → 数量框打开（harness 里 visible 已 true）
+        app.world_mut().resource_mut::<ChatState>().input_active = true;
+        app.world_mut().resource_mut::<TextInputState>().active = Some(0);
+        // 数量框已打开过一帧（was_open=true）→ 关掉再开，触发抢占
+        app.world_mut().resource_mut::<AmountBoxState>().visible = false;
+        app.update();
+        app.world_mut().resource_mut::<AmountBoxState>().visible = true;
+        app.update();
+        assert!(
+            !app.world().resource::<ChatState>().input_active,
+            "数量框打开应收起聊天输入"
+        );
+        assert!(
+            app.world().resource::<TextInputState>().active.is_none(),
+            "数量框打开应清空通用输入框聚焦"
+        );
     }
 }

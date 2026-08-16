@@ -27,10 +27,21 @@ use crate::ui::sprite_ui::{
 
 pub struct ModalBoxPlugin;
 
+/// modal_ui_system 的调度集合：外部（新建角色链）用它声明「先于模态取提交/
+/// 改焦点」的定序——SystemSet 是空标记类型，不暴露系统签名（其参数表含
+/// 私有组件标记，pub(crate) 化系统本身会触发 E0446）
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
+pub(crate) struct ModalUi;
+
 impl Plugin for ModalBoxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModalState>();
-        app.add_systems(Update, modal_ui_system.run_if(in_state(AppState::Select)));
+        app.add_systems(
+            Update,
+            modal_ui_system
+                .in_set(ModalUi)
+                .run_if(in_state(AppState::Select)),
+        );
     }
 }
 
@@ -374,6 +385,8 @@ fn modal_ui_system(
 
     // 一帧键盘事件只读一次（MessageReader::read() 推进游标，二次 read 为空）
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    // 未被 IME 用掉的事件（同值重复按用掉次数配给，#2596-10）
+    let pass_through = ime.unconsumed(&key_list);
 
     // 当前选中角色（删除确认用）
     let selected: Option<SelectInfo> = session
@@ -427,12 +440,8 @@ fn modal_ui_system(
             }
         }
         if state.input_focused {
-            for key in &key_list {
+            for key in &pass_through {
                 if key.state != bevy::input::ButtonState::Pressed {
-                    continue;
-                }
-                // 内置 IME 接管该键（拼音/选候选/编辑）→ 跳过原始插入
-                if ime.consumes_key(key) {
                     continue;
                 }
                 match key.logical_key {
@@ -451,11 +460,11 @@ fn modal_ui_system(
         }
     }
 
-    // 内置拼音 IME 提交的汉字 → 追加到删除确认输入框（≤50 字）
-    // 先记录本帧是否有 IME 提交（take_commit 会清空 commit_pending，Enter 守卫需要它）
-    let ime_committed = ime.has_commit();
-    if let Some(c) = ime.take_commit() {
-        if state.kind == ModalKind::DeleteConfirm && state.input_focused {
+    // 内置拼音 IME 提交的汉字 → 追加到删除确认输入框（≤50 字）。
+    // 只在自己持有输入焦点时 take：take_commit 是破坏性读取，非持有者
+    // 抢先取走会让真正的持有者丢失提交（#2596-6）
+    if state.kind == ModalKind::DeleteConfirm && state.input_focused {
+        if let Some(c) = ime.take_commit() {
             for ch in c.chars() {
                 if state.name_input.chars().count() < 50 {
                     state.name_input.push(ch);
@@ -492,18 +501,12 @@ fn modal_ui_system(
     // 键盘：回车=确认，ESC=取消（对齐原版 MirInputBox/MirMessageBox）
     let mut enter = false;
     let mut escape = false;
-    for key in &key_list {
+    for key in &pass_through {
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
-        // 内置 IME 接管该键（如组合中按 Enter 提交候选）→ 不触发对话框动作
-        if ime.consumes_key(key) {
-            continue;
-        }
-        // 本帧 IME 刚提交候选（Enter 被 IME 消费）→ 不触发对话框 Enter 动作
-        if ime_committed && key.logical_key == Key::Enter {
-            continue;
-        }
+        // 配给逐事件精确：组合中提交候选的那次 Enter 本身已被 IME 用掉，
+        // 不会进到这里 → 不触发对话框动作
         match key.logical_key {
             Key::Enter => enter = true,
             Key::Escape => escape = true,

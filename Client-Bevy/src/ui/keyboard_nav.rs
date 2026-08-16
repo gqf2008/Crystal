@@ -30,13 +30,21 @@ pub struct KeyboardNav {
 ///    C# TextBox_KeyPress Escape → ActiveControl=null 且 e.Handled，不触发 Closeall
 /// 2. 通用输入框聚焦 → 只取消聚焦（对话框不动）
 /// 3. 无输入聚焦 → Closeall（C# KeyBindSettings Closeall）
+///
+/// 另（#2596-7）：Esc 被内置 IME 用来取消拼音组合的那帧，本系统整体让路——
+/// ButtonInput 只知帧级真假，无从区分事件实例，故用 ime.escape_consumed()。
 pub fn esc_close_dialogs_system(
     keys: Res<ButtonInput<KeyCode>>,
+    ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     chat: Res<crate::game::chat::ChatState>,
     mut mgr: ResMut<DialogManager>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    // 取消组合的那次 Esc 已被 IME 用掉：只收候选条，不当帧连带关对话框
+    if ime.escape_consumed() {
         return;
     }
     if chat.input_active {
@@ -203,12 +211,61 @@ mod tests {
     use super::*;
     use crate::game::chat::ChatState;
     use crate::game::dialogs::text_input::TextInputState;
+    use crate::ui::pinyin_ime::{ImeFocus, PinyinDict, PinyinIme, PinyinImePlugin};
+    use bevy::ecs::message::Messages;
+    use bevy::input::keyboard::{Key, KeyboardInput};
     use bevy::input::ButtonInput;
+
+    fn char_key(ch: &str) -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: Key::Character(ch.into()),
+            state: bevy::input::ButtonState::Pressed,
+            text: Some(ch.into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    fn shift_key(state: bevy::input::ButtonState) -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::ShiftLeft,
+            logical_key: Key::Shift,
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    fn esc_key() -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: Key::Escape,
+            state: bevy::input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    fn send(app: &mut App, ev: KeyboardInput) {
+        app.world_mut()
+            .resource_mut::<Messages<KeyboardInput>>()
+            .write(ev);
+    }
+
+    /// esc_close_dialogs_system 依赖 PinyinIme（escape_consumed 让路）
+    fn insert_ime(app: &mut App) {
+        app.insert_resource(PinyinIme::new(PinyinDict::load()));
+        app.init_resource::<ImeFocus>();
+    }
 
     fn esc_app(chat_open: bool, text_active: Option<usize>) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<ButtonInput<KeyCode>>();
+        insert_ime(&mut app);
         app.insert_resource(ChatState {
             input_active: chat_open,
             ..Default::default()
@@ -268,6 +325,68 @@ mod tests {
         assert!(
             app.world().resource::<DialogManager>().open.is_empty(),
             "无输入聚焦时 Esc 应关闭全部对话框"
+        );
+    }
+
+    /// #2596-7 Esc 单键单效（IME 让路）：取消拼音组合的那次 Esc 只收候选条，
+    /// 本系统不当帧连带关全部对话框；组合结束后的下一次 Esc 恢复 Closeall。
+    /// ButtonInput 只知帧级真假，让路靠 ime.escape_consumed()。
+    #[test]
+    fn esc_yields_to_ime_composition_cancel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin); // PreUpdate 真实调度 IME 处理器
+        app.add_message::<KeyboardInput>();
+        // 弱字体句柄：候选条/chip 实体不 spawn（纯逻辑测试，pinyin_ime.rs 同款）
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.insert_resource(ChatState::default());
+        app.init_resource::<TextInputState>();
+        app.init_resource::<DialogManager>();
+        app.add_systems(Update, esc_close_dialogs_system);
+        // Update 回填聚焦（对齐生产契约：文本框每帧重写 ImeFocus）
+        app.add_systems(Update, |mut f: ResMut<ImeFocus>| {
+            f.rect = Some((10.0, 10.0, 100.0, 16.0));
+        });
+
+        // Shift 单按切中文 → 喂 'n' 组合中
+        send(&mut app, shift_key(bevy::input::ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(bevy::input::ButtonState::Released));
+        app.update();
+        send(&mut app, char_key("n"));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+
+        // 同帧：Esc 键盘事件（IME 取消组合并消费）+ ButtonInput Esc 按下
+        send(&mut app, esc_key());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        let mut mgr = app.world_mut().resource_mut::<DialogManager>();
+        mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+        app.update();
+        assert!(
+            !app.world().resource::<PinyinIme>().is_composing(),
+            "IME 应已取消组合"
+        );
+        assert_eq!(
+            app.world().resource::<DialogManager>().open.len(),
+            1,
+            "取消组合的 Esc 不应连带关掉对话框"
+        );
+
+        // 组合已空 → 下一次 Esc 恢复 Closeall（ButtonInput 需先释放再按下，
+        // just_pressed 只在释放→按下跳变置位）
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::Escape);
+            keys.press(KeyCode::Escape);
+        }
+        app.update();
+        assert!(
+            app.world().resource::<DialogManager>().open.is_empty(),
+            "组合结束后的 Esc 应恢复关闭全部对话框"
         );
     }
 }

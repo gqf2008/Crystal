@@ -157,14 +157,16 @@ fn player_menu_ui_system(
     mut input: ResMut<TextInputState>,
     net: Res<NetConnection>,
     mut chat: ResMut<ChatState>,
+    ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     mut options: Query<(&mut Transform, &mut UiButton, &mut Visibility, &PlayerMenuOption)>,
     mut widgets: Query<(&mut Transform, &mut Visibility), (With<PlayerMenuWidget>, Without<PlayerMenuOption>)>,
 ) {
-    // ESC 关闭（#146）
-    if state.visible && keys.just_pressed(KeyCode::Escape) {
+    // ESC 关闭（#146）。IME 让路（#2596-7）：取消拼音组合的那次 Esc 只收
+    // 候选条，不当帧连带关菜单（ButtonInput 只知帧级真假，靠 escape_consumed）
+    if state.visible && keys.just_pressed(KeyCode::Escape) && !ime.escape_consumed() {
         state.visible = false;
     }
     // 点击菜单外关闭

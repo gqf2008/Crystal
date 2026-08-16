@@ -803,6 +803,18 @@ fn login_ui_system(
     // 聚焦 + 回填内置 IME 聚焦框（仅非密码框：候选条定位 + 决定字母是否进 IME）
     // 只写 Some；None 由 clear_ime_focus 每帧统一重置
     for mut input in inputs.iter_mut() {
+        // 隐藏字段不吃焦点（#2596-2）：新建账号/改密对话框关闭期间其输入框
+        // 不可见——点击命中（如矩形与可见框重叠）也不聚焦、不回填、不喂键。
+        // 判定放帧首（原末尾清理晚一帧：隐藏当帧仍会吃输入/抢 IME 提交）
+        let shown = match input.kind {
+            InputKind::Na(_) => login.show_new_account,
+            InputKind::Cp(_) => login.show_change_password,
+            _ => true,
+        };
+        if !shown {
+            input.focused = false;
+            continue;
+        }
         let (x, y, w, h) = input.rect;
         if lclick && mx >= x && mx <= x + w && my >= y && my <= y + h {
             input.focused = true;
@@ -814,29 +826,15 @@ fn login_ui_system(
         }
     }
 
-    // 内置拼音 IME 提交的汉字 → 注入聚焦的非密码输入框
-    // 先记录本帧是否有 IME 提交（take_commit 会清空 commit_pending，Enter 守卫需要它）
-    let ime_committed = ime.has_commit();
-    if let Some(c) = ime.take_commit() {
-        for mut input in inputs.iter_mut() {
-            if input.focused && !input.password {
-                input.value.push_str(&c);
-            }
-        }
-    }
-
-    // 键盘
+    // 键盘。未被 IME 用掉的事件（同值重复按用掉次数配给，#2596-10）
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    let pass_through = ime.unconsumed(&key_list);
     for mut input in inputs.iter_mut() {
         if !input.focused {
             continue;
         }
-        for key in &key_list {
+        for key in &pass_through {
             if key.state != bevy::input::ButtonState::Pressed {
-                continue;
-            }
-            // 内置 IME 接管该键（拼音/选候选/编辑）→ 跳过原始插入
-            if ime.consumes_key(key) {
                 continue;
             }
             if key.logical_key == Key::Backspace {
@@ -845,6 +843,17 @@ fn login_ui_system(
                 if !text.is_empty() {
                     input.value.push_str(text);
                 }
+            }
+        }
+    }
+
+    // 内置拼音 IME 提交的汉字 → 注入聚焦的非密码输入框。
+    // 契约：在键循环之后 take（消费表使被 IME 用掉的键已精确跳过，提交键
+    // 不会泄漏进字段——旧实现先 take 再循环，选字数字/空格会拼进文本尾巴）
+    if let Some(c) = ime.take_commit() {
+        for mut input in inputs.iter_mut() {
+            if input.focused && !input.password {
+                input.value.push_str(&c);
             }
         }
     }
@@ -871,8 +880,9 @@ fn login_ui_system(
         }
     }
 
-    // 调试热键：F9 打开新建账号，F10 打开改密码（live 验证用）
-    for key in &key_list {
+    // 调试热键：F9 打开新建账号，F10 打开改密码（live 验证用）。
+    // IME 用掉的键不触发（组合中按 Esc 是收起候选条，不应同时关掉对话框）
+    for key in &pass_through {
         if key.state == bevy::input::ButtonState::Pressed {
             match key.logical_key {
                 Key::F9 => login.show_new_account = true,
@@ -921,14 +931,10 @@ fn login_ui_system(
             clicked = Some(kind.0);
         }
     }
-    // Enter 提交（对齐 C# TextBox_KeyPress：登录/新建账号/改密）
-    for key in &key_list {
-        if key.state == bevy::input::ButtonState::Pressed
-            && key.logical_key == Key::Enter
-            && !ime.consumes_key(key)
-            // 本帧 IME 刚提交候选（Enter 被 IME 消费）→ 不触发登录/注册/改密提交
-            && !ime_committed
-        {
+    // Enter 提交（对齐 C# TextBox_KeyPress：登录/新建账号/改密）。
+    // 配给逐事件精确：提交候选的那次 Enter 本身就被 IME 用掉 → 此处自然跳过
+    for key in &pass_through {
+        if key.state == bevy::input::ButtonState::Pressed && key.logical_key == Key::Enter {
             if login.show_new_account && val.na_ok {
                 clicked = Some(ButtonKind::NaOk);
             } else if login.show_change_password && val.cp_ok {
@@ -1036,6 +1042,8 @@ fn login_ui_system(
             ButtonKind::Close => std::process::exit(0),
         }
     }
+    // 对话框关闭 → 清其输入框焦点的判定已移至系统首的聚焦循环
+    // （#2596-2：隐藏字段当帧即不吃输入，不再晚一帧）
 }
 
 /// 网络状态提示（登录错误/断线/注册结果）显示到底部状态文本

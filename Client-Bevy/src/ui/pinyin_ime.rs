@@ -9,13 +9,25 @@
 // 前提：main.rs 把 Window.ime_enabled 置 false（winit 用 IACE_CHILDREN 解关联
 // IME 上下文），字母键便作为原始 KeyboardInput { Key::Character("a") } 到达。
 //
-// 与各文本框系统的契约：
-//   - pinyin_ime_system 跑在 PreUpdate，读 KeyboardInput 更新 IME 状态
-//     （Shift 单按切换中/英；中文模式按非密码聚焦框时消费字母/数字/空格/退格/Esc）。
-//   - 各文本框系统跑在 Update：先 ime.consumes_key(key) 判断 IME 是否接管该键，
-//     接管则跳过；再 ime.take_commit() 注入已选汉字；并回填 ImeFocus（聚焦框矩形，
-//     须每帧重写——PreUpdate 会被 clear_ime_focus 清空，而候选条失焦帧即隐藏，
-//     只在聚焦变化时写一次的框会让候选条在聚焦期间闪烁/消失）。
+// 与各文本框系统的契约（#2596 统一化）：
+//   - pinyin_ime_system 跑在 PreUpdate，逐事件处理 KeyboardInput：真正被 IME
+//     用掉的按键记入「本帧消费表」；组合/提交/编辑标记不再作为吞键依据。
+//   - 各文本框系统跑在 Update：先 ime.unconsumed(&key_list) 取本帧事件批中
+//     未被 IME 用掉的事件再逐个处理（同值重复按键按 IME 实际用掉的次数配给
+//     ——组合 "n" 时同帧两个退格：第一个删拼音，第二个照常删正文）；再
+//     ime.take_commit() 注入已选汉字（提交只在产生帧有效，下一帧 PreUpdate
+//     未被取走即过期丢弃）；并回填 ImeFocus（聚焦框矩形，须每帧重写——
+//     PreUpdate 会被 clear_ime_focus 清空，而候选条失焦帧即隐藏，只在聚焦
+//     变化时写一次的框会让候选条在聚焦期间闪烁/消失）。
+//   - ButtonInput 类消费方（just_pressed 无法区分事件实例）用
+//     ime.escape_consumed() 让路：取消组合的那次 Esc 已被 IME 用掉，当帧
+//     不再触发关对话框/关菜单。
+//   - 失焦即弃组：组合中途失焦（如点进密码框），下一帧组合自动取消——
+//     组合不会跨失焦冻结存活去吞后续按键。
+//   - 中文模式组合为空时 Shift+大写字母直通文本框并进入「临时英文段」：
+//     段内所有按键直通（中文模式也能整体打出 Bob / A@B.com），空格/回车/
+//     Esc 结束段后自动回中文（搜狗「Shift 切英文段」的单段节奏）；
+//     Shift 单按切换中/英（OS 自动重复的 Shift 不重新武装单按判定）。
 //   - pinyin_mode_chip_system 跑在 PostUpdate：聚焦框右侧常显「中/英」模式 chip。
 //     系统 IME 被禁用后 OS 输入法工具条不再出现——chip 是它的游戏内等价物
 //     （手心/搜狗用户的「中/英指示 + Shift 切换」通用约定），否则内置 IME 无从发现。
@@ -307,10 +319,21 @@ pub struct PinyinIme {
     candidates: Vec<String>,
     /// 候选分页
     page: usize,
-    /// 本帧要插入聚焦框的已选文本
+    /// 本帧要插入聚焦框的已选文本（只在产生帧有效：下一帧 PreUpdate 未被
+    /// take_commit 取走即过期丢弃——滞留的提交会在之后任意获焦框意外注入）
     commit_pending: Option<String>,
-    /// 本帧 IME 用退格编辑过拼音（供文本框判断是否跳过删除缓冲）
-    ate_edit: bool,
+    /// 本帧被 IME 真正消费的按键事件（逐事件记录）。unconsumed 据此配给，
+    /// 取代旧的「组合中/有提交/刚编辑」整体吞键——那会把同帧后段未被 IME
+    /// 处理的键也吞掉（如退格删尽组合后同帧的空格静默丢失）
+    consumed: Vec<KeyboardInput>,
+    /// 本帧是否有被消费的 Esc（取消组合的那次）。ButtonInput 类消费方
+    /// （just_pressed 只知帧级真假、无从区分事件实例）据此让路。
+    consumed_escape: bool,
+    /// 临时英文段（Shift+大写进入）：段内所有按键直通文本框、不进拼音，
+    /// 空格/回车/Esc 结束段。中文模式可整体打出 'Bob'/'A@B.com'（搜狗
+    /// 「Shift 切英文段」的单段节奏——只放行单个大写会让 'Bob' 的 'o'
+    /// 又进拼音组合）
+    temp_english: bool,
     dict: PinyinDict,
 }
 
@@ -322,7 +345,9 @@ impl PinyinIme {
             candidates: Vec::new(),
             page: 0,
             commit_pending: None,
-            ate_edit: false,
+            consumed: Vec::new(),
+            consumed_escape: false,
+            temp_english: false,
             dict,
         }
     }
@@ -354,6 +379,8 @@ impl PinyinIme {
         self.composing.clear();
         self.candidates.clear();
         self.page = 0;
+        // 显式中/英切换即终止临时英文段（段跟着中文模式走）
+        self.temp_english = false;
     }
 
     fn feed_letter(&mut self, c: char) {
@@ -364,7 +391,6 @@ impl PinyinIme {
 
     fn backspace(&mut self) {
         if self.composing.pop().is_some() {
-            self.ate_edit = true;
             self.page = 0;
             self.recompute();
         }
@@ -407,6 +433,7 @@ impl PinyinIme {
         self.composing.clear();
         self.candidates.clear();
         self.page = 0;
+        self.temp_english = false;
     }
 
     fn page_next(&mut self) {
@@ -437,33 +464,37 @@ impl PinyinIme {
         }
     }
 
-    /// 文本框系统据此判断某键是否被 IME 接管（应跳过自身处理）。
-    /// 依赖 PreUpdate 已更新好状态。
-    pub fn consumes_key(&self, key: &KeyboardInput) -> bool {
-        if !self.enabled || key.state != ButtonState::Pressed {
-            return false;
+    /// 本帧事件批中未被 IME 用掉的事件（文本框系统逐个处理这些）。
+    /// 同值重复按键（Windows ~30Hz 自动重复遇 ≥33ms 帧即同帧合并）按 IME
+    /// 本帧实际用掉的次数配给：组合 "n" + 同帧 [退格, 退格] → 第一个被
+    /// 用掉（删拼音），第二个直通文本框（删正文）。按值 contains 会把
+    /// 同值事件整体误判为已消费，第二个退格静默丢失（#2596-10 变体）。
+    /// 纯函数：多个消费方用同一事件批调用得到同一结果，互不消耗配额。
+    pub fn unconsumed<'a>(&self, batch: &'a [KeyboardInput]) -> Vec<&'a KeyboardInput> {
+        if !self.enabled {
+            return batch.iter().collect();
         }
-        let acting = self.is_composing() || self.commit_pending.is_some() || self.ate_edit;
-        match &key.logical_key {
-            Key::Character(c) => {
-                let s = c.as_str();
-                if s.chars().all(|ch| ch.is_ascii_alphabetic()) {
-                    // 字母：IME 正在组合时接管（PreUpdate 已把它喂进拼音）
-                    self.is_composing()
-                } else if s.chars().all(|ch| ch.is_ascii_digit()) {
-                    acting // 数字选候选（仅组合中）
-                } else if (s == "-" || s == "=") && self.is_composing() {
-                    true // 翻页键（仅组合中）
-                } else {
+        let mut quota: HashMap<&KeyboardInput, usize> = HashMap::new();
+        for k in &self.consumed {
+            *quota.entry(k).or_insert(0) += 1;
+        }
+        batch
+            .iter()
+            .filter(|k| match quota.get(*k).copied() {
+                Some(n) if n > 0 => {
+                    quota.insert(*k, n - 1);
                     false
                 }
-            }
-            Key::Space => acting,
-            Key::Backspace => self.is_composing() || self.ate_edit,
-            Key::Enter => acting,
-            Key::Escape => self.is_composing(),
-            _ => false,
-        }
+                _ => true,
+            })
+            .collect()
+    }
+
+    /// 本帧是否有被 IME 用掉的 Esc（= 取消组合的那次按键）。
+    /// ButtonInput 类消费方（just_pressed 只知帧级真假）据此让路：
+    /// 组合中按 Esc 只收候选条，不当帧连带关对话框/关菜单（#2596-7）。
+    pub fn escape_consumed(&self) -> bool {
+        self.enabled && self.consumed_escape
     }
 }
 
@@ -543,15 +574,24 @@ fn pinyin_ime_system(
     focus: Res<ImeFocus>,
     mut shift: Local<ShiftToggle>,
 ) {
-    // 本帧先清掉上帧的编辑标记（commit_pending 由文本框 take_commit 取走）
-    ime.ate_edit = false;
+    // 帧首三清（须在任何早退之前生效）：
+    // - 上帧消费表（unconsumed 只反映本帧事件）；
+    // - 上帧未被取走的提交——提交只在产生帧有效，失焦帧产生的提交若无人取走
+    //   会永久滞留，之后注入到任意获焦框（还会封锁该期间的按键判定）
+    // - 上帧的 Esc 消费标记（escape_consumed 只反映本帧）
+    ime.consumed.clear();
+    ime.commit_pending = None;
+    ime.consumed_escape = false;
 
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
 
     // 1) Shift 单按检测（无论是否聚焦都允许切换中/英）
     for key in &key_list {
         if key.logical_key == Key::Shift {
-            if key.state == ButtonState::Pressed {
+            if key.state == ButtonState::Pressed && !key.repeat {
+                // repeat 的 Pressed 是 OS 自动重复（按住 Shift 打大写期间会持续
+                // 产生）——重新武装 clean 会让松开时误判为单按而切换中/英，
+                // 丢弃进行中的组合
                 shift.down = true;
                 shift.clean = true;
             } else if key.state == ButtonState::Released {
@@ -577,21 +617,47 @@ fn pinyin_ime_system(
     if !ime.enabled() {
         return;
     }
-    let focused = focus.rect.is_some();
-    if !focused {
+    if focus.rect.is_none() {
+        // 失焦即弃组（对齐系统 IME：焦点离开输入框，进行中的组合就地取消）。
+        // 旧实现组合跨失焦冻结存活，而 unconsumed 无视焦点 → 组合滞留期间
+        // 后续所有字母/数字/退格/Enter 被空组合吞掉——组合拼音后点进密码框，
+        // 一个字符都打不进去（focus 为上一帧 Update 的回填，弃组晚一帧生效）
+        ime.cancel();
         return;
     }
     for key in &key_list {
         if key.state != ButtonState::Pressed {
             continue;
         }
+        // 临时英文段：所有按键直通文本框，不进拼音处理（也不消费）。空格/
+        // 回车/Esc 结束段——键本身同样直通（空格进正文、Enter 提交输入框、
+        // Esc 归对话框/关输入行），段后自动回中文。
+        // 进段见下方字母分支（组合为空的 Shift+大写）；失焦弃组/中英切换出段。
+        if ime.temp_english {
+            match &key.logical_key {
+                Key::Space | Key::Enter | Key::Escape => ime.temp_english = false,
+                _ => {}
+            }
+            continue;
+        }
+        // 记录「本事件被 IME 消费」：unconsumed 逐事件配给，未消费的事件
+        // （如组合为空时的空格/数字/退格）照常到达文本框
+        let mut consumed = false;
         match &key.logical_key {
             Key::Character(c) => {
                 let s = c.as_str();
                 if s.chars().all(|ch| ch.is_ascii_alphabetic()) {
-                    // 字母进拼音缓冲（小写）
-                    for ch in s.chars() {
-                        ime.feed_letter(ch.to_ascii_lowercase());
+                    if ime.is_composing() || !s.chars().any(|ch| ch.is_ascii_uppercase()) {
+                        // 字母进拼音缓冲（小写）
+                        for ch in s.chars() {
+                            ime.feed_letter(ch.to_ascii_lowercase());
+                        }
+                        consumed = true;
+                    } else {
+                        // 组合为空的 Shift+大写字母直通文本框并进入临时英文段
+                        // ——中文模式也能整体打出 Bob / A@B.com：只放行单个
+                        // 大写的话，'Bob' 后续的 'o' 又会进拼音组合
+                        ime.temp_english = true;
                     }
                 } else if s.chars().all(|ch| ch.is_ascii_digit()) {
                     // 数字选候选（仅组合中）
@@ -599,40 +665,52 @@ fn pinyin_ime_system(
                         if let Ok(n) = s.parse::<usize>() {
                             if n >= 1 {
                                 ime.select(n - 1);
+                                consumed = true;
                             }
                         }
                     }
                 } else if s == "-" {
                     if ime.is_composing() {
                         ime.page_prev();
+                        consumed = true;
                     }
                 } else if s == "=" {
                     if ime.is_composing() {
                         ime.page_next();
+                        consumed = true;
                     }
                 }
             }
             Key::Space => {
                 if ime.is_composing() {
                     ime.commit_default();
+                    consumed = true;
                 }
             }
             Key::Enter => {
                 if ime.is_composing() {
                     ime.commit_default();
+                    consumed = true;
                 }
             }
             Key::Backspace => {
                 if ime.is_composing() {
                     ime.backspace();
+                    consumed = true;
                 }
             }
             Key::Escape => {
                 if ime.is_composing() {
                     ime.cancel();
+                    consumed = true;
+                    // 供 ButtonInput 类消费方让路（见 escape_consumed）
+                    ime.consumed_escape = true;
                 }
             }
             _ => {}
+        }
+        if consumed {
+            ime.consumed.push(key.clone());
         }
     }
 }
@@ -826,6 +904,26 @@ mod tests {
         }
     }
 
+    /// Shift 键（可指定 repeat——OS 按住自动重复产生的事件）
+    fn shift_key_with(repeat: bool, state: ButtonState) -> KeyboardInput {
+        KeyboardInput {
+            repeat,
+            ..shift_key(state)
+        }
+    }
+
+    /// 任意逻辑键（按下）——Esc/Enter/Space/Backspace 等非字符键
+    fn raw_key(logical: Key) -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::Escape, // 逻辑只看 logical_key，物理码随意
+            logical_key: logical,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
     fn send(app: &mut App, ev: KeyboardInput) {
         app.world_mut()
             .resource_mut::<Messages<KeyboardInput>>()
@@ -877,17 +975,31 @@ mod tests {
         assert_eq!(ime.take_commit(), Some("zzz".to_string()));
     }
 
-    /// consumes_key：英文模式不接管任何键；中文模式接管字母（组合中）
+    /// unconsumed 契约：只有真正喂进拼音缓冲的那次按键才被配给掉。
+    /// 英文模式全批直通；中文模式首字母被用掉（探针批中消失）；未发生的
+    /// 键即使组合中也不受影响。
     #[test]
-    fn consumes_key_contract() {
-        let mut ime = PinyinIme::new(PinyinDict::minimal());
-        let pressed = char_key("a");
-        assert!(!ime.consumes_key(&pressed)); // 英文模式
-        ime.toggle();
-        assert!(!ime.consumes_key(&pressed)); // 中文但未组合 → 不接管字母（首字母由 PreUpdate 喂入后才开始接管）
-        ime.feed_letter('a');
-        // 组合中：再按字母应被接管
-        assert!(ime.consumes_key(&char_key("b")));
+    fn unconsumed_contract() {
+        let mut app = ime_app_with_toggled_focus();
+        // 英文模式：字母直通
+        send(&mut app, char_key("a"));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<PinyinIme>()
+                .unconsumed(&[char_key("a")])
+                .len(),
+            1
+        );
+
+        // 切中文 + 聚焦，喂首字母 → 该事件被用掉；未发生的 'b' 不受影响
+        enable_chinese(&mut app);
+        send(&mut app, char_key("a"));
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(ime.is_composing());
+        assert!(ime.unconsumed(&[char_key("a")]).is_empty());
+        assert_eq!(ime.unconsumed(&[char_key("b")]).len(), 1);
     }
 
     // ---- 集成（真实 bevy 调度）----
@@ -1166,12 +1278,247 @@ mod tests {
         assert_eq!(*bg.single(app.world()).unwrap(), Visibility::Visible);
         assert_eq!(*txt.single(app.world()).unwrap(), Visibility::Visible);
 
-        // 失焦帧（组合仍在）：候选条当帧必须落回 Hidden
+        // 失焦帧：候选条当帧落回 Hidden（PostUpdate 读到 None）；组合在下一帧
+        // PreUpdate 弃组（IME 读的是上一帧 Update 的回填，弃组晚一帧生效）
         app.world_mut().resource_mut::<BackfillFocus>().0 = false;
         app.update();
-        // 组合未被取消——上面的 Hidden 只能来自失焦路径，而非组合结束
-        assert!(app.world().resource::<PinyinIme>().is_composing());
         assert_eq!(*bg.single(app.world()).unwrap(), Visibility::Hidden);
         assert_eq!(*txt.single(app.world()).unwrap(), Visibility::Hidden);
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().is_composing());
+    }
+
+    // ---- #2596 统一契约（逐事件消费 / 失焦弃组 / 提交过期 / 大写直通 / Shift 重复）----
+
+    /// 组装可切换聚焦的 IME 契约测试 App（弱字体句柄：不 spawn 候选条实体）
+    fn ime_app_with_toggled_focus() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.insert_resource(BackfillFocus(true));
+        app.add_systems(
+            Update,
+            |flag: Res<BackfillFocus>, mut f: ResMut<ImeFocus>| {
+                if flag.0 {
+                    f.rect = Some((10.0, 10.0, 100.0, 16.0));
+                }
+            },
+        );
+        app
+    }
+
+    /// Shift 单按切到中文模式
+    fn enable_chinese(app: &mut App) {
+        send(app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(app, shift_key(ButtonState::Released));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().enabled());
+    }
+
+    /// #2596-1 密码框死锁回归：组合中途失焦 → 组合就地取消，后续按键不再被吞。
+    /// 旧实现组合跨失焦冻结存活，consumes_key 无视焦点吞掉一切字母/数字/退格/
+    /// Enter——组合拼音后点进密码框，一个字符都打不进（本测试在旧代码上失败）。
+    #[test]
+    fn blur_releases_composition_and_keys() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        for c in "ni".chars() {
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+
+        // 失焦 → 组合就地取消（IME 读上一帧的回填，弃组在下一帧 PreUpdate 生效）
+        app.world_mut().resource_mut::<BackfillFocus>().0 = false;
+        app.update(); // 本帧 PreUpdate 仍见 Some；Update 起不再回填
+        app.update(); // 本帧 PreUpdate 见 None → 弃组
+        assert!(!app.world().resource::<PinyinIme>().is_composing());
+
+        // 失焦后的字母：不进缓冲、不被配给（可正常到达任意文本框，含密码框）
+        send(&mut app, char_key("a"));
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(!ime.is_composing());
+        assert_eq!(ime.unconsumed(&[char_key("a")]).len(), 1);
+    }
+
+    /// #2596-9 提交帧过期回归：失焦帧产生的提交（无人取走）下一帧即丢弃，
+    /// 不滞留注入到之后任意获焦框、不封锁期间的 Enter/空格。旧实现永久滞留。
+    #[test]
+    fn commit_expires_next_frame() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        for c in "ni".chars() {
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        // 数字 1 选首候选 → commit_pending（本测试无消费者取走）
+        send(&mut app, char_key("1"));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().has_commit());
+
+        // 下一帧仍未取走 → 过期丢弃（旧实现永久滞留，本断言失败）
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().has_commit());
+    }
+
+    /// #2596-7 Esc 单键单效回归：取消组合的那次 Esc 被 IME 消费（对话框当帧
+    /// 不再同时关闭/清空）；组合已空后的 Esc 不被消费（正常触发对话框动作）。
+    #[test]
+    fn escape_consumed_exactly_once() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        for c in "ni".chars() {
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        let esc = raw_key(Key::Escape);
+        send(&mut app, esc.clone());
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().is_composing());
+        // 取消组合的 Esc 被消费（旧实现 cancel 后 is_composing=false →
+        // 消费表查不到该键，对话框被同一按键连带关闭）
+        assert!(app.world().resource::<PinyinIme>().escape_consumed());
+        assert!(app
+            .world()
+            .resource::<PinyinIme>()
+            .unconsumed(&[esc])
+            .is_empty());
+
+        // 下一帧组合已空 → Esc 不再被消费
+        send(&mut app, raw_key(Key::Escape));
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().escape_consumed());
+        assert_eq!(
+            app.world()
+                .resource::<PinyinIme>()
+                .unconsumed(&[raw_key(Key::Escape)])
+                .len(),
+            1
+        );
+    }
+
+    /// #2596-10 同帧批黑洞回归：退格删尽组合后同帧的空格不再被吞。
+    /// 旧实现 acting 整体判定（组合中/有提交/刚编辑）把同帧后段未被 IME
+    /// 处理的键一并吞掉——帧合并时静默丢失。
+    #[test]
+    fn same_frame_backspace_drain_space_passes_through() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        for c in "ni".chars() {
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        // 同帧批：退格删 'i'、退格删 'n'（删尽）、空格
+        let bs = raw_key(Key::Backspace);
+        let sp = raw_key(Key::Space);
+        send(&mut app, bs.clone());
+        send(&mut app, bs);
+        send(&mut app, sp.clone());
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(!ime.is_composing());
+        // 两次退格都被用掉（删的是拼音）；删尽后的空格直通（可正常上屏）
+        assert!(ime.unconsumed(&[raw_key(Key::Backspace)]).is_empty());
+        assert_eq!(ime.unconsumed(&[sp]).len(), 1);
+    }
+
+    /// #2596-10 同值重复配给回归：组合只够删一次时，同帧第二个退格直通
+    /// 文本框（删正文）——按值 contains 会把它也判为已消费而静默丢失
+    /// （Windows ~30Hz 自动重复在 ≥33ms 帧内合并的实况，#2596-10 记录）。
+    #[test]
+    fn same_frame_duplicate_backspace_rations_by_consumed_count() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        send(&mut app, char_key("n")); // 'n' 单字母：组合长度 1，只够删一次
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+
+        let bs1 = raw_key(Key::Backspace);
+        let bs2 = raw_key(Key::Backspace); // 与 bs1 完全等值（真实合并即如此）
+        send(&mut app, bs1.clone());
+        send(&mut app, bs2);
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(!ime.is_composing(), "第一个退格删尽拼音组合");
+        // 配给：批中 2 个退格只配掉 1 个——第二个必须直通（删正文一字符）
+        let batch = [bs1.clone(), bs1];
+        let left = ime.unconsumed(&batch);
+        assert_eq!(left.len(), 1, "同值重复按用掉次数配给，第二个退格直通");
+    }
+
+    /// #2596-12 临时英文段回归：中文模式组合为空时 Shift+大写字母直通并进段，
+    /// 段内后续小写继续直通（'Bob' 整体可打），空格结束段后自动回中文。
+    /// 旧实现一律 to_ascii_lowercase 喂入 → 'Bob' 变 'bob'；只放行单个大写
+    /// 的话 'o' 又进拼音组合。
+    #[test]
+    fn uppercase_enters_temp_english_segment() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        send(&mut app, char_key("B"));
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(!ime.is_composing(), "组合为空时大写字母应直通，不进缓冲");
+        assert!(ime.temp_english, "Shift+大写进入临时英文段");
+
+        // 段内小写继续直通（'Bob' 的 'o' 不进拼音组合）
+        send(&mut app, char_key("o"));
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(ime.temp_english);
+        assert!(!ime.is_composing(), "临时英文段内字母不进拼音缓冲");
+
+        // 空格结束段（本身直通）→ 后续字母回中文拼音
+        send(&mut app, raw_key(Key::Space));
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().temp_english);
+        send(&mut app, char_key("n"));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+    }
+
+    /// #2596-12 实况序列：'A@B.com' 整体打出——'A' 进段，'@'/'B'/'.'/'com'
+    /// 全部直通（无组合、无候选条），段被空格/回车/Esc/失焦结束。
+    #[test]
+    fn temp_english_types_email_address() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        for ch in ["A", "@", "B", ".", "c", "o", "m"] {
+            send(&mut app, char_key(ch));
+            app.update();
+        }
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(ime.temp_english, "段持续到显式结束键");
+        assert!(!ime.is_composing(), "段内符号/字母都不进拼音");
+
+        // Esc 结束段且直通（归对话框/输入行，不进拼音）
+        send(&mut app, raw_key(Key::Escape));
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().temp_english);
+    }
+
+    /// #2596-11 Shift 自动重复回归：按住 Shift（期间按过其它键，作修饰键用）
+    /// 时 OS 重复派发的 Shift Pressed 不再重新武装单按判定——松开不误切中/英。
+    #[test]
+    fn shift_repeat_does_not_rearm_clean() {
+        let mut app = ime_app_with_toggled_focus();
+        enable_chinese(&mut app);
+        // 按下 Shift（clean）→ 按住期间按 'B'（clean=false，修饰用途）
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, char_key("B"));
+        app.update();
+        // OS 自动重复的 Shift Pressed（repeat=true）→ 旧实现把 clean 重新置 true
+        send(&mut app, shift_key_with(true, ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        assert!(
+            app.world().resource::<PinyinIme>().enabled(),
+            "按住 Shift 用作修饰键 + 自动重复 → 松开不应切换中/英"
+        );
     }
 }

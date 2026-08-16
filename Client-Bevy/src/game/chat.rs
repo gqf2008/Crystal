@@ -727,12 +727,35 @@ pub(crate) fn chat_input_system(
     mut ime: ResMut<PinyinIme>,
     mut focus: ResMut<ImeFocus>,
     mut chat: ResMut<ChatState>,
+    // #2596-5 输入互斥：聊天输入与通用输入框（商店搜索等）同一时刻只活一个，
+    // 否则两系统无序双写 ImeFocus、抢 take_commit，提交入错框
+    mut text_input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    // 数量框是模态输入（C# MirAmountBox 独立窗体夺焦点）——打开期间不激活聊天
+    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
     net: Res<NetConnection>,
     net_mode: Res<crate::network::NetMode>,
     hud: Res<HudState>,
     filter: Res<ChatFilter>,
+    // 互斥上升沿跟踪（#2596-5 编程式激活点兜底）
+    mut chat_active_prev: Local<bool>,
+    mut ti_active_prev: Local<bool>,
 ) {
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    // 未被 IME 用掉的事件（同值重复按用掉次数配给，#2596-10）
+    let pass_through = ime.unconsumed(&key_list);
+
+    // #2596-5 互斥上升沿（编程式激活点兜底）：私聊按钮/频道快捷/点聊天行
+    // 等入口直接置 chat.input_active=true，不经过下面的键盘激活路径——
+    // 在此检测「聊天输入从无到有」收起通用输入框（仅当它上一帧已聚焦；
+    // 同帧双升时通用输入框为唯一胜者：text_input_system 的上升沿无条件
+    // 收起本侧，两边规则合流不会互相关掉）
+    let chat_rising = chat.input_active && !*chat_active_prev;
+    let ti_was_active = *ti_active_prev;
+    *chat_active_prev = chat.input_active;
+    *ti_active_prev = text_input.active.is_some();
+    if chat_rising && ti_was_active {
+        text_input.active = None;
+    }
 
     // 回填 IME 聚焦框（聊天输入行屏幕矩形，候选条定位 + 判定字母是否进 IME）
     // 输入行位置见 spawn_chat：panel_x+4=10, panel_y+140=568
@@ -742,11 +765,8 @@ pub(crate) fn chat_input_system(
     }
 
     // Enter：激活/发送（组合中被 IME 接管 → 跳过，不发送）
-    for key in &key_list {
+    for key in &pass_through {
         if key.state != bevy::input::ButtonState::Pressed {
-            continue;
-        }
-        if ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Enter {
@@ -776,8 +796,12 @@ pub(crate) fn chat_input_system(
                     }
                     tracing::info!("💬 发送聊天: {}", msg);
                 }
-            } else {
+            } else if !amount.visible && text_input.active.is_none() {
+                // 数量框打开时不激活；通用输入框聚焦时不抢焦点（C# WinForms
+                // 焦点路由：聚焦的 MirInputBox 吃掉 Enter，不转发聊天面板）；
+                // 激活即收起通用输入框（互斥，#2596-5）
                 chat.input_active = true;
+                text_input.active = None;
             }
             continue;
         }
@@ -792,8 +816,8 @@ pub(crate) fn chat_input_system(
     }
 
     // C# ChatPanel_KeyPress：@ / ! / 空格 / 斜杠 也能直接打开输入框。
-    for key in &key_list {
-        if key.state != bevy::input::ButtonState::Pressed || ime.consumes_key(key) {
+    for key in &pass_through {
+        if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
         let prefix: Option<String> = match &key.logical_key {
@@ -806,8 +830,14 @@ pub(crate) fn chat_input_system(
             _ => None,
         };
         if let Some(prefix) = prefix {
-            chat.input_active = true;
-            chat.input_text = prefix;
+            // 输入行已开不重开（'@' 等作为正文进输入行，重开会把已输入文本
+            // 重置为前缀）；通用输入框聚焦时不抢焦点（C# 焦点路由，同 Enter）
+            if !chat.input_active && text_input.active.is_none() && !amount.visible {
+                // 同 Enter 激活：数量框打开期间不激活；激活即收起通用输入框
+                chat.input_active = true;
+                chat.input_text = prefix;
+                text_input.active = None;
+            }
         }
     }
 
@@ -815,11 +845,8 @@ pub(crate) fn chat_input_system(
         return;
     }
 
-    for key in &key_list {
+    for key in &pass_through {
         if key.state != bevy::input::ButtonState::Pressed {
-            continue;
-        }
-        if ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Backspace {
@@ -1215,6 +1242,9 @@ mod tests {
         ));
         app.init_resource::<crate::game::hud::HudState>();
         app.init_resource::<ChatFilter>();
+        // #2596：chat_input_system 的输入互斥/模态门参数（缺资源会在系统运行时 panic）
+        app.init_resource::<crate::game::dialogs::text_input::TextInputState>();
+        app.init_resource::<crate::game::dialogs::amount_box::AmountBoxState>();
         app.add_systems(Update, chat_input_system);
         app.world_mut()
             .resource_mut::<Messages<KeyboardInput>>()
@@ -1230,6 +1260,66 @@ mod tests {
         let chat = app.world().resource::<ChatState>();
         assert!(!chat.input_active, "Escape 应关闭聊天输入行");
         assert_eq!(chat.input_text, "nihao", "C# 取消聚焦不清文本");
+    }
+
+    /// #2596-5 系统级互斥回归：编程式激活点（私聊按钮/频道快捷/点聊天行、
+    /// 好友添加/组队邀请/NPC 输入等直接置位的入口）不经过点击/键盘路径——
+    /// 双系统的上升沿兜底须各自收起对方，任一时刻只活一个。
+    #[test]
+    fn chat_text_input_mutex_rising_edge() {
+        use crate::game::dialogs::text_input::TextInputState;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::ui::pinyin_ime::PinyinImePlugin);
+        app.add_plugins(crate::game::dialogs::text_input::TextInputPlugin); // 真实调度 text_input_system
+        app.add_message::<KeyboardInput>();
+        app.init_resource::<bevy::input::ButtonInput<bevy::input::mouse::MouseButton>>();
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.init_resource::<ChatState>();
+        app.init_resource::<crate::network::NetConnection>();
+        app.insert_resource(crate::network::NetMode(crate::network::NetworkMode::Mock));
+        app.init_resource::<crate::game::hud::HudState>();
+        app.init_resource::<ChatFilter>();
+        app.init_resource::<crate::game::dialogs::amount_box::AmountBoxState>();
+        app.add_systems(Update, chat_input_system);
+        app.insert_resource(State::new(crate::scenes::AppState::Game));
+
+        // 方向 1：通用输入框聚焦（模拟商店搜索）→ 编程式激活聊天（模拟私聊按钮）
+        {
+            let mut ti = app.world_mut().resource_mut::<TextInputState>();
+            ti.texts.resize(1, String::new());
+            ti.active = Some(0);
+        }
+        app.update(); // 稳定一帧：双方各自记录「上一帧」状态
+        {
+            let mut chat = app.world_mut().resource_mut::<ChatState>();
+            chat.input_active = true;
+            chat.input_text = "/w bob ".to_string();
+        }
+        app.update();
+        assert!(
+            app.world().resource::<TextInputState>().active.is_none(),
+            "聊天编程式激活应收起通用输入框"
+        );
+        assert!(app.world().resource::<ChatState>().input_active);
+
+        // 方向 2：聊天开 → 编程式聚焦通用输入框（模拟好友「添加好友」）
+        {
+            let mut ti = app.world_mut().resource_mut::<TextInputState>();
+            ti.texts.resize(31, String::new());
+            ti.active = Some(30);
+        }
+        app.update();
+        assert!(
+            !app.world().resource::<ChatState>().input_active,
+            "通用输入框编程式聚焦应收起聊天输入"
+        );
+        assert_eq!(
+            app.world().resource::<TextInputState>().active,
+            Some(30),
+            "胜者保持聚焦（同帧双升时通用输入框为唯一胜者）"
+        );
     }
 
     #[test]
