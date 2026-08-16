@@ -150,7 +150,10 @@ fn player_menu_open_system(
 }
 
 /// 菜单显隐 + 定位 + 选项点击
-fn player_menu_ui_system(
+/// （pub(crate)：#2604 esc_close_dialogs_system 的 Esc 让路依赖
+/// `.before(本系统)` 排序锚点——本系统同帧消费 Esc 置 visible=false，
+/// 若先跑则 esc_close 读到 false 误入 Closeall 连坐）
+pub(crate) fn player_menu_ui_system(
     mut state: ResMut<PlayerMenuState>,
     mut mgr: ResMut<DialogManager>,
     mut mail: ResMut<MailState>,
@@ -159,12 +162,14 @@ fn player_menu_ui_system(
     mut chat: ResMut<ChatState>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     windows: Query<&Window>,
     mut options: Query<(&mut Transform, &mut UiButton, &mut Visibility, &PlayerMenuOption)>,
     mut widgets: Query<(&mut Transform, &mut Visibility), (With<PlayerMenuWidget>, Without<PlayerMenuOption>)>,
 ) {
-    // ESC 关闭（#146）
-    if state.visible && keys.just_pressed(KeyCode::Escape) {
+    // ESC 关闭（#146）。#2604：输入态（聊天/数量框/通用输入框）激活时不抢
+    // Esc——那些模态自己消费（否则同帧 Esc 既关菜单又关输入框，层级穿透）
+    if state.visible && !gate.0 && keys.just_pressed(KeyCode::Escape) {
         state.visible = false;
     }
     // 点击菜单外关闭

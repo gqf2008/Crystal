@@ -693,7 +693,7 @@ fn dialog_hotkey_system(
     gate: Res<crate::game::input_gate::TextInputGate>,
     mut mgr: ResMut<DialogManager>,
     mut page: ResMut<CharPage>,
-    mut belt_visible: ResMut<crate::game::dialogs::belt::BeltVisible>,
+    mut opt: ResMut<crate::game::dialogs::option::OptionState>,
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
 ) {
     use crate::game::input_gate::forwarded_while_typing;
@@ -776,9 +776,12 @@ fn dialog_hotkey_system(
     }
     // #1370：技能栏显隐（R）/ 腰带（Z）——非对话框，走显隐资源
     // （#2595：字母键，聚焦文本框时不转发）
+    // #2604：R 改接设置开关 opt.skill_bar（C# Skillbar 键 → Settings.SkillBar，
+    // 双栏整体 Show/Hide + INI 持久化）——旧代码误接已删除的 belt.rs BeltVisible（空转）
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "技能栏显隐") {
         if !blocked(b) && keys.just_pressed(b.key) {
-            belt_visible.0 = !belt_visible.0;
+            opt.skill_bar = !opt.skill_bar;
+            opt.save();
         }
     }
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "腰带") {
@@ -948,7 +951,7 @@ mod tests {
             });
             app.init_resource::<DialogManager>();
             app.init_resource::<CharPage>();
-            app.init_resource::<crate::game::dialogs::belt::BeltVisible>();
+            app.init_resource::<crate::game::dialogs::option::OptionState>();
             app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
             app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
             app.add_systems(Update, dialog_hotkey_system);

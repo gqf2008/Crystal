@@ -136,7 +136,10 @@ fn spawn_amount_box(
 }
 
 /// 显示/隐藏 + 数字输入 + OK/Cancel/Close
-fn amount_box_system(
+/// （pub(crate)：#2604 esc_close_dialogs_system 的 Esc 让路依赖
+/// `.before(本系统)` 排序锚点——本系统同帧消费 Esc 置 visible=false，
+/// 若先跑则 esc_close 读到 false 误入 Closeall 连坐关全部对话框）
+pub(crate) fn amount_box_system(
     mut state: ResMut<AmountBoxState>,
     mut result: MessageWriter<AmountBoxResult>,
     mut keys: MessageReader<KeyboardInput>,
@@ -158,10 +161,22 @@ fn amount_box_system(
         return;
     }
 
-    // 数字键盘输入
+    // 数字键盘输入 + Esc/Enter（C# MirAmountBox：Esc=Cancel、Enter=OK；
+    // #2604——Esc 由此消费，esc_close_dialogs_system 检查 amount.visible 让路）
     for key in keys.read() {
 
         if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        if key.logical_key == Key::Escape {
+            state.visible = false;
+            result.write(AmountBoxResult(None));
+            continue;
+        }
+        if key.logical_key == Key::Enter {
+            let amount = state.value.parse::<u32>().ok().map(|v| v.min(state.max));
+            state.visible = false;
+            result.write(AmountBoxResult(amount));
             continue;
         }
         if key.logical_key == Key::Backspace {
