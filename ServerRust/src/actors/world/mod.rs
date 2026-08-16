@@ -11004,7 +11004,8 @@ fn send_inspect_packet(
     body.extend_from_slice(&state.level.to_le_bytes());
     body.push(state.class as u8);
     body.push(state.gender as u8);
-    // 装备信息（只发送已装备的）
+    // 装备信息（只发送已装备的；#2607 每件前置 slot u8——旧格式
+    // filter 后槽位下标丢失，客户端 14 格网格无法定位）
     body.push(
         state
             .inventory
@@ -11013,9 +11014,21 @@ fn send_inspect_packet(
             .filter(|s| s.is_some())
             .count() as u8,
     );
-    for eq in state.inventory.equipment.iter().flatten() {
+    for (slot, eq) in state
+        .inventory
+        .equipment
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, eq)| eq.as_ref().map(|eq| (slot, eq)))
+    {
+        body.push(slot as u8);
         body.extend_from_slice(&eq.unique_id.to_le_bytes());
         body.extend_from_slice(&eq.item_index.to_le_bytes());
+        // #2607：图标索引（ItemInfo.Image，Items 库位）——客户端无 item_index→image
+        // 信息表，服务端带上才能渲染 14 格网格图标（C# 客户端本地有 ItemInfos）。
+        // ⚠ ItemInfo.image 是 u16——必须显式 as i32（客户端按 i32 读，审查 BLOCKER）
+        let image = eq.info.as_ref().map(|i| i.image).unwrap_or(0) as i32;
+        body.extend_from_slice(&image.to_le_bytes());
         body.extend_from_slice(&(eq.current_dura as i32).to_le_bytes());
         body.extend_from_slice(&(eq.max_dura as i32).to_le_bytes());
     }

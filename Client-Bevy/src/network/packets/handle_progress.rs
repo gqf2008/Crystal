@@ -448,7 +448,9 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // ---- M46: 查看玩家 ----
         x if x == ServerPacketIds::PlayerInspect as i16 => {
             // [object_id u32][name dotnet][guild dotnet][level u16][class u8][gender u8]
-            // [count u8][per: uid u64][index i32][dura i32][max_dura i32]
+            // [count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
+            // （#2607：slot/image 为新增字段——服务端旧格式 filter 后槽位丢失、
+            //  客户端无 item_index→image 信息表，14 格网格两者必需）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -462,11 +464,13 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             let mut items = Vec::with_capacity(count);
             let mut ok = true;
             for _ in 0..count {
+                let slot = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let unique_id = match cur.read_u64::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let item_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let image = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let current_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let max_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                items.push(InspectItem { unique_id, item_index, current_dura, max_dura });
+                items.push(InspectItem { slot, unique_id, item_index, image, current_dura, max_dura });
             }
             if ok {
                 let item_count = items.len();
