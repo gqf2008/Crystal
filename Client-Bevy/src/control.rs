@@ -7,6 +7,7 @@
 //   nearby {}            返回周围实体（含 object_id）
 //   attack {object_id}   攻击指定对象
 //   interact {object_id} 与指定 NPC 对话
+//   npc_call {object_id,key} 对 NPC 发 CallNPC(key)（e2e 页面跳转驱动；后台窗口无法注入鼠标）
 //   pickup {object_id}  拾取指定地面物品
 //   chat {message}    发送聊天/GM 命令（@MAKE 等）
 //   dialog {kind,action?}  打开/关闭/切换对话框（默认 toggle；验收截图巡回用，#2586）
@@ -53,6 +54,12 @@ enum ControlCommand {
     },
     Interact {
         object_id: u32,
+    },
+    /// e2e：直接对当前 NPC 发 CallNPC(key)——实机鼠标点击在后台窗口不可注入
+    /// （winit 丢弃注入的 WM_MOUSEMOVE → cursor=None），页面跳转只能走 RPC 驱动
+    NpcCall {
+        object_id: u32,
+        key: String,
     },
     Pickup {
         object_id: u32,
@@ -216,6 +223,23 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "missing object_id"})
                 }
             }
+            "npc_call" => {
+                let object_id = params
+                    .get("object_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let key = params
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if object_id > 0 && !key.is_empty() {
+                    let _ = tx.send(ControlCommand::NpcCall { object_id, key });
+                    json!({"ok": true})
+                } else {
+                    json!({"error": "missing object_id or key"})
+                }
+            }
             "dialog" => {
                 let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                 let action = params
@@ -265,9 +289,12 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
 
 /// snake_case 对话框名 → DialogKind（#2586）。
 ///
-/// 覆盖除 `GuestTrade` 外的全部 46 个变体（`DialogKind` 共 47 个）——
+/// 覆盖除 `GuestTrade` 外的全部 44 个变体（`DialogKind` 共 45 个）——
 /// `GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs），无独立开关语义，
 /// 故不做 RPC 映射（调用会回 unknown dialog kind）。
+/// 另有 2 个历史别名（#2599 移除 M9 占位空壳后保留工具兼容）：
+/// `trust_merchant` → Market（C# TrustMerchantDialog 的真身是 market.rs）、
+/// `npc_drop` → Npc（C# NPCDropDialog 的真身是挂 Npc 根下的 sell_panel.rs）。
 /// **新增 DialogKind 变体时必须同步本函数、[`has_rpc_mapping`] 与测试名单**
 /// （[`has_rpc_mapping`] 的穷尽 match 会让漏改编译失败）。
 fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
@@ -298,7 +325,8 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "hero_equipment" => D::HeroEquipment,
         "hero_skill" => D::HeroSkill,
         "creature" => D::Creature,
-        "trust_merchant" => D::TrustMerchant,
+        // #2599 历史别名：真实现见 market.rs / sell_panel.rs
+        "trust_merchant" => D::Market,
         "item_rental" => D::ItemRental,
         "guild_territory" => D::GuildTerritory,
         "help" => D::Help,
@@ -309,7 +337,7 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "refine" => D::Refine,
         "craft" => D::Craft,
         "dura_status" => D::DuraStatus,
-        "npc_drop" => D::NpcDrop,
+        "npc_drop" => D::Npc,
         "roll" => D::Roll,
         "npc_awake" => D::NpcAwake,
         "timer" => D::Timer,
@@ -355,7 +383,6 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::HeroEquipment
         | D::HeroSkill
         | D::Creature
-        | D::TrustMerchant
         | D::ItemRental
         | D::GuildTerritory
         | D::Help
@@ -366,7 +393,6 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Refine
         | D::Craft
         | D::DuraStatus
-        | D::NpcDrop
         | D::Roll
         | D::NpcAwake
         | D::Timer
@@ -533,6 +559,13 @@ fn apply_control_commands(
                 });
                 tracing::info!("🎮 control interact: {object_id}");
             }
+            ControlCommand::NpcCall { object_id, key } => {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id,
+                    key: key.clone(),
+                });
+                tracing::info!("🎮 control npc_call: {object_id} {key}");
+            }
             ControlCommand::Pickup { object_id } => {
                 let Ok((pe, ptf, _)) = players.single() else {
                     continue;
@@ -638,7 +671,9 @@ mod tests {
             "storage",
             "skills",
         ];
-        // 全部可解析且互不相同（46 个名字一一对应；DialogKind 共 47 个变体，
+        // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
+        // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 45 个变体，
         // GuestTrade 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
         let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
         let uniq: Vec<&DialogKind> = {
@@ -648,7 +683,11 @@ mod tests {
             seen
         };
         assert_eq!(all.len(), 46);
-        assert_eq!(uniq.len(), all.len(), "46 个名字应映射到 46 个不同变体");
+        assert_eq!(
+            uniq.len(),
+            44,
+            "46 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 44 个不同变体"
+        );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(
             parsed.iter().all(|k| has_rpc_mapping(*k)),

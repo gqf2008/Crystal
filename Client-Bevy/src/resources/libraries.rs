@@ -132,26 +132,41 @@ impl std::fmt::Display for ArrayLibType {
 /// （避免复制数 GB 资源）。
 pub fn resolve_data_path() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let candidates = [
+    // 运行时候选（cwd / exe 相对）：worktree 构建的 exe 共享主检出 target 目录时，
+    // CARGO_MANIFEST_DIR 是编译期常量、指向 worktree（无 Data 资产，gitignore 不入库），
+    // 曾导致地图地面 0 瓦片全黑屏（#2599 排查记录）。运行时路径按启动环境解析，
+    // 从主检出 cwd 启动的 worktree exe 也能找到正确 Data。
+    let runtime_candidates = || -> Vec<PathBuf> {
+        let mut v = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            v.push(cwd.join("Data"));
+            v.push(cwd.join("../ClientRust/Data"));
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                v.push(dir.join("Data"));
+                v.push(dir.join("../ClientRust/Data"));
+            }
+        }
+        v
+    };
+    let mut candidates: Vec<String> = runtime_candidates()
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    candidates.extend([
         format!("{}/Data", manifest_dir),
         format!("{}/../Client-Macroquad/Data", manifest_dir),
         format!("{}/../../Crystal/Client-Macroquad/Data", manifest_dir),
         format!("{}/../ClientRust/Data", manifest_dir),
         format!("{}/../../Crystal/ClientRust/Data", manifest_dir),
-    ];
+    ]);
     // 要求目录内确实存在 .Lib 数据（Items.Lib 是核心库）。
     // 独立 worktree 里 Client-Macroquad/Data 被 gitignore 不存在，
     // 会正确回落到主仓库的数据目录。
     for c in &candidates {
         let p = Path::new(c);
         if p.join("Items.Lib").exists() {
-            return p.to_path_buf();
-        }
-    }
-    // 兜底：第一个存在的目录（用于报错提示）
-    for c in &candidates {
-        let p = Path::new(c);
-        if p.exists() {
             return p.to_path_buf();
         }
     }

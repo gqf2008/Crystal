@@ -31,6 +31,9 @@ pub struct NpcDialogState {
     pub visible: bool,
     pub npc_object_id: u32,
     pub lines: Vec<String>,
+    /// CJK 主字体（宋体资产）：动态改写的行文本用它——parley 脚本回退在
+    /// 重排版时失效（#2599 实机），主字体自带 CJK 则不依赖回退
+    pub cjk_font: Handle<Font>,
 }
 
 #[derive(Component)]
@@ -41,6 +44,15 @@ pub struct NpcClose;
 
 #[derive(Component)]
 pub struct NpcLine(usize);
+
+/// 行渲染缓存（源文本 + 悬停态）——未变不重建，避免每帧重排（#112 同因）
+#[derive(Component, Default)]
+struct NpcLineSrc {
+    src: String,
+    hover: bool,
+    /// 行内标记段的叠加标签实体（彩色段/链接段，C# NewColour 独立 MirLabel）
+    overlays: Vec<Entity>,
+}
 
 #[derive(Component)]
 pub struct NpcQuest;
@@ -96,6 +108,7 @@ fn cleanup_npc_dialog(mut commands: Commands, roots: Query<Entity, With<DialogRo
 
 fn spawn_npc_dialog(
     mut commands: Commands,
+    mut npc: ResMut<NpcDialogState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -107,6 +120,9 @@ fn spawn_npc_dialog(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    if !npc.cjk_font.is_strong() {
+        npc.cjk_font = crate::ui::sprite_ui::load_cjk_font(&mut fonts);
+    }
 
     // 背景 Prguse[384]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 384) {
@@ -197,6 +213,11 @@ fn spawn_npc_dialog(
         );
         commands.entity(e).insert((
             NpcLine(i),
+            NpcLineSrc::default(),
+            // C# GDI 小字号文本经网格适配渲染出整像素笔画；Text2d 默认
+            // Disabled 的软抗锯齿使细笔画覆盖率不满、颜色被叠白冲淡，
+            // 开启 hinting 还原 C# 观感（#2599）
+            FontHinting::Enabled,
             DialogRoot(crate::game::dialogs::DialogKind::Npc),
             NpcDialogWidget,
         ));
@@ -204,7 +225,9 @@ fn spawn_npc_dialog(
 }
 
 /// 显示/关闭 + 文本渲染 + 选项点击
+#[allow(clippy::type_complexity)]
 fn npc_ui_system(
+    mut commands: Commands,
     mut npc: ResMut<NpcDialogState>,
     mut npc_goods: ResMut<crate::game::dialogs::npc_goods::NpcGoodsState>,
     mut sell_panel: ResMut<crate::game::dialogs::sell_panel::SellPanelState>,
@@ -216,7 +239,16 @@ fn npc_ui_system(
     close: Query<&UiButton, With<NpcClose>>,
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
     mut quest_btns: Query<(&UiButton, &mut Visibility), (With<NpcQuest>, Without<NpcDialogWidget>)>,
-    mut lines: Query<(&mut Text2d, &mut TextColor, &NpcLine)>,
+    mut lines: Query<
+        (
+            Entity,
+            &mut Text2d,
+            &mut TextColor,
+            &mut TextFont,
+            &NpcLine,
+            &mut NpcLineSrc,
+        ),
+    >,
     mut scroll: Query<&mut ScrollList, With<NpcDialogWidget>>,
 ) {
     for mut vis in widgets.iter_mut() {
@@ -273,15 +305,63 @@ fn npc_ui_system(
     }
     let off = scroll.single().map(|s| s.offset).unwrap_or(0);
 
-    // 渲染行 + 选项悬停高亮
+    // 渲染行：按 #2599 标记解析分段（{t/Color} 着色段、<t/@key> 链接段）
+    // 源文本/悬停未变不重建（span 子实体缓存）
+    // 鼠标不在窗口内时 cursor_position()=None：文字照常渲染（仅无悬停高亮）——
+    // 原实现在此 early-return，鼠标离开窗口后 NPC 文字永不渲染/更新（master 既有 bug）
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    for (mut text, mut color, line) in &mut lines {
-        if let Some(l) = npc.lines.get(off + line.0) {
-            text.0 = l.clone();
-            let y = 34.0 + line.0 as f32 * 18.0;
-            let hover = cursor.x >= 8.0 && cursor.x <= 400.0 && cursor.y >= y && cursor.y <= y + 16.0;
-            let c = if is_clickable_npc_line(l) {
+    let cursor = window.cursor_position();
+    for (_root, mut text, mut color, mut font, line, mut src_cache) in &mut lines {
+        let src = npc.lines.get(off + line.0).cloned().unwrap_or_default();
+        let y = 34.0 + line.0 as f32 * 18.0;
+        let clickable = is_clickable_npc_line(&src);
+        let hover = clickable
+            && cursor.is_some_and(|c| c.x >= 8.0 && c.x <= 400.0 && c.y >= y && c.y <= y + 16.0);
+        if src_cache.src == src && src_cache.hover == hover {
+            continue;
+        }
+        src_cache.src = src.clone();
+        src_cache.hover = hover;
+        // 所有重建路径统一换 CJK 主字体：parley 的 Hani 脚本回退只在实体
+        // 首次排版生效，换页改 text.0 触发的重排版会退化为 .notdef 豆腐框
+        // （#2599 实机验证），主字体自带宋体字形才不依赖回退。
+        font.font = FontSource::Handle(npc.cjk_font.clone());
+        // 旧叠加标签整体重建（C# NewText 每页 Dispose 全部 _textButtons）
+        for e in src_cache.overlays.drain(..) {
+            commands.entity(e).despawn();
+        }
+        if src.is_empty() {
+            text.0 = String::new();
+            continue;
+        }
+        // [@XXX] 菜单行（无标记语法）：整行橙色（原行为）
+        let segs = parse_npc_line(&src);
+        if !segs.iter().any(|s| s.color.is_some() || s.link.is_some()) && clickable {
+            text.0 = src.trim().trim_matches('"').to_string();
+            color.0 = if hover {
+                Color::srgb(1.0, 0.95, 0.4)
+            } else {
+                Color::srgb(1.0, 0.85, 0.3)
+            };
+            continue;
+        }
+        // C# MirScrollingLabel.NewText（MirScrollingLabel.cs:62-108）：
+        // 整行去标记文本一个基础白字标签 + 每个 {t/Color} 段一个独立彩色
+        // MirLabel 叠加（NewColour）。Bevy 侧不用 TextSpan 混排——实机验证
+        // TextSpan 子段与重排版的 CJK 都不走字体回退链、渲染为 .notdef
+        // 豆腐框（#2599），故按 C# 原结构为基础标签 + 独立叠加标签，全部
+        // 用自带 CJK 的宋体资产（无需回退），叠加段以前缀估宽定位（宋体
+        // 全角字宽=字号，估宽即精确；拉丁段 ±1px 与 C# MeasureText-10 同级）。
+        let mut stripped = String::new();
+        let mut prefix_w = 0.0f32;
+        let mut overlay_specs: Vec<(f32, String, Color)> = Vec::new();
+        let FontSize::Px(font_px) = font.font_size else {
+            continue;
+        };
+        for seg in &segs {
+            let seg_col = if let Some(c) = seg.color {
+                c
+            } else if seg.link.is_some() {
                 if hover {
                     Color::srgb(1.0, 0.95, 0.4)
                 } else {
@@ -290,18 +370,43 @@ fn npc_ui_system(
             } else {
                 Color::WHITE
             };
-            if color.0 != c {
-                color.0 = c;
+            let is_plain = seg.color.is_none() && seg.link.is_none();
+            if !is_plain {
+                overlay_specs.push((prefix_w, seg.text.clone(), seg_col));
             }
-        } else {
-            text.0 = String::new();
+            prefix_w += est_text_width(&seg.text, font_px);
+            stripped.push_str(&seg.text);
+        }
+        text.0 = stripped;
+        color.0 = Color::WHITE;
+        for (x_off, seg_text, seg_col) in overlay_specs {
+            let e = commands
+                .spawn((
+                    UiEntity,
+                    Text2d::new(seg_text),
+                    Anchor::TOP_LEFT,
+                    TextFont {
+                        font: FontSource::Handle(npc.cjk_font.clone()),
+                        font_size: FontSize::Px(font_px),
+                        ..default()
+                    },
+                    TextColor(seg_col),
+                    FontHinting::Enabled,
+                    Transform::from_xyz(8.0 + x_off, -y, 8.05),
+                    Visibility::Visible,
+                    DialogRoot(crate::game::dialogs::DialogKind::Npc),
+                    NpcDialogWidget,
+                ))
+                .id();
+            src_cache.overlays.push(e);
         }
     }
 
-    // 点击选项行（以 [@ 开头的行，#118 含滚动偏移）
+    // 点击选项行（以 [@ 开头的行，#118 含滚动偏移）——点击本身要求光标在窗口内
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
+    let Some(cursor) = cursor else { return };
     for (i, l) in npc.lines.iter().enumerate() {
         if i >= off && i < off + 8 && is_clickable_npc_line(l) {
             let row = i - off;
@@ -325,6 +430,162 @@ fn npc_ui_system(
 fn is_clickable_npc_line(line: &str) -> bool {
     let t = line.trim();
     t.starts_with("[@") || t.contains("/@")
+}
+
+// ---------------------------------------------------------------------------
+// #2599 NPC 对话文本标记（C# NPCDialogs.cs:18-26）
+//   R = <text/@key>   行内链接：显示 text，点击发 CallNPC([@key])
+//   C = {text/Color}  行内着色：显示 text（KnownColor 名，大小写不敏感）
+//   引号是脚本引擎的字符串定界符，下发原样保留 → 渲染时从纯文本段剔除
+//   B = <<text/@key>> 大按钮面板：本服 1088 个脚本 0 处使用，不移植（附 #2599）
+// ---------------------------------------------------------------------------
+
+/// 一行解析后的渲染段
+#[derive(Debug, PartialEq)]
+pub struct NpcSeg {
+    pub text: String,
+    /// {t/Color} 指定色（未知色名 → None 白）
+    pub color: Option<Color>,
+    /// <t/@key> 链接 key（不含 [@] 前后缀）
+    pub link: Option<String>,
+}
+
+/// 解析一行 NPC 文本为渲染段（标记外的文本是普通段）
+pub fn parse_npc_line(line: &str) -> Vec<NpcSeg> {
+    let mut out: Vec<NpcSeg> = Vec::new();
+    let mut plain = String::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        // {text/Color}：花括号内按最后一个 '/' 切（C# 正则 text 非贪婪、color 非贪婪到 '}'）
+        if c == '{' {
+            if let Some(close) = find_char(&chars, i + 1, '}', 64) {
+                let inner: String = chars[i + 1..close].iter().collect();
+                if let Some((text, color_name)) = inner.rsplit_once('/') {
+                    if !text.is_empty() && !color_name.is_empty() {
+                        push_plain(&mut out, &mut plain);
+                        out.push(NpcSeg {
+                            text: text.to_string(),
+                            color: known_color(color_name),
+                            link: None,
+                        });
+                        i = close + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        // <text/@key>（含 <<text/@key>> 双括号，等价处理）
+        if c == '<' {
+            let dbl = i + 1 < chars.len() && chars[i + 1] == '<';
+            let content_start = if dbl { i + 2 } else { i + 1 };
+            let terminator: Vec<char> = if dbl { vec!['>', '>'] } else { vec!['>'] };
+            if let Some(content_end) = find_seq(&chars, content_start, &terminator) {
+                let inner: String = chars[content_start..content_end].iter().collect();
+                if let Some(slash) = inner.find("/@") {
+                    let text = &inner[..slash];
+                    let key = &inner[slash + 2..];
+                    if !text.is_empty() && !key.is_empty() {
+                        push_plain(&mut out, &mut plain);
+                        out.push(NpcSeg {
+                            text: text.to_string(),
+                            color: None,
+                            link: Some(key.to_string()),
+                        });
+                        i = content_end + terminator.len();
+                        continue;
+                    }
+                }
+            }
+        }
+        // 引号是脚本定界符，纯文本段剔除
+        if c != '"' {
+            plain.push(c);
+        }
+        i += 1;
+    }
+    push_plain(&mut out, &mut plain);
+    out
+}
+
+fn push_plain(out: &mut Vec<NpcSeg>, plain: &mut String) {
+    if !plain.is_empty() {
+        out.push(NpcSeg {
+            text: std::mem::take(plain),
+            color: None,
+            link: None,
+        });
+    }
+}
+
+/// 文本估宽（逻辑 px）：CJK/全角=字号（SimSun 全角字宽与字号一致，估即精确），
+/// 其余按 Arial 平均 ~0.55em——用于叠加标签的前缀定位（C# 用 MeasureText-10 同级精度）
+fn est_text_width(s: &str, size: f32) -> f32 {
+    s.chars()
+        .map(|c| if (c as u32) >= 0x2E80 { size } else { size * 0.55 })
+        .sum()
+}
+
+fn find_char(chars: &[char], from: usize, target: char, max: usize) -> Option<usize> {
+    let end = (from + max).min(chars.len());
+    (from..end).find(|&i| chars[i] == target)
+}
+
+fn find_seq(chars: &[char], from: usize, seq: &[char]) -> Option<usize> {
+    if seq.is_empty() || from >= chars.len() {
+        return None;
+    }
+    (from..=chars.len().saturating_sub(seq.len())).find(|&i| chars[i..].starts_with(seq))
+}
+
+/// C# Color.FromName 常用 KnownColor → srgb（脚本实际使用的子集 + 常见色）
+fn known_color(name: &str) -> Option<Color> {
+    let rgb = match name.to_ascii_lowercase().as_str() {
+        "red" => (1.0, 0.0, 0.0),
+        "darkred" => (0.55, 0.0, 0.0),
+        "crimson" => (0.86, 0.08, 0.24),
+        "indianred" => (0.8, 0.36, 0.36),
+        "tomato" => (1.0, 0.39, 0.31),
+        "orangered" => (1.0, 0.27, 0.0),
+        "orange" => (1.0, 0.5, 0.0),
+        "coral" => (1.0, 0.5, 0.31),
+        "gold" | "goldenrod" => (1.0, 0.84, 0.0),
+        "yellow" => (1.0, 1.0, 0.0),
+        "khaki" => (0.94, 0.9, 0.55),
+        "wheat" => (0.96, 0.87, 0.7),
+        "green" => (0.0, 0.5, 0.0),
+        "darkgreen" => (0.0, 0.39, 0.0),
+        "seagreen" => (0.18, 0.55, 0.34),
+        "forestgreen" => (0.13, 0.55, 0.13),
+        "limegreen" => (0.2, 0.8, 0.2),
+        "springgreen" => (0.0, 1.0, 0.5),
+        "cyan" | "aqua" => (0.0, 1.0, 1.0),
+        "teal" => (0.0, 0.5, 0.5),
+        "blue" => (0.0, 0.0, 1.0),
+        "darkblue" => (0.0, 0.0, 0.55),
+        "dodgerblue" => (0.12, 0.56, 1.0),
+        "skyblue" => (0.53, 0.81, 0.92),
+        "deepskyblue" => (0.0, 0.75, 1.0),
+        "royalblue" => (0.25, 0.41, 0.88),
+        "lightsteelblue" => (0.69, 0.77, 0.87),
+        "steelblue" => (0.27, 0.51, 0.71),
+        "purple" => (0.5, 0.0, 0.5),
+        "violet" => (0.56, 0.0, 1.0),
+        "magenta" | "fuchsia" => (1.0, 0.0, 1.0),
+        "plum" => (0.87, 0.63, 0.87),
+        "pink" => (1.0, 0.75, 0.8),
+        "hotpink" => (1.0, 0.41, 0.71),
+        "brown" => (0.5, 0.25, 0.13),
+        "chocolate" => (0.82, 0.41, 0.12),
+        "gray" | "grey" => (0.5, 0.5, 0.5),
+        "lightgray" | "lightgrey" | "silver" => (0.75, 0.75, 0.75),
+        "darkgray" | "darkgrey" => (0.25, 0.25, 0.25),
+        "black" => (0.0, 0.0, 0.0),
+        "white" => (1.0, 1.0, 1.0),
+        _ => return None,
+    };
+    Some(Color::srgb(rgb.0, rgb.1, rgb.2))
 }
 
 /// 提取菜单键（统一为 "[@XXX]" 格式，服务端按该格式匹配）
@@ -520,5 +781,78 @@ fn spawn_npc_input_overlay(
         560.0, 175.0, 8.2, 50.0, 22.0,
     ) {
         commands.entity(e).insert(NpcInputOk);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seg(text: &str, color: Option<Color>, link: Option<&str>) -> NpcSeg {
+        NpcSeg {
+            text: text.to_string(),
+            color,
+            link: link.map(|s| s.to_string()),
+        }
+    }
+
+    /// #2599 真实脚本行（AncientNatural-D003.txt）：
+    /// `"Dungeon of the Ancient <Ones/@omacavea>" {Level10~22./KHAKI}`
+    /// 引号剔除 + 链接段 + 着色段
+    #[test]
+    fn parse_real_script_line() {
+        let segs = parse_npc_line("\"Dungeon of the Ancient <Ones/@omacavea>\" {Level10~22./KHAKI}");
+        assert_eq!(
+            segs,
+            vec![
+                seg("Dungeon of the Ancient ", None, None),
+                seg("Ones", None, Some("omacavea")),
+                seg(" ", None, None),
+                seg("Level10~22.", Some(Color::srgb(0.94, 0.9, 0.55)), None),
+            ]
+        );
+    }
+
+    /// <Close/@exit>：纯链接行
+    #[test]
+    fn parse_link_only_line() {
+        let segs = parse_npc_line("<Close/@exit>");
+        assert_eq!(segs, vec![seg("Close", None, Some("exit"))]);
+    }
+
+    /// 未知色名：显示文本但不着色（不裸显花括号）
+    #[test]
+    fn parse_unknown_color_renders_plain() {
+        let segs = parse_npc_line("{Text/NotAColor}");
+        assert_eq!(segs, vec![seg("Text", None, None)]);
+    }
+
+    /// 普通行 + 菜单行原样（[@main] 不是标记语法）
+    #[test]
+    fn parse_plain_and_menu_lines() {
+        assert_eq!(parse_npc_line("hello"), vec![seg("hello", None, None)]);
+        assert_eq!(parse_npc_line("[@main]"), vec![seg("[@main]", None, None)]);
+    }
+
+    /// 未闭合标记按普通文本渲染（不丢字）
+    #[test]
+    fn parse_unclosed_markup_falls_back() {
+        assert_eq!(parse_npc_line("a {bad"), vec![seg("a {bad", None, None)]);
+        assert_eq!(parse_npc_line("<bad"), vec![seg("<bad", None, None)]);
+    }
+
+    /// <<双括号>>链接等价解析（C# B 大按钮标记，本服 0 处但保持等价）
+    #[test]
+    fn parse_double_bracket_link() {
+        let segs = parse_npc_line("<<Buy/@shop>>");
+        assert_eq!(segs, vec![seg("Buy", None, Some("shop"))]);
+    }
+
+    /// is_clickable_npc_line 与链接行兼容（点击路径不变）
+    #[test]
+    fn clickable_line_with_markup() {
+        assert!(is_clickable_npc_line("\"Dungeon of the Ancient <Ones/@omacavea>\" {x/KHAKI}"));
+        assert!(is_clickable_npc_line("[@main]"));
+        assert!(!is_clickable_npc_line("plain text"));
     }
 }
