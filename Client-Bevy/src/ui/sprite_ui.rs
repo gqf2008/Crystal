@@ -54,6 +54,35 @@ pub fn load_ui_font(assets: &mut Assets<Font>) -> Handle<Font> {
     assets.add(Font::from_bytes(bytes))
 }
 
+/// 选 CJK 主字体字节（宋体资产，TTC）：动态改写文本的 UI 用——
+/// 实机验证 parley 的 Hani 脚本回退只在实体首次排版时生效，后续重排版
+/// （换页改文本）CJK 退化为 .notdef 豆腐（#2599）。主字体自带 CJK 则无需
+/// 回退，规避该缺陷；宋体 = C# GDI 链中文最终命中的字体，视觉一致。
+/// 缺失（非 Windows/精简系统）回退内置 PuHuiTi（自带 CJK）。
+fn pick_cjk_font_bytes() -> (Vec<u8>, &'static str) {
+    #[cfg(windows)]
+    {
+        let path = system_fonts_dir().join("simsun.ttc");
+        if let Ok(bytes) = std::fs::read(&path) {
+            // TTC magic 'ttcf'
+            if bytes.len() >= 4 && &bytes[..4] == b"ttcf" {
+                return (bytes, "system-simsun");
+            }
+        }
+    }
+    (
+        include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf").to_vec(),
+        "builtin-puhuiti",
+    )
+}
+
+/// 加载 CJK 主字体资产（见 [pick_cjk_font_bytes]）
+pub fn load_cjk_font(assets: &mut Assets<Font>) -> Handle<Font> {
+    let (bytes, kind) = pick_cjk_font_bytes();
+    tracing::info!("CJK 主字体 = {kind}（动态文本主字体，规避 #2599 重排版回退失效）");
+    assets.add(Font::from_bytes(bytes))
+}
+
 /// 注册系统宋体并设为 Han 字形回退（复刻 GDI 字体链接：Arial 无中文 → 宋体）。
 /// Startup 一次；SimSun 家族已在集合（重复注册）时仅确保 fallback 指向它。
 /// 非 Windows / 无宋体：打 warn 后跳过（中文由主字体自带 CJK 或 tofu，与现状一致）。

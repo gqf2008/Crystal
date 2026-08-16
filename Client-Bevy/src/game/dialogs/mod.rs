@@ -40,7 +40,6 @@ pub mod mount;
 pub mod notice;
 pub mod npc;
 pub mod npc_awake;
-pub mod npc_drop;
 pub mod npc_goods;
 pub mod option;
 pub mod potion_belt;
@@ -58,7 +57,6 @@ pub mod storage;
 pub mod text_input;
 pub mod timer;
 pub mod trade;
-pub mod trust_merchant;
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -98,7 +96,6 @@ pub enum DialogKind {
     HeroEquipment,
     HeroSkill,
     Creature,
-    TrustMerchant,
     ItemRental,
     GuildTerritory,
     Help,
@@ -109,7 +106,6 @@ pub enum DialogKind {
     Refine,
     Craft,
     DuraStatus,
-    NpcDrop,
     Roll,
     NpcAwake,
     Timer,
@@ -625,7 +621,6 @@ impl Plugin for DialogsPlugin {
                 hero::HeroPlugin,
                 hero_inventory::HeroInventoryPlugin,
                 creature::CreaturePlugin,
-                trust_merchant::TrustMerchantPlugin,
                 item_rental::ItemRentalPlugin,
                 guild_territory::GuildTerritoryPlugin,
                 option::OptionPlugin,
@@ -639,7 +634,6 @@ impl Plugin for DialogsPlugin {
                 refine::RefinePlugin,
                 craft::CraftPlugin,
                 dura_status::DuraPlugin,
-                npc_drop::NpcDropPlugin,
                 roll::RollPlugin,
                 npc_awake::NpcAwakePlugin,
                 timer::TimerPlugin,

@@ -376,6 +376,12 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 "完成后回来交任务，奖励 100 金币 + 4000 经验".to_string(),
                                                 "[@MAIN] 返回".to_string(),
                                             ],
+                                            // #2599：标记语法演示（<t/@key> 链接 + {t/Color} 着色）
+                                            "[@MARKUP]" => vec![
+                                                "\"古老符文的神秘石碑。\" {等级10~22/KHAKI}".to_string(),
+                                                "<查看商店/@SHOP>".to_string(),
+                                                "<回到首页/@MAIN>".to_string(),
+                                            ],
                                             "[@STORAGE]" => vec![
                                                 "这里是仓库（MOCK）".to_string(),
                                                 "[@CLOSE] 关闭".to_string(),
@@ -386,6 +392,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 "[@SHOP] 商店".to_string(),
                                                 "[@QUEST] 任务".to_string(),
                                                 "[@STORAGE] 仓库".to_string(),
+                                                "[@MARKUP] 标记演示".to_string(),
                                                 "[@CLOSE] 关闭".to_string(),
                                             ],
                                         };
