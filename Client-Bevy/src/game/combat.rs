@@ -155,11 +155,17 @@ impl Plugin for CombatPlugin {
 }
 
 /// Ctrl+H 循环切换攻击模式（#156 C# KeybindOptions.ChangeAttackmode）
+/// #2595：文本输入聚焦时让路（Ctrl+H 不在 C# ChatTextBox_KeyDown 转发表内，
+/// MainDialogs.cs:1160-1185 仅 F1-F12/Tab）
 fn attack_mode_system(
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     mut state: ResMut<AttackModeState>,
     net: Res<crate::network::NetConnection>,
 ) {
+    if gate.0 {
+        return;
+    }
     if !(keys.just_pressed(KeyCode::KeyH)
         && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)))
     {

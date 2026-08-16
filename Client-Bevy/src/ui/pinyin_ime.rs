@@ -335,6 +335,11 @@ impl PinyinIme {
         !self.composing.is_empty()
     }
 
+    /// 当前拼音缓冲（e2e 真值：GetState 报告字母是否到达 IME）
+    pub fn composing_text(&self) -> &str {
+        &self.composing
+    }
+
     pub fn has_commit(&self) -> bool {
         self.commit_pending.is_some()
     }

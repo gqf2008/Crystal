@@ -563,7 +563,10 @@ impl Plugin for DialogsPlugin {
         app.add_systems(
             Update,
             (
-                crate::ui::keyboard_nav::esc_close_dialogs_system,
+                // #2595：Esc 优先级要求 esc_close 先于 chat_input 跑——
+                // 聊天输入开时 esc_close 让路，chat_input_system 同帧关闭输入行
+                crate::ui::keyboard_nav::esc_close_dialogs_system
+                    .before(crate::game::chat::chat_input_system),
                 crate::ui::keyboard_nav::keyboard_scroll_lists_system,
                 crate::ui::keyboard_nav::tab_focus_system,
             )

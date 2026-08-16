@@ -24,27 +24,45 @@ pub struct KeyboardNav {
     pub highlight: Option<Entity>,
 }
 
-/// ESC：关闭所有打开对话框（C# Closeall）+ 清空文本输入焦点
+/// ESC 三级优先级（#2595，C# WinForms 焦点路由 + MirTextBox.cs:386-395）：
+/// 1. 聊天输入开 → 本系统让路（chat_input_system 同帧关闭输入行；
+///    注册处 .before(chat_input_system) 保证这里先看到 input_active=true）；
+///    C# TextBox_KeyPress Escape → ActiveControl=null 且 e.Handled，不触发 Closeall
+/// 2. 通用输入框聚焦 → 只取消聚焦（对话框不动）
+/// 3. 无输入聚焦 → Closeall（C# KeyBindSettings Closeall）
 pub fn esc_close_dialogs_system(
     keys: Res<ButtonInput<KeyCode>>,
+    chat: Res<crate::game::chat::ChatState>,
     mut mgr: ResMut<DialogManager>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
 ) {
-    if keys.just_pressed(KeyCode::Escape) {
-        if !mgr.open.is_empty() {
-            mgr.open.clear();
-            tracing::info!("⌨️ ESC 关闭全部对话框");
-        }
+    if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    if chat.input_active {
+        return;
+    }
+    if input.active.is_some() {
         input.active = None;
+        return;
+    }
+    if !mgr.open.is_empty() {
+        mgr.open.clear();
+        tracing::info!("⌨️ ESC 关闭全部对话框");
     }
 }
 
 /// ↑/↓/PageUp/PageDown：滚动最上层打开对话框的 ScrollList
+/// （#2595：文本输入聚焦时让路——箭头键进文本框，C# 焦点路由）
 pub fn keyboard_scroll_lists_system(
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     mgr: Res<DialogManager>,
     mut lists: Query<(&mut ScrollList, &DialogRoot)>,
 ) {
+    if gate.0 {
+        return;
+    }
     let Some(top) = mgr.open.last().copied() else {
         return;
     };
@@ -73,15 +91,30 @@ pub fn keyboard_scroll_lists_system(
 }
 
 /// Tab/Shift+Tab 焦点切换 + Enter 触发点击 + 焦点高亮框
+/// （#2595：文本输入聚焦时让路——C# 聚焦 TextBox 时 Tab 转发给游戏键位
+/// （拾取，MainDialogs.cs:1160-1185），Enter 归输入框；对话框导航是移植附加，
+/// 打字时整体让路，仅清理残留焦点/高亮）
 pub fn tab_focus_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     mut nav: ResMut<KeyboardNav>,
     mgr: Res<DialogManager>,
     mut images: ResMut<Assets<Image>>,
     mut buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
     mut highlight_q: Query<(&mut Transform, &mut Sprite), Without<UiButton>>,
 ) {
+    if gate.0 {
+        nav.focused = None;
+        nav.click_remaining = 0;
+        if let Some(he) = nav.highlight {
+            if let Ok((mut tf, _)) = highlight_q.get_mut(he) {
+                tf.translation.x = -9999.0;
+                tf.translation.y = -9999.0;
+            }
+        }
+        return;
+    }
     // 收集最上层打开对话框的按钮（按位置 y 排序便于上下导航）
     let top = mgr.open.last().copied();
     let mut cands: Vec<(Entity, (f32, f32, f32, f32))> = buttons
@@ -162,5 +195,79 @@ pub fn tab_focus_system(
                 *cs = Vec2::new(w + 2.0, h + 2.0);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::chat::ChatState;
+    use crate::game::dialogs::text_input::TextInputState;
+    use bevy::input::ButtonInput;
+
+    fn esc_app(chat_open: bool, text_active: Option<usize>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.insert_resource(ChatState {
+            input_active: chat_open,
+            ..Default::default()
+        });
+        app.init_resource::<TextInputState>();
+        app.init_resource::<DialogManager>();
+        app.add_systems(Update, esc_close_dialogs_system);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        let mut mgr = app.world_mut().resource_mut::<DialogManager>();
+        mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+        if let Some(id) = text_active {
+            app.world_mut().resource_mut::<TextInputState>().active = Some(id);
+        }
+        app
+    }
+
+    /// #2595 Esc 三级优先级（C# MirTextBox.cs:386-395）：
+    /// 聊天输入开 → esc_close 让路（对话框不动，输入行由 chat_input_system 关）
+    #[test]
+    fn esc_yields_to_chat_input() {
+        let mut app = esc_app(true, None);
+        app.update();
+        assert_eq!(
+            app.world().resource::<DialogManager>().open.len(),
+            1,
+            "聊天输入开时 Esc 不应关对话框"
+        );
+        assert!(
+            app.world().resource::<ChatState>().input_active,
+            "esc_close 不动聊天输入（由 chat_input_system 同帧关）"
+        );
+    }
+
+    /// 通用输入框聚焦 → 只取消聚焦，对话框不动
+    #[test]
+    fn esc_clears_generic_input_only() {
+        let mut app = esc_app(false, Some(0));
+        app.update();
+        assert!(
+            app.world().resource::<TextInputState>().active.is_none(),
+            "Esc 应取消通用输入框聚焦"
+        );
+        assert_eq!(
+            app.world().resource::<DialogManager>().open.len(),
+            1,
+            "输入框聚焦时 Esc 不应关对话框"
+        );
+    }
+
+    /// 无任何输入聚焦 → Closeall（C# KeyBindSettings Closeall）
+    #[test]
+    fn esc_closes_all_dialogs() {
+        let mut app = esc_app(false, None);
+        app.update();
+        assert!(
+            app.world().resource::<DialogManager>().open.is_empty(),
+            "无输入聚焦时 Esc 应关闭全部对话框"
+        );
     }
 }

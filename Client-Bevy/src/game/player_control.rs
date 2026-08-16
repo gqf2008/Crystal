@@ -1010,10 +1010,13 @@ fn hold_move_system(
 }
 
 /// 按键拾取最近物品（#158 C# KeybindOptions.Pickup：默认 Tab；保留 Space 为次键）
+/// #2595：文本输入聚焦时让路（C# 空格进文本框）；Tab 按 ChatTextBox_KeyDown
+/// 转发表（MainDialogs.cs:1160-1185）仍放行——C# 打字时 Tab 仍会拾取
 fn key_pickup_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
     game_data: Res<GameData>,
     mut control: ResMut<ControlState>,
@@ -1027,6 +1030,9 @@ fn key_pickup_system(
     else {
         return;
     };
+    if gate.0 && !crate::game::input_gate::forwarded_while_typing(b.key) {
+        return;
+    }
     if !keys.just_pressed(b.key) {
         return;
     }
@@ -1090,8 +1096,8 @@ pub fn build_pet_pickup(
 fn pet_pickup_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
-    chat: Res<crate::game::chat::ChatState>,
     windows: Query<&Window>,
     camera: Query<
         &Transform,
@@ -1103,8 +1109,9 @@ fn pet_pickup_system(
     if hud.dead || hud.fishing || hud.paralysis {
         return;
     }
-    // 聊天输入激活时不触发（X/Ctrl+X 是文本按键，避免输入字母时误发拾取指令）
-    if chat.input_active {
+    // 聊天/任意文本输入聚焦时不触发（#2595：X/Ctrl+X 是文本按键，避免打字误发
+    // 拾取指令；旧门只查 chat.input_active，好友/组队等通用输入框漏网）
+    if gate.0 {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -1154,13 +1161,15 @@ pub fn build_change_pmode(mode: mir2_shared::enums::PetMode) -> mir2_shared::pac
 fn pet_mode_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
-    chat: Res<crate::game::chat::ChatState>,
     time: Res<Time>,
     hud: Res<crate::game::hud::HudState>,
     mut last_toggle: Local<f32>,
 ) {
-    if chat.input_active {
+    // #2595：文本输入聚焦让路（Ctrl+T 不在 C# ChatTextBox 转发表内；
+    // 旧门只查 chat.input_active，通用输入框漏网）
+    if gate.0 {
         return;
     }
     let Some(b) = kb.bindings.iter().find(|b| b.action == "宠物模式切换") else {

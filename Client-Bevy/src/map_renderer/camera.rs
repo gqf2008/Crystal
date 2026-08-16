@@ -20,11 +20,17 @@ pub(crate) fn spawn_camera(mut commands: Commands) {
 ///
 /// 供 Bevy 渲染与离屏诊断（examples）共用，确保验证路径与渲染路径一致。
 
+// #2595：文本输入聚焦时相机平移/缩放让路——WASD/方向键/± 全是文本按键，
+// C# 聚焦 TextBox 时这些键进文本框（WinForms 焦点路由），不打断输入
 pub(crate) fn camera_control(
     mut camera: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     time: Res<Time>,
 ) {
+    if gate.0 {
+        return;
+    }
     let Ok((mut transform, mut projection)) = camera.single_mut() else {
         return;
     };
@@ -60,14 +66,19 @@ pub(crate) fn camera_control(
 
 
 /// 图层调试热键：1=Back 2=Middle 3=Front静态 F=动画/混合
+/// （#2595：文本输入聚焦时让路——数字/F 是文本按键）
 pub(crate) fn map_layer_toggle_system(
     keys: Res<ButtonInput<KeyCode>>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     mut show: ResMut<MapLayerShow>,
     mut floors: Query<(&MapFloorMark, &mut Visibility), (Without<FrontTile>,)>,
     mut fronts: Query<&mut Visibility, (With<FrontTile>, Without<MapFloorMark>)>,
     mut anims: Query<&mut Visibility, (With<crate::map_tile_anim::MapTileAnim>, Without<MapFloorMark>, Without<FrontTile>)>,
     mut lights: Query<&mut Visibility, (With<MapLight>, Without<MapFloorMark>, Without<FrontTile>, Without<crate::map_tile_anim::MapTileAnim>)>,
 ) {
+    if gate.0 {
+        return;
+    }
     if keys.just_pressed(KeyCode::Digit1) { show.back = !show.back; tracing::info!("[LAYER] Back {}", if show.back {"ON"} else {"OFF"}); }
     if keys.just_pressed(KeyCode::Digit2) { show.middle = !show.middle; tracing::info!("[LAYER] Middle {}", if show.middle {"ON"} else {"OFF"}); }
     if keys.just_pressed(KeyCode::Digit3) { show.front = !show.front; tracing::info!("[LAYER] Front {}", if show.front {"ON"} else {"OFF"}); }

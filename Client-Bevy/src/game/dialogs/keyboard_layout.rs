@@ -681,14 +681,21 @@ fn keyboard_layout_ui_system(
 
 /// 快捷键打开/关闭窗口（#148/#1370，C# KeybindOptions 对齐；随键位设置可重绑）
 /// 覆盖：背包/角色/技能/好友/宠物/坐骑/钓鱼/夫妻/队伍/商城/大地图/排行/键位/帮助/行会/小地图/任务/设置
+/// #2595：文本输入聚焦时让路（C# WinForms 焦点路由——TextBox 聚焦则
+/// GameScene_KeyDown 不触发），F1-F12/Tab 按 ChatTextBox_KeyDown 转发表放行
+/// （MainDialogs.cs:1160-1185）
 fn dialog_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<KeyboardState>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     mut mgr: ResMut<DialogManager>,
     mut page: ResMut<CharPage>,
     mut belt_visible: ResMut<crate::game::dialogs::belt::BeltVisible>,
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
 ) {
+    use crate::game::input_gate::forwarded_while_typing;
+    // #2595：该绑定在当前聚焦状态下是否应让路
+    let blocked = |b: &KeyBinding| gate.0 && !forwarded_while_typing(b.key);
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
     let map: [(&str, DialogKind); 23] = [
         ("背包", DialogKind::Inventory),
@@ -719,6 +726,9 @@ fn dialog_hotkey_system(
     let mut hits: Vec<(&str, DialogKind)> = Vec::new();
     for (action, kind) in map {
         if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+            if blocked(b) {
+                continue;
+            }
             if b.matches(&keys) {
                 hits.push((action, kind));
             }
@@ -747,6 +757,9 @@ fn dialog_hotkey_system(
     // 技能（C# KeybindOptions.Skills/Skills2）：无独立技能窗口，打开角色对话框技能页
     for action in ["技能", "技能2"] {
         if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+            if blocked(b) {
+                continue;
+            }
             if b.matches(&keys) {
                 if mgr.is_open(DialogKind::Character) && page.0 == 3 {
                     mgr.close(DialogKind::Character);
@@ -759,13 +772,14 @@ fn dialog_hotkey_system(
         }
     }
     // #1370：技能栏显隐（R）/ 腰带（Z）——非对话框，走显隐资源
+    // （#2595：字母键，聚焦文本框时不转发）
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "技能栏显隐") {
-        if keys.just_pressed(b.key) {
+        if !blocked(b) && keys.just_pressed(b.key) {
             belt_visible.0 = !belt_visible.0;
         }
     }
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "腰带") {
-        if keys.just_pressed(b.key) {
+        if !blocked(b) && keys.just_pressed(b.key) {
             potion_belt_visible.0 = !potion_belt_visible.0;
         }
     }
@@ -774,15 +788,21 @@ fn dialog_hotkey_system(
 /// #1373：次级快捷键（C# KeyBindSettings 默认，含修饰键；修饰键暂不可重绑为简化）
 /// 英雄背包 Ctrl+I / 英雄装备 Ctrl+C / 英雄技能 Ctrl+S / 坐骑 M(@ride) /
 /// 退出 Alt+Q / 下线 Alt+X / 腰带 1-8（使用药水，C# Belt1..8）
+/// #2595：文本输入聚焦时全部让路（坐骑/腰带是字母数字键，退出/下线 Alt 组合
+/// 也不在 C# ChatTextBox 转发表内——MainDialogs.cs:1160-1185 仅 F1-F12/Tab）
 fn secondary_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<KeyboardState>,
+    gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
     hud: Res<HudState>,
     time: Res<Time>,
     mut feedback: ResMut<ItemUseFeedback>,
     belt: Res<PotionBeltState>,
 ) {
+    if gate.0 {
+        return;
+    }
     // #1386：坐骑切换（M，可重绑）→ @ride
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "坐骑切换") {
         if b.matches(&keys) {
@@ -869,6 +889,57 @@ mod tests {
         let ini = "[Bindings]\n背包=NotAKey\n";
         let loaded = bindings_from_ini(ini, &defaults);
         assert_eq!(loaded[7].key, defaults[7].key);
+    }
+
+    /// #2595：文本输入聚焦时对话框热键让路——字母键（背包2=I）不触发，
+    /// F 键（背包=F9）按 C# ChatTextBox_KeyDown 转发表（MainDialogs.cs:1160-1185）仍触发，
+    /// 门关时字母键恢复触发。回归：去掉 blocked 守卫则第 1/3 断言变红。
+    #[test]
+    fn dialog_hotkey_yields_while_typing() {
+        fn hotkey_app(gate_on: bool, pressed: KeyCode) -> App {
+            use crate::game::dialogs::DialogManager;
+            use bevy::input::ButtonInput;
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            app.init_resource::<ButtonInput<KeyCode>>();
+            app.insert_resource(KeyboardState {
+                bindings: default_bindings(),
+                defaults: default_bindings(),
+                top_line: 0,
+                rebinding: None,
+                enforce: true,
+            });
+            app.init_resource::<DialogManager>();
+            app.init_resource::<CharPage>();
+            app.init_resource::<crate::game::dialogs::belt::BeltVisible>();
+            app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
+            app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
+            app.add_systems(Update, dialog_hotkey_system);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(pressed);
+            app
+        }
+        let is_inv_open = |app: &App| {
+            app.world()
+                .resource::<crate::game::dialogs::DialogManager>()
+                .is_open(DialogKind::Inventory)
+        };
+
+        // 聚焦 + 字母（背包2=I）→ 不开（用户实测 n/i 弹对话框的回归锚点）
+        let mut app = hotkey_app(true, KeyCode::KeyI);
+        app.update();
+        assert!(!is_inv_open(&app), "聚焦打字时 I 不应开背包");
+
+        // 聚焦 + F9（背包主键，转发键）→ 仍开
+        let mut app = hotkey_app(true, KeyCode::F9);
+        app.update();
+        assert!(is_inv_open(&app), "聚焦打字时 F9 应按转发表照常开背包");
+
+        // 未聚焦 + 字母 → 恢复正常
+        let mut app = hotkey_app(false, KeyCode::KeyI);
+        app.update();
+        assert!(is_inv_open(&app), "未聚焦时 I 应正常开背包");
     }
 }
 
