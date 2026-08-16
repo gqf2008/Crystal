@@ -15,7 +15,10 @@ use bevy::prelude::*;
 use std::fs;
 
 use crate::game::dialogs::character::CharPage;
-use crate::game::dialogs::inventory::{try_use_belt_item, ItemUseFeedback};
+use crate::game::dialogs::inventory::{
+    item_use_sound_id, try_use_belt_item, use_item_core, InvDropConfirm, ItemUseFeedback,
+    UseItemCtx, UseOutcome,
+};
 use crate::game::dialogs::potion_belt::PotionBeltState;
 use crate::game::hud::HudState;
 use crate::game::dialogs::settings_file;
@@ -799,6 +802,8 @@ fn secondary_hotkey_system(
     time: Res<Time>,
     mut feedback: ResMut<ItemUseFeedback>,
     belt: Res<PotionBeltState>,
+    hero: Res<crate::game::dialogs::hero::HeroState>,
+    mut confirm: ResMut<InvDropConfirm>,
 ) {
     if gate.0 {
         return;
@@ -826,7 +831,8 @@ fn secondary_hotkey_system(
             tracing::info!("🎮 下线");
         }
     }
-    // 腰带 1-8（C# Belt1..8：D1..D8 / NumPad1..8）
+    // 腰带 1-8（C# Belt1..8：D1..D8 / NumPad1..8）：
+    // 1-6 = 主药水腰带（#1544）；7/8 = 英雄腰带（#2602，C# GameScene.cs:759-766）
     let digits = [
         KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4,
         KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8,
@@ -837,11 +843,42 @@ fn secondary_hotkey_system(
     ];
     for i in 0..8usize {
         let pressed = keys.just_pressed(digits[i]) || keys.just_pressed(numpads[i]);
-        if pressed {
+        if !pressed {
+            continue;
+        }
+        let now = time.elapsed_secs_f64();
+        if i < 6 {
+            // 主腰带：C# BeltDialog.Grid[i].UseItem
             if let Some(uid) = belt.slots.get(i).and_then(|u| u.as_ref()).copied() {
-                // #1544：腰带快捷使用走节流/钓鱼守卫（C# Belt1..8 → BeltDialog.Grid[i].UseItem）
-                let now = time.elapsed_secs_f64();
                 try_use_belt_item(uid, &net, &hud, now, &mut feedback);
+            }
+        } else {
+            // 英雄腰带格 0/1（= 英雄背包前 2 格；UseItem 按 uid 全背包查）
+            let slot = i - 6;
+            let Some(item) = hero.inventory.get(slot).and_then(|s| s.as_ref()) else {
+                continue;
+            };
+            let (gender, class, level) = hero
+                .current
+                .as_ref()
+                .map(|c| (c.gender as u8, c.class as u8, c.level))
+                .unwrap_or((0, 0, 1));
+            let ctx = UseItemCtx {
+                grid: mir2_shared::enums::MirGridType::HeroInventory,
+                equipment: &hero.equipment,
+                gender,
+                class,
+                level,
+                check_fishing: false,
+                allow_consumable: true,
+            };
+            if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
+                == UseOutcome::Sent
+            {
+                // 音效同英雄背包双击链路
+                if let Some(sid) = item_use_sound_id(item) {
+                    feedback.sounds.push(sid);
+                }
             }
         }
     }

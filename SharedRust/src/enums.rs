@@ -1507,6 +1507,11 @@ pub enum MirGridType {
 #[repr(u8)]
 pub enum EquipmentSlot {
     // 数值对齐 C# EquipmentSlot（Weapon=0..Mount=13，见 Shared/Enums.cs；#1296 清理 +3 偏移）
+    //
+    // ⚠ 同名异序（#2602）：ServerRust `actors::inventory::EquipmentSlot`（服务端
+    // 装备数组线序：Necklace=3/Mount=10/Torch=11/Belt=12/Stone=13）与本枚举同名
+    // 不同值。客户端 hero/character.rs 的 SERVER_SLOT_TO_POS 按服务端旧序映射；
+    // 服务端装备数组统一切到本枚举序时必须同步改它（否则 10 槽静默错位）。
     Weapon = 0,
     Armour = 1,
     Helmet = 2,

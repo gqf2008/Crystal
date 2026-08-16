@@ -24,6 +24,7 @@ pub mod guild;
 pub mod guild_territory;
 pub mod help;
 pub mod hero;
+pub mod hero_belt;
 pub mod hero_equipment;
 pub mod hero_inventory;
 pub mod hero_skills;
@@ -390,10 +391,10 @@ pub fn dialog_drag_system(
             }
             for (e, mut dd, _) in drop_downs.iter_mut() {
                 if let Some(o) = drag.dd_origins.get(&e) {
-                    dd.box_rect.0 = o.0 .0 + delta.x;
-                    dd.box_rect.1 = o.0 .1 + delta.y;
-                    dd.popup_pos.0 = o.1 .0 + delta.x;
-                    dd.popup_pos.1 = o.1 .1 + delta.y;
+                    dd.box_rect.0 = o.0.0 + delta.x;
+                    dd.box_rect.1 = o.0.1 + delta.y;
+                    dd.popup_pos.0 = o.1.0 + delta.x;
+                    dd.popup_pos.1 = o.1.1 + delta.y;
                 }
             }
             // 背包拖动 → 命中用原点同步平移（与实体/rect 同一 delta）
@@ -619,6 +620,7 @@ impl Plugin for DialogsPlugin {
                 mount::MountPlugin,
                 report::ReportPlugin,
                 hero::HeroPlugin,
+                hero_belt::HeroBeltPlugin,
                 hero_inventory::HeroInventoryPlugin,
                 creature::CreaturePlugin,
                 item_rental::ItemRentalPlugin,
