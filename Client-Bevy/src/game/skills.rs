@@ -1393,7 +1393,9 @@ fn skill_bar_show_system(
         Visibility::Hidden
     };
     for mut vis in &mut roots {
-        *vis = show;
+        if *vis != show {
+            *vis = show;
+        }
     }
 }
 

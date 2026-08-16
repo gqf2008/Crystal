@@ -150,7 +150,10 @@ fn player_menu_open_system(
 }
 
 /// 菜单显隐 + 定位 + 选项点击
-fn player_menu_ui_system(
+/// （pub(crate)：#2604 esc_close_dialogs_system 的 Esc 让路依赖
+/// `.before(本系统)` 排序锚点——本系统同帧消费 Esc 置 visible=false，
+/// 若先跑则 esc_close 读到 false 误入 Closeall 连坐）
+pub(crate) fn player_menu_ui_system(
     mut state: ResMut<PlayerMenuState>,
     mut mgr: ResMut<DialogManager>,
     mut mail: ResMut<MailState>,

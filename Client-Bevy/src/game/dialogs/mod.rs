@@ -561,8 +561,13 @@ impl Plugin for DialogsPlugin {
             (
                 // #2595：Esc 优先级要求 esc_close 先于 chat_input 跑——
                 // 聊天输入开时 esc_close 让路，chat_input_system 同帧关闭输入行
+                // #2604：amount_box/player_menu 同理（审查 MAJOR——无排序边时
+                // 它们可能先跑、同帧置 visible=false，esc_close 随后读到 false
+                // 误入 Closeall，一次 Esc 连坐关掉模态 + 全部对话框）
                 crate::ui::keyboard_nav::esc_close_dialogs_system
-                    .before(crate::game::chat::chat_input_system),
+                    .before(crate::game::chat::chat_input_system)
+                    .before(crate::game::dialogs::amount_box::amount_box_system)
+                    .before(crate::game::player_menu::player_menu_ui_system),
                 crate::ui::keyboard_nav::keyboard_scroll_lists_system,
                 crate::ui::keyboard_nav::tab_focus_system,
             )
