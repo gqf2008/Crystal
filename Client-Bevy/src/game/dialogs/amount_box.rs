@@ -27,6 +27,8 @@ pub struct AmountBoxState {
     pub title: String,
     pub max: u32,
     pub value: String,
+    /// 预填 max 后未编辑（首个数字整体替换，C# 预填全选语义）
+    pub fresh: bool,
 }
 
 #[derive(Component)]
@@ -65,12 +67,15 @@ impl Plugin for AmountBoxPlugin {
 }
 
 impl AmountBoxState {
-    /// 弹出数量输入框
+    /// 弹出数量输入框。默认文本 = MaxAmount（C# MirAmountBox.cs:91，
+    /// Amount 初值=max——空 Enter 即以最后有效值确认，#2609）。
+    /// fresh=预填未编辑态：首个数字输入整体替换（C# :92-93 预填全选语义）
     pub fn ask(&mut self, title: impl Into<String>, max: u32) {
         self.visible = true;
         self.title = title.into();
         self.max = max.max(1);
-        self.value = String::new();
+        self.value = self.max.to_string();
+        self.fresh = true;
     }
 }
 
@@ -135,6 +140,17 @@ fn spawn_amount_box(
     }
 }
 
+/// 确认值：解析失败/空以 MaxAmount 兜底，钳 [1, max]（C# Amount=最后有效值
+/// 初值 max、MinAmount 下限；Enter/OK 两路径共用，审查 MAJOR 语义统一）
+fn confirm_amount(state: &AmountBoxState) -> Option<u32> {
+    state
+        .value
+        .parse::<u32>()
+        .ok()
+        .or(Some(state.max))
+        .map(|v| v.clamp(1, state.max))
+}
+
 /// 显示/隐藏 + 数字输入 + OK/Cancel/Close
 /// （pub(crate)：#2604 esc_close_dialogs_system 的 Esc 让路依赖
 /// `.before(本系统)` 排序锚点——本系统同帧消费 Esc 置 visible=false，
@@ -174,28 +190,48 @@ pub(crate) fn amount_box_system(
             continue;
         }
         if key.logical_key == Key::Enter {
-            let amount = state.value.parse::<u32>().ok().map(|v| v.min(state.max));
+            // 空/非法文本以 MaxAmount 兜底（C# Amount 属性=最后有效值，
+            // 初值即 max；#2609）；MinAmount 语义=下限 1
+            let amount = confirm_amount(&state);
             state.visible = false;
             result.write(AmountBoxResult(amount));
             continue;
         }
-        if key.logical_key == Key::Backspace {
-            state.value.pop();
-        } else if let Some(text) = &key.text {
-            if text.chars().all(|c| c.is_ascii_digit()) && state.value.len() < 10 {
-                state.value.push_str(text);
-            }
+        // 预填未编辑时首个数字整体替换（C# :92-93 预填全选，输入即覆盖）
+        let digit = if let Some(text) = &key.text {
+            text.chars().all(|c| c.is_ascii_digit())
+                .then(|| text.clone())
         } else if let Key::Character(c) = &key.logical_key {
             // winit 注入/部分键盘事件 text=None，用 logical_key 兜底（原版 C# 任意可打印字符）
-            if c.chars().all(|ch| ch.is_ascii_digit()) && state.value.len() < 10 {
-                state.value.push_str(c);
+            c.chars().all(|ch| ch.is_ascii_digit()).then(|| c.clone())
+        } else {
+            None
+        };
+        if let Some(d) = digit.filter(|d| !d.is_empty()) {
+            if state.value.len() < 10 || state.fresh {
+                if state.fresh {
+                    state.value = d.to_string();
+                    state.fresh = false;
+                } else {
+                    state.value.push_str(&d);
+                }
             }
+        } else if key.logical_key == Key::Backspace {
+            // 预填全选态下 Backspace 整体清空（C# 全选删除语义，复审 NIT）
+            if state.fresh {
+                state.value.clear();
+            } else {
+                state.value.pop();
+            }
+            state.fresh = false;
         }
     }
 
     for btn in &ok {
         if btn.clicked {
-            let amount = state.value.parse::<u32>().ok().map(|v| v.min(state.max));
+            // C# Enter 即 OKButton.InvokeMouseClick（:204-209/:277-278）——
+            // 两路径同一解析/钳制（审查 MAJOR：旧 OK 路径未同步，语义分裂）
+            let amount = confirm_amount(&state);
             state.visible = false;
             result.write(AmountBoxResult(amount));
         }
