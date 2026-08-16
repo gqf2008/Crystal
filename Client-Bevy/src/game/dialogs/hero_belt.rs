@@ -13,9 +13,13 @@
 //     旋转 1938-1940 @(19,82)、关闭 1935-1937 @(3,82)、叠层 1946
 //   - 格点击/双击/转移由 hero_inventory::hero_inv_click_system 统一处理
 //     （hero_slot_at 扩展覆盖腰带格，槽位即 0/1）
-// 有意偏差：腰带用尽后从英雄背包自动补货（C# MirItemCell.cs:574-581 走
-//   C.MoveItem(Grid=HeroInventory)）暂缓——服务端 MoveItem 英雄分支待核，
-//   附 #2602 记录
+// 有意偏差（附 #2602 记录）：
+//   - 腰带用尽后从英雄背包自动补货（C# MirItemCell.cs:574-581 走
+//     C.MoveItem(Grid=HeroInventory)）暂缓——服务端 MoveItem 英雄分支待核
+//   - C# HeroBeltDialog Movable=true 且随 MainDialog 移动（MainDialogs.cs
+//     :1284-1285）；本移植位置固定、不参与 dialog_drag_system（未挂
+//     DialogRoot；主对话框底栏本也固定）
+//   - 键标白字与 C# 一致（MirControl.cs:707 构造器默认 _foreColour=White）
 // ============================================================================
 
 use bevy::prelude::*;
@@ -313,7 +317,7 @@ fn hero_belt_ui_system(
         &mut Transform,
         Option<&mut Sprite>,
         Option<&mut ButtonFrames>,
-        Option<&UiButton>,
+        Option<&mut UiButton>,
         Option<&HeroBeltBg>,
         Option<&HeroBeltBgOverlay>,
         Option<&HeroBeltSlotCell>,
@@ -334,7 +338,7 @@ fn hero_belt_ui_system(
     }
     let vert = vertical.0;
 
-    for (_, mut tf, mut sp, mut frames, btn, bg, overlay, slot, num, rot, cls) in &mut items {
+    for (_, mut tf, mut sp, mut frames, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
             if let Some(h) = ui_image(
                 &mut libs,
@@ -385,7 +389,9 @@ fn hero_belt_ui_system(
             tf.translation.x = x;
             tf.translation.y = -y;
         } else if rot.is_some() {
-            // 旋转（横向 @(82,3)；纵向 @(19,82)，C# :343-346）
+            // 旋转（横向 @(82,3)；纵向 @(19,82)，C# :343-346）。命中矩形同步
+            // 视觉位置（审查 M2：rect 只在 spawn 按横向固定，Flip 后点击落空/
+            // 旧位误触——dialog_drag_system 的 btn_origins 同款义务）
             let (x, y) = if vert {
                 (BELT_VERT_X + 19.0, BELT_VERT_Y + 82.0)
             } else {
@@ -400,14 +406,16 @@ fn hero_belt_ui_system(
                     swap_button_frames(f, &mut libs, &mut images, &mut cache, (1926, 1927, 1928));
                 }
             }
-            if let Some(b) = btn {
+            if let Some(b) = btn.as_mut() {
+                b.rect.0 = x;
+                b.rect.1 = y;
                 if b.clicked {
                     vertical.0 = !vertical.0;
                     tracing::info!("🔁 英雄腰带旋转: {}", if !vert { "纵向" } else { "横向" });
                 }
             }
         } else if cls.is_some() {
-            // 关闭（横向 @(82,19)；纵向 @(3,82)，C# :338-341）
+            // 关闭（横向 @(82,19)；纵向 @(3,82)，C# :338-341）；rect 同步同上
             let (x, y) = if vert {
                 (BELT_VERT_X + 3.0, BELT_VERT_Y + 82.0)
             } else {
@@ -422,7 +430,9 @@ fn hero_belt_ui_system(
                     swap_button_frames(f, &mut libs, &mut images, &mut cache, (1923, 1924, 1925));
                 }
             }
-            if let Some(b) = btn {
+            if let Some(b) = btn.as_mut() {
+                b.rect.0 = x;
+                b.rect.1 = y;
                 if b.clicked {
                     visible.0 = false;
                     tracing::info!("🧪 关闭英雄腰带");

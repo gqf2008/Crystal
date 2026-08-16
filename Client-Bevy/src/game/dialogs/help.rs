@@ -128,16 +128,17 @@ pub struct HelpPageLabelText;
 #[derive(Component)]
 pub struct HelpPageImage;
 
-/// 快捷键页两列表头（C# shortcutTitleLabel/infoTitleLabel @(13,75)/(114,75)；
+/// 快捷键页两列表头（C# shortcutTitleLabel/infoTitleLabel，对话框坐标
+/// 中心 (75,125)/(328,125)——C# 页内 (13,75)/(114,75) + 页偏移 (12,35)；
 /// 携带自身文案，图文页清空/快捷键页还原）
 #[derive(Component)]
 pub struct HelpShortcutHeader(pub &'static str);
 
-/// 快捷键页左列（键名，黄，C# @(18,107+20i)）
+/// 快捷键页左列（键名，黄，C# 对话框坐标 (30,142+20i)）
 #[derive(Component)]
 pub struct HelpShortcutKey(usize);
 
-/// 快捷键页右列（说明，白，C# @(119,107+20i)）
+/// 快捷键页右列（说明，白，C# 对话框坐标 (131,142+20i)）
 #[derive(Component)]
 pub struct HelpShortcutInfo(usize);
 
@@ -335,8 +336,10 @@ fn spawn_help(
         Transform::from_xyz(ox + 12.0, -(oy + 75.0), 8.0),
         Visibility::Hidden,
     ));
-    // 快捷键页两列表头（C# ShortcutInfoPage :308-330：黄白两列 @ (13,75)/(114,75) 居中）
-    let headers: [(&str, f32, f32); 2] = [("快捷键", 63.0, 90.0), ("信息", 316.0, 90.0)];
+    // 快捷键页两列表头（C# ShortcutInfoPage :308-330 坐标相对 ShortcutInfoPage，
+    // 其 Parent=HelpPage @(12,35)——折算到对话框坐标：表头中心 (12+13+50,35+75+15)
+    // =(75,125) / (12+114+202,125)；审查 m1 修正整页漏加 (12,35) 偏移）
+    let headers: [(&str, f32, f32); 2] = [("快捷键", 75.0, 125.0), ("信息", 328.0, 125.0)];
     for (text, rx, ry) in headers {
         let h = spawn_ui_text(
             &mut commands,
@@ -355,14 +358,15 @@ fn spawn_help(
             HelpWidget,
         ));
     }
-    // 快捷键页行（黄键名 @(18,107+20i) / 白说明 @(119,107+20i)，9F）
+    // 快捷键页行（黄键名/白说明 9F；C# @(18,107+20i)/(119,107+20i) 相对页 →
+    // 对话框 (30,142+20i)/(131,142+20i)，含 (12,35) 偏移）
     for i in 0..SHORTCUT_ROWS {
-        let y = oy + 107.0 + i as f32 * 20.0;
+        let y = oy + 142.0 + i as f32 * 20.0;
         let k = spawn_ui_text(
             &mut commands,
             &font,
             "",
-            ox + 18.0,
+            ox + 30.0,
             y,
             9.0,
             Color::srgb(1.0, 1.0, 0.0),
@@ -375,7 +379,7 @@ fn spawn_help(
             &mut commands,
             &font,
             "",
-            ox + 119.0,
+            ox + 131.0,
             y,
             9.0,
             Color::WHITE,

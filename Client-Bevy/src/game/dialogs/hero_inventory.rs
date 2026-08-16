@@ -603,7 +603,11 @@ fn hero_inv_click_system(
     belt_visible: Res<crate::game::dialogs::hero_belt::HeroBeltVisible>,
     belt_vertical: Res<crate::game::dialogs::hero_belt::HeroBeltVertical>,
 ) {
-    if !mgr.is_open(DialogKind::HeroInventory) {
+    // 网格格交互要求英雄背包开；腰带格独立（C# HeroBeltDialog 的 MirItemCell
+    // 腰带可见即可点，审查 m3——网格格坐标区 (0..309, 0..190) 覆盖世界点击，
+    // 背包关着时不得命中）
+    let grid_open = mgr.is_open(DialogKind::HeroInventory);
+    if !grid_open && !belt_visible.0 {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -628,7 +632,7 @@ fn hero_inv_click_system(
     // #2602 命中目标 → 英雄背包原始槽位：8x5 网格格 = 2+idx（C# ItemSlot = 2+idx，
     // HeroDialogs.cs:53，前 2 槽是腰带不进网格）；英雄腰带格 = 0/1（HeroBeltDialog，
     // 独立渲染/命中，横纵布局随其 Flip）
-    let slot = if let Some(i) = hero_slot_at(cursor.x, cursor.y) {
+    let slot = if let Some(i) = hero_slot_at(cursor.x, cursor.y).filter(|_| grid_open) {
         Some(2 + i)
     } else if belt_visible.0 {
         (0..crate::game::dialogs::hero_belt::BELT_SLOTS).find(|&j| {

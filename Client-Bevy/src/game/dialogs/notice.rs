@@ -28,8 +28,8 @@ use crate::ui::text_markup::{est_text_width, known_color, wrap_text};
 // —— 布局常量（NoticeDialog.cs；Prguse[961] 实测 316x466）——
 pub const BG_W: f32 = 316.0;
 pub const BG_H: f32 = 466.0;
-/// Location = ((SW-W)/2, (SH-H)/3)（C# 整除）= (354, 100)
-pub const ORIGIN: (f32, f32) = ((1024.0 - BG_W) / 2.0, (768.0 - BG_H) / 3.0);
+/// Location = ((SW-W)/2, (SH-H)/3)（C# 整除）= (354, 100)——用整数除再转 f32
+pub const ORIGIN: (f32, f32) = (((1024.0 - BG_W) / 2.0).trunc(), ((768.0 - BG_H) / 3.0).trunc());
 pub const MAX_LINES: usize = 19;
 pub const LINE_X: f32 = 25.0;
 pub const LINE_Y0: f32 = 50.0;
@@ -52,9 +52,11 @@ pub const BAR_H: f32 = 18.0;
 /// C# interval 基数：400 / (count - MaximumLines)（:143/:176）
 pub const BAR_TRAVEL: f32 = 400.0;
 
-/// 滑块间隔（调用方保证 count > MAX_LINES）
+/// 滑块间隔（调用方保证 count > MAX_LINES）。C# `400 / (count - 19)` 是
+/// **int/int 截断除**（NoticeDialog.cs:143/:176）——f32 除在非整除 count
+/// 时 y 定位偏 ~8px 且正反换算不自洽（审查 M5），必须整数除后转 f32
 fn bar_interval(count: usize) -> f32 {
-    BAR_TRAVEL / (count - MAX_LINES) as f32
+    (BAR_TRAVEL as i32 / (count as i32 - MAX_LINES as i32)) as f32
 }
 
 /// 首行下标 → 滑块 y（C# UpdatePositionBar :172-185）
@@ -270,8 +272,9 @@ fn spawn_notice(
             }
         }
     }
-    // PositionBar（:119-131）：不挂 DialogRoot——由本系统按背景 Transform 定位
-    // （拖动跟随与滚动定位统一走一个写方，避免双写竞争）
+    // PositionBar（:119-131）：挂 DialogRoot 随对话框清理/拖动（审查 M3——
+    // 不挂会在重进 Game 时泄漏残留，且 bar_tf.single_mut 从第二个起失效）；
+    // 定位由本系统每帧按背景 Transform 覆写，与 drag 系统平移无净冲突
     if let Some(h) = ui_image(
         &mut libs,
         &mut images,
@@ -287,9 +290,12 @@ fn spawn_notice(
             7.1,
             1.0,
         );
-        commands
-            .entity(e)
-            .insert((NoticeBar, NoticeScrollWidget, NoticeWidget));
+        commands.entity(e).insert((
+            NoticeBar,
+            NoticeScrollWidget,
+            NoticeWidget,
+            DialogRoot(DialogKind::Notice),
+        ));
     }
     // 19 行正文（:264-273）
     for i in 0..MAX_LINES {
@@ -569,17 +575,19 @@ fn notice_ui_system(
     }
 }
 
-/// 打开外部链接（C# Process.Start(UseShellExecute)；非 Windows 记日志）
+/// 打开外部链接（C# Process.Start(UseShellExecute)；非 Windows 记日志）。
+/// http(s) 前缀大小写不敏感（C# StartsWith ignoreCase:true）。Windows 用
+/// explorer.exe 直接传参——**不走 cmd /C start**（cmd 元字符 & | ^ % 会把
+/// 服务器可控的 url 变成命令注入面，审查 M4）
 fn open_url(url: &str) {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    let lower = url.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
         tracing::info!("公告链接非 http(s)，忽略: {url}");
         return;
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn();
+        let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
     }
     #[cfg(not(windows))]
     {
@@ -595,11 +603,19 @@ fn notice_server_events(
 ) {
     for ev in events.read() {
         if let crate::network::server_event::ServerEvent::NoticeUpdated { title, message } = ev {
+            // C# Update :193-196：空白消息不开窗
+            if message.trim().is_empty() {
+                continue;
+            }
             notice.title = title.clone();
             notice.message = message.clone();
-            // C# 按 "\r\n" 切行 + WordBreak 420px 折行；容错裸 "\n"
+            // 切行 + 420px 折行（审查 M1）：本移植服务端/mock 链路发 "\n"
+            //（ServerRust session.rs join("\n")），C# 是 "\r\n" 直传——两种
+            // 都切；折行展开计入行数（滑块 count 按显示行算，C# 按原始行数
+            // + 控件内视觉折行——有意偏差：本移植滚动边界=可读行）
             notice.lines = message
                 .split("\r\n")
+                .flat_map(|l| l.split('\n'))
                 .flat_map(|l| wrap_text(l, LINE_FONT_PX, LINE_WRAP_W))
                 .collect();
             notice.index = 0;
@@ -750,6 +766,12 @@ mod tests {
         assert_eq!(index_from_bar_y(300.0, 10), 0);
         // count=20：interval=400 → 任何 index ≥1 都到 399（C# 整数 interval 特例，如实复刻）
         assert_eq!(position_bar_y(1, 20), 399.0);
+        // 非整除 count（审查 M5）：count=42 → C# int 除 interval=400/23=17（非 17.39），
+        // 且 y↔index 往返自洽
+        assert_eq!(bar_interval(42), 17.0);
+        assert_eq!(position_bar_y(20, 42), 46.0 + 20.0 * 17.0);
+        assert_eq!(index_from_bar_y(position_bar_y(20, 42), 42), 20);
+        assert_eq!(index_from_bar_y(position_bar_y(7, 42), 42), 7);
     }
 
     /// 折行驱动分页：50 CJK → 42+8 两行，19 行/页 → 第 2 页 4 行
