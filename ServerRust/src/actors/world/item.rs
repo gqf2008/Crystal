@@ -503,17 +503,37 @@ impl Message<MoveItemRequest> for WorldActor {
             None => return,
         };
 
-        // 客户端发来的 grid 是 MirGridType，实际移动的源/目标槽位是 from/to
-        let success = record
-            .actor_ref
-            .ask(InventoryMoveItem {
-                from_grid: msg.from as u8,
-                to_grid: msg.to as u8,
-            })
-            .await
-            .unwrap_or(false);
+        // 客户端发来的 grid 是 MirGridType，实际移动的源/目标槽位是 from/to。
+        // #2611：Grid=HeroInventory 时在**英雄背包**内移动（C# 腰带补货走此路径，
+        // MirItemCell.cs:574-581）——旧实现无视 grid 恒操作主背包
+        let hero_grid = mir2_shared::enums::MirGridType::HeroInventory as u8;
+        let hero = msg.grid == hero_grid;
+        let success = if hero {
+            record
+                .actor_ref
+                .ask(crate::actors::player::InventoryMoveHeroItem {
+                    from_grid: msg.from as u8,
+                    to_grid: msg.to as u8,
+                })
+                .await
+                .unwrap_or(false)
+        } else {
+            record
+                .actor_ref
+                .ask(InventoryMoveItem {
+                    from_grid: msg.from as u8,
+                    to_grid: msg.to as u8,
+                })
+                .await
+                .unwrap_or(false)
+        };
 
         if success {
+            if hero {
+                // 英雄背包变更走 HeroInformation 全量同步（同 ConsumeHeroItem 路径）
+                self.send_hero_information_packet(msg.session_id).await;
+                return;
+            }
             // 发送 ItemChanged 通知（用 MoveItem 响应）
             send_move_item_response(
                 &self.gate_ref,

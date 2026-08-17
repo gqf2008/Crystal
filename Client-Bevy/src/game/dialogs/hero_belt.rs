@@ -119,7 +119,7 @@ impl Plugin for HeroBeltPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero_belt);
         app.add_systems(
             Update,
-            (hero_belt_ui_system, hero_belt_icon_system, ui_button_system)
+            (hero_belt_ui_system, hero_belt_icon_system, hero_belt_refill_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -492,9 +492,91 @@ pub fn hero_belt_item_uid(hero: &HeroState, i: usize) -> Option<u64> {
         .map(|it| it.unique_id)
 }
 
+/// 腰带自动补货纯函数（#2611，C# MirItemCell.cs:574-581）：某腰带格从
+/// 「有 prev_index 物品」变为空 → 英雄背包区（2..）找第一件**同 item_index**
+/// → 返回 (from, to)；无匹配/格未空返回 None（便于单测）
+pub fn belt_refill_move(prev_index: i32, hero: &HeroState) -> Option<(i32, i32)> {
+    for slot in 0..BELT_SLOTS {
+        if hero.inventory.get(slot).and_then(|s| s.as_ref()).is_some() {
+            continue; // 该格未空
+        }
+        for from in BELT_SLOTS..hero.inventory.len() {
+            if let Some(it) = hero.inventory.get(from).and_then(|s| s.as_ref()) {
+                if it.item_index == prev_index {
+                    return Some((from as i32, slot as i32));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 补货系统：记忆两腰带格上一帧物品索引，Some→None 跃迁时发
+/// C.MoveItem(Grid=HeroInventory)（服务端 #2611 已加英雄背包分支）
+fn hero_belt_refill_system(
+    hero: Res<HeroState>,
+    net: Res<crate::network::NetConnection>,
+    mut prev: Local<[Option<i32>; BELT_SLOTS]>,
+) {
+    for slot in 0..BELT_SLOTS {
+        let cur = hero
+            .inventory
+            .get(slot)
+            .and_then(|s| s.as_ref())
+            .map(|it| it.item_index);
+        // 用尽跃迁：上一帧有、本帧空 → 按上一帧物品类型补货
+        if prev[slot].is_some() && cur.is_none() {
+            if let Some((from, to)) = belt_refill_move(prev[slot].unwrap_or(0), &hero) {
+                net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                    grid: mir2_shared::enums::MirGridType::HeroInventory,
+                    from,
+                    to,
+                });
+                tracing::info!("🧪 腰带补货: 英雄背包{} -> 腰带{}", from, to);
+            }
+        }
+        prev[slot] = cur;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::dialogs::hero::HeroState;
+
+    fn hero_with(inv: Vec<Option<usize>>) -> HeroState {
+        // inv: Some(item_index)/None 逐槽；转成 HeroState（借用 InvItem 字段构造
+        // 太重——用真实 InvItem 最小构造）
+        let mut h = HeroState::default();
+        h.inventory = inv
+            .into_iter()
+            .map(|s| {
+                s.map(|idx| crate::game::dialogs::inventory::InvItem {
+                    unique_id: idx as u64 + 1,
+                    item_index: idx as i32,
+                    ..Default::default()
+                })
+            })
+            .collect();
+        h
+    }
+
+    /// 补货纯函数（C# 语义：用尽格按上一帧物品类型从背包区找同类）
+    #[test]
+    fn belt_refill_finds_same_index_in_backpack() {
+        // 腰带 0 空、背包区 2 有同类 7 → from=2, to=0
+        let h = hero_with(vec![None, None, Some(7), Some(9)]);
+        assert_eq!(belt_refill_move(7, &h), Some((2, 0)));
+        // 背包区无同类 → 不补
+        let h = hero_with(vec![None, None, Some(9)]);
+        assert_eq!(belt_refill_move(7, &h), None);
+        // 腰带都有货 → 不动
+        let h = hero_with(vec![Some(7), Some(7), Some(9)]);
+        assert_eq!(belt_refill_move(7, &h), None);
+        // 腰带 0 有货、1 空：从背包区找同类补到 1
+        let h = hero_with(vec![Some(7), None, Some(7)]);
+        assert_eq!(belt_refill_move(7, &h), Some((2, 1)));
+    }
 
     /// 布局常量对齐 C#（HeroDialogs.cs:261/:333；格子公式 :313/:336）
     #[test]
