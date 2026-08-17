@@ -536,7 +536,7 @@ fn hero_belt_refill_system(
         }
         return;
     }
-    let mut fired = false;
+    let mut transition_seen = false;
     for slot in 0..BELT_SLOTS {
         let cur = hero
             .inventory
@@ -545,6 +545,7 @@ fn hero_belt_refill_system(
             .map(|it| it.item_index);
         // 用尽跃迁：上一帧有、本帧空 → 按上一帧物品类型补回触发格
         if prev[slot].is_some() && cur.is_none() {
+            transition_seen = true;
             if let Some((from, to)) = belt_refill_move(prev[slot].unwrap_or(0), slot, &hero) {
                 net.send_packet(&mir2_shared::packets::client::item::MoveItem {
                     grid: mir2_shared::enums::MirGridType::HeroInventory,
@@ -552,12 +553,13 @@ fn hero_belt_refill_system(
                     to,
                 });
                 tracing::info!("🧪 腰带补货: 英雄背包{} -> 腰带{}", from, to);
-                fired = true;
             }
         }
         prev[slot] = cur;
     }
-    if fired {
+    // 武装只活一次跃迁评估（无论是否命中）——封掉"耗尽但无同类"的
+    // 闩锁泄漏（审查复审：闩锁下后续取回/切英雄清空会误触回填）
+    if transition_seen {
         armed.0 = false;
     }
 }

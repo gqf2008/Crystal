@@ -879,8 +879,11 @@ fn secondary_hotkey_system(
             if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
                 == UseOutcome::Sent
             {
-                // #2611：腰带用尽补货武装（C# 补货挂在 UseItem 点击内）
-                belt_armed.0 = true;
+                // #2611：腰带用尽补货武装（C# :574 Item.Count == 1 才发——
+                // 只有用最后一瓶时武装，非耗尽使用不得闩锁）
+                if item.count == 1 {
+                    belt_armed.0 = true;
+                }
                 // 音效同英雄背包双击链路
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);

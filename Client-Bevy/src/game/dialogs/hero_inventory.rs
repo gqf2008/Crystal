@@ -678,8 +678,9 @@ fn hero_inv_click_system(
                 if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
-                    // #2611：腰带格（0/1）使用时武装补货（C# 补货挂 UseItem 内）
-                    if slot < crate::game::dialogs::hero_belt::BELT_SLOTS {
+                    // #2611：腰带格（0/1）使用时武装补货（C# :574 Item.Count==1
+                    // 才发——只有用最后一瓶时武装）
+                    if slot < crate::game::dialogs::hero_belt::BELT_SLOTS && item.count == 1 {
                         belt_armed.0 = true;
                     }
                     if let Some(sid) = item_use_sound_id(item) {
