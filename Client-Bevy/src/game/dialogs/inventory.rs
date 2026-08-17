@@ -271,9 +271,9 @@ fn inv_weight_bar_system(
     };
     for mut sp in &mut bars {
         sp.color = tint;
-        // 左端对齐裁宽（锚点 TOP_LEFT，宽度按比例缩放；位置由 DialogRoot
-        // 随对话框拖动，本系统不写 Transform）
-        sp.custom_size = Some(Vec2::new(((84.0 - 3.0) * percent).max(0.001), 6.0));
+        // 左端对齐裁宽（锚点 TOP_LEFT，宽度按比例缩放；percent=0 不绘制——
+        // C# :402 早退；位置由 DialogRoot 随对话框拖动，本系统不写 Transform）
+        sp.custom_size = Some(Vec2::new((84.0 - 3.0) * percent, 6.0));
     }
 }
 
@@ -474,10 +474,11 @@ fn spawn_inventory_dialog(
         DialogWidget,
     ));
 
-    // 负重条（C# WeightBar Prguse[24] 实测 84x6 @(182,217)——批B 核实这是
-    // 局部坐标非对话框原点；按填充度裁宽 (W-3)*percent，InventoryDialog.cs:396-426。
+    // 负重条（C# WeightBar：Prguse[24] 实测 84x6，对话框内局部坐标 (182,217)——
+    // 批B 曾误把它当对话框原点，实为相对背包(0,0)的偏移）；按填充度裁宽
+    // (W-3)*percent，InventoryDialog.cs:396-426。
     // #2611 偏差：本机数据无 UI_32bit.Lib（>50% 的黄/红段素材缺失），三段
-    // 全用 Prguse[24] + 色调（白/黄/红）近似
+    // 全用 Prguse[24] + 色调（白/黄/红）近似；custom_size 缩放≈源矩形裁剪
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 24) {
         let e = spawn_ui_sprite(&mut commands, h, DIALOG_X + 182.0, DIALOG_Y + 217.0, 6.2, 1.0);
         commands.entity(e).insert((

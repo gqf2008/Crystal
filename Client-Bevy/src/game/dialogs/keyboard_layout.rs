@@ -807,6 +807,7 @@ fn secondary_hotkey_system(
     belt: Res<PotionBeltState>,
     hero: Res<crate::game::dialogs::hero::HeroState>,
     mut confirm: ResMut<InvDropConfirm>,
+    mut belt_armed: ResMut<crate::game::dialogs::hero_belt::HeroBeltUseArmed>,
 ) {
     if gate.0 {
         return;
@@ -878,6 +879,8 @@ fn secondary_hotkey_system(
             if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
                 == UseOutcome::Sent
             {
+                // #2611：腰带用尽补货武装（C# 补货挂在 UseItem 点击内）
+                belt_armed.0 = true;
                 // 音效同英雄背包双击链路
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);

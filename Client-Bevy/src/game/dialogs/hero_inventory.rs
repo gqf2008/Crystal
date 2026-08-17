@@ -602,6 +602,7 @@ fn hero_inv_click_system(
     mut last_hero_click: Local<Option<(usize, f64)>>,
     belt_visible: Res<crate::game::dialogs::hero_belt::HeroBeltVisible>,
     belt_vertical: Res<crate::game::dialogs::hero_belt::HeroBeltVertical>,
+    mut belt_armed: ResMut<crate::game::dialogs::hero_belt::HeroBeltUseArmed>,
 ) {
     // 网格格交互要求英雄背包开；腰带格独立（C# HeroBeltDialog 的 MirItemCell
     // 腰带可见即可点，审查 m3——网格格坐标区 (0..309, 0..190) 覆盖世界点击，
@@ -677,6 +678,10 @@ fn hero_inv_click_system(
                 if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
+                    // #2611：腰带格（0/1）使用时武装补货（C# 补货挂 UseItem 内）
+                    if slot < crate::game::dialogs::hero_belt::BELT_SLOTS {
+                        belt_armed.0 = true;
+                    }
                     if let Some(sid) = item_use_sound_id(item) {
                         feedback.sounds.push(sid);
                     }
