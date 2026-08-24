@@ -11004,6 +11004,8 @@ fn send_inspect_packet(
     body.extend_from_slice(&state.level.to_le_bytes());
     body.push(state.class as u8);
     body.push(state.gender as u8);
+    // #2611：允许观察标志（C# GameScene.cs:3159 从包读 AllowObserve 门控 Observe 按钮）
+    body.push(if state.allow_observe { 1u8 } else { 0u8 });
     // 装备信息（只发送已装备的；#2607 每件前置 slot u8——旧格式
     // filter 后槽位下标丢失，客户端 14 格网格无法定位）
     body.push(
@@ -11059,6 +11061,7 @@ fn send_basic_inspect_packet(
     body.extend_from_slice(&level.to_le_bytes());
     body.push(class);
     body.push(gender);
+    body.push(0u8); // allow_observe（#2611：离线排行查看默认禁观察）
     body.push(0u8); // 装备数 = 0
     let _ = gate_ref
         .tell(SendToClient {

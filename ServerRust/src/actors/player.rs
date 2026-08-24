@@ -3696,6 +3696,27 @@ impl Message<InventoryMoveItem> for PlayerActor {
     }
 }
 
+/// 英雄背包内移动（#2611：C.MoveItem Grid=HeroInventory——腰带补货路径。
+/// 英雄背包同步包由 WorldActor.send_hero_information_packet 统一发）
+pub struct InventoryMoveHeroItem {
+    pub from_grid: u8,
+    pub to_grid: u8,
+}
+
+impl Message<InventoryMoveHeroItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: InventoryMoveHeroItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state
+            .hero_inventory
+            .move_item(msg.from_grid, msg.to_grid)
+    }
+}
+
 /// 获取物品信息
 pub struct GetItemInfo {
     pub unique_id: u64,

@@ -280,6 +280,8 @@ pub enum ServerEvent {
         level: u16,
         class: u8,
         gender: u8,
+        /// #2611：允许观察（Observe 按钮门控）
+        allow_observe: bool,
         items: Vec<InspectItem>,
     },
     /// UpdateIntelligentCreatureList：宠物列表

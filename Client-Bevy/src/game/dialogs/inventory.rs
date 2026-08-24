@@ -245,6 +245,38 @@ pub struct InvGoldText;
 #[derive(Component)]
 pub struct InvWeightText;
 
+/// 负重条（C# WeightBar Prguse[24] 84x6，按填充度裁宽）
+#[derive(Component)]
+pub struct InvWeightBar;
+
+/// 负重条填充（C# WeightBar_BeforeDraw :396-426）：percent = weight/max_weight
+/// clamp [0,1]，宽度 = (84-3)*percent；色调近似三段（白≤50%/黄≤75%/红>75%，
+/// 原 UI_32bit[471/470] 素材本机数据缺失——#2611 偏差）
+fn inv_weight_bar_system(
+    hud: Res<HudState>,
+    mut bars: Query<&mut Sprite, With<InvWeightBar>>,
+) {
+    let max = hud.inventory.max_weight;
+    let percent = if max == 0 {
+        0.0
+    } else {
+        (hud.inventory.weight as f32 / max as f32).clamp(0.0, 1.0)
+    };
+    let tint = if percent <= 0.50 {
+        Color::srgb(1.0, 1.0, 1.0)
+    } else if percent <= 0.75 {
+        Color::srgb(1.0, 0.85, 0.3)
+    } else {
+        Color::srgb(1.0, 0.35, 0.25)
+    };
+    for mut sp in &mut bars {
+        sp.color = tint;
+        // 左端对齐裁宽（锚点 TOP_LEFT，宽度按比例缩放；percent=0 不绘制——
+        // C# :402 早退；位置由 DialogRoot 随对话框拖动，本系统不写 Transform）
+        sp.custom_size = Some(Vec2::new((84.0 - 3.0) * percent, 6.0));
+    }
+}
+
 pub struct InventoryDialogPlugin;
 
 impl Plugin for InventoryDialogPlugin {
@@ -262,6 +294,7 @@ impl Plugin for InventoryDialogPlugin {
             (
                 inv_grid_sync_system,
                 inventory_ui_system,
+                inv_weight_bar_system,
                 inv_selection_system,
                 inv_tooltip_system,
                 inv_socket_open_system,
@@ -440,6 +473,20 @@ fn spawn_inventory_dialog(
         DialogRoot(DialogKind::Inventory),
         DialogWidget,
     ));
+
+    // 负重条（C# WeightBar：Prguse[24] 实测 84x6，对话框内局部坐标 (182,217)——
+    // 批B 曾误把它当对话框原点，实为相对背包(0,0)的偏移）；按填充度裁宽
+    // (W-3)*percent，InventoryDialog.cs:396-426。
+    // #2611 偏差：本机数据无 UI_32bit.Lib（>50% 的黄/红段素材缺失），三段
+    // 全用 Prguse[24] + 色调（白/黄/红）近似；custom_size 缩放≈源矩形裁剪
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 24) {
+        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X + 182.0, DIALOG_Y + 217.0, 6.2, 1.0);
+        commands.entity(e).insert((
+            InvWeightBar,
+            DialogRoot(DialogKind::Inventory),
+            DialogWidget,
+        ));
+    }
 
     // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)，Size 72x23）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(

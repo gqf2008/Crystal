@@ -115,11 +115,12 @@ impl Plugin for HeroBeltPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HeroBeltVertical>();
         app.init_resource::<HeroBeltVisible>();
+        app.init_resource::<HeroBeltUseArmed>();
         app.add_systems(OnEnter(AppState::Game), spawn_hero_belt);
         app.add_systems(OnExit(AppState::Game), cleanup_hero_belt);
         app.add_systems(
             Update,
-            (hero_belt_ui_system, hero_belt_icon_system, ui_button_system)
+            (hero_belt_ui_system, hero_belt_icon_system, hero_belt_refill_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -492,9 +493,115 @@ pub fn hero_belt_item_uid(hero: &HeroState, i: usize) -> Option<u64> {
         .map(|it| it.unique_id)
 }
 
+/// 腰带补货武装标志（审查 MAJOR 窄修）：仅在发出 UseItem(HeroInventory)
+/// 且物品在腰带格 0/1 时置 true——补货只覆盖"用尽最后一瓶"，不覆盖
+/// 取回/切换英雄等其它清空路径（否则与 TakeBackHeroItem 拉锯回填死循环）
+#[derive(Resource, Default)]
+pub struct HeroBeltUseArmed(pub bool);
+
+/// 腰带自动补货纯函数（#2611，C# MirItemCell.cs:574-581）：to_slot 格从
+/// 「有 prev_index 物品」变为空 → 英雄背包区（2..）找第一件**同 item_index**
+/// → 返回 (from, to)（落点=触发格，C# To=ItemSlot）；无匹配返回 None
+pub fn belt_refill_move(prev_index: i32, to_slot: usize, hero: &HeroState) -> Option<(i32, i32)> {
+    if hero.inventory.get(to_slot).and_then(|s| s.as_ref()).is_some() {
+        return None; // 触发格未空
+    }
+    for from in BELT_SLOTS..hero.inventory.len() {
+        if let Some(it) = hero.inventory.get(from).and_then(|s| s.as_ref()) {
+            if it.item_index == prev_index {
+                return Some((from as i32, to_slot as i32));
+            }
+        }
+    }
+    None
+}
+
+/// 补货系统：仅 armed（UseItem 发出）时的 Some→None 跃迁触发——
+/// C# 补货挂在 UseItem 点击内（Item.Count==1 才发），帧跃迁门控配 armed
+/// 标志等价收窄；发 C.MoveItem(Grid=HeroInventory)（服务端 #2611 已加分支）
+fn hero_belt_refill_system(
+    hero: Res<HeroState>,
+    net: Res<crate::network::NetConnection>,
+    mut armed: ResMut<HeroBeltUseArmed>,
+    mut prev: Local<[Option<i32>; BELT_SLOTS]>,
+) {
+    if !armed.0 {
+        // 未武装也要同步记忆，避免武装瞬间的历史跃迁误触发
+        for slot in 0..BELT_SLOTS {
+            prev[slot] = hero
+                .inventory
+                .get(slot)
+                .and_then(|s| s.as_ref())
+                .map(|it| it.item_index);
+        }
+        return;
+    }
+    let mut transition_seen = false;
+    for slot in 0..BELT_SLOTS {
+        let cur = hero
+            .inventory
+            .get(slot)
+            .and_then(|s| s.as_ref())
+            .map(|it| it.item_index);
+        // 用尽跃迁：上一帧有、本帧空 → 按上一帧物品类型补回触发格
+        if prev[slot].is_some() && cur.is_none() {
+            transition_seen = true;
+            if let Some((from, to)) = belt_refill_move(prev[slot].unwrap_or(0), slot, &hero) {
+                net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                    grid: mir2_shared::enums::MirGridType::HeroInventory,
+                    from,
+                    to,
+                });
+                tracing::info!("🧪 腰带补货: 英雄背包{} -> 腰带{}", from, to);
+            }
+        }
+        prev[slot] = cur;
+    }
+    // 武装只活一次跃迁评估（无论是否命中）——封掉"耗尽但无同类"的
+    // 闩锁泄漏（审查复审：闩锁下后续取回/切英雄清空会误触回填）
+    if transition_seen {
+        armed.0 = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::dialogs::hero::HeroState;
+
+    fn hero_with(inv: Vec<Option<usize>>) -> HeroState {
+        // inv: Some(item_index)/None 逐槽；转成 HeroState（借用 InvItem 字段构造
+        // 太重——用真实 InvItem 最小构造）
+        let mut h = HeroState::default();
+        h.inventory = inv
+            .into_iter()
+            .map(|s| {
+                s.map(|idx| crate::game::dialogs::inventory::InvItem {
+                    unique_id: idx as u64 + 1,
+                    item_index: idx as i32,
+                    ..Default::default()
+                })
+            })
+            .collect();
+        h
+    }
+
+    /// 补货纯函数（C# 语义：用尽格按上一帧物品类型从背包区找同类，落回触发格）
+    #[test]
+    fn belt_refill_finds_same_index_in_backpack() {
+        // 腰带 0 空、背包区 2 有同类 7 → from=2, to=0
+        let h = hero_with(vec![None, None, Some(7), Some(9)]);
+        assert_eq!(belt_refill_move(7, 0, &h), Some((2, 0)));
+        // 背包区无同类 → 不补
+        let h = hero_with(vec![None, None, Some(9)]);
+        assert_eq!(belt_refill_move(7, 0, &h), None);
+        // 触发格未空 → 不动
+        let h = hero_with(vec![Some(7), Some(7), Some(9)]);
+        assert_eq!(belt_refill_move(7, 0, &h), None);
+        // 落点=触发格（审查 MINOR：腰带 0 空、触发格 1 用尽 → 补回 1 而非 0）
+        let h = hero_with(vec![None, None, Some(7)]);
+        assert_eq!(belt_refill_move(7, 1, &h), Some((2, 1)));
+    }
 
     /// 布局常量对齐 C#（HeroDialogs.cs:261/:333；格子公式 :313/:336）
     #[test]

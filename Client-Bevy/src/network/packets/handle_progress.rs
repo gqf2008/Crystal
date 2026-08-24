@@ -448,9 +448,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // ---- M46: 查看玩家 ----
         x if x == ServerPacketIds::PlayerInspect as i16 => {
             // [object_id u32][name dotnet][guild dotnet][level u16][class u8][gender u8]
-            // [count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
-            // （#2607：slot/image 为新增字段——服务端旧格式 filter 后槽位丢失、
-            //  客户端无 item_index→image 信息表，14 格网格两者必需）
+            // [allow_observe u8][count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
+            // （#2607：slot/image 新增；#2611：allow_observe 新增——Observe 按钮门控）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -460,6 +459,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             let level = match cur.read_u16::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return true; } };
             let class = cur.read_u8().unwrap_or(0);
             let gender = cur.read_u8().unwrap_or(0);
+            let allow_observe = cur.read_u8().unwrap_or(0) == 1;
             let count = cur.read_u8().unwrap_or(0) as usize;
             let mut items = Vec::with_capacity(count);
             let mut ok = true;
@@ -480,6 +480,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     level,
                     class,
                     gender,
+                    allow_observe,
                     items,
                 });
                 tracing::info!(

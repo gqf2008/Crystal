@@ -51,6 +51,8 @@ pub struct InspectState {
     pub level: u16,
     pub class: u8,
     pub gender: u8,
+    /// 允许观察（#2611：Observe 按钮门控，服务端下发）
+    pub allow_observe: bool,
     pub items: Vec<InspectItem>,
 }
 
@@ -314,6 +316,7 @@ fn inspect_ui_system(
     net: Res<crate::network::NetConnection>,
     mut mail: ResMut<crate::game::dialogs::mail::MailState>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
     close: Query<&UiButton, (With<InspectClose>, Without<InspectBtn>)>,
     // 单查询分发（多 With<marker> 查询有 B0001 风险）；接线同 player_menu 既有实现
     btns: Query<(&UiButton, &InspectBtn)>,
@@ -378,12 +381,21 @@ fn inspect_ui_system(
                 net.send_packet(&mir2_shared::packets::client::trade::TradeRequest);
                 tracing::info!("🤝 [查看] 请求交易");
             }
-            // C# :2305-2315：C.Observe{Name}
+            // C# :2305-2315：C.Observe{Name}；AllowObserve=false 时不发包、
+            // 聊天系统消息提示（#2611：协议已带该字段，守卫落地）
             InspectBtnKind::Observe => {
-                net.send_packet(&crate::network::ObserveWire {
-                    name: state.name.clone(),
-                });
-                tracing::info!("👁️ [查看] 观察玩家 {}", state.name);
+                if state.allow_observe {
+                    net.send_packet(&crate::network::ObserveWire {
+                        name: state.name.clone(),
+                    });
+                    tracing::info!("👁️ [查看] 观察玩家 {}", state.name);
+                } else {
+                    chat.add_line(
+                        format!("{} 禁用了观察", state.name),
+                        Color::srgb(1.0, 0.85, 0.3),
+                        crate::game::chat::ChatChannel::System,
+                    );
+                }
             }
         }
     }
@@ -538,12 +550,13 @@ fn inspect_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::InspectPlayer { name, guild, level, class, gender, items } = ev {
+        if let ServerEvent::InspectPlayer { name, guild, level, class, gender, allow_observe, items } = ev {
             inspect.name = name.clone();
             inspect.guild = guild.clone();
             inspect.level = *level;
             inspect.class = *class;
             inspect.gender = *gender;
+            inspect.allow_observe = *allow_observe;
             inspect.items = items.clone();
             mgr.open(DialogKind::Inspect);
         }

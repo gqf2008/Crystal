@@ -109,6 +109,7 @@ impl Packet for MockPlayerInspect {
         writer.write_u16::<LittleEndian>(30)?; // level
         writer.write_u8(MirClass::Warrior as u8)?;
         writer.write_u8(MirGender::Male as u8)?;
+        writer.write_u8(1)?; // allow_observe（#2611）
         writer.write_u8(1)?; // 装备数
         writer.write_u8(0)?; // slot（服务端旧序 0=Weapon）
         writer.write_u64::<LittleEndian>(8001)?; // uid
