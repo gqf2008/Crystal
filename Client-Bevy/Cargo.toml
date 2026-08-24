@@ -51,13 +51,10 @@ lto = true
 codegen-units = 1
 strip = true
 
-# Windows 中文 IME 修复：winit 0.30 在 Windows 上屏蔽了 IME 原生组合窗/候选窗，
-# 假设应用用 Ime::Preedit 自绘；但中文 IME 经 GCS_COMPSTR 给的只是占位空格，
-# 真实拼音在 IME 自己的候选窗里（被 winit 吞了），导致"盲打"。
-# 本补丁恢复 WM_IME_SETCONTEXT / WM_IME_COMPOSITION 的 DefWindowProc，
-# 让原生候选窗正常弹出。见 ../vendor/winit-0.30.13 内 [CRYSTAL PATCH] 注释。
+# 仅保留 parley 本地补丁：上游 0.9.0 的 word/line_segmenter 用
+# new_for_non_complex_scripts（不加载 CJK 词典 → 中文/日文不渲染），改为 new_auto。
+# 注：winit 曾被打本地补丁恢复 WM_IME_SETCONTEXT，但 winit 0.30.13 上游已含该修复
+# （changelog v0.30.13），且本地 vendor 与 crates.io 同版本、无本地改动，故已移除。
 [patch.crates-io]
-winit = { path = "../vendor/winit-0.30.13" }
-# parley CJK 修复：new_for_non_complex_scripts -> new_auto（中文文字渲染）
 parley = { path = "vendor/parley" }
 
