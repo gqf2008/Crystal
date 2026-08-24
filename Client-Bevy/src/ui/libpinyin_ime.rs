@@ -2,12 +2,16 @@
 // libpinyin 内置拼音输入法引擎（与 mir2x 一致）
 // ============================================================================
 // 直接封装 GNU libpinyin（mir2x 通过 vcpkg 引入的 etorth/libpinyin fork + model20 数据），
-// 提供整句拼音预测（pinyin_guess_sentence_with_prefix + 候选堆栈 stk 逐段累积成句）、
+// 提供整句拼音预测（pinyin_guess_sentence_with_prefix + 候选堆栈逐段累积成句）、
 // 不完整拼音(PINYIN_INCOMPLETE)、模糊纠正(PINYIN_CORRECT_ALL)、divided/resplit 切分、
 // 动态词频(DYNAMIC_ADJUST)。
 //
-// 与原 mir2x ime.cpp 的差异：本模块用同步 recompute（游戏 IME 仅在 PreUpdate 单线程访问），
-// 不启后台线程；候选窗口保留在 pinyin_ime.rs 的 PinyinBar（自绘候选条）。
+// 交互模型（按独立审查 B2 修正）：**选中即上屏 + 剩余拼音重新组合**——
+// 选词时立刻把选中词提交给输入框，并把未消费的剩余拼音作为新组合继续（每次 recompute
+// 都对当前 input 重新 pinyin_reset + parse，保证新字母一定被解析，避免 stk 状态下
+// “选词后续打”候选停滞/上屏错乱）。
+//
+// 候选窗口保留在 pinyin_ime.rs 的 PinyinBar（自绘候选条）。
 // ----------------------------------------------------------------------------
 
 #![allow(non_camel_case_types)]
@@ -20,20 +24,16 @@ use std::ffi::CStr;
 type pinyin_context_t = std::ffi::c_void;
 type pinyin_instance_t = std::ffi::c_void;
 type lookup_candidate_t = std::ffi::c_void;
-type lookup_candidate_type_t = std::ffi::c_int;
 type guint = std::ffi::c_uint;
 type gchar = std::ffi::c_char;
 
-// ---- libpinyin 选项（pinyin.h enum）----
-const PINYIN_INCOMPLETE: guint = 0x1;
-const PINYIN_CORRECT_ALL: guint = 0x4;
-const USE_DIVIDED_TABLE: guint = 0x8;
-const USE_RESPLIT_TABLE: guint = 0x10;
-const DYNAMIC_ADJUST: guint = 0x20;
-const SORT_BY_PHRASE_LENGTH_AND_PINYIN_LENGTH_AND_FREQUENCY: guint = 0x1E;
-// lookup_candidate_type_t
-const NBEST_MATCH_CANDIDATE: lookup_candidate_type_t = 0;
-const NORMAL_MATCH_CANDIDATE: lookup_candidate_type_t = 1;
+// ---- libpinyin 选项位（etorth/libpinyin fork: src/storage/pinyin_custom2.h）----
+const PINYIN_INCOMPLETE: guint = 0x8; // 1U<<3
+const USE_DIVIDED_TABLE: guint = 0x80; // 1U<<7
+const USE_RESPLIT_TABLE: guint = 0x100; // 1U<<8
+const DYNAMIC_ADJUST: guint = 0x200; // 1U<<9
+const PINYIN_CORRECT_ALL: guint = 0xFF << 21; // 0x1FE00000
+const SORT_BY_PHRASE_LENGTH_AND_PINYIN_LENGTH_AND_FREQUENCY: guint = 0x1E; // fork pinyin.h sort_option_t
 
 extern "C" {
     fn pinyin_init(systemdir: *const gchar, userdir: *const gchar) -> *mut pinyin_context_t;
@@ -50,11 +50,6 @@ extern "C" {
         index: guint,
         candidate: *mut *mut lookup_candidate_t,
     ) -> bool;
-    fn pinyin_get_candidate_type(
-        instance: *mut pinyin_instance_t,
-        candidate: *mut lookup_candidate_t,
-        type_: *mut lookup_candidate_type_t,
-    ) -> bool;
     fn pinyin_get_candidate_string(
         instance: *mut pinyin_instance_t,
         candidate: *mut lookup_candidate_t,
@@ -70,23 +65,23 @@ extern "C" {
     fn pinyin_mask_out(context: *mut pinyin_context_t, unknown_1: guint, unknown_2: guint) -> bool;
 }
 
-/// libpinyin 引擎封装。每个实例持有一个 context + instance（仅在本线程访问，故不需要 Sync）。
+/// libpinyin 引擎封装。每个实例持有一个 context + instance（仅主线程访问，故只需 Send）。
 pub struct LibpinyinEngine {
     context: *mut pinyin_context_t,
     instance: *mut pinyin_instance_t,
-    /// 用户已输入的原始拼音串
+    /// 用户已输入的原始拼音串（选中部分提交后，这里只剩剩余拼音）
     input: String,
     /// 句子预测用的前缀（当前为空串；保留接口对齐 mir2x）
     prefix: String,
-    /// 待选中的候选下标（选中后在下一次 recompute 处理）
-    selection: Option<usize>,
     /// 当前候选列表
     candidates: Vec<String>,
-    /// 已选候选堆栈：(累计句子, 当前拼音偏移)
-    stk: Vec<(String, usize)>,
 }
 
-// raw pointer 仅在本机单线程访问（游戏 PreUpdate 一个系统），手动标记 Send 以便放进 Bevy Resource。
+// Bevy Resource 要求 Send + Sync。libpinyin 的 context/instance 非线程安全，这里手动标记。
+// SAFETY: context/instance 仅由 pinyin_ime_system（PreUpdate，单系统独占 ResMut）经 &mut self
+// 调用 libpinyin FFI；UI 系统只经 &self 读已缓存的自绘候选（candidates Vec），不触碰 FFI。
+// 同一时刻至多一个系统访问该资源，且不跨线程共享，故 `&LibpinyinEngine` 跨线程共享与
+// 并发调用 FFI 均不会发生 —— Send + Sync 均安全。
 unsafe impl Send for LibpinyinEngine {}
 unsafe impl Sync for LibpinyinEngine {}
 
@@ -121,23 +116,19 @@ impl LibpinyinEngine {
                 instance,
                 input: String::new(),
                 prefix: String::new(),
-                selection: None,
                 candidates: Vec::new(),
-                stk: Vec::new(),
             })
         }
     }
 
-    /// 清空输入、候选、堆栈（放弃当前组合）。
+    /// 清空输入与候选（放弃当前组合）。
     pub fn clear(&mut self) {
         unsafe {
             pinyin_reset(self.instance);
         }
         self.input.clear();
         self.prefix.clear();
-        self.selection = None;
         self.candidates.clear();
-        self.stk.clear();
     }
 
     pub fn feed(&mut self, c: char) {
@@ -146,25 +137,19 @@ impl LibpinyinEngine {
     }
 
     pub fn backspace(&mut self) {
-        if self.stk.is_empty() {
-            self.input.pop();
-        } else {
-            self.stk.pop();
-        }
+        self.input.pop();
         self.recompute();
     }
 
-    pub fn assign(&mut self, prefix: String, input: String) {
-        self.stk.clear();
-        self.selection = None;
-        self.prefix = prefix;
+    /// 重置并设置输入串（选中词提交后，把剩余拼音喂回来）。
+    pub fn set_input(&mut self, input: String) {
         self.input = input;
         self.recompute();
     }
 
-    /// 选中第 idx 个候选（下次 recompute 处理）。
-    pub fn select(&mut self, idx: usize) {
-        self.selection = Some(idx);
+    pub fn assign(&mut self, prefix: String, input: String) {
+        self.prefix = prefix;
+        self.input = input;
         self.recompute();
     }
 
@@ -181,86 +166,58 @@ impl LibpinyinEngine {
         self.input.is_empty()
     }
 
-    /// 整个输入串是否已被候选堆栈消费完（可整句上屏）。
-    pub fn done(&self) -> bool {
-        !self.stk.is_empty() && self.stk.last().map(|(_, off)| *off >= self.input.len()).unwrap_or(false)
-    }
-
-    /// 上屏结果：已选句 + 剩余未消费拼音。
-    pub fn result(&self) -> String {
-        if let Some((sentence, off)) = self.stk.last() {
-            let mut s = sentence.clone();
-            if *off < self.input.len() {
-                s.push_str(&self.input[*off..]);
+    /// 选中第 idx 个候选：返回 (选中词, 已消费的拼音字节数)，并重置实例。
+    /// 调用方负责把剩余拼音经 set_input 喂回继续组合。
+    pub fn choose(&mut self, idx: usize) -> Option<(String, usize)> {
+        if idx >= self.candidates.len() {
+            return None;
+        }
+        unsafe {
+            let mut cand: *mut lookup_candidate_t = std::ptr::null_mut();
+            if !pinyin_get_candidate(self.instance, idx as guint, &mut cand) || cand.is_null() {
+                return None;
             }
-            s
-        } else {
-            self.input.clone()
+            let mut word_ptr: *const gchar = std::ptr::null();
+            if !pinyin_get_candidate_string(self.instance, cand, &mut word_ptr) || word_ptr.is_null() {
+                return None;
+            }
+            let word = CStr::from_ptr(word_ptr).to_string_lossy().into_owned();
+            // 偏移 0：本实现每次都在“当前输入从头开始”的组合上选词
+            let new_offset = pinyin_choose_candidate(self.instance, 0, cand).max(0) as usize;
+            pinyin_reset(self.instance);
+            Some((word, new_offset))
         }
     }
 
-    /// 已累积成句的部分（done() 后等于上屏结果）。
-    pub fn sentence(&self) -> String {
-        self.stk.last().map(|(s, _)| s.clone()).unwrap_or_default()
-    }
-
-    /// 重建候选：处理 pending selection → 维护堆栈 → guess candidates。
+    /// 重建候选：对当前 input 重新 parse + guess（保证增量输入一定被解析）。
     fn recompute(&mut self) {
-        let ins = self.instance;
         unsafe {
             if self.input.is_empty() {
-                self.prefix.clear();
-                self.selection = None;
                 self.candidates.clear();
-                self.stk.clear();
-                pinyin_reset(ins);
+                pinyin_reset(self.instance);
                 return;
             }
-
-            // 1) 处理选中
-            if let Some(sel) = self.selection {
-                let mut num: guint = 0;
-                pinyin_get_n_candidate(ins, &mut num);
-                if sel < num as usize {
-                    let choice = sel;
-                    self.selection = None;
-                    let mut cand: *mut lookup_candidate_t = std::ptr::null_mut();
-                    pinyin_get_candidate(ins, choice as guint, &mut cand);
-                    let mut word_ptr: *const gchar = std::ptr::null();
-                    pinyin_get_candidate_string(ins, cand, &mut word_ptr);
-                    let word = CStr::from_ptr(word_ptr).to_string_lossy().into_owned();
-                    let mut typ: lookup_candidate_type_t = 0;
-                    pinyin_get_candidate_type(ins, cand, &mut typ);
-                    let (sentence, offset) = if (typ == NBEST_MATCH_CANDIDATE) || self.stk.is_empty() {
-                        (word.clone(), 0)
-                    } else {
-                        let (prev_sentence, prev_off) = self.stk.last().unwrap().clone();
-                        (prev_sentence + &word, prev_off)
-                    };
-                    let chosen = pinyin_choose_candidate(ins, offset, cand);
-                    self.stk.push((sentence, chosen.max(0) as usize));
-                } else {
-                    self.selection = None;
-                }
-            } else if self.stk.is_empty() {
-                let c_input = std::ffi::CString::new(self.input.as_str()).unwrap_or_default();
-                let c_prefix = std::ffi::CString::new(self.prefix.as_str()).unwrap_or_default();
-                pinyin_parse_more_full_pinyins(ins, c_input.as_ptr());
-                pinyin_guess_sentence_with_prefix(ins, c_prefix.as_ptr());
-            }
-
-            // 2) 候选
+            let c_input = std::ffi::CString::new(self.input.as_str()).unwrap_or_default();
+            let c_prefix = std::ffi::CString::new(self.prefix.as_str()).unwrap_or_default();
+            pinyin_reset(self.instance);
+            pinyin_parse_more_full_pinyins(self.instance, c_input.as_ptr());
+            pinyin_guess_sentence_with_prefix(self.instance, c_prefix.as_ptr());
             self.candidates.clear();
-            let offset = if self.stk.is_empty() { 0 } else { self.stk.last().unwrap().1 };
-            pinyin_guess_candidates(ins, offset, SORT_BY_PHRASE_LENGTH_AND_PINYIN_LENGTH_AND_FREQUENCY);
-            let mut num: guint = 0;
-            pinyin_get_n_candidate(ins, &mut num);
-            for i in 0..num {
-                let mut cand: *mut lookup_candidate_t = std::ptr::null_mut();
-                pinyin_get_candidate(ins, i, &mut cand);
-                let mut word_ptr: *const gchar = std::ptr::null();
-                pinyin_get_candidate_string(ins, cand, &mut word_ptr);
-                self.candidates.push(CStr::from_ptr(word_ptr).to_string_lossy().into_owned());
+            if pinyin_guess_candidates(self.instance, 0, SORT_BY_PHRASE_LENGTH_AND_PINYIN_LENGTH_AND_FREQUENCY) {
+                let mut num: guint = 0;
+                if pinyin_get_n_candidate(self.instance, &mut num) {
+                    for i in 0..num {
+                        let mut cand: *mut lookup_candidate_t = std::ptr::null_mut();
+                        if !pinyin_get_candidate(self.instance, i, &mut cand) || cand.is_null() {
+                            continue;
+                        }
+                        let mut word_ptr: *const gchar = std::ptr::null();
+                        if !pinyin_get_candidate_string(self.instance, cand, &mut word_ptr) || word_ptr.is_null() {
+                            continue;
+                        }
+                        self.candidates.push(CStr::from_ptr(word_ptr).to_string_lossy().into_owned());
+                    }
+                }
             }
         }
     }

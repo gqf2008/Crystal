@@ -103,7 +103,8 @@ fn build_libpinyin(root: &Path, install: &Path) {
         }
         fs::rename(&extracted, &src).unwrap_or_else(|e| panic!("rename {} -> src: {}", extracted.display(), e));
     }
-    // 2) model20 数据（可用 LIBPINYIN_MODEL_TARBALL 指定本地 tarball，跳过下载）
+    // 2) model20 数据（可用 LIBPINYIN_MODEL_TARBALL 指定本地 tarball，跳过下载）。
+    //    无论是否复用缓存包，都做 SHA512 校验，防止上次残留损坏包在解压/构建时出错。
     let model_tar = root.join("model20.text.tar.gz");
     if !model_tar.exists() {
         if let Ok(local) = env::var("LIBPINYIN_MODEL_TARBALL") {
@@ -115,8 +116,8 @@ fn build_libpinyin(root: &Path, install: &Path) {
         } else {
             download_with_fallback(&model_tar, MODEL_URLS);
         }
-        verify_sha512(&model_tar, MODEL_SHA512);
     }
+    verify_sha512(&model_tar, MODEL_SHA512);
     extract_into(&model_tar, &src.join("data"));
     // 3) autoreconf + configure + make + install
     run(Command::new("autoreconf").args(["-f", "-i"]).current_dir(&src), "autoreconf");
@@ -196,18 +197,34 @@ fn download_with_fallback(target: &Path, urls: &[&str]) {
 }
 
 fn verify_sha512(path: &Path, want: &str) {
-    let out = Command::new("shasum")
-        .args(["-a", "512"])
-        .arg(path)
-        .output()
-        .unwrap_or_else(|e| panic!("spawn shasum: {}", e));
-    let got = String::from_utf8_lossy(&out.stdout)
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_lowercase();
+    // macOS: shasum -a 512；Linux: sha512sum。两命令都试，兼容 CI(ubuntu) 与本地(mac)。
+    let tries: &[(&str, &[&str])] = &[
+        ("shasum", &["-a", "512"]),
+        ("sha512sum", &[]),
+    ];
+    let mut got = String::new();
+    for (cmd, args) in tries {
+        let out = Command::new(cmd).args(*args).arg(path).output();
+        if let Ok(o) = out {
+            if o.status.success() {
+                got = String::from_utf8_lossy(&o.stdout)
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                if !got.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
     if got != want {
-        panic!("SHA512 校验失败: {} != {}", got, want);
+        panic!(
+            "SHA512 校验失败: 得到 {}，期望 {}（文件: {}）",
+            got,
+            want,
+            path.display()
+        );
     }
     eprintln!("[libpinyin] SHA512 校验通过: {}", path.display());
 }
@@ -272,6 +289,7 @@ fn db_include_flag() -> String {
         "/opt/homebrew/opt/berkeley-db/include",
         "/usr/local/opt/berkeley-db/include",
         "/usr/include",
+        "/usr/local/include",
     ] {
         if Path::new(p).join("db.h").exists() {
             return format!("-I{}", p);
@@ -287,6 +305,9 @@ fn db_libdir() -> Option<PathBuf> {
     for p in [
         "/opt/homebrew/opt/berkeley-db/lib",
         "/usr/local/opt/berkeley-db/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib/aarch64-linux-gnu",
+        "/usr/lib64",
         "/usr/lib",
     ] {
         let pb = PathBuf::from(p);

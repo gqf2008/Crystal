@@ -109,9 +109,9 @@ impl PinyinIme {
         &self.composing
     }
 
-    /// 候选条左段显示文本：libpinyin 的“已选句 + 剩余拼音”，比原始拼音更贴近输入状态。
+    /// 候选条左段显示文本：当前组合拼音（剩余未上屏部分）。
     pub fn display_text(&self) -> String {
-        self.engine.result()
+        self.engine.input().to_string()
     }
 
     pub fn has_commit(&self) -> bool {
@@ -147,41 +147,42 @@ impl PinyinIme {
         }
     }
 
+    /// 选中候选：立即上屏选中词，剩余拼音继续组合（审查 B2 修正：选中即上屏 + 剩余续打）。
     fn select(&mut self, idx: usize) {
         let abs = self.page * CANDS_PER_PAGE + idx;
-        if abs < self.engine.candidates().len() {
-            self.engine.select(abs);
-            self.recompute();
-            // libpinyin 判定整句已消费完 → 上屏
-            if self.engine.done() {
-                let text = self.engine.result();
-                self.engine.clear();
-                self.commit(text);
+        if let Some((word, consumed)) = self.engine.choose(abs) {
+            // 上屏选中词
+            if let Some(existing) = &mut self.commit_pending {
+                existing.push_str(&word);
+            } else {
+                self.commit_pending = Some(word);
             }
+            // 剩余拼音继续组合（consumed 为已消费的 ASCII 拼音字节数）
+            if consumed < self.composing.len() {
+                self.composing = self.composing[consumed..].to_string();
+                self.engine.set_input(self.composing.clone());
+            } else {
+                self.composing.clear();
+                self.engine.clear();
+            }
+            self.page = 0;
+            self.recompute();
         }
     }
 
-    /// 空格 / Enter：组合中选首个候选；无候选且组合中则上屏原始拼音（逃生口）
+    /// 空格 / Enter：选首个候选（整句/词）；无候选且组合中则上屏原始拼音（逃生口）
     fn commit_default(&mut self) {
         if !self.candidates.is_empty() {
             self.select(0);
         } else if !self.composing.is_empty() {
-            // 词典无匹配：上屏原始字母，避免用户输入卡死
             let raw = std::mem::take(&mut self.composing);
             self.engine.clear();
-            self.commit(raw);
+            if let Some(existing) = &mut self.commit_pending {
+                existing.push_str(&raw);
+            } else {
+                self.commit_pending = Some(raw);
+            }
         }
-    }
-
-    fn commit(&mut self, s: String) {
-        if let Some(existing) = &mut self.commit_pending {
-            existing.push_str(&s);
-        } else {
-            self.commit_pending = Some(s);
-        }
-        self.composing.clear();
-        self.candidates.clear();
-        self.page = 0;
     }
 
     fn cancel(&mut self) {
@@ -779,6 +780,34 @@ mod tests {
         assert_eq!(ime.take_commit(), Some("你好吗我叫".to_string()));
         assert!(!ime.is_composing());
     }
+
+    /// 审查 B2：部分选词后继续输入——选中「你好」后剩余 "ma" 续打，候选/上屏不脱节。
+    #[test]
+    fn libpinyin_partial_select_then_continue() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        for c in "nihaoma".chars() {
+            ime.feed_letter(c);
+        }
+        let idx = ime
+            .candidates
+            .iter()
+            .position(|c| c == "你好")
+            .expect("nihaoma 候选中应含「你好」");
+        ime.select(idx);
+        // 选中词立即上屏
+        assert_eq!(ime.take_commit(), Some("你好".to_string()));
+        // 剩余拼音 "ma" 继续组合
+        assert_eq!(ime.composing, "ma");
+        assert!(ime.candidates.iter().any(|c| c == "吗"), "剩余 ma 候选应含「吗」，实际 {:?}", ime.candidates);
+        // 继续输入 wojiao → mawojiao
+        for c in "wojiao".chars() {
+            ime.feed_letter(c);
+        }
+        assert_eq!(ime.composing, "mawojiao");
+        assert!(ime.candidates.iter().any(|c| c == "吗我叫"), "mawojiao 候选应含「吗我叫」，实际 {:?}", ime.candidates);
+    }
+
 
     /// 空组合回归：无输入时候选为空且不 panic。
     #[test]
