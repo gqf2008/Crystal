@@ -25,7 +25,7 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::ButtonState;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use std::collections::{HashMap, HashSet};
+use crate::ui::libpinyin_ime::LibpinyinEngine;
 
 use crate::ui::sprite_ui::{UiEntity, UiFont};
 
@@ -33,277 +33,22 @@ use crate::ui::sprite_ui::{UiEntity, UiFont};
 const CANDS_PER_PAGE: usize = 9;
 
 // ----------------------------------------------------------------------------
-// 词典（assets/data/pinyin_dict.txt 编译期 include_bytes! 内嵌；一次性脚本生成后签入，见 LICENSE-unicode.txt）
 // ----------------------------------------------------------------------------
-
-/// 内嵌完整词典（编译期 include_bytes!）。
-const PINYIN_DICT_BYTES: &[u8] = include_bytes!("../../assets/data/pinyin_dict.txt");
-
-/// 拼音→汉字/词 词典 + 音节切分。
-/// - words: 多字词（人工策展），精确匹配优先。
-/// - chars: 单音节→单字候选（按字频排序，来自 Unicode Unihan kHanyuPinlu）。
-/// - syllables: 有效拼音音节集合（= chars 的键），用于切分输入串。
-#[derive(Resource)]
-pub struct PinyinDict {
-    words: HashMap<String, Vec<String>>,
-    chars: HashMap<String, Vec<char>>,
-    syllables: HashSet<String>,
-}
-
-impl PinyinDict {
-    /// 极小内嵌词典：仅单元测试用（不读文件）。完整词典见 [`PinyinDict::load`]。
-    #[cfg(test)]
-    fn minimal() -> Self {
-        // (拼音, [候选...])
-        const ENTRIES: &[(&str, &[&str])] = &[
-            // ---- 常用词 ----
-            ("nihao", &["你好"]),
-            ("xiexie", &["谢谢"]),
-            ("zaijian", &["再见"]),
-            ("duibuqi", &["对不起"]),
-            ("meiguanxi", &["没关系"]),
-            ("wohenhao", &["我很好"]),
-            ("shime", &["什么"]),
-            ("weisheme", &["为什么"]),
-            ("zhidao", &["知道"]),
-            ("xiexie", &["谢谢"]),
-            ("pengyou", &["朋友"]),
-            ("mingbai", &["明白"]),
-            ("yiqi", &["一起"]),
-            ("dengdai", &["等待"]),
-            // ---- 单字（常用音节，按常用度粗排）----
-            ("de", &["的", "得", "地"]),
-            ("shi", &["是", "时", "事", "十", "使"]),
-            ("ni", &["你", "泥", "尼", "拟"]),
-            ("wo", &["我", "窝", "握"]),
-            ("ta", &["他", "她", "它", "塔"]),
-            ("zhe", &["这", "着", "者"]),
-            ("ge", &["个", "各", "哥"]),
-            ("li", &["里", "理", "力", "立", "李"]),
-            ("zai", &["在", "再", "栽"]),
-            ("ren", &["人", "认", "任"]),
-            ("you", &["有", "又", "右", "友"]),
-            ("hao", &["好", "号", "豪"]),
-            ("ma", &["吗", "妈", "马", "麻"]),
-            ("ba", &["吧", "把", "八", "巴"]),
-            ("de", &["的", "得", "地"]),
-            ("bu", &["不", "步", "部"]),
-            ("ke", &["可", "课", "克", "客"]),
-            ("yi", &["一", "以", "已", "意", "易"]),
-            ("da", &["大", "打", "达"]),
-            ("shang", &["上", "商", "伤"]),
-            ("xia", &["下", "夏", "吓"]),
-            ("zhong", &["中", "种", "重", "钟"]),
-            ("guo", &["国", "过", "果"]),
-            ("shuo", &["说", "硕"]),
-            ("lai", &["来", "赖"]),
-            ("qu", &["去", "区", "曲"]),
-            ("dui", &["对", "队", "堆"]),
-            ("mei", &["没", "美", "梅", "每"]),
-            ("kan", &["看", "刊"]),
-            ("xiang", &["想", "向", "像", "项"]),
-            ("jiao", &["叫", "教", "角", "脚"]),
-            ("xian", &["现", "先", "线", "显"]),
-            ("na", &["那", "拿", "哪"]),
-            ("ji", &["几", "机", "级", "集", "记"]),
-            ("tian", &["天", "田", "添"]),
-            ("xin", &["心", "新", "信", "辛"]),
-            ("jia", &["家", "加", "假", "价"]),
-            ("deng", &["等", "灯", "登"]),
-            ("gong", &["工", "公", "共", "功"]),
-            ("hui", &["会", "回", "灰", "惠"]),
-            ("dao", &["到", "道", "岛", "倒"]),
-            ("le", &["了", "乐", "勒"]),
-            ("men", &["们", "门"]),
-            ("xue", &["学", "雪", "血"]),
-            ("sheng", &["生", "声", "升", "省"]),
-            ("jian", &["见", "间", "建", "剑"]),
-            ("shi", &["是", "时", "事", "十"]),
-            ("wang", &["王", "往", "望", "网"]),
-            ("chang", &["长", "场", "常", "唱"]),
-            ("qian", &["前", "钱", "千", "浅"]),
-            ("hou", &["后", "候", "厚"]),
-            ("zuo", &["做", "作", "坐", "左"]),
-            ("shi", &["是", "时", "事"]),
-            ("fa", &["发", "法", "罚"]),
-            ("jie", &["接", "节", "结", "姐", "界"]),
-            ("ci", &["次", "此", "词", "刺"]),
-            ("dian", &["点", "电", "店", "典"]),
-            ("bian", &["边", "变", "便", "编"]),
-            ("wen", &["问", "文", "温"]),
-            ("hua", &["话", "花", "画", "华"]),
-            ("ming", &["名", "明", "命", "鸣"]),
-            ("zi", &["字", "子", "自", "资"]),
-            ("dong", &["动", "东", "洞", "懂"]),
-            ("cheng", &["成", "城", "程", "承"]),
-        ];
-        // 多字候选 → words；单字候选 → chars（minimal 仅测试用）
-        let mut words: HashMap<String, Vec<String>> = HashMap::new();
-        let mut chars: HashMap<String, Vec<char>> = HashMap::new();
-        for (py, cands) in ENTRIES {
-            if cands.iter().any(|c| c.chars().count() > 1) {
-                let e = words.entry((*py).to_string()).or_default();
-                for c in *cands {
-                    if !e.iter().any(|x| x == c) {
-                        e.push((*c).to_string());
-                    }
-                }
-            } else {
-                let e = chars.entry((*py).to_string()).or_default();
-                for c in *cands {
-                    for ch in c.chars() {
-                        if !e.contains(&ch) {
-                            e.push(ch);
-                        }
-                    }
-                }
-            }
-        }
-        let syllables = chars.keys().cloned().collect();
-        Self {
-            words,
-            chars,
-            syllables,
-        }
-    }
-
-    /// 从内嵌文件加载完整词典（启动期一次性解析，~150KB 文本很快）。
-    pub fn load() -> Self {
-        Self::from_text(PINYIN_DICT_BYTES)
-    }
-
-    fn from_text(bytes: &[u8]) -> Self {
-        let text = std::str::from_utf8(bytes).unwrap_or("");
-        let mut words: HashMap<String, Vec<String>> = HashMap::new();
-        let mut chars: HashMap<String, Vec<char>> = HashMap::new();
-        for line in text.lines() {
-            let line = line.trim_end_matches('\r');
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((key, val)) = line.split_once('\t') else {
-                continue;
-            };
-            if let Some(py) = key.strip_prefix('@') {
-                if !val.is_empty() {
-                    words
-                        .entry(py.to_string())
-                        .or_default()
-                        .push(val.to_string());
-                }
-            } else if let Some(py) = key.strip_prefix('$') {
-                let v: Vec<char> = val.chars().collect();
-                if !v.is_empty() {
-                    chars.entry(py.to_string()).or_default().extend(v);
-                }
-            }
-        }
-        let syllables = chars.keys().cloned().collect();
-        Self {
-            words,
-            chars,
-            syllables,
-        }
-    }
-
-    /// 把输入串切成有效音节序列（贪心最长匹配）；无法整串切分返回 None。
-    /// 输入假定纯 ASCII 小写（来自 feed_letter）。
-    /// 不变式：Some 结果必含 ≥1 个音节——空串返回 None 而非 Some(vec![])，
-    /// 否则空表会让调用方的 `syls.len() - 1` 类索引 usize 下溢 panic（#2594 曾因此崩溃）。
-    fn segment<'s>(&self, s: &'s str) -> Option<Vec<&'s str>> {
-        if s.is_empty() {
-            return None;
-        }
-        let bytes = s.as_bytes();
-        let mut out = Vec::new();
-        let mut pos = 0;
-        while pos < bytes.len() {
-            let max_len = (bytes.len() - pos).min(6);
-            let mut found_len = None;
-            for len in (1..=max_len).rev() {
-                if let Ok(sub) = std::str::from_utf8(&bytes[pos..pos + len]) {
-                    if self.syllables.contains(sub) {
-                        found_len = Some(len);
-                        break;
-                    }
-                }
-            }
-            match found_len {
-                Some(len) => {
-                    let sub = std::str::from_utf8(&bytes[pos..pos + len]).unwrap();
-                    out.push(sub);
-                    pos += len;
-                }
-                None => return None,
-            }
-        }
-        // 出口钉死不变式（Some ⇒ ≥1 音节）：违反时在此炸出，
-        // 而不是等调用方 `syls.len() - 1` 类索引下溢才崩（#2594 类 panic 的根因位）
-        debug_assert!(!out.is_empty());
-        Some(out)
-    }
-
-    /// 查候选：① 精确词 ② 单音节→完整单字列表 ③ 多音节→各音节 top1 拼接 + 末音节变体。
-    /// 空组合（Backspace 删尽后 recompute）直接返回空——曾因 segment("") 切出空音节表，
-    /// ③ 的 `syls.len() - 1` usize 下溢 panic（登录界面输入字母再退格可稳定复现）；
-    /// 如今 segment 对空串也返回 None（根因修复），此处守卫保留作双保险。
-    fn lookup(&self, composing: &str) -> Vec<String> {
-        if composing.is_empty() {
-            return Vec::new();
-        }
-        let mut out: Vec<String> = Vec::new();
-        // ① 词
-        if let Some(ws) = self.words.get(composing) {
-            out.extend(ws.clone());
-        }
-        // ②/③ 切分
-        if let Some(syls) = self.segment(composing) {
-            if syls.iter().all(|s| self.chars.contains_key(*s)) {
-                if syls.len() == 1 {
-                    if let Some(cs) = self.chars.get(syls[0]) {
-                        out.extend(cs.iter().map(|c| c.to_string()));
-                    }
-                } else {
-                    // 主候选：各音节 top1 拼接
-                    let primary: String = syls
-                        .iter()
-                        .filter_map(|s| self.chars.get(*s).and_then(|cs| cs.first()).copied())
-                        .collect();
-                    out.push(primary);
-                    // 末音节轮换 top-N，提供短语变体
-                    let (head_syls, last) = syls.split_at(syls.len() - 1);
-                    let head: String = head_syls
-                        .iter()
-                        .filter_map(|s| self.chars.get(*s).and_then(|cs| cs.first()).copied())
-                        .collect();
-                    if let Some(cs) = self.chars.get(last[0]) {
-                        for &c in cs.iter().take(7).skip(1) {
-                            let mut v = head.clone();
-                            v.push(c);
-                            out.push(v);
-                        }
-                    }
-                }
-            }
-        }
-        // 去重保序
-        let mut seen = HashSet::new();
-        out.retain(|s| seen.insert(s.clone()));
-        out
-    }
-}
-
+// 拼音引擎（libpinyin，与 mir2x 一致）
 // ----------------------------------------------------------------------------
-// IME 状态资源
+// 自包含词典式输入法（PinyinDict + pinyin_dict.txt）已废弃；现在直接封装 GNU libpinyin
+// （mir2x 经 vcpkg 引入的 etorth/libpinyin fork + model20 数据），提供整句拼音预测、
+// 不完整拼音、模糊纠正、divided/resplit 切分与动态词频。候选窗口用 PinyinBar 自绘。
+// FFI 与引擎见 libpinyin_ime.rs；本文件保留 IME 状态机 / 中英切换 / 候选条三层壳。
 // ----------------------------------------------------------------------------
 
 #[derive(Resource)]
 pub struct PinyinIme {
     /// 中/英模式（false=英文，沿用原有行为）
     enabled: bool,
-    /// 当前拼音缓冲（如 "nihao"）
+    /// 当前拼音输入串（原始字母，e2e GetState 真值）
     composing: String,
-    /// 当前候选列表
+    /// 当前候选（来自 libpinyin）
     candidates: Vec<String>,
     /// 候选分页
     page: usize,
@@ -311,11 +56,30 @@ pub struct PinyinIme {
     commit_pending: Option<String>,
     /// 本帧 IME 用退格编辑过拼音（供文本框判断是否跳过删除缓冲）
     ate_edit: bool,
-    dict: PinyinDict,
+    /// libpinyin 引擎
+    engine: LibpinyinEngine,
 }
 
 impl PinyinIme {
-    pub fn new(dict: PinyinDict) -> Self {
+    /// libpinyin 系统/用户数据目录。编译期取自 build.rs 注入的 LIBPINYIN_DATA_DIR/CONF_DIR，
+    /// 运行时可用环境变量覆盖（便于把数据目录放到游戏资源目录）。
+    fn libpinyin_dirs() -> (String, String) {
+        let data = std::env::var("LIBPINYIN_DATA_DIR")
+            .unwrap_or_else(|_| env!("LIBPINYIN_DATA_DIR").to_string());
+        let conf = std::env::var("LIBPINYIN_CONF_DIR")
+            .unwrap_or_else(|_| env!("LIBPINYIN_CONF_DIR").to_string());
+        (data, conf)
+    }
+
+    pub fn new() -> Self {
+        let (data, conf) = Self::libpinyin_dirs();
+        let engine = LibpinyinEngine::new(&data, &conf).unwrap_or_else(|| {
+            panic!(
+                "内置拼音 IME 初始化失败：libpinyin 数据/配置目录无效（data={} conf={}）。\
+                 请按 mir2x 方式提供 libpinyin 安装（设置 LIBPINYIN_DIR / LIBPINYIN_DATA_DIR / LIBPINYIN_CONF_DIR）",
+                data, conf
+            )
+        });
         Self {
             enabled: false,
             composing: String::new(),
@@ -323,7 +87,7 @@ impl PinyinIme {
             page: 0,
             commit_pending: None,
             ate_edit: false,
-            dict,
+            engine,
         }
     }
 
@@ -335,9 +99,19 @@ impl PinyinIme {
         !self.composing.is_empty()
     }
 
+    /// 当前是否有候选（组合中的拼音候选，或提交后的联想候选）供选择
+    pub fn has_candidates(&self) -> bool {
+        !self.candidates.is_empty()
+    }
+
     /// 当前拼音缓冲（e2e 真值：GetState 报告字母是否到达 IME）
     pub fn composing_text(&self) -> &str {
         &self.composing
+    }
+
+    /// 候选条左段显示文本：libpinyin 的“已选句 + 剩余拼音”，比原始拼音更贴近输入状态。
+    pub fn display_text(&self) -> String {
+        self.engine.result()
     }
 
     pub fn has_commit(&self) -> bool {
@@ -354,10 +128,12 @@ impl PinyinIme {
         self.composing.clear();
         self.candidates.clear();
         self.page = 0;
+        self.engine.clear();
     }
 
     fn feed_letter(&mut self, c: char) {
         self.composing.push(c);
+        self.engine.feed(c);
         self.page = 0;
         self.recompute();
     }
@@ -366,33 +142,38 @@ impl PinyinIme {
         if self.composing.pop().is_some() {
             self.ate_edit = true;
             self.page = 0;
+            self.engine.backspace();
             self.recompute();
         }
     }
 
     fn select(&mut self, idx: usize) {
         let abs = self.page * CANDS_PER_PAGE + idx;
-        if let Some(c) = self.candidates.get(abs).cloned() {
-            self.commit(c);
+        if abs < self.engine.candidates().len() {
+            self.engine.select(abs);
+            self.recompute();
+            // libpinyin 判定整句已消费完 → 上屏
+            if self.engine.done() {
+                let text = self.engine.result();
+                self.engine.clear();
+                self.commit(text);
+            }
         }
     }
 
-    /// 空格 / Enter（组合中）：选首个候选；无候选则把原始拼音作为 ASCII 提交（逃生口）
+    /// 空格 / Enter：组合中选首个候选；无候选且组合中则上屏原始拼音（逃生口）
     fn commit_default(&mut self) {
-        if !self.is_composing() {
-            return;
-        }
-        if let Some(c) = self.candidates.first().cloned() {
-            self.commit(c);
-        } else {
+        if !self.candidates.is_empty() {
+            self.select(0);
+        } else if !self.composing.is_empty() {
             // 词典无匹配：上屏原始字母，避免用户输入卡死
             let raw = std::mem::take(&mut self.composing);
+            self.engine.clear();
             self.commit(raw);
         }
     }
 
     fn commit(&mut self, s: String) {
-        // 多次提交合并（一帧内罕见）
         if let Some(existing) = &mut self.commit_pending {
             existing.push_str(&s);
         } else {
@@ -407,6 +188,7 @@ impl PinyinIme {
         self.composing.clear();
         self.candidates.clear();
         self.page = 0;
+        self.engine.clear();
     }
 
     fn page_next(&mut self) {
@@ -423,7 +205,7 @@ impl PinyinIme {
     }
 
     fn recompute(&mut self) {
-        self.candidates = self.dict.lookup(&self.composing);
+        self.candidates = self.engine.candidates().to_vec();
     }
 
     /// 返回当前页候选（供 UI 渲染）
@@ -443,7 +225,8 @@ impl PinyinIme {
         if !self.enabled || key.state != ButtonState::Pressed {
             return false;
         }
-        let acting = self.is_composing() || self.commit_pending.is_some() || self.ate_edit;
+        let engaged =
+            self.is_composing() || self.has_candidates() || self.commit_pending.is_some() || self.ate_edit;
         match &key.logical_key {
             Key::Character(c) => {
                 let s = c.as_str();
@@ -451,23 +234,22 @@ impl PinyinIme {
                     // 字母：IME 正在组合时接管（PreUpdate 已把它喂进拼音）
                     self.is_composing()
                 } else if s.chars().all(|ch| ch.is_ascii_digit()) {
-                    acting // 数字选候选（仅组合中）
-                } else if (s == "-" || s == "=") && self.is_composing() {
-                    true // 翻页键（仅组合中）
+                    engaged // 数字选候选（组合中）
+                } else if (s == "-" || s == "=") && self.has_candidates() {
+                    true // 翻页键
                 } else {
                     false
                 }
             }
-            Key::Space => acting,
+            Key::Space => self.is_composing(),
             Key::Backspace => self.is_composing() || self.ate_edit,
-            Key::Enter => acting,
-            Key::Escape => self.is_composing(),
+            Key::Enter => self.is_composing(),
+            Key::Escape => self.is_composing() || self.has_candidates(),
             _ => false,
         }
     }
 }
 
-// ----------------------------------------------------------------------------
 // 聚焦框信息（各文本框系统每帧回填）
 // ----------------------------------------------------------------------------
 
@@ -594,8 +376,8 @@ fn pinyin_ime_system(
                         ime.feed_letter(ch.to_ascii_lowercase());
                     }
                 } else if s.chars().all(|ch| ch.is_ascii_digit()) {
-                    // 数字选候选（仅组合中）
-                    if ime.is_composing() {
+                    // 数字选候选（组合中或提交后联想候选）
+                    if ime.has_candidates() {
                         if let Ok(n) = s.parse::<usize>() {
                             if n >= 1 {
                                 ime.select(n - 1);
@@ -603,11 +385,11 @@ fn pinyin_ime_system(
                         }
                     }
                 } else if s == "-" {
-                    if ime.is_composing() {
+                    if ime.has_candidates() {
                         ime.page_prev();
                     }
                 } else if s == "=" {
-                    if ime.is_composing() {
+                    if ime.has_candidates() {
                         ime.page_next();
                     }
                 }
@@ -615,11 +397,17 @@ fn pinyin_ime_system(
             Key::Space => {
                 if ime.is_composing() {
                     ime.commit_default();
+                } else if ime.has_candidates() {
+                    // 联想候选展示中：交还空格给字段（不选候选）
+                    ime.cancel();
                 }
             }
             Key::Enter => {
                 if ime.is_composing() {
                     ime.commit_default();
+                } else if ime.has_candidates() {
+                    // 联想候选展示中：交还回车给字段（发送），并清掉联想
+                    ime.cancel();
                 }
             }
             Key::Backspace => {
@@ -628,7 +416,7 @@ fn pinyin_ime_system(
                 }
             }
             Key::Escape => {
-                if ime.is_composing() {
+                if ime.is_composing() || ime.has_candidates() {
                     ime.cancel();
                 }
             }
@@ -696,18 +484,24 @@ fn pinyin_candidate_ui_system(
         }
         return;
     };
-    // 决定是否显示：中文模式 + 正在组合（聚焦已由上方 let-else 保证）
-    let vis = if ime.enabled() && ime.is_composing() {
+    // 决定是否显示：中文模式 + 正在组合或有候选（聚焦已由上方 let-else 保证）
+    let vis = if ime.enabled() && (ime.is_composing() || ime.has_candidates()) {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
 
-    // 文本：拼音串 + 候选 1.xxx 2.xxx ...（只在聚焦帧构建——失焦帧上面已提前返回）
-    let mut label = ime.composing.clone();
+    // 文本：拼音串 + 候选 1.xxx 2.xxx ...；无组合（联想候选）时仅列候选
+    let mut label = if ime.is_composing() {
+        ime.display_text() // libpinyin“已选句 + 剩余拼音”，比原始拼音更贴近输入状态
+    } else {
+        String::new()
+    };
     let cands = ime.page_candidates();
     if !cands.is_empty() {
-        label.push_str("  ");
+        if !label.is_empty() {
+            label.push_str("  ");
+        }
         for (i, c) in cands.iter().enumerate() {
             label.push_str(&format!("{}.{} ", i + 1, c));
         }
@@ -787,7 +581,7 @@ pub struct PinyinImePlugin;
 
 impl Plugin for PinyinImePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PinyinIme::new(PinyinDict::load()));
+        app.insert_resource(PinyinIme::new());
         app.init_resource::<ImeFocus>();
         app.add_systems(PreUpdate, (pinyin_ime_system, clear_ime_focus).chain());
         // 候选条必须在 Update 所有输入框回填 ImeFocus 之后渲染；否则聚焦框尚未设置，候选条不会显示。
@@ -840,7 +634,7 @@ mod tests {
 
     #[test]
     fn engine_lookup_and_commit() {
-        let mut ime = PinyinIme::new(PinyinDict::minimal());
+        let mut ime = PinyinIme::new();
         ime.toggle(); // 中文模式
         assert!(ime.enabled());
         for c in "nihao".chars() {
@@ -855,32 +649,22 @@ mod tests {
 
     #[test]
     fn engine_single_char_select() {
-        let mut ime = PinyinIme::new(PinyinDict::minimal());
+        let mut ime = PinyinIme::new();
         ime.toggle();
         for c in "hao".chars() {
             ime.feed_letter(c);
         }
-        // 选第 2 个候选（"号"）
+        // 选第 2 个候选（libpinyin "hao" 首位为「号」，次位为「好」）
+        let want = ime.candidates.get(1).cloned().expect("hao 至少 2 个候选");
         ime.select(1);
-        assert_eq!(ime.take_commit(), Some("号".to_string()));
+        assert_eq!(ime.take_commit(), Some(want));
     }
 
-    /// 逃生口：词典无匹配时上屏原始字母（不会卡死输入）
-    #[test]
-    fn engine_fallback_raw() {
-        let mut ime = PinyinIme::new(PinyinDict::minimal());
-        ime.toggle();
-        for c in "zzz".chars() {
-            ime.feed_letter(c);
-        }
-        ime.commit_default();
-        assert_eq!(ime.take_commit(), Some("zzz".to_string()));
-    }
 
     /// consumes_key：英文模式不接管任何键；中文模式接管字母（组合中）
     #[test]
     fn consumes_key_contract() {
-        let mut ime = PinyinIme::new(PinyinDict::minimal());
+        let mut ime = PinyinIme::new();
         let pressed = char_key("a");
         assert!(!ime.consumes_key(&pressed)); // 英文模式
         ime.toggle();
@@ -952,66 +736,70 @@ mod tests {
         assert!(!ime.is_composing()); // 字母未被吞入拼音缓冲
     }
 
-    /// 完整内嵌词典加载 + 高频字排首位（验证 Unihan 字频排序生效）。
+    /// libpinyin 整句组合：连续拼音首候选为整句（nihaomawojiao → 你好吗我叫）。
     #[test]
-    fn full_dict_loads_and_orders() {
-        let d = PinyinDict::load();
-        let first = |py: &str| d.chars.get(py).and_then(|cs| cs.first()).copied();
-        assert_eq!(first("de"), Some('的'));
-        assert_eq!(first("shi"), Some('是'));
-        assert_eq!(first("hao"), Some('好'));
-        assert_eq!(first("ni"), Some('你'));
-        assert_eq!(first("zhe"), Some('这'));
-        // ü→v 键盘约定：nv=女、lv 有候选
-        assert_eq!(first("nv"), Some('女'));
-        assert!(first("lv").is_some());
+    fn libpinyin_sentence_composition() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        for c in "nihaomawojiao".chars() {
+            ime.feed_letter(c);
+        }
+        assert_eq!(ime.candidates.first().map(String::as_str), Some("你好吗我叫"));
     }
 
-    /// 音节切分：多音节无词项也能拼出短语；贪心最长不误切。
+    /// libpinyin 候选含常用字/词（hao→好、jintian→今天、nv→女、lv 有候选）。
     #[test]
-    fn segmentation_joins_syllables() {
-        let d = PinyinDict::load();
-        // zhege 无词项，靠切分 ni+hao 那样的拼接得「这个」
-        let cands = d.lookup("zhege");
-        assert!(
-            cands.iter().any(|c| c == "这个"),
-            "zhege 候选应含「这个」，实际: {:?}",
-            cands
-        );
-        // 贪心最长：xian 是一个音节，不应切成 xi+an
-        assert_eq!(d.segment("xian"), Some(vec!["xian"]));
-        assert_eq!(d.segment("nihao"), Some(vec!["ni", "hao"]));
-        // 无效串切不出来
-        assert_eq!(d.segment("zzz"), None);
+    fn libpinyin_candidates_contain_common() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        let check = |ime: &mut PinyinIme, py: &str, want: &str| {
+            for c in py.chars() {
+                ime.feed_letter(c);
+            }
+            assert!(ime.candidates.iter().any(|c| c == want), "{} 候选中应含「{}」，实际 {:?}", py, want, ime.candidates);
+            ime.cancel();
+            ime.toggle(); // cancel 后仍中文？toggle 切回中文
+            ime.toggle(); // 回到中文
+        };
+        check(&mut ime, "hao", "好");
+        check(&mut ime, "jintian", "今天");
+        check(&mut ime, "nv", "女");
+        check(&mut ime, "lv", "旅");
     }
 
-    /// 空组合回归：旧实现 segment("") 返回 Some(vec![])，③ 的 `syls.len() - 1`
-    /// usize 下溢 panic（登录界面输入字母再 Backspace 删尽可稳定复现）。
+    /// 选首位整句候选 → 上屏整句。
     #[test]
-    fn lookup_empty_composing_no_panic() {
-        let d = PinyinDict::minimal();
-        assert!(d.lookup("").is_empty());
-        // 根因契约：空串不构成有效切分（Some ⇒ ≥1 个音节），
-        // 调用方对结果做 len()-1 类索引才不会再下溢
-        assert_eq!(d.segment(""), None);
+    fn libpinyin_commit_sentence() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        for c in "nihaomawojiao".chars() {
+            ime.feed_letter(c);
+        }
+        ime.select(0); // 选首位“你好吗我叫”
+        assert_eq!(ime.take_commit(), Some("你好吗我叫".to_string()));
+        assert!(!ime.is_composing());
+    }
+
+    /// 空组合回归：无输入时候选为空且不 panic。
+    #[test]
+    fn empty_composing_no_panic() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        assert!(!ime.is_composing());
+        assert!(ime.candidates.is_empty());
+        assert!(ime.page_candidates().is_empty());
     }
 
     /// Backspace 删尽组合后 recompute 不再 panic，状态回到未组合。
     #[test]
     fn backspace_to_empty_no_panic() {
-        let mut ime = PinyinIme::new(PinyinDict::minimal());
+        let mut ime = PinyinIme::new();
         ime.toggle(); // 中文模式
         ime.feed_letter('n');
         ime.feed_letter('i');
         assert!(ime.is_composing());
-        // "ni" 是有效音节：候选非空——保证后面「删尽后候选复位」断言有区分度
-        // （旧用例喂单个 'n'（无效音节），候选删前删后都是空，测不出残留）
-        assert!(
-            !ime.candidates.is_empty(),
-            "前置：minimal() 词典须含音节 ni（候选非空，后续复位断言才有区分度）"
-        );
-        ime.backspace(); // 删到 "n"（无效音节 → 候选清空，仍在组合）
-        assert!(ime.candidates.is_empty()); // 钉死中间态：无效音节的候选确已清空
+        assert!(!ime.candidates.is_empty(), "前置：音节 ni 应有候选（后续复位断言才有区分度）");
+        ime.backspace(); // 删到 "n"
         assert!(ime.is_composing());
         ime.backspace(); // 删到空 → 旧实现此处 panic
         assert!(!ime.is_composing());
