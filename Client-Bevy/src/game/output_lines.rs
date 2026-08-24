@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use crate::network::server_event::ServerEvent;
 use crate::scenes::AppState;
 use crate::ui::outlined_text::{outline_on, OutlineShadow};
-use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
+use crate::ui::sprite_ui::{shared_cjk_font, spawn_ui_text, UiCjkFont, UiEntity, UiFont};
 
 /// 行数（C# :272 `new MirLabel[10]`）
 pub const OUTPUT_LINE_COUNT: usize = 10;
@@ -96,6 +96,7 @@ pub struct OutputLinesPlugin;
 impl Plugin for OutputLinesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OutputState>();
+        app.init_resource::<crate::ui::sprite_ui::UiCjkFont>();
         app.add_systems(OnEnter(AppState::Game), spawn_output_lines);
         app.add_systems(OnExit(AppState::Game), cleanup_output_lines);
         app.add_systems(Update, output_lines_system.run_if(in_state(AppState::Game)));
@@ -119,12 +120,11 @@ fn cleanup_output_lines(
 fn spawn_output_lines(
     mut commands: Commands,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // #2599 契约：动态中文文本（OutputLines 战报/系统提示）用宋体 CJK 主字体，
+    // 而非 Arial——Arial 无 CJK 字形，Han 回退在重排版时退化为 .notdef 豆腐。
+    let font = shared_cjk_font(&mut fonts, &mut cjk_font);
     spawn_output_lines_with(&mut commands, &font);
 }
 
