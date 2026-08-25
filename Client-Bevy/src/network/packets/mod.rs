@@ -4,6 +4,8 @@ use bevy::prelude::*;
 use mir2_shared::packets::base::{Packet, PacketHeader};
 use super::*;
 use crate::ui::login::AuthFeedback;
+// #2630：显式引入本模块构造的 UI 载荷类型（原经 super::* 隐私链隐式传入，见 handle_guild 注）。
+use crate::game::dialogs::mail::{MailDetail, MailEntry};
 
 mod handle_guild;
 mod handle_npc_items;
