@@ -311,12 +311,20 @@ fn spawn_quest_log(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 961) {
+        let e = spawn_ui_sprite(&mut commands, h, 200.0, 60.0, 6.0, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::QuestLog),
             QuestLogWidget,
             Visibility::Hidden,
+        ));
+    }
+    // 标题 Title[15]（C# QuestDiaryDialog：Title[15] @(18,9)，绘制「QUEST DIARY」）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 15) {
+        let e = spawn_ui_sprite(&mut commands, h, 218.0, 69.0, 6.1, 1.0);
+        commands.entity(e).insert((
+            DialogRoot(DialogKind::QuestLog),
+            QuestLogWidget,
         ));
     }
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
@@ -328,11 +336,33 @@ fn spawn_quest_log(
         360,
         361,
         362,
-        280.0 + 300.0,
-        83.0,
+        489.0,
+        63.0,
         7.0,
         20.0,
         20.0,
+    ) {
+        commands.entity(e).insert((
+            QuestLogClose,
+            DialogRoot(DialogKind::QuestLog),
+            QuestLogWidget,
+        ));
+    }
+    // 底部关闭按钮（C# QuestDiaryDialog：Title[193/194/195] @(200,436) 相对）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        193,
+        194,
+        195,
+        400.0,
+        496.0,
+        7.1,
+        76.0,
+        25.0,
     ) {
         commands.entity(e).insert((
             QuestLogClose,
@@ -346,8 +376,8 @@ fn spawn_quest_log(
             &mut commands,
             &font,
             "",
-            298.0,
-            120.0 + i as f32 * 20.0,
+            218.0,
+            100.0 + i as f32 * 20.0,
             12.0,
             Color::WHITE,
             8.0,
@@ -364,8 +394,8 @@ fn spawn_quest_log(
             &mut commands,
             &font,
             "追踪",
-            612.0,
-            120.0 + i as f32 * 20.0,
+            450.0,
+            100.0 + i as f32 * 20.0,
             11.0,
             Color::srgb(0.6, 0.9, 1.0),
             8.1,
@@ -373,7 +403,7 @@ fn spawn_quest_log(
         commands.entity(e).insert((
             QuestLogTrack(i),
             UiButton {
-                rect: (612.0, 120.0 + i as f32 * 20.0, 40.0, 18.0),
+                rect: (450.0, 100.0 + i as f32 * 20.0, 40.0, 18.0),
                 clicked: false,
             },
             DialogRoot(DialogKind::QuestLog),
@@ -385,8 +415,8 @@ fn spawn_quest_log(
         &mut commands,
         &font,
         "",
-        298.0,
-        100.0,
+        218.0,
+        80.0,
         12.0,
         Color::WHITE,
         8.0,
@@ -406,8 +436,8 @@ fn spawn_quest_log(
         206,
         207,
         208,
-        480.0,
-        365.0,
+        400.0,
+        345.0,
         8.3,
         76.0,
         25.0,
@@ -428,8 +458,8 @@ fn spawn_quest_log(
         270,
         271,
         272,
-        300.0,
-        365.0,
+        220.0,
+        345.0,
         8.4,
         76.0,
         25.0,
@@ -450,8 +480,8 @@ fn spawn_quest_log(
         273,
         274,
         275,
-        390.0,
-        365.0,
+        310.0,
+        345.0,
         8.4,
         76.0,
         25.0,
@@ -682,9 +712,9 @@ fn quest_log_ui_system(
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 for i in 0..8usize {
-                    let y = 120.0 + i as f32 * 20.0;
-                    if cursor.x >= 298.0
-                        && cursor.x <= 600.0
+                    let y = 100.0 + i as f32 * 20.0;
+                    if cursor.x >= 218.0
+                        && cursor.x <= 500.0
                         && cursor.y >= y
                         && cursor.y <= y + 18.0
                     {
@@ -723,14 +753,14 @@ fn quest_log_ui_system(
                 // #2535 可选奖励点击分段选择（行 12，横向等分；x 上限避开放弃按钮）
                 if let Some(info) = sel_info {
                     if !info.rewards_select_item.is_empty() {
-                        let y = 120.0 + 12.0 * 20.0;
-                        if cursor.x >= 298.0
-                            && cursor.x <= 478.0
+                        let y = 100.0 + 12.0 * 20.0;
+                        if cursor.x >= 218.0
+                            && cursor.x <= 398.0
                             && cursor.y >= y
                             && cursor.y <= y + 18.0
                         {
                             let n = info.rewards_select_item.len() as f32;
-                            let k = (((cursor.x - 298.0) / ((478.0 - 298.0) / n)) as usize)
+                            let k = (((cursor.x - 218.0) / ((398.0 - 218.0) / n)) as usize)
                                 .min(info.rewards_select_item.len() - 1);
                             state.selected_reward = Some(k);
                         }
