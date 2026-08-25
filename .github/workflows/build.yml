@@ -140,6 +140,7 @@ jobs:
             make
             tar
             curl
+            gettext
       - name: Add GNU target (Windows only)
         if: runner.os == 'Windows'
         run: rustup target add x86_64-pc-windows-gnu
