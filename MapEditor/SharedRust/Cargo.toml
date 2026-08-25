@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 
 [features]
 default = []
-client-parse = []  # Enable parse functions for ClientRust usage
+client-parse = []  # Enable parse functions for client usage（Client-Bevy 使用）
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

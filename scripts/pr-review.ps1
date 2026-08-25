@@ -41,7 +41,7 @@
 .PARAMETER WorktreesRoot
     评审 worktree 根目录，默认为主仓库同级的 "Crystal-prreview-worktrees"。
     实际 worktree 路径为 <WorktreesRoot>\pr-<n>；建议保持默认，
-    Client-Bevy 的 resolve_data_path 需要回退到主仓库数据目录（仓库根 Data/ 或 ClientRust/Data）。
+    Client-Bevy 的 resolve_data_path 需要回退到主仓库数据目录（仓库根 Data/）。
 
 .PARAMETER StateFile
     已评审状态 JSON 文件路径，默认 <WorktreesRoot>\state.json。
