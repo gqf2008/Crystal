@@ -14,16 +14,16 @@ use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
-use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
+use crate::game::sound::{SoundBank, SoundCache, play_sound_cached};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use mir2_shared::enums::MirGridType;
 
-use crate::ui::controls::{spawn_item_cell, ItemCellData};
+use crate::ui::controls::{ItemCellData, spawn_item_cell};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
 };
 
 /// 背包物品条目（网络 UserInformation 写入）
@@ -252,10 +252,7 @@ pub struct InvWeightBar;
 /// 负重条填充（C# WeightBar_BeforeDraw :396-426）：percent = weight/max_weight
 /// clamp [0,1]，宽度 = (84-3)*percent；色调近似三段（白≤50%/黄≤75%/红>75%，
 /// 原 UI_32bit[471/470] 素材本机数据缺失——#2611 偏差）
-fn inv_weight_bar_system(
-    hud: Res<HudState>,
-    mut bars: Query<&mut Sprite, With<InvWeightBar>>,
-) {
+fn inv_weight_bar_system(hud: Res<HudState>, mut bars: Query<&mut Sprite, With<InvWeightBar>>) {
     let max = hud.inventory.max_weight;
     let percent = if max == 0 {
         0.0
@@ -286,12 +283,15 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvPendingAmount>();
         app.init_resource::<ItemUseFeedback>();
         app.init_resource::<InventoryOrigin>();
+        // #2631：背包自我右移让位（交易开窗解耦；背包实体/Origin 归本模块所有）
+        app.add_message::<InventoryShiftRight>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
         app.add_systems(OnEnter(AppState::Game), spawn_inv_confirm);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
         app.add_systems(
             Update,
             (
+                inventory_shift_right_system,
                 inv_grid_sync_system,
                 inventory_ui_system,
                 inv_weight_bar_system,
@@ -480,7 +480,14 @@ fn spawn_inventory_dialog(
     // #2611 偏差：本机数据无 UI_32bit.Lib（>50% 的黄/红段素材缺失），三段
     // 全用 Prguse[24] + 色调（白/黄/红）近似；custom_size 缩放≈源矩形裁剪
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 24) {
-        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X + 182.0, DIALOG_Y + 217.0, 6.2, 1.0);
+        let e = spawn_ui_sprite(
+            &mut commands,
+            h,
+            DIALOG_X + 182.0,
+            DIALOG_Y + 217.0,
+            6.2,
+            1.0,
+        );
         commands.entity(e).insert((
             InvWeightBar,
             DialogRoot(DialogKind::Inventory),
@@ -555,6 +562,14 @@ impl Default for InventoryOrigin {
     }
 }
 
+/// 交易打开时请求背包右移让位（#2631 跨对话框解耦 Message）。
+/// C# TradeDialog.TradeAccept（TradeDialogs.cs:152-161）：
+/// `InventoryDialog.Location = new Point(ScreenWidth - inv.W, 0)` —— 背包推到屏幕右侧。
+/// 所有权：背包实体 Transform / UiButton.rect / [`InventoryOrigin`] 仅由本模块改写；
+/// 交易等外部对话框只发本 Message，由 [`inventory_shift_right_system`] 自我重排（幂等）。
+#[derive(Message, Debug)]
+pub struct InventoryShiftRight;
+
 /// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
 /// 位置 (i%8, (i/8)%5) 复用同一 8x5 区域（C# Grid Location = y%5）。
@@ -587,7 +602,17 @@ pub fn inv_slot_at(
 /// 背包格子索引（0..MAX_INV_SLOTS-1）
 #[derive(Component, Clone, Copy)]
 pub struct InvSlot(pub usize);
-/// 双击检测（记录最近一次左键点击的格子与时间）
+
+/// 双击检测 + 背包/英雄背包「当前选中」共享选择态（C# GameScene.SelectedCell 语义）。
+///
+/// **所有权（#2631）**：本状态归 inventory 模块所有；一切变更经下方公开方法进行，
+/// 外部对话框不直接读写字段——
+/// - 读当前背包选中格 → [`InvClickState::selected`]；
+/// - 「读并清」转移语义（仓库存入/腰带穿戴/英雄转移后清选中）→ [`InvClickState::take_selected`]；
+/// - 互斥清空（选中他处物品时取消背包选中）→ [`InvClickState::clear_selected`]；
+/// - 英雄背包选中格 → [`InvClickState::hero_selected`] / [`InvClickState::toggle_hero_selected`]
+///   / [`InvClickState::clear_hero_selected`]。
+/// 取代旧「靠注释约定谁负责清选中」的隐式契约。
 #[derive(Resource, Default)]
 pub struct InvClickState {
     pub last: Option<(usize, f64)>,
@@ -597,6 +622,42 @@ pub struct InvClickState {
     pub hero_selected: Option<usize>,
     /// #1346：删除模式（C# DelItemButton ToggleDeleteMode）
     pub delete_mode: bool,
+}
+
+impl InvClickState {
+    /// 读当前背包选中格（只读，不改动选择态）。
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// 「读并清」：取出当前背包选中格并清空（转移/穿戴/出售后不再保留选中）。
+    pub fn take_selected(&mut self) -> Option<usize> {
+        self.selected.take()
+    }
+
+    /// 清空背包选中（选中他处物品/取消时互斥；幂等）。
+    pub fn clear_selected(&mut self) {
+        self.selected = None;
+    }
+
+    /// 读英雄背包选中格（只读）。
+    pub fn hero_selected(&self) -> Option<usize> {
+        self.hero_selected
+    }
+
+    /// 清空英雄背包选中格（转移到英雄/取消时；幂等）。
+    pub fn clear_hero_selected(&mut self) {
+        self.hero_selected = None;
+    }
+
+    /// 切换英雄背包选中格（再点同一格取消；空格由调用方保证不传入）。
+    pub fn toggle_hero_selected(&mut self, slot: usize) {
+        self.hero_selected = if self.hero_selected == Some(slot) {
+            None
+        } else {
+            Some(slot)
+        };
+    }
 }
 
 /// 丢弃确认框（原版 C# MirMessageBox YesNo：DropTip）
@@ -1023,6 +1084,62 @@ fn inv_grid_sync_system(
             .entity(cell)
             .insert((DialogRoot(DialogKind::Inventory), DialogWidget, InvSlot(i)));
     }
+}
+
+/// 消费 [`InventoryShiftRight`]：交易开窗时背包自我右移让位（#2631 跨对话框解耦）。
+/// 逻辑等同 C# TradeDialog.TradeAccept；背包平移自身全部实体 Transform + UiButton.rect
+/// 并覆写 [`InventoryOrigin`]（幂等——重复推位时 min 已在目标处，delta=0）。
+/// 查询/过滤与旧 trade.rs `push_inventory_right` 完全一致（按 DialogKind::Inventory 过滤，
+/// 与本插件其它系统组件访问不重叠，无 B0001）。
+#[allow(clippy::type_complexity)]
+fn inventory_shift_right_system(
+    mut events: MessageReader<InventoryShiftRight>,
+    mut libs: ResMut<GameLibraries>,
+    mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
+    mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
+    mut inv_origin: ResMut<InventoryOrigin>,
+) {
+    let mut shift = false;
+    for _ in events.read() {
+        shift = true;
+    }
+    if !shift {
+        return;
+    }
+    let (inv_w, _) = inventory_real_size(&mut libs);
+    let target_x = 1024.0 - inv_w;
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX; // 屏幕 y
+    for (tf, root) in inv_entities.iter() {
+        if root.0 != DialogKind::Inventory {
+            continue;
+        }
+        min_x = min_x.min(tf.translation.x);
+        min_y = min_y.min(-tf.translation.y);
+    }
+    if min_x == f32::MAX {
+        return; // 背包未生成
+    }
+    let dx = target_x - min_x;
+    let dy_screen = 0.0 - min_y;
+    for (mut tf, root) in inv_entities.iter_mut() {
+        if root.0 != DialogKind::Inventory {
+            continue;
+        }
+        tf.translation.x += dx;
+        tf.translation.y -= dy_screen;
+    }
+    // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
+    // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
+    for (mut btn, root) in inv_buttons.iter_mut() {
+        if root.0 != DialogKind::Inventory {
+            continue;
+        }
+        btn.rect.0 += dx;
+        btn.rect.1 += dy_screen;
+    }
+    // 同步 InventoryOrigin（镶嵌面板锚定 / Ctrl+右键入口等读背包当前原点的系统跟随推位）
+    *inv_origin = InventoryOrigin(target_x, 0.0);
 }
 
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
@@ -1756,7 +1873,7 @@ fn inv_item_action_system(
     // 光标下的背包格（按当前页与格数，#276；原点取 InventoryOrigin——推位/拖动后仍准确）
     let page = hud.inventory.page;
     let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
-    let (ox, oy) = (misc.2 .0, misc.2 .1);
+    let (ox, oy) = (misc.2.0, misc.2.1);
     let slot_at = |cx: f32, cy: f32| -> Option<usize> {
         let range: std::ops::Range<usize> = match page {
             0 => 0..size.min(GRID_COLS * GRID_ROWS),
@@ -2082,6 +2199,85 @@ mod tests {
             .map(|(_, tf)| (tf.translation.x, tf.translation.y))
             .expect("扩容应补出格 1");
         assert_eq!(cell1, (sx, sy), "新格应在推位原点基准处（列 1）");
+    }
+
+    /// #2631：InventoryShiftRight → 背包自我右移让位（替代旧 trade.rs push_inventory_right）。
+    /// 平移背包实体 Transform + UiButton.rect 并覆写 InventoryOrigin；非背包实体不动。
+    #[test]
+    fn inventory_shift_right_repositions_entities_and_origin() {
+        use crate::ui::sprite_ui::UiButton;
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(Messages::<InventoryShiftRight>::default());
+        // 未初始化的 GameLibraries → inventory_real_size 走缺省 (316,236)，无磁盘 IO
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(InventoryOrigin::default());
+        // 背包两枚实体（初始位 (0,0) 基准：背景 (0,0)、首格 (9,37)）
+        world.spawn((
+            DialogRoot(DialogKind::Inventory),
+            Visibility::Visible,
+            Transform::from_xyz(0.0, 0.0, 6.0),
+        ));
+        world.spawn((
+            DialogRoot(DialogKind::Inventory),
+            Visibility::Visible,
+            Transform::from_xyz(9.0, -37.0, 6.5),
+        ));
+        // 非背包实体（交易窗）不应被平移
+        world.spawn((
+            DialogRoot(DialogKind::Trade),
+            Visibility::Visible,
+            Transform::from_xyz(298.0, -418.0, 6.0),
+        ));
+        // 背包按钮命中区（屏幕坐标 rect，不随 Transform 走，需同步）
+        world.spawn((
+            DialogRoot(DialogKind::Inventory),
+            UiButton {
+                rect: (289.0, 3.0, 20.0, 20.0),
+                clicked: false,
+            },
+        ));
+        world
+            .resource_mut::<Messages<InventoryShiftRight>>()
+            .write(InventoryShiftRight);
+
+        world
+            .run_system_once(inventory_shift_right_system)
+            .expect("shift right 应成功");
+
+        // target_x = 1024 - 316 = 708；顶缘屏幕 y -> 0
+        let mut q = world.query_filtered::<(&Transform, &DialogRoot), ()>();
+        let inv_min_x = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Inventory)
+            .map(|(tf, _)| tf.translation.x)
+            .fold(f32::MAX, f32::min);
+        assert_eq!(inv_min_x, 708.0, "背包左缘应右移到 target_x");
+        let inv_top = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Inventory)
+            .map(|(tf, _)| -tf.translation.y)
+            .fold(f32::MAX, f32::min);
+        assert_eq!(inv_top, 0.0, "背包顶缘应移到屏幕 y=0");
+        let trade_x = q
+            .iter(&world)
+            .find(|(_, r)| r.0 == DialogKind::Trade)
+            .map(|(tf, _)| tf.translation.x)
+            .expect("交易实体存在");
+        assert_eq!(trade_x, 298.0, "非背包实体不应移动");
+        // 按钮命中区同步平移（289 + 708）
+        let mut bq = world.query_filtered::<(&UiButton, &DialogRoot), ()>();
+        let btn_x = bq
+            .iter(&world)
+            .find(|(_, r)| r.0 == DialogKind::Inventory)
+            .map(|(b, _)| b.rect.0)
+            .expect("背包按钮存在");
+        assert_eq!(btn_x, 289.0 + 708.0, "按钮命中区应同步平移");
+        // InventoryOrigin 覆写
+        let origin = world.resource::<InventoryOrigin>();
+        assert_eq!((origin.0, origin.1), (708.0, 0.0));
     }
 
     fn item_with_type(t: ItemType) -> InvItem {

@@ -22,18 +22,18 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::inventory::{inventory_real_size, InvItem, InventoryOrigin, InvSlot};
+use crate::game::dialogs::inventory::{InvItem, InvSlot, InventoryShiftRight};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{spawn_item_cell, ItemCellData};
-use crate::ui::outlined_text::{outline_on, OutlineShadow};
+use crate::ui::controls::{ItemCellData, spawn_item_cell};
+use crate::ui::outlined_text::{OutlineShadow, outline_on};
 use crate::ui::sprite_ui::{
-    spawn_ui_text_anchored, ui_button_system, ui_image, ButtonFrames, UiButton, UiFont,
-    UiImageCache,
+    ButtonFrames, UiButton, UiFont, UiImageCache, spawn_ui_text_anchored, ui_button_system,
+    ui_image,
 };
 
 /// 交易物品（槽内显示用）
@@ -533,52 +533,9 @@ fn spawn_trade(
     }
 }
 
-/// C# TradeDialog.TradeAccept（TradeDialogs.cs:152-161）：
-/// InventoryDialog.Location = new Point(ScreenWidth - inv.W, 0) —— 背包推到屏幕右侧
-/// （平移全部背包实体；幂等——重复推位时 min 已在目标处，delta=0）
-fn push_inventory_right(
-    libs: &mut GameLibraries,
-    inv_entities: &mut Query<(&mut Transform, &DialogRoot), With<Visibility>>,
-    inv_buttons: &mut Query<(&mut UiButton, &DialogRoot)>,
-    inv_origin: &mut ResMut<InventoryOrigin>,
-) {
-    let (inv_w, _) = inventory_real_size(libs);
-    let target_x = 1024.0 - inv_w;
-    let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX; // 屏幕 y
-    for (tf, root) in inv_entities.iter() {
-        if root.0 != DialogKind::Inventory {
-            continue;
-        }
-        min_x = min_x.min(tf.translation.x);
-        min_y = min_y.min(-tf.translation.y);
-    }
-    if min_x == f32::MAX {
-        return; // 背包未生成
-    }
-    let dx = target_x - min_x;
-    let dy_screen = 0.0 - min_y;
-    for (mut tf, root) in inv_entities.iter_mut() {
-        if root.0 != DialogKind::Inventory {
-            continue;
-        }
-        tf.translation.x += dx;
-        tf.translation.y -= dy_screen;
-    }
-    // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
-    // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
-    for (mut btn, root) in inv_buttons.iter_mut() {
-        if root.0 != DialogKind::Inventory {
-            continue;
-        }
-        btn.rect.0 += dx;
-        btn.rect.1 += dy_screen;
-    }
-    // 同步 InventoryOrigin（批E 资源：镶嵌面板锚定 / Ctrl+右键入口等
-    // 读背包当前原点的系统跟随推位；与 storage 推位同款义务）
-    **inv_origin = InventoryOrigin(target_x, 0.0);
-}
-
+/// C# TradeDialog.TradeAccept（TradeDialogs.cs:152-161）：交易开窗把背包推到屏幕右侧。
+/// #2631：不再由本模块直接改写背包实体/原点（跨域直写已解耦）——交易开窗时发
+/// [`InventoryShiftRight`]，背包自己的 `inventory_shift_right_system` 响应并自我重排。
 /// C# TradeDialog.TradeReset（TradeDialogs.cs:163-177）：清双方物品/金币并解锁
 fn trade_reset(trade: &mut TradeState) {
     trade.my_items = vec![None; TRADE_SLOTS];
@@ -619,12 +576,8 @@ fn trade_ui_system(
     mut invite_widgets: Query<&mut Visibility, (With<TradeInviteWidget>, Without<TradeWidget>)>,
     // 锁定后确认钮 normal 帧常显 521（C# ChangeLockState:128-132）
     mut confirm: Query<&mut ButtonFrames, With<TradeConfirmBtn>>,
-    // 背包推位（开窗瞬间；Transform/UiButton 写方与显隐/文本写方组件不同，无 B0001）
-    mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
-    // 推位同步背包按钮命中区（屏幕坐标 rect；同上无 B0001）
-    mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
-    // 推位同步 InventoryOrigin（批E 资源：镶嵌锚定/入口等读背包原点的系统跟随）
-    mut inv_origin: ResMut<InventoryOrigin>,
+    // 开窗瞬间通知背包右移让位（#2631：背包实体/Origin 归 inventory 所有，这里只发 Message）
+    mut shift_right: MessageWriter<InventoryShiftRight>,
     mut was_visible: Local<bool>,
 ) {
     for mut vis in &mut widgets {
@@ -635,8 +588,9 @@ fn trade_ui_system(
         };
     }
     // 开窗瞬间推背包（C# TradeAccept；服务器开窗与本地邀请接受两条路都汇聚于此）
+    // #2631：解耦为发 InventoryShiftRight，由背包自我重排（可见行为不变：交易开时背包右移）
     if trade.visible && !*was_visible {
-        push_inventory_right(&mut libs, &mut inv_entities, &mut inv_buttons, &mut inv_origin);
+        shift_right.write(InventoryShiftRight);
     }
     *was_visible = trade.visible;
 
