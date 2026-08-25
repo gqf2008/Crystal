@@ -364,11 +364,9 @@ FodyWeavers.xsd
 /Build
 /.idea/.idea.Legend of Mir/.idea
 /.idea/config
-# 游戏数据（gitignore，不入库）：仓库根 Data/、Map/
+# 游戏数据（本地保留，不入库）：仓库根 Data/、Map/
 /Data
 /Map
-/ClientRust/Data
-/ClientRust/target
 /Server.MirForms/Envir
 /ServerRust/Daneo1989
 /SharedRust/target

@@ -6,7 +6,7 @@
 ## 前置条件
 - Windows + PowerShell 7（`pwsh`），已安装 [gh CLI](https://cli.github.com/) 并登录（`gh auth login`）
 - 本机已配置 Rust 工具链（`cargo`），且主仓库数据目录存在游戏数据（仓库根 `Data/` 或
-  `ClientRust/Data`，Client-Bevy 的 `resolve_data_path` 会自动回退）
+  仓库根 `Data/`，Client-Bevy 的 `resolve_data_path` 会自动回退）
 
 ## 用法
 ```powershell

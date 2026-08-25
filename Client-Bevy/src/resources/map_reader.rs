@@ -14,7 +14,7 @@ use std::path::Path;
 /// 2) `Client-Bevy/Data/` 下
 /// 3) `Client-Bevy/` 下
 /// 4) 仓库根 `Data/` 下
-/// 5) `../ClientRust/` 下（当前仓库的地图文件实际在这里）
+/// 5) 仓库根 `Map/` 下（原 ClientRust/Map，本地保留不入库）
 pub fn resolve_map_path(file_name: &str) -> String {
     let mut f = file_name.trim().replace('\\', "/");
     if f.is_empty() {
@@ -49,12 +49,12 @@ pub fn resolve_map_path(file_name: &str) -> String {
             let base = f.trim_start_matches("Map/");
             format!("{}/../../Crystal/ServerRust/Daneo1989/Maps/{}", manifest_dir, base)
         },
-        // 仓库根 Data/（gitignore 不入库，本地放共享游戏数据）
+        // 仓库根 Data/（原 ClientRust/Data，本地保留不入库）
         format!("{}/../Data/{}", manifest_dir, f),
         format!("{}/../../Crystal/Data/{}", manifest_dir, f),
-        // ClientRust 作为地图回落（其 Map 文件被跟踪，worktree 里也有）
-        format!("{}/../ClientRust/{}", manifest_dir, f),
-        format!("{}/../../Crystal/ClientRust/{}", manifest_dir, f),
+        // 仓库根 Map/（原 ClientRust/Map，本地保留不入库；f 形如 "Map/0.map"）
+        format!("{}/../{}", manifest_dir, f),
+        format!("{}/../../Crystal/{}", manifest_dir, f),
     ];
     for c in candidates {
         if Path::new(&c).exists() {

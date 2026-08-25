@@ -36,4 +36,4 @@
 - PowerShell 下 `gh pr create --body` 含反引号会失败：用 Python 写 `pr_body.md`，`--body-file pr_body.md`。
 - 提交用 `git add <具体文件>`，**不要 `git add -A`**（会混入 `pr_body.md`、`target/.rustc_info.json` 等临时/构建文件）。
 - 验证基线：ServerRust `cargo check --tests` + `cargo test`（当前 368 passed）；Client-Bevy `cargo check --tests` + `cargo test`（当前 179 passed）；SharedRust `cargo test`（172+11）。
-- 改 SharedRust 包结构需同步 `MapEditor/SharedRust` 副本 + 各客户端引用处（Client-Bevy / ClientRust）；协议以 Rust 客户端+服务端自洽为准（网络参考 Rust，不强制 C# 线格式）。
+- 改 SharedRust 包结构需同步 `MapEditor/SharedRust` 副本 + 各客户端引用处（Client-Bevy）；协议以 Rust 客户端+服务端自洽为准（网络参考 Rust，不强制 C# 线格式）。

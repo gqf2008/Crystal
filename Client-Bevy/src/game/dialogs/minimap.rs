@@ -615,7 +615,7 @@ fn minimap_ui_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resources::libraries::Libraries;
+    use crate::resources::libraries::{resolve_data_path, Libraries};
 
     /// 小地图布局对齐 C# MainDialogs.cs MiniMapDialog：
     /// - 背景 Prguse[2090] 128x154 / Prguse[2091] 128x45
@@ -623,7 +623,13 @@ mod tests {
     /// - ToggleButton(109,3)、MailButton(4,y)、BigMapButton(25,y)、LightSetting(102,y)
     #[test]
     fn minimap_layout_matches_csharp() {
-        let mut libs = Libraries::new("Data");
+        // 依赖真实 .Lib 数据：本地无数据（CI/新检出）时跳过，避免假红
+        let data_path = resolve_data_path();
+        if !data_path.join("Items.Lib").exists() {
+            eprintln!("跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源", data_path.display());
+            return;
+        }
+        let mut libs = Libraries::new(data_path);
         libs.ensure_initialized();
 
         let big = libs.get_image(LibraryName::Prguse, BG_BIG).expect("Prguse[2090] 缺失");
