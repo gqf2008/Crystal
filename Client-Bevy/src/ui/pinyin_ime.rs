@@ -44,7 +44,9 @@ const CANDS_PER_PAGE: usize = 9;
 
 #[derive(Resource)]
 pub struct PinyinIme {
-    /// 中/英模式（false=英文，沿用原有行为）
+    /// 中/英模式（true=中文、false=英文）。生产默认中文（常规 IME 激活，
+    /// 聚焦非密码文本框即可打拼音；Shift 单按切换中/英）；
+    /// `PinyinIme::new()` 保持英文默认用于测试隔离，插件构造后显式置中文。
     enabled: bool,
     /// 当前拼音输入串（原始字母，e2e GetState 真值）
     composing: String,
@@ -635,7 +637,11 @@ pub struct PinyinImePlugin;
 
 impl Plugin for PinyinImePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PinyinIme::new());
+        let mut ime = PinyinIme::new();
+        // #2635-1：默认中文（常规 IME 激活方式）——聚焦非密码文本框即可直接打拼音，
+        // 无需先按 Shift；Shift 单按仍可切回英文。
+        ime.enabled = true;
+        app.insert_resource(ime);
         app.init_resource::<ImeFocus>();
         app.add_systems(PreUpdate, (pinyin_ime_system, clear_ime_focus).chain());
         // 候选条必须在 Update 所有输入框回填 ImeFocus 之后渲染；否则聚焦框尚未设置，候选条不会显示。
@@ -739,11 +745,7 @@ mod tests {
         // 候选条 UI 系统读 Res<UiFont>，需提供（弱句柄 → 不 spawn 实体，逻辑测试足够）
         app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
 
-        // 1) Shift 单按切中文（无需聚焦）
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
+        // 1) 默认即中文（插件构造后 enabled=true，常规 IME 激活，无需 Shift）
         assert!(app.world().resource::<PinyinIme>().enabled());
 
         // 2) 喂 n-i-h-a-o（每帧重设 focus.rect，PreUpdate 末尾会被清空）
@@ -920,7 +922,7 @@ mod tests {
             f.rect = Some((100.0, 200.0, 120.0, 16.0));
         });
 
-        // 1) 首帧 spawn（Commands 下一帧生效）、次帧设文本（默认英文模式）
+        // 1) 首帧 spawn（Commands 下一帧生效）、次帧设文本（默认中文模式）
         app.update();
         app.update();
         {
@@ -928,11 +930,11 @@ mod tests {
                 .world_mut()
                 .query_filtered::<(&Text2d, &Visibility), With<PinyinModeChip>>();
             let (t, v) = q.single(app.world()).expect("字体强句柄后 chip 已 spawn");
-            assert_eq!(t.0, "英");
+            assert_eq!(t.0, "中");
             assert_eq!(*v, Visibility::Visible);
         }
 
-        // 2) Shift 单按 → 中文：文本与颜色同帧翻转
+        // 2) Shift 单按 → 英文：文本与颜色同帧翻转
         send(&mut app, shift_key(ButtonState::Pressed));
         app.update();
         send(&mut app, shift_key(ButtonState::Released));
@@ -942,11 +944,11 @@ mod tests {
                 .world_mut()
                 .query_filtered::<(&Text2d, &TextColor, &Transform), With<PinyinModeChip>>();
             let (t, c, tf) = q.single(app.world()).unwrap();
-            assert_eq!(t.0, "中");
+            assert_eq!(t.0, "英");
             let Color::Srgba(s) = c.0 else {
                 panic!("srgb 颜色")
             };
-            assert!((s.red - 1.0).abs() < 1e-3 && (s.blue - 0.3).abs() < 1e-3);
+            assert!((s.red - 0.55).abs() < 1e-3 && (s.blue - 0.55).abs() < 1e-3);
             // 位置：框右 (100+120+4, -(200+8-6))
             assert_eq!(tf.translation.x, 224.0);
             assert_eq!(tf.translation.y, -202.0);
@@ -1005,11 +1007,7 @@ mod tests {
         app.add_systems(Update, |mut f: ResMut<ImeFocus>| {
             f.rect = Some((10.0, 10.0, 100.0, 16.0));
         });
-        // 1) Shift 单按切中文
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
+        // 1) 默认即中文（插件构造后 enabled=true）
         assert!(app.world().resource::<PinyinIme>().enabled());
         // 2) 输入 n-i-h-a-o（每帧喂一个字母，候选条实体下一帧可见）
         for c in "nihao".chars() {
@@ -1058,13 +1056,7 @@ mod tests {
             },
         );
 
-        // 切中文（Shift 单按，无需聚焦）
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
-
-        // 聚焦 + 喂 n,i → 组合中：候选条应 Visible（spawn 的 Commands 下一帧生效）
+        // 默认即中文；聚焦 + 喂 n,i → 组合中：候选条应 Visible（spawn 的 Commands 下一帧生效）
         send(&mut app, char_key("n"));
         app.update();
         send(&mut app, char_key("i"));
@@ -1101,11 +1093,7 @@ mod tests {
         app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
         focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
 
-        // 切中文并组合（clear_ime_focus 每帧清空，故每帧 send 前重设 focus）
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
+        // 默认即中文并组合（clear_ime_focus 每帧清空，故每帧 send 前重设 focus）
         for c in "nihao".chars() {
             focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
             send(&mut app, char_key(&c.to_string()));
@@ -1163,11 +1151,7 @@ mod tests {
         app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
         focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
 
-        // 切到中文
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
+        // 默认即中文（插件构造后 enabled=true）
         assert!(app.world().resource::<PinyinIme>().enabled());
 
         // 按住 Shift 输大写 B（clean=false）→ OS 重复 Shift Pressed → 松开
@@ -1196,10 +1180,6 @@ mod tests {
         app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
         focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
 
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
         focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
         send(&mut app, char_key("n"));
         app.update();
