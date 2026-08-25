@@ -271,8 +271,9 @@ fn sell_panel_action_system(
         let dx = DIALOG_X + 20.0;
         let dy = DIALOG_Y + 55.0;
         if cursor.x >= dx && cursor.x <= dx + 75.0 && cursor.y >= dy && cursor.y <= dy + 75.0 {
-            // #2631：选中态归 inventory 所有，经 take_selected 读并清（放入面板后不再保留选中）
-            if let Some(sel) = inv_click.take_selected() {
+            // #2631：选中态归 inventory 所有，经接口访问。严格对齐旧码：仅当物品确实存在
+            // 才放入并清除选中；陈旧选中（物品已被移除）保留选中态，不用 take_selected。
+            if let Some(sel) = inv_click.selected() {
                 if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
                     state.target = Some(item.clone());
                     tracing::info!(
@@ -281,6 +282,7 @@ fn sell_panel_action_system(
                         item.unique_id,
                         item.count
                     );
+                    inv_click.clear_selected();
                 }
             }
         }

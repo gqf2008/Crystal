@@ -365,8 +365,9 @@ fn fishing_gear_system(
             return;
         }
         // 空槽 + 背包已选中物品 → 穿戴（C# EquipSlotItem GridTo=Fishing）
-        // #2631：选中态归 inventory 所有，经 take_selected 读并清（穿戴后不再保留选中）
-        if let Some(sel) = inv_click.take_selected() {
+        // #2631：选中态归 inventory 所有，经接口访问。严格对齐旧码：仅当物品确实存在
+        // 才发送并清除选中；陈旧选中（物品已被移除）保留选中态，不用 take_selected。
+        if let Some(sel) = inv_click.selected() {
             if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
                 net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
                     grid: mir2_shared::enums::MirGridType::Inventory,
@@ -375,6 +376,7 @@ fn fishing_gear_system(
                     grid_to: mir2_shared::enums::MirGridType::Fishing,
                 });
                 tracing::info!("🎣 穿戴钓具 {} -> 槽{}", item.name, slot);
+                inv_click.clear_selected();
             }
         }
         return;
