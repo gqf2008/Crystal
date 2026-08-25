@@ -8,7 +8,6 @@
 
 pub mod actor;
 pub mod control;
-pub mod event_bus;
 pub mod game;
 pub mod map_renderer;
 pub mod map_tile_anim;

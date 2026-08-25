@@ -15,11 +15,10 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
+use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use client_bevy::actor::ActorPlugin;
 use client_bevy::control::ControlPlugin;
-use client_bevy::event_bus::EventBusPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;
 use client_bevy::network::NetworkPlugin;
 use client_bevy::scenes::AppState;
@@ -110,7 +109,6 @@ fn main() {
             },
         );
     }
-    app.add_plugins(EventBusPlugin);
     app.add_plugins(ControlPlugin);
     app.add_plugins(PinyinImePlugin);
     // UI 字体链 Han 回退（复刻 C# GDI：Arial 缺中文→宋体）：Startup 一次注册系统宋体。
