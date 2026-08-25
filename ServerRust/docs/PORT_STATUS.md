@@ -9,7 +9,7 @@
 | 组件 | 文件 | 状态 |
 |------|------|------|
 | SharedRust (协议库) | 146 client + 273 server packets | ✅ 100% |
-| Client-Macroquad | 228 .rs, 46 ECS 系统, 37 对话框 | ✅ ~99% |
+| Client-Bevy（原 Client-Macroquad，macroquad 版已移除） | 228 .rs, 46 ECS 系统, 37 对话框 | ✅ ~99% |
 | ServerRust | 47+ .rs, kameo actor 架构 | ✅ ~90% |
 
 ---
@@ -116,7 +116,7 @@
 |----|--------|------|
 | SharedRust | 156 | 包体 roundtrip |
 | ServerRust | 106 (含 7 E2E) | 单元 + 端到端 |
-| Client-Macroquad | 10 E2E | Mock 网络 + ECS |
+| Client-Bevy（原 Client-Macroquad） | 10 E2E | Mock 网络 + ECS |
 
 ---
 

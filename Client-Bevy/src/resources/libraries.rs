@@ -128,7 +128,7 @@ impl std::fmt::Display for ArrayLibType {
 
 /// 解析 Data 根目录。
 ///
-/// 优先使用本 crate 的 Data/，其次共享其他客户端的数据目录
+/// 优先使用本 crate 的 Data/，其次仓库根 Data/ 与其他客户端的数据目录
 /// （避免复制数 GB 资源）。
 pub fn resolve_data_path() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -156,14 +156,13 @@ pub fn resolve_data_path() -> PathBuf {
         .collect();
     candidates.extend([
         format!("{}/Data", manifest_dir),
-        format!("{}/../Client-Macroquad/Data", manifest_dir),
-        format!("{}/../../Crystal/Client-Macroquad/Data", manifest_dir),
+        format!("{}/../Data", manifest_dir),
+        format!("{}/../../Crystal/Data", manifest_dir),
         format!("{}/../ClientRust/Data", manifest_dir),
         format!("{}/../../Crystal/ClientRust/Data", manifest_dir),
     ]);
     // 要求目录内确实存在 .Lib 数据（Items.Lib 是核心库）。
-    // 独立 worktree 里 Client-Macroquad/Data 被 gitignore 不存在，
-    // 会正确回落到主仓库的数据目录。
+    // Data 不入库（gitignore），独立 worktree 会正确回落到主仓库数据目录。
     for c in &candidates {
         let p = Path::new(c);
         if p.join("Items.Lib").exists() {

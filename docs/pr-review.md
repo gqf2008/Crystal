@@ -5,8 +5,8 @@
 
 ## 前置条件
 - Windows + PowerShell 7（`pwsh`），已安装 [gh CLI](https://cli.github.com/) 并登录（`gh auth login`）
-- 本机已配置 Rust 工具链（`cargo`），且主仓库 `Client-Macroquad/Data` 存在游戏数据
-  （Client-Bevy 的 `resolve_data_path` 会回退到主仓库数据目录）
+- 本机已配置 Rust 工具链（`cargo`），且主仓库数据目录存在游戏数据（仓库根 `Data/` 或
+  `ClientRust/Data`，Client-Bevy 的 `resolve_data_path` 会自动回退）
 
 ## 用法
 ```powershell
@@ -35,7 +35,6 @@ pwsh scripts/pr-review.ps1 -Watch -NoWake
    - Client-Bevy：`cargo check` + `cargo test --lib`
      （`--lib` 跑 47 个单测，避免依赖外部 Data 目录的集成测试 `ui_alignment`）
    - ServerRust / SharedRust：`cargo test`（SharedRust 仅改动时另跑 `cargo test --lib`）
-   - Client-Macroquad（仅当 Client-Bevy 未涉及）：`cargo check`
 4. 生成评审意见：
    - 验证失败 → `gh pr review --request-changes`
    - 验证通过 + PR 描述完整 → `--comment`（`-Approve` 时自动 approve）

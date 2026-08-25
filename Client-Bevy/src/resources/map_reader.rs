@@ -11,9 +11,10 @@ use std::path::Path;
 ///
 /// 搜索顺序（从高到低）：
 /// 1) 输入本身（可能是绝对路径或相对路径）
-/// 2) `Client-Macroquad/Data/` 下
-/// 3) `Client-Macroquad/` 下
-/// 4) `../ClientRust/` 下（当前仓库的地图文件实际在这里）
+/// 2) `Client-Bevy/Data/` 下
+/// 3) `Client-Bevy/` 下
+/// 4) 仓库根 `Data/` 下
+/// 5) `../ClientRust/` 下（当前仓库的地图文件实际在这里）
 pub fn resolve_map_path(file_name: &str) -> String {
     let mut f = file_name.trim().replace('\\', "/");
     if f.is_empty() {
@@ -38,7 +39,7 @@ pub fn resolve_map_path(file_name: &str) -> String {
         format!("{}/Data/{}", manifest_dir, f),
         format!("{}/{}", manifest_dir, f),
         // ServerRust/Daneo1989/Maps：真实服务器使用的地图（Map 2010 Ver 1.0 格式），
-        // 与服务器坐标体系一致——客户端必须加载它而不是 Client-Macroquad 的 Type100 转换版（#57 实测坐标错位）
+        // 与服务器坐标体系一致——客户端必须加载它而不是旧 Type100 转换版（#57 实测坐标错位）
         // f 形如 "Map/0.map"，Daneo1989/Maps 下直接是 "0.map"，需去掉前缀
         {
             let base = f.trim_start_matches("Map/");
@@ -48,12 +49,9 @@ pub fn resolve_map_path(file_name: &str) -> String {
             let base = f.trim_start_matches("Map/");
             format!("{}/../../Crystal/ServerRust/Daneo1989/Maps/{}", manifest_dir, base)
         },
-        // 共享其他客户端的数据目录（避免复制数 GB 资源）
-        format!("{}/../Client-Macroquad/Data/{}", manifest_dir, f),
-        format!("{}/../Client-Macroquad/{}", manifest_dir, f),
-        // 独立 worktree（GitHub/Crystal-bevy）→ 主仓库的 Client-Macroquad
-        format!("{}/../../Crystal/Client-Macroquad/Data/{}", manifest_dir, f),
-        format!("{}/../../Crystal/Client-Macroquad/{}", manifest_dir, f),
+        // 仓库根 Data/（gitignore 不入库，本地放共享游戏数据）
+        format!("{}/../Data/{}", manifest_dir, f),
+        format!("{}/../../Crystal/Data/{}", manifest_dir, f),
         // ClientRust 作为地图回落（其 Map 文件被跟踪，worktree 里也有）
         format!("{}/../ClientRust/{}", manifest_dir, f),
         format!("{}/../../Crystal/ClientRust/{}", manifest_dir, f),
