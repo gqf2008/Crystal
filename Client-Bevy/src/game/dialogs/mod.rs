@@ -123,6 +123,11 @@ pub struct DialogManager {
     pub open: Vec<DialogKind>,
 }
 
+/// 恒可见标记：挂该组件的实体不随 `DialogManager.open` 门控显隐（如 C# DuraStatusDialog
+/// 切换钮——对话框关闭也恒可见）。`enforce_dialog_visibility` 会跳过它。
+#[derive(Component)]
+pub struct AlwaysVisible;
+
 impl DialogManager {
     pub fn is_open(&self, kind: DialogKind) -> bool {
         self.open.contains(&kind)
@@ -520,6 +525,20 @@ fn bump_dialog_z(
 
 pub struct DialogsPlugin;
 
+/// 通用对话框可见性兜底（#幽灵/泄漏）：PostUpdate 强制所有挂 `DialogRoot(kind)` 且
+/// kind 不在 `DialogManager.open` 的实体隐藏。根治"未 open 却 Visible"的控件泄漏——
+/// 各对话框 ui_system 若漏了部分子控件门控，会被这里兜底。跳过 `AlwaysVisible`。
+fn enforce_dialog_visibility(
+    mgr: Res<DialogManager>,
+    mut q: Query<(&DialogRoot, &mut Visibility), Without<AlwaysVisible>>,
+) {
+    for (root, mut vis) in &mut q {
+        if !mgr.is_open(root.0) && *vis == Visibility::Visible {
+            *vis = Visibility::Hidden;
+        }
+    }
+}
+
 impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogManager>();
@@ -528,6 +547,12 @@ impl Plugin for DialogsPlugin {
         app.add_plugins(hero_equipment::HeroEquipmentPlugin);
         app.add_plugins(hero_skills::HeroSkillPlugin);
         // 先置顶再开始拖动：点击重叠窗口时，先让被点窗口到最前，再由 drag 选中它。
+        // 通用对话框可见性兜底：PostUpdate（所有 Update 对话框 ui_system 之后）强制隐藏
+        // 未 open 的挂 DialogRoot 实体，消除控件泄漏叠加（清理"一堆 UI 堆屏幕"）。
+        app.add_systems(
+            PostUpdate,
+            enforce_dialog_visibility.run_if(in_state(AppState::Game)),
+        );
         app.add_systems(
             Update,
             (dialog_front_system, dialog_drag_system)

@@ -141,6 +141,9 @@ fn spawn_dura_status(
         // 使 widgets 查询（With<DuraWidget>）不再匹配本钮——否则面板关闭时钮被隐藏、无法正常点开
         commands.entity(e).insert((
             DuraToggleBtn,
+            // 恒可见（C# DuraStatusDialog 不随面板显隐）：标记 AlwaysVisible，
+            // 使通用对话框兜底（enforce_dialog_visibility）跳过本钮
+            crate::game::dialogs::AlwaysVisible,
             DialogRoot(DialogKind::DuraStatus),
             Visibility::Visible,
         ));
