@@ -695,8 +695,17 @@ fn dialog_hotkey_system(
     mut page: ResMut<CharPage>,
     mut opt: ResMut<crate::game::dialogs::option::OptionState>,
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
+    windows: Query<&Window>,
 ) {
     use crate::game::input_gate::forwarded_while_typing;
+    // 幽灵按键修复：对话框快捷键仅在窗口聚焦时响应。
+    // 窗口失焦/后台时 winit 可能残留按键状态（ButtonInput 未清），重聚焦后把残留键当作
+    // just_pressed，导致 Friend/Character 等对话框被误开、叠加成一团。聚焦门控直接阻断该路径。
+    if let Ok(w) = windows.single() {
+        if !w.focused {
+            return;
+        }
+    }
     // #2595：该绑定在当前聚焦状态下是否应让路
     let blocked = |b: &KeyBinding| gate.0 && !forwarded_while_typing(b.key);
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
