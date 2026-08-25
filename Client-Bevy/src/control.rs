@@ -25,7 +25,7 @@ use crate::actor::{
     ActorAnim, GroundItem, LocalPlayer, Monster, MonsterName, NetObjectId, Npc, NpcName, Player,
     PlayerName,
 };
-use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::{world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::game::player_control::ControlState;
@@ -44,6 +44,14 @@ enum ControlCommand {
         path: String,
     },
     GetState {
+        reply: Sender<String>,
+    },
+    /// 诊断：返回当前打开的对话框列表
+    GetDialogs {
+        reply: Sender<String>,
+    },
+    /// 诊断：返回当前 Visible 的 DialogRoot kind（含未 open 却可见的=泄漏）
+    GetVisible {
         reply: Sender<String>,
     },
     Nearby {
@@ -160,6 +168,28 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "dialogs" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::GetDialogs { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "visible" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::GetVisible { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    json!({"visible": s})
                 } else {
                     json!({"error": "control channel closed"})
                 }
@@ -430,6 +460,7 @@ fn apply_control_commands(
     npcs: Query<(&Transform, &NpcName, &NetObjectId), (With<Npc>, Without<LocalPlayer>)>,
     others: Query<(&Transform, &PlayerName, &NetObjectId), (With<Player>, Without<LocalPlayer>)>,
     items: Query<(&Transform, &GroundItem, &NetObjectId), (With<GroundItem>, Without<LocalPlayer>)>,
+    dialog_roots: Query<(&DialogRoot, &Visibility)>,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
@@ -484,6 +515,20 @@ fn apply_control_commands(
                     DialogAction::Toggle => mgr.toggle(kind),
                 }
                 tracing::info!("🎮 control dialog: {kind:?} -> open={}", mgr.is_open(kind));
+            }
+            ControlCommand::GetDialogs { reply } => {
+                let list: Vec<String> = mgr.open.iter().map(|k| format!("{k:?}")).collect();
+                tracing::info!("🎮 [DIALOGS] open={:?}", mgr.open);
+                let _ = reply.send(format!(r#"{{"dialogs":{list:?}}}"#));
+            }
+            ControlCommand::GetVisible { reply } => {
+                let mut map: std::collections::BTreeMap<String, usize> = Default::default();
+                for (root, vis) in &dialog_roots {
+                    if *vis == Visibility::Visible {
+                        *map.entry(format!("{:?}", root.0)).or_insert(0) += 1;
+                    }
+                }
+                let _ = reply.send(format!("{map:?}"));
             }
             ControlCommand::Nearby { reply } => {
                 let Ok((_, ptf, _)) = players.single() else {
