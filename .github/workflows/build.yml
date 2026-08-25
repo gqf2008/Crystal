@@ -140,6 +140,9 @@ jobs:
             make
             tar
             curl
+      - name: Add GNU target (Windows only)
+        if: runner.os == 'Windows'
+        run: rustup target add x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: Client-Bevy
@@ -153,7 +156,8 @@ jobs:
         working-directory: Client-Bevy
         run: |
           set -euo pipefail
-          rustup target add x86_64-pc-windows-gnu
+          # dtolnay/rust-toolchain 以 --no-modify-path 安装，MSYS2 shell 需要显式补 cargo bin
+          export PATH="$(cygpath -u "$CARGO_HOME")/bin:$PATH"
           export BERKELEY_DB_INCLUDE="$(cygpath -m /ucrt64/include)"
           export BERKELEY_DB_LIBDIR="$(cygpath -m /ucrt64/lib)"
           CARGO_BUILD_TARGET=x86_64-pc-windows-gnu cargo build --release --bin client_bevy
