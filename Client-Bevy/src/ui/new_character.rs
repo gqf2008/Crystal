@@ -515,7 +515,7 @@ fn new_char_ui_system(
     )>,
     ok_btns: Query<&UiButton, With<NcOkBtn>>,
     cancel_btns: Query<&UiButton, With<NcCancelBtn>>,
-    ime: Res<PinyinIme>,
+    mut ime: ResMut<PinyinIme>,
 ) {
     // 显隐
     let show = state.visible;
@@ -562,6 +562,10 @@ fn new_char_ui_system(
             }
             match key.logical_key {
                 Key::Backspace => {
+                    // #2596-10：IME 本帧消费的退格按次数精确跳过，其余放行
+                    if ime.consume_backspace() {
+                        continue;
+                    }
                     state.name.pop();
                 }
                 _ => {

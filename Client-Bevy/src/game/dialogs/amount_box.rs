@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::pinyin_ime::PinyinIme;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
@@ -159,6 +160,7 @@ pub(crate) fn amount_box_system(
     mut state: ResMut<AmountBoxState>,
     mut result: MessageWriter<AmountBoxResult>,
     mut keys: MessageReader<KeyboardInput>,
+    mut ime: ResMut<PinyinIme>,
     ok: Query<&UiButton, (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>)>,
     cancel: Query<&UiButton, (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
     close: Query<&UiButton, (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
@@ -182,6 +184,11 @@ pub(crate) fn amount_box_system(
     for key in keys.read() {
 
         if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        // #2596-3：IME 组合/候选时接管该键（数字选候选/退格删拼音/Esc 收候选），
+        // 避免与聊天输入双写；非组合时数字正常进数量框
+        if ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Escape {

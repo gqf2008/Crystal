@@ -768,6 +768,15 @@ fn cleanup_login_ui(mut commands: Commands, root: Query<Entity, With<UiEntity>>)
     }
 }
 
+/// #2596-2：关闭新建账号/改密对话框时，清除对应输入框焦点（避免隐藏字段持续吃键）
+fn clear_dialog_focus(inputs: &mut Query<&mut UiInput>) {
+    for mut input in inputs.iter_mut() {
+        if matches!(input.kind, InputKind::Na(_) | InputKind::Cp(_)) {
+            input.focused = false;
+        }
+    }
+}
+
 fn login_ui_system(
     mut keys: MessageReader<KeyboardInput>,
     mut net: ResMut<NetConnection>,
@@ -814,17 +823,6 @@ fn login_ui_system(
         }
     }
 
-    // 内置拼音 IME 提交的汉字 → 注入聚焦的非密码输入框
-    // 先记录本帧是否有 IME 提交（take_commit 会清空 commit_pending，Enter 守卫需要它）
-    let ime_committed = ime.has_commit();
-    if let Some(c) = ime.take_commit() {
-        for mut input in inputs.iter_mut() {
-            if input.focused && !input.password {
-                input.value.push_str(&c);
-            }
-        }
-    }
-
     // 键盘
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
     for mut input in inputs.iter_mut() {
@@ -840,11 +838,27 @@ fn login_ui_system(
                 continue;
             }
             if key.logical_key == Key::Backspace {
+                // #2596-10：IME 本帧消费的退格按次数精确跳过，其余放行
+                if ime.consume_backspace() {
+                    continue;
+                }
                 input.value.pop();
             } else if let Some(text) = &key.text {
                 if !text.is_empty() {
                     input.value.push_str(text);
                 }
+            }
+        }
+    }
+
+    // 内置拼音 IME 提交的汉字 → 注入聚焦的非密码输入框
+    // #2596-4：遵守“先 consumes_key 后 take_commit”契约（按键循环之后取，
+    // 避免提交候选那个键的原始文本泄漏进字段）；Enter 守卫用 ime_committed
+    let ime_committed = ime.has_commit();
+    if let Some(c) = ime.take_commit() {
+        for mut input in inputs.iter_mut() {
+            if input.focused && !input.password {
+                input.value.push_str(&c);
             }
         }
     }
@@ -872,17 +886,26 @@ fn login_ui_system(
     }
 
     // 调试热键：F9 打开新建账号，F10 打开改密码（live 验证用）
+    // #2596-8：热键循环也过 consumes_key（Esc 被 IME cancel 消费时跳过，不误关对话框）
     for key in &key_list {
-        if key.state == bevy::input::ButtonState::Pressed {
-            match key.logical_key {
-                Key::F9 => login.show_new_account = true,
-                Key::F10 => login.show_change_password = true,
-                Key::Escape => {
-                    login.show_new_account = false;
-                    login.show_change_password = false;
-                }
-                _ => {}
+        if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        // 只对热键做 IME 消费判定（避免提前消费输入循环的键，#2596-10）
+        let is_hotkey = matches!(key.logical_key, Key::F9 | Key::F10 | Key::Escape);
+        if is_hotkey && ime.consumes_key(key) {
+            continue;
+        }
+        match key.logical_key {
+            Key::F9 => login.show_new_account = true,
+            Key::F10 => login.show_change_password = true,
+            Key::Escape => {
+                login.show_new_account = false;
+                login.show_change_password = false;
+                // #2596-2：关闭子对话框时清除其输入框焦点，避免隐藏字段持续吃键
+                clear_dialog_focus(&mut inputs);
             }
+            _ => {}
         }
     }
 
@@ -983,6 +1006,7 @@ fn login_ui_system(
                     login.status_error = true;
                 } else {
                     login.show_new_account = false;
+                    clear_dialog_focus(&mut inputs);
                     login.status_msg = "注册请求已发送…".to_string();
                     login.status_error = false;
                     auth.new_account_error = None;
@@ -1000,6 +1024,7 @@ fn login_ui_system(
             }
             ButtonKind::NaCancel => {
                 login.show_new_account = false;
+                clear_dialog_focus(&mut inputs);
                 login.status_msg = String::new();
             }
             ButtonKind::CpOk => {
@@ -1017,6 +1042,7 @@ fn login_ui_system(
                     login.status_error = true;
                 } else {
                     login.show_change_password = false;
+                    clear_dialog_focus(&mut inputs);
                     login.status_msg = "修改密码请求已发送…".to_string();
                     login.status_error = false;
                     auth.change_password_error = None;
@@ -1030,6 +1056,7 @@ fn login_ui_system(
             }
             ButtonKind::CpCancel => {
                 login.show_change_password = false;
+                clear_dialog_focus(&mut inputs);
                 login.status_msg = String::new();
             }
             ButtonKind::ViewKey => {}

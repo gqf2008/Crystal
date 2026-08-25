@@ -45,7 +45,11 @@ impl Plugin for TextInputPlugin {
         app.add_message::<TextInputSubmit>();
         app.add_systems(
             Update,
-            text_input_system.run_if(in_state(AppState::Game)),
+            // #2596-5：与 chat_input_system 确定 IME 消费顺序（chat 先跑），
+            // 避免同帧双写 ImeFocus / 抢 take_commit（已知限制：双框同时激活仍各写各的）
+            text_input_system
+                .run_if(in_state(AppState::Game))
+                .after(crate::game::chat::chat_input_system),
         );
     }
 }
@@ -114,7 +118,8 @@ fn text_input_system(
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
-        if ime.consumes_key(key) {
+        // 只对 Enter 做 IME 消费判定（避免提前消费按键循环的键，#2596-10）
+        if key.logical_key == Key::Enter && ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Enter {
@@ -135,6 +140,10 @@ fn text_input_system(
             }
             let text = &mut state.texts[active];
             if key.logical_key == Key::Backspace {
+                // #2596-10：IME 本帧消费的退格按次数精确跳过，其余放行
+                if ime.consume_backspace() {
+                    continue;
+                }
                 text.pop();
             } else if let Some(t) = &key.text {
                 if !t.is_empty() {
