@@ -17,7 +17,13 @@
 use bevy::prelude::*;
 use mir2_shared::enums::PetMode;
 
+use crate::actor::LocalPlayer;
+use crate::game::dialogs::character::CharacterState;
 use crate::game::dialogs::inventory::InvItem;
+use crate::game::hud::HudState;
+use crate::game::sets::GameSet;
+use crate::network::server_event::ServerEvent;
+use crate::scenes::AppState;
 
 /// 生命/法力（HealthChanged{hp,mp} 恒同写；HUD 血蓝球、自动喝药、施法、角色面板同读）。
 ///
@@ -215,4 +221,582 @@ pub struct LocalPlayerStateBundle {
     pub loadout: Loadout,
     pub inventory: Inventory,
     pub auto_potion: AutoPotion,
+}
+
+// ============================================================================
+// ServerEvent 写系统（#2633 批次4 步2：拆 hud_server_events，设计 §10）
+//
+// 双写过渡（设计 §11 批1）：每个系统把值**同时**写进玩家组件与原 `HudState`
+// （CharacterState 双写同样保留），读者仍读 HudState/CharacterState，行为等价。
+// 组件写用 `Query<&mut X, With<LocalPlayer>>` + `single_mut()`；实体未生成时
+// （UserInformation 可能先于 ObjectPlayer 到达，设计 §12 R1）跳过组件写、仅写
+// HudState 兜底——本批不缓冲，标 R1 待后续批处理。
+// ============================================================================
+
+pub struct PlayerStatePlugin;
+
+impl Plugin for PlayerStatePlugin {
+    fn build(&self, app: &mut App) {
+        // 写方须排在读方前（设计 §12 R5）：先写玩家组件/HudState，后 sync_hud_data（Hud 集）读。
+        app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
+        app.add_systems(
+            Update,
+            (player_vitals_events, player_status_events)
+                .in_set(GameSet::PlayerState)
+                .run_if(in_state(AppState::Game)),
+        );
+    }
+}
+
+/// 玩家生命/法、金币/声望、基础属性、经验/等级、宠物模式、面板属性 + UserInformation 玩家属性部分。
+/// （设计 §10 `player_vitals_events`；背包/装备部分归 inventory_events，二者读同一事件不同组件。）
+#[allow(clippy::too_many_arguments)]
+fn player_vitals_events(
+    mut events: MessageReader<ServerEvent>,
+    mut hud: ResMut<HudState>,
+    mut char_state: ResMut<CharacterState>,
+    mut vitals_q: Query<&mut Vitals, With<LocalPlayer>>,
+    mut progression_q: Query<&mut Progression, With<LocalPlayer>>,
+    mut gold_q: Query<&mut Gold, With<LocalPlayer>>,
+    mut credit_q: Query<&mut Credit, With<LocalPlayer>>,
+    mut base_stats_q: Query<&mut BaseStats, With<LocalPlayer>>,
+    mut pet_mode_q: Query<&mut PetModeState, With<LocalPlayer>>,
+    mut combat_stats_q: Query<&mut CombatStats, With<LocalPlayer>>,
+) {
+    for ev in events.read() {
+        match ev {
+            ServerEvent::PetModeChanged { mode } => {
+                // #1388：HUD 宠物模式标签
+                hud.pet_mode = *mode;
+                if let Ok(mut p) = pet_mode_q.single_mut() {
+                    p.0 = *mode;
+                }
+            }
+            ServerEvent::HealthChanged { hp, mp } => {
+                hud.hp = *hp;
+                hud.mp = *mp;
+                if let Ok(mut v) = vitals_q.single_mut() {
+                    v.hp = *hp;
+                    v.mp = *mp;
+                }
+            }
+            ServerEvent::GoldGained { gold } => {
+                hud.gold = hud.gold.saturating_add(*gold);
+                if let Ok(mut g) = gold_q.single_mut() {
+                    g.0 = g.0.saturating_add(*gold);
+                }
+            }
+            ServerEvent::BaseStats { stats } => {
+                // #268：基础属性（角色面板数据）
+                hud.base_stats = stats.clone();
+                if let Ok(mut b) = base_stats_q.single_mut() {
+                    b.0 = stats.clone();
+                }
+                tracing::info!("📊 基础属性: {:?}", stats);
+            }
+            ServerEvent::PlayerNameUpdated { name } => {
+                // #264：本地玩家改名。复用组件 PlayerName 的写随读者迁移（批6）一并处理，
+                // 本批严格行为等价、不动既有 PlayerName 维护路径（spawn/object_state）。
+                hud.name = name.clone();
+                tracing::info!("🏷️ 玩家改名 -> {}", name);
+            }
+            ServerEvent::CreditGained { credit } => {
+                // #248：声望增加
+                hud.credit = hud.credit.saturating_add(*credit);
+                if let Ok(mut c) = credit_q.single_mut() {
+                    c.0 = c.0.saturating_add(*credit);
+                }
+                tracing::info!("🏅 获得声望 +{}（当前 {}）", credit, hud.credit);
+            }
+            ServerEvent::CreditLost { amount } => {
+                // #248：声望减少
+                hud.credit = hud.credit.saturating_sub(*amount);
+                if let Ok(mut c) = credit_q.single_mut() {
+                    c.0 = c.0.saturating_sub(*amount);
+                }
+                tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, hud.credit);
+            }
+            ServerEvent::GoldLost { amount } => {
+                hud.gold = hud.gold.saturating_sub(*amount);
+                if let Ok(mut g) = gold_q.single_mut() {
+                    g.0 = g.0.saturating_sub(*amount);
+                }
+                tracing::info!("💸 失去金币 -{}（当前 {}）", amount, hud.gold);
+            }
+            ServerEvent::ExperienceGained { amount } => {
+                hud.exp += *amount;
+                if let Ok(mut p) = progression_q.single_mut() {
+                    p.exp += *amount;
+                }
+                tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, hud.exp, hud.max_exp);
+            }
+            ServerEvent::LevelChanged {
+                level,
+                exp,
+                max_exp,
+            } => {
+                hud.level = *level;
+                hud.exp = *exp;
+                hud.max_exp = (*max_exp).max(1);
+                if let Ok(mut p) = progression_q.single_mut() {
+                    p.level = *level;
+                    p.exp = *exp;
+                    p.max_exp = (*max_exp).max(1);
+                }
+                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
+            }
+            ServerEvent::UserInformation {
+                name,
+                level,
+                hp,
+                mp,
+                exp,
+                max_exp,
+                gold,
+                gender,
+                class,
+                object_id,
+                max_hp,
+                max_mp,
+                ac,
+                mac,
+                dc,
+                mc,
+                sc,
+                critical_rate,
+                critical_damage,
+                attack_speed,
+                accuracy,
+                agility,
+                luck,
+                bag_weight,
+                wear_weight,
+                hand_weight,
+                magic_resist,
+                poison_resist,
+                health_recovery,
+                spell_recovery,
+                poison_recovery,
+                holy,
+                freezing,
+                poison_atk,
+                ..
+            } => {
+                // —— HudState 玩家属性部分（inventory/equipment 部分归 inventory_events）——
+                hud.name = name.clone();
+                hud.level = *level;
+                hud.hp = *hp;
+                hud.mp = *mp;
+                hud.max_hp = *max_hp;
+                hud.max_mp = *max_mp;
+                hud.exp = *exp;
+                hud.max_exp = (*max_exp).max(1);
+                hud.gold = *gold;
+                hud.class = *class;
+                hud.gender = *gender;
+                hud.player_object_id = Some(*object_id);
+                // —— CharacterState 双写（过渡保留；批7 消双源时删除）——
+                char_state.name = name.clone();
+                char_state.level = *level;
+                char_state.hp = *hp;
+                char_state.max_hp = *max_hp;
+                char_state.mp = *mp;
+                char_state.max_mp = *max_mp;
+                char_state.stats = [*ac, *mac, *dc, *mc, *sc];
+                char_state.critical_rate = *critical_rate;
+                char_state.critical_damage = *critical_damage;
+                char_state.attack_speed = *attack_speed;
+                char_state.accuracy = *accuracy;
+                char_state.agility = *agility;
+                char_state.luck = *luck;
+                char_state.exp = *exp;
+                char_state.max_exp = (*max_exp).max(1);
+                char_state.bag_weight = *bag_weight;
+                char_state.wear_weight = *wear_weight;
+                char_state.hand_weight = *hand_weight;
+                char_state.magic_resist = *magic_resist;
+                char_state.poison_resist = *poison_resist;
+                char_state.health_recovery = *health_recovery;
+                char_state.spell_recovery = *spell_recovery;
+                char_state.poison_recovery = *poison_recovery;
+                char_state.holy = *holy;
+                char_state.freezing = *freezing;
+                char_state.poison_atk = *poison_atk;
+                // —— 玩家组件（实体未生成则跳过，R1）——
+                if let Ok(mut v) = vitals_q.single_mut() {
+                    v.hp = *hp;
+                    v.max_hp = *max_hp;
+                    v.mp = *mp;
+                    v.max_mp = *max_mp;
+                }
+                if let Ok(mut p) = progression_q.single_mut() {
+                    p.level = *level;
+                    p.exp = *exp;
+                    p.max_exp = (*max_exp).max(1);
+                }
+                if let Ok(mut g) = gold_q.single_mut() {
+                    g.0 = *gold;
+                }
+                if let Ok(mut cb) = combat_stats_q.single_mut() {
+                    cb.stats = [*ac, *mac, *dc, *mc, *sc];
+                    cb.critical_rate = *critical_rate;
+                    cb.critical_damage = *critical_damage;
+                    cb.attack_speed = *attack_speed;
+                    cb.accuracy = *accuracy;
+                    cb.agility = *agility;
+                    cb.luck = *luck;
+                    cb.bag_weight = *bag_weight;
+                    cb.wear_weight = *wear_weight;
+                    cb.hand_weight = *hand_weight;
+                    cb.magic_resist = *magic_resist;
+                    cb.poison_resist = *poison_resist;
+                    cb.health_recovery = *health_recovery;
+                    cb.spell_recovery = *spell_recovery;
+                    cb.poison_recovery = *poison_recovery;
+                    cb.holy = *holy;
+                    cb.freezing = *freezing;
+                    cb.poison_atk = *poison_atk;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 玩家状态旗标（钓鱼/陷阱/麻痹/死亡/复活/轮回）+ 骑乘 HudState 镜像。
+/// （设计 §10 `player_status_events`；sprint/sneaking 由 buff.rs 写、本批未迁移；
+/// MountUpdated 的 MountState 由 object_state/spawn 维护，此处仅写 HudState.riding/mount_type。）
+fn player_status_events(
+    mut events: MessageReader<ServerEvent>,
+    mut hud: ResMut<HudState>,
+    mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
+) {
+    for ev in events.read() {
+        match ev {
+            ServerEvent::FishingUpdate { progress, .. } => {
+                // #1544：钓鱼中不可使用物品
+                hud.fishing = *progress != 0;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.fishing = *progress != 0;
+                }
+            }
+            ServerEvent::TrapRockChanged { in_trap } => {
+                // #1550：陷阱中不可走/跑
+                hud.in_trap_rock = *in_trap;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.in_trap_rock = *in_trap;
+                }
+            }
+            ServerEvent::LocalPoisonChanged { paralysis } => {
+                // #1616：麻痹/冰冻毒锁定输入
+                hud.paralysis = *paralysis;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.paralysis = *paralysis;
+                }
+            }
+            ServerEvent::MountUpdated {
+                object_id,
+                mount_type,
+                is_mounted,
+            } => {
+                // #1544：本地玩家骑乘状态。MountState 组件由 object_state/spawn 路径维护，
+                // 此处仅写 HudState 镜像（riding/mount_type），读者迁移（批6/§12 R7）后改用 MountState。
+                if Some(*object_id) == hud.player_object_id {
+                    hud.riding = *is_mounted;
+                    // #1564：记录坐骑类型（骑乘音效 Tiger/Wolf 区分）
+                    hud.mount_type = *mount_type;
+                }
+            }
+            ServerEvent::PlayerDied => {
+                hud.dead = true;
+                hud.death_popup_dismissed = false;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.dead = true;
+                }
+            }
+            ServerEvent::ReincarnationRequested => {
+                if hud.dead {
+                    hud.reincarnation_offered = true;
+                    if let Ok(mut f) = flags_q.single_mut() {
+                        f.reincarnation_offered = true;
+                    }
+                }
+            }
+            ServerEvent::PlayerRevived => {
+                hud.dead = false;
+                hud.reincarnation_offered = false;
+                hud.death_popup_dismissed = false;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.dead = false;
+                    f.reincarnation_offered = false;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::dialogs::inventory::InvItem;
+    use crate::game::dialogs::potion_belt::PotionBeltState;
+
+    /// 注册 4 个写系统（与生产一致的 GameSet::PlayerState + belt 先于 inventory 排序 +
+    /// in_state(Game) 门控），配齐所需资源。首个 update 在非 Game 态跑（schedule 初始化
+    /// 期 B0001 检查），再切 Game 触发系统体。
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
+        app.init_state::<AppState>();
+        app.add_message::<ServerEvent>();
+        app.init_resource::<HudState>();
+        app.init_resource::<CharacterState>();
+        app.init_resource::<PotionBeltState>();
+        app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
+        app.add_systems(
+            Update,
+            (
+                player_vitals_events,
+                player_status_events,
+                crate::game::dialogs::potion_belt::belt_restock_events
+                    .before(crate::game::dialogs::inventory::inventory_events),
+                crate::game::dialogs::inventory::inventory_events,
+            )
+                .in_set(GameSet::PlayerState)
+                .run_if(in_state(AppState::Game)),
+        );
+        app
+    }
+
+    fn enter_game(app: &mut App) {
+        app.update(); // 非 Game 态一帧（B0001 初始化检查）
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Game);
+        app.update(); // 切 Game
+    }
+
+    fn spawn_local(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn((LocalPlayer, LocalPlayerStateBundle::default()))
+            .id()
+    }
+
+    fn get<T: Component>(app: &mut App) -> T
+    where
+        T: Clone,
+    {
+        app.world_mut()
+            .query_filtered::<&T, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .expect("LocalPlayer 应有该组件")
+            .clone()
+    }
+
+    fn item(uid: u64, item_index: i32, count: u16) -> InvItem {
+        InvItem {
+            unique_id: uid,
+            item_index,
+            count,
+            ..Default::default()
+        }
+    }
+
+    /// vitals/status 写路径 + HudState 双写等价（HealthChanged/LevelChanged/GoldGained/PlayerDied）
+    #[test]
+    fn vitals_status_write_components_and_hud() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        app.world_mut()
+            .write_message(ServerEvent::HealthChanged { hp: 500, mp: 200 });
+        app.world_mut().write_message(ServerEvent::LevelChanged {
+            level: 30,
+            exp: 12345,
+            max_exp: 99999,
+        });
+        app.world_mut()
+            .write_message(ServerEvent::GoldGained { gold: 777 });
+        app.world_mut().write_message(ServerEvent::PlayerDied);
+        app.update();
+
+        let hud = app.world().resource::<HudState>();
+        assert_eq!((hud.hp, hud.mp), (500, 200));
+        assert_eq!((hud.level, hud.exp, hud.max_exp), (30, 12345, 99999));
+        assert_eq!(hud.gold, 777);
+        assert!(hud.dead);
+
+        let v: Vitals = get(&mut app);
+        assert_eq!((v.hp, v.mp), (500, 200), "Vitals 组件应同步");
+        let p: Progression = get(&mut app);
+        assert_eq!((p.level, p.exp, p.max_exp), (30, 12345, 99999));
+        let g: Gold = get(&mut app);
+        assert_eq!(g.0, 777);
+        let f: StatusFlags = get(&mut app);
+        assert!(f.dead);
+    }
+
+    /// UserInformation：玩家属性/面板属性写组件 + HudState + CharacterState 三写等价
+    #[test]
+    fn user_information_writes_vitals_progression_gold_combatstats() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        app.world_mut().write_message(user_info(60, 800, 400));
+        app.update();
+
+        let hud = app.world().resource::<HudState>();
+        assert_eq!((hud.hp, hud.max_hp, hud.mp, hud.max_mp), (800, 5000, 400, 2000));
+        assert_eq!(hud.level, 60);
+        assert_eq!(hud.gold, 4242);
+        assert_eq!(hud.player_object_id, Some(31415));
+
+        let v: Vitals = get(&mut app);
+        assert_eq!((v.hp, v.max_hp, v.mp, v.max_mp), (800, 5000, 400, 2000));
+        let p: Progression = get(&mut app);
+        assert_eq!(p.level, 60);
+        let g: Gold = get(&mut app);
+        assert_eq!(g.0, 4242);
+        let cb: CombatStats = get(&mut app);
+        assert_eq!(cb.critical_rate, 17);
+        assert_eq!(cb.bag_weight, 250);
+
+        // CharacterState 双写保留（过渡）
+        let cs = app.world().resource::<CharacterState>();
+        assert_eq!(cs.level, 60);
+        assert_eq!(cs.critical_rate, 17);
+    }
+
+    /// 背包/装备写组件镜像 + HudState（ItemGained + UserInformation 背包部分）
+    #[test]
+    fn inventory_events_mirror_to_components() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        // UserInformation 写入背包/装备
+        app.world_mut().write_message(user_info(10, 100, 50));
+        app.update();
+        let hud = app.world().resource::<HudState>();
+        assert_eq!(hud.inventory.items.len(), 4);
+        assert_eq!(hud.equipment[0].as_ref().unwrap().unique_id, 900);
+        let inv: crate::game::player_state::Inventory = get(&mut app);
+        assert_eq!(inv.items.len(), 4, "Inventory 组件应镜像背包");
+        assert_eq!(inv.items[0].as_ref().unwrap().unique_id, 1);
+        let loadout: crate::game::player_state::Loadout = get(&mut app);
+        assert_eq!(loadout.slots[0].as_ref().unwrap().unique_id, 900);
+
+        // ItemGained 增量（进第一个空格）
+        app.world_mut().write_message(ServerEvent::ItemGained {
+            item: item(7, 70, 1),
+        });
+        app.update();
+        let inv: crate::game::player_state::Inventory = get(&mut app);
+        assert!(
+            inv.items
+                .iter()
+                .flatten()
+                .any(|it| it.unique_id == 7),
+            "新物品应入包并镜像到组件"
+        );
+        let hud = app.world().resource::<HudState>();
+        assert!(hud.inventory.items.iter().flatten().any(|it| it.unique_id == 7));
+    }
+
+    /// ItemUsed：腰带补货须读「扣减前」背包（belt_restock 先于 inventory 扣减，§12 R6）
+    #[test]
+    fn belt_restock_reads_pre_deduct_inventory() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        // 背包：stack A(uid=100,idx=500,count=1) + stack B(uid=200,idx=500,count=3)；腰带格 0 = uid 100
+        {
+            let mut hud = app.world_mut().resource_mut::<HudState>();
+            hud.inventory.items = vec![Some(item(100, 500, 1)), Some(item(200, 500, 3))];
+            let mut belt = app.world_mut().resource_mut::<PotionBeltState>();
+            belt.slots[0] = Some(100);
+        }
+        app.world_mut()
+            .write_message(ServerEvent::ItemUsed { unique_id: 100 });
+        app.update();
+
+        // 补货：找到同 item_index 的 stack B(uid=200)；若 belt 晚于扣减则读不到 used_item_index→不补
+        let belt = app.world().resource::<PotionBeltState>();
+        assert_eq!(belt.slots[0], Some(200), "腰带应补货为另一组同物品");
+        // 扣减：stack A(count=1) 被移除
+        let hud = app.world().resource::<HudState>();
+        assert!(
+            !hud.inventory.items.iter().flatten().any(|it| it.unique_id == 100),
+            "已消耗物品应出包"
+        );
+        assert!(hud.inventory.items.iter().flatten().any(|it| it.unique_id == 200));
+    }
+
+    /// R1：实体未生成时组件写跳过、不 panic，HudState 仍写（读者零影响）
+    #[test]
+    fn write_skips_when_entity_missing() {
+        let mut app = test_app();
+        // 不 spawn LocalPlayer
+        enter_game(&mut app);
+        app.world_mut()
+            .write_message(ServerEvent::HealthChanged { hp: 42, mp: 24 });
+        app.update(); // 不应 panic
+        let hud = app.world().resource::<HudState>();
+        assert_eq!((hud.hp, hud.mp), (42, 24), "HudState 兜底写仍生效");
+        // 无实体 → 查询不到组件（无法断言值，只要不 panic 即通过）
+    }
+
+    /// 构造 UserInformation 事件（背包 2 格、装备槽 0 有 uid=900）
+    fn user_info(level: u16, hp: i32, mp: i32) -> ServerEvent {
+        ServerEvent::UserInformation {
+            name: "测试者".to_string(),
+            level,
+            hp,
+            mp,
+            exp: 500,
+            max_exp: 1000,
+            gold: 4242,
+            class: 1,
+            gender: 0,
+            object_id: 31415,
+            magics: Vec::new(),
+            inventory: vec![Some(item(1, 10, 1)), Some(item(2, 20, 5)), None, None],
+            equipment: {
+                let mut e = vec![None; 14];
+                e[0] = Some(item(900, 900, 1));
+                e
+            },
+            quest_inventory: Vec::new(),
+            item_names: Vec::new(),
+            max_hp: 5000,
+            max_mp: 2000,
+            ac: [1, 2],
+            mac: [3, 4],
+            dc: [5, 6],
+            mc: [7, 8],
+            sc: [9, 10],
+            critical_rate: 17,
+            critical_damage: 18,
+            attack_speed: 19,
+            accuracy: 20,
+            agility: 21,
+            luck: 22,
+            bag_weight: 250,
+            wear_weight: 260,
+            hand_weight: 270,
+            magic_resist: 23,
+            poison_resist: 24,
+            health_recovery: 25,
+            spell_recovery: 26,
+            poison_recovery: 27,
+            holy: 28,
+            freezing: 29,
+            poison_atk: 30,
+        }
+    }
 }
