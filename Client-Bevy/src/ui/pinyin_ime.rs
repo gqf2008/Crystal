@@ -54,8 +54,13 @@ pub struct PinyinIme {
     page: usize,
     /// 本帧要插入聚焦框的已选文本
     commit_pending: Option<String>,
-    /// 本帧 IME 用退格编辑过拼音（供文本框判断是否跳过删除缓冲）
-    ate_edit: bool,
+    /// 本帧 IME 已消费的退格数（供文本框精确跳过同数量退格，#2596-10）
+    ate_edit: u8,
+    /// 本帧 IME 用 Esc 取消过组合/候选（同帧标志，供对话框跳过 Esc 动作，#2596-7/8）
+    ate_cancel: bool,
+    /// 本帧 PreUpdate 已消费的键（逐事件记录，#2596-10：选字/编辑键本身被挡住，
+    /// 同帧后续同款键放行给文本框，避免黑洞也不双写）
+    consumed: std::collections::VecDeque<Key>,
     /// libpinyin 引擎
     engine: LibpinyinEngine,
 }
@@ -86,7 +91,9 @@ impl PinyinIme {
             candidates: Vec::new(),
             page: 0,
             commit_pending: None,
-            ate_edit: false,
+            ate_edit: 0,
+            ate_cancel: false,
+            consumed: std::collections::VecDeque::new(),
             engine,
         }
     }
@@ -123,6 +130,29 @@ impl PinyinIme {
         self.commit_pending.take()
     }
 
+    /// 文本框退格前调用：返回 true 表示该退格已被 IME 消费（应跳过）。
+    /// 按本帧 IME 消费退格数精确放行（#2596-10：同帧批量退格不丢键也不双删）。
+    pub fn consume_backspace(&mut self) -> bool {
+        if self.ate_edit > 0 {
+            self.ate_edit -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 失焦重置：清空组合/候选/滞留提交（#2596-1/9：无聚焦时既不吃键也不留提交）。
+    pub fn reset_activity(&mut self) {
+        self.composing.clear();
+        self.candidates.clear();
+        self.page = 0;
+        self.commit_pending = None;
+        self.ate_edit = 0;
+        self.ate_cancel = false;
+        self.consumed.clear();
+        self.engine.clear();
+    }
+
     fn toggle(&mut self) {
         self.enabled = !self.enabled;
         self.composing.clear();
@@ -140,7 +170,7 @@ impl PinyinIme {
 
     fn backspace(&mut self) {
         if self.composing.pop().is_some() {
-            self.ate_edit = true;
+            self.ate_edit += 1;
             self.page = 0;
             self.engine.backspace();
             self.recompute();
@@ -189,6 +219,7 @@ impl PinyinIme {
         self.composing.clear();
         self.candidates.clear();
         self.page = 0;
+        self.ate_cancel = true;
         self.engine.clear();
     }
 
@@ -222,12 +253,19 @@ impl PinyinIme {
 
     /// 文本框系统据此判断某键是否被 IME 接管（应跳过自身处理）。
     /// 依赖 PreUpdate 已更新好状态。
-    pub fn consumes_key(&self, key: &KeyboardInput) -> bool {
+    /// #2596-10：先逐事件匹配本帧 IME 已消费的键（选字/编辑键本身被挡住），
+    /// 匹配失败再按状态判定（组合中字母等）。
+    pub fn consumes_key(&mut self, key: &KeyboardInput) -> bool {
         if !self.enabled || key.state != ButtonState::Pressed {
             return false;
         }
-        let engaged =
-            self.is_composing() || self.has_candidates() || self.commit_pending.is_some() || self.ate_edit;
+        if self.consumed.front() == Some(&key.logical_key) {
+            self.consumed.pop_front();
+            return true;
+        }
+        // #2596-10：engaged 与 PreUpdate 处理器同口径（不含 ate_edit/commit_pending——
+        // 同帧先编辑/选字后，后续 Space/Enter/数字应放行给文本框，不吞键）
+        let engaged = self.is_composing() || self.has_candidates();
         match &key.logical_key {
             Key::Character(c) => {
                 let s = c.as_str();
@@ -243,9 +281,10 @@ impl PinyinIme {
                 }
             }
             Key::Space => self.is_composing(),
-            Key::Backspace => self.is_composing() || self.ate_edit,
+            // 退格不再经 consumes_key 判定：统一由文本框调 consume_backspace() 精确消费
+            Key::Backspace => false,
             Key::Enter => self.is_composing(),
-            Key::Escape => self.is_composing() || self.has_candidates(),
+            Key::Escape => self.is_composing() || self.has_candidates() || self.ate_cancel,
             _ => false,
         }
     }
@@ -326,15 +365,18 @@ fn pinyin_ime_system(
     focus: Res<ImeFocus>,
     mut shift: Local<ShiftToggle>,
 ) {
-    // 本帧先清掉上帧的编辑标记（commit_pending 由文本框 take_commit 取走）
-    ime.ate_edit = false;
+    // 本帧先清掉上帧的编辑/取消标志（commit_pending 由文本框 take_commit 取走）
+    ime.ate_edit = 0;
+    ime.ate_cancel = false;
+    ime.consumed.clear();
 
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
 
     // 1) Shift 单按检测（无论是否聚焦都允许切换中/英）
     for key in &key_list {
         if key.logical_key == Key::Shift {
-            if key.state == ButtonState::Pressed {
+            // #2596-11：OS 自动重复的 Shift Pressed 不算“单按”，过滤 repeat
+            if key.state == ButtonState::Pressed && !key.repeat {
                 shift.down = true;
                 shift.clean = true;
             } else if key.state == ButtonState::Released {
@@ -362,6 +404,8 @@ fn pinyin_ime_system(
     }
     let focused = focus.rect.is_some();
     if !focused {
+        // #2596-1/9：失焦（如点进密码框）→ 清组合/候选/滞留提交，既不吃键也不留提交
+        ime.reset_activity();
         return;
     }
     for key in &key_list {
@@ -372,9 +416,12 @@ fn pinyin_ime_system(
             Key::Character(c) => {
                 let s = c.as_str();
                 if s.chars().all(|ch| ch.is_ascii_alphabetic()) {
-                    // 字母进拼音缓冲（小写）
+                    // 字母进拼音缓冲（小写）；#2596-12：组合为空时 Shift+大写直通文本框
                     for ch in s.chars() {
-                        ime.feed_letter(ch.to_ascii_lowercase());
+                        if ime.is_composing() || ch.is_ascii_lowercase() {
+                            ime.feed_letter(ch.to_ascii_lowercase());
+                            ime.consumed.push_back(key.logical_key.clone());
+                        }
                     }
                 } else if s.chars().all(|ch| ch.is_ascii_digit()) {
                     // 数字选候选（组合中或提交后联想候选）
@@ -382,32 +429,37 @@ fn pinyin_ime_system(
                         if let Ok(n) = s.parse::<usize>() {
                             if n >= 1 {
                                 ime.select(n - 1);
+                                ime.consumed.push_back(key.logical_key.clone());
                             }
                         }
                     }
                 } else if s == "-" {
                     if ime.has_candidates() {
                         ime.page_prev();
+                        ime.consumed.push_back(key.logical_key.clone());
                     }
                 } else if s == "=" {
                     if ime.has_candidates() {
                         ime.page_next();
+                        ime.consumed.push_back(key.logical_key.clone());
                     }
                 }
             }
             Key::Space => {
                 if ime.is_composing() {
                     ime.commit_default();
+                    ime.consumed.push_back(key.logical_key.clone());
                 } else if ime.has_candidates() {
-                    // 联想候选展示中：交还空格给字段（不选候选）
+                    // 联想候选展示中：交还空格给字段（不选候选，不登记 consumed）
                     ime.cancel();
                 }
             }
             Key::Enter => {
                 if ime.is_composing() {
                     ime.commit_default();
+                    ime.consumed.push_back(key.logical_key.clone());
                 } else if ime.has_candidates() {
-                    // 联想候选展示中：交还回车给字段（发送），并清掉联想
+                    // 联想候选展示中：交还回车给字段（发送），并清掉联想（不登记）
                     ime.cancel();
                 }
             }
@@ -419,6 +471,7 @@ fn pinyin_ime_system(
             Key::Escape => {
                 if ime.is_composing() || ime.has_candidates() {
                     ime.cancel();
+                    ime.consumed.push_back(key.logical_key.clone());
                 }
             }
             _ => {}
@@ -1035,4 +1088,155 @@ mod tests {
         assert_eq!(*bg.single(app.world()).unwrap(), Visibility::Hidden);
         assert_eq!(*txt.single(app.world()).unwrap(), Visibility::Hidden);
     }
+    // ---- #2596 契约修复回归 ----
+
+    /// 中文模式组合中失焦（如点进密码框）→ 重置活动：不再吃键、滞留提交清空（#2596-1/9）
+    #[test]
+    fn focus_loss_resets_activity_and_releases_keys() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        // 候选条/chip 系统需要 UiFont（弱句柄即可，实体不 spawn）
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
+
+        // 切中文并组合（clear_ime_focus 每帧清空，故每帧 send 前重设 focus）
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        for c in "nihao".chars() {
+            focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+
+        // 失焦帧：PreUpdate 重置（清组合/候选/提交）
+        focus(&mut app, None);
+        send(&mut app, char_key("a"));
+        app.update();
+        let ime = app.world().resource::<PinyinIme>();
+        assert!(!ime.is_composing());
+        assert!(!ime.has_candidates());
+        assert!(!ime.has_commit());
+        // 失焦后键放行给文本框（密码可输入）
+        let mut ime = app.world_mut().resource_mut::<PinyinIme>();
+        assert!(!ime.consumes_key(&char_key("a")));
+    }
+
+    /// 选候选的数字键本身被 IME 消费（文本框不插入），同帧后续同款键放行（#2596-10）
+    #[test]
+    fn select_key_consumed_but_same_frame_followup_released() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        for c in "nihao".chars() {
+            ime.feed_letter(c);
+        }
+        // 模拟 PreUpdate 已消费数字 1（select）并登记
+        ime.select(0);
+        ime.consumed.push_back(Key::Character("1".into()));
+        // 第一个 "1"（触发选字）被挡住
+        assert!(ime.consumes_key(&char_key("1")));
+        // 同帧后续 "1" 放行给文本框
+        assert!(!ime.consumes_key(&char_key("1")));
+    }
+
+    /// 组合为空时 Shift+大写直通文本框（不进 IME 拼音缓冲）（#2596-12）
+    #[test]
+    fn uppercase_passthrough_when_not_composing() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        assert!(!ime.is_composing());
+        assert!(!ime.consumes_key(&char_key("A")));
+    }
+
+    /// OS 自动重复的 Shift Pressed 不触发中/英切换（#2596-11）
+    #[test]
+    fn shift_repeat_does_not_toggle() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        // 候选条/chip 系统需要 UiFont（弱句柄即可，实体不 spawn）
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
+
+        // 切到中文
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().enabled());
+
+        // 按住 Shift 输大写 B（clean=false）→ OS 重复 Shift Pressed → 松开
+        let mut repeat_shift = shift_key(ButtonState::Pressed);
+        repeat_shift.repeat = true;
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, char_key("B"));
+        app.update();
+        send(&mut app, repeat_shift); // 旧实现会把 clean 置回 true
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        // 仍为中文（未误切英文）
+        assert!(app.world().resource::<PinyinIme>().enabled());
+    }
+
+    /// Esc 收候选后同帧 consumes_key(Escape) 仍为 true（对话框跳过 Esc 动作）（#2596-7/8）
+    #[test]
+    fn escape_cancel_sets_ate_cancel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        // 候选条/chip 系统需要 UiFont（弱句柄即可，实体不 spawn）
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
+
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
+        send(&mut app, char_key("n"));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().is_composing());
+
+        focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
+        send(&mut app, bevy::input::keyboard::KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: Key::Escape,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        let mut ime = app.world_mut().resource_mut::<PinyinIme>();
+        assert!(!ime.is_composing());
+        // 同帧 Esc 已被 IME 消费（ate_cancel / consumed）→ 对话框应跳过 Esc
+        assert!(ime.consumes_key(&bevy::input::keyboard::KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: Key::Escape,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }));
+    }
+
+    /// 退格精确计数：IME 消费 1 次退格后，第 1 个退格文本框跳过、第 2 个放行（#2596-10）
+    #[test]
+    fn backspace_count_precise() {
+        let mut ime = PinyinIme::new();
+        ime.toggle();
+        ime.feed_letter('n');
+        ime.backspace(); // IME 删掉拼音（ate_edit=1）
+        assert!(ime.consume_backspace());
+        assert!(!ime.consume_backspace());
+    }
+
 }

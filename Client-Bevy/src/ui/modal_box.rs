@@ -437,6 +437,10 @@ fn modal_ui_system(
                 }
                 match key.logical_key {
                     Key::Backspace => {
+                        // #2596-10：IME 本帧消费的退格按次数精确跳过，其余放行
+                        if ime.consume_backspace() {
+                            continue;
+                        }
                         state.name_input.pop();
                     }
                     _ => {

@@ -746,7 +746,8 @@ pub(crate) fn chat_input_system(
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
-        if ime.consumes_key(key) {
+        // 只对 Enter/Escape 做 IME 消费判定（避免提前消费按键循环的键，#2596-10）
+        if matches!(key.logical_key, Key::Enter | Key::Escape) && ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Enter {
@@ -836,6 +837,10 @@ pub(crate) fn chat_input_system(
             continue;
         }
         if key.logical_key == Key::Backspace {
+            // #2596-10：IME 本帧消费的退格按次数精确跳过，其余放行
+            if ime.consume_backspace() {
+                continue;
+            }
             chat.input_text.pop();
         } else if let Some(text) = &key.text {
             if !text.is_empty() {
