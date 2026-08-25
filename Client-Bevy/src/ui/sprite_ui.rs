@@ -480,6 +480,8 @@ pub fn ui_button_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
+    mut prev_focused: Local<Option<bool>>,
+    mut warmup: Local<u32>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -501,6 +503,16 @@ pub fn ui_button_system(
     // 重聚焦后把残留点击当作新点击（症状：进游戏后 HUD 按钮被“自动点击”，技能窗口自己开关）。
     // 加窗口聚焦门控，失焦时不响应任何按钮点击（对齐 #2618 键盘聚焦门控）。
     let focused = window.focused;
+    // #幽灵鼠标加固：窗口 focus 状态变化的那一帧忽略点击（macOS 在窗口获焦/切换应用时
+    // 可能派发残留/伪造的 ButtonInput<MouseButton> just_pressed；若鼠标恰好停在 HUD 按钮上，
+    // 重聚焦后“点击”会被当作新点击，进游戏后技能栏自己开关）。用 prev_focused 捕捉变化帧。
+    let focus_changed = prev_focused.map_or(true, |p| p != focused);
+    *prev_focused = Some(focused);
+    // 启动/窗口初始化前 90 帧忽略按钮点击（Bevy 初始化常有假鼠标事件）
+    let init_ignore = *warmup < 90;
+    *warmup += 1;
+    let just = mouse.just_pressed(MouseButton::Left) && !focus_changed && !init_ignore;
+    let down = mouse.pressed(MouseButton::Left) && !focus_changed;
     for (mut btn, frames, mut sprite) in &mut buttons {
         let (x, y, w, h) = btn.rect;
         let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;

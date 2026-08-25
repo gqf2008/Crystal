@@ -58,7 +58,14 @@ fn main() {
             // 使用 DX12 后端（Vulkan 的 swapchain present 在此机器上会冻结）
             .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
-                    backends: Some(Backends::DX12),
+                    // 跨平台后端：macOS 用 Metal；其余（Windows 为主）用 DX12，
+                    // 避免 Vulkan swapchain present 冻结。此前硬编码 DX12 导致 macOS
+                    // 启动即报 "Unable to find a GPU"（wgpu 只枚举 DX12 adapter）。
+                    backends: if cfg!(target_os = "macos") {
+                        Some(Backends::METAL)
+                    } else {
+                        Some(Backends::DX12)
+                    },
                     ..default()
                 })),
                 ..default()

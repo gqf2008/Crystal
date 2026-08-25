@@ -15,7 +15,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::controls::{spawn_checkbox, CheckBox};
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::sprite_ui::{spawn_ui_button, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -166,7 +166,7 @@ fn spawn_ranking(
             .id()
     };
     // #89 可滚动排行列表：10 行 × 28px
-    let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (490.0, 190.0, 4.0, 280.0), 8.3);
+    let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (490.0, 248.0, 4.0, 280.0), 8.3);
     commands.entity(track).insert((DialogRoot(DialogKind::Ranking), RankingWidget, Visibility::Visible));
     commands.entity(thumb).insert((
         DialogRoot(DialogKind::Ranking),
@@ -174,19 +174,38 @@ fn spawn_ranking(
         Visibility::Visible,
     ));
     commands.entity(panel).insert(ScrollList {
-        rect_rel: (10.0, 40.0, 280.0, 280.0),
+        rect_rel: (10.0, 98.0, 280.0, 280.0),
         row_h: 28.0,
         visible: 10,
         total: 0,
         offset: 0,
         step: 3,
-        track_rel: (290.0, 40.0, 4.0, 280.0),
+        track_rel: (290.0, 98.0, 4.0, 280.0),
         thumb: Some(thumb),
         z: 9.0,
     });
 
-    // 标题
-    let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 158.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
+    // 关闭按钮（右上角 X，Prguse2 360/361/362；与 ranking_ui_system 底部关闭命中区同坐标）
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        496.0,
+        154.0,
+        8.3,
+        20.0,
+        20.0,
+    ) {
+        commands.entity(e).insert((RankingClose, DialogRoot(DialogKind::Ranking), RankingWidget));
+    }
+
+    // 标题（原 y=158 与下方页签 y=168 重叠；上移到面板标题栏顶部，对齐 C# 无独立标题、页签居中的布局）
+    let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 150.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
     commands.entity(t).insert((DialogRoot(DialogKind::Ranking), RankingWidget));
 
     // 页签（C# RankingDialog：All/War/Wiz/Tao/Sin/Arch）
@@ -217,13 +236,13 @@ fn spawn_ranking(
     // 翻页（C# PrevButton/NextButton；两种组件类型不同，分别生成）
     let prev = spawn_ui_text(
         &mut commands, &font, "上一页",
-        210.0, 480.0,
+        210.0, 560.0,
         12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
     );
     commands.entity(prev).insert((
         RankingPrev,
         UiButton {
-            rect: (210.0, 480.0, 66.0, 20.0),
+            rect: (210.0, 560.0, 66.0, 20.0),
             clicked: false,
         },
         DialogRoot(DialogKind::Ranking),
@@ -231,13 +250,13 @@ fn spawn_ranking(
     ));
     let next = spawn_ui_text(
         &mut commands, &font, "下一页",
-        280.0, 480.0,
+        280.0, 560.0,
         12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
     );
     commands.entity(next).insert((
         RankingNext,
         UiButton {
-            rect: (280.0, 480.0, 66.0, 20.0),
+            rect: (280.0, 560.0, 66.0, 20.0),
             clicked: false,
         },
         DialogRoot(DialogKind::Ranking),
@@ -250,7 +269,7 @@ fn spawn_ranking(
         LibraryName::Prguse,
         [2086, 2086, 2086],
         [2087, 2087, 2087],
-        390.0, 502.0, 8.2, 16.0, 14.0,
+        390.0, 560.0, 8.2, 16.0, 14.0,
         ranking.online_only,
     ) {
         commands.entity(e).insert((
@@ -261,7 +280,7 @@ fn spawn_ranking(
     }
     let e = spawn_ui_text(
         &mut commands, &font, "仅在线",
-        410.0, 502.0,
+        410.0, 560.0,
         12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
     );
     commands.entity(e).insert((
@@ -273,7 +292,7 @@ fn spawn_ranking(
     for i in 0..10usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            210.0, 190.0 + i as f32 * 28.0,
+            210.0, 248.0 + i as f32 * 28.0,
             13.0, Color::WHITE, 8.2,
         );
         commands.entity(e).insert((
@@ -285,7 +304,7 @@ fn spawn_ranking(
     // 我的排名（C# MyRank；点击滚动到我的行）
     let t = spawn_ui_text(
         &mut commands, &font, "我的排名：--",
-        210.0, 462.0,
+        210.0, 538.0,
         12.0, Color::srgb(1.0, 0.9, 0.3), 8.2,
     );
     commands.entity(t).insert((
@@ -406,7 +425,7 @@ fn ranking_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
-                if cursor.x >= 210.0 && cursor.x <= 420.0 && cursor.y >= 462.0 && cursor.y <= 482.0 {
+                if cursor.x >= 210.0 && cursor.x <= 420.0 && cursor.y >= 538.0 && cursor.y <= 558.0 {
                     if let Some(idx) = filtered.iter().position(|e| e.player_name == self_name) {
                         if let Ok(mut sl) = scroll.single_mut() {
                             sl.offset = idx.min(max_offset);
@@ -421,7 +440,7 @@ fn ranking_ui_system(
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 for i in 0..10usize {
-                    let y = 190.0 + i as f32 * 28.0;
+                    let y = 248.0 + i as f32 * 28.0;
                     if cursor.x >= 210.0 && cursor.x <= 500.0 && cursor.y >= y && cursor.y <= y + 26.0 {
                         if let Some(e) = filtered.get(i) {
                             if !mgr.is_open(DialogKind::Inspect) {

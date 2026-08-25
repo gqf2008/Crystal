@@ -232,6 +232,12 @@ mod tests {
     #[test]
     fn text_input_english_typing() {
         let mut app = app_with_focused_field();
+        // 默认中文：先 Shift 单按切到英文，再验证字母原样进缓冲
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        assert!(!app.world().resource::<PinyinIme>().enabled());
         for c in ["a", "b", "c"] {
             send(&mut app, char_key(c));
             app.update();
@@ -245,11 +251,7 @@ mod tests {
     fn text_input_chinese_ime_pipeline() {
         let mut app = app_with_focused_field();
 
-        // Shift 单按切中文
-        send(&mut app, shift_key(ButtonState::Pressed));
-        app.update();
-        send(&mut app, shift_key(ButtonState::Released));
-        app.update();
+        // 默认即中文（插件构造后 enabled=true）
         assert!(app.world().resource::<PinyinIme>().enabled());
 
         // 打 nihao（每帧 text_input 回填 focus.rect，字母被 IME 吞入拼音缓冲）
