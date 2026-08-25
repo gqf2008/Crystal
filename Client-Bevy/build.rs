@@ -120,7 +120,9 @@ fn build_libpinyin(root: &Path, install: &Path) {
     verify_sha512(&model_tar, MODEL_SHA512);
     extract_into(&model_tar, &src.join("data"));
     // 3) autoreconf + configure + make + install
-    run(Command::new("autoreconf").args(["-f", "-i"]).current_dir(&src), "autoreconf");
+    // Windows(MSYS2) 下 autoreconf/configure 是 shell 脚本，native 进程无法直接 spawn，
+    // 必须经 bash -c 执行；Unix 用 sh -c（行为等价）。
+    run_script("autoreconf -f -i", &src, &[], "autoreconf");
     let configure = src.join("configure");
     let db_cpp = db_include_flag();
     let db_ld = db_libdir().map(|d| format!("-L{}", d.display())).unwrap_or_default();
@@ -131,21 +133,40 @@ fn build_libpinyin(root: &Path, install: &Path) {
     }
     configure_env.push(("CPPFLAGS".into(), format!("{} {}", db_cpp, env_opt("CPPFLAGS"))));
     configure_env.push(("LDFLAGS".into(), format!("{} {}", db_ld, env_opt("LDFLAGS"))));
-    let mut cfg = Command::new(&configure)
-        .arg(format!("--prefix={}", install.display()))
-        .args(["--with-dbm=BerkeleyDB", "--disable-libzhuyin", "--disable-dependency-tracking"])
-        .current_dir(&src)
-        .envs(configure_env)
-        .spawn()
-        .unwrap_or_else(|e| panic!("spawn configure: {}", e));
-    let status = cfg.wait().unwrap_or_else(|e| panic!("wait configure: {}", e));
-    if !status.success() {
-        panic!("configure 失败（status {:?}）。依赖：glib-2.0、berkeley-db、autoconf/automake/libtool 需已安装。", status.code());
-    }
+    // 路径转正斜杠：Windows 下传给 msys bash 避免反斜杠被吞。
+    let configure_cmd = format!(
+        "'{}' --prefix='{}' --with-dbm=BerkeleyDB --disable-libzhuyin --disable-dependency-tracking",
+        configure.display().to_string().replace('\\', "/"),
+        install.display().to_string().replace('\\', "/"),
+    );
+    run_script(
+        &configure_cmd,
+        &src,
+        &configure_env,
+        "configure（依赖：glib-2.0、berkeley-db、autoconf/automake/libtool 需已安装）",
+    );
     run(Command::new("make").args(["-j", "4"]).current_dir(&src), "make");
     run(Command::new("make").args(["install"]).current_dir(&src), "make install");
     if !install.join("lib/libpinyin.a").exists() {
         panic!("libpinyin 构建后缺少 lib/libpinyin.a: {}", install.display());
+    }
+}
+
+/// 执行 autotools 脚本类命令（autoreconf/configure）。
+/// Windows(MSYS2) 下它们是 shell 脚本，native 进程直接 spawn 会“program not found”，
+/// 须经 bash -c；Unix 用 sh -c（行为等价）。
+fn run_script(cmd: &str, cwd: &Path, envs: &[(String, String)], what: &str) {
+    let shell = if cfg!(windows) { "bash" } else { "sh" };
+    let mut command = Command::new(shell);
+    command.args(["-c", cmd]).current_dir(cwd);
+    for (k, v) in envs {
+        command.env(k, v);
+    }
+    let status = command
+        .status()
+        .unwrap_or_else(|e| panic!("spawn {}: {}", what, e));
+    if !status.success() {
+        panic!("{} 失败", what);
     }
 }
 
