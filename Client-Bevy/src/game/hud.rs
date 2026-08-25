@@ -17,6 +17,7 @@ use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::option::OptionState;
 use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -449,23 +450,28 @@ impl Plugin for HudPlugin {
         );
         app.add_systems(OnEnter(AppState::Game), spawn_hud);
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
+        // #2632：放宽 11 系统 .chain() 全串行——只保留确有数据依赖的排序，其余解链并行。
+        // 保留的依赖（写方须排在读方前，晚一帧读会引入一帧滞后）：
+        //   · ui_button_system 每帧写 UiButton.clicked → hud_button / death_overlay 读；
+        //   · sync_hud_data 写 HudData → hud_update_system 以 Changed<HudData> 门控消费；
+        //   · auto_potion_system 读 hud.dead 与 death_overlay_system 写 hud.dead 共享
+        //     ResMut<HudState>，保持原「先读 dead、后写 dead」的相对先后。
+        // 其余（attack_mode/hero_btn/hero_panel/space_weight/tooltip）读写的组件互不相交，
+        // 顺序不影响输出，解链允许并行。
         app.add_systems(
             Update,
             (
-                ui_button_system,
-                hud_button_system,
-                auto_potion_system,
-                sync_hud_data,
-                hud_update_system,
-                death_overlay_system,
+                (ui_button_system, hud_button_system, death_overlay_system).chain(),
+                (sync_hud_data, hud_update_system).chain(),
+                auto_potion_system.before(death_overlay_system),
                 attack_mode_text_system,
                 hero_btn_system,
                 hero_panel_system,
                 hud_space_weight_system,
                 hud_tooltip_system,
             )
-                .chain()
-                .run_if(in_state(AppState::Game)),
+                .run_if(in_state(AppState::Game))
+                .in_set(GameSet::Hud),
         );
     }
 }

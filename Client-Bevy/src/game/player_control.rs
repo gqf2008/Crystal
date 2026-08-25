@@ -13,6 +13,7 @@ use bevy::window::{CursorIcon, SystemCursorIcon};
 
 use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
+use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
 use crate::game::pathfinding;
@@ -63,13 +64,50 @@ impl Default for ControlState {
     }
 }
 
+/// 玩家输入使能（#2632 共享 run condition）：非 dead/fishing/paralysis 时为 true。
+/// 对齐 C# GameScene.CheckInput 的 Dead/Fishing/Paralysis 门——原先在 8 个系统首句
+/// 手动 `if ... { return }` 复制，此处统一为 run condition（门控语义完全不变：
+/// 条件不满足时系统整体不运行，与原早退等价——早退前本就无任何副作用）。
+pub fn player_input_enabled(hud: Res<HudState>) -> bool {
+    !(hud.dead || hud.fishing || hud.paralysis)
+}
+
 pub struct PlayerControlPlugin;
 
 impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
+        // #2632：声明调度顺序——输入采集（写 ControlState / 经 Commands 写 LocalMove）
+        // 先于结算（auto_attack 读 attack_target/last_attack、pickup_arrival 读
+        // pickup_target/LocalMove），保证「点击写 attack_target 当帧被 auto_attack 消费」。
+        app.configure_sets(Update, GameSet::PlayerInput.before(GameSet::Combat));
         app.add_systems(
             Update,
-            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, pet_pickup_system, pet_mode_system, hold_move_system, auto_attack_system, pickup_arrival_system, context_cursor_system)
+            (
+                // —— PlayerInput：输入采集 ——
+                // key_pickup/pet_mode/context_cursor 原本就无 dead/fishing/paralysis 门，
+                // 维持不加 run_if（行为等价，不擅自加门）。
+                (
+                    advance_attack_timer_system.run_if(player_input_enabled),
+                    autorun_toggle_system.run_if(player_input_enabled),
+                    right_click_move_system.run_if(player_input_enabled),
+                    left_click_interact_system.run_if(player_input_enabled),
+                    key_pickup_system,
+                    pet_pickup_system.run_if(player_input_enabled),
+                    pet_mode_system,
+                    // 与 right_click_move 同写 LocalMove：声明 right_click 先建立路径、hold 再跟随
+                    hold_move_system
+                        .run_if(player_input_enabled)
+                        .after(right_click_move_system),
+                    context_cursor_system,
+                )
+                    .in_set(GameSet::PlayerInput),
+                // —— Combat：消费 attack_target / pickup_target / LocalMove ——
+                (
+                    auto_attack_system.run_if(player_input_enabled),
+                    pickup_arrival_system.run_if(player_input_enabled),
+                )
+                    .in_set(GameSet::Combat),
+            )
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -190,14 +228,11 @@ fn is_shift_down(keys: &ButtonInput<KeyCode>) -> bool {
 
 
 /// 推进攻击计时（原 player_input_system 末尾逻辑独立成系统；保持既有行为）
+/// 门控（dead/fishing/paralysis）由 .run_if(player_input_enabled) 承担。
 fn advance_attack_timer_system(
     time: Res<Time>,
     mut control: ResMut<ControlState>,
-    hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     control.last_attack += time.delta_secs();
 }
 
@@ -205,11 +240,7 @@ fn advance_attack_timer_system(
 fn autorun_toggle_system(
     mut control: ResMut<ControlState>,
     mouse: Res<ButtonInput<MouseButton>>,
-    hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     if mouse.just_pressed(MouseButton::Middle) {
         control.autorun = !control.autorun;
         tracing::info!("🏃 AutoRun: {}", control.autorun);
@@ -234,14 +265,10 @@ fn right_click_move_system(
         ),
     >,
     buttons: Query<&UiButton>,
-    hud: Res<HudState>,
     dialog: Res<crate::game::dialogs::DialogManager>,
     skill_bar: Res<crate::game::skills::SkillBarState>,
     skill_bar_opt: Res<crate::game::dialogs::option::OptionState>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Some(cursor_logical) = window.cursor_position() else { return };
@@ -320,11 +347,7 @@ fn left_click_interact_system(
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<&UiButton>,
     ui: UiLockState,
-    hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Some(cursor_logical) = window.cursor_position() else { return };
@@ -477,11 +500,7 @@ fn pickup_arrival_system(
     net: Res<NetConnection>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     players: Query<(&Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
-    hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     let Some(target) = control.pickup_target else { return };
     // 物品已消失（被拾取/过期）→ 清除目标
     let Some((_, item_tf)) = items.iter().find(|(id, _)| id.0 == target) else {
@@ -568,9 +587,6 @@ fn auto_attack_system(
     // C# OutputDelay=1000ms：范围外提示节流
     mut too_far_timer: Local<f32>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     control.last_attack += time.delta_secs();
     let Some(target_id) = control.attack_target else { return };
 
@@ -723,8 +739,9 @@ fn hold_move_system(
     hud: Res<HudState>,
     dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
+    // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
     // #1830：窗口类对话框打开时不按住移动（小地图除外）
-    if hud.dead || hud.fishing || hud.paralysis || dialog.blocks_world_click() {
+    if dialog.blocks_world_click() {
         return;
     }
     let Some(map) = &game_data.map else { return };
@@ -1104,11 +1121,7 @@ fn pet_pickup_system(
         (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>),
     >,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
-    hud: Res<HudState>,
 ) {
-    if hud.dead || hud.fishing || hud.paralysis {
-        return;
-    }
     // 聊天/任意文本输入聚焦时不触发（#2595：X/Ctrl+X 是文本按键，避免打字误发
     // 拾取指令；旧门只查 chat.input_active，好友/组队等通用输入框漏网）
     if gate.0 {
