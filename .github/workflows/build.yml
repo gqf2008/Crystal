@@ -151,6 +151,37 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: Client-Bevy
         run: cargo build --release --bin client_bevy
+      - name: Build libpinyin (Windows MSYS2, pre-build for cargo escape)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # native cargo build 进程直接跑 autotools（autoreconf/aclocal）会因 MSYS2 root
+          # 路径映射异常（/a/_temp/msys64 缺盘符）失败，因此先在标准 msys2 shell 里按
+          # build.rs 相同流程预编译 libpinyin，再经 LIBPINYIN_DIR 逃生口让 cargo 复用。
+          # 注意：REF/SHA512 须与 Client-Bevy/build.rs 顶部常量保持一致。
+          fork_ref=f21ef9a12a14eef626a89a38bb06e8ed115c38ca
+          fork_sha=d3e293d5a4a7bcf6dfc2f96724e2c16ecb2046d38de4d8c7fc349bd6eab3b4472f01cba317c50d75ef6afa773c9e007a273fd065a7418e0819a420616ef12858
+          model_sha=ed4d0607ad35e0e7ea424670539ddcd81a2b03c1da914b9c00cb748cf065f29471502d40b9a189852001da1fb9178c3bcc4675d7efebea5d081d78bfeee9b5d6
+          work="$(cygpath -u "$RUNNER_TEMP")/libpinyin-build"
+          install="$(cygpath -u "$RUNNER_TEMP")/libpinyin-install"
+          rm -rf "$work" "$install"
+          mkdir -p "$work" "$install"
+          curl -sL --retry 3 --max-time 600 -o "$work/fork.tar.gz" "https://github.com/etorth/libpinyin/archive/${fork_ref}.tar.gz"
+          echo "${fork_sha}  $work/fork.tar.gz" | sha512sum -c -
+          tar xzf "$work/fork.tar.gz" -C "$work"
+          mv "$work/libpinyin-${fork_ref}" "$work/src"
+          curl -sL --retry 3 --max-time 600 -o "$work/model20.text.tar.gz" "https://downloads.sourceforge.net/project/libpinyin/models/model20.text.tar.gz"
+          echo "${model_sha}  $work/model20.text.tar.gz" | sha512sum -c -
+          mkdir -p "$work/src/data"
+          tar xzf "$work/model20.text.tar.gz" -C "$work/src/data"
+          cd "$work/src"
+          autoreconf -f -i
+          ./configure --prefix="$install" --with-dbm=BerkeleyDB --disable-libzhuyin --disable-dependency-tracking \
+            CPPFLAGS="-I$(cygpath -m /ucrt64/include)" LDFLAGS="-L$(cygpath -m /ucrt64/lib)"
+          make -j4
+          make install
+          test -f "$install/lib/libpinyin.a"
       - name: Build release (client_bevy, Windows MSYS2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -159,11 +190,10 @@ jobs:
           set -euo pipefail
           # dtolnay/rust-toolchain 以 --no-modify-path 安装，MSYS2 shell 需要显式补 cargo bin
           export PATH="$(cygpath -u "$CARGO_HOME")/bin:$PATH"
+          # 复用上一步在标准 msys2 shell 里预编译好的 libpinyin（build.rs 逃生口）
+          export LIBPINYIN_DIR="$(cygpath -w "$RUNNER_TEMP/libpinyin-install")"
           export BERKELEY_DB_INCLUDE="$(cygpath -m /ucrt64/include)"
           export BERKELEY_DB_LIBDIR="$(cygpath -m /ucrt64/lib)"
-          # native cargo build 进程 spawn 的 `bash` 会命中 WSL 的 System32/bash.exe，
-          # 必须显式指向 MSYS2 bash 的 Windows 绝对路径
-          export LIBPINYIN_SHELL="$(cygpath -w /usr/bin/bash.exe)"
           CARGO_BUILD_TARGET=x86_64-pc-windows-gnu cargo build --release --bin client_bevy
       - name: Stage Windows exe + runtime DLLs
         if: runner.os == 'Windows'
