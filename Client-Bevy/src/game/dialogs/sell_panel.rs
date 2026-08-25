@@ -20,8 +20,8 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
+    ui_image,
 };
 use mir2_shared::enums::PanelType;
 
@@ -61,15 +61,19 @@ pub struct SellPanelPlugin;
 impl Plugin for SellPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SellPanelState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             sell_panel_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_sell_panel);
+        app.add_systems(OnEnter(AppState::Game), spawn_sell_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_sell_panel);
         app.add_systems(
             Update,
-            (sell_panel_ui_system, sell_panel_action_system, ui_button_system)
+            (
+                sell_panel_ui_system,
+                sell_panel_action_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -99,9 +103,11 @@ fn spawn_sell_panel(
     // 背景 Prguse[392]（C# NPCDropDialog）
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 392) {
         let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((SellPanelWidget, DialogRoot(DialogKind::Npc), Visibility::Hidden));
+        commands.entity(e).insert((
+            SellPanelWidget,
+            DialogRoot(DialogKind::Npc),
+            Visibility::Hidden,
+        ));
     }
 
     // 确认按钮 Title[290/291/292]（C# ConfirmButton）
@@ -138,11 +144,9 @@ fn spawn_sell_panel(
         Color::WHITE,
         8.0,
     );
-    commands.entity(info).insert((
-        SellPanelInfo,
-        SellPanelWidget,
-        DialogRoot(DialogKind::Npc),
-    ));
+    commands
+        .entity(info)
+        .insert((SellPanelInfo, SellPanelWidget, DialogRoot(DialogKind::Npc)));
 
     // 拖放区（C# ItemCell (38,72)，36x32 格子 + 边框底色）
     let white = images.add(crate::map_renderer::make_image(
@@ -258,18 +262,25 @@ fn sell_panel_action_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
 
     // 点拖放区（C# NPCDropPanel_Click 区域 (20,55,75,75) 相对面板）：放入选中物品
     if mouse.just_pressed(MouseButton::Left) {
         let dx = DIALOG_X + 20.0;
         let dy = DIALOG_Y + 55.0;
         if cursor.x >= dx && cursor.x <= dx + 75.0 && cursor.y >= dy && cursor.y <= dy + 75.0 {
-            if let Some(sel) = inv_click.selected {
+            // #2631：选中态归 inventory 所有，经 take_selected 读并清（放入面板后不再保留选中）
+            if let Some(sel) = inv_click.take_selected() {
                 if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
                     state.target = Some(item.clone());
-                    inv_click.selected = None;
-                    tracing::info!("🎯 放入面板: {} (uid={}) x{}", item.name, item.unique_id, item.count);
+                    tracing::info!(
+                        "🎯 放入面板: {} (uid={}) x{}",
+                        item.name,
+                        item.unique_id,
+                        item.count
+                    );
                 }
             }
         }
@@ -283,7 +294,9 @@ fn sell_panel_action_system(
         if !btn.clicked {
             continue;
         }
-        let Some(item) = state.target.take() else { continue };
+        let Some(item) = state.target.take() else {
+            continue;
+        };
         match state.mode {
             Some(PanelType::Sell) => {
                 // 原版 C# Confirm：C.SellItem{UniqueID, Count=TargetItem.Count}（卖整叠）
@@ -308,7 +321,6 @@ fn sell_panel_action_system(
         }
     }
 }
-
 
 /// 消费服务端出售/修理面板事件（网络层只广播 ServerEvent）
 fn sell_panel_server_events(

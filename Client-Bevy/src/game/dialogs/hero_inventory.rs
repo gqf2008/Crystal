@@ -13,10 +13,10 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::hero::{next_autopot, HeroState, STAT_HP, STAT_MP};
+use crate::game::dialogs::hero::{HeroState, STAT_HP, STAT_MP, next_autopot};
 use crate::game::dialogs::inventory::{
-    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, ItemUseFeedback,
-    UseItemCtx, UseOutcome,
+    InvClickState, InvDropConfirm, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
+    item_use_sound_id, use_item_core,
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
@@ -24,9 +24,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCellIcon};
+use crate::ui::controls::{ItemCellData, ItemCellIcon, spawn_item_cell};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
 };
 
 // 布局常量（相对对话框左上角；C# HeroInventoryDialog）
@@ -544,7 +544,7 @@ fn hero_inv_data_system(
     }
     // 选中高亮（黄色半透明，C# SelectedCell 语义；hero_selected 存原始槽位 2+idx）
     for (mut sprite, slot) in &mut cell_sprites {
-        let target = if click.hero_selected == Some(2 + slot.0) {
+        let target = if click.hero_selected() == Some(2 + slot.0) {
             Color::srgba(1.0, 0.9, 0.2, 0.35)
         } else {
             Color::srgba(0.0, 0.0, 0.0, 0.18)
@@ -692,25 +692,21 @@ fn hero_inv_click_system(
         }
     }
     *last_hero_click = Some((slot, now));
-    if let Some(main_from) = click.selected {
+    // #2631：选中态归 inventory 所有，经 take_selected 读并清（转移到英雄后不再保留主背包选中）
+    if let Some(main_from) = click.take_selected() {
         net.send_packet(&crate::network::TransferHeroItemWire {
             from: main_from as i32,
             to: slot as i32,
         });
-        click.selected = None;
-        click.hero_selected = None;
+        click.clear_hero_selected();
         tracing::info!("🎒 转移物品 主背包{} -> 英雄{}", main_from, slot);
     } else {
         // 选中/取消选中英雄格（空格不选中；hero_selected 存原始背包槽位，
         // 主背包取回路径 TakeBackHeroItem from 直接消费它）
         if hero.inventory.get(slot).and_then(|s| s.as_ref()).is_some() {
-            click.hero_selected = if click.hero_selected == Some(slot) {
-                None
-            } else {
-                Some(slot)
-            };
+            click.toggle_hero_selected(slot);
         } else {
-            click.hero_selected = None;
+            click.clear_hero_selected();
         }
     }
 }

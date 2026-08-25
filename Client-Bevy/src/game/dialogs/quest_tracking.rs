@@ -13,10 +13,18 @@ use bevy::prelude::*;
 use crate::actor::{LocalPlayer, PlayerName};
 use crate::game::dialogs::quest_log::QuestLogState;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
+use crate::ui::sprite_ui::{UiEntity, UiFont, spawn_ui_text};
 
 /// 最多同时追踪 5 个任务（C# QuestTrackingDialog：Count >= 5 return）
 pub const MAX_TRACKED: usize = 5;
+
+/// 切换某任务追踪状态（#2631 跨对话框解耦 Message）。
+/// quest_log 不再直写 [`QuestTrackingState`] + save，改发本 Message；本模块的
+/// [`quest_tracking_toggle_system`] 消费并自行 toggle + save（含按角色持久化）。
+#[derive(Message, Debug)]
+pub struct ToggleQuestTracking {
+    pub quest_id: i32,
+}
 
 /// C# Settings.cs：QuestTrackingReader = InIReader(Data/UserData/QuestTracking.ini)
 const TRACKING_PATH: &str = "./Data/UserData/QuestTracking.ini";
@@ -82,7 +90,12 @@ impl QuestTrackingState {
         let mut content = fs::read_to_string(TRACKING_PATH).unwrap_or_default();
         for i in 0..MAX_TRACKED as usize {
             let v = self.tracked.get(i).copied().unwrap_or(-1);
-            content = set_ini_value(&content, &self.char_name, &format!("Quest-{}", i), &v.to_string());
+            content = set_ini_value(
+                &content,
+                &self.char_name,
+                &format!("Quest-{}", i),
+                &v.to_string(),
+            );
         }
         let _ = fs::write(TRACKING_PATH, content);
     }
@@ -121,11 +134,15 @@ pub struct QuestTrackingPlugin;
 impl Plugin for QuestTrackingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<QuestTrackingState>();
+        // #2631：quest_log 跨对话框追踪切换请求（本模块消费并自行 toggle + save）
+        app.add_message::<ToggleQuestTracking>();
         app.add_systems(OnEnter(AppState::Game), spawn_quest_tracking);
         app.add_systems(OnExit(AppState::Game), cleanup_quest_tracking);
         app.add_systems(
             Update,
-            quest_tracking_ui_system.run_if(in_state(AppState::Game)),
+            (quest_tracking_toggle_system, quest_tracking_ui_system)
+                .chain()
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -142,15 +159,19 @@ fn spawn_quest_tracking(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
-if !crate::ui::sprite_ui::ui_enabled("quest") {
-    return;
-}
+    if !crate::ui::sprite_ui::ui_enabled("quest") {
+        return;
+    }
 
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     // 半透明面板（C# 无背景，这里用深色半透明便于阅读）
     commands.spawn((
         UiEntity,
@@ -166,11 +187,7 @@ if !crate::ui::sprite_ui::ui_enabled("quest") {
         Visibility::Hidden,
     ));
     for i in 0..TEXT_LINES {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            0.0, 0.0,
-            11.0, Color::WHITE, 20.2,
-        );
+        let e = spawn_ui_text(&mut commands, &font, "", 0.0, 0.0, 11.0, Color::WHITE, 20.2);
         commands.entity(e).insert((QuestTrackingText(i), UiEntity));
         // C# QuestDialogs.cs _questNameLabel/_questTaskLabel OutLine=true：任务追踪文本黑色描边
         crate::ui::outlined_text::outline_on(
@@ -185,6 +202,18 @@ if !crate::ui::sprite_ui::ui_enabled("quest") {
     }
 }
 
+/// 消费 [`ToggleQuestTracking`]：切换追踪并按角色持久化（#2631 跨对话框解耦）。
+/// 数据所有权归本模块——quest_log 只发 Message，toggle + save 在这里统一进行。
+fn quest_tracking_toggle_system(
+    mut events: MessageReader<ToggleQuestTracking>,
+    mut state: ResMut<QuestTrackingState>,
+) {
+    for ev in events.read() {
+        state.toggle(ev.quest_id);
+        state.save();
+    }
+}
+
 /// 渲染追踪任务 + 拖动
 fn quest_tracking_ui_system(
     mut state: ResMut<QuestTrackingState>,
@@ -192,14 +221,29 @@ fn quest_tracking_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     local_player: Query<&PlayerName, (With<LocalPlayer>, Without<QuestTrackingWidget>)>,
-    mut widgets: Query<(&mut Transform, &mut Visibility), (With<QuestTrackingWidget>, Without<QuestTrackingText>)>,
-    mut texts: Query<(&mut Transform, &mut Text2d, &mut TextColor, &QuestTrackingText), Without<QuestTrackingWidget>>,
+    mut widgets: Query<
+        (&mut Transform, &mut Visibility),
+        (With<QuestTrackingWidget>, Without<QuestTrackingText>),
+    >,
+    mut texts: Query<
+        (
+            &mut Transform,
+            &mut Text2d,
+            &mut TextColor,
+            &QuestTrackingText,
+        ),
+        Without<QuestTrackingWidget>,
+    >,
 ) {
     // 角色名变化 → 按角色加载持久化追踪列表（C# SaveTrackedQuests(name)）
     if let Ok(name) = local_player.single() {
         if state.char_name != name.0 {
             state.load(&name.0);
-            tracing::info!("📌 任务追踪已加载（角色 {}，{} 个）", name.0, state.tracked.len());
+            tracing::info!(
+                "📌 任务追踪已加载（角色 {}，{} 个）",
+                name.0,
+                state.tracked.len()
+            );
         }
     }
 
@@ -212,7 +256,9 @@ fn quest_tracking_ui_system(
     }
 
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
 
     // 拖动（C# Movable：按住面板移动）
     let in_panel = cursor.x >= state.pos.0
@@ -233,7 +279,11 @@ fn quest_tracking_ui_system(
     // 无追踪任务或都不在当前任务列表 → 隐藏（C# questsToTrack.Count < 1 → Hide）
     let visible = !quests_to_track.is_empty();
     for (mut tf, mut vis) in &mut widgets {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if visible {
             tf.translation.x = state.pos.0;
             tf.translation.y = -state.pos.1;
@@ -281,6 +331,26 @@ mod tests {
         assert!(!s.toggle(2)); // 关闭
     }
 
+    /// #2631：ToggleQuestTracking Message → 本模块自行 toggle + save（替代 quest_log 直写）。
+    /// char_name 空 → save() 提前返回不落盘，纯内存断言。
+    #[test]
+    fn toggle_quest_tracking_message_toggles_state() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(Messages::<ToggleQuestTracking>::default());
+        world.insert_resource(QuestTrackingState::default()); // char_name 空 → save 不落盘
+        world
+            .resource_mut::<Messages<ToggleQuestTracking>>()
+            .write(ToggleQuestTracking { quest_id: 7 });
+
+        world
+            .run_system_once(quest_tracking_toggle_system)
+            .expect("toggle 应成功");
+        assert!(world.resource::<QuestTrackingState>().is_tracked(7));
+    }
+
     #[test]
     fn test_max_tracked() {
         let mut s = QuestTrackingState::default();
@@ -315,5 +385,3 @@ mod tests {
         assert_eq!(parse_tracked(&content, "Bob"), vec![9]);
     }
 }
-
-

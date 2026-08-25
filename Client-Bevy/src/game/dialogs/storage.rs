@@ -14,8 +14,8 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::inventory::{
-    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, InvItem,
-    ItemUseFeedback, UseItemCtx, UseOutcome,
+    InvClickState, InvDropConfirm, InvItem, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
+    item_use_sound_id, use_item_core,
 };
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -24,10 +24,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{spawn_item_cell, ItemCell, ItemCellData, ItemCellIcon};
+use crate::ui::controls::{ItemCell, ItemCellData, ItemCellIcon, spawn_item_cell};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
+    ui_image,
 };
 
 /// 仓库数据（网络 UserStorage 写入）
@@ -728,14 +728,15 @@ fn storage_action_system(
     }
 
     // 1) 选中了背包物品 → 点仓库格：存入（原版 C# SelectedCell Inventory → Storage 拖放）
-    if let Some(from) = inv_click.selected {
+    // #2631：选中态归 inventory 所有，经 selected() 读、clear_selected() 清（存入后不再保留）
+    if let Some(from) = inv_click.selected() {
         if let Some(to) = storage_slot {
+            inv_click.clear_selected();
             net.send_packet(&mir2_shared::packets::client::item::StoreItem {
                 from: from as i32,
                 to: to as i32,
             });
             tracing::info!("📦 存入仓库 {} -> {}", from, to);
-            inv_click.selected = None;
             state.selected = None;
             return;
         }
@@ -750,7 +751,7 @@ fn storage_action_system(
             });
             tracing::info!("📦 取出仓库 {} -> {}", from, to);
             state.selected = None;
-            inv_click.selected = None;
+            inv_click.clear_selected(); // #2631：经接口清（互斥）
             return;
         }
     }
@@ -762,7 +763,7 @@ fn storage_action_system(
             _ => {
                 if state.items.get(i).and_then(|s| s.as_ref()).is_some() {
                     state.selected = Some(i);
-                    inv_click.selected = None;
+                    inv_click.clear_selected(); // #2631：经接口清（与背包选中互斥）
                 }
             }
         }

@@ -20,7 +20,7 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
 };
 use mir2_shared::data::client_data::ClientQuestInfo;
 use mir2_shared::data::shared_data::QuestItemReward;
@@ -482,7 +482,9 @@ fn quest_log_ui_system(
     mut state: ResMut<QuestLogState>,
     catalog: Res<QuestCatalog>,
     hud: Res<crate::game::hud::HudState>,
-    mut tracking: ResMut<crate::game::dialogs::quest_tracking::QuestTrackingState>,
+    // #2631：追踪状态只读（渲染追踪/取消按钮）；切换改发 ToggleQuestTracking 由 quest_tracking 处理
+    tracking: Res<crate::game::dialogs::quest_tracking::QuestTrackingState>,
+    mut toggle_tracking: MessageWriter<crate::game::dialogs::quest_tracking::ToggleQuestTracking>,
     net: Res<NetConnection>,
     close: Query<&UiButton, With<QuestLogClose>>,
     abandon_btn: Query<&UiButton, With<QuestLogAbandon>>,
@@ -760,8 +762,13 @@ fn quest_log_ui_system(
         };
         if btn.clicked {
             if let Some(q) = quest {
-                let now_tracked = tracking.toggle(q.id);
-                tracking.save();
+                // #2631：toggle + save 归 quest_tracking 处理（数据所有权），这里只发 Message。
+                // toggle() 返回值恒等于「点击前未追踪」，故 now_tracked = !tracked（只读推导，
+                // 反馈文案与旧直写版完全一致）。
+                let now_tracked = !tracked;
+                toggle_tracking.write(crate::game::dialogs::quest_tracking::ToggleQuestTracking {
+                    quest_id: q.id,
+                });
                 state.message = if now_tracked {
                     format!("已追踪任务 {}", q.name)
                 } else {

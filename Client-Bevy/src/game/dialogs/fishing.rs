@@ -17,7 +17,7 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
 };
 
 /// 钓鱼状态（FishingUpdate 写入）
@@ -46,18 +46,19 @@ pub struct FishingAutocast;
 pub struct FishingLine(usize);
 
 /// 钓具槽（0=Hook 1=Float 2=Bait 3=Finder 4=Reel，C# FishingSlot）
-#[derive(Component)] struct FishingGearSlot(usize);
+#[derive(Component)]
+struct FishingGearSlot(usize);
 
 pub struct FishingPlugin;
 
 impl Plugin for FishingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FishingState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             fishing_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_fishing);
+        app.add_systems(OnEnter(AppState::Game), spawn_fishing);
         app.add_systems(OnExit(AppState::Game), cleanup_fishing);
         app.add_systems(
             Update,
@@ -75,7 +76,13 @@ fn cleanup_fishing(mut commands: Commands, roots: Query<Entity, With<DialogRoot>
 }
 
 /// 钓具槽位置（C# FishingDialog Grid：Hook@(17,203) Float@(17,241) Bait@(57,241) Finder@(97,241) Reel@(137,241)，34x30）
-const GEAR_POS: [(f32, f32); 5] = [(17.0, 203.0), (17.0, 241.0), (57.0, 241.0), (97.0, 241.0), (137.0, 241.0)];
+const GEAR_POS: [(f32, f32); 5] = [
+    (17.0, 203.0),
+    (17.0, 241.0),
+    (57.0, 241.0),
+    (97.0, 241.0),
+    (137.0, 241.0),
+];
 
 /// 找背包第一个空格（钓具卸下目标；无空格返回 None）
 fn free_inventory_index(items: &[Option<InvItem>]) -> Option<usize> {
@@ -97,7 +104,13 @@ fn spawn_fishing(
     let font = ui_font.0.clone();
 
     // 背景 Prguse[1340]（C# FishingDialog.Index=1340）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1340) {
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        1340,
+    ) {
         let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::Fishing),
@@ -107,22 +120,35 @@ fn spawn_fishing(
     }
     // 关闭（C# Prguse2 360/361/362）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 220.0, 83.0, 7.0, 20.0, 20.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        280.0 + 220.0,
+        83.0,
+        7.0,
+        20.0,
+        20.0,
     ) {
-        commands.entity(e).insert((
-            FishingClose,
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((FishingClose, DialogRoot(DialogKind::Fishing), FishingWidget));
     }
     // 状态行
     for i in 0..4usize {
         let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
+            &mut commands,
+            &font,
+            "",
+            298.0,
+            120.0 + i as f32 * 22.0,
+            12.0,
+            Color::WHITE,
+            8.0,
         );
         commands.entity(e).insert((
             FishingLine(i),
@@ -150,17 +176,25 @@ fn spawn_fishing(
         0.13,
         true,
     ) {
-        commands.entity(e).insert((
-            FishingCast,
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-        ));
+        commands
+            .entity(e)
+            .insert((FishingCast, DialogRoot(DialogKind::Fishing), FishingWidget));
     }
     // 自动钓鱼开关
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 220.0, 8.3, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
+        390.0,
+        220.0,
+        8.3,
+        76.0,
+        25.0,
     ) {
         commands.entity(e).insert((
             FishingAutocast,
@@ -169,10 +203,19 @@ fn spawn_fishing(
         ));
     }
     // 钓具槽（C# FishingDialog Grid：Hook/Float/Bait/Finder/Reel，34x30）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     for (i, (rx, ry)) in GEAR_POS.iter().enumerate() {
         let e = spawn_ui_sprite(
-            &mut commands, white.clone(), 280.0 + rx, 80.0 + ry, 8.1, 1.0,
+            &mut commands,
+            white.clone(),
+            280.0 + rx,
+            80.0 + ry,
+            8.1,
+            1.0,
         );
         commands.entity(e).insert((
             Sprite {
@@ -185,11 +228,20 @@ fn spawn_fishing(
             FishingWidget,
         ));
         let t = spawn_ui_text(
-            &mut commands, &font, "—",
-            280.0 + rx + 4.0, 80.0 + ry + 8.0,
-            10.0, Color::WHITE, 8.2,
+            &mut commands,
+            &font,
+            "—",
+            280.0 + rx + 4.0,
+            80.0 + ry + 8.0,
+            10.0,
+            Color::WHITE,
+            8.2,
         );
-        commands.entity(t).insert((FishingGearSlot(i), DialogRoot(DialogKind::Fishing), FishingWidget));
+        commands.entity(t).insert((
+            FishingGearSlot(i),
+            DialogRoot(DialogKind::Fishing),
+            FishingWidget,
+        ));
     }
 }
 
@@ -207,7 +259,11 @@ fn fishing_ui_system(
 ) {
     let open = mgr.is_open(DialogKind::Fishing);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -249,15 +305,11 @@ fn fishing_ui_system(
             net.send_packet(&crate::network::FishingChangeAutocastWire {
                 enabled: state.autocast,
             });
-            state.message = format!(
-                "自动钓鱼: {}",
-                if state.autocast { "开" } else { "关" }
-            );
+            state.message = format!("自动钓鱼: {}", if state.autocast { "开" } else { "关" });
             tracing::info!("🎣 自动钓鱼: {}", state.autocast);
         }
     }
 }
-
 
 /// #1313：钓具槽显示 + 点击穿戴/卸下（C# FishingDialog Grid + EquipSlotItem/RemoveSlotItem）
 #[allow(clippy::too_many_arguments)]
@@ -268,7 +320,7 @@ fn fishing_gear_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut slots: Query<(&mut Text2d, &FishingGearSlot)>
+    mut slots: Query<(&mut Text2d, &FishingGearSlot)>,
 ) {
     let open = mgr.is_open(DialogKind::Fishing);
     let rod = hud.equipment.get(0).and_then(|e| e.as_ref());
@@ -286,7 +338,9 @@ fn fishing_gear_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     for (slot, (rx, ry)) in GEAR_POS.iter().enumerate() {
         let x = 280.0 + rx;
         let y = 80.0 + ry;
@@ -311,7 +365,8 @@ fn fishing_gear_system(
             return;
         }
         // 空槽 + 背包已选中物品 → 穿戴（C# EquipSlotItem GridTo=Fishing）
-        if let Some(sel) = inv_click.selected {
+        // #2631：选中态归 inventory 所有，经 take_selected 读并清（穿戴后不再保留选中）
+        if let Some(sel) = inv_click.take_selected() {
             if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
                 net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
                     grid: mir2_shared::enums::MirGridType::Inventory,
@@ -320,7 +375,6 @@ fn fishing_gear_system(
                     grid_to: mir2_shared::enums::MirGridType::Fishing,
                 });
                 tracing::info!("🎣 穿戴钓具 {} -> 槽{}", item.name, slot);
-                inv_click.selected = None;
             }
         }
         return;
@@ -358,7 +412,12 @@ mod tests {
 
     #[test]
     fn free_inventory_index_finds_first_empty() {
-        let items = vec![Some(InvItem::default()), None, Some(InvItem::default()), None];
+        let items = vec![
+            Some(InvItem::default()),
+            None,
+            Some(InvItem::default()),
+            None,
+        ];
         assert_eq!(free_inventory_index(&items), Some(1));
         let full = vec![Some(InvItem::default()); 3];
         assert_eq!(free_inventory_index(&full), None);
