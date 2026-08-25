@@ -93,10 +93,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: clippy, rustfmt
-      - name: Install system deps (bevy needs)
+      - name: Install system deps (bevy + libpinyin IME needs)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libgl1-mesa-dev libfreetype6-dev libwayland-dev libxkbcommon-dev libglib2.0-dev libdb-dev
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libgl1-mesa-dev libfreetype6-dev libwayland-dev libxkbcommon-dev autoconf automake libtool libglib2.0-dev libdb-dev build-essential
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: Client-Bevy
