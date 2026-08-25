@@ -3,6 +3,10 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
 use super::*;
+// #2630：显式引入本处理器构造的 UI 载荷类型——原先经 network/mod.rs 私有 use 再沿
+// super::* 隐私链隐式传入，易被误当死 import 清理（ecsnet 即踩此坑），改为显式声明。
+use crate::game::dialogs::guild::GuildMember as UiGuildMember;
+use crate::game::dialogs::guild_territory::TerritoryRow;
 
 // 网络包解码分派（#72 拆分）：handle_guild 处理 arms_guild.rs 的服务端包分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
