@@ -223,6 +223,17 @@ pub struct LocalPlayerStateBundle {
     pub auto_potion: AutoPotion,
 }
 
+/// 登录首帧 UserInformation 缓冲（#2633 §12 R1）。
+///
+/// R1 已证实：UserInformation（属性）先于本地 ObjectPlayer（生成实体）到达，且
+/// spawn_local_player_with 走 Commands 延迟到帧尾才生成实体。故 UserInformation 到达时
+/// `LocalPlayer` 实体尚不存在，组件写被跳过。此处暂存该快照（latest wins，后到覆盖先到），
+/// 待实体生成后由 `apply_pending_user_info` 应用一次。
+///
+/// 只缓冲 UserInformation——HealthChanged 等高频事件随后会自我纠正，不值得缓冲。
+#[derive(Resource, Default)]
+pub struct PendingUserInfo(pub Option<ServerEvent>);
+
 // ============================================================================
 // ServerEvent 写系统（#2633 批次4 步2：拆 hud_server_events，设计 §10）
 //
@@ -233,12 +244,121 @@ pub struct LocalPlayerStateBundle {
 // HudState 兜底——本批不缓冲，标 R1 待后续批处理。
 // ============================================================================
 
+/// 从 UserInformation 事件把玩家属性/面板属性写入 Vitals/Progression/Gold/CombatStats。
+///
+/// `player_vitals_events` 与 `apply_pending_user_info` 共用此一份字段映射，避免双份漂移
+/// （#2633 R1）。非 UserInformation 事件为 no-op。只写组件，不写 HudState/CharacterState
+/// （那两份由调用方按双写过渡各自处理）。
+pub(crate) fn apply_user_info_stats(
+    ev: &ServerEvent,
+    vitals: &mut Vitals,
+    progression: &mut Progression,
+    gold: &mut Gold,
+    combat_stats: &mut CombatStats,
+) {
+    let ServerEvent::UserInformation {
+        level,
+        hp,
+        mp,
+        exp,
+        max_exp,
+        gold: g,
+        max_hp,
+        max_mp,
+        ac,
+        mac,
+        dc,
+        mc,
+        sc,
+        critical_rate,
+        critical_damage,
+        attack_speed,
+        accuracy,
+        agility,
+        luck,
+        bag_weight,
+        wear_weight,
+        hand_weight,
+        magic_resist,
+        poison_resist,
+        health_recovery,
+        spell_recovery,
+        poison_recovery,
+        holy,
+        freezing,
+        poison_atk,
+        ..
+    } = ev
+    else {
+        return;
+    };
+    vitals.hp = *hp;
+    vitals.max_hp = *max_hp;
+    vitals.mp = *mp;
+    vitals.max_mp = *max_mp;
+    progression.level = *level;
+    progression.exp = *exp;
+    progression.max_exp = (*max_exp).max(1);
+    gold.0 = *g;
+    combat_stats.stats = [*ac, *mac, *dc, *mc, *sc];
+    combat_stats.critical_rate = *critical_rate;
+    combat_stats.critical_damage = *critical_damage;
+    combat_stats.attack_speed = *attack_speed;
+    combat_stats.accuracy = *accuracy;
+    combat_stats.agility = *agility;
+    combat_stats.luck = *luck;
+    combat_stats.bag_weight = *bag_weight;
+    combat_stats.wear_weight = *wear_weight;
+    combat_stats.hand_weight = *hand_weight;
+    combat_stats.magic_resist = *magic_resist;
+    combat_stats.poison_resist = *poison_resist;
+    combat_stats.health_recovery = *health_recovery;
+    combat_stats.spell_recovery = *spell_recovery;
+    combat_stats.poison_recovery = *poison_recovery;
+    combat_stats.holy = *holy;
+    combat_stats.freezing = *freezing;
+    combat_stats.poison_atk = *poison_atk;
+}
+
+/// 从 UserInformation 事件把背包/装备写入 Inventory/Loadout。
+///
+/// `inventory_events` 与 `apply_pending_user_info` 共用此一份字段映射，避免双份漂移
+/// （#2633 R1）。非 UserInformation 事件为 no-op。
+pub(crate) fn apply_user_info_items(ev: &ServerEvent, inventory: &mut Inventory, loadout: &mut Loadout) {
+    let ServerEvent::UserInformation {
+        inventory: items,
+        equipment,
+        quest_inventory,
+        bag_weight,
+        ..
+    } = ev
+    else {
+        return;
+    };
+    inventory.items = items.clone();
+    inventory.quest_inventory = quest_inventory.clone();
+    // #1544：RefreshStats 重量（max_weight=服务端 bag_weight；weight 由物品重算）
+    inventory.max_weight = (*bag_weight).max(0) as u32;
+    inventory.refresh_weight();
+    loadout.slots = equipment.clone();
+}
+
 pub struct PlayerStatePlugin;
 
 impl Plugin for PlayerStatePlugin {
     fn build(&self, app: &mut App) {
         // 写方须排在读方前（设计 §12 R5）：先写玩家组件/HudState，后 sync_hud_data（Hud 集）读。
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
+        app.init_resource::<PendingUserInfo>();
+        // R1 reconcile：须在事件写系统之前运行——缓冲快照先应用，本帧新到事件后写（新值胜）。
+        app.add_systems(
+            Update,
+            apply_pending_user_info
+                .before(player_vitals_events)
+                .before(crate::game::dialogs::inventory::inventory_events)
+                .in_set(GameSet::PlayerState)
+                .run_if(in_state(AppState::Game)),
+        );
         app.add_systems(
             Update,
             (player_vitals_events, player_status_events)
@@ -255,6 +375,7 @@ fn player_vitals_events(
     mut events: MessageReader<ServerEvent>,
     mut hud: ResMut<HudState>,
     mut char_state: ResMut<CharacterState>,
+    mut pending: ResMut<PendingUserInfo>,
     mut vitals_q: Query<&mut Vitals, With<LocalPlayer>>,
     mut progression_q: Query<&mut Progression, With<LocalPlayer>>,
     mut gold_q: Query<&mut Gold, With<LocalPlayer>>,
@@ -422,40 +543,19 @@ fn player_vitals_events(
                 char_state.holy = *holy;
                 char_state.freezing = *freezing;
                 char_state.poison_atk = *poison_atk;
-                // —— 玩家组件（实体未生成则跳过，R1）——
-                if let Ok(mut v) = vitals_q.single_mut() {
-                    v.hp = *hp;
-                    v.max_hp = *max_hp;
-                    v.mp = *mp;
-                    v.max_mp = *max_mp;
-                }
-                if let Ok(mut p) = progression_q.single_mut() {
-                    p.level = *level;
-                    p.exp = *exp;
-                    p.max_exp = (*max_exp).max(1);
-                }
-                if let Ok(mut g) = gold_q.single_mut() {
-                    g.0 = *gold;
-                }
-                if let Ok(mut cb) = combat_stats_q.single_mut() {
-                    cb.stats = [*ac, *mac, *dc, *mc, *sc];
-                    cb.critical_rate = *critical_rate;
-                    cb.critical_damage = *critical_damage;
-                    cb.attack_speed = *attack_speed;
-                    cb.accuracy = *accuracy;
-                    cb.agility = *agility;
-                    cb.luck = *luck;
-                    cb.bag_weight = *bag_weight;
-                    cb.wear_weight = *wear_weight;
-                    cb.hand_weight = *hand_weight;
-                    cb.magic_resist = *magic_resist;
-                    cb.poison_resist = *poison_resist;
-                    cb.health_recovery = *health_recovery;
-                    cb.spell_recovery = *spell_recovery;
-                    cb.poison_recovery = *poison_recovery;
-                    cb.holy = *holy;
-                    cb.freezing = *freezing;
-                    cb.poison_atk = *poison_atk;
+                // —— 玩家组件：实体已生成就地写入（共享映射），未生成则缓冲快照待 reconcile（R1）——
+                // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），故单一查询成败即实体有无。
+                if let (Ok(mut v), Ok(mut p), Ok(mut g), Ok(mut cb)) = (
+                    vitals_q.single_mut(),
+                    progression_q.single_mut(),
+                    gold_q.single_mut(),
+                    combat_stats_q.single_mut(),
+                ) {
+                    apply_user_info_stats(ev, &mut v, &mut p, &mut g, &mut cb);
+                } else {
+                    // R1：UserInformation 先于 ObjectPlayer 到达、实体未生成——缓冲快照
+                    // （latest wins），待 apply_pending_user_info 在实体生成后应用一次。
+                    pending.0 = Some(ev.clone());
                 }
             }
             _ => {}
@@ -536,6 +636,42 @@ fn player_status_events(
     }
 }
 
+/// R1 reconcile（#2633 §12 R1）：LocalPlayer 实体生成后，把缓冲的 UserInformation 快照
+/// 一次性应用到全部玩家组件（Vitals/Progression/Gold/CombatStats + Inventory/Loadout），
+/// 然后清空 pending。
+///
+/// 入 GameSet::PlayerState 并排在事件写系统与 Hud 集之前：实体在 ObjectPlayer 帧尾生成后，
+/// 下一帧本系统先应用缓冲、事件写系统再写本帧新值、Hud 集 sync_hud_data 最后读，无可见默认帧。
+/// 实体尚未生成则保留 pending 留待下帧。不重注入事件（避免重复触发 log/其他 ServerEvent
+/// 读者副作用）；组件写入与事件处理器共用 apply_user_info_stats/items 同一份映射。
+#[allow(clippy::too_many_arguments)]
+fn apply_pending_user_info(
+    mut pending: ResMut<PendingUserInfo>,
+    mut q: Query<
+        (
+            &mut Vitals,
+            &mut Progression,
+            &mut Gold,
+            &mut CombatStats,
+            &mut Inventory,
+            &mut Loadout,
+        ),
+        With<LocalPlayer>,
+    >,
+) {
+    let Some(ev) = pending.0.take() else {
+        return;
+    };
+    // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），单一元组查询成败即实体有无。
+    if let Ok((mut v, mut p, mut g, mut cb, mut inv, mut lo)) = q.single_mut() {
+        apply_user_info_stats(&ev, &mut v, &mut p, &mut g, &mut cb);
+        apply_user_info_items(&ev, &mut inv, &mut lo);
+    } else {
+        // 实体仍未生成（ObjectPlayer 尚未到达/未生效）：放回 pending，下一帧再试。
+        pending.0 = Some(ev);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,10 +689,14 @@ mod tests {
         app.init_resource::<HudState>();
         app.init_resource::<CharacterState>();
         app.init_resource::<PotionBeltState>();
+        app.init_resource::<PendingUserInfo>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
         app.add_systems(
             Update,
             (
+                apply_pending_user_info
+                    .before(player_vitals_events)
+                    .before(crate::game::dialogs::inventory::inventory_events),
                 player_vitals_events,
                 player_status_events,
                 crate::game::dialogs::potion_belt::belt_restock_events
@@ -749,6 +889,83 @@ mod tests {
         let hud = app.world().resource::<HudState>();
         assert_eq!((hud.hp, hud.mp), (42, 24), "HudState 兜底写仍生效");
         // 无实体 → 查询不到组件（无法断言值，只要不 panic 即通过）
+    }
+
+    /// R1 修复：实体缺失时 UserInformation 被缓冲（不 panic、HudState 照写、组件查不到），
+    /// 实体生成后 reconcile 一次性应用全部组件并清空 pending。
+    #[test]
+    fn pending_user_info_buffered_then_applied_on_spawn() {
+        let mut app = test_app();
+        // 不 spawn LocalPlayer
+        enter_game(&mut app);
+
+        // 实体缺失时写 UserInformation
+        app.world_mut().write_message(user_info(60, 800, 400));
+        app.update(); // 不应 panic
+
+        // HudState/CharacterState 双写照常（读者零影响）
+        let hud = app.world().resource::<HudState>();
+        assert_eq!((hud.hp, hud.max_hp, hud.level, hud.gold), (800, 5000, 60, 4242));
+        assert_eq!(hud.inventory.items.len(), 4);
+        // 组件仍查不到（实体未生成）
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Vitals, With<LocalPlayer>>()
+                .iter(app.world())
+                .next()
+                .is_none(),
+            "实体未生成时不应有 Vitals 组件"
+        );
+        // 快照已缓冲
+        assert!(app.world().resource::<PendingUserInfo>().0.is_some());
+
+        // 生成 LocalPlayer（挂默认组件）→ reconcile 应应用缓冲快照
+        spawn_local(&mut app);
+        app.update();
+
+        let v: Vitals = get(&mut app);
+        assert_eq!((v.hp, v.max_hp, v.mp, v.max_mp), (800, 5000, 400, 2000));
+        let p: Progression = get(&mut app);
+        assert_eq!((p.level, p.exp, p.max_exp), (60, 500, 1000));
+        let g: Gold = get(&mut app);
+        assert_eq!(g.0, 4242);
+        let cb: CombatStats = get(&mut app);
+        assert_eq!(cb.critical_rate, 17);
+        assert_eq!(cb.bag_weight, 250);
+        assert_eq!(cb.stats, [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]);
+        let inv: crate::game::player_state::Inventory = get(&mut app);
+        assert_eq!(inv.items.len(), 4);
+        assert_eq!(inv.items[0].as_ref().unwrap().unique_id, 1);
+        assert_eq!(inv.max_weight, 250);
+        let loadout: crate::game::player_state::Loadout = get(&mut app);
+        assert_eq!(loadout.slots[0].as_ref().unwrap().unique_id, 900);
+        // pending 已清空
+        assert!(app.world().resource::<PendingUserInfo>().0.is_none());
+        // HudState 仍正确
+        let hud = app.world().resource::<HudState>();
+        assert_eq!((hud.hp, hud.level, hud.gold), (800, 60, 4242));
+    }
+
+    /// R1：实体缺失时连发两个 UserInformation → 后到覆盖先到（latest wins）
+    #[test]
+    fn pending_user_info_latest_wins() {
+        let mut app = test_app();
+        // 不 spawn LocalPlayer
+        enter_game(&mut app);
+
+        app.world_mut().write_message(user_info(60, 800, 400));
+        app.world_mut().write_message(user_info(70, 999, 450));
+        app.update();
+
+        // 生成实体 → reconcile 应应用**后到**的快照（level=70/hp=999）
+        spawn_local(&mut app);
+        app.update();
+
+        let p: Progression = get(&mut app);
+        assert_eq!(p.level, 70, "后者覆盖前者（latest wins）");
+        let v: Vitals = get(&mut app);
+        assert_eq!(v.hp, 999);
+        assert!(app.world().resource::<PendingUserInfo>().0.is_none());
     }
 
     /// 构造 UserInformation 事件（背包 2 格、装备槽 0 有 uid=900）

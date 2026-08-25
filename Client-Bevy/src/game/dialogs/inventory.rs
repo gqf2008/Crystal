@@ -451,7 +451,12 @@ pub(crate) fn inventory_events(
                 // #1544：RefreshStats 重量（C# User.RefreshStats；max_weight=服务端 bag_weight）
                 hud.inventory.max_weight = (*bag_weight).max(0) as u32;
                 hud.inventory.refresh_weight();
-                dirty = true;
+                // 组件写：直接复用共享映射 apply_user_info_items（与 reconcile 同一份）。
+                // 实体未生成则跳过，由 apply_pending_user_info 统一应用（R1）。
+                // 不置 dirty——已直接写组件，无需末尾整体镜像。
+                if let Ok((mut inv, mut loadout)) = inv_q.single_mut() {
+                    crate::game::player_state::apply_user_info_items(ev, &mut inv, &mut loadout);
+                }
             }
             ServerEvent::ItemUsed { unique_id } => {
                 // 背包扣减段（腰带补货段归 belt_restock_events，须先于此运行）
