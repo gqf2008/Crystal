@@ -17,6 +17,7 @@ pub mod output_lines;
 pub mod player_menu;
 pub mod pathfinding;
 pub mod player_control;
+pub mod sets;
 pub mod skills;
 pub mod sound;
 pub mod weather;

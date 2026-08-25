@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use mir2_shared::data::client_data::ClientMagic;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
@@ -330,6 +331,10 @@ impl Plugin for SkillsPlugin {
         app.add_systems(OnEnter(AppState::Game), spawn_skills_window);
         app.add_systems(OnEnter(AppState::Game), spawn_skill_bar);
         app.add_systems(OnExit(AppState::Game), cleanup_skills_window);
+        // #2632：原先 5 次独立 add_systems 各挂 .run_if(in_state(Game))，归并为
+        // Skills 集统一门控。这些系统彼此本无显式排序，合并进同一元组（非 .chain()）
+        // 不增删任何 ordering，保持行为等价。
+        app.configure_sets(Update, GameSet::Skills.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
             // #148 技能快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
@@ -339,21 +344,12 @@ impl Plugin for SkillsPlugin {
                 skill_bar_icon_system,
                 skill_bar_cooldown_system,
                 ui_button_system,
+                skills_server_events,
+                skill_bar_system,
+                magic_cooldown_system,
+                skill_bar_pointer_system,
             )
-                .run_if(in_state(AppState::Game)),
-        );
-        app.add_systems(
-            Update,
-            skills_server_events.run_if(in_state(crate::scenes::AppState::Game)),
-        );
-        app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
-        app.add_systems(
-            Update,
-            magic_cooldown_system.run_if(in_state(AppState::Game)),
-        );
-        app.add_systems(
-            Update,
-            skill_bar_pointer_system.run_if(in_state(AppState::Game)),
+                .in_set(GameSet::Skills),
         );
     }
 }
