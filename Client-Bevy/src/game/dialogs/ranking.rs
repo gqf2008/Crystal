@@ -204,8 +204,8 @@ fn spawn_ranking(
         commands.entity(e).insert((RankingClose, DialogRoot(DialogKind::Ranking), RankingWidget));
     }
 
-    // 标题
-    let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 158.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
+    // 标题（原 y=158 与下方页签 y=168 重叠；上移到面板标题栏顶部，对齐 C# 无独立标题、页签居中的布局）
+    let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 150.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
     commands.entity(t).insert((DialogRoot(DialogKind::Ranking), RankingWidget));
 
     // 页签（C# RankingDialog：All/War/Wiz/Tao/Sin/Arch）
