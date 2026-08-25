@@ -10,6 +10,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::dura_status::{dura_btn_y, MINIMAP_X};
 use crate::game::dialogs::inventory::InvItem;
@@ -17,6 +18,9 @@ use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::option::OptionState;
 use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::game::player_state::{
+    AutoPotion, Gold, Inventory, PetModeState, Progression, StatusFlags, Vitals,
+};
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -454,8 +458,9 @@ impl Plugin for HudPlugin {
         // 保留的依赖（写方须排在读方前，晚一帧读会引入一帧滞后）：
         //   · ui_button_system 每帧写 UiButton.clicked → hud_button / death_overlay 读；
         //   · sync_hud_data 写 HudData → hud_update_system 以 Changed<HudData> 门控消费；
-        //   · auto_potion_system 读 hud.dead 与 death_overlay_system 写 hud.dead 共享
-        //     ResMut<HudState>，保持原「先读 dead、后写 dead」的相对先后。
+        //   · auto_potion_system 读 StatusFlags.dead 与 death_overlay_system 写 StatusFlags.dead
+        //     共享玩家实体组件（#2633 步3 由 ResMut<HudState> 迁来），保持原「先读 dead、
+        //     后写 dead」的相对先后。
         // 其余（attack_mode/hero_btn/hero_panel/space_weight/tooltip）读写的组件互不相交，
         // 顺序不影响输出，解链允许并行。
         app.add_systems(
@@ -898,20 +903,29 @@ fn spawn_centered_text(
 }
 
 /// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
+///
+/// #2633 批次4 步3：hp/max_hp→`Vitals`、dead→`StatusFlags`、inventory→`Inventory`、
+/// auto_pot_hp/pot_cooldown→`AutoPotion`（enabled/cooldown，本系统是其唯一读者/写者，
+/// 设计 §4.5，可整体迁离 HudState；`hud.auto_pot_hp`/`hud.pot_cooldown` 自此无读写、
+/// 待步9 统一删）。实体缺失跳过——喝药本就需实体在场，缺席不动作（原 HudState 默认
+/// 放行语义无对应组件）。
 fn auto_potion_system(
-    mut hud: ResMut<HudState>,
     net: Res<crate::network::NetConnection>,
     time: Res<Time>,
+    mut player: Query<(&Vitals, &StatusFlags, &Inventory, &mut AutoPotion), With<LocalPlayer>>,
 ) {
-    hud.pot_cooldown -= time.delta_secs();
-    if hud.dead || !hud.auto_pot_hp || hud.pot_cooldown > 0.0 {
+    let Ok((vitals, flags, inventory, mut auto_pot)) = player.single_mut() else {
+        return;
+    };
+    auto_pot.cooldown -= time.delta_secs();
+    if flags.dead || !auto_pot.enabled || auto_pot.cooldown > 0.0 {
         return;
     }
-    let pct = hud.hp as f32 / hud.max_hp.max(1) as f32;
+    let pct = vitals.hp as f32 / vitals.max_hp.max(1) as f32;
     if pct < 0.35 {
         // #1592：优先 HP 药（shape==0），无则退化为任意药水（避免喝蓝药不回复 HP）
         let potion = crate::game::dialogs::inventory::pick_auto_hp_potion(
-            hud.inventory.items.iter().flatten(),
+            inventory.items.iter().flatten(),
         );
         if let Some(potion) = potion {
             net.send_packet(&mir2_shared::packets::client::item::UseItem {
@@ -921,10 +935,10 @@ fn auto_potion_system(
                 "💊 自动喝药 {} (uid={})（HP {}/{}）",
                 potion.name,
                 potion.unique_id,
-                hud.hp,
-                hud.max_hp
+                vitals.hp,
+                vitals.max_hp
             );
-            hud.pot_cooldown = 3.0;
+            auto_pot.cooldown = 3.0;
         }
     }
 }
@@ -966,7 +980,8 @@ fn update_mode_label(
 /// 模式指示更新（#156 攻击 / #1388 宠物+技能）：值变化即写，无变化跳过
 fn attack_mode_text_system(
     mode: Res<crate::game::combat::AttackModeState>,
-    hud: Res<HudState>,
+    // #2633 批次4 步3：pet_mode→`PetModeState`；实体缺失回退 Both（同原 HudState 默认）。
+    pet: Query<&PetModeState, With<LocalPlayer>>,
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
     mut am: Query<
@@ -997,7 +1012,8 @@ fn attack_mode_text_system(
     for (mut t, mut tf, children) in &mut am {
         update_mode_label(&mut t, &mut tf, children, &mut shadows, &a, ay);
     }
-    let p = match hud.pet_mode {
+    let pet_mode = pet.single().map(|p| p.0).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let p = match pet_mode {
         mir2_shared::enums::PetMode::Both => "宠物:攻击和跟随".to_string(),
         mir2_shared::enums::PetMode::MoveOnly => "宠物:仅跟随".to_string(),
         mir2_shared::enums::PetMode::AttackOnly => "宠物:仅攻击".to_string(),
@@ -1016,17 +1032,27 @@ fn attack_mode_text_system(
     }
 }
 
-fn sync_hud_data(mut roots: Query<&mut HudData>, hud: Res<HudState>) {
+/// #2633 批次4 步3：hp/max_hp/mp/max_mp→`Vitals`、exp/max_exp/level→`Progression`、
+/// gold→`Gold`；`name` 仍读 `hud.name`（身份字段待批6 复用 `PlayerName`）。
+/// R3：保留 `Changed<HudData>` 跳帧门控——仍「值变才写 HudData」（`if *data != new`），
+/// 不改成每帧无条件写；R4：一律读组件当前值，不加 `Changed<组件>` 过滤。
+/// 实体缺失跳过（登录前无 LocalPlayer，HudData 保持默认，与组件默认值一致）。
+fn sync_hud_data(
+    mut roots: Query<&mut HudData>,
+    hud: Res<HudState>,
+    player: Query<(&Vitals, &Progression, &Gold), With<LocalPlayer>>,
+) {
     let Ok(mut data) = roots.single_mut() else { return };
+    let Ok((vitals, progression, gold)) = player.single() else { return };
     let new = HudData {
-        hp: hud.hp,
-        max_hp: hud.max_hp,
-        mp: hud.mp,
-        max_mp: hud.max_mp,
-        exp: hud.exp,
-        max_exp: hud.max_exp,
-        level: hud.level,
-        gold: hud.gold,
+        hp: vitals.hp,
+        max_hp: vitals.max_hp,
+        mp: vitals.mp,
+        max_mp: vitals.max_mp,
+        exp: progression.exp,
+        max_exp: progression.max_exp,
+        level: progression.level,
+        gold: gold.0,
         name: hud.name.clone(),
     };
     if *data != new {
@@ -1034,10 +1060,14 @@ fn sync_hud_data(mut roots: Query<&mut HudData>, hud: Res<HudState>) {
     }
 }
 
+/// #2633 批次4 步3：血/蓝/经验/等级/金币改读 `Vitals`/`Progression`/`Gold` 组件；
+/// `name` 仍读 `hud.name`（批6 才迁 `PlayerName`）。门控不变：仍靠 `Changed<HudData>`
+/// 跳帧（#70），R4 读当前值不加组件 Changed 过滤。实体缺失跳过（HudData 默认帧不更新）。
 fn hud_update_system(
     hud: Res<HudState>,
     opt: Res<crate::game::dialogs::option::OptionState>,
     hud_datas: Query<&HudData, Changed<HudData>>,
+    player: Query<(&Vitals, &Progression, &Gold), With<LocalPlayer>>,
     mut fills: Query<(
         &mut Sprite,
         &mut Transform,
@@ -1062,9 +1092,10 @@ fn hud_update_system(
     if hud_datas.single().is_err() {
         return;
     }
-    let hp_pct = (hud.hp as f32 / hud.max_hp.max(1) as f32).clamp(0.0, 1.0);
-    let mp_pct = (hud.mp as f32 / hud.max_mp.max(1) as f32).clamp(0.0, 1.0);
-    let exp_pct = (hud.exp as f32 / hud.max_exp.max(1) as f32).clamp(0.0, 1.0);
+    let Ok((vitals, progression, player_gold)) = player.single() else { return };
+    let hp_pct = (vitals.hp as f32 / vitals.max_hp.max(1) as f32).clamp(0.0, 1.0);
+    let mp_pct = (vitals.mp as f32 / vitals.max_mp.max(1) as f32).clamp(0.0, 1.0);
+    let exp_pct = (progression.exp as f32 / progression.max_exp.max(1) as f32).clamp(0.0, 1.0);
 
     for (mut sprite, mut tf, orb_base, hp, mp, exp) in &mut fills {
         if hp.is_some() {
@@ -1098,14 +1129,14 @@ fn hud_update_system(
             // C# :436-457：HPView=true → HealthLabel="HP cur/max"；
             // false → HealthLabel/ManaLabel 清空，两行 Top/Bottom 标签接管
             if opt.hp_view {
-                format!("HP {}/{}", hud.hp, hud.max_hp)
+                format!("HP {}/{}", vitals.hp, vitals.max_hp)
             } else {
                 String::new()
             }
         } else if mp.is_some() {
             if opt.hp_view {
                 // C# "MP {0}/{1} " 带尾随空格（影响居中测量，与 C# 一致）
-                format!("MP {}/{} ", hud.mp, hud.max_mp)
+                format!("MP {}/{} ", vitals.mp, vitals.max_mp)
             } else {
                 String::new()
             }
@@ -1114,24 +1145,24 @@ fn hud_update_system(
             if opt.hp_view {
                 String::new()
             } else {
-                hud_orb_top_text(hud.hp, hud.mp)
+                hud_orb_top_text(vitals.hp, vitals.mp)
             }
         } else if bottom.is_some() {
             // C# :453 BottomLabel（仅 HPView=false）：" {maxHP}    {maxMP} "
             if opt.hp_view {
                 String::new()
             } else {
-                hud_orb_bottom_text(hud.max_hp, hud.max_mp)
+                hud_orb_bottom_text(vitals.max_hp, vitals.max_mp)
             }
         } else if exp.is_some() {
             // C# ExperienceLabel = "{0:#0.##%}"（最多两位小数、去尾零）
             format_exp_percent(exp_pct)
         } else if lv.is_some() {
             // C# LevelLabel = User.Level.ToString()（纯数字，"Lv" 由底栏美术自带）
-            format!("{}", hud.level)
+            format!("{}", progression.level)
         } else if gold.is_some() {
             // C# GoldLabel = Gold.ToString("###,###,##0")（千分位）
-            format_gold(hud.gold)
+            format_gold(player_gold.0)
         } else if name.is_some() {
             hud.name.clone()
         } else {
@@ -1174,9 +1205,18 @@ fn format_gold(n: u32) -> String {
 }
 
 /// 死亡遮罩显隐 + 复活按钮（#46）
+///
+/// #2633 批次4 步3：dead/reincarnation_offered 读改 `StatusFlags`；`death_popup_dismissed`
+/// 是纯 UI 残留，仍留 `HudState`（步9 才清）。**写仍双写** `StatusFlags` + `hud.dead`/
+/// `hud.reincarnation_offered`：auto/world、auto/navigation、auto/combat、player_control
+/// 等「旗标读者」本步尚未迁移、仍读 `hud.dead`（设计 §11批3 步4 才迁），若此处只写
+/// `StatusFlags`，点「复活」后这些读者会在服务器确认前一直读到陈旧 `hud.dead=true`
+/// （输入仍被锁/自动战斗仍判死亡），破坏行为等价；保留双写则所有读者值与之前一致。
+/// 实体缺失视同未死亡/无轮回请求（同原 HudState 默认 false），遮罩不显示。
 fn death_overlay_system(
     mut hud: ResMut<HudState>,
     net: Res<crate::network::NetConnection>,
+    mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
     // 背景/遮罩/文字/是/否按钮全部带 DeathOverlay，统一随死亡显隐
     mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
     mut death_texts: Query<&mut Text2d, (With<DeathText>, Without<DeathReviveBtn>, Without<DeathReincDeclineBtn>)>,
@@ -1184,7 +1224,11 @@ fn death_overlay_system(
     no_btns: Query<&UiButton, (With<DeathReincDeclineBtn>, Without<DeathReviveBtn>)>,
 ) {
     // C# ShowReviveMessage：死亡后弹一次；点“否”关闭后不再弹（除非再次死亡）
-    let show = hud.dead && !hud.death_popup_dismissed;
+    let (dead, reinc_offered) = flags_q
+        .single()
+        .map(|f| (f.dead, f.reincarnation_offered))
+        .unwrap_or((false, false));
+    let show = dead && !hud.death_popup_dismissed;
     for mut vis in overlay.iter_mut() {
         *vis = if show {
             Visibility::Visible
@@ -1193,7 +1237,7 @@ fn death_overlay_system(
         };
     }
     for mut t in &mut death_texts {
-        let new = if hud.reincarnation_offered {
+        let new = if reinc_offered {
             "你想要复活吗？"
         } else {
             "你已经死亡，是否要在城镇复活？"
@@ -1208,13 +1252,18 @@ fn death_overlay_system(
     // 是：轮回术请求 → AcceptReincarnation；否则 TownRevive（C# YesButton 语义）
     for btn in &yes_btns {
         if btn.clicked {
-            if hud.reincarnation_offered {
+            if reinc_offered {
                 net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
                 tracing::info!("🌀 接受轮回术复活");
             } else {
                 net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
                 tracing::info!("⛪ 点击复活（TownRevive）");
             }
+            if let Ok(mut f) = flags_q.single_mut() {
+                f.dead = false;
+                f.reincarnation_offered = false;
+            }
+            // 双写：未迁移旗标读者（auto/*、player_control）仍读 hud.dead（见函数注释）
             hud.dead = false;
             hud.reincarnation_offered = false;
             hud.death_popup_dismissed = false;
@@ -1223,9 +1272,12 @@ fn death_overlay_system(
     // 否：轮回术请求 → CancelReincarnation；关闭弹窗（玩家保持死亡，C# Dispose 语义）
     for btn in &no_btns {
         if btn.clicked {
-            if hud.reincarnation_offered {
+            if reinc_offered {
                 net.send_packet(&mir2_shared::packets::client::misc::CancelReincarnation);
                 tracing::info!("🌀 拒绝轮回术复活");
+            }
+            if let Ok(mut f) = flags_q.single_mut() {
+                f.reincarnation_offered = false;
             }
             hud.reincarnation_offered = false;
             hud.death_popup_dismissed = true;
@@ -1286,12 +1338,15 @@ mod tests {
             let mut opt = OptionState::default();
             opt.hp_view = hp_view;
             world.insert_resource(opt);
-            let mut hud = HudState::default();
-            hud.hp = 100;
-            hud.max_hp = 200;
-            hud.mp = 50;
-            hud.max_mp = 100;
-            world.insert_resource(hud);
+            // #2633 步3：hud_update_system 改读玩家组件（Vitals/Progression/Gold），
+            // HudState 仅剩 name 等身份字段；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
+            world.insert_resource(HudState::default());
+            world.spawn((
+                LocalPlayer,
+                Vitals { hp: 100, max_hp: 200, mp: 50, max_mp: 100 },
+                Progression::default(),
+                Gold(0),
+            ));
             world.insert_resource(MiniMapMode::default());
             world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
             world
