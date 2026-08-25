@@ -96,7 +96,7 @@ jobs:
       - name: Install system deps (bevy needs)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libgl1-mesa-dev libfreetype6-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libgl1-mesa-dev libfreetype6-dev libwayland-dev libxkbcommon-dev libglib2.0-dev libdb-dev
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: Client-Bevy
