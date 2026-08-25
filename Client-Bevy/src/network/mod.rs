@@ -4,62 +4,33 @@
 
 pub mod codec;
 pub mod mock;
+pub mod packets;
 pub mod server_event;
 pub mod tcp;
-pub mod packets;
 use packets::handle_packet;
 mod reconnect;
 mod wire;
 mod wire2;
 
 pub use reconnect::NetServerAddr;
+use reconnect::setup_network;
 pub use wire::*;
 pub use wire2::*;
-use reconnect::setup_network;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
-use server_event::ServerEvent;
+use mir2_shared::SelectInfo;
 use mir2_shared::enums::ServerPacketIds;
 use mir2_shared::packets::base::{Packet, PacketHeader};
-use mir2_shared::SelectInfo;
+use server_event::ServerEvent;
 use std::path::Path;
 
-use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvent;
-use crate::game::dialogs::friend::{FriendEntry, FriendState};
-use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState, StorageItem};
-use crate::game::dialogs::ranking::{RankEntry, RankingState};
-use crate::game::dialogs::group::GroupState;
-use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
-use crate::game::dialogs::mentor::MentorState;
-use crate::game::dialogs::market::{MarketItem, MarketState};
-use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
-use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
-use crate::game::dialogs::fishing::FishingState;
-use crate::game::dialogs::refine::RefineState;
-use crate::game::dialogs::craft::CraftState;
-use crate::game::dialogs::item_rental::ItemRentalState;
-use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
-use crate::game::dialogs::buff::{BuffEntry, BuffState};
-use crate::game::dialogs::report::ReportState;
-use crate::game::dialogs::inspect::{InspectItem, InspectState};
-use crate::game::dialogs::creature::{CreatureEntry, CreatureState};
-use crate::game::dialogs::hero::HeroState;
-use crate::game::dialogs::relationship::RelationshipState;
-use crate::game::effects::PendingEffect;
-use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
-use crate::game::dialogs::npc::NpcDialogState;
-use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
-use crate::game::dialogs::sell_panel::SellPanelState;
- use crate::game::dialogs::storage::StorageState;
-use crate::game::dialogs::trade::{TradeItem as UiTradeItem, TradeState};
-use crate::game::hud::HudState;
+use crate::game::effects::PendingEffect;
 use crate::game::movement::NetMotion;
-use crate::game::skills::MagicsState;
-use crate::game::weather::WeatherState;
+use crate::game::player_control::ControlState;
 use crate::map_renderer::GameData;
 use crate::scenes::AppState;
 use crate::ui::login::AuthFeedback;
@@ -351,37 +322,10 @@ impl Plugin for NetworkPlugin {
     }
 }
 
-/// 真实 TCP 服务器地址资源
+/// 网络系统面板状态参数（#65 迁移后仅剩 control 在用；其余 UI State 走 ServerEvent 总线）
 #[derive(SystemParam)]
 pub(crate) struct NetworkPanels<'w> {
-    storage: ResMut<'w, StorageState>,
-    sell_panel: ResMut<'w, SellPanelState>,
-    group: ResMut<'w, GroupState>,
-    mail: ResMut<'w, MailState>,
-    trade: ResMut<'w, TradeState>,
-    friend: ResMut<'w, FriendState>,
-    guild: ResMut<'w, GuildState>,
-    ranking: ResMut<'w, RankingState>,
-    mentor: ResMut<'w, MentorState>,
-    market: ResMut<'w, MarketState>,
-    shop: ResMut<'w, GameShopState>,
-    territory: ResMut<'w, GuildTerritoryState>,
     control: ResMut<'w, ControlState>,
-    fishing: ResMut<'w, FishingState>,
-    refine: ResMut<'w, RefineState>,
-    craft: ResMut<'w, CraftState>,
-    rental: ResMut<'w, ItemRentalState>,
-    quest_log: ResMut<'w, QuestLogState>,
-    buff: ResMut<'w, BuffState>,
-    report: ResMut<'w, ReportState>,
-    inspect: ResMut<'w, InspectState>,
-    creature: ResMut<'w, CreatureState>,
-    hero: ResMut<'w, HeroState>,
-    relationship: ResMut<'w, RelationshipState>,
-    big_map: ResMut<'w, crate::game::dialogs::big_map::BigMapState>,
-    awake: ResMut<'w, crate::game::dialogs::npc_awake::NpcAwakeState>,
-    roll: ResMut<'w, crate::game::dialogs::roll::RollState>,
-    mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
 /// 网络→游戏消息出口（对象/移动/战斗/特效；MessageWriter 替代手写 Vec 队列）
@@ -403,12 +347,6 @@ pub(crate) fn network_system(
     mut auth: ResMut<AuthFeedback>,
     mut game_data: ResMut<GameData>,
     mut outbox: NetworkOutbox,
-    mut hud: ResMut<HudState>,
-    mut chat: ResMut<ChatState>,
-    mut npc_dialog: ResMut<NpcDialogState>,
-    mut npc_goods: ResMut<NpcGoodsState>,
-    mut weather: ResMut<WeatherState>,
-    mut magics: ResMut<MagicsState>,
     mut panels: NetworkPanels,
     mut next: ResMut<NextState<AppState>>,
     time: Res<Time>,
@@ -451,10 +389,8 @@ pub(crate) fn network_system(
                 },
                 NetworkMode::Mock => {
                     // #643：重建 mock 通道并重新登录
-                    let (to_server, from_client) =
-                        crossbeam_channel::bounded::<Vec<u8>>(1024);
-                    let (to_client, from_server) =
-                        crossbeam_channel::bounded::<Vec<u8>>(1024);
+                    let (to_server, from_client) = crossbeam_channel::bounded::<Vec<u8>>(1024);
+                    let (to_client, from_server) = crossbeam_channel::bounded::<Vec<u8>>(1024);
                     net.to_server = Some(to_server);
                     net.from_server = Some(from_server);
                     mock::spawn_mock(to_client, from_client);
@@ -509,7 +445,8 @@ pub(crate) fn network_system(
                         net.reconnecting = true;
                         net.reconnect_delay = 2.0;
                         net.reconnect_timer = 2.0;
-                        auth.login_error = Some(format!("连接断开，2 秒后自动重连...（{}）", reason));
+                        auth.login_error =
+                            Some(format!("连接断开，2 秒后自动重连...（{}）", reason));
                     } else {
                         auth.login_error = Some(format!("与服务器断开连接：{}", reason));
                     }

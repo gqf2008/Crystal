@@ -3,6 +3,10 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
 use super::*;
+// #2630：显式引入本处理器构造的 UI 载荷类型（原经 super::* 隐私链隐式传入，见 handle_guild 注）。
+use crate::game::dialogs::creature::CreatureEntry;
+use crate::game::dialogs::inspect::InspectItem;
+use crate::game::dialogs::quest_log::QuestEntry;
 
 // 网络包解码分派（#72 拆分）：handle_progress 处理 arms_progress.rs 的服务端包分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
