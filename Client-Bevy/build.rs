@@ -207,11 +207,14 @@ fn verify_sha512(path: &Path, want: &str) {
         let out = Command::new(cmd).args(*args).arg(path).output();
         if let Ok(o) = out {
             if o.status.success() {
-                got = String::from_utf8_lossy(&o.stdout)
+                // Windows(msys) 的 shasum/sha512sum 输出首 token 可能带 `\` 前缀，
+                // 只保留开头非 hex 字符剥离后的哈希（如 `\d3e293...` -> `d3e293...`）。
+                let token = String::from_utf8_lossy(&o.stdout)
                     .split_whitespace()
                     .next()
                     .unwrap_or_default()
                     .to_lowercase();
+                got = token.trim_start_matches(|c: char| !c.is_ascii_hexdigit()).to_string();
                 if !got.is_empty() {
                     break;
                 }
