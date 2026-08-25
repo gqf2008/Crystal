@@ -935,6 +935,50 @@ mod tests {
     #[derive(Resource, Default)]
     struct BackfillFocus(bool);
 
+    /// 自绘候选窗：Shift 切中文 + 聚焦 + 输入 nihao → 候选条渲染出“拼音 + 候选”文本。
+    /// 这是对“游戏内候选窗口”的硬证明：候选条实体(PinyinBarText)可见且内容正确。
+    #[test]
+    fn candidate_bar_renders_pinyin_and_candidates() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Font>();
+        let bytes = include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+        let handle = app.world_mut().resource_mut::<Assets<Font>>().add(Font::from_bytes(bytes.to_vec()));
+        app.insert_resource(crate::ui::sprite_ui::UiFont(handle));
+        // Update 阶段回填 focus（对齐生产契约：各文本框每帧 Update 回填 ImeFocus）
+        app.add_systems(Update, |mut f: ResMut<ImeFocus>| {
+            f.rect = Some((10.0, 10.0, 100.0, 16.0));
+        });
+        // 1) Shift 单按切中文
+        send(&mut app, shift_key(ButtonState::Pressed));
+        app.update();
+        send(&mut app, shift_key(ButtonState::Released));
+        app.update();
+        assert!(app.world().resource::<PinyinIme>().enabled());
+        // 2) 输入 n-i-h-a-o（每帧喂一个字母，候选条实体下一帧可见）
+        for c in "nihao".chars() {
+            focus(&mut app, Some((10.0, 10.0, 100.0, 16.0)));
+            send(&mut app, char_key(&c.to_string()));
+            app.update();
+        }
+        app.update();
+        // 3) 候选条文本应包含拼音串与候选「你好」
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Text2d, With<PinyinBarText>>();
+        let bar_text = q.single(app.world()).unwrap().0.clone();
+        assert!(bar_text.contains("nihao"), "候选条应含拼音 nihao，实际: {:?}", bar_text);
+        assert!(bar_text.contains("你好"), "候选条应含候选「你好」，实际: {:?}", bar_text);
+        // 4) 候选条可见
+        let mut vq = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<PinyinBarText>>();
+        assert_eq!(*vq.single(app.world()).unwrap(), Visibility::Visible);
+    }
+
     /// 组合中途失焦（focus=None）当帧候选条必须落回 Hidden：
     /// 旧实现可见性只写在 `if let Some(focus.rect)` 内，失焦帧算出的 Hidden 永不落地，
     /// 候选条带着旧组合（"ni 1.你 …"）无限悬浮在失焦的界面上（对齐 mode chip 测法）。
