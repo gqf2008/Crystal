@@ -156,7 +156,13 @@ fn build_libpinyin(root: &Path, install: &Path) {
 /// Windows(MSYS2) 下它们是 shell 脚本，native 进程直接 spawn 会“program not found”，
 /// 须经 bash -c；Unix 用 sh -c（行为等价）。
 fn run_script(cmd: &str, cwd: &Path, envs: &[(String, String)], what: &str) {
-    let shell = if cfg!(windows) { "bash" } else { "sh" };
+    // Windows 下裸 `bash` 会命中 WSL 的 System32/bash.exe（报 “WSL has no installed
+    // distributions”），须用 MSYS2 bash 的绝对路径（CI 经 LIBPINYIN_SHELL 注入）。
+    let shell = if cfg!(windows) {
+        env::var("LIBPINYIN_SHELL").unwrap_or_else(|_| "bash".to_string())
+    } else {
+        "sh".to_string()
+    };
     let mut command = Command::new(shell);
     command.args(["-c", cmd]).current_dir(cwd);
     for (k, v) in envs {

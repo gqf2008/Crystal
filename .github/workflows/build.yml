@@ -160,6 +160,9 @@ jobs:
           export PATH="$(cygpath -u "$CARGO_HOME")/bin:$PATH"
           export BERKELEY_DB_INCLUDE="$(cygpath -m /ucrt64/include)"
           export BERKELEY_DB_LIBDIR="$(cygpath -m /ucrt64/lib)"
+          # native cargo build 进程 spawn 的 `bash` 会命中 WSL 的 System32/bash.exe，
+          # 必须显式指向 MSYS2 bash 的 Windows 绝对路径
+          export LIBPINYIN_SHELL="$(cygpath -w /usr/bin/bash.exe)"
           CARGO_BUILD_TARGET=x86_64-pc-windows-gnu cargo build --release --bin client_bevy
       - name: Stage Windows exe + runtime DLLs
         if: runner.os == 'Windows'
