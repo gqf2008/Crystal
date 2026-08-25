@@ -15,7 +15,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::controls::{spawn_checkbox, CheckBox};
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::sprite_ui::{spawn_ui_button, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -184,6 +184,25 @@ fn spawn_ranking(
         thumb: Some(thumb),
         z: 9.0,
     });
+
+    // 关闭按钮（右上角 X，Prguse2 360/361/362；与 ranking_ui_system 底部关闭命中区同坐标）
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        496.0,
+        154.0,
+        8.3,
+        20.0,
+        20.0,
+    ) {
+        commands.entity(e).insert((RankingClose, DialogRoot(DialogKind::Ranking), RankingWidget));
+    }
 
     // 标题
     let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 158.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
