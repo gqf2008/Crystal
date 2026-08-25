@@ -2,7 +2,7 @@
 name = "client_bevy"
 version = "0.1.0"
 edition = "2021"
-description = "Legend of Mir 2 (传奇2) 游戏客户端 — Bevy 移植版（由 Client-Macroquad 迁移）"
+description = "Legend of Mir 2 (传奇2) 游戏客户端 — Bevy 移植版（原 Client-Macroquad 已移除）"
 
 [dependencies]
 # Bevy 游戏引擎 0.19（ECS/渲染大幅升级）

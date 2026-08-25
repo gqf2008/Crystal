@@ -64,7 +64,7 @@ ecs_macros = { path = "ecs_macros" } # ECS系统派生宏
 # ] }
 
 # ========== 渲染后端 ==========
-# 使用 ggez 作为主要渲染后端（macroquad 已迁移到独立的 Client-Macroquad 项目）
+# 使用 ggez 作为主要渲染后端（macroquad 客户端已移除，Bevy 版见 Client-Bevy）
 ggez = { version = "=0.10.0-rc0", optional = true }       # Includes winit re-export (use ggez::winit::*)
 hecs = { version = "0.10.5", features = ["hecs-macros"] } # 轻量级高性能 ECS 库
 rayon = "1.8"                                             # 并行执行 ECS 系统
@@ -139,8 +139,7 @@ path = "src/bin/mir2x.rs"
 # name = "map_viewer_v2"
 # path = "src/bin/map_viewer_v2.rs"
 
-# 🆕 Macroquad 地图查看器已迁移到独立项目 Client-Macroquad
-# 请访问 ../Client-Macroquad 目录使用 macroquad 版本
+# Macroquad 地图查看器（原 Client-Macroquad）已于 2026-08 移除，Bevy 版见 Client-Bevy
 
 # # 中文输入法测试程序
 # [[bin]]
@@ -172,5 +171,5 @@ path = "src/bin/mir2x.rs"
 [features]
 default = ["client", "backend-ggez"]
 client = []
-# 渲染后端（macroquad 已迁移到 Client-Macroquad 项目）
+# 渲染后端（macroquad 客户端已移除，Bevy 版见 Client-Bevy）
 backend-ggez = ["ggez"]

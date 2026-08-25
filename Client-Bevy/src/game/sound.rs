@@ -24,15 +24,15 @@ pub struct SoundBank {
 impl SoundBank {
     /// 加载 SoundList.lst（参考 Client-Macroquad/src/systems/presentation/sound_system.rs）
     pub fn load(&mut self) {
-        // 共享主仓库的 Sound 目录（独立 worktree 场景：Crystal-bevy → ../Crystal）
+        // Sound 目录已随 Client-Macroquad 移除迁到仓库根（独立 worktree 场景：Crystal-bevy → ../Crystal）
         let candidate = [
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Client-Macroquad/Sound"),
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Crystal/Client-Macroquad/Sound"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../Sound"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Crystal/Sound"),
         ];
         self.root = candidate
             .into_iter()
             .find(|p| p.join("SoundList.lst").exists())
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Crystal/Client-Macroquad/Sound"));
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Crystal/Sound"));
         let lst = self.root.join("SoundList.lst");
         let Ok(text) = std::fs::read_to_string(&lst) else {
             tracing::warn!("🔊 SoundList.lst 未找到: {}", lst.display());

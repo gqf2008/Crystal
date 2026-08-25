@@ -41,7 +41,7 @@
 .PARAMETER WorktreesRoot
     评审 worktree 根目录，默认为主仓库同级的 "Crystal-prreview-worktrees"。
     实际 worktree 路径为 <WorktreesRoot>\pr-<n>；建议保持默认，
-    Client-Bevy 的 resolve_data_path 需要回退到主仓库的 Client-Macroquad/Data。
+    Client-Bevy 的 resolve_data_path 需要回退到主仓库数据目录（仓库根 Data/ 或 ClientRust/Data）。
 
 .PARAMETER StateFile
     已评审状态 JSON 文件路径，默认 <WorktreesRoot>\state.json。
@@ -229,7 +229,6 @@ function Get-TouchedCrates([string]$PrNumber) {
         if ($f -like "Client-Bevy/*")          { $crates["Client-Bevy"] = $true }
         elseif ($f -like "SharedRust/*")       { $crates["SharedRust"] = $true }
         elseif ($f -like "ServerRust/*")       { $crates["ServerRust"] = $true }
-        elseif ($f -like "Client-Macroquad/*") { $crates["Client-Macroquad"] = $true }
     }
     return @($crates.Keys)
 }
@@ -265,13 +264,6 @@ function Invoke-Validation([string]$PrNumber, [string]$WtPath) {
         if (-not $r.Ok) { $anyFailed = $true }
         $results.Add([pscustomobject]@{ Crate = "SharedRust"; Cmd = "cargo test --lib"; Ok = $r.Ok; Tail = $r.Tail })
     }
-    if ($touched -contains "Client-Macroquad" -and $touched -notcontains "Client-Bevy") {
-        $mc = Join-Path $WtPath "Client-Macroquad"
-        $r = Invoke-Cmd -File "cargo" -ArgList @("check") -Dir $mc -LogPrefix (Join-Path $WorktreesRoot "mc-$stamp")
-        if (-not $r.Ok) { $anyFailed = $true }
-        $results.Add([pscustomobject]@{ Crate = "Client-Macroquad"; Cmd = "cargo check"; Ok = $r.Ok; Tail = $r.Tail })
-    }
-
     return @{ Results = $results; Touched = $touched; Passed = (-not $anyFailed) }
 }
 

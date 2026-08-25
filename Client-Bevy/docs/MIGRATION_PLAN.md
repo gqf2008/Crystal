@@ -1,6 +1,8 @@
 # Client-Bevy 迁移计划（Bevy 0.19）
 
 > 生成日期: 2026-08-02 | 分支: feat/bevy-client
+> 更新（2026-08-25）：`Client-Macroquad` 已移除，本文为迁移过程的历史记录，路径引用仅作对照。
+>
 > 目标: 将 `Client-Macroquad`（macroquad + hecs，约 99% 完成）迁移到 **Bevy 0.19**
 > 参考: `Client-Macroquad/IMPLEMENTATION_PLAN.md`（P0–P5）、`ServerRust/docs/PORT_STATUS.md`
 > 共享: `SharedRust`（协议库，276 S→C + 145 C→S）、`Client-Macroquad/Data`（游戏数据）
@@ -570,7 +572,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 中文输入（IME） | 已解决（Font::from_bytes + MessageReader） |
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
-| 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+| 数据依赖 | 复用仓库根 Data/（原 Client-Macroquad/Data），`resolve_data_path` 自动解析 |
 
 
 ---

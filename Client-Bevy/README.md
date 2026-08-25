@@ -1,8 +1,8 @@
 # Client-Bevy — 传奇2 (Legend of Mir 2) 客户端 Bevy 移植版
 
-把 `Client-Macroquad`（macroquad + hecs 实现）迁移到 **Bevy 0.19**。
+从 macroquad + hecs 实现迁移到 **Bevy 0.19**（原 `Client-Macroquad` 已于 2026-08 移除）。
 UI 交互以原版 C# 客户端（`Client/MirScenes/Dialogs/*.cs`）为准，游戏绘制/网络参考 Rust 版
-（`Client-Macroquad` + `SharedRust`/`ServerRust`）。
+（`SharedRust`/`ServerRust`）。
 
 ## 当前状态（M58，2026-08-03）
 
@@ -45,7 +45,7 @@ UI 交互以原版 C# 客户端（`Client/MirScenes/Dialogs/*.cs`）为准，游
 ## 运行
 
 ```bash
-# 需要数据目录（共享 Client-Macroquad/Data，自动解析）与 ServerRust
+# 需要数据目录（仓库根 Data/ 或 Client-Bevy/Data，自动解析）与 ServerRust
 # mock 模式（离线演示）：
 cargo run --bin client_bevy -- --auto-enter          # 自动进游戏
 cargo run --bin client_bevy                          # 手动登录界面
@@ -64,8 +64,8 @@ cargo test
 
 ## 与 macroquad / C# 版的关系
 
-- 共享 `SharedRust`（协议）与游戏数据目录（`Client-Macroquad/Data`、`Client-Macroquad/Map`）
-- 数据解析逻辑保持与 `Client-Macroquad/src/resources/*` 一致，仅去掉渲染引擎耦合
+- 共享 `SharedRust`（协议）；游戏数据目录约定为仓库根 `Data/`（gitignore 不入库）或 `Client-Bevy/Data`
+- 数据解析逻辑源自原 macroquad 版 `src/resources/*`（该客户端已移除），仅去掉渲染引擎耦合
 - 对话框布局/交互以 `Client/MirScenes/Dialogs/*.cs` 为准（纹理索引、坐标、三态帧）
 
 ## 版本
