@@ -15,6 +15,10 @@ use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 use crate::ui::sprite_ui::{
     spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
 };
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_scroll_bar_ui,
+    UiScrollList,
+};
 use mir2_shared::enums::Spell;
 
 use crate::actor::ActorAnim;
@@ -842,7 +846,6 @@ fn spawn_skills_window(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -852,121 +855,67 @@ fn spawn_skills_window(
     }
     let font = ui_font.0.clone();
 
-    // 面板背景 Title[508]（C# CharacterDialog 技能页背景；248x284）
-    let panel =
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 508) {
-            commands
-                .spawn((
-                    UiEntity,
-                    DialogRoot(DialogKind::Skills),
-                    SkillsWidget,
-                    Sprite::from_image(h),
-                    bevy::sprite::Anchor::TOP_LEFT,
-                    Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
-                    Visibility::Hidden,
-                ))
-                .id()
-        } else {
-            // 兜底：纹理缺失时退回半透明深色面板
-            let white = images.add(crate::map_renderer::make_image(
-                vec![255, 255, 255, 255],
-                1,
-                1,
-            ));
-            commands
-                .spawn((
-                    UiEntity,
-                    DialogRoot(DialogKind::Skills),
-                    SkillsWidget,
-                    Sprite {
-                        image: white.clone(),
-                        color: Color::srgba(0.12, 0.12, 0.16, 0.95),
-                        custom_size: Some(Vec2::new(300.0, 360.0)),
-                        ..default()
-                    },
-                    bevy::sprite::Anchor::TOP_LEFT,
-                    Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
-                    Visibility::Hidden,
-                ))
-                .id()
-        };
-    // 标题
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "技能",
-        SKILLS_DX + 12.0,
-        SKILLS_DY + 8.0,
-        15.0,
-        Color::srgb(1.0, 0.9, 0.3),
-        6.2,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Skills), SkillsWidget));
-    // 关闭
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        SKILLS_DX + 272.0,
-        SKILLS_DY + 3.0,
-        6.3,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((SkillsClose, DialogRoot(DialogKind::Skills), SkillsWidget));
-    }
-    // 列表（10 行 × 20px + 滚动条）
-    let (track, thumb) = spawn_scroll_bar(
-        &mut commands,
-        &mut images,
-        (SKILLS_DX + 288.0, SKILLS_DY + 36.0, 4.0, 200.0),
-        6.3,
-    );
-    commands.entity(track).insert((
-        DialogRoot(DialogKind::Skills),
-        SkillsWidget,
-        Visibility::Visible,
-    ));
-    commands.entity(thumb).insert((
-        DialogRoot(DialogKind::Skills),
-        SkillsWidget,
-        Visibility::Visible,
-    ));
-    commands.entity(panel).insert(ScrollList {
-        rect_rel: (12.0, 36.0, 270.0, 200.0),
-        row_h: 20.0,
-        visible: 10,
-        total: 0,
-        offset: 0,
-        step: 3,
-        track_rel: (288.0, 36.0, 4.0, 200.0),
-        thumb: Some(thumb),
-        z: 8.0,
+    // 面板背景 Title[508]（C# CharacterDialog 技能页背景；248x284 @ (360,180)）
+    let panel = if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 508) {
+        let p = spawn_panel(&mut commands, bg, SKILLS_DX, SKILLS_DY, 248.0, 284.0, 30);
+        commands.entity(p).insert((
+            DialogRoot(DialogKind::Skills),
+            SkillsWidget,
+            // #89 技能列表滚轮（10 行 × 20px）
+            UiScrollList {
+                rect_rel: (12.0, 36.0, 270.0, 200.0),
+                row_h: 20.0,
+                visible: 10,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (288.0, 36.0, 4.0, 200.0),
+                thumb: None,
+                z: 9,
+            },
+        ));
+        p
+    } else {
+        // 兜底：纹理缺失时退回半透明深色面板
+        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        let p = spawn_panel(&mut commands, white, SKILLS_DX, SKILLS_DY, 300.0, 360.0, 30);
+        commands.entity(p).insert((
+            DialogRoot(DialogKind::Skills),
+            SkillsWidget,
+            UiScrollList {
+                rect_rel: (12.0, 36.0, 270.0, 200.0),
+                row_h: 20.0,
+                visible: 10,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (288.0, 36.0, 4.0, 200.0),
+                thumb: None,
+                z: 9,
+            },
+        ));
+        p
+    };
+
+    commands.entity(panel).with_children(|p| {
+        // 滚动条（面板子节点）
+        spawn_scroll_bar_ui(p, (288.0, 36.0, 4.0, 200.0), 9);
+        // 标题
+        spawn_label(p, &font, "技能", 12.0, 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 9);
+        // 关闭
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 272.0, 3.0, 20.0, 20.0, 10).insert(SkillsClose);
+        }
+        // 列表（10 行 × 20px）@(12,36+20i)
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 12.0, 36.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+                .insert(SkillsLine(i));
+        }
     });
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            SKILLS_DX + 12.0,
-            SKILLS_DY + 36.0 + i as f32 * 20.0,
-            12.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands
-            .entity(e)
-            .insert((SkillsLine(i), DialogRoot(DialogKind::Skills), SkillsWidget));
-    }
 }
 
 fn cleanup_skills_window(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
@@ -979,11 +928,20 @@ fn cleanup_skills_window(mut commands: Commands, roots: Query<Entity, With<Dialo
 fn skills_window_system(
     mut mgr: ResMut<DialogManager>,
     magics: Res<MagicsState>,
-    close: Query<&UiButton, With<SkillsClose>>,
+    close: Query<(Entity, &Interaction), With<SkillsClose>>,
     mut widgets: Query<&mut Visibility, With<SkillsWidget>>,
-    mut lines: Query<(&mut Text2d, &SkillsLine)>,
-    mut scroll: Query<&mut ScrollList, With<SkillsWidget>>,
+    mut lines: Query<(&mut Text, &SkillsLine)>,
+    mut scroll: Query<&mut UiScrollList, With<SkillsWidget>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Skills);
     for mut vis in &mut widgets {
         *vis = if open {
@@ -995,8 +953,8 @@ fn skills_window_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Skills);
         }
     }
