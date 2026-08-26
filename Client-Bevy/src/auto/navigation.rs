@@ -215,6 +215,8 @@ pub(crate) fn real_verify_system(
         (Entity, &Transform),
         (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
     >,
+    // #2633 批次4 步4：dead 读改 StatusFlags；hud 仍留（hud.name 批6 才迁）
+    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
     mut s: Local<RealVerifyState>,
 ) {
     use client_bevy::scenes::AppState;
@@ -222,10 +224,12 @@ pub(crate) fn real_verify_system(
         return;
     }
     s.t += time.delta_secs();
+    // #2633 步4：实体缺失视同未死亡（同原 hud 默认 false）
+    let dead = flags.single().map(|f| f.dead).unwrap_or(false);
 
     // #304：死亡处理——城镇复活（C# TownRevive）。
     // 测试进行中死亡 → 复活后重置阶段重跑；测试完成后死亡 → 仅复活清理状态（避免角色卡死影响下次冒烟）
-    if hud.dead {
+    if dead {
         if !s.revive_sent {
             s.revive_sent = true;
             s.revive_count += 1;
@@ -436,7 +440,7 @@ pub(crate) fn real_verify_system(
                 s.t = 0.0;
                 return;
             }
-            if hud.dead {
+            if dead {
                 tracing::warn!("[REAL] ⚠️ 玩家死亡（战斗验证部分通过，继续 NPC 验证）");
                 s.stage = 3;
                 s.t = 0.0;

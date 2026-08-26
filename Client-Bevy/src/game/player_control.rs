@@ -13,6 +13,7 @@ use bevy::window::{CursorIcon, SystemCursorIcon};
 
 use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
+use crate::game::player_state::StatusFlags;
 use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
@@ -68,8 +69,11 @@ impl Default for ControlState {
 /// 对齐 C# GameScene.CheckInput 的 Dead/Fishing/Paralysis 门——原先在 8 个系统首句
 /// 手动 `if ... { return }` 复制，此处统一为 run condition（门控语义完全不变：
 /// 条件不满足时系统整体不运行，与原早退等价——早退前本就无任何副作用）。
-pub fn player_input_enabled(hud: Res<HudState>) -> bool {
-    !(hud.dead || hud.fishing || hud.paralysis)
+/// #2633 批次4 步4：读改 `StatusFlags`；R2 门控默认放行——实体未生成 `single()` 失败
+/// 时 `return true`（未死亡/可输入），与原 HudState 默认 dead/fishing/paralysis=false 等价。
+pub fn player_input_enabled(flags: Query<&StatusFlags, With<LocalPlayer>>) -> bool {
+    let Ok(f) = flags.single() else { return true };
+    !(f.dead || f.fishing || f.paralysis)
 }
 
 pub struct PlayerControlPlugin;
@@ -737,6 +741,8 @@ fn hold_move_system(
     >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
     hud: Res<HudState>,
+    // #2633 批次4 步4：in_trap_rock/sprint/sneaking 读改 StatusFlags；riding/inventory/equipment 仍读 hud（批5/6）
+    flags: Query<&StatusFlags, With<LocalPlayer>>,
     dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
@@ -833,7 +839,11 @@ fn hold_move_system(
             }
 
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
-            let in_trap = hud.in_trap_rock;
+            // #2633 步4：in_trap_rock/sprint/sneaking 读改 StatusFlags；实体缺失视同无旗标（同原 hud 默认 false）
+            let (in_trap, sprint, sneaking) = flags
+                .single()
+                .map(|f| (f.in_trap_rock, f.sprint, f.sneaking))
+                .unwrap_or((false, false, false));
 
             // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
             // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
@@ -888,8 +898,8 @@ fn hold_move_system(
                     .map(|i| i.weight as u32)
                     .sum::<u32>()
                     <= hud.inventory.max_weight;
-                let can_run_base = !in_trap && bag_ok && wear_ok && !(hud.sneaking && !hud.sprint);
-                let run_dist = if hud.riding || (hud.sprint && !hud.sneaking) { 3 } else { 2 };
+                let can_run_base = !in_trap && bag_ok && wear_ok && !(sneaking && !sprint);
+                let run_dist = if hud.riding || (sprint && !sneaking) { 3 } else { 2 };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {
                     if !can_run_base {
                         break;
@@ -1208,6 +1218,37 @@ fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2633 批次4 步4 R2：player_input_enabled 门控读 `StatusFlags`；实体未生成
+    /// （single() 失败）默认放行 true，等价原 HudState 默认 dead/fishing/paralysis=false。
+    #[test]
+    fn player_input_enabled_gates_on_status_flags() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn enabled(world: &mut World) -> bool {
+            world.run_system_once(player_input_enabled).expect("门控应成功运行")
+        }
+
+        // 实体未生成 → 默认放行（未死亡/可输入）
+        let mut world = World::new();
+        assert!(enabled(&mut world), "无 LocalPlayer 实体应默认放行");
+
+        // 实体存活（无任何旗标）→ 放行
+        let mut world = World::new();
+        world.spawn((LocalPlayer, StatusFlags::default()));
+        assert!(enabled(&mut world), "无 dead/fishing/paralysis 应放行");
+
+        // dead / fishing / paralysis 任一置位 → 锁定输入
+        for (name, flags) in [
+            ("dead", StatusFlags { dead: true, ..Default::default() }),
+            ("fishing", StatusFlags { fishing: true, ..Default::default() }),
+            ("paralysis", StatusFlags { paralysis: true, ..Default::default() }),
+        ] {
+            let mut world = World::new();
+            world.spawn((LocalPlayer, flags));
+            assert!(!enabled(&mut world), "{name} 置位应锁定输入");
+        }
+    }
 
     #[test]
     fn test_npc_call_cooldown() {

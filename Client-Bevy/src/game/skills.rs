@@ -18,6 +18,7 @@ use crate::ui::sprite_ui::{
 use mir2_shared::enums::Spell;
 
 use crate::actor::ActorAnim;
+use crate::game::player_state::StatusFlags;
 use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
 
@@ -360,7 +361,8 @@ impl Plugin for SkillsPlugin {
 fn skill_bar_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    hud: Res<crate::game::hud::HudState>,
+    // #2633 批次4 步4：fishing/paralysis 施法门读改 StatusFlags（本系统不再用 HudState）
+    flags: Query<&StatusFlags, With<crate::actor::LocalPlayer>>,
     mut bar: ResMut<SkillBarState>,
     mut magics: ResMut<MagicsState>,
     net: Res<NetConnection>,
@@ -390,7 +392,9 @@ fn skill_bar_system(
     // 键位（C# KeyBindSettings:242-276）：bar1 = F1..F8；bar2 = Ctrl+F1..F8 → 键 9..16
     let pending = bar.pending_cast.take();
     // #1600/#1616：C# GameScene.CheckInput——钓鱼/麻痹/冰冻锁定施法输入
-    if hud.fishing || hud.paralysis {
+    // #2633 步4：读改 StatusFlags；实体缺失视同未锁（同原 hud 默认 false，放行施法）
+    let cast_locked = flags.single().map(|f| f.fishing || f.paralysis).unwrap_or(false);
+    if cast_locked {
         return;
     }
     let ctrl_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);

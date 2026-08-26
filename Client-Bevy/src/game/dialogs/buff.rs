@@ -397,5 +397,47 @@ mod tests {
         match 10u8 { 12 => hud.sprint = false, 10 => hud.sneaking = false, _ => {} }
         assert!(!hud.sneaking);
     }
+
+    /// #2633 批次4 步4：buff 事件写 sprint/sneaking 双写 `StatusFlags` 组件 + 原 `hud.*`
+    /// （链路：buff 事件 → 组件 → movement/门控读组件）。逐 tag 核对组件与 hud 同步置位/清除。
+    #[test]
+    fn buff_events_double_write_status_flags_and_hud() {
+        use crate::network::server_event::ServerEvent;
+
+        fn flags(app: &mut App) -> StatusFlags {
+            app.world_mut()
+                .query_filtered::<&StatusFlags, With<LocalPlayer>>()
+                .iter(app.world())
+                .next()
+                .copied()
+                .expect("LocalPlayer 应有 StatusFlags")
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<BuffState>();
+        app.init_resource::<crate::game::hud::HudState>();
+        app.add_systems(Update, buff_server_events);
+        app.world_mut().spawn((LocalPlayer, StatusFlags::default()));
+        app.update(); // 初始化消息缓冲/系统状态
+
+        // BuffAdded tag=12 → sprint、tag=10 → sneaking（组件 + hud 同步置位）
+        app.world_mut().write_message(ServerEvent::BuffAdded { tag: 12, ticks: 100 });
+        app.world_mut().write_message(ServerEvent::BuffAdded { tag: 10, ticks: 100 });
+        app.update();
+        assert!(flags(&mut app).sprint, "BuffAdded(12) 应置 StatusFlags.sprint");
+        assert!(flags(&mut app).sneaking, "BuffAdded(10) 应置 StatusFlags.sneaking");
+        let hud = app.world().resource::<crate::game::hud::HudState>();
+        assert!(hud.sprint && hud.sneaking, "hud.sprint/sneaking 应同步置位");
+
+        // BuffRemoved tag=12 → 清 sprint（组件 + hud 同步），sneaking 保持
+        app.world_mut().write_message(ServerEvent::BuffRemoved { tag: 12 });
+        app.update();
+        assert!(!flags(&mut app).sprint, "BuffRemoved(12) 应清 StatusFlags.sprint");
+        assert!(flags(&mut app).sneaking, "sneaking 应保持");
+        let hud = app.world().resource::<crate::game::hud::HudState>();
+        assert!(!hud.sprint && hud.sneaking, "hud.sprint 应清除、sneaking 保持");
+    }
 }
 

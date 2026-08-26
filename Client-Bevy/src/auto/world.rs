@@ -950,7 +950,8 @@ pub(crate) fn auto_reincarnation_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步4：dead/reincarnation_offered 读改 StatusFlags（本系统不再用 HudState）；实体缺失视同未死亡/无 offer
+    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -959,6 +960,10 @@ pub(crate) fn auto_reincarnation_test(
         return;
     }
     *t += time.delta_secs();
+    let (dead, reinc_offered) = flags
+        .single()
+        .map(|f| (f.dead, f.reincarnation_offered))
+        .unwrap_or((false, false));
     match *stage {
         0 => {
             if *t >= 300.0 {
@@ -966,8 +971,8 @@ pub(crate) fn auto_reincarnation_test(
                 *stage = 9;
                 return;
             }
-            if hud.dead {
-                if hud.reincarnation_offered {
+            if dead {
+                if reinc_offered {
                     tracing::info!("[REINC] ✅ 收到轮回术 offer");
                     net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
                     tracing::info!("[REINC] 接受轮回术复活");
@@ -985,7 +990,7 @@ pub(crate) fn auto_reincarnation_test(
                 *stage = 9;
                 return;
             }
-            if !hud.dead {
+            if !dead {
                 tracing::info!("[REINC] ✅ 轮回术复活成功");
                 *stage = 9;
             }

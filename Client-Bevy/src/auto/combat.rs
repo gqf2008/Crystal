@@ -484,14 +484,16 @@ pub(crate) fn auto_revive_system(
     net: Res<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步4：dead 读改 StatusFlags（本系统不再用 HudState）；实体缺失视同未死亡
+    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
-    if !hud.dead {
+    let dead = flags.single().map(|f| f.dead).unwrap_or(false);
+    if !dead {
         *t = 0.0;
         return;
     }
