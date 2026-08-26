@@ -20,9 +20,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
-    ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    ImageButton,
 };
 
 /// 药水腰带格数（C# BeltDialog 6 格）
@@ -194,7 +195,6 @@ fn spawn_potion_belt(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -204,141 +204,82 @@ fn spawn_potion_belt(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1932] + 半透明叠层 Prguse[1933]（C# BeltPanel_BeforeDraw 0.5 alpha）
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1932,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, BELT_X, BELT_Y, 5.4, 1.0);
-        commands
-            .entity(e)
-            .insert((PotionBeltWidget, PotionBeltBg, Visibility::Visible));
-    }
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1933,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, BELT_X, BELT_Y, 5.41, 1.0);
-        commands
-            .entity(e)
-            .insert((PotionBeltWidget, PotionBeltBgOverlay, Visibility::Visible));
-    }
+    // 背景 Prguse[1932]（横 240x38 @ (230,618)）/ 纵向 Prguse[1944]（40x241 @ (0,200)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1932) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, BELT_X, BELT_Y, 240.0, 38.0, 15);
+    commands
+        .entity(panel)
+        .insert((PotionBeltWidget, PotionBeltBg, Visibility::Visible));
 
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    for i in 0..BELT_SLOTS {
-        let (x, y) = h_slot(i);
-        let slot = commands
-            .spawn((
-                UiEntity,
+    commands.entity(panel).with_children(|p| {
+        // 半透明叠层 Prguse[1933]（C# BeltPanel_BeforeDraw 0.5 alpha；ImageNode.color 调透明度）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1933) {
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(240.0),
+                    height: Val::Px(38.0),
+                    ..default()
+                },
+                ImageNode::new(h).with_color(Color::srgba(1.0, 1.0, 1.0, 0.5)),
                 PotionBeltWidget,
-                PotionBeltSlot(i),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.0, 0.0, 0.0, 0.35),
-                    custom_size: Some(Vec2::new(CELL_SIZE, CELL_SIZE)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(x, -y, 5.5),
-                Visibility::Visible,
-            ))
-            .id();
-        commands.entity(slot).with_children(|p| {
-            p.spawn((
-                PotionBeltIcon(i),
-                Sprite {
-                    image: white.clone(),
-                    custom_size: Some(Vec2::new(CELL_SIZE - 4.0, CELL_SIZE - 4.0)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(2.0, -2.0, 5.6),
-                Visibility::Hidden,
+                PotionBeltBgOverlay,
+                ZIndex(1),
             ));
-            p.spawn((
-                PotionBeltCount(i),
-                Text2d::new(String::new()),
-                bevy::sprite::Anchor::BOTTOM_RIGHT,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(10.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                Transform::from_xyz(30.0, -30.0, 5.7),
-                Visibility::Hidden,
-            ));
-        });
-        // 数字标签 1-6（C# Key[i]）
-        let (nx, ny) = h_num(i);
-        let k = spawn_ui_text(
-            &mut commands,
-            &font,
-            &(i + 1).to_string(),
-            nx,
-            ny,
-            10.0,
-            Color::WHITE,
-            5.7,
-        );
-        commands
-            .entity(k)
-            .insert((PotionBeltWidget, PotionBeltNumber(i)));
-    }
+        }
 
-    // 旋转按钮（C# RotateButton Prguse[1926-1928] @(222,3)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1926,
-        1927,
-        1928,
-        BELT_X + 222.0,
-        BELT_Y + 3.0,
-        5.5,
-        16.0,
-        15.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((PotionBeltWidget, PotionBeltRotate, Visibility::Visible));
-    }
-    // 关闭按钮（C# CloseButton Prguse[1923-1925] @(222,19)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1923,
-        1924,
-        1925,
-        BELT_X + 222.0,
-        BELT_Y + 19.0,
-        5.5,
-        16.0,
-        15.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((PotionBeltWidget, PotionBeltClose, Visibility::Visible));
-    }
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
+        for i in 0..BELT_SLOTS {
+            // 格（相对面板：横 (12+35i,3) / 纵 (3,12+35i)，由 ui_system 按布局更新）
+            spawn_container(p, 12.0 + i as f32 * CELL_SPACING, 3.0, CELL_SIZE, CELL_SIZE, 2)
+                .insert((
+                    PotionBeltWidget,
+                    PotionBeltSlot(i),
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+                ))
+                .with_children(|c| {
+                    spawn_image(c, white.clone(), 2.0, 2.0, CELL_SIZE - 4.0, CELL_SIZE - 4.0, 3)
+                        .insert((PotionBeltWidget, PotionBeltIcon(i), Visibility::Hidden));
+                    spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3)
+                        .insert((PotionBeltWidget, PotionBeltCount(i), Visibility::Hidden));
+                });
+        }
+        // 数字标签 1-6（C# Key[i]；相对面板：横 (8+35i,2) / 纵 (3,10+35i)）
+        for i in 0..BELT_SLOTS {
+            spawn_label(p, &font, &(i + 1).to_string(), 8.0 + i as f32 * CELL_SPACING, 2.0, 10.0, Color::WHITE, 3)
+                .insert((PotionBeltWidget, PotionBeltNumber(i)));
+        }
+        // 旋转按钮（C# RotateButton Prguse[1926-1928] @(222,3)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1926),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1927),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1928),
+        ) {
+            spawn_icon_button(p, n, h, pr, 222.0, 3.0, 16.0, 15.0, 3)
+                .insert((PotionBeltWidget, PotionBeltRotate));
+        }
+        // 关闭按钮（C# CloseButton Prguse[1923-1925] @(222,19)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1923),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1924),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1925),
+        ) {
+            spawn_icon_button(p, n, h, pr, 222.0, 19.0, 16.0, 15.0, 3)
+                .insert((PotionBeltWidget, PotionBeltClose));
+        }
+    });
 }
 
 /// 交互：显隐 + 横纵布局 + 旋转/关闭 + 选中指派/点击使用/右键清除
+/// 单查询（Option 组件区分角色）避免 Bevy 16 参数上限（#1374 同款 B0001 预防）。
 #[allow(clippy::type_complexity)]
 fn potion_belt_ui_system(
     mut belt: ResMut<PotionBeltState>,
@@ -354,15 +295,13 @@ fn potion_belt_ui_system(
     windows: Query<&Window>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    // 关键：必须 With<PotionBeltWidget>，否则会匹配全屏所有 Sprite 实体，
-    // 把其它 UI/地图/角色的可见性全部改掉（大量窗口闪烁/白块）
     mut items: Query<
         (
+            Entity,
+            &mut Node,
             &mut Visibility,
-            &mut Transform,
-            Option<&mut Sprite>,
-            Option<&UiButton>,
+            Option<&mut ImageNode>,
+            Option<&Interaction>,
             Option<&PotionBeltBg>,
             Option<&PotionBeltBgOverlay>,
             Option<&PotionBeltSlot>,
@@ -370,15 +309,20 @@ fn potion_belt_ui_system(
             Option<&PotionBeltRotate>,
             Option<&PotionBeltClose>,
         ),
-        (
-            With<PotionBeltWidget>,
-            Without<PotionBeltIcon>,
-            Without<PotionBeltCount>,
-        ),
+        With<PotionBeltWidget>,
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     // 显隐（Z 快捷键 / 关闭按钮）
-    for (mut vis, _, _, _, _, _, _, _, _, _) in &mut items {
+    for (_, _, mut vis, _, _, _, _, _, _, _, _) in &mut items {
         *vis = if visible.0 {
             Visibility::Visible
         } else {
@@ -390,68 +334,59 @@ fn potion_belt_ui_system(
     }
 
     let vert = vertical.0;
+    // 面板：横 (230,618) 240x38 / 纵 (0,200) 40x241
+    let (px, py, pw, ph) = if vert {
+        (BELT_VERT_X, BELT_VERT_Y, 40.0, 241.0)
+    } else {
+        (BELT_X, BELT_Y, 240.0, 38.0)
+    };
 
-    // 横纵布局：背景图/叠层/格/数字/按钮位置 + 旋转/关闭点击
-    for (_, mut tf, mut sp, btn, bg, overlay, slot, num, rot, cls) in &mut items {
+    for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
-            if let Some(h) = ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                if vert { 1944 } else { 1932 },
-            ) {
-                if let Some(sp) = sp.as_mut() {
-                    sp.image = h;
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1944 } else { 1932 }) {
+                if let Some(img) = img.as_mut() {
+                    if img.image != h {
+                        img.image = h;
+                    }
                 }
             }
-            let (x, y) = if vert {
-                (BELT_VERT_X, BELT_VERT_Y)
-            } else {
-                (BELT_X, BELT_Y)
-            };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(px);
+            node.top = Val::Px(py);
+            node.width = Val::Px(pw);
+            node.height = Val::Px(ph);
         } else if overlay.is_some() {
-            if let Some(h) = ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                if vert { 1945 } else { 1933 },
-            ) {
-                if let Some(sp) = sp.as_mut() {
-                    sp.image = h;
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1945 } else { 1933 }) {
+                if let Some(img) = img.as_mut() {
+                    if img.image != h {
+                        img.image = h;
+                    }
                     // C# BeltPanel_BeforeDraw：Prguse[1933/1945] 用 0.5F 透明度叠加；
                     // 纹理本身 99% 是不透明黑块，不降 alpha 会整块黑盖住腰带
-                    sp.color = Color::srgba(1.0, 1.0, 1.0, 0.5);
+                    img.color = Color::srgba(1.0, 1.0, 1.0, 0.5);
                 }
             }
-            let (x, y) = if vert {
-                (BELT_VERT_X, BELT_VERT_Y)
-            } else {
-                (BELT_X, BELT_Y)
-            };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(0.0);
+            node.top = Val::Px(0.0);
+            node.width = Val::Px(pw);
+            node.height = Val::Px(ph);
         } else if let Some(s) = slot {
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
         } else if let Some(n) = num {
             let (x, y) = if vert { v_num(n.0) } else { h_num(n.0) };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
         } else if rot.is_some() {
             let (x, y) = if vert {
                 (BELT_VERT_X + 19.0, BELT_VERT_Y + 222.0)
             } else {
                 (BELT_X + 222.0, BELT_Y + 3.0)
             };
-            tf.translation.x = x;
-            tf.translation.y = -y;
-            if let Some(b) = btn {
-                if b.clicked {
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
+            if let Some(inter) = inter {
+                if edge(e, inter, &mut prev_inter) {
                     vertical.0 = !vertical.0;
                     tracing::info!("🔁 药水腰带旋转: {}", if !vert { "纵向" } else { "横向" });
                 }
@@ -462,10 +397,10 @@ fn potion_belt_ui_system(
             } else {
                 (BELT_X + 222.0, BELT_Y + 19.0)
             };
-            tf.translation.x = x;
-            tf.translation.y = -y;
-            if let Some(b) = btn {
-                if b.clicked {
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
+            if let Some(inter) = inter {
+                if edge(e, inter, &mut prev_inter) {
                     visible.0 = false;
                     tracing::info!("🧪 关闭药水腰带");
                 }
@@ -481,14 +416,10 @@ fn potion_belt_ui_system(
 
     // 定位点中的腰带格（按当前横纵布局）
     let mut hit: Option<usize> = None;
-    for (_, _, _, _, _, _, slot, _, _, _) in &items {
+    for (_, _, _, _, _, _, _, slot, _, _, _) in &items {
         if let Some(s) = slot {
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
-            if cursor.x >= x
-                && cursor.x <= x + CELL_SIZE
-                && cursor.y >= y
-                && cursor.y <= y + CELL_SIZE
-            {
+            if cursor.x >= x && cursor.x <= x + CELL_SIZE && cursor.y >= y && cursor.y <= y + CELL_SIZE {
                 hit = Some(s.0);
                 break;
             }
@@ -536,10 +467,9 @@ fn potion_belt_icon_system(
     inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     // #1374：B0001 修复（#1362 药水腰带合入后启动 panic）——icons 与 counts 的 &mut Visibility 需 Without 隔离
-    mut icons: Query<(&mut Sprite, &mut Visibility, &PotionBeltIcon), Without<PotionBeltCount>>,
-    mut counts: Query<(&mut Text2d, &mut Visibility, &PotionBeltCount), Without<PotionBeltIcon>>,
+    mut icons: Query<(&mut ImageNode, &mut Visibility, &PotionBeltIcon), Without<PotionBeltCount>>,
+    mut counts: Query<(&mut Text, &mut Visibility, &PotionBeltCount), Without<PotionBeltIcon>>,
 ) {
     let inv = inv_q.single().ok();
     let find = |i: usize| -> Option<&InvItem> {
@@ -549,17 +479,15 @@ fn potion_belt_icon_system(
             .flatten()
             .find(|it| it.unique_id == *uid)
     };
-    for (mut sprite, mut vis, icon) in &mut icons {
+    for (mut node, mut vis, icon) in &mut icons {
         if let Some(item) = find(icon.0) {
-            if let Some(h) = ui_image(
+            if let Some(h) = load_lib_image(
                 &mut libs,
                 &mut images,
-                &mut cache,
                 LibraryName::Items,
                 item.image as usize,
             ) {
-                sprite.image = h;
-                sprite.custom_size = None;
+                node.image = h;
             }
             *vis = Visibility::Visible;
         } else {
