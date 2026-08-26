@@ -17,8 +17,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_label,
+    spawn_panel,
 };
 
 /// 钓鱼状态（FishingUpdate 写入）
@@ -63,7 +65,7 @@ impl Plugin for FishingPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_fishing);
         app.add_systems(
             Update,
-            (fishing_ui_system, fishing_gear_system, ui_button_system)
+            (fishing_ui_system, fishing_gear_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -94,7 +96,6 @@ fn spawn_fishing(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -104,146 +105,60 @@ fn spawn_fishing(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1340]（C# FishingDialog.Index=1340）
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1340,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭（C# Prguse2 360/361/362）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        280.0 + 220.0,
-        83.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FishingClose, DialogRoot(DialogKind::Fishing), FishingWidget));
-    }
-    // 状态行
-    for i in 0..4usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            298.0,
-            120.0 + i as f32 * 22.0,
-            12.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands.entity(e).insert((
-            FishingLine(i),
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-        ));
-    }
-    // 抛竿按钮（#90 续：MirAnimatedButton，C# FishingDialog FishButton
-    // Title[170..179] 10 帧 130ms 循环 + 按下帧 142）
-    if let Some(e) = crate::ui::controls::spawn_animated_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        170,
-        10,
-        None,
-        Some(142),
-        300.0,
-        220.0,
-        8.3,
-        76.0,
-        25.0,
-        0.13,
-        true,
-    ) {
-        commands
-            .entity(e)
-            .insert((FishingCast, DialogRoot(DialogKind::Fishing), FishingWidget));
-    }
-    // 自动钓鱼开关
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        210,
-        211,
-        212,
-        390.0,
-        220.0,
-        8.3,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            FishingAutocast,
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-        ));
-    }
-    // 钓具槽（C# FishingDialog Grid：Hook/Float/Bait/Finder/Reel，34x30）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    for (i, (rx, ry)) in GEAR_POS.iter().enumerate() {
-        let e = spawn_ui_sprite(
-            &mut commands,
-            white.clone(),
-            280.0 + rx,
-            80.0 + ry,
-            8.1,
-            1.0,
-        );
-        commands.entity(e).insert((
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(34.0, 30.0)),
-                ..default()
-            },
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-        ));
-        let t = spawn_ui_text(
-            &mut commands,
-            &font,
-            "—",
-            280.0 + rx + 4.0,
-            80.0 + ry + 8.0,
-            10.0,
-            Color::WHITE,
-            8.2,
-        );
-        commands.entity(t).insert((
-            FishingGearSlot(i),
-            DialogRoot(DialogKind::Fishing),
-            FishingWidget,
-        ));
-    }
+    // 背景 Prguse[1340]（C# FishingDialog.Index=1340，200x287 @ (280,80)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1340) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 200.0, 287.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Fishing), FishingWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362]：旧 sprite 在 rel(220,3) 悬空面板外（200 宽），
+        // 移到面板右上角 (176,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 176.0, 3.0, 20.0, 20.0, 10).insert(FishingClose);
+        }
+        // 状态行 4 @(18,40+22i)
+        for i in 0..4usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(FishingLine(i));
+        }
+        // 抛竿按钮（#90 续：MirAnimatedButton，C# FishingDialog FishButton
+        // Title[170..179] 10 帧 130ms 循环 + 按下帧 142）@(20,140)
+        let frames: Vec<Handle<Image>> = (0..10usize)
+            .filter_map(|i| load_lib_image(&mut libs, &mut images, LibraryName::Title, 170 + i))
+            .collect();
+        if !frames.is_empty() {
+            let pressed = load_lib_image(&mut libs, &mut images, LibraryName::Title, 142);
+            spawn_animated_icon_button(
+                p, frames, None, pressed, 20.0, 140.0, 76.0, 25.0, 10, 0.13, true,
+            )
+            .insert(FishingCast);
+        }
+        // 自动钓鱼开关 Title[210/211/212] @(110,140)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 140.0, 76.0, 25.0, 10).insert(FishingAutocast);
+        }
+        // 钓具槽（C# FishingDialog Grid：Hook/Float/Bait/Finder/Reel，34x30）
+        for (i, (rx, ry)) in GEAR_POS.iter().enumerate() {
+            spawn_container(p, *rx, *ry, 34.0, 30.0, 9)
+                .insert(BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)))
+                .with_children(|c| {
+                    spawn_label(c, &font, "—", 4.0, 8.0, 10.0, Color::WHITE, 10)
+                        .insert(FishingGearSlot(i));
+                });
+        }
+    });
 }
 
 /// 显隐 + 渲染 + 抛竿/自动钓鱼
@@ -252,12 +167,21 @@ fn fishing_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<FishingState>,
     net: Res<NetConnection>,
-    close: Query<&UiButton, With<FishingClose>>,
-    cast_btn: Query<&UiButton, With<FishingCast>>,
-    autocast_btn: Query<&UiButton, With<FishingAutocast>>,
+    close: Query<(Entity, &Interaction), With<FishingClose>>,
+    cast_btn: Query<(Entity, &Interaction), With<FishingCast>>,
+    autocast_btn: Query<(Entity, &Interaction), With<FishingAutocast>>,
     mut widgets: Query<&mut Visibility, With<FishingWidget>>,
-    mut lines: Query<(&mut Text2d, &FishingLine)>,
+    mut lines: Query<(&mut Text, &FishingLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Fishing);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
@@ -269,8 +193,8 @@ fn fishing_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Fishing);
         }
     }
@@ -292,16 +216,16 @@ fn fishing_ui_system(
         };
     }
     // 抛竿（C# FishingDialog → C.FishingCast）
-    for btn in &cast_btn {
-        if btn.clicked {
+    for (e, inter) in &cast_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&crate::network::FishingCastWire { fishing_type: 0 });
             state.message = "已抛竿，等待鱼上钩…".to_string();
             tracing::info!("🎣 抛竿");
         }
     }
     // 自动钓鱼开关
-    for btn in &autocast_btn {
-        if btn.clicked {
+    for (e, inter) in &autocast_btn {
+        if edge(e, inter, &mut prev_inter) {
             state.autocast = !state.autocast;
             net.send_packet(&crate::network::FishingChangeAutocastWire {
                 enabled: state.autocast,
@@ -321,7 +245,7 @@ fn fishing_gear_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut slots: Query<(&mut Text2d, &FishingGearSlot)>,
+    mut slots: Query<(&mut Text, &FishingGearSlot)>,
 ) {
     let open = mgr.is_open(DialogKind::Fishing);
     let player = inv_q.single().ok();
