@@ -291,7 +291,7 @@ fn npc_awake_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<NpcAwakeState>,
     net: ResMut<NetConnection>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     close: Query<&UiButton, With<NpcAwakeClose>>,
     upgrade: Query<&UiButton, With<NpcAwakeUpgrade>>,
     mut type_dd: Query<(&mut DropDown, &NpcAwakeTypeDrop)>,
@@ -395,10 +395,11 @@ fn npc_awake_ui_system(
                 && cursor.y <= 119.0
             {
                 // #1356：觉醒模式循环武器；分解/降级/重置循环全部物品
+                let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
                 let pool: Vec<InvItem> = if state.service == NpcAwakeService::Awaken {
-                    hud.inventory.items.iter().flatten().filter(|it| it.item_type == 1).cloned().collect()
+                    items.iter().flatten().filter(|it| it.item_type == 1).cloned().collect()
                 } else {
-                    hud.inventory.items.iter().flatten().cloned().collect()
+                    items.iter().flatten().cloned().collect()
                 };
                 if !pool.is_empty() {
                     let cur = state

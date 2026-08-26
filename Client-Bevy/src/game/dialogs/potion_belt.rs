@@ -12,8 +12,10 @@
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem, ItemUseFeedback, try_use_belt_item};
-use crate::game::hud::HudState;
+use crate::game::player_state::{Inventory, StatusFlags};
+use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -95,6 +97,15 @@ impl Plugin for PotionBeltPlugin {
         app.init_resource::<PotionBeltVertical>();
         app.add_systems(OnEnter(AppState::Game), spawn_potion_belt);
         app.add_systems(OnExit(AppState::Game), cleanup_potion_belt);
+        // #2633 批次4：腰带补货 ServerEvent 写系统（玩家状态集）。须在 inventory_events
+        // 扣减之前运行——used_item_index 取扣减前的物品 item_index（§12 R6）。
+        app.add_systems(
+            Update,
+            belt_restock_events
+                .before(crate::game::dialogs::inventory::inventory_events)
+                .in_set(GameSet::PlayerState)
+                .run_if(in_state(AppState::Game)),
+        );
         app.add_systems(
             Update,
             (potion_belt_ui_system, potion_belt_icon_system).run_if(in_state(AppState::Game)),
@@ -105,6 +116,56 @@ impl Plugin for PotionBeltPlugin {
 fn cleanup_potion_belt(mut commands: Commands, roots: Query<Entity, With<PotionBeltWidget>>) {
     for e in roots.iter() {
         commands.entity(e).despawn();
+    }
+}
+
+/// 腰带自动补货写系统（#2633 批次4 步2：拆 hud_server_events 的 ItemUsed 补货段，设计 §10）。
+///
+/// #2633 批次4 步9：物品直读 `Inventory` 组件（HudState 已删）。
+/// 须在 `inventory_events` 扣减**之前**运行——`used_item_index` 取扣减前的物品 item_index：
+/// 被消耗物品 count==1 时扣减后即从背包移除，后置会读不到（§12 R6）。补货查找按
+/// `unique_id != 已消耗` 排除自身，故与扣减的相对先后不影响查找结果（只影响 used_item_index
+/// 的读取），因此只需保证本系统先读。背包扣减本身归 inventory_events（两系统读同一事件）。
+pub(crate) fn belt_restock_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
+    mut belt: ResMut<PotionBeltState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    // R1：实体未生成则无背包可补货（原 HudState 默认空背包同样无补货，等价）
+    let Ok(inv) = inv_q.single() else {
+        return;
+    };
+    for ev in events.read() {
+        if let ServerEvent::ItemUsed { unique_id } = ev {
+            // #1544：扣减前记录被消耗物品的 item_index（腰带补货据此找同物品补上）
+            let used_item_index = inv
+                .items
+                .iter()
+                .find(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id))
+                .and_then(|s| s.as_ref())
+                .map(|it| it.item_index);
+            // #1544：腰带自动补货（C# MirItemCell.UseItem count==1 && ItemSlot < BeltIdx →
+            // 背包找同物品 MoveItem 到腰带）；Bevy 腰带为 unique_id 虚拟槽：消耗后找同 item_index 补上
+            if let Some(used_index) = used_item_index {
+                for slot in belt.slots.iter_mut() {
+                    if *slot == Some(*unique_id) {
+                        let next = inv
+                            .items
+                            .iter()
+                            .flatten()
+                            .find(|it| it.unique_id != *unique_id && it.item_index == used_index)
+                            .map(|it| it.unique_id);
+                        if let Some(uid) = next {
+                            *slot = Some(uid);
+                            tracing::info!("🧪 腰带补货 uid={} -> {}", unique_id, uid);
+                        } else {
+                            *slot = None;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -283,7 +344,7 @@ fn potion_belt_ui_system(
     mut belt: ResMut<PotionBeltState>,
     mut visible: ResMut<PotionBeltVisible>,
     mut vertical: ResMut<PotionBeltVertical>,
-    hud: Res<HudState>,
+    player_q: Query<(&Inventory, &StatusFlags), With<LocalPlayer>>,
     net: Res<NetConnection>,
     mut feedback: ResMut<ItemUseFeedback>,
     // #2631：选中态归 inventory 所有，本系统只读（指派腰带给当前背包选中格）
@@ -443,12 +504,20 @@ fn potion_belt_ui_system(
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
+    let player = player_q.single().ok();
     if let Some(uid) = belt.slots[i] {
-        if try_use_belt_item(uid, &net, &hud, now, &mut feedback) {
+        if try_use_belt_item(
+            uid,
+            &net,
+            player.map(|(_, f)| f.fishing).unwrap_or(false),
+            now,
+            &mut feedback,
+        ) {
             tracing::info!("🧪 使用腰带物品 uid={}", uid);
         }
     } else if let Some(sel) = click.selected() {
-        if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
+        if let Some(item) = player.and_then(|(inv, _)| inv.items.get(sel).and_then(|s| s.as_ref()))
+        {
             belt.slots[i] = Some(item.unique_id);
             tracing::info!(
                 "🧪 指派腰带 {}: {} (uid={})",
@@ -460,11 +529,11 @@ fn potion_belt_ui_system(
     }
 }
 
-/// 渲染：图标/数量（从背包按 unique_id 找物品）
+/// 渲染：图标/数量（从背包按 unique_id 找物品；#2633 批次4 步9 改读 `Inventory` 组件）
 #[allow(clippy::too_many_arguments)]
 fn potion_belt_icon_system(
     belt: Res<PotionBeltState>,
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -472,10 +541,10 @@ fn potion_belt_icon_system(
     mut icons: Query<(&mut Sprite, &mut Visibility, &PotionBeltIcon), Without<PotionBeltCount>>,
     mut counts: Query<(&mut Text2d, &mut Visibility, &PotionBeltCount), Without<PotionBeltIcon>>,
 ) {
+    let inv = inv_q.single().ok();
     let find = |i: usize| -> Option<&InvItem> {
         let uid = belt.slots.get(i).and_then(|u| u.as_ref())?;
-        hud.inventory
-            .items
+        inv?.items
             .iter()
             .flatten()
             .find(|it| it.unique_id == *uid)

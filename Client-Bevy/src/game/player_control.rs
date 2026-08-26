@@ -11,8 +11,11 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, SystemCursorIcon};
 
-use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
-use crate::game::hud::HudState;
+use crate::actor::{
+    ActorAnim, ActorAppearance, GroundItem, LocalPlayer, Monster, MountState, NetObjectId, Npc,
+    Player,
+};
+use crate::game::player_state::{CombatStats, Inventory, Loadout, PetModeState, Progression, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
@@ -68,8 +71,11 @@ impl Default for ControlState {
 /// 对齐 C# GameScene.CheckInput 的 Dead/Fishing/Paralysis 门——原先在 8 个系统首句
 /// 手动 `if ... { return }` 复制，此处统一为 run condition（门控语义完全不变：
 /// 条件不满足时系统整体不运行，与原早退等价——早退前本就无任何副作用）。
-pub fn player_input_enabled(hud: Res<HudState>) -> bool {
-    !(hud.dead || hud.fishing || hud.paralysis)
+/// #2633 批次4 步4：读改 `StatusFlags`；R2 门控默认放行——实体未生成 `single()` 失败
+/// 时 `return true`（未死亡/可输入），与原 HudState 默认 dead/fishing/paralysis=false 等价。
+pub fn player_input_enabled(flags: Query<&StatusFlags, With<LocalPlayer>>) -> bool {
+    let Ok(f) = flags.single() else { return true };
+    !(f.dead || f.fishing || f.paralysis)
 }
 
 pub struct PlayerControlPlugin;
@@ -580,8 +586,19 @@ fn auto_attack_system(
     game_data: Res<GameData>,
     players: Query<(Entity, &Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
-    hud: Res<HudState>,
-    character_state: Res<crate::game::dialogs::character::CharacterState>,
+    // #2633 批次4 步6/7/8：class/riding/mount_type 改读 `ActorAppearance`/`MountState`、
+    // 武器 shape 读 `Loadout`、攻速/等级读 `CombatStats`/`Progression`（CharacterState 已删）；
+    // 实体缺失按默认值（class=0/riding=false/mount_type=0/shape=-1/attack_speed=0/level=1）
+    player_q: Query<
+        (
+            &Loadout,
+            &ActorAppearance,
+            Option<&MountState>,
+            &CombatStats,
+            &Progression,
+        ),
+        With<LocalPlayer>,
+    >,
     magics: Res<crate::game::skills::MagicsState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
     // C# OutputDelay=1000ms：范围外提示节流
@@ -598,14 +615,31 @@ fn auto_attack_system(
     let Ok((pe, player_tf, lm_opt)) = players.single() else { return };
 
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
-    let attack_kind = player_attack_kind(
-        hud.class,
-        hud.equipment.get(0).and_then(|s| s.as_ref()).is_some(),
-    );
+    // 武器槽/职业/骑乘读 `Loadout`/`ActorAppearance`/`MountState`（#2633 批次4 步6/步7）
+    let player_state = player_q.single().ok();
+    let class = player_state.map(|(_, a, _, _, _)| a.class as u8).unwrap_or(0);
+    let weapon_equipped = player_state
+        .and_then(|(l, _, _, _, _)| l.slots.get(0))
+        .and_then(|s| s.as_ref())
+        .is_some();
+    let riding = player_state.map(|(_, _, m, _, _)| m.is_some()).unwrap_or(false);
+    let mount_type = player_state
+        .and_then(|(_, _, m, _, _)| m)
+        .map(|m| m.mount_type)
+        .unwrap_or(0);
+    let weapon_shape = player_state
+        .and_then(|(l, _, _, _, _)| l.slots.get(0))
+        .and_then(|s| s.as_ref())
+        .map(|i| i.shape)
+        .unwrap_or(-1);
+    let attack_kind = player_attack_kind(class, weapon_equipped);
     let is_archer = attack_kind == PlayerAttackKind::Ranged;
     let max_range = if is_archer { 9 } else { 1 };
     // #1602：C# AttackTime = User.AttackSpeed（弓手远程 +200ms）——按攻速/等级动态计算
-    control.attack_interval = attack_interval_secs(character_state.attack_speed, character_state.level)
+    let (attack_speed, level) = player_state
+        .map(|(_, _, _, c, p)| (c.attack_speed, p.level))
+        .unwrap_or((0, 1));
+    control.attack_interval = attack_interval_secs(attack_speed, level)
         + if is_archer { 0.2 } else { 0.0 };
     let p_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
     let t_tile = world_to_tile(target_tf.translation.x, target_tf.translation.y);
@@ -690,12 +724,9 @@ fn auto_attack_system(
             spell: attack_spell,
         });
         // #1564：近战挥击音按武器/职业/骑乘选择（C# PlayAttackSound；弓手无挥击音）
-        if let Some(sound_id) = crate::game::sound::attack_swing_sound(
-            hud.class,
-            hud.riding,
-            hud.mount_type,
-            hud.equipment.get(0).and_then(|s| s.as_ref()).map(|i| i.shape).unwrap_or(-1),
-        ) {
+        if let Some(sound_id) =
+            crate::game::sound::attack_swing_sound(class, riding, mount_type, weapon_shape)
+        {
             crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
         }
     }
@@ -736,7 +767,9 @@ fn hold_move_system(
         ),
     >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
-    hud: Res<HudState>,
+    // #2633 批次4：in_trap_rock/sprint/sneaking 读 StatusFlags（步4）、背包负重读 Inventory（步5）、
+    // 装备负重读 Loadout（步6）、riding 读 MountState（步7，骑乘=组件存在，缺席 0.2s 窗口可接受）
+    flags: Query<(&StatusFlags, &Inventory, &Loadout, Option<&MountState>), With<LocalPlayer>>,
     dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
@@ -833,7 +866,23 @@ fn hold_move_system(
             }
 
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
-            let in_trap = hud.in_trap_rock;
+            // #2633 步4/步5/步6/步7：in_trap_rock/sprint/sneaking 读 StatusFlags、背包负重读 Inventory、
+            // 装备负重读 Loadout、riding 读 MountState；实体缺失视同无旗标/空负重/未骑乘
+            //（同原 hud 默认 false/0/false）
+            let (in_trap, sprint, sneaking, bag_weight, bag_max, wear_weight, riding) = flags
+                .single()
+                .map(|(f, inv, lo, m)| {
+                    (
+                        f.in_trap_rock,
+                        f.sprint,
+                        f.sneaking,
+                        inv.weight,
+                        inv.max_weight,
+                        lo.slots.iter().flatten().map(|i| i.weight as u32).sum::<u32>(),
+                        m.is_some(),
+                    )
+                })
+                .unwrap_or((false, false, false, 0, 0, 0, false));
 
             // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
             // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
@@ -880,16 +929,10 @@ fn hold_move_system(
                 // C# CanRun：负重不超限 && CanWalk(dir) && EmptyCell(2 格)；
                 // 骑乘或冲刺（且非潜行）→ 3 格（C# GameScene.cs:12143-12147）
                 // 潜行且非冲刺 → 不可跑（C# CheckInput 11528：!Sneaking || (Sneaking && Sprint)）
-                let bag_ok = hud.inventory.weight <= hud.inventory.max_weight;
-                let wear_ok = hud
-                    .equipment
-                    .iter()
-                    .flatten()
-                    .map(|i| i.weight as u32)
-                    .sum::<u32>()
-                    <= hud.inventory.max_weight;
-                let can_run_base = !in_trap && bag_ok && wear_ok && !(hud.sneaking && !hud.sprint);
-                let run_dist = if hud.riding || (hud.sprint && !hud.sneaking) { 3 } else { 2 };
+                let bag_ok = bag_weight <= bag_max;
+                let wear_ok = wear_weight <= bag_max;
+                let can_run_base = !in_trap && bag_ok && wear_ok && !(sneaking && !sprint);
+                let run_dist = if riding || (sprint && !sneaking) { 3 } else { 2 };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {
                     if !can_run_base {
                         break;
@@ -1170,14 +1213,15 @@ pub fn build_change_pmode(mode: mir2_shared::enums::PetMode) -> mir2_shared::pac
 /// 宠物模式切换（#1562，C# KeybindOptions.ChangePetmode → GameScene.ChangePetMode）：
 /// - 默认 Ctrl+T（C# 默认 Ctrl+A，但 Bevy 中 A 用于相机平移，避免冲突改 Ctrl+T）；
 /// - 500ms 冷却（C# ChangePModeTime = Time + 500）；
-/// - 发送后由服务端 S.ChangePMode 确认更新 HudState.pet_mode（不本地抢改）。
+/// - 发送后由服务端 S.ChangePMode 确认更新 `PetModeState` 组件（不本地抢改）。
+/// #2633 批次4 步9：pet_mode 直读 `PetModeState` 组件（HudState 已删）；实体缺失回退 Both。
 fn pet_mode_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
     gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
     time: Res<Time>,
-    hud: Res<crate::game::hud::HudState>,
+    pet_q: Query<&PetModeState, With<LocalPlayer>>,
     mut last_toggle: Local<f32>,
 ) {
     // #2595：文本输入聚焦让路（Ctrl+T 不在 C# ChatTextBox 转发表内；
@@ -1195,9 +1239,10 @@ fn pet_mode_system(
         return;
     }
     *last_toggle = time.elapsed_secs();
-    let next = next_pet_mode(hud.pet_mode);
+    let cur = pet_q.single().map(|p| p.0).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let next = next_pet_mode(cur);
     net.send_packet(&build_change_pmode(next));
-    tracing::info!("🐾 宠物模式切换 {:?} -> {:?}", hud.pet_mode, next);
+    tracing::info!("🐾 宠物模式切换 {:?} -> {:?}", cur, next);
 }
 
 /// C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC
@@ -1208,6 +1253,37 @@ fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2633 批次4 步4 R2：player_input_enabled 门控读 `StatusFlags`；实体未生成
+    /// （single() 失败）默认放行 true，等价原 HudState 默认 dead/fishing/paralysis=false。
+    #[test]
+    fn player_input_enabled_gates_on_status_flags() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn enabled(world: &mut World) -> bool {
+            world.run_system_once(player_input_enabled).expect("门控应成功运行")
+        }
+
+        // 实体未生成 → 默认放行（未死亡/可输入）
+        let mut world = World::new();
+        assert!(enabled(&mut world), "无 LocalPlayer 实体应默认放行");
+
+        // 实体存活（无任何旗标）→ 放行
+        let mut world = World::new();
+        world.spawn((LocalPlayer, StatusFlags::default()));
+        assert!(enabled(&mut world), "无 dead/fishing/paralysis 应放行");
+
+        // dead / fishing / paralysis 任一置位 → 锁定输入
+        for (name, flags) in [
+            ("dead", StatusFlags { dead: true, ..Default::default() }),
+            ("fishing", StatusFlags { fishing: true, ..Default::default() }),
+            ("paralysis", StatusFlags { paralysis: true, ..Default::default() }),
+        ] {
+            let mut world = World::new();
+            world.spawn((LocalPlayer, flags));
+            assert!(!enabled(&mut world), "{name} 置位应锁定输入");
+        }
+    }
 
     #[test]
     fn test_npc_call_cooldown() {
@@ -1246,19 +1322,29 @@ mod tests {
 
     #[test]
     fn test_can_run_weight_and_trap_conditions() {
-        // #1550：C# CanRun（GameScene.cs:12139）——负重/陷阱决定能否跑
-        let mut hud = HudState::default();
-        hud.inventory.weight = 10;
-        hud.inventory.max_weight = 100;
-        assert!(hud.inventory.weight <= hud.inventory.max_weight);
-        let wear: u32 = hud.equipment.iter().flatten().map(|i| i.weight as u32).sum();
-        assert!(wear <= hud.inventory.max_weight);
+        // #1550：C# CanRun（GameScene.cs:12139）——负重/陷阱决定能否跑（#2633 批次4 步9 改读组件）
+        let inv = Inventory {
+            weight: 10,
+            max_weight: 100,
+            ..Default::default()
+        };
+        assert!(inv.weight <= inv.max_weight);
+        let equip = Loadout::default();
+        let wear: u32 = equip.slots.iter().flatten().map(|i| i.weight as u32).sum();
+        assert!(wear <= inv.max_weight);
         // 背包超重 → 不可跑（C# CurrentBagWeight > BagWeight）
-        hud.inventory.weight = 200;
-        assert!(hud.inventory.weight > hud.inventory.max_weight);
-        // 陷阱 → 不可走/跑（C# InTrapRock）
-        hud.in_trap_rock = true;
-        assert!(hud.in_trap_rock);
+        let heavy = Inventory {
+            weight: 200,
+            max_weight: 100,
+            ..Default::default()
+        };
+        assert!(heavy.weight > heavy.max_weight);
+        // 陷阱 → 不可走/跑（C# InTrapRock；StatusFlags 组件）
+        let flags = StatusFlags {
+            in_trap_rock: true,
+            ..Default::default()
+        };
+        assert!(flags.in_trap_rock);
     }
 
     #[test]
@@ -1395,26 +1481,42 @@ mod tests {
 
     #[test]
     fn test_archer_detection() {
-        // #1554：弓手 = Class==Archer 且装备武器（C# HasClassWeapon 简化）
-        let mut hud = crate::game::hud::HudState::default();
-        hud.class = mir2_shared::enums::MirClass::Archer as u8;
+        // #1554：弓手 = Class==Archer 且装备武器（C# HasClassWeapon 简化；#2633 批次4 步9 改读组件）
+        let appearance = ActorAppearance {
+            class: mir2_shared::enums::MirClass::Archer,
+            gender: mir2_shared::enums::MirGender::Male,
+            armour: 0,
+            hair: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            wing_effect: 0,
+        };
         // 无武器 → 非弓手
-        let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
-            && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        let is_archer = appearance.class == mir2_shared::enums::MirClass::Archer
+            && Loadout::default().slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(!is_archer);
         // 装备武器 → 弓手（远程范围 9）
         let mut bow = crate::game::dialogs::inventory::InvItem::default();
         bow.item_type = mir2_shared::enums::ItemType::Weapon as u8;
-        hud.equipment[0] = Some(bow);
-        let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
-            && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        let mut loadout = Loadout::default();
+        loadout.slots[0] = Some(bow);
+        let is_archer = appearance.class == mir2_shared::enums::MirClass::Archer
+            && loadout.slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(is_archer);
         // 战士 → 近战
-        let mut warrior = crate::game::hud::HudState::default();
-        warrior.class = mir2_shared::enums::MirClass::Warrior as u8;
-        warrior.equipment[0] = Some(crate::game::dialogs::inventory::InvItem::default());
-        let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer as u8
-            && warrior.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        let warrior = ActorAppearance {
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+            armour: 0,
+            hair: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            wing_effect: 0,
+        };
+        let mut w_loadout = Loadout::default();
+        w_loadout.slots[0] = Some(crate::game::dialogs::inventory::InvItem::default());
+        let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer
+            && w_loadout.slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(!is_archer);
     }
 

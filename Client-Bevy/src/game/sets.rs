@@ -21,6 +21,10 @@ pub enum GameSet {
     /// 输入结算：`auto_attack` 读 `attack_target`/`last_attack`，`pickup_arrival`
     /// 读 `pickup_target`/`LocalMove`——须排在 `PlayerInput` 之后（同帧消费本帧输入）。
     Combat,
+    /// 玩家状态写（#2633 批次4）：消费 `ServerEvent` 写玩家实体组件（Vitals/Inventory/…）
+    /// 并过渡双写 `HudState`。须排在 `Hud` 之前——「先写状态、后 sync_hud_data 读」，
+    /// 维持原 hud.rs「写方须排在读方前，晚一帧读会引入一帧滞后」的约束（设计 §12 R5）。
+    PlayerState,
     /// HUD 显示刷新（hud.rs 内部另有按钮/数据两条有序链）。
     Hud,
     /// 技能快捷栏/施法（skills.rs，统一 in_state(Game) 门控）。

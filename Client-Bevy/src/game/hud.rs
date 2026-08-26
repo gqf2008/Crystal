@@ -10,13 +10,17 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::actor::LocalPlayer;
+use crate::actor::PlayerName;
 use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::dura_status::{dura_btn_y, MINIMAP_X};
-use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::option::OptionState;
 use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::game::player_state::{
+    AutoPotion, Gold, Inventory, PetModeState, Progression, StatusFlags, Vitals,
+};
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -26,94 +30,13 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiEntity, UiFont, UiImageCache,
 };
 
-/// HUD 状态（网络 handler 写入，HUD 系统读取）
-#[derive(Resource)]
-pub struct HudState {
-    pub hp: i32,
-    pub max_hp: i32,
-    pub mp: i32,
-    pub max_mp: i32,
-    pub exp: i64,
-    pub max_exp: i64,
-    pub level: u16,
-    pub gold: u32,
-    /// #248 声望/功勋
-    pub credit: u32,
-    /// #268 基础属性（S.BaseStatsInfo）
-    pub base_stats: Vec<i32>,
-    pub name: String,
-    /// 本地玩家 object_id（UserInformation 提供）
-    pub player_object_id: Option<u32>,
-    /// 角色职业（显示用）
-    pub class: u8,
-    /// 角色性别（UserInformation 提供；C# MirGender，CanUseItem 用，#1544）
-    pub gender: u8,
-    /// 是否骑乘中（MountUpdated 本地玩家，#1544：骑乘时仅 Scroll/Potion/Torch 可用）
-    pub riding: bool,
-    /// 坐骑类型（MountUpdated 本地玩家，#1564：骑乘音效区分 Tiger/Wolf）
-    pub mount_type: i16,
-    /// 是否钓鱼中（FishingUpdate 本地玩家，#1544：钓鱼时不可使用物品）
-    pub fishing: bool,
-    /// #1616：本地玩家麻痹/冰冻毒（C# CheckInput：Paralysis/LRParalysis/Frozen 锁定输入）
-    pub paralysis: bool,
-    /// #1550：陷阱岩石（C# User.InTrapRock：陷阱中不可走/跑）
-    pub in_trap_rock: bool,
-    /// #1552：冲刺（C# User.Sprint，SwiftFeet Buff）——CanRun 3 格
-    pub sprint: bool,
-    /// #1552：潜行（C# User.Sneaking，MoonLight/DarkBody Buff）——不可跑 + 半透明
-    pub sneaking: bool,
-    /// 自动喝药开关（HP < 35% 自动使用背包药品）
-    pub auto_pot_hp: bool,
-    /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
-    pub dead: bool,
-    /// 收到轮回术复活请求（#222）
-    pub reincarnation_offered: bool,
-    /// 死亡弹窗已点击“否”关闭（C# ShowReviveMessage 只弹一次；死亡后重置）
-    pub death_popup_dismissed: bool,
-    /// 自动喝药冷却（避免连发）
-    pub pot_cooldown: f32,
-    /// 背包（网络 UserInformation 写入）
-    pub inventory: crate::game::dialogs::inventory::InventoryState,
-    /// 装备（12 槽）
-    pub equipment: Vec<Option<InvItem>>,
-    /// #1388：宠物模式（C# PModeLabel；S.ChangePMode 更新）
-    pub pet_mode: mir2_shared::enums::PetMode,
-}
-
-impl Default for HudState {
-    fn default() -> Self {
-        Self {
-            hp: 1,
-            max_hp: 1000,
-            mp: 1,
-            max_mp: 600,
-            exp: 0,
-            max_exp: 100,
-            level: 1,
-            gold: 0,
-            credit: 0,
-            base_stats: Vec::new(),
-            name: String::new(),
-            player_object_id: None,
-            class: 0,
-            gender: 0,
-            riding: false,
-            mount_type: 0,
-            fishing: false,
-            paralysis: false,
-            in_trap_rock: false,
-            sprint: false,
-            sneaking: false,
-            auto_pot_hp: true,
-            dead: false,
-            reincarnation_offered: false,
-            death_popup_dismissed: false,
-            pot_cooldown: 0.0,
-            inventory: Default::default(),
-            equipment: vec![None; 14], // #1136：服务端补 Torch/Belt/Stone 共 14 槽
-            pet_mode: mir2_shared::enums::PetMode::Both,
-        }
-    }
+/// #2633 批次4 步9：死亡弹窗 UI 态（原 `HudState.death_popup_dismissed`，设计 §1/§8 纯 UI 残余）。
+/// 语义不变：死亡/复活时重置 false、死亡弹窗点"否"置 true（C# ShowReviveMessage 只弹一次）。
+/// 由 player_status_events（PlayerDied/PlayerRevived 重置）与 death_overlay_system（点否置位）读写，
+/// 与玩家状态无关，故保留为 UI 资源而非玩家组件。
+#[derive(Resource, Default)]
+pub struct DeathDialogState {
+    pub dismissed: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -158,11 +81,22 @@ pub struct HudData {
 
 /// #1392：HUD 负重/空格标签（C# WeightLabel=剩余负重，SpaceLabel=背包空格数）
 fn hud_space_weight_system(
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut wt: Query<&mut Text2d, (With<HudWeightText>, Without<HudSpaceText>)>,
     mut sp: Query<&mut Text2d, (With<HudSpaceText>, Without<HudWeightText>)>,
 ) {
-    let rem = hud.inventory.max_weight.saturating_sub(hud.inventory.weight);
+    // #2633 批次4 步5：负重/空格读 Inventory 组件；实体缺失视同空背包（同原 hud 默认 0）
+    let (max_weight, weight, space) = inv_q
+        .single()
+        .map(|inv| {
+            (
+                inv.max_weight,
+                inv.weight,
+                inv.items.iter().filter(|s| s.is_none()).count(),
+            )
+        })
+        .unwrap_or((0, 0, 0));
+    let rem = max_weight.saturating_sub(weight);
     // C# WeightLabel = (BagWeight - CurrentBagWeight).ToString()：仅剩余负重（不带 /max）
     let w = format!("{}", rem);
     for mut t in &mut wt {
@@ -170,7 +104,7 @@ fn hud_space_weight_system(
             t.0 = w.clone();
         }
     }
-    let space = hud.inventory.items.iter().filter(|s| s.is_none()).count().to_string();
+    let space = space.to_string();
     for mut t in &mut sp {
         if t.0 != space {
             t.0 = space.clone();
@@ -444,18 +378,20 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            hud_server_events.run_if(in_state(crate::scenes::AppState::Game)),
-        );
+        // #2633 批次4：原 hud_server_events（518 行上帝系统）已按域拆为 4 个写系统——
+        // player_vitals_events / player_status_events（game/player_state.rs）、
+        // inventory_events（dialogs/inventory.rs）、belt_restock_events（dialogs/potion_belt.rs），
+        // 均入 GameSet::PlayerState（.before(Hud)，维持「写方在读方前」）；步9 双写删除。
+        app.init_resource::<DeathDialogState>();
         app.add_systems(OnEnter(AppState::Game), spawn_hud);
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         // #2632：放宽 11 系统 .chain() 全串行——只保留确有数据依赖的排序，其余解链并行。
         // 保留的依赖（写方须排在读方前，晚一帧读会引入一帧滞后）：
         //   · ui_button_system 每帧写 UiButton.clicked → hud_button / death_overlay 读；
         //   · sync_hud_data 写 HudData → hud_update_system 以 Changed<HudData> 门控消费；
-        //   · auto_potion_system 读 hud.dead 与 death_overlay_system 写 hud.dead 共享
-        //     ResMut<HudState>，保持原「先读 dead、后写 dead」的相对先后。
+        //   · auto_potion_system 读 StatusFlags.dead 与 death_overlay_system 写 StatusFlags.dead
+        //     共享玩家实体组件（#2633 步3 由 ResMut<HudState> 迁来），保持原「先读 dead、
+        //     后写 dead」的相对先后。
         // 其余（attack_mode/hero_btn/hero_panel/space_weight/tooltip）读写的组件互不相交，
         // 顺序不影响输出，解链允许并行。
         app.add_systems(
@@ -898,20 +834,27 @@ fn spawn_centered_text(
 }
 
 /// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
+///
+/// #2633 批次4 步3/9：hp/max_hp→`Vitals`、dead→`StatusFlags`、inventory→`Inventory`、
+/// auto_pot_hp/pot_cooldown→`AutoPotion`（enabled/cooldown，本系统是其唯一读者/写者，
+/// 设计 §4.5，整体迁离 HudState）。实体缺失跳过——喝药本就需实体在场，缺席不动作。
 fn auto_potion_system(
-    mut hud: ResMut<HudState>,
     net: Res<crate::network::NetConnection>,
     time: Res<Time>,
+    mut player: Query<(&Vitals, &StatusFlags, &Inventory, &mut AutoPotion), With<LocalPlayer>>,
 ) {
-    hud.pot_cooldown -= time.delta_secs();
-    if hud.dead || !hud.auto_pot_hp || hud.pot_cooldown > 0.0 {
+    let Ok((vitals, flags, inventory, mut auto_pot)) = player.single_mut() else {
+        return;
+    };
+    auto_pot.cooldown -= time.delta_secs();
+    if flags.dead || !auto_pot.enabled || auto_pot.cooldown > 0.0 {
         return;
     }
-    let pct = hud.hp as f32 / hud.max_hp.max(1) as f32;
+    let pct = vitals.hp as f32 / vitals.max_hp.max(1) as f32;
     if pct < 0.35 {
         // #1592：优先 HP 药（shape==0），无则退化为任意药水（避免喝蓝药不回复 HP）
         let potion = crate::game::dialogs::inventory::pick_auto_hp_potion(
-            hud.inventory.items.iter().flatten(),
+            inventory.items.iter().flatten(),
         );
         if let Some(potion) = potion {
             net.send_packet(&mir2_shared::packets::client::item::UseItem {
@@ -921,10 +864,10 @@ fn auto_potion_system(
                 "💊 自动喝药 {} (uid={})（HP {}/{}）",
                 potion.name,
                 potion.unique_id,
-                hud.hp,
-                hud.max_hp
+                vitals.hp,
+                vitals.max_hp
             );
-            hud.pot_cooldown = 3.0;
+            auto_pot.cooldown = 3.0;
         }
     }
 }
@@ -966,7 +909,8 @@ fn update_mode_label(
 /// 模式指示更新（#156 攻击 / #1388 宠物+技能）：值变化即写，无变化跳过
 fn attack_mode_text_system(
     mode: Res<crate::game::combat::AttackModeState>,
-    hud: Res<HudState>,
+    // #2633 批次4 步3：pet_mode→`PetModeState`；实体缺失回退 Both（同原 HudState 默认）。
+    pet: Query<&PetModeState, With<LocalPlayer>>,
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
     mut am: Query<
@@ -997,7 +941,8 @@ fn attack_mode_text_system(
     for (mut t, mut tf, children) in &mut am {
         update_mode_label(&mut t, &mut tf, children, &mut shadows, &a, ay);
     }
-    let p = match hud.pet_mode {
+    let pet_mode = pet.single().map(|p| p.0).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let p = match pet_mode {
         mir2_shared::enums::PetMode::Both => "宠物:攻击和跟随".to_string(),
         mir2_shared::enums::PetMode::MoveOnly => "宠物:仅跟随".to_string(),
         mir2_shared::enums::PetMode::AttackOnly => "宠物:仅攻击".to_string(),
@@ -1016,28 +961,40 @@ fn attack_mode_text_system(
     }
 }
 
-fn sync_hud_data(mut roots: Query<&mut HudData>, hud: Res<HudState>) {
+/// #2633 批次4 步3/步7：hp/max_hp/mp/max_mp→`Vitals`、exp/max_exp/level→`Progression`、
+/// gold→`Gold`、name→复用 `PlayerName`（步7 迁；HudState 已于步9 删除）。
+/// R3：保留 `Changed<HudData>` 跳帧门控——仍「值变才写 HudData」（`if *data != new`），
+/// 不改成每帧无条件写；R4：一律读组件当前值，不加 `Changed<组件>` 过滤。
+/// 实体缺失跳过（登录前无 LocalPlayer，HudData 保持默认，与组件默认值一致）。
+fn sync_hud_data(
+    mut roots: Query<&mut HudData>,
+    player: Query<(&Vitals, &Progression, &Gold, &PlayerName), With<LocalPlayer>>,
+) {
     let Ok(mut data) = roots.single_mut() else { return };
+    let Ok((vitals, progression, gold, player_name)) = player.single() else { return };
     let new = HudData {
-        hp: hud.hp,
-        max_hp: hud.max_hp,
-        mp: hud.mp,
-        max_mp: hud.max_mp,
-        exp: hud.exp,
-        max_exp: hud.max_exp,
-        level: hud.level,
-        gold: hud.gold,
-        name: hud.name.clone(),
+        hp: vitals.hp,
+        max_hp: vitals.max_hp,
+        mp: vitals.mp,
+        max_mp: vitals.max_mp,
+        exp: progression.exp,
+        max_exp: progression.max_exp,
+        level: progression.level,
+        gold: gold.0,
+        name: player_name.0.clone(),
     };
     if *data != new {
         *data = new;
     }
 }
 
+/// #2633 批次4 步3/步7：血/蓝/经验/等级/金币/名字改读 `Vitals`/`Progression`/`Gold`/
+/// `PlayerName` 组件（步7 迁 name；HudState 已于步9 删除）。门控不变：仍靠 `Changed<HudData>`
+/// 跳帧（#70），R4 读当前值不加组件 Changed 过滤。实体缺失跳过（HudData 默认帧不更新）。
 fn hud_update_system(
-    hud: Res<HudState>,
     opt: Res<crate::game::dialogs::option::OptionState>,
     hud_datas: Query<&HudData, Changed<HudData>>,
+    player: Query<(&Vitals, &Progression, &Gold, &PlayerName), With<LocalPlayer>>,
     mut fills: Query<(
         &mut Sprite,
         &mut Transform,
@@ -1062,9 +1019,10 @@ fn hud_update_system(
     if hud_datas.single().is_err() {
         return;
     }
-    let hp_pct = (hud.hp as f32 / hud.max_hp.max(1) as f32).clamp(0.0, 1.0);
-    let mp_pct = (hud.mp as f32 / hud.max_mp.max(1) as f32).clamp(0.0, 1.0);
-    let exp_pct = (hud.exp as f32 / hud.max_exp.max(1) as f32).clamp(0.0, 1.0);
+    let Ok((vitals, progression, player_gold, player_name)) = player.single() else { return };
+    let hp_pct = (vitals.hp as f32 / vitals.max_hp.max(1) as f32).clamp(0.0, 1.0);
+    let mp_pct = (vitals.mp as f32 / vitals.max_mp.max(1) as f32).clamp(0.0, 1.0);
+    let exp_pct = (progression.exp as f32 / progression.max_exp.max(1) as f32).clamp(0.0, 1.0);
 
     for (mut sprite, mut tf, orb_base, hp, mp, exp) in &mut fills {
         if hp.is_some() {
@@ -1098,14 +1056,14 @@ fn hud_update_system(
             // C# :436-457：HPView=true → HealthLabel="HP cur/max"；
             // false → HealthLabel/ManaLabel 清空，两行 Top/Bottom 标签接管
             if opt.hp_view {
-                format!("HP {}/{}", hud.hp, hud.max_hp)
+                format!("HP {}/{}", vitals.hp, vitals.max_hp)
             } else {
                 String::new()
             }
         } else if mp.is_some() {
             if opt.hp_view {
                 // C# "MP {0}/{1} " 带尾随空格（影响居中测量，与 C# 一致）
-                format!("MP {}/{} ", hud.mp, hud.max_mp)
+                format!("MP {}/{} ", vitals.mp, vitals.max_mp)
             } else {
                 String::new()
             }
@@ -1114,26 +1072,26 @@ fn hud_update_system(
             if opt.hp_view {
                 String::new()
             } else {
-                hud_orb_top_text(hud.hp, hud.mp)
+                hud_orb_top_text(vitals.hp, vitals.mp)
             }
         } else if bottom.is_some() {
             // C# :453 BottomLabel（仅 HPView=false）：" {maxHP}    {maxMP} "
             if opt.hp_view {
                 String::new()
             } else {
-                hud_orb_bottom_text(hud.max_hp, hud.max_mp)
+                hud_orb_bottom_text(vitals.max_hp, vitals.max_mp)
             }
         } else if exp.is_some() {
             // C# ExperienceLabel = "{0:#0.##%}"（最多两位小数、去尾零）
             format_exp_percent(exp_pct)
         } else if lv.is_some() {
             // C# LevelLabel = User.Level.ToString()（纯数字，"Lv" 由底栏美术自带）
-            format!("{}", hud.level)
+            format!("{}", progression.level)
         } else if gold.is_some() {
             // C# GoldLabel = Gold.ToString("###,###,##0")（千分位）
-            format_gold(hud.gold)
+            format_gold(player_gold.0)
         } else if name.is_some() {
-            hud.name.clone()
+            player_name.0.clone()
         } else {
             continue;
         };
@@ -1174,9 +1132,14 @@ fn format_gold(n: u32) -> String {
 }
 
 /// 死亡遮罩显隐 + 复活按钮（#46）
+///
+/// #2633 批次4 步3/9：dead/reincarnation_offered 读改 `StatusFlags`；`death_popup_dismissed`
+/// 迁入 `DeathDialogState.dismissed`（纯 UI 态，设计 §1/§8）。实体缺失视同未死亡/无轮回请求
+/// （同原 HudState 默认 false），遮罩不显示。
 fn death_overlay_system(
-    mut hud: ResMut<HudState>,
+    mut death_ui: ResMut<DeathDialogState>,
     net: Res<crate::network::NetConnection>,
+    mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
     // 背景/遮罩/文字/是/否按钮全部带 DeathOverlay，统一随死亡显隐
     mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
     mut death_texts: Query<&mut Text2d, (With<DeathText>, Without<DeathReviveBtn>, Without<DeathReincDeclineBtn>)>,
@@ -1184,7 +1147,11 @@ fn death_overlay_system(
     no_btns: Query<&UiButton, (With<DeathReincDeclineBtn>, Without<DeathReviveBtn>)>,
 ) {
     // C# ShowReviveMessage：死亡后弹一次；点“否”关闭后不再弹（除非再次死亡）
-    let show = hud.dead && !hud.death_popup_dismissed;
+    let (dead, reinc_offered) = flags_q
+        .single()
+        .map(|f| (f.dead, f.reincarnation_offered))
+        .unwrap_or((false, false));
+    let show = dead && !death_ui.dismissed;
     for mut vis in overlay.iter_mut() {
         *vis = if show {
             Visibility::Visible
@@ -1193,7 +1160,7 @@ fn death_overlay_system(
         };
     }
     for mut t in &mut death_texts {
-        let new = if hud.reincarnation_offered {
+        let new = if reinc_offered {
             "你想要复活吗？"
         } else {
             "你已经死亡，是否要在城镇复活？"
@@ -1208,547 +1175,31 @@ fn death_overlay_system(
     // 是：轮回术请求 → AcceptReincarnation；否则 TownRevive（C# YesButton 语义）
     for btn in &yes_btns {
         if btn.clicked {
-            if hud.reincarnation_offered {
+            if reinc_offered {
                 net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
                 tracing::info!("🌀 接受轮回术复活");
             } else {
                 net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
                 tracing::info!("⛪ 点击复活（TownRevive）");
             }
-            hud.dead = false;
-            hud.reincarnation_offered = false;
-            hud.death_popup_dismissed = false;
+            if let Ok(mut f) = flags_q.single_mut() {
+                f.dead = false;
+                f.reincarnation_offered = false;
+            }
+            death_ui.dismissed = false;
         }
     }
     // 否：轮回术请求 → CancelReincarnation；关闭弹窗（玩家保持死亡，C# Dispose 语义）
     for btn in &no_btns {
         if btn.clicked {
-            if hud.reincarnation_offered {
+            if reinc_offered {
                 net.send_packet(&mir2_shared::packets::client::misc::CancelReincarnation);
                 tracing::info!("🌀 拒绝轮回术复活");
             }
-            hud.reincarnation_offered = false;
-            hud.death_popup_dismissed = true;
-        }
-    }
-}
-
-/// 消费服务端事件更新 HUD 状态（网络层只发 ServerEvent，不再直接改 HudState）
-fn hud_server_events(
-    mut events: MessageReader<crate::network::server_event::ServerEvent>,
-    mut hud: ResMut<HudState>,
-    mut belt: ResMut<crate::game::dialogs::potion_belt::PotionBeltState>,
-    mut char_state: ResMut<crate::game::dialogs::character::CharacterState>,
-) {
-    use crate::network::server_event::ServerEvent;
-    for ev in events.read() {
-        match ev {
-            // #1342：任务物品格增量更新由 inventory.rs quest_inventory_events 处理
-            ServerEvent::QuestItemGained { .. } | ServerEvent::QuestItemDeleted { .. } | ServerEvent::NpcAwakePanel { .. } | ServerEvent::MagicCooldown { .. } | ServerEvent::PearlShop { .. } => {}
-            ServerEvent::PetModeChanged { mode } => {
-                // #1388：HUD 宠物模式标签
-                hud.pet_mode = *mode;
+            if let Ok(mut f) = flags_q.single_mut() {
+                f.reincarnation_offered = false;
             }
-            ServerEvent::HealthChanged { hp, mp } => {
-                hud.hp = *hp;
-                hud.mp = *mp;
-            }
-            ServerEvent::GoldGained { gold } => {
-                hud.gold = hud.gold.saturating_add(*gold);
-            }
-            ServerEvent::BaseStats { stats } => {
-                // #268：基础属性（角色面板数据）
-                hud.base_stats = stats.clone();
-                tracing::info!("📊 基础属性: {:?}", stats);
-            }
-            ServerEvent::PlayerNameUpdated { name } => {
-                // #264：本地玩家改名
-                hud.name = name.clone();
-                tracing::info!("🏷️ 玩家改名 -> {}", name);
-            }
-            ServerEvent::CreditGained { credit } => {
-                // #248：声望增加
-                hud.credit = hud.credit.saturating_add(*credit);
-                tracing::info!("🏅 获得声望 +{}（当前 {}）", credit, hud.credit);
-            }
-            ServerEvent::CreditLost { amount } => {
-                // #248：声望减少
-                hud.credit = hud.credit.saturating_sub(*amount);
-                tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, hud.credit);
-            }
-            ServerEvent::GoldLost { amount } => {
-                hud.gold = hud.gold.saturating_sub(*amount);
-                tracing::info!("💸 失去金币 -{}（当前 {}）", amount, hud.gold);
-            }
-            ServerEvent::ExperienceGained { amount } => {
-                hud.exp += *amount;
-                tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, hud.exp, hud.max_exp);
-            }
-            ServerEvent::LevelChanged { level, exp, max_exp } => {
-                hud.level = *level;
-                hud.exp = *exp;
-                hud.max_exp = (*max_exp).max(1);
-                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
-            }
-            ServerEvent::FishingUpdate { progress, .. } => {
-                // #1544：钓鱼中不可使用物品（C# MirItemCell.UseItem 非英雄格 User.Fishing 检查）
-                hud.fishing = *progress != 0;
-            }
-            ServerEvent::TrapRockChanged { in_trap } => {
-                // #1550：C# User.InTrapRock——陷阱中不可走/跑
-                hud.in_trap_rock = *in_trap;
-            }
-            ServerEvent::LocalPoisonChanged { paralysis } => {
-                // #1616：C# CheckInput——麻痹/冰冻毒锁定输入
-                hud.paralysis = *paralysis;
-            }
-            ServerEvent::MountUpdated {
-                object_id,
-                mount_type,
-                is_mounted,
-            } => {
-                // #1544：本地玩家骑乘状态（C# User.RidingMount；骑乘时仅 Scroll/Potion/Torch 可用）
-                if Some(*object_id) == hud.player_object_id {
-                    hud.riding = *is_mounted;
-                    // #1564：记录坐骑类型（骑乘音效 Tiger/Wolf 区分）
-                    hud.mount_type = *mount_type;
-                }
-            }
-            ServerEvent::Chat { .. }
-            | ServerEvent::NpcDialog { .. }
-            | ServerEvent::Roll { .. }
-            | ServerEvent::AwakeningMaterials { .. }
-            | ServerEvent::AwakeningResult { .. }
-            | ServerEvent::StorageOpened { .. }
-            | ServerEvent::GuildInGuild { .. }
-            | ServerEvent::GuildData { .. }
-            | ServerEvent::GuildStorage { .. }
-            | ServerEvent::GroupMembers { .. }
-            | ServerEvent::GroupInvite { .. }
-            | ServerEvent::GroupDeleted
-            | ServerEvent::GroupMemberLeft { .. }
-            | ServerEvent::GroupAllowChanged { .. }
-            | ServerEvent::MentorInvite { .. }
-            | ServerEvent::MentorUpdate { .. }
-            | ServerEvent::FriendUpdated { .. }
-            | ServerEvent::Rankings { .. }
-            | ServerEvent::GuildNotice { .. }
-            | ServerEvent::QuestChanged { .. }
-            | ServerEvent::QuestCompleted { .. }
-            | ServerEvent::BuffAdded { .. }
-            | ServerEvent::BuffRemoved { .. }
-            | ServerEvent::InspectPlayer { .. }
-            | ServerEvent::CreatureList { .. }
-            | ServerEvent::HeroChanged { .. }
-            | ServerEvent::MarriageInvite { .. }
-            | ServerEvent::LoverUpdate { .. }
-            | ServerEvent::DivorceRequest
-            | ServerEvent::RentalRequestReceived
-            | ServerEvent::RentalItemUpdate { .. }
-            | ServerEvent::RentalFee { .. }
-            | ServerEvent::RentalPeriod { .. }
-            | ServerEvent::RentalDeposit { .. }
-            | ServerEvent::RentalRetrieve { .. }
-            | ServerEvent::RentalLocked
-            | ServerEvent::RentalPartnerLocked
-            | ServerEvent::RentalCanConfirm { .. }
-            | ServerEvent::RentalConfirmed { .. }
-            | ServerEvent::RentalCancelled
-            | ServerEvent::MarketPages { .. }
-            | ServerEvent::MarketListings { .. }
-            | ServerEvent::MarketConsign { .. }
-            | ServerEvent::MarketSuccess { .. }
-            | ServerEvent::MarketFail { .. }
-            | ServerEvent::ShopCatalog { .. }
-            | ServerEvent::ShopStock { .. }
-            | ServerEvent::TerritoryList { .. }
-            | ServerEvent::TerritoryWar { .. }
-            | ServerEvent::TradeGold { .. }
-            | ServerEvent::TradeCancelled
-            | ServerEvent::MailReceived { .. }
-            | ServerEvent::MailCost { .. }
-            | ServerEvent::ParcelCollected { .. }
-            | ServerEvent::TradeRequested { .. }
-            | ServerEvent::TradeConfirm { .. }
-            | ServerEvent::TradeItemUpdate { .. }
-            | ServerEvent::TradeDeposit { .. }
-            | ServerEvent::GuildMemberChanged { .. }
-            | ServerEvent::GuildInvited { .. }
-            | ServerEvent::RankingsCleared
-            | ServerEvent::WeatherChanged { .. }
-            | ServerEvent::MapInfo { .. }
-            | ServerEvent::WorldMapSetup { .. }
-            | ServerEvent::MagicLearned { .. }
-            | ServerEvent::MagicLeveled { .. }
-            | ServerEvent::HeroMagicLearned { .. }
-            | ServerEvent::HeroHealthChanged { .. }
-            | ServerEvent::GainHeroExperience { .. }
-            | ServerEvent::HeroLevelChanged { .. }
-            | ServerEvent::TimeOfDay { .. }
-            | ServerEvent::ObjectColourChanged { .. }
-            | ServerEvent::StoragePasswordResult { .. }
-            | ServerEvent::LogOutSuccess
-            | ServerEvent::AttackModeChanged { .. }
-            | ServerEvent::HeroManageReceived { .. }
-            | ServerEvent::NewHeroResult { .. }
-            | ServerEvent::HeroBehaviourSet { .. }
-            | ServerEvent::HeroAutoPotSet { .. }
-            | ServerEvent::HeroAutoPotItemSet { .. }
-            | ServerEvent::HeroInformation { .. }
-            | ServerEvent::CraftResult { .. }
-            | ServerEvent::NpcGoods { .. }
-            | ServerEvent::NpcSellPanel { .. }
-            | ServerEvent::ObjectHidden { .. }
-            | ServerEvent::ObjectShown { .. }
-            | ServerEvent::ObjectSitDown { .. }
-            | ServerEvent::ObjectPushed { .. }
-            | ServerEvent::ObjectTeleportOut { .. }
-            | ServerEvent::ObjectTeleportIn { .. }
-            | ServerEvent::MapEffect { .. }
-            | ServerEvent::PlaySound { .. }
-            | ServerEvent::TimerSet { .. }
-            | ServerEvent::TimerExpired { .. }
-            | ServerEvent::ObjectPoisoned { .. }
-            | ServerEvent::SpellToggled { .. }
-            | ServerEvent::NpcImageUpdated { .. }
-            | ServerEvent::CompassTarget { .. }
-            | ServerEvent::MemberLocation { .. }
-            | ServerEvent::NoticeUpdated { .. }
-            | ServerEvent::MagicRemoved { .. }
-            | ServerEvent::OutputMessage { .. }
-            | ServerEvent::QuestInfo { .. }
-            | ServerEvent::QuestShared { .. }
-            | ServerEvent::RecipeLearned { .. }
-            | ServerEvent::BuffPaused { .. }
-            | ServerEvent::ObjectName { .. }
-            | ServerEvent::NpcInputRequest { .. }
-            | ServerEvent::GuildBuffList { .. }
-            | ServerEvent::CreatureAcquired { .. }
-            | ServerEvent::CreatureRenameEnabled { .. }
-            | ServerEvent::CreaturePickupToggled { .. }
-            | ServerEvent::StorageUnlockResult { .. }
-            | ServerEvent::StoragePrompt
-            | ServerEvent::StorageResized { .. }
-            | ServerEvent::ObjectLeveled { .. }
-            | ServerEvent::ChatItemReceived { .. }
-            | ServerEvent::GuildStorageGoldChanged { .. }
-            | ServerEvent::GuildStorageItemChanged { .. }
-            | ServerEvent::LoginBanned { .. }
-            | ServerEvent::StartGameBanned { .. }
-            | ServerEvent::StartGameDelay { .. }
-            | ServerEvent::LogOutFailed
-            | ServerEvent::ReturnToLogin
-            | ServerEvent::PlayerUpdate { .. }
-            | ServerEvent::MonsterInfo { .. }
-            | ServerEvent::NpcInfo { .. }
-            | ServerEvent::ItemStored { .. }
-            | ServerEvent::ItemTakenBack { .. }
-            | ServerEvent::SlotItemRemoved { .. }
-            | ServerEvent::TradeItemRetrieved { .. }
-            | ServerEvent::ObserveAllowed { .. } => {}
-            ServerEvent::InventoryMoved { from, to } => {
-                if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
-                    hud.inventory.items.swap(*from, *to);
-                }
-            }
-            ServerEvent::ItemEquipped { unique_id, to } => {
-                // 从背包移除并放入装备槽；旧装备放回背包空格
-                let from_idx = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
-                if let Some(from_idx) = from_idx {
-                    let item = hud.inventory.items[from_idx].take();
-                    if let Some(item) = item {
-                        if *to < hud.equipment.len() {
-                            let old = hud.equipment[*to].take();
-                            hud.equipment[*to] = Some(item);
-                            if let Some(old) = old {
-                                if let Some(empty) =
-                                    hud.inventory.items.iter_mut().find(|s| s.is_none())
-                                {
-                                    *empty = Some(old);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ServerEvent::ItemRemoved { unique_id } => {
-                // 卸下装备：清空装备槽并放回背包空格
-                let mut item = None;
-                for slot in hud.equipment.iter_mut() {
-                    if slot.as_ref().map(|it| it.unique_id) == Some(*unique_id) {
-                        item = slot.take();
-                        break;
-                    }
-                }
-                if let Some(item) = item {
-                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
-                        *empty = Some(item);
-                    }
-                }
-            }
-            ServerEvent::UserInformation {
-                name,
-                level,
-                hp,
-                mp,
-                exp,
-                max_exp,
-                gold,
-                gender,
-                class,
-                object_id,
-                inventory,
-                equipment,
-                quest_inventory,
-                max_hp,
-                max_mp,
-                ac,
-                mac,
-                dc,
-                mc,
-                sc,
-                critical_rate,
-                critical_damage,
-                attack_speed,
-                accuracy,
-                agility,
-                luck,
-                bag_weight,
-                wear_weight,
-                hand_weight,
-                magic_resist,
-                poison_resist,
-                health_recovery,
-                spell_recovery,
-                poison_recovery,
-                holy,
-                freezing,
-                poison_atk,
-                ..
-            } => {
-                hud.name = name.clone();
-                hud.level = *level;
-                hud.hp = *hp;
-                hud.mp = *mp;
-                hud.max_hp = *max_hp;
-                hud.max_mp = *max_mp;
-                hud.exp = *exp;
-                hud.max_exp = (*max_exp).max(1);
-                hud.gold = *gold;
-                hud.class = *class;
-                hud.gender = *gender;
-                hud.player_object_id = Some(*object_id);
-                hud.inventory.items = inventory.clone();
-                hud.inventory.quest_inventory = quest_inventory.clone();
-                hud.inventory.gold = *gold;
-                hud.equipment = equipment.clone();
-                // #1544：RefreshStats 重量（C# User.RefreshStats；max_weight=服务端 bag_weight）
-                hud.inventory.max_weight = (*bag_weight).max(0) as u32;
-                hud.inventory.refresh_weight();
-                // #208：角色面板属性
-                char_state.name = name.clone();
-                char_state.level = *level;
-                char_state.hp = *hp;
-                char_state.max_hp = *max_hp;
-                char_state.mp = *mp;
-                char_state.max_mp = *max_mp;
-                char_state.stats = [*ac, *mac, *dc, *mc, *sc];
-                char_state.critical_rate = *critical_rate;
-                char_state.critical_damage = *critical_damage;
-                char_state.attack_speed = *attack_speed;
-                char_state.accuracy = *accuracy;
-                char_state.agility = *agility;
-                char_state.luck = *luck;
-                // #210：State 页
-                char_state.exp = *exp;
-                char_state.max_exp = (*max_exp).max(1);
-                char_state.bag_weight = *bag_weight;
-                char_state.wear_weight = *wear_weight;
-                char_state.hand_weight = *hand_weight;
-                char_state.magic_resist = *magic_resist;
-                char_state.poison_resist = *poison_resist;
-                char_state.health_recovery = *health_recovery;
-                char_state.spell_recovery = *spell_recovery;
-                char_state.poison_recovery = *poison_recovery;
-                char_state.holy = *holy;
-                char_state.freezing = *freezing;
-                char_state.poison_atk = *poison_atk;
-            }
-            ServerEvent::PlayerDied => {
-                hud.dead = true;
-                hud.death_popup_dismissed = false;
-            }
-            ServerEvent::ReincarnationRequested => {
-                if hud.dead {
-                    hud.reincarnation_offered = true;
-                }
-            }
-            ServerEvent::PlayerRevived => {
-                hud.dead = false;
-                hud.reincarnation_offered = false;
-                hud.death_popup_dismissed = false;
-            }
-            ServerEvent::ItemUsed { unique_id } => {
-                let idx = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
-                // #1544：记录被消耗物品的 item_index（腰带补货用）
-                let used_item_index = idx
-                    .and_then(|i| hud.inventory.items.get(i).and_then(|s| s.as_ref()))
-                    .map(|it| it.item_index);
-                if let Some(idx) = idx {
-                    let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
-                    if count > 1 {
-                        if let Some(it) = hud.inventory.items[idx].as_mut() {
-                            it.count -= 1;
-                        }
-                    } else {
-                        hud.inventory.items[idx] = None;
-                    }
-                    tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
-                    hud.inventory.refresh_weight();
-                }
-                // #1544：腰带自动补货（C# MirItemCell.UseItem count==1 && ItemSlot < BeltIdx → 背包找同物品 MoveItem 到腰带）
-                // Bevy 腰带为 unique_id 虚拟槽：消耗后找同 item_index 补上
-                if let Some(used_index) = used_item_index {
-                    for slot in belt.slots.iter_mut() {
-                        if *slot == Some(*unique_id) {
-                            let next = hud.inventory.items.iter().flatten()
-                                .find(|it| it.unique_id != *unique_id && it.item_index == used_index)
-                                .map(|it| it.unique_id);
-                            if let Some(uid) = next {
-                                *slot = Some(uid);
-                                tracing::info!("🧪 腰带补货 uid={} -> {}", unique_id, uid);
-                            } else {
-                                *slot = None;
-                            }
-                        }
-                    }
-                }
-            }
-            ServerEvent::ItemDuraChanged {
-                unique_id,
-                current_dura,
-            } => {
-                // #228：背包/装备栏按 unique_id 更新当前耐久
-                let mut updated = false;
-                for slot in hud.inventory.items.iter_mut().flatten() {
-                    if slot.unique_id == *unique_id {
-                        slot.current_dura = *current_dura;
-                        updated = true;
-                        break;
-                    }
-                }
-                if !updated {
-                    for slot in hud.equipment.iter_mut().flatten() {
-                        if slot.unique_id == *unique_id {
-                            slot.current_dura = *current_dura;
-                            updated = true;
-                            break;
-                        }
-                    }
-                }
-                tracing::info!("🔧 物品耐久变化 uid={} dura={}", unique_id, current_dura);
-            }
-            ServerEvent::ItemRepaired {
-                unique_id,
-                max_dura,
-                current_dura,
-            } => {
-                // #240：修理结果 → 更新背包/装备栏 当前/最大耐久
-                let mut updated = false;
-                for slot in hud.inventory.items.iter_mut().flatten() {
-                    if slot.unique_id == *unique_id {
-                        slot.current_dura = *current_dura;
-                        slot.max_dura = *max_dura;
-                        updated = true;
-                        break;
-                    }
-                }
-                if !updated {
-                    for slot in hud.equipment.iter_mut().flatten() {
-                        if slot.unique_id == *unique_id {
-                            slot.current_dura = *current_dura;
-                            slot.max_dura = *max_dura;
-                            updated = true;
-                            break;
-                        }
-                    }
-                }
-                tracing::info!(
-                    "🔧 物品修理 uid={} dura={}/{}",
-                    unique_id,
-                    current_dura,
-                    max_dura
-                );
-            }
-            ServerEvent::ItemSlotSizeChanged {
-                unique_id,
-                slot_size,
-            } => {
-                // #240：镶嵌槽位数量变化 → 调整 slots 长度
-                for slot in hud.inventory.items.iter_mut().flatten() {
-                    if slot.unique_id == *unique_id {
-                        let n = (*slot_size).max(0) as usize;
-                        slot.slots.resize(n, None);
-                        break;
-                    }
-                }
-                tracing::info!("📐 物品槽位变化 uid={} size={}", unique_id, slot_size);
-            }
-            ServerEvent::ItemUpgraded { item } => {
-                // #258：物品升级 → 按 unique_id 替换背包/装备栏物品
-                let mut updated = false;
-                for slot in hud.inventory.items.iter_mut().flatten() {
-                    if slot.unique_id == item.unique_id {
-                        *slot = item.clone();
-                        updated = true;
-                        break;
-                    }
-                }
-                if !updated {
-                    for slot in hud.equipment.iter_mut().flatten() {
-                        if slot.unique_id == item.unique_id {
-                            *slot = item.clone();
-                            updated = true;
-                            break;
-                        }
-                    }
-                }
-                tracing::info!("⬆️ 物品升级替换: {}", item.name);
-            }
-            ServerEvent::ItemDeleted { unique_id } => {
-                // #228：背包按 unique_id 删除（消耗/删除）
-                let idx = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
-                if let Some(idx) = idx {
-                    hud.inventory.items[idx] = None;
-                    tracing::info!("🗑️ 删除物品 uid={}", unique_id);
-                }
-            }
-            ServerEvent::ItemGained { item } => {
-                // #228：获得物品 → 放入第一个空格
-                if let Some(slot) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
-                    *slot = Some(item.clone());
-                    tracing::info!("🎁 获得物品入包: {} (uid={})", item.name, item.unique_id);
-                } else {
-                    tracing::warn!("🎒 背包已满，无法放入: {}", item.name);
-                }
-            }
-            ServerEvent::InventoryResized { size } => {
-                // #276：背包扩容（C# S.ResizeInventory → Array.Resize）
-                hud.inventory.resize(*size);
-                tracing::info!("🎒 背包扩容 -> {} 格", hud.inventory.items.len());
-            }
+            death_ui.dismissed = true;
         }
     }
 }
@@ -1806,12 +1257,15 @@ mod tests {
             let mut opt = OptionState::default();
             opt.hp_view = hp_view;
             world.insert_resource(opt);
-            let mut hud = HudState::default();
-            hud.hp = 100;
-            hud.max_hp = 200;
-            hud.mp = 50;
-            hud.max_mp = 100;
-            world.insert_resource(hud);
+            // #2633 步3/步7/步9：hud_update_system 改读玩家组件（Vitals/Progression/Gold/PlayerName），
+            // HudState 已删；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
+            world.spawn((
+                LocalPlayer,
+                Vitals { hp: 100, max_hp: 200, mp: 50, max_mp: 100 },
+                Progression::default(),
+                Gold(0),
+                PlayerName(String::new()),
+            ));
             world.insert_resource(MiniMapMode::default());
             world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
             world
@@ -1900,7 +1354,6 @@ mod tests {
 
         let mut world = World::new();
         world.insert_resource(crate::game::combat::AttackModeState::default());
-        world.insert_resource(HudState::default());
         world.insert_resource(OptionState::default());
         world.insert_resource(MiniMapMode::default()); // 默认大模式
         let sm = world
@@ -1952,7 +1405,6 @@ mod tests {
         // 无子实体的裸标签：系统安全（Option<&Children> = None）
         let mut world = World::new();
         world.insert_resource(crate::game::combat::AttackModeState::default());
-        world.insert_resource(HudState::default());
         world.insert_resource(OptionState::default());
         world.insert_resource(MiniMapMode::default());
         let bare = world

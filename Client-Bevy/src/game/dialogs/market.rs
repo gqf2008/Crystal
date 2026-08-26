@@ -13,8 +13,9 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
+use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -469,7 +470,7 @@ fn market_action_system(
     mut market: ResMut<MarketState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
     buy_btn: Query<&UiButton, With<MarketBuyBtn>>,
     consign_btn: Query<&UiButton, With<MarketConsignBtn>>,
@@ -507,6 +508,7 @@ fn market_action_system(
         }
     }
     // 寄售（选中背包物品 + 价格）
+    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
     for btn in &consign_btn {
         if btn.clicked {
             let price = input
@@ -519,10 +521,10 @@ fn market_action_system(
                 .unwrap_or(0);
             let idx = inv_click
                 .selected
-                .filter(|i| hud.inventory.items.get(*i).and_then(|s| s.as_ref()).is_some())
-                .or_else(|| hud.inventory.items.iter().position(|s| s.is_some()));
+                .filter(|i| items.get(*i).and_then(|s| s.as_ref()).is_some())
+                .or_else(|| items.iter().position(|s| s.is_some()));
             if let Some(i) = idx {
-                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if let Some(item) = items.get(i).and_then(|s| s.as_ref()) {
                     if price == 0 {
                         market.message = "价格无效".to_string();
                         continue;
@@ -578,10 +580,11 @@ fn market_action_system(
 
 
 /// 消费服务端市场事件（网络层只广播 ServerEvent；文案在此构造）
+/// #2633 批次4 步9：寄售移除背包格直接写 `Inventory` 组件（HudState 已删）；实体未生成跳过（R1）。
 fn market_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut market: ResMut<MarketState>,
-    mut hud: ResMut<HudState>,
+    mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -619,14 +622,15 @@ fn market_server_events(
             ServerEvent::MarketConsign { uid, success } => {
                 if *success {
                     // #720：寄售成功从背包移除（C# S.ConsignItem 语义）
-                    if let Some(idx) = hud
-                        .inventory
-                        .items
-                        .iter()
-                        .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*uid))
-                    {
-                        hud.inventory.items[idx] = None;
-                        tracing::info!("🏪 寄售成功，背包移除 uid={}", uid);
+                    if let Ok(mut inv) = inv_q.single_mut() {
+                        if let Some(idx) = inv
+                            .items
+                            .iter()
+                            .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*uid))
+                        {
+                            inv.items[idx] = None;
+                            tracing::info!("🏪 寄售成功，背包移除 uid={}", uid);
+                        }
                     }
                     market.consign_ok = Some(*uid);
                     market.message = format!("寄售成功 uid={}", uid);
@@ -647,5 +651,81 @@ fn market_server_events(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::dialogs::inventory::InvItem;
+    use crate::network::server_event::ServerEvent;
+
+    fn mk_item(uid: u64) -> InvItem {
+        InvItem {
+            unique_id: uid,
+            ..Default::default()
+        }
+    }
+
+    /// 寄售成功移除背包格（#2633 批次4 步9：直接写 Inventory 组件，HudState 双写已删）。
+    #[test]
+    fn market_consign_removes_item_from_component() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<MarketState>();
+        app.add_systems(Update, market_server_events);
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![Some(mk_item(11)), Some(mk_item(22)), None],
+                ..Default::default()
+            },
+        ));
+        app.update(); // 初始化消息缓冲/系统状态
+
+        // 寄售 uid=22（idx=1）成功 → Inventory 组件同格清空
+        app.world_mut()
+            .write_message(ServerEvent::MarketConsign { uid: 22, success: true });
+        app.update();
+        let inv = app
+            .world_mut()
+            .query_filtered::<&Inventory, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .cloned()
+            .expect("LocalPlayer 应有 Inventory");
+        assert!(inv.items[1].is_none(), "背包格 1 应被寄售移除");
+        assert!(inv.items[0].is_some(), "背包格 0 应保持（只移除寄售格）");
+    }
+
+    /// 寄售失败不移除背包格，Inventory 组件保持不动。
+    #[test]
+    fn market_consign_fail_keeps_inventory() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<MarketState>();
+        app.add_systems(Update, market_server_events);
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![Some(mk_item(11)), None],
+                ..Default::default()
+            },
+        ));
+        app.update();
+
+        app.world_mut()
+            .write_message(ServerEvent::MarketConsign { uid: 11, success: false });
+        app.update();
+        let inv = app
+            .world_mut()
+            .query_filtered::<&Inventory, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .cloned()
+            .expect("LocalPlayer 应有 Inventory");
+        assert!(inv.items[0].is_some(), "寄售失败背包应保持");
     }
 }

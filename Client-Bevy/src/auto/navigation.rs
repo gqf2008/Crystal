@@ -201,7 +201,8 @@ pub(crate) fn real_verify_system(
     mut control: ResMut<client_bevy::game::player_control::ControlState>,
     game_data: Res<client_bevy::map_renderer::GameData>,
     mut chat: ResMut<client_bevy::game::chat::ChatState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步7：聊天前缀读 `PlayerName`（HudState 已于步9 删除）
+    name_q: Query<&client_bevy::actor::PlayerName, With<client_bevy::actor::LocalPlayer>>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
     probe: Res<client_bevy::game::combat::RealHitProbe>,
     actors: Query<(
@@ -215,6 +216,8 @@ pub(crate) fn real_verify_system(
         (Entity, &Transform),
         (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
     >,
+    // #2633 批次4 步4：dead 读改 StatusFlags；hud 仍留（hud.name 批6 才迁）
+    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
     mut s: Local<RealVerifyState>,
 ) {
     use client_bevy::scenes::AppState;
@@ -222,10 +225,12 @@ pub(crate) fn real_verify_system(
         return;
     }
     s.t += time.delta_secs();
+    // #2633 步4：实体缺失视同未死亡（同原 hud 默认 false）
+    let dead = flags.single().map(|f| f.dead).unwrap_or(false);
 
     // #304：死亡处理——城镇复活（C# TownRevive）。
     // 测试进行中死亡 → 复活后重置阶段重跑；测试完成后死亡 → 仅复活清理状态（避免角色卡死影响下次冒烟）
-    if hud.dead {
+    if dead {
         if !s.revive_sent {
             s.revive_sent = true;
             s.revive_count += 1;
@@ -261,9 +266,9 @@ pub(crate) fn real_verify_system(
                     linked_items: vec![],
                 });
                 // 真实服务器不回发给自己（设计）；本地回显由 chat_input_system 负责（C# 行为），
-                // 这里模拟用户路径 add_line，验证显示链路
+                // 这里模拟用户路径 add_line，验证显示链路；实体缺失默认空串（同原 hud.name 默认）
                 chat.add_line(
-                    format!("[{}]: 真实服务器验证：你好！", hud.name),
+                    format!("[{}]: 真实服务器验证：你好！", name_q.single().map(|n| n.0.as_str()).unwrap_or("")),
                     Color::WHITE,
                     client_bevy::game::chat::ChatChannel::Nearby,
                 );
@@ -436,7 +441,7 @@ pub(crate) fn real_verify_system(
                 s.t = 0.0;
                 return;
             }
-            if hud.dead {
+            if dead {
                 tracing::warn!("[REAL] ⚠️ 玩家死亡（战斗验证部分通过，继续 NPC 验证）");
                 s.stage = 3;
                 s.t = 0.0;

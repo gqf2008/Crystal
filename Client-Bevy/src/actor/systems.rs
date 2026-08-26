@@ -7,7 +7,6 @@ use mir2_shared::MirAction;
 use crate::resources::libraries::ArrayLibType;
 use crate::objects::frames::get_player_frame;
 use crate::map_renderer::{FrontTile, TILE_HEIGHT, TILE_WIDTH};
-use crate::game::hud::HudState;
 use super::components::*;
 use super::frames::{actor_frame, mount_lib_frames, mount_player_action};
 use super::spawn::depth_z;
@@ -288,22 +287,21 @@ pub(crate) fn sync_actor_depth(
     }
 }
 
-/// 穿戴装备后同步本地玩家外观层（SpriteLayer slot ← HudState.equipment）
+/// 穿戴装备后同步本地玩家外观层（SpriteLayer slot ← `Loadout` 组件，#2633 批次4 步6）
 /// 槽位：0=武器(CWeapon) 1=衣服(CArmour) 2=头盔 3=项链 ... 与 ServerRust EquipmentSlot 一致
 pub(crate) fn sync_player_equipment(
-    hud: Res<crate::game::hud::HudState>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<LocalPlayer>>,
     players: Query<(Entity, &Children), (With<LocalPlayer>, With<Player>)>,
     mut layers: Query<&mut SpriteLayer>,
 ) {
     let Ok((_, children)) = players.single() else { return };
-    let armour_slot = hud
-        .equipment
+    let equipment = loadout_q.single().map(|l| l.slots.as_slice()).unwrap_or(&[]);
+    let armour_slot = equipment
         .get(1)
         .and_then(|s| s.as_ref())
         .map(|i| i.item_index.max(0) as u32)
         .unwrap_or(0);
-    let weapon_slot = hud
-        .equipment
+    let weapon_slot = equipment
         .get(0)
         .and_then(|s| s.as_ref())
         .map(|i| i.item_index.max(0) as u32)

@@ -708,8 +708,9 @@ fn hold_move_test_system(
     mut st: ResMut<HoldMoveTest>,
     time: Res<Time>,
     game_data: Res<client_bevy::map_renderer::GameData>,
-    mut hud: ResMut<client_bevy::game::hud::HudState>,
     players: Query<&Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
+    // #2633 批次4 步9：演示驱动改直写 StatusFlags 组件（hud.* 已删）
+    mut flags_q: Query<&mut client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
 ) {
     use client_bevy::game::movement::{mouse_direction, next_direction, point_move, previous_direction};
     use mir2_shared::enums::MirDirection;
@@ -743,7 +744,9 @@ fn hold_move_test_system(
                 let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
                 tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
                 // 进入陷阱阶段
-                hud.in_trap_rock = true;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.in_trap_rock = true;
+                }
                 st.frame = 0;
                 st.phase = 1;
                 return;
@@ -758,8 +761,10 @@ fn hold_move_test_system(
                 };
                 tracing::info!("[HOLDMOVE] {} 陷阱阶段方向 {:?}", verdict, dirs);
                 // 进入冲刺阶段
-                hud.in_trap_rock = false;
-                hud.sprint = true;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.in_trap_rock = false;
+                    f.sprint = true;
+                }
                 st.frame = 0;
                 st.phase = 2;
                 return;
@@ -770,7 +775,9 @@ fn hold_move_test_system(
                 let moving = !dirs.is_empty();
                 let verdict = if moving { "✅ 冲刺可移动（3 格跑）" } else { "❌ 冲刺未移动" };
                 tracing::info!("[HOLDMOVE] {} 冲刺阶段方向 {:?}", verdict, dirs);
-                hud.sprint = false;
+                if let Ok(mut f) = flags_q.single_mut() {
+                    f.sprint = false;
+                }
                 st.started = false;
                 st.frame = 0;
                 st.phase = 0;
@@ -784,7 +791,9 @@ fn hold_move_test_system(
     let mouse_world = player_world + Vec2::new(400.0, 400.0);
     let dir = mouse_direction(player_world, mouse_world);
     let from = client_bevy::game::movement::world_to_tile(player_world.x, player_world.y);
-    let chosen = if hud.in_trap_rock {
+    // #2633 步4：in_trap_rock 读改 StatusFlags；实体缺失视同未陷（同原 hud 默认 false）
+    let in_trap = flags_q.single().map(|f| f.in_trap_rock).unwrap_or(false);
+    let chosen = if in_trap {
         None // 陷阱禁止移动（C# CanWalk 12094 直接 false）
     } else {
         [dir, next_direction(dir), previous_direction(dir)].iter().copied().find(|d| {

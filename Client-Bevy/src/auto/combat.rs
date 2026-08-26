@@ -128,7 +128,7 @@ pub(crate) fn auto_drop_pick_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     ground: Query<&client_bevy::actor::NetObjectId, With<client_bevy::actor::GroundItem>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -181,7 +181,7 @@ pub(crate) fn auto_drop_pick_test(
             if *t < 1.0 {
                 return;
             }
-            *before = hud.inventory.items.iter().flatten().count();
+            *before = inv_q.single().map(|inv| inv.items.iter().flatten().count()).unwrap_or(0);
             net.send_packet(&mir2_shared::packets::client::item::PickUp {});
             tracing::info!("[DROPTEST] 发送 PickUp（拾取前背包 {} 件）", *before);
             *stage = 2;
@@ -191,7 +191,7 @@ pub(crate) fn auto_drop_pick_test(
             if *t < 3.0 {
                 return;
             }
-            let now = hud.inventory.items.iter().flatten().count();
+            let now = inv_q.single().map(|inv| inv.items.iter().flatten().count()).unwrap_or(0);
             if now > *before {
                 tracing::info!("[DROPTEST] ✅ 拾取成功：背包 {} -> {} 件", *before, now);
             } else {
@@ -414,18 +414,19 @@ pub(crate) fn auto_equip_system(
     mut fired: Local<bool>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<(&client_bevy::game::player_state::Inventory, &client_bevy::game::player_state::Loadout), With<client_bevy::actor::LocalPlayer>>,
 ) {
     if *fired {
         return;
     }
     *timer += time.delta_secs();
-    if *timer < 6.0 || hud.inventory.items.iter().flatten().count() == 0 {
+    let Ok((inv, loadout)) = inv_q.single() else { return };
+    if *timer < 6.0 || inv.items.iter().flatten().count() == 0 {
         return;
     }
     *fired = true;
-    if let Some(item) = hud.inventory.items.iter().flatten().find(|i| i.is_equipment()) {
-        if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
+    if let Some(item) = inv.items.iter().flatten().find(|i| i.is_equipment()) {
+        if let Some(to) = item.equip_slot_occupied(|s| loadout.slots.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 grid: mir2_shared::enums::MirGridType::Inventory,
                 unique_id: item.unique_id,
@@ -442,7 +443,7 @@ pub(crate) fn auto_life_system(
     mut phase: Local<u8>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
 ) {
     *timer += time.delta_secs();
     let t = *timer;
@@ -466,7 +467,12 @@ pub(crate) fn auto_life_system(
         }
         2 if t >= 12.0 => {
             *phase = 3;
-            if let Some(potion) = hud.inventory.items.iter().flatten().find(|i| i.item_index == 1) {
+            let potion = inv_q
+                .single()
+                .ok()
+                .and_then(|inv| inv.items.iter().flatten().find(|i| i.item_index == 1))
+                .cloned();
+            if let Some(potion) = potion {
                 net.send_packet(&mir2_shared::packets::client::item::UseItem {
                     unique_id: potion.unique_id,
                 });
@@ -484,14 +490,16 @@ pub(crate) fn auto_revive_system(
     net: Res<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步4：dead 读改 StatusFlags（本系统不再用 HudState）；实体缺失视同未死亡
+    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
-    if !hud.dead {
+    let dead = flags.single().map(|f| f.dead).unwrap_or(false);
+    if !dead {
         *t = 0.0;
         return;
     }
@@ -504,13 +512,21 @@ pub(crate) fn auto_revive_system(
 }
 
 /// --auto-cast-loop：每秒连发 F1 技能（验证 耗蓝递减 → 蓝不足拒绝 → 魔法药回蓝，#51）
+/// #2633 批次4 步9：mp/max_mp 读 `Vitals`、物品读 `Inventory` 组件（HudState 已删）；
+/// 实体未生成回退原 HudState 默认（mp=1/max_mp=600/空背包）。
 pub(crate) fn auto_cast_loop_system(
     mut timer: Local<f32>,
     mut last_cast: Local<f32>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
     magics: Res<client_bevy::game::skills::MagicsState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    player_q: Query<
+        (
+            &client_bevy::game::player_state::Vitals,
+            &client_bevy::game::player_state::Inventory,
+        ),
+        With<client_bevy::actor::LocalPlayer>,
+    >,
 ) {
     *timer += time.delta_secs();
     if *timer < 6.0 || magics.magics.is_empty() {
@@ -521,19 +537,27 @@ pub(crate) fn auto_cast_loop_system(
     }
     *last_cast = *timer;
     // 蓝不足时喝魔法药(小)
-    if hud.mp < 10 {
-        if let Some(potion) = hud
-            .inventory
-            .items
-            .iter()
-            .flatten()
-            .find(|i| i.item_index == 2)
-        {
-            net.send_packet(&mir2_shared::packets::client::item::UseItem {
-                unique_id: potion.unique_id,
-            });
-            tracing::info!("🔮 [CASTLOOP] MP 低，喝魔法药 uid={}", potion.unique_id);
+    let (mp, max_mp, potion_id) = match player_q.single() {
+        Ok((vitals, inv)) => {
+            let potion_id = if vitals.mp < 10 {
+                inv.items
+                    .iter()
+                    .flatten()
+                    .find(|i| i.item_index == 2)
+                    .map(|it| it.unique_id)
+            } else {
+                None
+            };
+            (vitals.mp, vitals.max_mp, potion_id)
         }
+        // R1：实体未生成 → 原 HudState 默认（mp=1/max_mp=600/空背包，无药可喝）
+        Err(_) => (1, 600, None),
+    };
+    if let Some(potion_uid) = potion_id {
+        net.send_packet(&mir2_shared::packets::client::item::UseItem {
+            unique_id: potion_uid,
+        });
+        tracing::info!("🔮 [CASTLOOP] MP 低，喝魔法药 uid={}", potion_uid);
     }
     let Some(m) = magics.by_key(1) else {
         return;
@@ -546,7 +570,7 @@ pub(crate) fn auto_cast_loop_system(
         target_id: 101,
         location: mir2_shared::map::Point { x: 0, y: 0 },
     });
-    tracing::info!("🔮 [CASTLOOP] 施放 {}（MP {}/{}）", m.name, hud.mp, hud.max_mp);
+    tracing::info!("🔮 [CASTLOOP] 施放 {}（MP {}/{}）", m.name, mp, max_mp);
 }
 
 /// --spell-verify：真实服务器法术冒烟（#306）
@@ -770,12 +794,13 @@ pub(crate) fn auto_spell_verify(
 }
 
 /// --book-test：技能书学习（#212：使用背包槽 3 技能书 → 等 S.NewMagic → 校验技能列表）
+/// #2633 批次4 步9：背包格读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_book_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     magics: Res<client_bevy::game::skills::MagicsState>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -790,10 +815,10 @@ pub(crate) fn auto_book_test(
             if *t < 8.0 {
                 return;
             }
-            let uid = hud
-                .inventory
-                .items
-                .get(3)
+            let uid = inv_q
+                .single()
+                .ok()
+                .and_then(|inv| inv.items.get(3))
                 .and_then(|s| s.as_ref())
                 .map(|i| i.unique_id);
             match uid {

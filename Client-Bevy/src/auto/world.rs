@@ -950,7 +950,8 @@ pub(crate) fn auto_reincarnation_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步4：dead/reincarnation_offered 读改 StatusFlags（本系统不再用 HudState）；实体缺失视同未死亡/无 offer
+    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -959,6 +960,10 @@ pub(crate) fn auto_reincarnation_test(
         return;
     }
     *t += time.delta_secs();
+    let (dead, reinc_offered) = flags
+        .single()
+        .map(|f| (f.dead, f.reincarnation_offered))
+        .unwrap_or((false, false));
     match *stage {
         0 => {
             if *t >= 300.0 {
@@ -966,8 +971,8 @@ pub(crate) fn auto_reincarnation_test(
                 *stage = 9;
                 return;
             }
-            if hud.dead {
-                if hud.reincarnation_offered {
+            if dead {
+                if reinc_offered {
                     tracing::info!("[REINC] ✅ 收到轮回术 offer");
                     net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
                     tracing::info!("[REINC] 接受轮回术复活");
@@ -985,7 +990,7 @@ pub(crate) fn auto_reincarnation_test(
                 *stage = 9;
                 return;
             }
-            if !hud.dead {
+            if !dead {
                 tracing::info!("[REINC] ✅ 轮回术复活成功");
                 *stage = 9;
             }
@@ -1439,12 +1444,13 @@ pub(crate) fn auto_mount_sync_test(
 
 /// --npc-credit-test：施法 → mock 回发 NPCImageUpdate(110→2) + GainedCredit(50)，
 /// 断言 NPC 形象变化 + 声望累积（#248）
+/// #2633 批次4 步9：声望读 `Credit` 组件（HudState 已删）；实体缺失视同 0。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_npc_credit_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    credit_q: Query<&client_bevy::game::player_state::Credit, With<client_bevy::actor::LocalPlayer>>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcAppearance,
@@ -1535,7 +1541,7 @@ pub(crate) fn auto_npc_credit_test(
                 let npc_updated = npcs
                     .iter()
                     .any(|(id, app)| id.0 == 110 && app.npc_index == 2);
-                let credit = hud.credit >= 50;
+                let credit = credit_q.single().map(|c| c.0 >= 50).unwrap_or(false);
                 tracing::info!("[NPCCR] NPC形象={} 声望={}", npc_updated, credit);
                 if npc_updated && credit {
                     tracing::info!("[NPCCR] ✅ NPC 形象/声望通过");
@@ -1894,7 +1900,8 @@ pub(crate) fn auto_name_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步7：读 `PlayerName` 组件（HudState 已删）
+    name_q: Query<&client_bevy::actor::PlayerName, With<client_bevy::actor::LocalPlayer>>,
     names: Query<(
         &client_bevy::actor::NetObjectId,
         Option<&client_bevy::actor::MonsterName>,
@@ -1986,7 +1993,7 @@ pub(crate) fn auto_name_test(
                 let obj = names
                     .iter()
                     .any(|(id, m)| id.0 == 101 && m.map(|m| m.0 == "稻草人·改").unwrap_or(false));
-                let player = hud.name == "刀客·改名";
+                let player = name_q.single().map(|n| n.0 == "刀客·改名").unwrap_or(false);
                 tracing::info!("[NAME] 对象改名={} 玩家改名={}", obj, player);
                 if obj && player {
                     tracing::info!("[NAME] ✅ 名称同步通过");
@@ -2008,12 +2015,13 @@ pub(crate) fn auto_name_test(
 }
 
 /// --misc2-test：施法 → mock 回发 BaseStatsInfo([10,20,30]) 等，断言基础属性存储（#268）
+/// #2633 批次4 步9：基础属性读 `BaseStats` 组件（HudState 已删）；实体缺失视同空。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_misc2_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    base_stats_q: Query<&client_bevy::game::player_state::BaseStats, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
@@ -2097,8 +2105,12 @@ pub(crate) fn auto_misc2_test(
         }
         2 => {
             if *t >= 2.5 {
-                let ok = hud.base_stats == vec![10, 20, 30];
-                tracing::info!("[MISC2] 基础属性={:?} ok={}", hud.base_stats, ok);
+                let bs = base_stats_q
+                    .single()
+                    .map(|b| b.0.clone())
+                    .unwrap_or_default();
+                let ok = bs == vec![10, 20, 30];
+                tracing::info!("[MISC2] 基础属性={:?} ok={}", bs, ok);
                 if ok {
                     tracing::info!("[MISC2] ✅ 杂项协议通过");
                 } else {
@@ -2460,12 +2472,13 @@ pub(crate) fn auto_creature2_test(
 }
 
 /// --level-fx-test：升级表现链路（#283）
-/// 流程：进游戏 → 连续攻击击杀怪物 → mock 回发 LevelChanged+ObjectLeveled → 断言 hud.level 提升
+/// 流程：进游戏 → 连续攻击击杀怪物 → mock 回发 LevelChanged+ObjectLeveled → 断言等级提升
+/// #2633 批次4 步9：等级读 `Progression` 组件（HudState 已删）；实体缺失视同默认 1。
 pub(crate) fn auto_level_fx_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    prog_q: Query<&client_bevy::game::player_state::Progression, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut hits: Local<u32>,
@@ -2508,10 +2521,11 @@ pub(crate) fn auto_level_fx_test(
             if *t < 2.0 {
                 return;
             }
-            if hud.level >= 31 {
-                tracing::info!("[LEVELFX] ✅ PASS 升级生效 level={}", hud.level);
+            let level = prog_q.single().map(|p| p.level).unwrap_or(1);
+            if level >= 31 {
+                tracing::info!("[LEVELFX] ✅ PASS 升级生效 level={}", level);
             } else {
-                tracing::error!("[LEVELFX] ❌ FAIL level={} 期望 >=31", hud.level);
+                tracing::error!("[LEVELFX] ❌ FAIL level={} 期望 >=31", level);
             }
             *stage = 9;
         }

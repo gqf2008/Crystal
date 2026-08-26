@@ -618,7 +618,6 @@ impl Plugin for DialogsPlugin {
                 .run_if(in_state(AppState::Game)),
         );
         app.add_plugins(text_input::TextInputPlugin);
-        app.init_resource::<character::CharacterState>();
         app.add_plugins((
             (
                 inventory::InventoryDialogPlugin,

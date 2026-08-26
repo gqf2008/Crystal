@@ -17,6 +17,7 @@ pub mod output_lines;
 pub mod player_menu;
 pub mod pathfinding;
 pub mod player_control;
+pub mod player_state;
 pub mod sets;
 pub mod skills;
 pub mod sound;
@@ -30,7 +31,6 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<hud::HudState>();
         app.init_resource::<chat::ChatState>();
         app.init_resource::<player_control::ControlState>();
         // 网络系统直接引用的对话框状态（与插件解耦，避免资源未注册）
@@ -46,6 +46,9 @@ impl Plugin for GamePlugin {
         // 各 Update 键位系统汇总，消费者见 input_gate 模块注释
         // （单独注册：下方插件元组已 15 个达上限）
         app.add_plugins(input_gate::TextInputGatePlugin);
+        // #2633 批次4：本地玩家状态写系统（player_vitals/player_status，GameSet::PlayerState
+        // 先于 Hud 读）；单独注册同上（插件元组上限）。
+        app.add_plugins(player_state::PlayerStatePlugin);
         app.add_plugins((
             hud::HudPlugin,
             chat::ChatPlugin,

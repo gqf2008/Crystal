@@ -12,9 +12,10 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem};
 use crate::game::dialogs::{DialogKind, DialogRoot};
-use crate::game::hud::HudState;
+use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -252,7 +253,7 @@ fn sell_panel_ui_system(
 fn sell_panel_action_system(
     mut state: ResMut<SellPanelState>,
     mut inv_click: ResMut<InvClickState>,
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -274,7 +275,11 @@ fn sell_panel_action_system(
             // #2631：选中态归 inventory 所有，经接口访问。严格对齐旧码：仅当物品确实存在
             // 才放入并清除选中；陈旧选中（物品已被移除）保留选中态，不用 take_selected。
             if let Some(sel) = inv_click.selected() {
-                if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
+                if let Some(item) = inv_q
+                    .single()
+                    .ok()
+                    .and_then(|inv| inv.items.get(sel).and_then(|s| s.as_ref()))
+                {
                     state.target = Some(item.clone());
                     tracing::info!(
                         "🎯 放入面板: {} (uid={}) x{}",
