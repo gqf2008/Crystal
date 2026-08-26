@@ -15,11 +15,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::ItemCellData;
-use crate::ui::scroll_list::{ScrollList, spawn_scroll_bar};
-use crate::ui::sprite_ui::{
-    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
-    ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui, spawn_label,
+    spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
 };
 
 /// 邮件列表条目
@@ -169,7 +168,6 @@ impl Plugin for MailPlugin {
                 mail_ui_system,
                 mail_compose_system,
                 mail_stamp_system,
-                ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -217,16 +215,24 @@ fn mail_compose_system(
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    write_btn: Query<&UiButton, With<MailWrite>>,
-    send_btn: Query<&UiButton, With<MailSendBtn>>,
-    cancel_btn: Query<&UiButton, With<MailCancelBtn>>,
+    write_btn: Query<(Entity, &Interaction), With<MailWrite>>,
+    send_btn: Query<(Entity, &Interaction), With<MailSendBtn>>,
+    cancel_btn: Query<(Entity, &Interaction), With<MailCancelBtn>>,
     mut compose_widgets: Query<&mut Visibility, (With<MailComposeWidget>, Without<MailWidget>)>,
-    mut attach_cells: Query<(&mut ItemCellData, &MailAttachSlot), Without<MailInvPick>>,
-    mut pick_cells: Query<(&mut ItemCellData, &MailInvPick), Without<MailAttachSlot>>,
+    mut attach_cells: Query<(&mut UiItemCellData, &MailAttachSlot), Without<MailInvPick>>,
+    mut pick_cells: Query<(&mut UiItemCellData, &MailInvPick), Without<MailAttachSlot>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mail.compose;
     for mut vis in &mut compose_widgets {
         *vis = if open {
@@ -235,8 +241,8 @@ fn mail_compose_system(
             Visibility::Hidden
         };
     }
-    for btn in &write_btn {
-        if btn.clicked {
+    for (e, inter) in &write_btn {
+        if edge(e, inter, &mut prev_inter) {
             mail.compose = true;
             mail.detail = None;
             mail.attach = vec![None; 5];
@@ -263,10 +269,9 @@ fn mail_compose_system(
                     .flatten()
                     .find(|it| it.unique_id == uid)
                     .and_then(|it| {
-                        ui_image(
+                        load_lib_image(
                             &mut libs,
                             &mut images,
-                            &mut cache,
                             LibraryName::Items,
                             it.image as usize,
                         )
@@ -296,10 +301,9 @@ fn mail_compose_system(
                 Some(slot_idx) => {
                     match items.get(slot_idx).and_then(|s| s.as_ref()) {
                         Some(it) => {
-                            let icon = ui_image(
+                            let icon = load_lib_image(
                                 &mut libs,
                                 &mut images,
-                                &mut cache,
                                 LibraryName::Items,
                                 it.image as usize,
                             );
@@ -393,8 +397,8 @@ fn mail_compose_system(
         }
     }
 
-    for btn in &send_btn {
-        if btn.clicked && mail.compose {
+    for (e, inter) in &send_btn {
+        if edge(e, inter, &mut prev_inter) && mail.compose {
             let gold = input
                 .texts
                 .get(3)
@@ -412,8 +416,8 @@ fn mail_compose_system(
             input.active = None;
         }
     }
-    for btn in &cancel_btn {
-        if btn.clicked && mail.compose {
+    for (e, inter) in &cancel_btn {
+        if edge(e, inter, &mut prev_inter) && mail.compose {
             mail.compose = false;
             mail.attach = vec![None; 5];
             mail.stamped = false;
@@ -428,10 +432,19 @@ fn mail_stamp_system(
     mut mail: ResMut<MailState>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     net: Res<NetConnection>,
-    stamp_btn: Query<&UiButton, With<MailStampBtn>>,
+    stamp_btn: Query<(Entity, &Interaction), With<MailStampBtn>>,
     mut stamp_on: Query<&mut Visibility, With<MailStampOn>>,
-    mut cost_label: Query<&mut Text2d, With<MailCostLabel>>,
+    mut cost_label: Query<&mut Text, With<MailCostLabel>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     for mut vis in &mut stamp_on {
         *vis = if mail.stamped && mail.compose {
             Visibility::Visible
@@ -442,8 +455,8 @@ fn mail_stamp_system(
     for mut text in &mut cost_label {
         text.0 = format!("邮资: {}", mail.parcel_cost);
     }
-    for btn in &stamp_btn {
-        if btn.clicked && mail.compose {
+    for (e, inter) in &stamp_btn {
+        if edge(e, inter, &mut prev_inter) && mail.compose {
             if !mail.stamped {
                 // C# StampParcel：背包须有邮票（Nothing/Shape==1）
                 let has_stamp = inv_q
@@ -530,7 +543,6 @@ fn spawn_mail(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -540,26 +552,23 @@ fn spawn_mail(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 956) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        // #89 可滚动邮件列表：8 行 × 22px
-        let (track, thumb) =
-            spawn_scroll_bar(&mut commands, &mut images, (610.0, 140.0, 4.0, 176.0), 6.3);
-        commands.entity(track).insert((
+    // 邮件列表视图：根容器（透明，承载顶栏/标题/按钮/行/详情/滚动条；内容到 rel y=260）
+    let list = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(280.0),
+                top: Val::Px(80.0),
+                width: Val::Px(360.0),
+                height: Val::Px(300.0),
+                ..default()
+            },
             DialogRoot(DialogKind::Mail),
             MailWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(thumb).insert((
-            DialogRoot(DialogKind::Mail),
-            MailWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Mail),
-            MailWidget,
+            GlobalZIndex(30),
             Visibility::Hidden,
-            ScrollList {
+            // #89 可滚动邮件列表：8 行 × 22px
+            UiScrollList {
                 rect_rel: (18.0, 60.0, 300.0, 176.0),
                 row_h: 22.0,
                 visible: 8,
@@ -567,420 +576,161 @@ fn spawn_mail(
                 offset: 0,
                 step: 3,
                 track_rel: (330.0, 60.0, 4.0, 176.0),
-                thumb: Some(thumb),
-                z: 8.0,
+                thumb: None,
+                z: 9,
             },
-        ));
-    }
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 20) {
-        let e = spawn_ui_sprite(&mut commands, h, 298.0, 88.0, 6.2, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Mail), MailWidget, Visibility::Hidden));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        280.0 + 340.0,
-        83.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((MailClose, DialogRoot(DialogKind::Mail), MailWidget));
-    }
-    // 写邮件按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        280.0 + 300.0,
-        280.0,
-        7.0,
-        60.0,
-        23.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((MailWrite, DialogRoot(DialogKind::Mail), MailWidget));
-    }
-    // 删除邮件按钮（#132 C# MailListDialog 删除）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        520.0,
-        306.0,
-        8.3,
-        60.0,
-        23.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((MailDelete, DialogRoot(DialogKind::Mail), MailWidget));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "删除",
-        534.0,
-        310.0,
-        12.0,
-        Color::WHITE,
-        8.4,
-    );
+        ))
+        .id();
 
-    // 收取附件按钮（#166 C# MailReadParcelDialog.CollectButton → C.CollectParcel）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        450.0,
-        306.0,
-        8.3,
-        60.0,
-        23.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((MailCollect, DialogRoot(DialogKind::Mail), MailWidget));
-    }
-    let tc = spawn_ui_text(
-        &mut commands,
-        &font,
-        "收取",
-        464.0,
-        310.0,
-        12.0,
-        Color::WHITE,
-        8.4,
-    );
-    commands
-        .entity(tc)
-        .insert((DialogRoot(DialogKind::Mail), MailWidget));
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Mail), MailWidget));
+    commands.entity(list).with_children(|p| {
+        // 滚动条（面板子节点）
+        spawn_scroll_bar_ui(p, (330.0, 60.0, 4.0, 176.0), 9);
+        // 顶栏 Prguse[956] @(0,0) 252x16
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 956) {
+            crate::ui::theme::spawn_image(p, h, 0.0, 0.0, 252.0, 16.0, 8);
+        }
+        // 标题 Title[20] @(18,8)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 20) {
+            crate::ui::theme::spawn_image(p, h, 18.0, 8.0, 187.0, 20.0, 8);
+        }
+        // 关闭 Prguse2[360-362] @(340,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 340.0, 3.0, 20.0, 20.0, 10).insert(MailClose);
+        }
+        // 写邮件 / 删除 / 收取
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 300.0, 200.0, 60.0, 23.0, 10)
+                .insert(MailWrite);
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 240.0, 226.0, 60.0, 23.0, 10)
+                .insert(MailDelete);
+            spawn_label(p, &font, "删除", 254.0, 230.0, 12.0, Color::WHITE, 11);
+            spawn_icon_button(p, n, h, pr, 170.0, 226.0, 60.0, 23.0, 10).insert(MailCollect);
+            spawn_label(p, &font, "收取", 184.0, 230.0, 12.0, Color::WHITE, 11);
+        }
+        // 邮件列表（8 行）@(18,60+22i)
+        for i in 0..8usize {
+            spawn_label(p, &font, "", 18.0, 60.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(MailLine(i));
+        }
+        // 内容区（正文/金币）@(18,260)
+        spawn_label(p, &font, "", 18.0, 260.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 9)
+            .insert(MailDetailText);
+    });
 
-    // 邮件列表（8 行）
-    for i in 0..8usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            298.0,
-            140.0 + i as f32 * 22.0,
-            12.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands
-            .entity(e)
-            .insert((MailLine(i), DialogRoot(DialogKind::Mail), MailWidget));
-    }
-    // 内容区（正文/金币）
-    let detail = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        298.0,
-        340.0,
-        12.0,
-        Color::srgb(0.95, 0.95, 0.8),
-        8.0,
-    );
-    commands
-        .entity(detail)
-        .insert((MailDetailText, DialogRoot(DialogKind::Mail), MailWidget));
-
-    // ---- 写邮件界面（C# MailComposeParcelDialog：收件人/主题/正文/金币 + 附件 5 格 + 背包选择）----
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    let compose_bg = commands
+    // ---- 写邮件界面（C# MailComposeParcelDialog 覆盖层 360x430 @ (290,80)）----
+    let compose = commands
         .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Mail),
-            MailComposeWidget,
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.0, 0.0, 0.0, 0.6),
-                custom_size: Some(Vec2::new(360.0, 430.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(290.0),
+                top: Val::Px(80.0),
+                width: Val::Px(360.0),
+                height: Val::Px(430.0),
                 ..default()
             },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(290.0, -80.0, 8.0),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            MailComposeWidget,
+            DialogRoot(DialogKind::Mail),
+            GlobalZIndex(40),
             Visibility::Hidden,
         ))
         .id();
-    // 标签 + 输入框（收件人/主题/正文/金币）
-    let fields: [(usize, &str, f32); 4] = [
-        (0, "收件人:", 100.0),
-        (1, "主题:", 130.0),
-        (2, "正文:", 160.0),
-        (3, "金币:", 190.0),
-    ];
-    for (id, label, y) in fields {
-        let t = spawn_ui_text(
-            &mut commands,
-            &font,
-            label,
-            300.0,
-            y,
-            12.0,
-            Color::WHITE,
-            8.1,
-        );
-        commands
-            .entity(t)
-            .insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
-        let box_e = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Mail),
-                MailComposeWidget,
-                TextInputField(id),
-                TextInputRect(360.0, y, 270.0, 20.0),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                    custom_size: Some(Vec2::new(270.0, 20.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(360.0, -y, 8.1),
-                Visibility::Hidden,
-            ))
-            .id();
-        commands.entity(box_e).with_children(|p| {
-            p.spawn((
-                TextInputDisplay(id),
-                Text2d::new(String::new()),
-                Anchor::TOP_LEFT,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 1.0, 1.0)),
-                Transform::from_xyz(4.0, -2.0, 8.2),
-            ));
-        });
-    }
-    // 附件 5 格（C# MailComposeParcelDialog）
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "附件:",
-        300.0,
-        218.0,
-        12.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
-    for i in 0..5usize {
-        let e = crate::ui::controls::spawn_item_cell(
-            &mut commands,
-            &mut images,
-            &font,
-            300.0 + i as f32 * 46.0,
-            226.0,
-            8.2,
-            40.0,
-            40.0,
-            i,
-        );
-        commands.entity(e).insert((
-            MailAttachSlot(i),
-            DialogRoot(DialogKind::Mail),
-            MailComposeWidget,
-            Visibility::Visible,
-        ));
-    }
-    // #2538：邮票按钮（C# StampButton Prguse2[203] 20x20 @(73,56)）+ 贴票覆层 [204]
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        203,
-        203,
-        203,
-        540.0,
-        224.0,
-        8.3,
-        20.0,
-        20.0,
-    ) {
-        commands.entity(e).insert((
-            MailStampBtn,
-            DialogRoot(DialogKind::Mail),
-            MailComposeWidget,
-        ));
-    }
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        204,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, 540.0, 224.0, 8.4, 1.0);
-        commands.entity(e).insert((
-            MailStampOn,
-            DialogRoot(DialogKind::Mail),
-            MailComposeWidget,
-            Visibility::Hidden,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "邮票",
-        566.0,
-        232.0,
-        11.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
-    // #2538：邮资标签（C# ParcelCostLabel）
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "邮资: 0",
-        590.0,
-        232.0,
-        11.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands.entity(t).insert((
-        MailCostLabel,
-        DialogRoot(DialogKind::Mail),
-        MailComposeWidget,
-    ));
-    // 背包物品选择（最多 20 格）
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "背包物品:",
-        300.0,
-        274.0,
-        12.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Mail), MailComposeWidget));
-    for i in 0..20usize {
-        let col = (i % 5) as f32;
-        let row = (i / 5) as f32;
-        let e = crate::ui::controls::spawn_item_cell(
-            &mut commands,
-            &mut images,
-            &font,
-            300.0 + col * 46.0,
-            282.0 + row * 46.0,
-            8.2,
-            40.0,
-            40.0,
-            100 + i,
-        );
-        commands.entity(e).insert((
-            MailInvPick(i),
-            DialogRoot(DialogKind::Mail),
-            MailComposeWidget,
-            Visibility::Visible,
-        ));
-    }
-    let _ = compose_bg;
-    // 发送 / 取消（C# MailComposeParcelDialog 底部）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        300.0,
-        470.0,
-        8.3,
-        76.0,
-        25.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((MailSendBtn, DialogRoot(DialogKind::Mail), MailComposeWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        210,
-        211,
-        212,
-        390.0,
-        470.0,
-        8.3,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            MailCancelBtn,
-            DialogRoot(DialogKind::Mail),
-            MailComposeWidget,
-        ));
-    }
+
+    commands.entity(compose).with_children(|p| {
+        // 标签 + 输入框（收件人/主题/正文/金币）
+        let fields: [(usize, &str, f32); 4] = [
+            (0, "收件人:", 20.0),
+            (1, "主题:", 50.0),
+            (2, "正文:", 80.0),
+            (3, "金币:", 110.0),
+        ];
+        for (id, label, y) in fields {
+            spawn_label(p, &font, label, 10.0, y, 12.0, Color::WHITE, 10);
+            spawn_container(p, 70.0, y, 270.0, 20.0, 10)
+                .insert((
+                    BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                    crate::game::dialogs::text_input::TextInputField(id),
+                    crate::game::dialogs::text_input::TextInputRect(360.0, y + 80.0, 270.0, 20.0),
+                ))
+                .with_children(|ic| {
+                    ic.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(4.0),
+                            top: Val::Px(2.0),
+                            ..default()
+                        },
+                        Text::new(String::new()),
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(11),
+                        crate::game::dialogs::text_input::TextInputDisplay(id),
+                    ));
+                });
+        }
+        // 附件 5 格（C# MailComposeParcelDialog）@(10+46i,146)
+        spawn_label(p, &font, "附件:", 10.0, 138.0, 12.0, Color::WHITE, 10);
+        for i in 0..5usize {
+            spawn_item_cell_ui(p, &mut images, &font, 10.0 + i as f32 * 46.0, 146.0, 40.0, 40.0, 10, i)
+                .insert(MailAttachSlot(i));
+        }
+        // #2538：邮票按钮（C# StampButton Prguse2[203] 20x20）+ 贴票覆层 [204]
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 203) {
+            spawn_container(p, 250.0, 144.0, 20.0, 20.0, 10)
+                .insert((Button, ImageNode::new(h.clone()), MailStampBtn));
+            crate::ui::theme::spawn_image(p, h, 250.0, 144.0, 20.0, 20.0, 11)
+                .insert((MailStampOn, Visibility::Hidden));
+        }
+        // 邮资标签 + 值
+        spawn_label(p, &font, "邮票:", 232.0, 152.0, 11.0, Color::WHITE, 10);
+        spawn_label(p, &font, "", 300.0, 152.0, 11.0, Color::WHITE, 10).insert(MailCostLabel);
+        // 背包选择 20 格 @(10+col*46, 202+row*46)
+        spawn_label(p, &font, "背包选择:", 10.0, 194.0, 12.0, Color::WHITE, 10);
+        for i in 0..20usize {
+            let col = (i % 5) as f32;
+            let row = (i / 5) as f32;
+            spawn_item_cell_ui(p, &mut images, &font, 10.0 + col * 46.0, 202.0 + row * 46.0, 40.0, 40.0, 10, i)
+                .insert(MailInvPick(i));
+        }
+        // 发送 / 取消 @(10/100,390)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 10.0, 390.0, 76.0, 25.0, 10).insert(MailSendBtn);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 100.0, 390.0, 76.0, 25.0, 10).insert(MailCancelBtn);
+        }
+    });
 }
 
-/// 显示/隐藏 + 列表渲染 + 内容区 + 点击读取
-#[allow(clippy::too_many_arguments)]
 fn mail_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut mail: ResMut<MailState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    close: Query<&UiButton, With<MailClose>>,
-    delete_btn: Query<&UiButton, With<MailDelete>>,
-    mut collect_btn: Query<(&UiButton, &mut Visibility), With<MailCollect>>,
+    close: Query<(Entity, &Interaction), With<MailClose>>,
+    delete_btn: Query<(Entity, &Interaction), With<MailDelete>>,
+    mut collect_btn: Query<(Entity, &Interaction, &mut Visibility), With<MailCollect>>,
     mut widgets: Query<
         (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),
         (
@@ -989,10 +739,19 @@ fn mail_ui_system(
             Without<MailCollect>,
         ),
     >,
-    mut lines: Query<(&mut Text2d, &mut TextColor, &MailLine), Without<MailDetailText>>,
-    mut detail_texts: Query<(&mut Text2d, &MailDetailText), Without<MailLine>>,
-    mut scroll: Query<&mut ScrollList, With<MailWidget>>,
+    mut lines: Query<(&mut Text, &mut TextColor, &MailLine), Without<MailDetailText>>,
+    mut detail_texts: Query<(&mut Text, &MailDetailText), Without<MailLine>>,
+    mut scroll: Query<&mut UiScrollList, With<MailWidget>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Mail);
     for (mut vis, line, _det) in &mut widgets {
         if line.is_some() || _det.is_some() {
@@ -1006,13 +765,13 @@ fn mail_ui_system(
     }
     if !open {
         // 收取附件按钮（MailCollect）不在 widgets 查询里，关闭时必须隐藏
-        for (_, mut vis) in &mut collect_btn {
+        for (_, _, mut vis) in &mut collect_btn {
             *vis = Visibility::Hidden;
         }
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Mail);
         }
     }
@@ -1069,13 +828,13 @@ fn mail_ui_system(
         .as_ref()
         .map(|d| d.collected && (!d.items.is_empty() || d.gold > 0))
         .unwrap_or(false);
-    for (btn, mut vis) in &mut collect_btn {
+    for (e, inter, mut vis) in &mut collect_btn {
         *vis = if open && can_collect {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
-        if btn.clicked && can_collect {
+        if edge(e, inter, &mut prev_inter) && can_collect {
             if let Some(d) = mail.detail.as_ref() {
                 net.send_packet(&mir2_shared::packets::client::mail::CollectParcel {
                     mail_id: d.mail_id,
@@ -1107,8 +866,8 @@ fn mail_ui_system(
         }
     }
     // 删除邮件（#132）
-    for btn in &delete_btn {
-        if btn.clicked {
+    for (e, inter) in &delete_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = mail.selected {
                 if let Some(m) = mail.mails.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::mail::DeleteMail {
