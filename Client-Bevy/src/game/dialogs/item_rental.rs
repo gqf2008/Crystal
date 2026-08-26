@@ -16,8 +16,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 /// 租赁状态
@@ -93,7 +94,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_item_rental);
         app.add_systems(OnExit(AppState::Game), cleanup_item_rental);
         app.add_systems(
             Update,
-            (item_rental_ui_system, item_rental_action_system, ui_button_system)
+            (item_rental_ui_system, item_rental_action_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -110,7 +111,6 @@ fn spawn_item_rental(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -120,153 +120,114 @@ fn spawn_item_rental(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::ItemRental),
-            ItemRentalWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            ItemRentalClose,
-            DialogRoot(DialogKind::ItemRental),
-            ItemRentalWidget,
-        ));
-    }
-    // 状态行 6 行
-    for i in 0..6usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 118.0 + i as f32 * 20.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            ItemRentalLine(i),
-            DialogRoot(DialogKind::ItemRental),
-            ItemRentalWidget,
-        ));
-    }
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    spawn_rental_input(&mut commands, &white, &font, 8, 298.0, 240.0, 120.0);
-    spawn_rental_input(&mut commands, &white, &font, 9, 298.0, 272.0, 80.0);
-    spawn_rental_input(&mut commands, &white, &font, 10, 430.0, 272.0, 80.0);
-    spawn_rental_buttons(&mut commands, &mut libs, &mut images, &mut cache);
+    // 面板 Prguse[170] @ (280,80)。加宽加高到 320x320：8 按钮 3 列 + 3 输入框
+    // + 关闭按钮全在面板内（旧 sprite 布局底部按钮 rel y=290 悬空 207 高面板外）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 320.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(ItemRentalClose);
+        }
+        // 状态行 6 行 @(18,38+20i)
+        for i in 0..6usize {
+            spawn_label(p, &font, "", 18.0, 38.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+                .insert(ItemRentalLine(i));
+        }
+        // 目标名（8）/费用（9）/期限（10）输入框 @(18,160)/(18,192)/(150,192)
+        spawn_rental_input(p, &mut images, &font, 8, 18.0, 160.0, 120.0, 298.0, 240.0);
+        spawn_rental_input(p, &mut images, &font, 9, 18.0, 192.0, 80.0, 298.0, 272.0);
+        spawn_rental_input(p, &mut images, &font, 10, 150.0, 192.0, 80.0, 430.0, 272.0);
+        // 按钮：发起（150,158）；存入/设费（18/110,222）；设期/锁费（18/110,256）；
+        // 锁物/确认/取消（18/110/200,290）
+        spawn_rental_buttons(p, &mut libs, &mut images);
+    });
 }
 
-/// 租赁按钮
-fn spawn_rental_buttons(
-    commands: &mut Commands,
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-    cache: &mut UiImageCache,
-) {
-    // 按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 206, 207, 208,
-        430.0, 238.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalRequest, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 206, 207, 208,
-        298.0, 302.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalDeposit, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 302.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalSetFee, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 206, 207, 208,
-        298.0, 336.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalSetPeriod, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 336.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalLockFee, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 206, 207, 208,
-        298.0, 370.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalLockItem, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 370.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalConfirm, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Title, 206, 207, 208,
-        480.0, 370.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((ItemRentalCancel, DialogRoot(DialogKind::ItemRental), ItemRentalWidget));
-    }
-}
-
-/// 租赁输入框（TextInputField(id) + 子 TextInputDisplay(id)）
+/// 租赁输入框（TextInputField(id) + 子 TextInputDisplay(id)）；面板子节点
+#[allow(clippy::too_many_arguments)]
 fn spawn_rental_input(
-    commands: &mut Commands,
-    white: &Handle<Image>,
+    parent: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    images: &mut Assets<Image>,
     font: &Handle<Font>,
     id: usize,
     x: f32,
     y: f32,
     w: f32,
+    rect_x: f32,
+    rect_y: f32,
 ) {
-    let box_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::ItemRental),
-            ItemRentalWidget,
+    spawn_container(parent, x, y, w, 20.0, 10)
+        .insert((
             crate::game::dialogs::text_input::TextInputField(id),
-            crate::game::dialogs::text_input::TextInputRect(x, y, w, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(w, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(x, -y, 8.1),
-            Visibility::Hidden,
+            crate::game::dialogs::text_input::TextInputRect(rect_x, rect_y, w, 20.0),
+            BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
         ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(id),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
+        .with_children(|ic| {
+            ic.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(4.0),
+                    top: Val::Px(2.0),
+                    ..default()
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                ZIndex(11),
+                crate::game::dialogs::text_input::TextInputDisplay(id),
+            ));
+        });
+    let _ = images;
+}
+
+/// 租赁按钮（面板子节点）
+fn spawn_rental_buttons(
+    parent: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+) {
+    // 发起 Title[206/207/208] @(150,158)
+    if let (Some(n), Some(h), Some(pr)) = (
+        load_lib_image(libs, images, LibraryName::Title, 206),
+        load_lib_image(libs, images, LibraryName::Title, 207),
+        load_lib_image(libs, images, LibraryName::Title, 208),
+    ) {
+        spawn_icon_button(parent, n.clone(), h.clone(), pr.clone(), 150.0, 158.0, 76.0, 25.0, 10)
+            .insert(ItemRentalRequest);
+        spawn_icon_button(parent, n.clone(), h.clone(), pr.clone(), 18.0, 222.0, 76.0, 25.0, 10)
+            .insert(ItemRentalDeposit);
+        spawn_icon_button(parent, n.clone(), h.clone(), pr.clone(), 18.0, 256.0, 76.0, 25.0, 10)
+            .insert(ItemRentalSetPeriod);
+        spawn_icon_button(parent, n.clone(), h.clone(), pr.clone(), 18.0, 290.0, 76.0, 25.0, 10)
+            .insert(ItemRentalLockItem);
+        spawn_icon_button(parent, n, h, pr, 200.0, 290.0, 76.0, 25.0, 10).insert(ItemRentalCancel);
+    }
+    if let (Some(n), Some(h), Some(pr)) = (
+        load_lib_image(libs, images, LibraryName::Title, 210),
+        load_lib_image(libs, images, LibraryName::Title, 211),
+        load_lib_image(libs, images, LibraryName::Title, 212),
+    ) {
+        spawn_icon_button(parent, n.clone(), h.clone(), pr.clone(), 110.0, 222.0, 76.0, 25.0, 10)
+            .insert(ItemRentalSetFee);
+        spawn_icon_button(parent, n.clone(), h.clone(), pr.clone(), 110.0, 256.0, 76.0, 25.0, 10)
+            .insert(ItemRentalLockFee);
+        spawn_icon_button(parent, n, h, pr, 110.0, 290.0, 76.0, 25.0, 10).insert(ItemRentalConfirm);
+    }
 }
 
 /// 显隐 + 渲染 + 全部按钮
@@ -276,11 +237,20 @@ fn item_rental_ui_system(
     mut state: ResMut<ItemRentalState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    close: Query<&UiButton, With<ItemRentalClose>>,
-    request_btn: Query<&UiButton, With<ItemRentalRequest>>,
+    close: Query<(Entity, &Interaction), With<ItemRentalClose>>,
+    request_btn: Query<(Entity, &Interaction), With<ItemRentalRequest>>,
     mut widgets: Query<&mut Visibility, With<ItemRentalWidget>>,
-    mut lines: Query<(&mut Text2d, &ItemRentalLine)>,
+    mut lines: Query<(&mut Text, &ItemRentalLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::ItemRental);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -288,8 +258,8 @@ fn item_rental_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::ItemRental);
         }
     }
@@ -309,8 +279,8 @@ fn item_rental_ui_system(
         };
     }
     // 发起租赁（租方）
-    for btn in &request_btn {
-        if btn.clicked {
+    for (e, inter) in &request_btn {
+        if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(8).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() {
@@ -335,20 +305,29 @@ fn item_rental_action_system(
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
-    deposit_btn: Query<&UiButton, With<ItemRentalDeposit>>,
-    fee_btn: Query<&UiButton, With<ItemRentalSetFee>>,
-    period_btn: Query<&UiButton, With<ItemRentalSetPeriod>>,
-    lock_fee_btn: Query<&UiButton, With<ItemRentalLockFee>>,
-    lock_item_btn: Query<&UiButton, With<ItemRentalLockItem>>,
-    confirm_btn: Query<&UiButton, With<ItemRentalConfirm>>,
-    cancel_btn: Query<&UiButton, With<ItemRentalCancel>>,
+    deposit_btn: Query<(Entity, &Interaction), With<ItemRentalDeposit>>,
+    fee_btn: Query<(Entity, &Interaction), With<ItemRentalSetFee>>,
+    period_btn: Query<(Entity, &Interaction), With<ItemRentalSetPeriod>>,
+    lock_fee_btn: Query<(Entity, &Interaction), With<ItemRentalLockFee>>,
+    lock_item_btn: Query<(Entity, &Interaction), With<ItemRentalLockItem>>,
+    confirm_btn: Query<(Entity, &Interaction), With<ItemRentalConfirm>>,
+    cancel_btn: Query<(Entity, &Interaction), With<ItemRentalCancel>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     if !mgr.is_open(DialogKind::ItemRental) {
         return;
     }
     // 存入（物主）：选中背包物品
-    for btn in &deposit_btn {
-        if btn.clicked {
+    for (e, inter) in &deposit_btn {
+        if edge(e, inter, &mut prev_inter) {
             let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
             let idx = inv_click
                 .selected
@@ -367,8 +346,8 @@ fn item_rental_action_system(
         }
     }
     // 设置费用
-    for btn in &fee_btn {
-        if btn.clicked {
+    for (e, inter) in &fee_btn {
+        if edge(e, inter, &mut prev_inter) {
             let fee = input
                 .texts
                 .get(9)
@@ -383,8 +362,8 @@ fn item_rental_action_system(
         }
     }
     // 设置期限
-    for btn in &period_btn {
-        if btn.clicked {
+    for (e, inter) in &period_btn {
+        if edge(e, inter, &mut prev_inter) {
             let days = input
                 .texts
                 .get(10)
@@ -399,32 +378,32 @@ fn item_rental_action_system(
         }
     }
     // 锁定费用（租方）
-    for btn in &lock_fee_btn {
-        if btn.clicked {
+    for (e, inter) in &lock_fee_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockFee);
             state.message = "已锁定费用".to_string();
             tracing::info!("📦 锁定费用");
         }
     }
     // 锁定物品（物主）
-    for btn in &lock_item_btn {
-        if btn.clicked {
+    for (e, inter) in &lock_item_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockItem);
             state.message = "已锁定物品".to_string();
             tracing::info!("📦 锁定物品");
         }
     }
     // 确认
-    for btn in &confirm_btn {
-        if btn.clicked {
+    for (e, inter) in &confirm_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&mir2_shared::packets::client::item::ConfirmItemRental);
             state.message = "已发送确认".to_string();
             tracing::info!("📦 确认租赁");
         }
     }
     // 取消
-    for btn in &cancel_btn {
-        if btn.clicked {
+    for (e, inter) in &cancel_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&mir2_shared::packets::client::item::CancelItemRental);
             state.message = "已发送取消".to_string();
             tracing::info!("📦 取消租赁");
