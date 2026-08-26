@@ -116,11 +116,11 @@ fn spawn_mentor(
     }
     let font = ui_font.0.clone();
 
-    // 面板 Prguse[170]（C# MentorDialog.Index=170，244x207 @ 280,80）
+    // 面板 Prguse[170]（C# MentorDialog.Index=170，320x262 @ 280,80）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
     commands.entity(panel).insert((DialogRoot(DialogKind::Mentor), MentorWidget));
 
     commands.entity(panel).with_children(|p| {
