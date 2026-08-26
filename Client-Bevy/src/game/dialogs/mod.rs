@@ -576,6 +576,7 @@ impl Plugin for DialogsPlugin {
                 crate::ui::theme::dropdown_ui_system,
                 crate::ui::theme::animated_button_ui_system,
                 crate::ui::theme::item_cell_ui_system,
+                crate::ui::theme::scroll_list_ui_system,
                 crate::ui::controls::scrolling_label_system,
                 crate::ui::controls::item_cell_system,
                 crate::ui::controls::animated_button_system,

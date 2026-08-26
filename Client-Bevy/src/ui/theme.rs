@@ -790,3 +790,215 @@ mod tests {
         assert_eq!(item_cell_dura_width(60.0, 0.01), 1.0);
     }
 }
+
+// ============================================================================
+// bevy_ui 可滚动列表（C# MirListBox + ScrollBar）
+// 与 sprite scroll_list 同语义：UiScrollList 挂在面板根（Node.left/top = 屏幕坐标），
+// rect_rel/track_rel 相对面板；滚轮滚动 + 滑块拖动 + 滑块跟随 offset。
+// ============================================================================
+
+/// bevy_ui 可滚动列表状态（挂在对话框容器实体上）
+#[derive(Component, Debug, Clone)]
+pub struct UiScrollList {
+    /// 列表可视区（相对容器左上角）
+    pub rect_rel: (f32, f32, f32, f32),
+    /// 行高（px）
+    pub row_h: f32,
+    /// 可视行数
+    pub visible: usize,
+    /// 数据总行数（对话框每帧 set_total）
+    pub total: usize,
+    /// 当前滚动偏移（首行下标）
+    pub offset: usize,
+    /// 滚轮每格滚动行数
+    pub step: usize,
+    /// 滚动条轨道（相对容器左上角）
+    pub track_rel: (f32, f32, f32, f32),
+    /// 滚动条滑块实体（spawn_scroll_bar_ui 返回）
+    pub thumb: Option<Entity>,
+    /// z 排序（多个列表重叠时滚动最上层）
+    pub z: i32,
+}
+
+impl UiScrollList {
+    /// 最大可用偏移（数据不满一屏时为 0）
+    pub fn max_offset(&self) -> usize {
+        self.total.saturating_sub(self.visible)
+    }
+
+    /// 更新数据行数并夹紧偏移
+    pub fn set_total(&mut self, total: usize) {
+        self.total = total;
+        self.offset = self.offset.min(self.max_offset());
+    }
+}
+
+/// bevy_ui 滚动条滑块标记
+#[derive(Component)]
+pub struct UiScrollThumb;
+
+/// 生成 bevy_ui 滚动条（轨道 + 滑块，面板子节点），返回滑块实体。
+/// 轨道/滑块为 Node + BackgroundColor；位置由 scroll_list_ui_system 维护。
+pub fn spawn_scroll_bar_ui(
+    parent: &mut ChildSpawnerCommands,
+    track_rel: (f32, f32, f32, f32),
+    z: i32,
+) -> (Entity, Entity) {
+    // 轨道（半透明深色）
+    let track = parent
+        .spawn((
+            abs_node(track_rel.0, track_rel.1, Some(track_rel.2), Some(track_rel.3)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            ZIndex(z),
+        ))
+        .id();
+    // 滑块（浅色）
+    let thumb = parent
+        .spawn((
+            abs_node(track_rel.0, track_rel.1, Some(track_rel.2), Some(40.0)),
+            BackgroundColor(Color::srgba(0.85, 0.85, 0.9, 0.9)),
+            UiScrollThumb,
+            ZIndex(z + 1),
+        ))
+        .id();
+    (track, thumb)
+}
+
+/// bevy_ui 滚轮滚动 + 滑块定位 + 滑块拖动
+#[allow(clippy::type_complexity)]
+pub fn scroll_list_ui_system(
+    mut wheels: MessageReader<MouseWheel>,
+    windows: Query<&Window>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut drag: ResMut<crate::ui::scroll_list::ScrollDrag>,
+    mut lists: Query<(Entity, &mut UiScrollList, &Node), Without<UiScrollThumb>>,
+    mut thumbs: Query<(&mut Node, &UiScrollThumb)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    // 容器屏幕原点（面板根 Node.left/top）
+    fn origin(node: &Node) -> (f32, f32) {
+        let x = match node.left {
+            Val::Px(v) => v,
+            _ => 0.0,
+        };
+        let y = match node.top {
+            Val::Px(v) => v,
+            _ => 0.0,
+        };
+        (x, y)
+    }
+
+    // 滑块拖动（C# MirScrollBar movable）
+    if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
+        for (_, list, node) in lists.iter() {
+            let Some(thumb) = list.thumb else {
+                continue;
+            };
+            let (ox, oy) = origin(node);
+            let total = list.total.max(list.visible);
+            let (tx, ty, tw, th) = list.track_rel;
+            let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+            let max_off = list.max_offset();
+            let ratio = if max_off == 0 { 0.0 } else { list.offset as f32 / max_off as f32 };
+            let thumb_y = oy + ty + ratio * (th - thumb_h);
+            if cursor.x >= ox + tx
+                && cursor.x <= ox + tx + tw
+                && cursor.y >= thumb_y
+                && cursor.y <= thumb_y + thumb_h
+            {
+                drag.dragging = Some(thumb);
+                drag.grab_offset = cursor.y - thumb_y;
+                break;
+            }
+        }
+    }
+    if let Some(thumb_e) = drag.dragging {
+        if !mouse.pressed(MouseButton::Left) {
+            drag.dragging = None;
+        } else {
+            for (_, mut list, node) in lists.iter_mut() {
+                if list.thumb != Some(thumb_e) {
+                    continue;
+                }
+                let (ox, oy) = origin(node);
+                let total = list.total.max(list.visible);
+                let (_, ty, _, th) = list.track_rel;
+                let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+                let track_top = oy + ty;
+                let max_off = list.max_offset();
+                if max_off == 0 {
+                    list.offset = 0;
+                    break;
+                }
+                let ty_clamped = (cursor.y - drag.grab_offset)
+                    .clamp(track_top, track_top + th - thumb_h);
+                let ratio = ((ty_clamped - track_top) / (th - thumb_h)).clamp(0.0, 1.0);
+                list.offset = (ratio * max_off as f32).round() as usize;
+                break;
+            }
+        }
+    }
+
+    // 汇总本帧滚轮增量（行）。像素滚动按 ~20px/行折算。
+    let mut scroll_y = 0.0f32;
+    for ev in wheels.read() {
+        match ev.unit {
+            MouseScrollUnit::Line => scroll_y += ev.y,
+            MouseScrollUnit::Pixel => scroll_y += ev.y / 20.0,
+        }
+    }
+
+    if scroll_y.abs() > 0.0 {
+        let mut best: Option<(i32, Entity)> = None;
+        for (e, list, node) in lists.iter() {
+            let (ox, oy) = origin(node);
+            let (rx, ry, rw, rh) = list.rect_rel;
+            if cursor.x >= ox + rx
+                && cursor.x <= ox + rx + rw
+                && cursor.y >= oy + ry
+                && cursor.y <= oy + ry + rh
+            {
+                if best.map_or(true, |(bz, _)| list.z > bz) {
+                    best = Some((list.z, e));
+                }
+            }
+        }
+        if let Some((_, e)) = best {
+            if let Ok((_, mut list, _)) = lists.get_mut(e) {
+                let rows = (scroll_y * list.step.max(1) as f32).round() as i32;
+                let max = list.max_offset() as i32;
+                list.offset = (list.offset as i32 + rows).clamp(0, max) as usize;
+            }
+        }
+    }
+
+    // 每帧把滑块移到 offset 对应位置（跟随容器拖动）
+    for (_, list, _) in lists.iter() {
+        let Some(thumb) = list.thumb else {
+            continue;
+        };
+        let Ok((mut tn, _)) = thumbs.get_mut(thumb) else {
+            continue;
+        };
+        let (tx, ty, tw, th) = list.track_rel;
+        let total = list.total.max(list.visible);
+        let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+        let max_off = list.max_offset();
+        let ratio = if max_off == 0 {
+            0.0
+        } else {
+            list.offset as f32 / max_off as f32
+        };
+        let thumb_y = ty + ratio * (th - thumb_h);
+        tn.left = Val::Px(tx);
+        tn.top = Val::Px(thumb_y);
+        tn.width = Val::Px(tw);
+        tn.height = Val::Px(thumb_h);
+    }
+}
