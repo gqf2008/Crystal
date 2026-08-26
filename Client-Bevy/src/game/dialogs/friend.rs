@@ -15,9 +15,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::scroll_list::{ScrollList, spawn_scroll_bar};
-use crate::ui::sprite_ui::{
-    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
 /// 好友条目
@@ -88,6 +88,28 @@ pub struct FriendTabBlock;
 #[derive(Component)]
 pub struct FriendLine(usize);
 
+/// bevy_ui 行文本子节点（父 Button 挂 FriendLine，子文本挂 FriendLineText）
+#[derive(Component)]
+pub struct FriendLineText(usize);
+
+/// friend_ui_system 的 Local 状态（合并以控制 Bevy 系统参数数 ≤16）
+#[derive(Default)]
+struct FriendLocal {
+    prev_inter: std::collections::HashMap<Entity, Interaction>,
+    requested: bool,
+    offset: usize,
+}
+
+/// 好友动作按钮（添加/删除/备注/邮件/私聊；bevy_ui Interaction 驱动）
+#[derive(Component, Clone, Copy)]
+pub struct FriendAction {
+    pub is_add: bool,
+    pub is_remove: bool,
+    pub is_memo: bool,
+    pub is_email: bool,
+    pub is_whisper: bool,
+}
+
 pub struct FriendPlugin;
 
 impl Plugin for FriendPlugin {
@@ -101,9 +123,7 @@ impl Plugin for FriendPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_friend);
         app.add_systems(
             Update,
-            (friend_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            friend_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -118,7 +138,6 @@ fn spawn_friend(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -127,266 +146,114 @@ fn spawn_friend(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
 
-    // 背景 Title[199]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 199) {
-        let e = spawn_ui_sprite(&mut commands, h, 300.0, 100.0, 6.0, 1.0);
-        // #89 可滚动列表：10 行 × 20px，滚动条在列表右侧
-        let (track, thumb) =
-            spawn_scroll_bar(&mut commands, &mut images, (508.0, 140.0, 4.0, 200.0), 6.3);
-        commands.entity(track).insert((
-            DialogRoot(DialogKind::Friend),
-            FriendWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(thumb).insert((
-            DialogRoot(DialogKind::Friend),
-            FriendWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Friend),
-            FriendWidget,
-            Visibility::Hidden,
-            ScrollList {
-                rect_rel: (18.0, 40.0, 190.0, 200.0),
-                row_h: 20.0,
-                visible: 10,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (208.0, 40.0, 4.0, 200.0),
-                thumb: Some(thumb),
-                z: 8.0,
-            },
-        ));
-    }
-    // 标题 Title[6]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 6) {
-        let e = spawn_ui_sprite(&mut commands, h, 318.0, 109.0, 6.2, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Friend),
-            FriendWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        300.0 + 206.0,
-        103.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FriendClose, DialogRoot(DialogKind::Friend), FriendWidget));
-    }
-    // 添加/删除/备注按钮（C# FriendDialog Add/Remove/Memo (60,241)/(88,241)/(116,241)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        554,
-        555,
-        556,
-        300.0 + 60.0,
-        100.0 + 241.0,
-        7.2,
-        24.0,
-        22.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FriendAdd, DialogRoot(DialogKind::Friend), FriendWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        557,
-        558,
-        559,
-        300.0 + 88.0,
-        100.0 + 241.0,
-        7.2,
-        24.0,
-        22.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FriendRemove, DialogRoot(DialogKind::Friend), FriendWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        560,
-        561,
-        562,
-        300.0 + 116.0,
-        100.0 + 241.0,
-        7.2,
-        24.0,
-        22.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FriendMemo, DialogRoot(DialogKind::Friend), FriendWidget));
-    }
-    // 邮件按钮（C# EmailButton Prguse 563-565 @(144,241)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        563,
-        564,
-        565,
-        300.0 + 144.0,
-        100.0 + 241.0,
-        7.2,
-        24.0,
-        22.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FriendEmail, DialogRoot(DialogKind::Friend), FriendWidget));
-    }
-    // 私聊按钮（C# WhisperButton Prguse 566-568 @(172,241)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        566,
-        567,
-        568,
-        300.0 + 172.0,
-        100.0 + 241.0,
-        7.2,
-        24.0,
-        22.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((FriendWhisper, DialogRoot(DialogKind::Friend), FriendWidget));
-    }
-    // 内嵌输入框（添加/备注，TextInput id 30，#130）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    let box_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Friend),
-            FriendWidget,
-            FriendInputBox,
-            crate::game::dialogs::text_input::TextInputField(30),
-            crate::game::dialogs::text_input::TextInputRect(318.0, 345.0, 180.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(180.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(318.0, -345.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(30),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
+    // 面板 Title[199]（264x272 @ 300,100）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 199) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 300.0, 100.0, 264.0, 272.0, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Friend), FriendWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[6] @(18,9)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 6) {
+            spawn_image(p, h, 18.0, 9.0, 57.0, 15.0, 9);
+        }
+        // 关闭 Prguse2[360/361/362] @(206,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 206.0, 3.0, 20.0, 20.0, 10).insert(FriendClose);
+        }
+        // 添加/删除/备注/邮件/私聊（Prguse 554-568 @(60/88/116/144/172, 241)）
+        let acts: [(bool, bool, bool, bool, bool, usize, f32); 5] = [
+            (true, false, false, false, false, 554, 60.0),
+            (false, true, false, false, false, 557, 88.0),
+            (false, false, true, false, false, 560, 116.0),
+            (false, false, false, true, false, 563, 144.0),
+            (false, false, false, false, true, 566, 172.0),
+        ];
+        for (is_add, is_remove, is_memo, is_email, is_whisper, idx, x) in acts {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 1),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 2),
+            ) {
+                spawn_icon_button(p, n, h, pr, x, 241.0, 24.0, 22.0, 10).insert((
+                    FriendAction {
+                        is_add,
+                        is_remove,
+                        is_memo,
+                        is_email,
+                        is_whisper,
+                    },
+                ));
+            }
+        }
+        // 内嵌输入框（TextInput id 30）@(18,245) 180x20
+        spawn_container(p, 18.0, 245.0, 180.0, 20.0, 10)
+            .insert((
+                FriendInputBox,
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                crate::game::dialogs::text_input::TextInputField(30),
+                crate::game::dialogs::text_input::TextInputRect(318.0, 345.0, 180.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(30),
+                ));
+            });
+        // 页签（好友/黑名单）@(18,18)/(70,18)
+        spawn_label(p, &font, "好友", 18.0, 18.0, 12.0, Color::WHITE, 10)
+            .insert((Button, FriendTabFriend));
+        spawn_label(p, &font, "黑名单", 70.0, 18.0, 12.0, Color::WHITE, 10)
+            .insert((Button, FriendTabBlock));
+        // 好友列表（10 行，可点击 Button + 文本子节点）
+        for i in 0..10usize {
+            spawn_container(p, 18.0, 40.0 + i as f32 * 20.0, 190.0, 18.0, 9)
+                .insert((Button, FriendLine(i)))
+                .with_children(|rc| {
+                    rc.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            ..default()
+                        },
+                        Text::new(String::new()),
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(10),
+                        FriendLineText(i),
+                    ));
+                });
+        }
     });
-
-    // 页签（C# FriendLabel/BlacklistLabel：好友/黑名单）
-    let e = spawn_ui_text(
-        &mut commands,
-        &font,
-        "好友",
-        318.0,
-        118.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(e).insert((
-        FriendTabFriend,
-        UiButton {
-            rect: (318.0, 118.0, 44.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Friend),
-        FriendWidget,
-    ));
-    let e = spawn_ui_text(
-        &mut commands,
-        &font,
-        "黑名单",
-        370.0,
-        118.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(e).insert((
-        FriendTabBlock,
-        UiButton {
-            rect: (370.0, 118.0, 60.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Friend),
-        FriendWidget,
-    ));
-
-    // 好友列表（10 行）
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            318.0,
-            140.0 + i as f32 * 20.0,
-            12.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands
-            .entity(e)
-            .insert((FriendLine(i), DialogRoot(DialogKind::Friend), FriendWidget));
-    }
 }
 
 /// 显隐 + 列表渲染 + 打开时自动请求刷新（原版 C# FriendDialog.Show → RefreshFriends）
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn friend_ui_system(
     mut mgr: ResMut<DialogManager>,
@@ -394,39 +261,38 @@ fn friend_ui_system(
     mut compose_mail: MessageWriter<ComposeMail>,
     mut chat: ResMut<ChatState>,
     net: Res<NetConnection>,
-    close: Query<&UiButton, With<FriendClose>>,
-    btns: Query<(
-        &UiButton,
-        Has<FriendAdd>,
-        Has<FriendRemove>,
-        Has<FriendMemo>,
-        Has<FriendEmail>,
-        Has<FriendWhisper>,
-        Has<FriendTabFriend>,
-        Has<FriendTabBlock>,
-    )>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    mut wheels: MessageReader<bevy::input::mouse::MouseWheel>,
+    close: Query<(Entity, &Interaction), With<FriendClose>>,
+    actions: Query<(Entity, &Interaction, &FriendAction)>,
+    tabs: Query<(Entity, &Interaction, Has<FriendTabBlock>)>,
+    rows: Query<(Entity, &Interaction, &FriendLine), Without<FriendLineText>>,
+    mut line_texts: Query<(&mut Text, &mut TextColor, &FriendLineText)>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     mut submits: MessageReader<crate::game::dialogs::text_input::TextInputSubmit>,
     mut input_box: Query<&mut Visibility, With<FriendInputBox>>,
     mut widgets: Query<
-        (&mut Visibility, Option<&FriendLine>),
-        (With<FriendWidget>, Without<FriendInputBox>),
+        &mut Visibility,
+        (With<FriendWidget>, Without<FriendInputBox>, Without<FriendLineText>),
     >,
-    mut lines: Query<(&mut Text2d, &mut TextColor, &FriendLine)>,
-    mut scroll: Query<&mut ScrollList, With<FriendWidget>>,
-    mut requested: Local<bool>,
+    mut local: Local<FriendLocal>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     let open = mgr.is_open(DialogKind::Friend);
-    for (mut vis, _line) in &mut widgets {
+    for mut vis in widgets.iter_mut() {
         *vis = if open {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
     }
-    // 内嵌输入框只在有待处理动作时显示
     let show_input = open && friend.pending.is_some();
     for mut vis in &mut input_box {
         *vis = if show_input {
@@ -436,139 +302,105 @@ fn friend_ui_system(
         };
     }
     if !open {
-        *requested = false;
+        local.requested = false;
         friend.pending = None;
         friend.selected = None;
         input.active = None;
+        local.offset = 0;
         return;
     }
-    // 打开瞬间请求一次好友列表
-    if !*requested {
-        *requested = true;
+    if !local.requested {
+        local.requested = true;
         net.send_packet(&mir2_shared::packets::client::friend::RefreshFriends);
         tracing::info!("👥 请求刷新好友列表");
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut local.prev_inter) {
             mgr.close(DialogKind::Friend);
         }
     }
-    // 当前页签的显示列表（好友/黑名单过滤，C# _blockedTab）
+    // 当前页签的显示列表
     let list = filter_friends(&friend.friends, friend.blocked_tab);
-    // 列表（在线标记，原版 C# 语义）；#89 支持滚轮滚动；#130 选中行高亮
-    let mut sl = scroll.single_mut();
-    if let Ok(sl) = sl.as_mut() {
-        sl.set_total(list.len());
-        let off = sl.offset;
-        for (mut text, mut color, line) in &mut lines {
-            let idx = off + line.0;
-            let selected = friend.selected == Some(idx);
-            text.0 = match list.get(idx) {
-                Some(f) => {
-                    let mark = if f.online {
-                        "（在线）"
-                    } else {
-                        "（离线）"
-                    };
-                    let name = if f.memo.is_empty() {
-                        f.name.clone()
-                    } else {
-                        format!("{} ({})", f.name, f.memo)
-                    };
-                    format!("{}{}", name, mark)
-                }
-                None => String::new(),
-            };
-            let c = if selected {
-                Color::srgb(1.0, 0.9, 0.3)
+    let max_offset = list.len().saturating_sub(10);
+    // 滚轮滚动
+    let mut scroll_y = 0.0f32;
+    for ev in wheels.read() {
+        scroll_y += match ev.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => ev.y,
+            bevy::input::mouse::MouseScrollUnit::Pixel => ev.y / 20.0,
+        };
+    }
+    if scroll_y.abs() > 0.0 {
+        local.offset = ((local.offset as i32) - (scroll_y * 3.0) as i32).clamp(0, max_offset as i32) as usize;
+    }
+    local.offset = (local.offset).min(max_offset);
+    // 列表文本（含在线标记/备注/选中高亮）
+    for (mut text, mut color, line) in &mut line_texts {
+        let idx = local.offset + line.0;
+        let selected = friend.selected == Some(idx);
+        text.0 = match list.get(idx) {
+            Some(f) => {
+                let mark = if f.online { "（在线）" } else { "（离线）" };
+                let name = if f.memo.is_empty() {
+                    f.name.clone()
+                } else {
+                    format!("{} ({})", f.name, f.memo)
+                };
+                format!("{}{}", name, mark)
+            }
+            None => String::new(),
+        };
+        color.0 = if selected {
+            Color::srgb(1.0, 0.9, 0.3)
+        } else {
+            Color::WHITE
+        };
+    }
+    // 行点击选中（#130）
+    for (e, inter, line) in &rows {
+        if edge(e, inter, &mut local.prev_inter) {
+            let idx = local.offset + line.0;
+            friend.selected = if friend.selected == Some(idx) {
+                None
             } else {
-                Color::WHITE
+                Some(idx)
             };
-            if color.0 != c {
-                color.0 = c;
-            }
         }
     }
-
-    // 点击行选中（#130）
-    if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
-            if let Some(cursor) = window.cursor_position() {
-                let off = scroll.single().map(|s| s.offset).unwrap_or(0);
-                for i in 0..10usize {
-                    let y = 140.0 + i as f32 * 20.0;
-                    if cursor.x >= 318.0
-                        && cursor.x <= 500.0
-                        && cursor.y >= y
-                        && cursor.y <= y + 18.0
-                    {
-                        let idx = off + i;
-                        friend.selected = if friend.selected == Some(idx) {
-                            None
-                        } else {
-                            Some(idx)
-                        };
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // 添加/删除/备注/邮件/私聊按钮（C# FriendDialog Add/Remove/Memo/Email/Whisper）
-    for (btn, is_add, is_remove, is_memo, is_email, is_whisper, is_tab_friend, is_tab_block) in
-        &btns
-    {
-        if !btn.clicked {
+    // 动作按钮 + 页签
+    for (e, inter, act) in &actions {
+        if !edge(e, inter, &mut local.prev_inter) {
             continue;
         }
-        // 页签切换（C# FriendLabel/BlacklistLabel）
-        if is_tab_friend || is_tab_block {
-            let target = is_tab_block;
-            if friend.blocked_tab != target {
-                friend.blocked_tab = target;
-                friend.selected = None;
-            }
-            continue;
-        }
-        if is_add {
+        if act.is_add {
             friend.pending = Some(FriendPending::Add);
             input.texts[30].clear();
             input.active = Some(30);
-            tracing::info!("👥 添加好友：请输入名字");
-        } else if is_remove {
+        } else if act.is_remove {
             if let Some(idx) = friend.selected {
                 if let Some(f) = list.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::friend::RemoveFriend {
                         character_index: f.object_id as i32,
                     });
-                    tracing::info!("👥 删除好友: {}", f.name);
                     friend.selected = None;
                 }
             }
-        } else if is_memo {
+        } else if act.is_memo {
             if let Some(idx) = friend.selected {
                 friend.pending = Some(FriendPending::Memo(idx));
                 input.texts[30].clear();
                 input.active = Some(30);
-                tracing::info!("👥 备注好友：请输入备注");
             }
-        } else if is_email {
-            // 邮件：给选中好友写邮件（C# FriendDialog EmailButton）。
-            // #2631：不再直写 MailState/打开邮件窗，改发 ComposeMail，由邮件对话框自行预填+打开。
+        } else if act.is_email {
             if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
-                let to = f.name.clone();
-                compose_mail.write(ComposeMail { to: to.clone() });
-                tracing::info!("✉️ 给好友 {} 写邮件", to);
+                compose_mail.write(ComposeMail { to: f.name.clone() });
             }
-        } else if is_whisper {
-            // 私聊：在线预填 /w，离线系统提示（C# FriendDialog WhisperButton）
+        } else if act.is_whisper {
             if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
                 match friend_whisper_command(&f.name, f.online) {
                     Some(cmd) => {
                         chat.input_active = true;
                         chat.input_text = cmd;
-                        tracing::info!("💬 私聊好友 {}", f.name);
                     }
                     None => {
                         chat.add_line(
@@ -576,9 +408,18 @@ fn friend_ui_system(
                             Color::srgb(1.0, 0.3, 0.3),
                             ChatChannel::System,
                         );
-                        tracing::info!("💬 好友 {} 不在线", f.name);
                     }
                 }
+            }
+        }
+    }
+    for (e, inter, is_block) in &tabs {
+        if edge(e, inter, &mut local.prev_inter) {
+            let target = is_block; // 黑名单页签 → true；好友页签 → false
+            if friend.blocked_tab != target {
+                friend.blocked_tab = target;
+                friend.selected = None;
+                local.offset = 0;
             }
         }
     }
@@ -600,7 +441,6 @@ fn friend_ui_system(
                     name: name.clone(),
                     blocked: friend.blocked_tab,
                 });
-                tracing::info!("👥 添加好友: {}", name);
             }
             Some(FriendPending::Memo(idx)) => {
                 if let Some(f) = list.get(idx) {
@@ -608,7 +448,6 @@ fn friend_ui_system(
                         character_index: f.object_id as i32,
                         memo: name.clone(),
                     });
-                    tracing::info!("👥 备注好友 {}: {}", f.name, name);
                 }
             }
             None => {}

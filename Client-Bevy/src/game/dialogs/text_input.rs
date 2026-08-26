@@ -64,6 +64,9 @@ fn text_input_system(
     windows: Query<&Window>,
     fields: Query<(Entity, &TextInputField, &TextInputRect)>,
     mut displays: Query<(&mut Text2d, &TextInputDisplay)>,
+    // bevy_ui 迁移：输入框显示文本同时支持 bevy_ui Text（Node 内文本），
+    // 与 Sprite Text2d 显示实体按组件类型互斥（Text vs Text2d），无 B0001 冲突
+    mut bevy_displays: Query<(&mut Text, &TextInputDisplay)>,
     mut submit: MessageWriter<TextInputSubmit>,
     mut focus: ResMut<ImeFocus>,
 ) {
@@ -159,6 +162,13 @@ fn text_input_system(
 
     // 显示同步（变化才更新，避免每帧重排文本，#31）
     for (mut text, disp) in &mut displays {
+        let new = state.texts.get(disp.0).cloned().unwrap_or_default();
+        if text.0 != new {
+            text.0 = new;
+        }
+    }
+    // bevy_ui 显示同步（Node 内 Text）
+    for (mut text, disp) in &mut bevy_displays {
         let new = state.texts.get(disp.0).cloned().unwrap_or_default();
         if text.0 != new {
             text.0 = new;
