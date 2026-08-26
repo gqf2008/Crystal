@@ -19,9 +19,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
 /// 商城商品（GameShopInfo 写入）
@@ -103,9 +103,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_game_shop);
         app.add_systems(OnExit(AppState::Game), cleanup_game_shop);
         app.add_systems(
             Update,
-            (game_shop_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            game_shop_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -120,7 +118,6 @@ fn spawn_game_shop(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -130,135 +127,95 @@ fn spawn_game_shop(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Title[411]（C# GameshopDialog.Index=749 Title 库；placeholder 用 411）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 411) {
-        let e = spawn_ui_sprite(&mut commands, h, 200.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        200.0 + 330.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            GameShopClose,
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-        ));
-    }
-    // 商品列表 10 行
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            208.0, 130.0 + i as f32 * 20.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            GameShopLine(i),
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-        ));
-    }
-    // 分类页签（C# GameshopDialog Filters + Up/Down/PositionBar；第 0 项 = 全部）
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            108.0, 130.0 + i as f32 * 20.0,
-            12.0, Color::srgb(0.9, 0.9, 0.9), 8.0,
-        );
-        commands.entity(e).insert((
-            GameShopCat(i),
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-        ));
-    }
-    // 分类翻页（Prguse2 197/198/199 上，207/208/209 下，16x14）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 197, 198, 199,
-        108.0, 335.0, 8.3, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((GameShopCatUp, DialogRoot(DialogKind::GameShop), GameShopWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 207, 208, 209,
-        128.0, 335.0, 8.3, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((GameShopCatDown, DialogRoot(DialogKind::GameShop), GameShopWidget));
-    }
-    // 状态行（金币/消息）
-    for i in 10..=11usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            208.0, 335.0 + (i - 10) as f32 * 18.0,
-            12.0, Color::srgb(1.0, 0.9, 0.5), 8.0,
-        );
-        commands.entity(e).insert((
-            GameShopLine(i),
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-        ));
-    }
-    // 购买按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        360.0, 385.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GameShopBuy,
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-        ));
-    }
+    // 面板 Title[749]（C# GameshopDialog Index=749，696x476 居中 @(164,146)；
+    // 旧 Bevy 用 Title[411] 259 宽占位，分类/搜索悬空面板外）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 749) else {
+        return;
+    };
+    let (px, py) = ((1024.0 - 696.0) / 2.0, (768.0 - 476.0) / 2.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 696.0, 476.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::GameShop), GameShopWidget));
 
-    // 搜索框（C# GameshopDialog Search：本地按名称过滤，TextInput id 31）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    let label = spawn_ui_text(
-        &mut commands, &font, "搜索",
-        390.0, 106.0, 12.0, Color::WHITE, 8.1,
-    );
-    commands.entity(label).insert((DialogRoot(DialogKind::GameShop), GameShopWidget));
-    let box_e = commands
-        .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::GameShop),
-            GameShopWidget,
-            TextInputField(31),
-            TextInputRect(425.0, 105.0, 115.0, 18.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(115.0, 18.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(425.0, -105.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            TextInputDisplay(31),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -1.0, 8.2),
-        ));
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[26]（C# (18,9)）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 26) {
+            spawn_image(p, h, 18.0, 9.0, 103.0, 17.0, 8);
+        }
+        // 关闭（C# (671,4)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 671.0, 4.0, 20.0, 20.0, 10).insert(GameShopClose);
+        }
+        // 分类页签（C# Filters 区 @(11,102)，每页 10 行）
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 11.0, 105.0 + i as f32 * 20.0, 12.0, Color::srgb(0.9, 0.9, 0.9), 9)
+                .insert(GameShopCat(i));
+        }
+        // 分类翻页（C# Up/Down @(120,103)/(120,421)；本实现行区 105..285）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(p, n, h, pr, 120.0, 103.0, 16.0, 14.0, 10).insert(GameShopCatUp);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(p, n, h, pr, 120.0, 290.0, 16.0, 14.0, 10).insert(GameShopCatDown);
+        }
+        // 商品列表 10 行 @(135,90+20i)
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 135.0, 90.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+                .insert(GameShopLine(i));
+        }
+        // 状态行（金币/消息）@(135,270)/(135,288)
+        for i in 10..=11usize {
+            spawn_label(p, &font, "", 135.0, 270.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+                .insert(GameShopLine(i));
+        }
+        // 购买按钮 @(160,305)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 160.0, 305.0, 76.0, 25.0, 10).insert(GameShopBuy);
+        }
+        // 搜索（C# Search @(540,69) 140x16；TextInput 31）
+        spawn_label(p, &font, "搜索", 500.0, 67.0, 12.0, Color::WHITE, 9);
+        spawn_container(p, 540.0, 69.0, 140.0, 16.0, 10)
+            .insert((
+                BackgroundColor(Color::srgba(0.05, 0.05, 0.08, 0.95)),
+                crate::game::dialogs::text_input::TextInputField(31),
+                crate::game::dialogs::text_input::TextInputRect(px + 540.0, py + 69.0, 140.0, 16.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(1.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(31),
+                ));
+            });
     });
 }
 
@@ -269,18 +226,27 @@ fn game_shop_ui_system(
     mut shop: ResMut<GameShopState>,
     mut input: ResMut<TextInputState>,
     net: Res<NetConnection>,
-    close: Query<&UiButton, With<GameShopClose>>,
-    buy_btn: Query<&UiButton, With<GameShopBuy>>,
+    close: Query<(Entity, &Interaction), With<GameShopClose>>,
+    buy_btn: Query<(Entity, &Interaction), With<GameShopBuy>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<GameShopWidget>>,
-    // #1354：B0001 修复（#1334 商城分类合入后启动 panic）——lines 与 cats 的 &mut Text2d 需 Without 隔离
-    mut lines: Query<(&mut Text2d, &GameShopLine), Without<GameShopCat>>,
-    mut cats: Query<(&mut Text2d, &GameShopCat), Without<GameShopLine>>,
-    cat_up: Query<&UiButton, With<GameShopCatUp>>,
-    cat_down: Query<&UiButton, With<GameShopCatDown>>,
+    // #1354：B0001 修复（#1334 商城分类合入后启动 panic）——lines 与 cats 的 &mut Text 需 Without 隔离
+    mut lines: Query<(&mut Text, &GameShopLine), Without<GameShopCat>>,
+    mut cats: Query<(&mut Text, &GameShopCat), Without<GameShopLine>>,
+    cat_up: Query<(Entity, &Interaction), With<GameShopCatUp>>,
+    cat_down: Query<(Entity, &Interaction), With<GameShopCatDown>>,
     mut requested: Local<bool>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::GameShop);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -308,8 +274,8 @@ fn game_shop_ui_system(
         shop.search = t.clone();
     }
     let filtered = filter_shop_items(&shop.items, &shop.search, &shop.category);
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::GameShop);
         }
     }
@@ -350,13 +316,13 @@ fn game_shop_ui_system(
         };
     }
     // 分类翻页（C# UpButton/DownButton）
-    for btn in &cat_up {
-        if btn.clicked && shop.category_page > 0 {
+    for (e, inter) in &cat_up {
+        if edge(e, inter, &mut prev_inter) && shop.category_page > 0 {
             shop.category_page -= 1;
         }
     }
-    for btn in &cat_down {
-        if btn.clicked && shop.category_page + 1 < cat_pages {
+    for (e, inter) in &cat_down {
+        if edge(e, inter, &mut prev_inter) && shop.category_page + 1 < cat_pages {
             shop.category_page += 1;
         }
     }
@@ -365,8 +331,8 @@ fn game_shop_ui_system(
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 for i in 0..10usize {
-                    let y = 130.0 + i as f32 * 20.0;
-                    if cursor.x >= 208.0 && cursor.x <= 540.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                    let y = 236.0 + i as f32 * 20.0;
+                    if cursor.x >= 299.0 && cursor.x <= 704.0 && cursor.y >= y && cursor.y <= y + 18.0 {
                         if let Some(&idx) = filtered.get(i) {
                             shop.selected = Some(idx);
                             let it = &shop.items[idx];
@@ -388,8 +354,8 @@ fn game_shop_ui_system(
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 for i in 0..10usize {
-                    let y = 130.0 + i as f32 * 20.0;
-                    if cursor.x >= 108.0 && cursor.x <= 200.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                    let y = 251.0 + i as f32 * 20.0;
+                    if cursor.x >= 175.0 && cursor.x <= 284.0 && cursor.y >= y && cursor.y <= y + 18.0 {
                         let idx = shop.category_page * 10 + i;
                         if let Some(c) = shop.categories.get(idx).cloned() {
                             shop.category = c;
@@ -402,8 +368,8 @@ fn game_shop_ui_system(
         }
     }
     // 购买选中商品（C#：选中商品 → C.GameshopBuy{g_index, quantity=1}）
-    for btn in &buy_btn {
-        if btn.clicked {
+    for (e, inter) in &buy_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = shop.selected {
                 let it = &shop.items[idx];
                 net.send_packet(&crate::network::GameshopBuyWire {
