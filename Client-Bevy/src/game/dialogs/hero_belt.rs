@@ -28,9 +28,10 @@ use crate::game::dialogs::hero::HeroState;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    ButtonFrames, UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text,
-    ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    ImageButton,
 };
 
 /// 格数（C# HeroBeltDialog.Grid[2]）
@@ -120,7 +121,7 @@ impl Plugin for HeroBeltPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero_belt);
         app.add_systems(
             Update,
-            (hero_belt_ui_system, hero_belt_icon_system, hero_belt_refill_system, ui_button_system)
+            (hero_belt_ui_system, hero_belt_icon_system, hero_belt_refill_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -137,7 +138,6 @@ fn spawn_hero_belt(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -147,178 +147,96 @@ fn spawn_hero_belt(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1921] + 半透明叠层 1934（C# :256-257/:319-325）
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1921,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, BELT_X, BELT_Y, 5.4, 1.0);
-        commands
-            .entity(e)
-            .insert((HeroBeltWidget, HeroBeltBg, Visibility::Visible));
-    }
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1934,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, BELT_X, BELT_Y, 5.41, 1.0);
-        commands
-            .entity(e)
-            .insert((HeroBeltWidget, HeroBeltBgOverlay, Visibility::Visible));
-    }
+    // 背景 Prguse[1921]（横 100x38 @ (475,618)）/ 纵向 Prguse[1943]（40x101 @ (0,446)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1921) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, BELT_X, BELT_Y, 100.0, 38.0, 15);
+    commands
+        .entity(panel)
+        .insert((HeroBeltWidget, HeroBeltBg, Visibility::Visible));
 
-    // 2 格（C# :302-315：ItemSlot=x 即英雄背包 0/1）+ 键标 7/8（:265-274）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    for i in 0..BELT_SLOTS {
-        let (x, y) = h_slot(i);
-        let slot = commands
-            .spawn((
-                UiEntity,
+    commands.entity(panel).with_children(|p| {
+        // 半透明叠层 1934（92x38，C# BeforeDraw 0.5 alpha）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1934) {
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(92.0),
+                    height: Val::Px(38.0),
+                    ..default()
+                },
+                ImageNode::new(h).with_color(Color::srgba(1.0, 1.0, 1.0, 0.5)),
                 HeroBeltWidget,
-                HeroBeltSlotCell(i),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.0, 0.0, 0.0, 0.35),
-                    custom_size: Some(Vec2::new(CELL_SIZE, CELL_SIZE)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(x, -y, 5.5),
-                Visibility::Visible,
-            ))
-            .id();
-        commands.entity(slot).with_children(|p| {
-            p.spawn((
-                HeroBeltIcon(i),
-                Sprite {
-                    image: white.clone(),
-                    custom_size: Some(Vec2::new(CELL_SIZE - 4.0, CELL_SIZE - 4.0)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(2.0, -2.0, 5.6),
-                Visibility::Hidden,
+                HeroBeltBgOverlay,
+                ZIndex(1),
             ));
-            p.spawn((
-                HeroBeltCount(i),
-                Text2d::new(String::new()),
-                bevy::sprite::Anchor::BOTTOM_RIGHT,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(10.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                Transform::from_xyz(30.0, -30.0, 5.7),
-                Visibility::Hidden,
-            ));
-        });
-        let (nx, ny) = h_num(i);
-        let k = spawn_ui_text(
-            &mut commands,
-            &font,
-            &(i + 7).to_string(),
-            nx,
-            ny,
-            10.0,
-            Color::WHITE,
-            5.7,
-        );
-        commands
-            .entity(k)
-            .insert((HeroBeltWidget, HeroBeltNumber(i)));
-    }
+        }
 
-    // 旋转钮 1926-1928 @(82,3)（横向）/ 1938-1940 @(19,82)（纵向，Flip 换帧）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1926,
-        1927,
-        1928,
-        BELT_X + 82.0,
-        BELT_Y + 3.0,
-        5.5,
-        16.0,
-        16.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((HeroBeltWidget, HeroBeltRotate, Visibility::Visible));
-    }
-    // 关闭钮 1923-1925 @(82,19)（横向）/ 1935-1937 @(3,82)（纵向，Flip 换帧）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1923,
-        1924,
-        1925,
-        BELT_X + 82.0,
-        BELT_Y + 19.0,
-        5.5,
-        16.0,
-        14.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((HeroBeltWidget, HeroBeltClose, Visibility::Visible));
-    }
-}
-
-/// 换按钮三帧（横向/纵向组；ui_button_system 每帧按 hover/pressed 用
-/// ButtonFrames 刷 Sprite，换组必须改 ButtonFrames 而非直接改 Sprite）
-fn swap_button_frames(
-    frames: &mut ButtonFrames,
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-    cache: &mut UiImageCache,
-    ids: (usize, usize, usize),
-) {
-    let (n, h, p) = ids;
-    if let Some(i) = ui_image(libs, images, cache, LibraryName::Prguse, n) {
-        frames.normal = i;
-    }
-    if let Some(i) = ui_image(libs, images, cache, LibraryName::Prguse, h) {
-        frames.hover = i;
-    }
-    if let Some(i) = ui_image(libs, images, cache, LibraryName::Prguse, p) {
-        frames.pressed = i;
-    }
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
+        // 2 格（C# :302-315：ItemSlot=x 即英雄背包 0/1）+ 键标 7/8
+        for i in 0..BELT_SLOTS {
+            spawn_container(p, 12.0 + i as f32 * CELL_SPACING, 3.0, CELL_SIZE, CELL_SIZE, 2)
+                .insert((
+                    HeroBeltWidget,
+                    HeroBeltSlotCell(i),
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+                ))
+                .with_children(|c| {
+                    spawn_image(c, white.clone(), 2.0, 2.0, CELL_SIZE - 4.0, CELL_SIZE - 4.0, 3)
+                        .insert((HeroBeltWidget, HeroBeltIcon(i), Visibility::Hidden));
+                    spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3)
+                        .insert((HeroBeltWidget, HeroBeltCount(i), Visibility::Hidden));
+                });
+        }
+        for i in 0..BELT_SLOTS {
+            spawn_label(p, &font, &(i + 7).to_string(), 8.0 + i as f32 * CELL_SPACING, 2.0, 10.0, Color::WHITE, 3)
+                .insert((HeroBeltWidget, HeroBeltNumber(i)));
+        }
+        // 旋转钮 1926-1928 @(82,3)（横向）/ 1938-1940 @(19,82)（纵向，Flip 换帧）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1926),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1927),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1928),
+        ) {
+            spawn_icon_button(p, n, h, pr, 82.0, 3.0, 16.0, 14.0, 3)
+                .insert((HeroBeltWidget, HeroBeltRotate));
+        }
+        // 关闭钮 1923-1925 @(82,19)（横向）/ 1935-1937 @(3,82)（纵向，Flip 换帧）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1923),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1924),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1925),
+        ) {
+            spawn_icon_button(p, n, h, pr, 82.0, 19.0, 16.0, 14.0, 3)
+                .insert((HeroBeltWidget, HeroBeltClose));
+        }
+    });
 }
 
 /// 显隐 + 横纵布局 + 旋转/关闭（布局数学对齐 C# Flip :327-372）
+/// 单查询（Option 组件区分角色）避免 Bevy 16 参数上限。
 #[allow(clippy::type_complexity)]
 fn hero_belt_ui_system(
     mut visible: ResMut<HeroBeltVisible>,
     mut vertical: ResMut<HeroBeltVertical>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    // With<HeroBeltWidget> 限定，避免误碰全屏其它 Sprite 实体（#1362 同坑）——
-    // 漏过滤时下面的 Visibility 循环会把全游戏实体强制 Visible，所有本应
-    // Hidden 的白色占位精灵（物品格图标等）全部显形 = 白屏（#2602 实测踩坑）
+    // With<HeroBeltWidget> 限定，避免误碰全屏其它实体（#1362 同坑）——
+    // 漏过滤时下面的 Visibility 循环会把全游戏实体强制 Visible，白色占位全显形 = 白屏
     mut items: Query<(
+        Entity,
+        &mut Node,
         &mut Visibility,
-        &mut Transform,
-        Option<&mut Sprite>,
-        Option<&mut ButtonFrames>,
-        Option<&mut UiButton>,
+        Option<&mut ImageNode>,
+        Option<&Interaction>,
+        Option<&mut ImageButton>,
         Option<&HeroBeltBg>,
         Option<&HeroBeltBgOverlay>,
         Option<&HeroBeltSlotCell>,
@@ -326,8 +244,17 @@ fn hero_belt_ui_system(
         Option<&HeroBeltRotate>,
         Option<&HeroBeltClose>,
     ), With<HeroBeltWidget>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
-    for (mut vis, _, _, _, _, _, _, _, _, _, _) in &mut items {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    for (_, _, mut vis, _, _, _, _, _, _, _, _, _) in &mut items {
         *vis = if visible.0 {
             Visibility::Visible
         } else {
@@ -338,103 +265,89 @@ fn hero_belt_ui_system(
         return;
     }
     let vert = vertical.0;
+    // 面板：横 (475,618) 100x38 / 纵 (0,446) 40x101
+    let (px, py, pw, ph) = if vert {
+        (BELT_VERT_X, BELT_VERT_Y, 40.0, 101.0)
+    } else {
+        (BELT_X, BELT_Y, 100.0, 38.0)
+    };
 
-    for (_, mut tf, mut sp, mut frames, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {
+    for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
-            if let Some(h) = ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                if vert { 1943 } else { 1921 },
-            ) {
-                if let Some(sp) = sp.as_mut() {
-                    sp.image = h;
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1943 } else { 1921 }) {
+                if let Some(img) = img.as_mut() {
+                    if img.image != h {
+                        img.image = h;
+                    }
                 }
             }
-            let (x, y) = if vert {
-                (BELT_VERT_X, BELT_VERT_Y)
-            } else {
-                (BELT_X, BELT_Y)
-            };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(px);
+            node.top = Val::Px(py);
+            node.width = Val::Px(pw);
+            node.height = Val::Px(ph);
         } else if overlay.is_some() {
-            if let Some(h) = ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                if vert { 1946 } else { 1934 },
-            ) {
-                if let Some(sp) = sp.as_mut() {
-                    sp.image = h;
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1946 } else { 1934 }) {
+                if let Some(img) = img.as_mut() {
+                    if img.image != h {
+                        img.image = h;
+                    }
                     // C# BeforeDraw 0.5F alpha（叠层纹理本身不透明）
-                    sp.color = Color::srgba(1.0, 1.0, 1.0, 0.5);
+                    img.color = Color::srgba(1.0, 1.0, 1.0, 0.5);
                 }
             }
-            let (x, y) = if vert {
-                (BELT_VERT_X, BELT_VERT_Y)
-            } else {
-                (BELT_X, BELT_Y)
-            };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(0.0);
+            node.top = Val::Px(0.0);
+            node.width = Val::Px(if vert { 40.0 } else { 92.0 });
+            node.height = Val::Px(if vert { 92.0 } else { 38.0 });
         } else if let Some(n) = num {
             let (x, y) = if vert { v_num(n.0) } else { h_num(n.0) };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
         } else if let Some(s) = slot {
             // 格（横向 @(12+i*35,3)；纵向 @(3,i*35+12)，C# :313/:336）
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
-            tf.translation.x = x;
-            tf.translation.y = -y;
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
         } else if rot.is_some() {
-            // 旋转（横向 @(82,3)；纵向 @(19,82)，C# :343-346）。命中矩形同步
-            // 视觉位置（审查 M2：rect 只在 spawn 按横向固定，Flip 后点击落空/
-            // 旧位误触——dialog_drag_system 的 btn_origins 同款义务）
+            // 旋转（横向 @(82,3)；纵向 @(19,82)，C# :343-346）；Flip 换帧组
             let (x, y) = if vert {
                 (BELT_VERT_X + 19.0, BELT_VERT_Y + 82.0)
             } else {
                 (BELT_X + 82.0, BELT_Y + 3.0)
             };
-            tf.translation.x = x;
-            tf.translation.y = -y;
-            if let Some(f) = frames.as_mut() {
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
+            if let Some(btn) = btn.as_mut() {
                 if vert {
-                    swap_button_frames(f, &mut libs, &mut images, &mut cache, (1938, 1939, 1940));
+                    swap_btn_frames(btn, &mut libs, &mut images, (1938, 1939, 1940));
                 } else {
-                    swap_button_frames(f, &mut libs, &mut images, &mut cache, (1926, 1927, 1928));
+                    swap_btn_frames(btn, &mut libs, &mut images, (1926, 1927, 1928));
                 }
             }
-            if let Some(b) = btn.as_mut() {
-                b.rect.0 = x;
-                b.rect.1 = y;
-                if b.clicked {
+            if let Some(inter) = inter {
+                if edge(e, inter, &mut prev_inter) {
                     vertical.0 = !vertical.0;
                     tracing::info!("🔁 英雄腰带旋转: {}", if !vert { "纵向" } else { "横向" });
                 }
             }
         } else if cls.is_some() {
-            // 关闭（横向 @(82,19)；纵向 @(3,82)，C# :338-341）；rect 同步同上
+            // 关闭（横向 @(82,19)；纵向 @(3,82)，C# :338-341）；Flip 换帧组
             let (x, y) = if vert {
                 (BELT_VERT_X + 3.0, BELT_VERT_Y + 82.0)
             } else {
                 (BELT_X + 82.0, BELT_Y + 19.0)
             };
-            tf.translation.x = x;
-            tf.translation.y = -y;
-            if let Some(f) = frames.as_mut() {
+            node.left = Val::Px(x - px);
+            node.top = Val::Px(y - py);
+            if let Some(btn) = btn.as_mut() {
                 if vert {
-                    swap_button_frames(f, &mut libs, &mut images, &mut cache, (1935, 1936, 1937));
+                    swap_btn_frames(btn, &mut libs, &mut images, (1935, 1936, 1937));
                 } else {
-                    swap_button_frames(f, &mut libs, &mut images, &mut cache, (1923, 1924, 1925));
+                    swap_btn_frames(btn, &mut libs, &mut images, (1923, 1924, 1925));
                 }
             }
-            if let Some(b) = btn.as_mut() {
-                b.rect.0 = x;
-                b.rect.1 = y;
-                if b.clicked {
+            if let Some(inter) = inter {
+                if edge(e, inter, &mut prev_inter) {
                     visible.0 = false;
                     tracing::info!("🧪 关闭英雄腰带");
                 }
@@ -443,27 +356,43 @@ fn hero_belt_ui_system(
     }
 }
 
+/// 换 ImageButton 三帧（横向/纵向组；image_button_system 按 normal/hover/pressed 刷）
+fn swap_btn_frames(
+    btn: &mut ImageButton,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    ids: (usize, usize, usize),
+) {
+    let (n, h, p) = ids;
+    if let Some(i) = load_lib_image(libs, images, LibraryName::Prguse, n) {
+        btn.normal = i;
+    }
+    if let Some(i) = load_lib_image(libs, images, LibraryName::Prguse, h) {
+        btn.hover = i;
+    }
+    if let Some(i) = load_lib_image(libs, images, LibraryName::Prguse, p) {
+        btn.pressed = i;
+    }
+}
+
 /// 渲染：图标/数量（英雄背包前 2 格 = 腰带）
 fn hero_belt_icon_system(
     hero: Res<HeroState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     // B0001：icons 与 counts 的 &mut Visibility 需 Without 隔离（#1362 同坑）
-    mut icons: Query<(&mut Sprite, &mut Visibility, &HeroBeltIcon), Without<HeroBeltCount>>,
-    mut counts: Query<(&mut Text2d, &mut Visibility, &HeroBeltCount), Without<HeroBeltIcon>>,
+    mut icons: Query<(&mut ImageNode, &mut Visibility, &HeroBeltIcon), Without<HeroBeltCount>>,
+    mut counts: Query<(&mut Text, &mut Visibility, &HeroBeltCount), Without<HeroBeltIcon>>,
 ) {
-    for (mut sprite, mut vis, icon) in &mut icons {
+    for (mut node, mut vis, icon) in &mut icons {
         if let Some(item) = hero.inventory.get(icon.0).and_then(|s| s.as_ref()) {
-            if let Some(h) = ui_image(
+            if let Some(h) = load_lib_image(
                 &mut libs,
                 &mut images,
-                &mut cache,
                 LibraryName::Items,
                 item.image as usize,
             ) {
-                sprite.image = h;
-                sprite.custom_size = None;
+                node.image = h;
             }
             *vis = Visibility::Visible;
         } else {
