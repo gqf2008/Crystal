@@ -30,10 +30,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::outlined_text::spawn_outlined_label_center;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_label_center,
-    spawn_panel, UiItemCellData, UiItemCellIcon, ImageButton,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, UiItemCellData,
+    UiItemCellIcon, ImageButton,
 };
 
 /// 交易物品（槽内显示用）
@@ -221,6 +222,8 @@ impl Plugin for TradePlugin {
                 trade_ui_system,
                 trade_action_system,
                 trade_invite_system,
+                // 描边文本副本同步须排在正文写方之后（同 quest_tracking 先例）
+                crate::ui::outlined_text::sync_outline_ui_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -264,7 +267,7 @@ fn spawn_trade(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 522),
         ) {
             spawn_icon_button(p, n, h, pr, CONFIRM_X, CONFIRM_Y, CONFIRM_W, CONFIRM_H, 10)
-                .insert((TradeConfirmBtn, Visibility::Hidden));
+                .insert(TradeConfirmBtn);
         }
         // 关闭按钮 @(W-23, 3)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -273,19 +276,21 @@ fn spawn_trade(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
             spawn_icon_button(p, n, h, pr, CLOSE_DX, 3.0, 24.0, 21.0, 10)
-                .insert((TradeClose, Visibility::Hidden));
+                .insert(TradeClose);
         }
-        // 名字标签（框内居中）
-        spawn_label_center(p, &font, "", NAME_X + NAME_W / 2.0, NAME_Y + 2.0, NAME_W, 12.0, Color::WHITE, 9)
-            .insert((TradeLabel(TradeText::MyName), Visibility::Hidden));
+        // 名字标签（框内居中）。子实体不显式 Hidden：随面板根级联显隐——旧版
+        // 每个子实体都挂 TradeWidget 由 widgets blast 逐个刷（Sprite 树无级联），
+        // 迁移后只有面板根有 TradeWidget，子实体显式 Hidden 将永无写方而不可见
+        spawn_outlined_label_center(p, &font, "", NAME_X + NAME_W / 2.0, NAME_Y + 2.0, NAME_W, 12.0, Color::WHITE, 9)
+            .insert(TradeLabel(TradeText::MyName));
         // 金币标签（框内居中；可点击开数量框）
-        spawn_label_center(p, &font, "", GOLD_X + GOLD_W / 2.0, GOLD_Y + 1.0, GOLD_W, 12.0, Color::WHITE, 9)
-            .insert((TradeLabel(TradeText::MyGold), TradeGoldHit, Visibility::Hidden));
+        spawn_outlined_label_center(p, &font, "", GOLD_X + GOLD_W / 2.0, GOLD_Y + 1.0, GOLD_W, 12.0, Color::WHITE, 9)
+            .insert((TradeLabel(TradeText::MyGold), TradeGoldHit));
         // 我方 5x2 格（列主序）
         for i in 0..TRADE_SLOTS {
             let (sx, sy) = trade_slot_pos(i);
             spawn_item_cell_ui(p, &mut images, &font, sx, sy, CELL_W, CELL_H, 9, i)
-                .insert((TradeSlot(0, i), Visibility::Hidden));
+                .insert(TradeSlot(0, i));
         }
     });
 
@@ -299,14 +304,14 @@ fn spawn_trade(
         .insert((DialogRoot(DialogKind::GuestTrade), TradeWidget, Visibility::Hidden));
 
     commands.entity(gpanel).with_children(|p| {
-        spawn_label_center(p, &font, "", GUEST_NAME_X + TRADE_W / 2.0, NAME_Y + 2.0, TRADE_W, 12.0, Color::WHITE, 9)
-            .insert((TradeLabel(TradeText::GuestName), Visibility::Hidden));
-        spawn_label_center(p, &font, "", GOLD_X + GOLD_W / 2.0, GOLD_Y + 1.0, GOLD_W, 12.0, Color::WHITE, 9)
-            .insert((TradeLabel(TradeText::GuestGold), Visibility::Hidden));
+        spawn_outlined_label_center(p, &font, "", GUEST_NAME_X + TRADE_W / 2.0, NAME_Y + 2.0, TRADE_W, 12.0, Color::WHITE, 9)
+            .insert(TradeLabel(TradeText::GuestName));
+        spawn_outlined_label_center(p, &font, "", GOLD_X + GOLD_W / 2.0, GOLD_Y + 1.0, GOLD_W, 12.0, Color::WHITE, 9)
+            .insert(TradeLabel(TradeText::GuestGold));
         for i in 0..TRADE_SLOTS {
             let (sx, sy) = trade_slot_pos(i);
             spawn_item_cell_ui(p, &mut images, &font, sx, sy, CELL_W, CELL_H, 9, i)
-                .insert((TradeSlot(1, i), Visibility::Hidden));
+                .insert(TradeSlot(1, i));
         }
     });
 
@@ -317,7 +322,8 @@ fn spawn_trade(
     let inv = spawn_panel(&mut commands, ih, INVITE_X, INVITE_Y, INVITE_W, INVITE_H, 45);
     commands.entity(inv).insert((TradeInviteWidget, Visibility::Hidden));
     commands.entity(inv).with_children(|ip| {
-        spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
+        // C# MirMessageBox 文本为 MirLabel（默认描边）
+        crate::ui::outlined_text::spawn_outlined_label(ip, font.clone(), "", 35.0, 35.0, 12.0, Color::WHITE, 9)
             .insert(TradeInviteText);
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
@@ -363,8 +369,11 @@ fn trade_ui_system(
     // 显隐写方 1：双窗全部成员（邀请框独立、Without<TradeWidget> 可证互斥）
     mut widgets: Query<&mut Visibility, With<TradeWidget>>,
     mut cells: Query<(&mut UiItemCellData, &TradeSlot)>,
-    // Text 写方×2：labels / invite_text（描边已随 bevy_ui 迁移去除）
-    mut labels: Query<(&mut Text, &TradeLabel)>,
+    // Text 写方×2：labels / invite_text（批38-40 评审 P0：两查询同写 &mut Text
+    // 且 With 标记不同、无互斥 → 调度器初始化即 B0001 panic（app.run() 首帧即崩，
+    // run_if 只拦执行不拦初始化）。对称互斥：正文实体带 TradeLabel 必不带
+    // TradeInviteText）
+    mut labels: Query<(&mut Text, &TradeLabel), Without<TradeInviteText>>,
     mut invite_texts: Query<(&mut Text, &TradeInviteText)>,
     // 显隐写方 2（With<TradeInviteWidget> 且无 TradeWidget，与 widgets 互斥）
     mut invite_widgets: Query<&mut Visibility, (With<TradeInviteWidget>, Without<TradeWidget>)>,
@@ -741,6 +750,37 @@ fn trade_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 批38-40 评审 P0（B0001 实证）：`labels`/`invite_texts` 两查询同写
+    /// &mut Text 且 With 标记不同、无互斥过滤——B0001 在调度器初始化时
+    /// panic（同系统参数内，与实体是否实际重叠无关；`run_if` 只拦执行
+    /// 不拦初始化 → 真实游戏 `app.run()` 首帧即崩；catch_unwind 探针
+    /// 须 downcast 消息判 "B0001"，`{e:?}` 只打 `Any{..}` 会假绿）。
+    /// 修复：对称互斥（labels 加 Without<TradeInviteText>）。
+    #[test]
+    fn trade_ui_system_no_b0001_query_conflict() {
+        use bevy::app::{App, Update};
+        let mut app = App::new();
+        app.add_systems(Update, trade_ui_system);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            app.update();
+        }));
+        // 探针断言必须 downcast 取真实消息：`{e:?}` 对 payload 只打 `Any { .. }`，
+        // contains("B0001") 恒真 → 任何 panic 都假绿（本 PR 评审中实证过的坑）
+        let msg = r.err().map(|e| {
+            if let Some(s) = e.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                format!("{e:?}")
+            }
+        });
+        assert!(
+            msg.as_ref().map(|m| !m.contains("B0001")).unwrap_or(true),
+            "trade_ui_system 查询冲突：{msg:?}"
+        );
+    }
 
     /// C# TradeDialogs.cs:21/211 原点公式锚点（1024x768）：
     /// 我方 (512-204-10, 768-350)=(298,418)；对方 (512+10, 418)=(522,418)。

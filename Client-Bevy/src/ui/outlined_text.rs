@@ -186,6 +186,67 @@ pub fn spawn_outlined_label<'a>(
     ))
 }
 
+/// 生成带 4 向黑描边的 bevy_ui 居中文本（[`spawn_outlined_label`] 的居中版，
+/// 语义对齐 [`crate::ui::theme::spawn_label_center`]：cx=中心 x，width=排版宽度，
+/// `Justify::Center`）。层级与销毁语义同 [`spawn_outlined_label`]。
+pub fn spawn_outlined_label_center<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    cx: f32,
+    y: f32,
+    width: f32,
+    size: f32,
+    color: Color,
+    z: i32,
+) -> EntityCommands<'a> {
+    let mut shadows = Vec::with_capacity(4);
+    for (dx, dy) in OUTLINE_OFFSETS_UI {
+        let e = parent
+            .spawn((
+                OutlineUiShadow,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(cx - width / 2.0 + dx),
+                    top: Val::Px(y + dy),
+                    width: Val::Px(width),
+                    ..default()
+                },
+                Text::new(text),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(size),
+                    ..default()
+                },
+                TextLayout::justify(Justify::Center),
+                TextColor(OUTLINE_COLOR),
+                ZIndex(z - 1),
+            ))
+            .id();
+        shadows.push(e);
+    }
+    parent.spawn((
+        OutlinedUiText,
+        OutlineUiShadows(shadows),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(cx - width / 2.0),
+            top: Val::Px(y),
+            width: Val::Px(width),
+            ..default()
+        },
+        Text::new(text),
+        TextFont {
+            font: FontSource::Handle(font.clone()),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextLayout::justify(Justify::Center),
+        TextColor(color),
+        ZIndex(z),
+    ))
+}
+
 /// bevy_ui 正文内容变化 → 同步到 4 个黑色副本（同 [`sync_outline_system`]）
 pub fn sync_outline_ui_system(
     mains: Query<(Ref<Text>, &OutlineUiShadows), (With<OutlinedUiText>, Without<OutlineUiShadow>)>,

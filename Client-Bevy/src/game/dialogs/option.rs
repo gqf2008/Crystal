@@ -446,8 +446,9 @@ fn option_ui_system(
     close: Query<(Entity, &Interaction), With<OptionClose>>,
     mut toggles: Query<(Entity, &mut ImageButton, &Interaction, &OptionToggleBtn), Without<OptionClose>>,
     mut widgets: Query<&mut Visibility, (With<OptionWidget>, Without<OptionVolumeFill>, Without<OptionVolumeKnob>)>,
-    mut fills: Query<(&mut Node, &OptionVolumeFill)>,
-    mut knobs: Query<(&mut Node, &OptionVolumeKnob)>,
+    // B0001 互斥：fills/knobs 同写 Node——对称补 Without（Fill/Knob 实体互斥）
+    mut fills: Query<(&mut Node, &OptionVolumeFill), Without<OptionVolumeKnob>>,
+    mut knobs: Query<(&mut Node, &OptionVolumeKnob), Without<OptionVolumeFill>>,
     bars: Query<&OptionBar>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
