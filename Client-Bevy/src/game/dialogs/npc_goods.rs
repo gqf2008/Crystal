@@ -14,12 +14,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont,
-    UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel,
+    spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
 };
-use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCell};
-use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 商品条目
 #[derive(Debug, Clone)]
@@ -127,9 +126,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_npc_goods);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_goods);
         app.add_systems(
             Update,
-            (npc_goods_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            npc_goods_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -144,7 +141,6 @@ fn spawn_npc_goods(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -154,85 +150,56 @@ fn spawn_npc_goods(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1000] 在 (0,224)
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1000) {
-        let e = spawn_ui_sprite(&mut commands, h, 0.0, 224.0, 6.0, 1.0);
-        // #124 长商品列表滚轮滚动
-        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (500.0, 240.0, 4.0, 176.0), 6.3);
-        commands.entity(track).insert((
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(thumb).insert((
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(e).insert((
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-            Visibility::Hidden,
-            ScrollList {
-                rect_rel: (12.0, 16.0, 470.0, 176.0),
-                row_h: 22.0,
-                visible: 8,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (500.0, 16.0, 4.0, 176.0),
-                thumb: Some(thumb),
-                z: 8.0,
-            },
-        ));
-    }
+    // 背景 Prguse[1000]（C# NPCGoodsDialog Index=1000，244x334 @ (0,224)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1000) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 0.0, 224.0, 244.0, 334.0, 30);
+    commands.entity(panel).insert((
+        DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
+        NpcGoodsWidget,
+        // #124 长商品列表滚轮滚动（C# Up/Down；本实现用滑块条，位置在面板内右侧）
+        UiScrollList {
+            rect_rel: (10.0, 16.0, 230.0, 176.0),
+            row_h: 22.0,
+            visible: 8,
+            total: 0,
+            offset: 0,
+            step: 3,
+            track_rel: (220.0, 16.0, 4.0, 176.0),
+            thumb: None,
+            z: 9,
+        },
+    ));
 
-    // 关闭按钮（右上）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        500.0, 227.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            NpcGoodsClose,
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-        ));
-    }
-
-    // 购买按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 312, 313, 314,
-        420.0, 224.0 + 250.0, 7.0, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            NpcGoodsBuy,
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-        ));
-    }
-
-    // 8 行商品（#110：左侧通用 ItemCell 图标 + 右侧名称/价格文本，对齐 C# MirGoodsCell）
-    for i in 0..8usize {
-        let y = 240.0 + i as f32 * 22.0;
-        let cell = spawn_item_cell(&mut commands, &mut images, &font, 12.0, y, 7.8, 32.0, 20.0, i);
-        commands.entity(cell).insert((
-            NpcGoodsCell(i),
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-        ));
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            50.0, y + 2.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            NpcGoodsLine(i),
-            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
-            NpcGoodsWidget,
-        ));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 滚动条（轨道+滑块，面板子节点，面板内右侧）
+        spawn_scroll_bar_ui(p, (220.0, 16.0, 4.0, 176.0), 9);
+        // 关闭按钮（C# (217,3)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 217.0, 3.0, 20.0, 20.0, 10).insert(NpcGoodsClose);
+        }
+        // 购买按钮（C# (77,304)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 312),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 313),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 314),
+        ) {
+            spawn_icon_button(p, n, h, pr, 77.0, 304.0, 76.0, 25.0, 10).insert(NpcGoodsBuy);
+        }
+        // 8 行商品（#110：左侧通用 UiItemCell 图标 + 右侧名称/价格文本，对齐 C# MirGoodsCell）
+        for i in 0..8usize {
+            let y = 16.0 + i as f32 * 22.0;
+            spawn_item_cell_ui(p, &mut images, &font, 10.0, y, 32.0, 20.0, 9, i)
+                .insert(NpcGoodsCell(i));
+            spawn_label(p, &font, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9)
+                .insert(NpcGoodsLine(i));
+        }
+    });
 }
 
 /// 显示/隐藏 + 商品列表渲染 + 选中/购买/关闭
@@ -244,17 +211,25 @@ fn npc_goods_ui_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    close: Query<&UiButton, (With<NpcGoodsClose>, Without<NpcGoodsBuy>)>,
-    mut buy: Query<(&UiButton, &mut Visibility), (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
+    close: Query<(Entity, &Interaction), (With<NpcGoodsClose>, Without<NpcGoodsBuy>)>,
+    mut buy: Query<(Entity, &Interaction, &mut Visibility), (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
     mut widgets: Query<&mut Visibility, (With<NpcGoodsWidget>, Without<NpcGoodsBuy>)>,
-    mut lines: Query<(&mut Text2d, &NpcGoodsLine)>,
-    mut cells: Query<(&mut ItemCellData, &NpcGoodsCell)>,
-    mut scroll: Query<&mut ScrollList, With<NpcGoodsWidget>>,
+    mut lines: Query<(&mut Text, &NpcGoodsLine)>,
+    mut cells: Query<(&mut UiItemCellData, &NpcGoodsCell)>,
+    mut scroll: Query<&mut UiScrollList, With<NpcGoodsWidget>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     for mut vis in widgets.iter_mut() {
         *vis = if state.visible {
             Visibility::Visible
@@ -264,7 +239,7 @@ fn npc_goods_ui_system(
     }
     // #2536：Craft 面板隐藏购买按钮（C# NPCDialogs.cs:1142）
     let buy_vis = buy_button_visible(&state);
-    for (_, mut vis) in &mut buy {
+    for (_, _, mut vis) in &mut buy {
         *vis = if buy_vis {
             Visibility::Visible
         } else {
@@ -326,10 +301,9 @@ fn npc_goods_ui_system(
     for (mut data, cell) in &mut cells {
         let g = state.goods.get(off + cell.0);
         let icon = g.and_then(|g| {
-            ui_image(
+            load_lib_image(
                 &mut libs,
                 &mut images,
-                &mut cache,
                 LibraryName::Items,
                 g.image as usize,
             )
@@ -402,16 +376,16 @@ fn npc_goods_ui_system(
     }
 
     // 关闭
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             state.visible = false;
             state.selected = None;
             state.craft_pick = None;
         }
     }
     // 购买/回购（原版 C# NPCGoodsDialog 购买按钮 → C.BuyItem；回购面板 → C.BuyItemBack）
-    for (btn, _) in &buy {
-        if btn.clicked {
+    for (e, inter, _) in &buy {
+        if edge(e, inter, &mut prev_inter) {
             // #2536：Craft 面板无购买（C# NPCDialogs.cs:1104 DoubleClick return；按钮已隐藏）
             if state.panel == mir2_shared::enums::PanelType::Craft {
                 continue;
