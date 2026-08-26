@@ -572,6 +572,14 @@ pub fn spawn_animated_icon_button<'a>(
     delay: f32,
     looping: bool,
 ) -> EntityCommands<'a> {
+    // （批次19-23 评审 F2）delay 钳位下限：轮播 while 里 `timer -= delay`，delay<=0
+    // 时 timer 永不下降 → 单帧死循环（整帧卡死）。空帧会让 `frames[0]` 越界崩溃，
+    // 这里语义化断言（调用点 fishing.rs 已有 !frames.is_empty() 守卫，此为防未来调用者）。
+    let delay = delay.max(0.01);
+    assert!(
+        !frames.is_empty(),
+        "spawn_animated_icon_button 需要至少 1 帧"
+    );
     parent.spawn((
         Button,
         abs_node(x, y, Some(w), Some(h)),
@@ -779,7 +787,8 @@ pub fn item_cell_ui_system(
 
 #[cfg(test)]
 mod tests {
-    use super::item_cell_dura_width;
+    use super::*;
+    use bevy::ecs::world::CommandQueue;
 
     /// 耐久条宽度：满耐久=整格，随比例缩短，最小 1px（C# MirItemCell DrawDurability）
     #[test]
@@ -788,6 +797,80 @@ mod tests {
         assert_eq!(item_cell_dura_width(60.0, 0.5), 30.0);
         assert_eq!(item_cell_dura_width(60.0, 0.0), 1.0);
         assert_eq!(item_cell_dura_width(60.0, 0.01), 1.0);
+    }
+
+    /// 批次19-23 评审 F2：delay<=0 会让轮播 while 永不推进（单帧死循环）→ 钳位下限
+    #[test]
+    fn animated_button_delay_clamped_to_minimum() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        // 非法值：调用方漏传/误传
+        commands.spawn_empty().with_children(|p| {
+            spawn_animated_icon_button(
+                p,
+                vec![Handle::default()],
+                None,
+                None,
+                0.0,
+                0.0,
+                10.0,
+                10.0,
+                0,
+                0.0,
+                true,
+            );
+        });
+        // 合法正值原样保留（不过度钳位）
+        commands.spawn_empty().with_children(|p| {
+            spawn_animated_icon_button(
+                p,
+                vec![Handle::default()],
+                None,
+                None,
+                0.0,
+                0.0,
+                10.0,
+                10.0,
+                0,
+                0.13,
+                true,
+            );
+        });
+        queue.apply(&mut world);
+
+        let mut delays = world
+            .query_filtered::<&UiAnimatedButton, ()>()
+            .iter(&world)
+            .map(|ab| ab.delay)
+            .collect::<Vec<_>>();
+        delays.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(delays, vec![0.01, 0.13]);
+    }
+
+    /// 批次19-23 评审 F2：空帧会让 `frames[0]` 越界崩溃 → 语义化断言（fail fast）
+    #[test]
+    #[should_panic(expected = "需要至少 1 帧")]
+    fn animated_button_rejects_empty_frames() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        commands.spawn_empty().with_children(|p| {
+            spawn_animated_icon_button(
+                p,
+                Vec::new(),
+                None,
+                None,
+                0.0,
+                0.0,
+                10.0,
+                10.0,
+                0,
+                0.13,
+                true,
+            );
+        });
+        queue.apply(&mut world);
     }
 }
 
