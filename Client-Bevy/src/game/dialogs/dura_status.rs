@@ -16,9 +16,8 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache,
-};
+use crate::ui::sprite_ui::{ui_image, UiImageCache};
+use crate::ui::theme::{load_lib_image, spawn_image, spawn_panel, ImageButton};
 
 /// 面板位置（C#：ScreenWidth-61=963, y=200；背景图 (3,3) 内布局）
 const PANEL_X: f32 = 963.0;
@@ -109,9 +108,7 @@ impl Plugin for DuraPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_dura_status);
         app.add_systems(
             Update,
-            (dura_status_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            dura_status_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -126,63 +123,61 @@ fn spawn_dura_status(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
 ) {
     libs.0.ensure_initialized();
 
-    // 切换按钮（Prguse 2111 hover / 2112 pressed / 2113 normal）；默认大模式 y=154
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 2113, 2111, 2112,
-        BTN_X, dura_btn_y(true), 6.0, 20.0, 19.0,
+    // 切换按钮：独立根节点（C# DuraStatusDialog 恒可见，不随面板显隐）。
+    // Prguse 2111 hover / 2112 pressed / 2113 normal；打开时 ui_system 换 2110。
+    if let (Some(n), Some(h), Some(pr)) = (
+        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2113),
+        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2111),
+        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2112),
     ) {
-        // C# DuraStatusDialog 恒可见（不随面板显隐）：不挂 DuraWidget、显式 Visible，
-        // 使 widgets 查询（With<DuraWidget>）不再匹配本钮——否则面板关闭时钮被隐藏、无法正常点开
-        commands.entity(e).insert((
+        commands.spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(BTN_X),
+                top: Val::Px(dura_btn_y(true)),
+                width: Val::Px(20.0),
+                height: Val::Px(19.0),
+                ..default()
+            },
+            ImageNode::new(n.clone()),
+            ImageButton { normal: n, hover: h, pressed: pr },
             DuraToggleBtn,
             // 恒可见（C# DuraStatusDialog 不随面板显隐）：标记 AlwaysVisible，
             // 使通用对话框兜底（enforce_dialog_visibility）跳过本钮
             crate::game::dialogs::AlwaysVisible,
             DialogRoot(DialogKind::DuraStatus),
+            GlobalZIndex(35),
             Visibility::Visible,
         ));
     }
 
     // 面板 Prguse[2105] @ (963,200)
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2105) {
-        let e = spawn_ui_sprite(&mut commands, h, PANEL_X, PANEL_Y, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::DuraStatus),
-            DuraWidget,
-            Visibility::Hidden,
-        ));
-    }
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2105) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, PANEL_X, PANEL_Y, 64.0, 85.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::DuraStatus), DuraWidget));
 
-    // 部位精灵（C# Background @ (3,3) 内相对坐标）
-    for def in &PIECES {
-        if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
-            LibraryName::Prguse,
-            def.idx[0],
-        ) {
-            let e = spawn_ui_sprite(
-                &mut commands,
-                h,
-                PANEL_X + 3.0 + def.rel.0,
-                PANEL_Y + 3.0 + def.rel.1,
-                6.1,
-                1.0,
-            );
-            commands.entity(e).insert((
-                DuraPiece(def.kind),
-                DialogRoot(DialogKind::DuraStatus),
-                DuraWidget,
-                Visibility::Hidden,
-            ));
+    // 部位图（C# Background @ (3,3) 内相对坐标；面板子节点，随面板显隐）
+    commands.entity(panel).with_children(|p| {
+        for def in &PIECES {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, def.idx[0]) {
+                // 部位图用帧原生尺寸（C# 不缩放）
+                let (iw, ih) = match libs.0.get_image(LibraryName::Prguse, def.idx[0]) {
+                    Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                    None => (18.0, 18.0),
+                };
+                spawn_image(p, h, 3.0 + def.rel.0, 3.0 + def.rel.1, iw, ih, 9)
+                    .insert(DuraPiece(def.kind));
+            }
         }
-    }
+    });
 }
 
 /// 按 C# UpdateCharacterDura 规则计算耐久状态索引（返回 -1 表示空/损坏隐藏）
@@ -223,19 +218,20 @@ fn dura_status_ui_system(
     mode: Res<MiniMapMode>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut widgets: Query<&mut Visibility, (With<DuraWidget>, Without<DuraPiece>)>,
-    mut pieces: Query<(&mut Visibility, &mut Sprite, &DuraPiece)>,
-    mut toggle: Query<
-        (
-            &mut UiButton,
-            &mut crate::ui::sprite_ui::ButtonFrames,
-            &mut Transform,
-        ),
-        With<DuraToggleBtn>,
-    >,
+    mut pieces: Query<(&mut Visibility, &mut ImageNode, &DuraPiece)>,
+    mut toggle: Query<(Entity, &Interaction, &mut ImageButton, &mut Node), With<DuraToggleBtn>>,
     mut logged: Local<bool>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::DuraStatus);
     let equipment = loadout_q
         .single()
@@ -258,37 +254,40 @@ fn dura_status_ui_system(
         *logged = false;
     }
 
-    // 面板 + 切换按钮显隐
+    // 面板显隐
     for mut vis in &mut widgets {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
 
     // 切换按钮点击（C# Character.Click）
-    for (mut btn, mut frames, mut tf) in &mut toggle {
-        if btn.clicked {
+    for (e, inter, mut btn, mut node) in &mut toggle {
+        if edge(e, inter, &mut prev_inter) {
             if open {
                 mgr.close(DialogKind::DuraStatus);
             } else {
                 mgr.open(DialogKind::DuraStatus);
             }
         }
-        // 打开时换 2110 图标
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, if open { 2110 } else { 2113 }) {
-            if frames.normal != h {
-                frames.normal = h.clone();
+        // 打开时换 2110 图标（image_button_system 按 normal 帧切换）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if open { 2110 } else { 2113 }) {
+            if btn.normal != h {
+                btn.normal = h.clone();
             }
         }
         // Y 跟随小地图大/小模式（C# SetBigMode/SetSmallMode 更新 DuraStatusPanel.Location）：
-        // 同步命中区 rect.1（y 向下）与视觉 Transform.y（取负），二者不可脱节
+        // 同步命中区（Node.top，y 向下）与视觉位置，二者不可脱节
         let want_y = dura_btn_y(mode.big);
-        if (btn.rect.1 - want_y).abs() > 0.5 {
-            btn.rect.1 = want_y;
-            tf.translation.y = -want_y;
+        let cur_y = match node.top {
+            Val::Px(v) => v,
+            _ => 0.0,
+        };
+        if (cur_y - want_y).abs() > 0.5 {
+            node.top = Val::Px(want_y);
         }
     }
 
     // 部位：装备存在且耐久>0 显示对应三态，否则隐藏
-    for (mut vis, mut sprite, piece) in &mut pieces {
+    for (mut vis, mut node, piece) in &mut pieces {
         let mut show = false;
         if let Some(def) = PIECES.iter().find(|d| d.kind == piece.0) {
             if let Some(item) = equipment
@@ -297,8 +296,8 @@ fn dura_status_ui_system(
             {
                 let idx = dura_index(item, piece.0);
                 if idx > 0 {
-                    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, idx as usize) {
-                        sprite.image = h;
+                    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx as usize) {
+                        node.image = h;
                         show = true;
                     }
                 }

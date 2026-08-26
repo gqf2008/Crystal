@@ -1,6 +1,10 @@
 // ============================================================================
 // 计时器对话框（M50）
 // 纯客户端对话框（无网络依赖）
+// bevy_ui 迁移（批 16）：面板 Prguse[170] @(280,80) 244x207，全节点化
+// 注：C# TimerDialog 实际是 Prguse2 沙漏动画+数字位（Index=960/_libraryOffset=900，
+//     起点 (ScreenWidth-120, ScreenHeight-230)）；本实现沿用既有 Bevy 简化面板
+//     （Prguse[170] + 文本行），仅迁移渲染层，C# 逐帧对齐留待后续
 // ============================================================================
 
 use bevy::prelude::*;
@@ -9,9 +13,8 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
-};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
 
 /// 状态
 #[derive(Resource, Default)]
@@ -40,7 +43,7 @@ impl Plugin for TimerPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_timer);
         app.add_systems(
             Update,
-            (timer_network_events, timer_countdown, timer_ui_system, ui_button_system)
+            (timer_network_events, timer_countdown, timer_ui_system)
                 .chain()
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
@@ -58,7 +61,6 @@ fn spawn_timer(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -68,47 +70,48 @@ fn spawn_timer(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Timer),
-            TimerWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            TimerClose,
-            DialogRoot(DialogKind::Timer),
-            TimerWidget,
-        ));
-    }
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            TimerLine(i),
-            DialogRoot(DialogKind::Timer),
-            TimerWidget,
-        ));
-    }
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Timer), TimerWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(TimerClose);
+        }
+        // 10 行信息 @(18,40+22i)
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(TimerLine(i));
+        }
+    });
 }
 
 /// 显隐 + 渲染 + 关闭
 fn timer_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut timer: ResMut<TimerState>,
-    close: Query<&UiButton, With<TimerClose>>,
+    close: Query<(Entity, &Interaction), With<TimerClose>>,
     mut widgets: Query<&mut Visibility, With<TimerWidget>>,
-    mut lines: Query<(&mut Text2d, &TimerLine)>,
+    mut lines: Query<(&mut Text, &TimerLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Timer);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -116,8 +119,8 @@ fn timer_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Timer);
         }
     }
