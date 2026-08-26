@@ -1,29 +1,37 @@
 // ============================================================================
-// NPC 对话框（M9 第 2 批）
+// NPC 对话框（M9 第 2 批 → 批 46 bevy_ui 迁移）
 // 布局参考：macroquad npc_dialog.rs / C# NPCDialogs.cs
-//   - 背景 Prguse[384/385]，位置 (0,0)
+//   - 背景 Prguse[384/385]（实测 440x224），位置 (0,0)
 //   - 文本区 (8,34)，行距 18；[@XXX] 行是选项，点击发送 CallNPC
 //   - 关闭按钮 Prguse2[360-362] 在 (413,3)
 // 网络：NPCResponse（行列表）→ 显示；CallNPC 推进
+// 迁移说明：
+//   - 面板根 = bevy_ui Node + ImageNode（spawn_panel），子节点绝对定位
+//   - 行/叠加段 = bevy_ui Text（CJK 主字体，#2599 重排版豆腐教训）
+//   - 服务器驱动显隐（NpcDialogState.visible），不走 DialogManager.open →
+//     面板根挂 AlwaysVisible，避开 enforce_dialog_visibility 的"未 open 即隐藏"
+//     兜底（否则 NPC 对话页在 PostUpdate 被强制隐藏，实机黑窗）
 // ============================================================================
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::{DialogKind, DialogRoot};
+use crate::game::dialogs::text_input::{
+    TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
+};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use bevy::sprite::Anchor;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
+use crate::ui::theme::{
+    load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_label,
+    spawn_panel, spawn_scroll_bar_ui, UiScrollList,
+};
 
-use crate::game::dialogs::text_input::{
-    TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
-};
-use crate::ui::scroll_list::{ScrollList, spawn_scroll_bar};
-use crate::ui::sprite_ui::{
-    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
-    ui_image,
-};
+/// 面板尺寸（Prguse[384] 实测 440x224）
+pub const PANEL_W: f32 = 440.0;
+pub const PANEL_H: f32 = 224.0;
 
 /// NPC 对话框状态（网络写入）
 #[derive(Resource, Default)]
@@ -92,7 +100,7 @@ pub struct NpcDialogPlugin;
 impl Plugin for NpcDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NpcDialogState>();
-        app.init_resource::<crate::ui::sprite_ui::UiCjkFont>();
+        app.init_resource::<UiCjkFont>();
         app.add_systems(OnEnter(AppState::Game), spawn_npc_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_dialog);
         app.add_systems(
@@ -106,12 +114,7 @@ impl Plugin for NpcDialogPlugin {
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
-        app.add_systems(
-            Update,
-            (npc_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, npc_ui_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -126,135 +129,91 @@ fn spawn_npc_dialog(
     mut npc: ResMut<NpcDialogState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
-    mut cjk_font: ResMut<crate::ui::sprite_ui::UiCjkFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
     if !npc.cjk_font.is_strong() {
         // 共享宋体资产（#2602 批R：与公告等对话框复用同一 Handle）
-        npc.cjk_font = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
+        npc.cjk_font = shared_cjk_font(&mut fonts, &mut cjk_font);
     }
+    let cjk = npc.cjk_font.clone();
 
-    // 背景 Prguse[384]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 384) {
-        let e = spawn_ui_sprite(&mut commands, h, 0.0, 0.0, 6.0, 1.0);
+    // 背景 Prguse[384] @ (0,0)；面板根（bevy_ui Node + ImageNode + Overflow::clip）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 384) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 0.0, 0.0, PANEL_W, PANEL_H, 30);
+    commands.entity(panel).insert((
+        DialogRoot(DialogKind::Npc),
+        NpcDialogWidget,
+        // 服务器驱动显隐，不随 DialogManager.open 门控（见文件头迁移说明）
+        AlwaysVisible,
         // #118 长对话页滚轮滚动（C# NPC 对话框支持 MouseWheel）
-        let (track, thumb) =
-            spawn_scroll_bar(&mut commands, &mut images, (420.0, 34.0, 4.0, 144.0), 6.3);
-        commands.entity(track).insert((
-            DialogRoot(crate::game::dialogs::DialogKind::Npc),
-            NpcDialogWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(thumb).insert((
-            DialogRoot(crate::game::dialogs::DialogKind::Npc),
-            NpcDialogWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(e).insert((
-            DialogRoot(crate::game::dialogs::DialogKind::Npc),
-            NpcDialogWidget,
-            Visibility::Hidden,
-            ScrollList {
-                rect_rel: (8.0, 34.0, 400.0, 144.0),
-                row_h: 18.0,
-                visible: 8,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (420.0, 34.0, 4.0, 144.0),
-                thumb: Some(thumb),
-                z: 8.0,
-            },
-        ));
-    }
-
-    // 关闭按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        413.0,
-        3.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands.entity(e).insert((
-            NpcClose,
-            DialogRoot(crate::game::dialogs::DialogKind::Npc),
-            NpcDialogWidget,
-        ));
-    }
-
-    // 任务按钮（#90 续：MirAnimatedButton，C# NPCDialog QuestButton
-    // Title[530..539] 10 帧 130ms 循环 + 悬停 284 / 按下 286，点击切换任务日志）
-    {
-        let bg_h = libs
-            .0
-            .get_image(LibraryName::Prguse, 384)
-            .map(|i| i.height.max(0) as f32)
-            .unwrap_or(210.0);
-        if let Some(e) = crate::ui::controls::spawn_animated_button(
-            &mut commands,
-            &mut libs,
-            &mut images,
-            &mut cache,
-            LibraryName::Title,
-            530,
-            10,
-            Some(284),
-            Some(286),
-            172.0,
-            bg_h - 30.0,
-            8.5,
-            96.0,
-            25.0,
-            0.13,
-            true,
+        UiScrollList {
+            rect_rel: (8.0, 34.0, 400.0, 144.0),
+            row_h: 18.0,
+            visible: 8,
+            total: 0,
+            offset: 0,
+            step: 3,
+            track_rel: (420.0, 34.0, 4.0, 144.0),
+            thumb: None,
+            z: 8,
+        },
+    ));
+    commands.entity(panel).with_children(|p| {
+        // 滚动条（轨道 + 滑块，UiScrollThumb 子节点）
+        spawn_scroll_bar_ui(p, (420.0, 34.0, 4.0, 144.0), 8);
+        // 关闭按钮 Prguse2[360-362] @ (413,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            commands.entity(e).insert((
-                NpcQuest,
-                DialogRoot(crate::game::dialogs::DialogKind::Npc),
-                Visibility::Hidden,
-            ));
+            spawn_icon_button(p, n, h, pr, 413.0, 3.0, 20.0, 20.0, 9).insert(NpcClose);
         }
-    }
-
-    // 8 行文本
-    for i in 0..8usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            8.0,
-            34.0 + i as f32 * 18.0,
-            NPC_LINE_FONT_PX,
-            Color::WHITE,
-            8.0,
-        );
-        commands.entity(e).insert((
-            NpcLine(i),
-            NpcLineSrc::default(),
-            // C# GDI 小字号文本经网格适配渲染出整像素笔画；Text2d 默认
-            // Disabled 的软抗锯齿使细笔画覆盖率不满、颜色被叠白冲淡，
-            // 开启 hinting 还原 C# 观感（#2599）
-            FontHinting::Enabled,
-            DialogRoot(crate::game::dialogs::DialogKind::Npc),
-            NpcDialogWidget,
-        ));
-    }
+        // 任务按钮（#90 续：MirAnimatedButton，C# NPCDialog QuestButton
+        // Title[530..539] 10 帧 130ms 循环 + 悬停 284 / 按下 286，点击切换任务日志）
+        let mut frames = Vec::new();
+        for i in 530..540usize {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, i) {
+                frames.push(h);
+            }
+        }
+        let hover = load_lib_image(&mut libs, &mut images, LibraryName::Title, 284);
+        let pressed = load_lib_image(&mut libs, &mut images, LibraryName::Title, 286);
+        if !frames.is_empty() {
+            spawn_animated_icon_button(
+                p,
+                frames,
+                hover,
+                pressed,
+                172.0,
+                PANEL_H - 30.0,
+                96.0,
+                25.0,
+                7,
+                0.13,
+                true,
+            )
+            .insert((NpcQuest, Visibility::Hidden));
+        }
+        // 8 行文本（bevy_ui Text，CJK 主字体）
+        for i in 0..8usize {
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                8.0,
+                34.0 + i as f32 * 18.0,
+                NPC_LINE_FONT_PX,
+                Color::WHITE,
+                8,
+            )
+            .insert((NpcLine(i), NpcLineSrc::default(), FontHinting::Enabled));
+        }
+    });
 }
 
 /// 显示/关闭 + 文本渲染 + 选项点击
@@ -269,20 +228,36 @@ fn npc_ui_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    close: Query<&UiButton, With<NpcClose>>,
+    close: Query<(Entity, &Interaction), With<NpcClose>>,
+    mut quest_btns: Query<
+        (Entity, &Interaction, &mut Visibility),
+        (With<NpcQuest>, Without<NpcDialogWidget>),
+    >,
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
-    mut quest_btns: Query<(&UiButton, &mut Visibility), (With<NpcQuest>, Without<NpcDialogWidget>)>,
-    mut lines: Query<(
-        Entity,
-        &mut Text2d,
-        &mut TextColor,
-        &mut TextFont,
-        &Transform,
-        &NpcLine,
-        &mut NpcLineSrc,
-    )>,
-    mut scroll: Query<&mut ScrollList, With<NpcDialogWidget>>,
+    mut lines: Query<
+        (
+            Entity,
+            &mut Text,
+            &mut TextColor,
+            &mut TextFont,
+            &Node,
+            &NpcLine,
+            &mut NpcLineSrc,
+        ),
+        With<NpcDialogWidget>,
+    >,
+    mut scroll: Query<(Entity, &mut UiScrollList), With<NpcDialogWidget>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     for mut vis in widgets.iter_mut() {
         *vis = if npc.visible {
             Visibility::Visible
@@ -296,13 +271,13 @@ fn npc_ui_system(
         .lines
         .iter()
         .any(|l| l.contains("可接受任务") || l.contains("可完成任务"));
-    for (btn, mut vis) in &mut quest_btns {
+    for (e, inter, mut vis) in &mut quest_btns {
         *vis = if npc.visible && has_quest {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
-        if btn.clicked && npc.visible && has_quest {
+        if edge(e, inter, &mut prev_inter) && npc.visible && has_quest {
             mgr.toggle(DialogKind::QuestLog);
         }
     }
@@ -321,21 +296,24 @@ fn npc_ui_system(
         return;
     }
 
-    // 关闭
-    for btn in &close {
-        if btn.clicked {
+    // 关闭（bevy_ui Interaction 边沿）
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             npc.visible = false;
         }
     }
 
-    // 滚动偏移 + 总行数（#118）
-    {
-        let mut sl = scroll.single_mut();
-        if let Ok(sl) = sl.as_mut() {
-            sl.set_total(npc.lines.len());
-        }
-    }
-    let off = scroll.single().map(|s| s.offset).unwrap_or(0);
+    // 滚动偏移 + 总行数（#118）；面板根实体（叠加标签作为它的子节点）
+    let panel = {
+        let (panel, mut sl) = match scroll.single_mut() {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        sl.set_total(npc.lines.len());
+        panel
+    };
+    let off = scroll.single().map(|s| s.1.offset).unwrap_or(0);
+    let cjk = npc.cjk_font.clone();
 
     // 渲染行：按 #2599 标记解析分段（{t/Color} 着色段、<t/@key> 链接段）
     // 源文本/悬停未变不重建（span 子实体缓存）
@@ -343,12 +321,21 @@ fn npc_ui_system(
     // 原实现在此 early-return，鼠标离开窗口后 NPC 文字永不渲染/更新（master 既有 bug）
     let Ok(window) = windows.single() else { return };
     let cursor = window.cursor_position();
-    // 各行实体当前屏幕原点（拖动后偏离初始 (8, 34+i*18)）——悬停/点击/
-    // 叠加标签都以它为基准，对话框拖动后命中与定位不脱节（#2602 批R 修复）
+    // 各行实体当前原点（bevy_ui 面板根 @(0,0)，行 Node.left/top 即屏幕坐标）——
+    // 悬停/点击/叠加标签都以它为基准
     let mut line_pos: Vec<Option<(f32, f32)>> = vec![None; npc.lines.len().max(8)];
-    for (_ent, mut text, mut color, mut font, tf, line, mut src_cache) in &mut lines {
+    for (_ent, mut text, mut color, mut font, node, line, mut src_cache) in &mut lines {
         let src = npc.lines.get(off + line.0).cloned().unwrap_or_default();
-        let (lx, ly) = (tf.translation.x, -tf.translation.y);
+        let (lx, ly) = (
+            match node.left {
+                Val::Px(v) => v,
+                _ => 0.0,
+            },
+            match node.top {
+                Val::Px(v) => v,
+                _ => 0.0,
+            },
+        );
         if line.0 < line_pos.len() {
             line_pos[line.0] = Some((lx, ly));
         }
@@ -388,7 +375,7 @@ fn npc_ui_system(
         // 所有重建路径统一换 CJK 主字体：parley 的 Hani 脚本回退只在实体
         // 首次排版生效，换页改 text.0 触发的重排版会退化为 .notdef 豆腐框
         // （#2599 实机验证），主字体自带宋体字形才不依赖回退。
-        font.font = FontSource::Handle(npc.cjk_font.clone());
+        font.font = FontSource::Handle(cjk.clone());
         // 旧叠加标签整体重建（C# NewText 每页 Dispose 全部 _textButtons）
         for e in src_cache.overlays.drain(..) {
             commands.entity(e).despawn();
@@ -440,26 +427,18 @@ fn npc_ui_system(
         text.0 = stripped;
         color.0 = Color::WHITE;
         for (x_off, seg_text, seg_col) in overlay_specs {
-            let e = commands
-                .spawn((
-                    UiEntity,
-                    Text2d::new(seg_text),
-                    Anchor::TOP_LEFT,
-                    TextFont {
-                        font: FontSource::Handle(npc.cjk_font.clone()),
-                        font_size: FontSize::Px(font_px),
-                        ..default()
-                    },
-                    TextColor(seg_col),
-                    FontHinting::Enabled,
-                    // 锚定行实体当前变换（拖动后重建的叠加段不落回初始坐标）
-                    Transform::from_xyz(lx + x_off, tf.translation.y, tf.translation.z + 0.05),
-                    Visibility::Visible,
-                    DialogRoot(crate::game::dialogs::DialogKind::Npc),
-                    NpcDialogWidget,
-                ))
-                .id();
-            src_cache.overlays.push(e);
+            // 叠加段 = 面板子节点（绝对定位，x=行原点 + 段前缀宽）
+            let mut child = None;
+            commands.entity(panel).with_children(|p| {
+                child = Some(
+                    spawn_label(p, &cjk, &seg_text, lx + x_off, ly, font_px, seg_col, 9)
+                        .insert(NpcDialogWidget)
+                        .id(),
+                );
+            });
+            if let Some(e) = child {
+                src_cache.overlays.push(e);
+            }
         }
     }
 
@@ -473,7 +452,7 @@ fn npc_ui_system(
     for (i, l) in npc.lines.iter().enumerate() {
         if i >= off && i < off + 8 && is_clickable_npc_line(l) {
             let row = i - off;
-            // 行实体当前屏幕原点（拖动后命中不脱节）
+            // 行实体当前屏幕原点（bevy_ui 行 Node.left/top）
             let Some((lx, ly)) = line_pos.get(row).copied().flatten() else {
                 continue;
             };
@@ -664,7 +643,6 @@ fn npc_input_overlay(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     net: Res<NetConnection>,
@@ -672,8 +650,9 @@ fn npc_input_overlay(
     mut text_state: ResMut<TextInputState>,
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut submits: MessageReader<TextInputSubmit>,
-    ok_btns: Query<&UiButton, With<NpcInputOk>>,
+    ok_btns: Query<(Entity, &Interaction), With<NpcInputOk>>,
     mut roots: Query<&mut Visibility, With<NpcInputRoot>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     use crate::network::server_event::ServerEvent;
 
@@ -690,7 +669,6 @@ fn npc_input_overlay(
                     &mut commands,
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     &mut fonts,
                     &mut ui_font,
                     page_name,
@@ -704,7 +682,11 @@ fn npc_input_overlay(
     }
 
     let submitted = submits.read().any(|s| s.0 == 0);
-    let ok_clicked = ok_btns.iter().any(|b| b.clicked);
+    // bevy_ui Interaction 边沿（C# MirInputBox OKButton Click；Enter 同路径）
+    let ok_clicked = ok_btns.iter().any(|(e, inter)| {
+        let was = prev_inter.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    });
     if state.active && (submitted || ok_clicked) {
         let value = text_state.texts.first().cloned().unwrap_or_default();
         net.send_packet(&mir2_shared::packets::client::npc::NPCConfirmInput {
@@ -726,12 +708,10 @@ fn npc_input_overlay(
 }
 
 /// 生成输入覆盖层（面板 + 提示 + 输入框 + 确定）
-#[allow(clippy::too_many_arguments)]
 fn spawn_npc_input_overlay(
     commands: &mut Commands,
     libs: &mut GameLibraries,
     images: &mut Assets<Image>,
-    cache: &mut UiImageCache,
     fonts: &mut Assets<Font>,
     ui_font: &mut UiFont,
     page_name: &str,
@@ -741,102 +721,63 @@ fn spawn_npc_input_overlay(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
     }
     let font = ui_font.0.clone();
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
 
-    // 面板
-    let root = if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((NpcInputRoot, Visibility::Hidden));
-        e
-    } else {
-        commands
-            .spawn((
-                NpcInputRoot,
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.1, 0.1, 0.14, 0.95),
-                    custom_size: Some(Vec2::new(360.0, 140.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(280.0, -80.0, 6.0),
-                Visibility::Hidden,
-            ))
-            .id()
+    // 面板 Prguse[170]（实测 244x207）@ (280,80)，z 高于 NPC 主面板
+    let Some(bg) = load_lib_image(libs, images, LibraryName::Prguse, 170) else {
+        return;
     };
-    let _ = root;
+    let root = spawn_panel(commands, bg, 280.0, 80.0, 244.0, 207.0, 40);
+    commands.entity(root).insert((NpcInputRoot, Visibility::Hidden));
 
-    // 提示
-    let prompt = spawn_ui_text(
-        commands,
-        &font,
-        &format!("请输入（{}）:", page_name),
-        300.0,
-        100.0,
-        14.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands.entity(prompt).insert(NpcInputRoot);
-
-    // 输入框
-    // #2521：field 是根级实体（父链无 UiEntity），必须直接挂 UiEntity；
-    // 其子控件 TextInputDisplay 由 propagate_ui_render_layers 统一兜底
-    let field = commands
-        .spawn((
-            UiEntity,
-            NpcInputRoot,
-            TextInputField(0),
-            TextInputRect(300.0, 130.0, 280.0, 22.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(280.0, 22.0)),
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(300.0, -130.0, 8.1),
-        ))
-        .id();
-    commands.entity(field).with_children(|p| {
-        p.spawn((
-            TextInputDisplay(0),
-            Text2d::new(String::new()),
-            Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(13.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(3.0, -3.0, 8.2),
-        ));
+    commands.entity(root).with_children(|p| {
+        // 提示（C# CaptionLabel @(25,25) 语义）
+        spawn_label(
+            p,
+            &font,
+            &format!("请输入（{}）:", page_name),
+            20.0,
+            20.0,
+            14.0,
+            Color::WHITE,
+            10,
+        );
+        // 输入框：容器（背景）+ TextInputDisplay 子 Text；TextInputRect 为屏幕坐标
+        // （面板原点 (280,80) + 相对 (20,50) = (300,130)）
+        spawn_container(p, 20.0, 50.0, 200.0, 22.0, 10)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                TextInputField(0),
+                TextInputRect(300.0, 130.0, 200.0, 22.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    TextInputDisplay(0),
+                ));
+            });
+        // 确定（C# MirInputBox OKButton Title[200-202] @(60,123)；本实现沿用
+        // 原 Prguse2[360-362] 三帧，落在面板内而非原越界的 (560,175)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(libs, images, LibraryName::Prguse2, 360),
+            load_lib_image(libs, images, LibraryName::Prguse2, 361),
+            load_lib_image(libs, images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 60.0, 123.0, 50.0, 22.0, 11).insert(NpcInputOk);
+        }
     });
-
-    // 确定
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        commands,
-        libs,
-        images,
-        cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        560.0,
-        175.0,
-        8.2,
-        50.0,
-        22.0,
-    ) {
-        commands.entity(e).insert(NpcInputOk);
-    }
 }
 
 #[cfg(test)]
