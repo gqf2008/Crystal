@@ -708,9 +708,8 @@ fn hold_move_test_system(
     mut st: ResMut<HoldMoveTest>,
     time: Res<Time>,
     game_data: Res<client_bevy::map_renderer::GameData>,
-    mut hud: ResMut<client_bevy::game::hud::HudState>,
     players: Query<&Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
-    // #2633 批次4 步4：演示驱动的 in_trap_rock/sprint 写改双写 StatusFlags（读也改组件）；hud.* 保留至步9
+    // #2633 批次4 步9：演示驱动改直写 StatusFlags 组件（hud.* 已删）
     mut flags_q: Query<&mut client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
 ) {
     use client_bevy::game::movement::{mouse_direction, next_direction, point_move, previous_direction};
@@ -745,7 +744,6 @@ fn hold_move_test_system(
                 let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
                 tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
                 // 进入陷阱阶段
-                hud.in_trap_rock = true;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.in_trap_rock = true;
                 }
@@ -763,8 +761,6 @@ fn hold_move_test_system(
                 };
                 tracing::info!("[HOLDMOVE] {} 陷阱阶段方向 {:?}", verdict, dirs);
                 // 进入冲刺阶段
-                hud.in_trap_rock = false;
-                hud.sprint = true;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.in_trap_rock = false;
                     f.sprint = true;
@@ -779,7 +775,6 @@ fn hold_move_test_system(
                 let moving = !dirs.is_empty();
                 let verdict = if moving { "✅ 冲刺可移动（3 格跑）" } else { "❌ 冲刺未移动" };
                 tracing::info!("[HOLDMOVE] {} 冲刺阶段方向 {:?}", verdict, dirs);
-                hud.sprint = false;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.sprint = false;
                 }

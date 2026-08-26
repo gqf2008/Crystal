@@ -25,8 +25,7 @@ use crate::actor::LocalPlayer;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::inventory::{InvItem, InvSlot, InventoryShiftRight};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
-use crate::game::player_state::Inventory;
+use crate::game::player_state::{Gold, Inventory};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -695,10 +694,11 @@ fn trade_ui_system(
 }
 
 /// 交易交互：存/取物品、金币输入、锁定、关闭
+/// #2633 批次4 步9：金币读改 `Gold` 组件（HudState 已删）；实体缺失默认 0（同原 HudState 默认）。
 #[allow(clippy::too_many_arguments)]
 fn trade_action_system(
     mut trade: ResMut<TradeState>,
-    hud: Res<HudState>,
+    gold_q: Query<&Gold, With<LocalPlayer>>,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -782,7 +782,7 @@ fn trade_action_system(
         let cy = -tf.translation.y;
         if (cursor.x - cx).abs() <= GOLD_W / 2.0 && (cursor.y - cy).abs() <= GOLD_H / 2.0 {
             if !trade.my_locked {
-                amount.ask("输入交易金币", hud.gold);
+                amount.ask("输入交易金币", gold_q.single().map(|g| g.0).unwrap_or(0));
             }
             return;
         }

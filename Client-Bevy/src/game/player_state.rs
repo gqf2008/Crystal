@@ -17,7 +17,6 @@ use mir2_shared::enums::PetMode;
 
 use crate::actor::{LocalPlayer, PlayerName};
 use crate::game::dialogs::inventory::InvItem;
-use crate::game::hud::HudState;
 use crate::game::sets::GameSet;
 use crate::network::server_event::ServerEvent;
 use crate::scenes::AppState;
@@ -367,11 +366,10 @@ impl Plugin for PlayerStatePlugin {
 
 /// 玩家生命/法、金币/声望、基础属性、经验/等级、宠物模式、面板属性 + UserInformation 玩家属性部分。
 /// （设计 §10 `player_vitals_events`；背包/装备部分归 inventory_events，二者读同一事件不同组件。）
-/// #2633 批次4 步8：CharacterState 双写已删除；hud.* 双写保留至步9。
+/// #2633 批次4 步8/9：CharacterState 双源已删、HudState 双写已删——唯一数据源是玩家实体组件。
 #[allow(clippy::too_many_arguments)]
 fn player_vitals_events(
     mut events: MessageReader<ServerEvent>,
-    mut hud: ResMut<HudState>,
     mut pending: ResMut<PendingUserInfo>,
     mut vitals_q: Query<&mut Vitals, With<LocalPlayer>>,
     mut progression_q: Query<&mut Progression, With<LocalPlayer>>,
@@ -386,37 +384,30 @@ fn player_vitals_events(
         match ev {
             ServerEvent::PetModeChanged { mode } => {
                 // #1388：HUD 宠物模式标签
-                hud.pet_mode = *mode;
                 if let Ok(mut p) = pet_mode_q.single_mut() {
                     p.0 = *mode;
                 }
             }
             ServerEvent::HealthChanged { hp, mp } => {
-                hud.hp = *hp;
-                hud.mp = *mp;
                 if let Ok(mut v) = vitals_q.single_mut() {
                     v.hp = *hp;
                     v.mp = *mp;
                 }
             }
             ServerEvent::GoldGained { gold } => {
-                hud.gold = hud.gold.saturating_add(*gold);
                 if let Ok(mut g) = gold_q.single_mut() {
                     g.0 = g.0.saturating_add(*gold);
                 }
             }
             ServerEvent::BaseStats { stats } => {
                 // #268：基础属性（角色面板数据）
-                hud.base_stats = stats.clone();
                 if let Ok(mut b) = base_stats_q.single_mut() {
                     b.0 = stats.clone();
                 }
                 tracing::info!("📊 基础属性: {:?}", stats);
             }
             ServerEvent::PlayerNameUpdated { name } => {
-                // #264：本地玩家改名。双写：hud.name（过渡，步9 删）+ 复用组件 `PlayerName`
-                //（object_state 亦有同名维护，值同，重复写无害）。
-                hud.name = name.clone();
+                // #264：本地玩家改名（复用组件 `PlayerName`；object_state 亦有同名维护，值同）
                 if let Ok(mut n) = name_q.single_mut() {
                     n.0 = name.clone();
                 }
@@ -424,42 +415,35 @@ fn player_vitals_events(
             }
             ServerEvent::CreditGained { credit } => {
                 // #248：声望增加
-                hud.credit = hud.credit.saturating_add(*credit);
                 if let Ok(mut c) = credit_q.single_mut() {
                     c.0 = c.0.saturating_add(*credit);
+                    tracing::info!("🏅 获得声望 +{}（当前 {}）", credit, c.0);
                 }
-                tracing::info!("🏅 获得声望 +{}（当前 {}）", credit, hud.credit);
             }
             ServerEvent::CreditLost { amount } => {
                 // #248：声望减少
-                hud.credit = hud.credit.saturating_sub(*amount);
                 if let Ok(mut c) = credit_q.single_mut() {
                     c.0 = c.0.saturating_sub(*amount);
+                    tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, c.0);
                 }
-                tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, hud.credit);
             }
             ServerEvent::GoldLost { amount } => {
-                hud.gold = hud.gold.saturating_sub(*amount);
                 if let Ok(mut g) = gold_q.single_mut() {
                     g.0 = g.0.saturating_sub(*amount);
+                    tracing::info!("💸 失去金币 -{}（当前 {}）", amount, g.0);
                 }
-                tracing::info!("💸 失去金币 -{}（当前 {}）", amount, hud.gold);
             }
             ServerEvent::ExperienceGained { amount } => {
-                hud.exp += *amount;
                 if let Ok(mut p) = progression_q.single_mut() {
                     p.exp += *amount;
+                    tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, p.exp, p.max_exp);
                 }
-                tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, hud.exp, hud.max_exp);
             }
             ServerEvent::LevelChanged {
                 level,
                 exp,
                 max_exp,
             } => {
-                hud.level = *level;
-                hud.exp = *exp;
-                hud.max_exp = (*max_exp).max(1);
                 if let Ok(mut p) = progression_q.single_mut() {
                     p.level = *level;
                     p.exp = *exp;
@@ -467,35 +451,7 @@ fn player_vitals_events(
                 }
                 tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
-            ServerEvent::UserInformation {
-                name,
-                level,
-                hp,
-                mp,
-                exp,
-                max_exp,
-                gold,
-                gender,
-                class,
-                object_id,
-                max_hp,
-                max_mp,
-                ..
-            } => {
-                // —— HudState 玩家属性部分（inventory/equipment 部分归 inventory_events；
-                // CharacterState 双写已随资源删除，步8）——
-                hud.name = name.clone();
-                hud.level = *level;
-                hud.hp = *hp;
-                hud.mp = *mp;
-                hud.max_hp = *max_hp;
-                hud.max_mp = *max_mp;
-                hud.exp = *exp;
-                hud.max_exp = (*max_exp).max(1);
-                hud.gold = *gold;
-                hud.class = *class;
-                hud.gender = *gender;
-                hud.player_object_id = Some(*object_id);
+            ServerEvent::UserInformation { name, .. } => {
                 // —— 玩家组件：实体已生成就地写入（共享映射），未生成则缓冲快照待 reconcile（R1）——
                 // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），故单一查询成败即实体有无。
                 // PlayerName 单独写：它由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
@@ -512,7 +468,7 @@ fn player_vitals_events(
                     // （latest wins），待 apply_pending_user_info 在实体生成后应用一次。
                     pending.0 = Some(ev.clone());
                 }
-                // #2633 批次4 步7：补写复用组件 `PlayerName`（读者已迁该组件；hud.name 双写保留）
+                // #2633 批次4 步7：补写复用组件 `PlayerName`
                 if let Ok(mut n) = name_q.single_mut() {
                     n.0 = name.clone();
                 }
@@ -522,73 +478,58 @@ fn player_vitals_events(
     }
 }
 
-/// 玩家状态旗标（钓鱼/陷阱/麻痹/死亡/复活/轮回）+ 骑乘 HudState 镜像。
-/// （设计 §10 `player_status_events`；sprint/sneaking 由 buff.rs 写、本批未迁移；
-/// MountUpdated 的 MountState 由 object_state/spawn 维护，此处仅写 HudState.riding/mount_type。）
+/// 玩家状态旗标（钓鱼/陷阱/麻痹/死亡/复活/轮回）。
+/// （设计 §10 `player_status_events`；sprint/sneaking 由 buff.rs 写；
+/// MountUpdated 的 MountState 由 object_state/spawn 维护——步9 起本系统不再为该事件写任何值。）
 fn player_status_events(
     mut events: MessageReader<ServerEvent>,
-    mut hud: ResMut<HudState>,
+    mut death_ui: ResMut<crate::game::hud::DeathDialogState>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
 ) {
     for ev in events.read() {
         match ev {
             ServerEvent::FishingUpdate { progress, .. } => {
                 // #1544：钓鱼中不可使用物品
-                hud.fishing = *progress != 0;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.fishing = *progress != 0;
                 }
             }
             ServerEvent::TrapRockChanged { in_trap } => {
                 // #1550：陷阱中不可走/跑
-                hud.in_trap_rock = *in_trap;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.in_trap_rock = *in_trap;
                 }
             }
             ServerEvent::LocalPoisonChanged { paralysis } => {
                 // #1616：麻痹/冰冻毒锁定输入
-                hud.paralysis = *paralysis;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.paralysis = *paralysis;
                 }
             }
-            ServerEvent::MountUpdated {
-                object_id,
-                mount_type,
-                is_mounted,
-            } => {
-                // #1544：本地玩家骑乘状态。MountState 组件由 object_state/spawn 路径维护，
-                // 此处仅写 HudState 镜像（riding/mount_type），读者迁移（批6/§12 R7）后改用 MountState。
-                if Some(*object_id) == hud.player_object_id {
-                    hud.riding = *is_mounted;
-                    // #1564：记录坐骑类型（骑乘音效 Tiger/Wolf 区分）
-                    hud.mount_type = *mount_type;
-                }
+            ServerEvent::MountUpdated { .. } => {
+                // #1544：本地玩家骑乘。MountState 组件由 object_state/spawn 路径维护
+                //（object_state.rs MountUpdated 分支插入/移除），HudState 镜像随资源删除。
             }
             ServerEvent::PlayerDied => {
-                hud.dead = true;
-                hud.death_popup_dismissed = false;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.dead = true;
                 }
+                // 死亡弹窗重新弹出（C# ShowReviveMessage 只弹一次，#46）
+                death_ui.dismissed = false;
             }
             ServerEvent::ReincarnationRequested => {
-                if hud.dead {
-                    hud.reincarnation_offered = true;
+                if flags_q.single().map(|f| f.dead).unwrap_or(false) {
                     if let Ok(mut f) = flags_q.single_mut() {
                         f.reincarnation_offered = true;
                     }
                 }
             }
             ServerEvent::PlayerRevived => {
-                hud.dead = false;
-                hud.reincarnation_offered = false;
-                hud.death_popup_dismissed = false;
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.dead = false;
                     f.reincarnation_offered = false;
                 }
+                death_ui.dismissed = false;
             }
             _ => {}
         }
@@ -643,6 +584,7 @@ mod tests {
     use super::*;
     use crate::game::dialogs::inventory::InvItem;
     use crate::game::dialogs::potion_belt::PotionBeltState;
+    use crate::game::hud::DeathDialogState;
 
     /// 注册 4 个写系统（与生产一致的 GameSet::PlayerState + belt 先于 inventory 排序 +
     /// in_state(Game) 门控），配齐所需资源。首个 update 在非 Game 态跑（schedule 初始化
@@ -652,7 +594,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
         app.init_state::<AppState>();
         app.add_message::<ServerEvent>();
-        app.init_resource::<HudState>();
+        app.init_resource::<DeathDialogState>();
         app.init_resource::<PotionBeltState>();
         app.init_resource::<PendingUserInfo>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
@@ -709,9 +651,9 @@ mod tests {
         }
     }
 
-    /// vitals/status 写路径 + HudState 双写等价（HealthChanged/LevelChanged/GoldGained/PlayerDied）
+    /// vitals/status 写路径（HealthChanged/LevelChanged/GoldGained/PlayerDied → 组件）
     #[test]
-    fn vitals_status_write_components_and_hud() {
+    fn vitals_status_write_components() {
         let mut app = test_app();
         spawn_local(&mut app);
         enter_game(&mut app);
@@ -728,23 +670,19 @@ mod tests {
         app.world_mut().write_message(ServerEvent::PlayerDied);
         app.update();
 
-        let hud = app.world().resource::<HudState>();
-        assert_eq!((hud.hp, hud.mp), (500, 200));
-        assert_eq!((hud.level, hud.exp, hud.max_exp), (30, 12345, 99999));
-        assert_eq!(hud.gold, 777);
-        assert!(hud.dead);
-
         let v: Vitals = get(&mut app);
-        assert_eq!((v.hp, v.mp), (500, 200), "Vitals 组件应同步");
+        assert_eq!((v.hp, v.mp), (500, 200), "Vitals 组件应更新");
         let p: Progression = get(&mut app);
         assert_eq!((p.level, p.exp, p.max_exp), (30, 12345, 99999));
         let g: Gold = get(&mut app);
         assert_eq!(g.0, 777);
         let f: StatusFlags = get(&mut app);
         assert!(f.dead);
+        // 死亡弹窗应重置（PlayerDied → DeathDialogState.dismissed=false）
+        assert!(!app.world().resource::<DeathDialogState>().dismissed);
     }
 
-    /// UserInformation：玩家属性/面板属性写组件 + HudState 双写（步8 起 CharacterState 已删）
+    /// UserInformation：玩家属性/面板属性写组件（步8 起 CharacterState 已删、步9 起 HudState 已删）
     #[test]
     fn user_information_writes_vitals_progression_gold_combatstats() {
         let mut app = test_app();
@@ -753,12 +691,6 @@ mod tests {
 
         app.world_mut().write_message(user_info(60, 800, 400));
         app.update();
-
-        let hud = app.world().resource::<HudState>();
-        assert_eq!((hud.hp, hud.max_hp, hud.mp, hud.max_mp), (800, 5000, 400, 2000));
-        assert_eq!(hud.level, 60);
-        assert_eq!(hud.gold, 4242);
-        assert_eq!(hud.player_object_id, Some(31415));
 
         let v: Vitals = get(&mut app);
         assert_eq!((v.hp, v.max_hp, v.mp, v.max_mp), (800, 5000, 400, 2000));
@@ -771,7 +703,7 @@ mod tests {
         assert_eq!(cb.bag_weight, 250);
     }
 
-    /// 背包/装备写组件镜像 + HudState（ItemGained + UserInformation 背包部分）
+    /// 背包/装备写组件（ItemGained + UserInformation 背包部分）
     #[test]
     fn inventory_events_mirror_to_components() {
         let mut app = test_app();
@@ -781,9 +713,6 @@ mod tests {
         // UserInformation 写入背包/装备
         app.world_mut().write_message(user_info(10, 100, 50));
         app.update();
-        let hud = app.world().resource::<HudState>();
-        assert_eq!(hud.inventory.items.len(), 4);
-        assert_eq!(hud.equipment[0].as_ref().unwrap().unique_id, 900);
         let inv: crate::game::player_state::Inventory = get(&mut app);
         assert_eq!(inv.items.len(), 4, "Inventory 组件应镜像背包");
         assert_eq!(inv.items[0].as_ref().unwrap().unique_id, 1);
@@ -803,13 +732,11 @@ mod tests {
                 .any(|it| it.unique_id == 7),
             "新物品应入包并镜像到组件"
         );
-        let hud = app.world().resource::<HudState>();
-        assert!(hud.inventory.items.iter().flatten().any(|it| it.unique_id == 7));
     }
 
-    /// §9：gold 唯一源是 Gold 组件——UserInformation 不再写 hud.inventory.gold（双源已消）。
+    /// §9：gold 唯一源是 Gold 组件——背包金币文本读 Gold 组件，无第二数据源可断言。
     #[test]
-    fn gold_single_source_inventory_gold_not_written() {
+    fn gold_single_source() {
         let mut app = test_app();
         spawn_local(&mut app);
         enter_game(&mut app);
@@ -819,17 +746,11 @@ mod tests {
 
         let g: Gold = get(&mut app);
         assert_eq!(g.0, 4242, "Gold 组件为金币唯一源");
-        let hud = app.world().resource::<HudState>();
-        assert_eq!(hud.gold, 4242, "hud.gold 仍双写（步9 删）");
-        assert_eq!(
-            hud.inventory.gold, 0,
-            "hud.inventory.gold 不再写入（§9 双源已消，背包金币文本读 Gold 组件）"
-        );
     }
 
-    /// 背包 CRUD（移动/删除）：组件与 hud 双写逐步一致（unique_id 序列比对）。
+    /// 背包 CRUD（移动/删除）：组件逐步更新（unique_id 序列断言）。
     #[test]
-    fn inventory_move_delete_mirror_to_component() {
+    fn inventory_move_delete_updates_component() {
         fn ids(items: &[Option<InvItem>]) -> Vec<Option<u64>> {
             items.iter().map(|s| s.as_ref().map(|i| i.unique_id)).collect()
         }
@@ -844,35 +765,34 @@ mod tests {
         app.world_mut()
             .write_message(ServerEvent::InventoryMoved { from: 0, to: 1 });
         app.update();
-        let hud_ids = ids(&app.world().resource::<HudState>().inventory.items);
         let inv: Inventory = get(&mut app);
-        assert_eq!(hud_ids, ids(&inv.items), "移动后 hud 与 Inventory 组件一致");
+        assert_eq!(ids(&inv.items), [Some(2), Some(1), None, None], "移动后应交换");
 
         // 删除当前 0 格物品（uid=2，移动后位于 0）
         let uid = inv.items[0].as_ref().unwrap().unique_id;
         app.world_mut()
             .write_message(ServerEvent::ItemDeleted { unique_id: uid });
         app.update();
-        let hud_ids = ids(&app.world().resource::<HudState>().inventory.items);
         let inv: Inventory = get(&mut app);
-        assert_eq!(hud_ids, ids(&inv.items), "删除后 hud 与 Inventory 组件一致");
         assert!(!inv.items.iter().flatten().any(|it| it.unique_id == uid));
     }
 
     /// ItemUsed：腰带补货须读「扣减前」背包（belt_restock 先于 inventory 扣减，§12 R6）
+    /// #2633 批次4 步9：补货系统改 `Query::single()` 读 Inventory 组件——本地玩家实体只允许
+    /// 一只（重复 spawn 会使 single() 判多实体而跳过），这里不再预 spawn。
     #[test]
     fn belt_restock_reads_pre_deduct_inventory() {
         let mut app = test_app();
-        spawn_local(&mut app);
         enter_game(&mut app);
 
         // 背包：stack A(uid=100,idx=500,count=1) + stack B(uid=200,idx=500,count=3)；腰带格 0 = uid 100
-        {
-            let mut hud = app.world_mut().resource_mut::<HudState>();
-            hud.inventory.items = vec![Some(item(100, 500, 1)), Some(item(200, 500, 3))];
-            let mut belt = app.world_mut().resource_mut::<PotionBeltState>();
-            belt.slots[0] = Some(100);
-        }
+        let e = spawn_local(&mut app);
+        app.world_mut().entity_mut(e).insert(Inventory {
+            items: vec![Some(item(100, 500, 1)), Some(item(200, 500, 3))],
+            ..Default::default()
+        });
+        let mut belt = app.world_mut().resource_mut::<PotionBeltState>();
+        belt.slots[0] = Some(100);
         app.world_mut()
             .write_message(ServerEvent::ItemUsed { unique_id: 100 });
         app.update();
@@ -881,15 +801,15 @@ mod tests {
         let belt = app.world().resource::<PotionBeltState>();
         assert_eq!(belt.slots[0], Some(200), "腰带应补货为另一组同物品");
         // 扣减：stack A(count=1) 被移除
-        let hud = app.world().resource::<HudState>();
+        let inv: Inventory = get(&mut app);
         assert!(
-            !hud.inventory.items.iter().flatten().any(|it| it.unique_id == 100),
+            !inv.items.iter().flatten().any(|it| it.unique_id == 100),
             "已消耗物品应出包"
         );
-        assert!(hud.inventory.items.iter().flatten().any(|it| it.unique_id == 200));
+        assert!(inv.items.iter().flatten().any(|it| it.unique_id == 200));
     }
 
-    /// R1：实体未生成时组件写跳过、不 panic，HudState 仍写（读者零影响）
+    /// R1：实体未生成时组件写跳过、不 panic（无 HudState 兜底可断言，行为=写方静默跳过）
     #[test]
     fn write_skips_when_entity_missing() {
         let mut app = test_app();
@@ -898,12 +818,9 @@ mod tests {
         app.world_mut()
             .write_message(ServerEvent::HealthChanged { hp: 42, mp: 24 });
         app.update(); // 不应 panic
-        let hud = app.world().resource::<HudState>();
-        assert_eq!((hud.hp, hud.mp), (42, 24), "HudState 兜底写仍生效");
-        // 无实体 → 查询不到组件（无法断言值，只要不 panic 即通过）
     }
 
-    /// R1 修复：实体缺失时 UserInformation 被缓冲（不 panic、HudState 照写、组件查不到），
+    /// R1 修复：实体缺失时 UserInformation 被缓冲（不 panic），
     /// 实体生成后 reconcile 一次性应用全部组件并清空 pending。
     #[test]
     fn pending_user_info_buffered_then_applied_on_spawn() {
@@ -915,10 +832,6 @@ mod tests {
         app.world_mut().write_message(user_info(60, 800, 400));
         app.update(); // 不应 panic
 
-        // HudState/CharacterState 双写照常（读者零影响）
-        let hud = app.world().resource::<HudState>();
-        assert_eq!((hud.hp, hud.max_hp, hud.level, hud.gold), (800, 5000, 60, 4242));
-        assert_eq!(hud.inventory.items.len(), 4);
         // 组件仍查不到（实体未生成）
         assert!(
             app.world_mut()
@@ -953,9 +866,6 @@ mod tests {
         assert_eq!(loadout.slots[0].as_ref().unwrap().unique_id, 900);
         // pending 已清空
         assert!(app.world().resource::<PendingUserInfo>().0.is_none());
-        // HudState 仍正确
-        let hud = app.world().resource::<HudState>();
-        assert_eq!((hud.hp, hud.level, hud.gold), (800, 60, 4242));
     }
 
     /// R1：实体缺失时连发两个 UserInformation → 后到覆盖先到（latest wins）
@@ -980,10 +890,10 @@ mod tests {
         assert!(app.world().resource::<PendingUserInfo>().0.is_none());
     }
 
-    /// 步7：PlayerNameUpdated / UserInformation 双写——hud.name 与 `PlayerName` 组件同步
-    /// （读者基于组件，写者须保证镜像成立；PlayerName 由 spawn 路径插入，测试须显式挂载）。
+    /// 步7/9：PlayerNameUpdated / UserInformation 写 `PlayerName` 组件
+    /// （PlayerName 由 spawn 路径插入，测试须显式挂载）。
     #[test]
-    fn player_name_component_dual_written() {
+    fn player_name_component_written() {
         let mut app = test_app();
         app.world_mut().spawn((
             LocalPlayer,
@@ -997,8 +907,6 @@ mod tests {
                 name: "改名后".to_string(),
             });
         app.update();
-        let hud = app.world().resource::<HudState>();
-        assert_eq!(hud.name, "改名后", "hud.name 双写保留");
         let pn = app
             .world_mut()
             .query_filtered::<&PlayerName, With<LocalPlayer>>()
@@ -1011,8 +919,6 @@ mod tests {
 
         app.world_mut().write_message(user_info(10, 100, 50));
         app.update();
-        let hud = app.world().resource::<HudState>();
-        assert_eq!(hud.name, "测试者");
         let pn = app
             .world_mut()
             .query_filtered::<&PlayerName, With<LocalPlayer>>()
@@ -1024,7 +930,7 @@ mod tests {
         assert_eq!(pn, "测试者", "UserInformation 应同步 PlayerName 组件");
     }
 
-    /// 步7：实体缺失时 PlayerName 写跳过不 panic（同 R1 语义），hud.name 照写
+    /// 步7：实体缺失时 PlayerName 写跳过不 panic（同 R1 语义）
     #[test]
     fn player_name_write_skips_when_entity_missing() {
         let mut app = test_app();
@@ -1035,8 +941,6 @@ mod tests {
                 name: "无实体".to_string(),
             });
         app.update(); // 不应 panic
-        let hud = app.world().resource::<HudState>();
-        assert_eq!(hud.name, "无实体");
     }
 
     /// 构造 UserInformation 事件（背包 2 格、装备槽 0 有 uid=900）

@@ -13,7 +13,6 @@ use bevy::prelude::*;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -359,7 +358,6 @@ mod tests {
         world.insert_resource(GameLibraries(Libraries::new(data_path)));
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(UiImageCache::default());
-        world.insert_resource(HudState::default());
         world.insert_resource(DialogManager::default()); // DuraStatus 默认关闭
         world.insert_resource(MiniMapMode::default()); // 默认大模式
         world

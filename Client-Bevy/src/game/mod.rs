@@ -31,7 +31,6 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<hud::HudState>();
         app.init_resource::<chat::ChatState>();
         app.init_resource::<player_control::ControlState>();
         // 网络系统直接引用的对话框状态（与插件解耦，避免资源未注册）

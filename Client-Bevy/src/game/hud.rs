@@ -14,7 +14,6 @@ use crate::actor::LocalPlayer;
 use crate::actor::PlayerName;
 use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::dura_status::{dura_btn_y, MINIMAP_X};
-use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::option::OptionState;
@@ -31,94 +30,13 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiEntity, UiFont, UiImageCache,
 };
 
-/// HUD 状态（网络 handler 写入，HUD 系统读取）
-#[derive(Resource)]
-pub struct HudState {
-    pub hp: i32,
-    pub max_hp: i32,
-    pub mp: i32,
-    pub max_mp: i32,
-    pub exp: i64,
-    pub max_exp: i64,
-    pub level: u16,
-    pub gold: u32,
-    /// #248 声望/功勋
-    pub credit: u32,
-    /// #268 基础属性（S.BaseStatsInfo）
-    pub base_stats: Vec<i32>,
-    pub name: String,
-    /// 本地玩家 object_id（UserInformation 提供）
-    pub player_object_id: Option<u32>,
-    /// 角色职业（显示用）
-    pub class: u8,
-    /// 角色性别（UserInformation 提供；C# MirGender，CanUseItem 用，#1544）
-    pub gender: u8,
-    /// 是否骑乘中（MountUpdated 本地玩家，#1544：骑乘时仅 Scroll/Potion/Torch 可用）
-    pub riding: bool,
-    /// 坐骑类型（MountUpdated 本地玩家，#1564：骑乘音效区分 Tiger/Wolf）
-    pub mount_type: i16,
-    /// 是否钓鱼中（FishingUpdate 本地玩家，#1544：钓鱼时不可使用物品）
-    pub fishing: bool,
-    /// #1616：本地玩家麻痹/冰冻毒（C# CheckInput：Paralysis/LRParalysis/Frozen 锁定输入）
-    pub paralysis: bool,
-    /// #1550：陷阱岩石（C# User.InTrapRock：陷阱中不可走/跑）
-    pub in_trap_rock: bool,
-    /// #1552：冲刺（C# User.Sprint，SwiftFeet Buff）——CanRun 3 格
-    pub sprint: bool,
-    /// #1552：潜行（C# User.Sneaking，MoonLight/DarkBody Buff）——不可跑 + 半透明
-    pub sneaking: bool,
-    /// 自动喝药开关（HP < 35% 自动使用背包药品）
-    pub auto_pot_hp: bool,
-    /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
-    pub dead: bool,
-    /// 收到轮回术复活请求（#222）
-    pub reincarnation_offered: bool,
-    /// 死亡弹窗已点击“否”关闭（C# ShowReviveMessage 只弹一次；死亡后重置）
-    pub death_popup_dismissed: bool,
-    /// 自动喝药冷却（避免连发）
-    pub pot_cooldown: f32,
-    /// 背包（网络 UserInformation 写入）
-    pub inventory: crate::game::dialogs::inventory::InventoryState,
-    /// 装备（12 槽）
-    pub equipment: Vec<Option<InvItem>>,
-    /// #1388：宠物模式（C# PModeLabel；S.ChangePMode 更新）
-    pub pet_mode: mir2_shared::enums::PetMode,
-}
-
-impl Default for HudState {
-    fn default() -> Self {
-        Self {
-            hp: 1,
-            max_hp: 1000,
-            mp: 1,
-            max_mp: 600,
-            exp: 0,
-            max_exp: 100,
-            level: 1,
-            gold: 0,
-            credit: 0,
-            base_stats: Vec::new(),
-            name: String::new(),
-            player_object_id: None,
-            class: 0,
-            gender: 0,
-            riding: false,
-            mount_type: 0,
-            fishing: false,
-            paralysis: false,
-            in_trap_rock: false,
-            sprint: false,
-            sneaking: false,
-            auto_pot_hp: true,
-            dead: false,
-            reincarnation_offered: false,
-            death_popup_dismissed: false,
-            pot_cooldown: 0.0,
-            inventory: Default::default(),
-            equipment: vec![None; 14], // #1136：服务端补 Torch/Belt/Stone 共 14 槽
-            pet_mode: mir2_shared::enums::PetMode::Both,
-        }
-    }
+/// #2633 批次4 步9：死亡弹窗 UI 态（原 `HudState.death_popup_dismissed`，设计 §1/§8 纯 UI 残余）。
+/// 语义不变：死亡/复活时重置 false、死亡弹窗点"否"置 true（C# ShowReviveMessage 只弹一次）。
+/// 由 player_status_events（PlayerDied/PlayerRevived 重置）与 death_overlay_system（点否置位）读写，
+/// 与玩家状态无关，故保留为 UI 资源而非玩家组件。
+#[derive(Resource, Default)]
+pub struct DeathDialogState {
+    pub dismissed: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -463,7 +381,8 @@ impl Plugin for HudPlugin {
         // #2633 批次4：原 hud_server_events（518 行上帝系统）已按域拆为 4 个写系统——
         // player_vitals_events / player_status_events（game/player_state.rs）、
         // inventory_events（dialogs/inventory.rs）、belt_restock_events（dialogs/potion_belt.rs），
-        // 均入 GameSet::PlayerState（.before(Hud)，维持「写方在读方前」），并保留 HudState 双写过渡。
+        // 均入 GameSet::PlayerState（.before(Hud)，维持「写方在读方前」）；步9 双写删除。
+        app.init_resource::<DeathDialogState>();
         app.add_systems(OnEnter(AppState::Game), spawn_hud);
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         // #2632：放宽 11 系统 .chain() 全串行——只保留确有数据依赖的排序，其余解链并行。
@@ -916,11 +835,9 @@ fn spawn_centered_text(
 
 /// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
 ///
-/// #2633 批次4 步3：hp/max_hp→`Vitals`、dead→`StatusFlags`、inventory→`Inventory`、
+/// #2633 批次4 步3/9：hp/max_hp→`Vitals`、dead→`StatusFlags`、inventory→`Inventory`、
 /// auto_pot_hp/pot_cooldown→`AutoPotion`（enabled/cooldown，本系统是其唯一读者/写者，
-/// 设计 §4.5，可整体迁离 HudState；`hud.auto_pot_hp`/`hud.pot_cooldown` 自此无读写、
-/// 待步9 统一删）。实体缺失跳过——喝药本就需实体在场，缺席不动作（原 HudState 默认
-/// 放行语义无对应组件）。
+/// 设计 §4.5，整体迁离 HudState）。实体缺失跳过——喝药本就需实体在场，缺席不动作。
 fn auto_potion_system(
     net: Res<crate::network::NetConnection>,
     time: Res<Time>,
@@ -1216,15 +1133,11 @@ fn format_gold(n: u32) -> String {
 
 /// 死亡遮罩显隐 + 复活按钮（#46）
 ///
-/// #2633 批次4 步3：dead/reincarnation_offered 读改 `StatusFlags`；`death_popup_dismissed`
-/// 是纯 UI 残留，仍留 `HudState`（步9 才清）。**写仍双写** `StatusFlags` + `hud.dead`/
-/// `hud.reincarnation_offered`：auto/world、auto/navigation、auto/combat、player_control
-/// 等「旗标读者」本步尚未迁移、仍读 `hud.dead`（设计 §11批3 步4 才迁），若此处只写
-/// `StatusFlags`，点「复活」后这些读者会在服务器确认前一直读到陈旧 `hud.dead=true`
-/// （输入仍被锁/自动战斗仍判死亡），破坏行为等价；保留双写则所有读者值与之前一致。
-/// 实体缺失视同未死亡/无轮回请求（同原 HudState 默认 false），遮罩不显示。
+/// #2633 批次4 步3/9：dead/reincarnation_offered 读改 `StatusFlags`；`death_popup_dismissed`
+/// 迁入 `DeathDialogState.dismissed`（纯 UI 态，设计 §1/§8）。实体缺失视同未死亡/无轮回请求
+/// （同原 HudState 默认 false），遮罩不显示。
 fn death_overlay_system(
-    mut hud: ResMut<HudState>,
+    mut death_ui: ResMut<DeathDialogState>,
     net: Res<crate::network::NetConnection>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
     // 背景/遮罩/文字/是/否按钮全部带 DeathOverlay，统一随死亡显隐
@@ -1238,7 +1151,7 @@ fn death_overlay_system(
         .single()
         .map(|f| (f.dead, f.reincarnation_offered))
         .unwrap_or((false, false));
-    let show = dead && !hud.death_popup_dismissed;
+    let show = dead && !death_ui.dismissed;
     for mut vis in overlay.iter_mut() {
         *vis = if show {
             Visibility::Visible
@@ -1273,10 +1186,7 @@ fn death_overlay_system(
                 f.dead = false;
                 f.reincarnation_offered = false;
             }
-            // 双写：未迁移旗标读者（auto/*、player_control）仍读 hud.dead（见函数注释）
-            hud.dead = false;
-            hud.reincarnation_offered = false;
-            hud.death_popup_dismissed = false;
+            death_ui.dismissed = false;
         }
     }
     // 否：轮回术请求 → CancelReincarnation；关闭弹窗（玩家保持死亡，C# Dispose 语义）
@@ -1289,8 +1199,7 @@ fn death_overlay_system(
             if let Ok(mut f) = flags_q.single_mut() {
                 f.reincarnation_offered = false;
             }
-            hud.reincarnation_offered = false;
-            hud.death_popup_dismissed = true;
+            death_ui.dismissed = true;
         }
     }
 }
@@ -1348,9 +1257,8 @@ mod tests {
             let mut opt = OptionState::default();
             opt.hp_view = hp_view;
             world.insert_resource(opt);
-            // #2633 步3/步7：hud_update_system 改读玩家组件（Vitals/Progression/Gold/PlayerName），
-            // HudState 仅剩身份字段双写；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
-            world.insert_resource(HudState::default());
+            // #2633 步3/步7/步9：hud_update_system 改读玩家组件（Vitals/Progression/Gold/PlayerName），
+            // HudState 已删；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
             world.spawn((
                 LocalPlayer,
                 Vitals { hp: 100, max_hp: 200, mp: 50, max_mp: 100 },
@@ -1446,7 +1354,6 @@ mod tests {
 
         let mut world = World::new();
         world.insert_resource(crate::game::combat::AttackModeState::default());
-        world.insert_resource(HudState::default());
         world.insert_resource(OptionState::default());
         world.insert_resource(MiniMapMode::default()); // 默认大模式
         let sm = world
@@ -1498,7 +1405,6 @@ mod tests {
         // 无子实体的裸标签：系统安全（Option<&Children> = None）
         let mut world = World::new();
         world.insert_resource(crate::game::combat::AttackModeState::default());
-        world.insert_resource(HudState::default());
         world.insert_resource(OptionState::default());
         world.insert_resource(MiniMapMode::default());
         let bare = world

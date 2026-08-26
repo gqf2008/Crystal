@@ -822,13 +822,14 @@ pub(crate) fn auto_ranking_test(
 }
 
 /// --guild-item-test：行会仓库物品链路（打开仓库 → 存入背包物品 → 取出）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_guild_item_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -901,25 +902,28 @@ pub(crate) fn auto_guild_item_test(
                 return;
             }
             // 选第一个背包物品存入
-            let first = hud
-                .inventory
-                .items
-                .iter()
-                .enumerate()
-                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+            let first = inv_q.single().ok().and_then(|inv| {
+                inv.items
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, s)| {
+                        s.as_ref()
+                            .map(|it| (i, it.unique_id, it.count as u32, it.name.clone()))
+                    })
+            });
             match first {
-                Some((i, item)) => {
-                    *deposited_uid = Some(item.unique_id);
+                Some((i, item_uid, count, item_name)) => {
+                    *deposited_uid = Some(item_uid);
                     net.send_packet(&client_bevy::network::GuildStorageItemChangeWire {
                         change_type: 0,
                         grid: 0,
-                        unique_id: item.unique_id,
-                        count: item.count as u32,
+                        unique_id: item_uid,
+                        count,
                     });
                     tracing::info!(
                         "[GUILDITEM] 存入背包物品 [{}] uid={} (格 {})",
-                        item.name,
-                        item.unique_id,
+                        item_name,
+                        item_uid,
                         i
                     );
                     *stage = 4;
@@ -966,12 +970,11 @@ pub(crate) fn auto_guild_item_test(
             }
             let slot0_empty = guild.storage_items.get(0).and_then(|s| s.as_ref()).is_none();
             let uid_back = match *deposited_uid {
-                Some(uid) => hud
-                    .inventory
-                    .items
-                    .iter()
-                    .filter_map(|s| s.as_ref())
-                    .any(|it| it.unique_id == uid),
+                Some(uid) => inv_q
+                    .single()
+                    .ok()
+                    .map(|inv| inv.items.iter().filter_map(|s| s.as_ref()).any(|it| it.unique_id == uid))
+                    .unwrap_or(false),
                 None => false,
             };
             if slot0_empty && uid_back {
@@ -1136,18 +1139,30 @@ pub(crate) fn auto_mentor_accept(
 }
 
 /// --market-test：寄售背包物品×2 → 取回一件 → 留一件给买家（配合 --market-buy）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_market_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     market: Res<client_bevy::game::dialogs::market::MarketState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut consigned: Local<Vec<u32>>,
 ) {
+    // 第一个背包物品 (slot, uid, name)；实体缺失/空背包 → None（同原空背包）
+    fn first_inv_item(
+        inv_q: &Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    ) -> Option<(usize, u64, String)> {
+        inv_q.single().ok().and_then(|inv| {
+            inv.items
+                .iter()
+                .enumerate()
+                .find_map(|(i, s)| s.as_ref().map(|it| (i, it.unique_id, it.name.clone())))
+        })
+    }
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
@@ -1171,25 +1186,15 @@ pub(crate) fn auto_market_test(
                 return;
             }
             // 寄售第一个背包物品（uid=100，价格 500）
-            let first = hud
-                .inventory
-                .items
-                .iter()
-                .enumerate()
-                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
-            match first {
-                Some((_i, item)) => {
+            match first_inv_item(&inv_q) {
+                Some((_i, uid, name)) => {
                     net.send_packet(&mir2_shared::packets::client::market::ConsignItem {
-                        unique_id: item.unique_id,
+                        unique_id: uid,
                         price: 500,
                         panel_type: mir2_shared::enums::MarketPanelType::Consign,
                     });
-                    tracing::info!(
-                        "[MARKETTEST] 寄售 [{}] uid={} 价格500",
-                        item.name,
-                        item.unique_id
-                    );
-                    consigned.push(item.unique_id as u32);
+                    tracing::info!("[MARKETTEST] 寄售 [{}] uid={} 价格500", name, uid);
+                    consigned.push(uid as u32);
                     *stage = 2;
                     *t = 0.0;
                 }
@@ -1214,25 +1219,19 @@ pub(crate) fn auto_market_test(
                 return;
             }
             // 寄售第二件（uid=101，价格 600）
-            let first = hud
-                .inventory
-                .items
-                .iter()
-                .enumerate()
-                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
-            match first {
-                Some((_i, item)) => {
+            match first_inv_item(&inv_q) {
+                Some((_i, uid, name)) => {
                     net.send_packet(&mir2_shared::packets::client::market::ConsignItem {
-                        unique_id: item.unique_id,
+                        unique_id: uid,
                         price: 600,
                         panel_type: mir2_shared::enums::MarketPanelType::Consign,
                     });
                     tracing::info!(
                         "[MARKETTEST] 寄售第二件 [{}] uid={} 价格600",
-                        item.name,
-                        item.unique_id
+                        name,
+                        uid
                     );
-                    consigned.push(item.unique_id as u32);
+                    consigned.push(uid as u32);
                     *stage = 3;
                     *t = 0.0;
                 }
@@ -1318,13 +1317,14 @@ pub(crate) fn auto_market_test(
 }
 
 /// --market-buy：刷新市场 → 买下卖家 bevychar 的商品（配合 --market-test）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_market_buy(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     market: Res<client_bevy::game::dialogs::market::MarketState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -1399,12 +1399,11 @@ pub(crate) fn auto_market_buy(
                 return;
             }
             // 验证物品进入背包（item_index=853）
-            let has = hud
-                .inventory
-                .items
-                .iter()
-                .filter_map(|s| s.as_ref())
-                .any(|it| it.item_index == 853);
+            let has = inv_q
+                .single()
+                .ok()
+                .map(|inv| inv.items.iter().filter_map(|s| s.as_ref()).any(|it| it.item_index == 853))
+                .unwrap_or(false);
             if has {
                 tracing::info!("[MARKETBUY] ✅ 购买的物品已进入背包");
             } else {

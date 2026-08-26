@@ -1233,7 +1233,6 @@ mod tests {
         app.insert_resource(crate::network::NetMode(
             crate::network::NetworkMode::Mock,
         ));
-        app.init_resource::<crate::game::hud::HudState>();
         app.init_resource::<ChatFilter>();
         app.add_systems(Update, chat_input_system);
         app.world_mut()

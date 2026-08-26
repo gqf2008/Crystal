@@ -287,12 +287,11 @@ fn buff_ui_system(
 
 
 /// 消费服务端状态事件（网络层只广播 ServerEvent）
-/// #2633 批次4 步4：sprint/sneaking 写改双写 `StatusFlags` 组件 + 原 `hud.*`（hud.* 保留至
-/// 步9 统一删）；组件写 `single_mut()` 失败（实体未生成）跳过不 panic（R1 同理）。
+/// #2633 批次4 步9：sprint/sneaking 直写 `StatusFlags` 组件（hud.* 双写已删）；
+/// 组件写 `single_mut()` 失败（实体未生成）跳过不 panic（R1 同理）。
 fn buff_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut buff: ResMut<BuffState>,
-    mut hud: ResMut<crate::game::hud::HudState>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
@@ -302,13 +301,11 @@ fn buff_server_events(
                 // #1552：SwiftFeet(ServerRust MoveSpeedBoost tag=12) → Sprint；MoonLight/DarkBody(Invisibility tag=10) → Sneaking
                 match *tag {
                     12 => {
-                        hud.sprint = true;
                         if let Ok(mut f) = flags_q.single_mut() {
                             f.sprint = true;
                         }
                     }
                     10 => {
-                        hud.sneaking = true;
                         if let Ok(mut f) = flags_q.single_mut() {
                             f.sneaking = true;
                         }
@@ -326,13 +323,11 @@ fn buff_server_events(
                 // #1552：状态消失 → 清对应移动状态
                 match *tag {
                     12 => {
-                        hud.sprint = false;
                         if let Ok(mut f) = flags_q.single_mut() {
                             f.sprint = false;
                         }
                     }
                     10 => {
-                        hud.sneaking = false;
                         if let Ok(mut f) = flags_q.single_mut() {
                             f.sneaking = false;
                         }
@@ -383,25 +378,24 @@ mod tests {
     #[test]
     fn buff_to_sprint_sneaking_state() {
         // #1552：SwiftFeet(ServerRust MoveSpeedBoost tag=12) → sprint；MoonLight/DarkBody(Invisibility tag=10) → sneaking
-        let mut hud = crate::game::hud::HudState::default();
-        assert!(!hud.sprint);
-        assert!(!hud.sneaking);
+        let mut flags = StatusFlags::default();
+        assert!(!flags.sprint);
+        assert!(!flags.sneaking);
         // 模拟 buff_server_events 的 tag 分支逻辑
-        match 12u8 { 12 => hud.sprint = true, 10 => hud.sneaking = true, _ => {} }
-        assert!(hud.sprint);
-        match 10u8 { 12 => hud.sprint = true, 10 => hud.sneaking = true, _ => {} }
-        assert!(hud.sneaking);
+        match 12u8 { 12 => flags.sprint = true, 10 => flags.sneaking = true, _ => {} }
+        assert!(flags.sprint);
+        match 10u8 { 12 => flags.sprint = true, 10 => flags.sneaking = true, _ => {} }
+        assert!(flags.sneaking);
         // 消失
-        match 12u8 { 12 => hud.sprint = false, 10 => hud.sneaking = false, _ => {} }
-        assert!(!hud.sprint);
-        match 10u8 { 12 => hud.sprint = false, 10 => hud.sneaking = false, _ => {} }
-        assert!(!hud.sneaking);
+        match 12u8 { 12 => flags.sprint = false, 10 => flags.sneaking = false, _ => {} }
+        assert!(!flags.sprint);
+        match 10u8 { 12 => flags.sprint = false, 10 => flags.sneaking = false, _ => {} }
+        assert!(!flags.sneaking);
     }
 
-    /// #2633 批次4 步4：buff 事件写 sprint/sneaking 双写 `StatusFlags` 组件 + 原 `hud.*`
-    /// （链路：buff 事件 → 组件 → movement/门控读组件）。逐 tag 核对组件与 hud 同步置位/清除。
+    /// #2633 批次4 步9：buff 事件直写 `StatusFlags` 组件（hud.* 双写已删）。
     #[test]
-    fn buff_events_double_write_status_flags_and_hud() {
+    fn buff_events_write_status_flags() {
         use crate::network::server_event::ServerEvent;
 
         fn flags(app: &mut App) -> StatusFlags {
@@ -417,27 +411,22 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<ServerEvent>();
         app.init_resource::<BuffState>();
-        app.init_resource::<crate::game::hud::HudState>();
         app.add_systems(Update, buff_server_events);
         app.world_mut().spawn((LocalPlayer, StatusFlags::default()));
         app.update(); // 初始化消息缓冲/系统状态
 
-        // BuffAdded tag=12 → sprint、tag=10 → sneaking（组件 + hud 同步置位）
+        // BuffAdded tag=12 → sprint、tag=10 → sneaking（组件置位）
         app.world_mut().write_message(ServerEvent::BuffAdded { tag: 12, ticks: 100 });
         app.world_mut().write_message(ServerEvent::BuffAdded { tag: 10, ticks: 100 });
         app.update();
         assert!(flags(&mut app).sprint, "BuffAdded(12) 应置 StatusFlags.sprint");
         assert!(flags(&mut app).sneaking, "BuffAdded(10) 应置 StatusFlags.sneaking");
-        let hud = app.world().resource::<crate::game::hud::HudState>();
-        assert!(hud.sprint && hud.sneaking, "hud.sprint/sneaking 应同步置位");
 
-        // BuffRemoved tag=12 → 清 sprint（组件 + hud 同步），sneaking 保持
+        // BuffRemoved tag=12 → 清 sprint（组件清除），sneaking 保持
         app.world_mut().write_message(ServerEvent::BuffRemoved { tag: 12 });
         app.update();
         assert!(!flags(&mut app).sprint, "BuffRemoved(12) 应清 StatusFlags.sprint");
         assert!(flags(&mut app).sneaking, "sneaking 应保持");
-        let hud = app.world().resource::<crate::game::hud::HudState>();
-        assert!(!hud.sprint && hud.sneaking, "hud.sprint 应清除、sneaking 保持");
     }
 }
 

@@ -7,7 +7,6 @@ use mir2_shared::MirAction;
 use crate::resources::libraries::ArrayLibType;
 use crate::objects::frames::get_player_frame;
 use crate::map_renderer::{FrontTile, TILE_HEIGHT, TILE_WIDTH};
-use crate::game::hud::HudState;
 use super::components::*;
 use super::frames::{actor_frame, mount_lib_frames, mount_player_action};
 use super::spawn::depth_z;

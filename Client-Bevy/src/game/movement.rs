@@ -586,7 +586,6 @@ mod tests {
             desired_map: None,
             player_spawn: None,
         });
-        app.insert_resource(crate::game::hud::HudState::default());
         app.insert_resource(crate::game::sound::SoundBank::default());
         app.insert_resource(bevy::asset::Assets::<bevy::audio::AudioSource>::default());
         app.add_systems(Update, advance_local_move);

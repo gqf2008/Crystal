@@ -14,7 +14,6 @@ use bevy::prelude::*;
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem, ItemUseFeedback, try_use_belt_item};
-use crate::game::hud::HudState;
 use crate::game::player_state::{Inventory, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
@@ -122,22 +121,25 @@ fn cleanup_potion_belt(mut commands: Commands, roots: Query<Entity, With<PotionB
 
 /// 腰带自动补货写系统（#2633 批次4 步2：拆 hud_server_events 的 ItemUsed 补货段，设计 §10）。
 ///
-/// 双写过渡：仍读 `HudState.inventory`、写 `PotionBeltState`（原逻辑不变，读者零改动）。
+/// #2633 批次4 步9：物品直读 `Inventory` 组件（HudState 已删）。
 /// 须在 `inventory_events` 扣减**之前**运行——`used_item_index` 取扣减前的物品 item_index：
 /// 被消耗物品 count==1 时扣减后即从背包移除，后置会读不到（§12 R6）。补货查找按
 /// `unique_id != 已消耗` 排除自身，故与扣减的相对先后不影响查找结果（只影响 used_item_index
 /// 的读取），因此只需保证本系统先读。背包扣减本身归 inventory_events（两系统读同一事件）。
 pub(crate) fn belt_restock_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut belt: ResMut<PotionBeltState>,
 ) {
     use crate::network::server_event::ServerEvent;
+    // R1：实体未生成则无背包可补货（原 HudState 默认空背包同样无补货，等价）
+    let Ok(inv) = inv_q.single() else {
+        return;
+    };
     for ev in events.read() {
         if let ServerEvent::ItemUsed { unique_id } = ev {
             // #1544：扣减前记录被消耗物品的 item_index（腰带补货据此找同物品补上）
-            let used_item_index = hud
-                .inventory
+            let used_item_index = inv
                 .items
                 .iter()
                 .find(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id))
@@ -148,8 +150,7 @@ pub(crate) fn belt_restock_events(
             if let Some(used_index) = used_item_index {
                 for slot in belt.slots.iter_mut() {
                     if *slot == Some(*unique_id) {
-                        let next = hud
-                            .inventory
+                        let next = inv
                             .items
                             .iter()
                             .flatten()
@@ -528,11 +529,11 @@ fn potion_belt_ui_system(
     }
 }
 
-/// 渲染：图标/数量（从背包按 unique_id 找物品）
+/// 渲染：图标/数量（从背包按 unique_id 找物品；#2633 批次4 步9 改读 `Inventory` 组件）
 #[allow(clippy::too_many_arguments)]
 fn potion_belt_icon_system(
     belt: Res<PotionBeltState>,
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -540,10 +541,10 @@ fn potion_belt_icon_system(
     mut icons: Query<(&mut Sprite, &mut Visibility, &PotionBeltIcon), Without<PotionBeltCount>>,
     mut counts: Query<(&mut Text2d, &mut Visibility, &PotionBeltCount), Without<PotionBeltIcon>>,
 ) {
+    let inv = inv_q.single().ok();
     let find = |i: usize| -> Option<&InvItem> {
         let uid = belt.slots.get(i).and_then(|u| u.as_ref())?;
-        hud.inventory
-            .items
+        inv?.items
             .iter()
             .flatten()
             .find(|it| it.unique_id == *uid)

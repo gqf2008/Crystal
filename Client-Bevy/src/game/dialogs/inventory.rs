@@ -14,7 +14,6 @@ use crate::actor::LocalPlayer;
 use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
 use crate::game::player_state::{Gold, Inventory, Loadout, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::sound::{SoundBank, SoundCache, play_sound_cached};
@@ -337,31 +336,30 @@ impl Plugin for InventoryDialogPlugin {
 }
 
 /// #1342：GainedQuestItem/DeleteQuestItem 增量更新任务格（C# QuestInventory）
+/// #2633 批次4 步9：直接写 `Inventory` 组件（HudState 双写已删）；实体未生成跳过（R1）。
 fn quest_inventory_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
-    mut hud: ResMut<HudState>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
-    let mut dirty = false;
     for ev in events.read() {
         match ev {
             ServerEvent::QuestItemGained { item } => {
-                if let Some(slot) = hud
-                    .inventory
+                let Ok(mut inv) = inv_q.single_mut() else { continue };
+                if let Some(slot) = inv
                     .quest_inventory
                     .iter_mut()
                     .find(|s| s.is_none())
                 {
                     *slot = Some(item.clone());
                 } else {
-                    hud.inventory.quest_inventory.push(Some(item.clone()));
+                    inv.quest_inventory.push(Some(item.clone()));
                 }
-                hud.inventory.quest_inventory.truncate(QUEST_GRID_SIZE);
-                dirty = true;
+                inv.quest_inventory.truncate(QUEST_GRID_SIZE);
             }
             ServerEvent::QuestItemDeleted { unique_id, count } => {
-                for slot in hud.inventory.quest_inventory.iter_mut() {
+                let Ok(mut inv) = inv_q.single_mut() else { continue };
+                for slot in inv.quest_inventory.iter_mut() {
                     if let Some(it) = slot {
                         if it.unique_id == *unique_id {
                             if it.count > *count {
@@ -373,15 +371,8 @@ fn quest_inventory_events(
                         }
                     }
                 }
-                dirty = true;
             }
             _ => {}
-        }
-    }
-    // 双写过渡：任务背包镜像到玩家组件（实体未生成则跳过，R1；hud 侧步9 删）。
-    if dirty {
-        if let Ok(mut inv) = inv_q.single_mut() {
-            inv.quest_inventory = hud.inventory.quest_inventory.clone();
         }
     }
 }
@@ -394,14 +385,13 @@ fn cleanup_dialogs(mut commands: Commands, roots: Query<Entity, With<DialogRoot>
 
 /// 背包/装备写系统（#2633 批次4 步2：拆 hud_server_events 背包域，设计 §10）。
 ///
-/// 双写过渡：仍写 `HudState.inventory`/`HudState.equipment`（原逻辑不变，读者零改动），
-/// 处理后把结果整体镜像到玩家实体 `Inventory`/`Loadout` 组件（Query 实体未生成则跳过，
-/// §12 R1）。UserInformation 玩家属性部分归 player_vitals_events（两系统读同一事件、各写
-/// 不同字段，MessageReader 游标独立合法）；ItemUsed 的腰带补货段归 potion_belt::
-/// belt_restock_events（须排在本系统扣减之前）。任务格增量由 quest_inventory_events 处理。
+/// #2633 批次4 步9：HudState 删除后直接操作玩家实体 `Inventory`/`Loadout` 组件（唯一数据源）；
+/// 实体未生成则本帧事件整体跳过（R1：UserInformation 由 PendingUserInfo 缓冲、其余事件
+/// 由 UserInformation 全量兜底）。UserInformation 玩家属性部分归 player_vitals_events（两系统
+/// 读同一事件、各写不同字段，MessageReader 游标独立合法）；ItemUsed 的腰带补货段归
+/// potion_belt::belt_restock_events（须排在本系统扣减之前）。任务格增量由 quest_inventory_events 处理。
 pub(crate) fn inventory_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
-    mut hud: ResMut<HudState>,
     mut inv_q: Query<
         (
             &mut crate::game::player_state::Inventory,
@@ -411,31 +401,31 @@ pub(crate) fn inventory_events(
     >,
 ) {
     use crate::network::server_event::ServerEvent;
-    let mut dirty = false;
+    let Ok((mut inv, mut loadout)) = inv_q.single_mut() else {
+        return;
+    };
     for ev in events.read() {
         match ev {
             ServerEvent::InventoryMoved { from, to } => {
-                if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
-                    hud.inventory.items.swap(*from, *to);
+                if *from < inv.items.len() && *to < inv.items.len() {
+                    inv.items.swap(*from, *to);
                 }
-                dirty = true;
             }
             ServerEvent::ItemEquipped { unique_id, to } => {
                 // 从背包移除并放入装备槽；旧装备放回背包空格
-                let from_idx = hud
-                    .inventory
+                let from_idx = inv
                     .items
                     .iter()
                     .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
                 if let Some(from_idx) = from_idx {
-                    let item = hud.inventory.items[from_idx].take();
+                    let item = inv.items[from_idx].take();
                     if let Some(item) = item {
-                        if *to < hud.equipment.len() {
-                            let old = hud.equipment[*to].take();
-                            hud.equipment[*to] = Some(item);
+                        if *to < loadout.slots.len() {
+                            let old = loadout.slots[*to].take();
+                            loadout.slots[*to] = Some(item);
                             if let Some(old) = old {
                                 if let Some(empty) =
-                                    hud.inventory.items.iter_mut().find(|s| s.is_none())
+                                    inv.items.iter_mut().find(|s| s.is_none())
                                 {
                                     *empty = Some(old);
                                 }
@@ -443,69 +433,47 @@ pub(crate) fn inventory_events(
                         }
                     }
                 }
-                dirty = true;
             }
             ServerEvent::ItemRemoved { unique_id } => {
                 // 卸下装备：清空装备槽并放回背包空格
                 let mut item = None;
-                for slot in hud.equipment.iter_mut() {
+                for slot in loadout.slots.iter_mut() {
                     if slot.as_ref().map(|it| it.unique_id) == Some(*unique_id) {
                         item = slot.take();
                         break;
                     }
                 }
                 if let Some(item) = item {
-                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                    if let Some(empty) = inv.items.iter_mut().find(|s| s.is_none()) {
                         *empty = Some(item);
                     }
                 }
-                dirty = true;
             }
-            ServerEvent::UserInformation {
-                inventory,
-                equipment,
-                quest_inventory,
-                bag_weight,
-                ..
-            } => {
-                // 背包/装备部分（玩家属性部分归 player_vitals_events）
-                hud.inventory.items = inventory.clone();
-                hud.inventory.quest_inventory = quest_inventory.clone();
-                // #2633 批次4 §9：gold 唯一源是 Gold 组件（vitals 路径同事件写入，
-                // player_state.rs apply_user_info_vitals）；不再写 hud.inventory.gold。
-                hud.equipment = equipment.clone();
-                // #1544：RefreshStats 重量（C# User.RefreshStats；max_weight=服务端 bag_weight）
-                hud.inventory.max_weight = (*bag_weight).max(0) as u32;
-                hud.inventory.refresh_weight();
-                // 组件写：直接复用共享映射 apply_user_info_items（与 reconcile 同一份）。
-                // 实体未生成则跳过，由 apply_pending_user_info 统一应用（R1）。
-                // 不置 dirty——已直接写组件，无需末尾整体镜像。
-                if let Ok((mut inv, mut loadout)) = inv_q.single_mut() {
-                    crate::game::player_state::apply_user_info_items(ev, &mut inv, &mut loadout);
-                }
+            ServerEvent::UserInformation { .. } => {
+                // 背包/装备部分（玩家属性部分归 player_vitals_events；金币唯一源是 Gold 组件）。
+                // 与 reconcile 共用 apply_user_info_items 同一份映射。
+                crate::game::player_state::apply_user_info_items(ev, &mut inv, &mut loadout);
             }
             ServerEvent::ItemUsed { unique_id } => {
                 // 背包扣减段（腰带补货段归 belt_restock_events，须先于此运行）
-                let idx = hud
-                    .inventory
+                let idx = inv
                     .items
                     .iter()
                     .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
                 if let Some(idx) = idx {
-                    let count = hud.inventory.items[idx]
+                    let count = inv.items[idx]
                         .as_ref()
                         .map(|it| it.count)
                         .unwrap_or(0);
                     if count > 1 {
-                        if let Some(it) = hud.inventory.items[idx].as_mut() {
+                        if let Some(it) = inv.items[idx].as_mut() {
                             it.count -= 1;
                         }
                     } else {
-                        hud.inventory.items[idx] = None;
+                        inv.items[idx] = None;
                     }
                     tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
-                    hud.inventory.refresh_weight();
-                    dirty = true;
+                    inv.refresh_weight();
                 }
             }
             ServerEvent::ItemDuraChanged {
@@ -514,7 +482,7 @@ pub(crate) fn inventory_events(
             } => {
                 // #228：背包/装备栏按 unique_id 更新当前耐久
                 let mut updated = false;
-                for slot in hud.inventory.items.iter_mut().flatten() {
+                for slot in inv.items.iter_mut().flatten() {
                     if slot.unique_id == *unique_id {
                         slot.current_dura = *current_dura;
                         updated = true;
@@ -522,7 +490,7 @@ pub(crate) fn inventory_events(
                     }
                 }
                 if !updated {
-                    for slot in hud.equipment.iter_mut().flatten() {
+                    for slot in loadout.slots.iter_mut().flatten() {
                         if slot.unique_id == *unique_id {
                             slot.current_dura = *current_dura;
                             break;
@@ -530,7 +498,6 @@ pub(crate) fn inventory_events(
                     }
                 }
                 tracing::info!("🔧 物品耐久变化 uid={} dura={}", unique_id, current_dura);
-                dirty = true;
             }
             ServerEvent::ItemRepaired {
                 unique_id,
@@ -539,7 +506,7 @@ pub(crate) fn inventory_events(
             } => {
                 // #240：修理结果 → 更新背包/装备栏 当前/最大耐久
                 let mut updated = false;
-                for slot in hud.inventory.items.iter_mut().flatten() {
+                for slot in inv.items.iter_mut().flatten() {
                     if slot.unique_id == *unique_id {
                         slot.current_dura = *current_dura;
                         slot.max_dura = *max_dura;
@@ -548,7 +515,7 @@ pub(crate) fn inventory_events(
                     }
                 }
                 if !updated {
-                    for slot in hud.equipment.iter_mut().flatten() {
+                    for slot in loadout.slots.iter_mut().flatten() {
                         if slot.unique_id == *unique_id {
                             slot.current_dura = *current_dura;
                             slot.max_dura = *max_dura;
@@ -562,14 +529,13 @@ pub(crate) fn inventory_events(
                     current_dura,
                     max_dura
                 );
-                dirty = true;
             }
             ServerEvent::ItemSlotSizeChanged {
                 unique_id,
                 slot_size,
             } => {
                 // #240：镶嵌槽位数量变化 → 调整 slots 长度
-                for slot in hud.inventory.items.iter_mut().flatten() {
+                for slot in inv.items.iter_mut().flatten() {
                     if slot.unique_id == *unique_id {
                         let n = (*slot_size).max(0) as usize;
                         slot.slots.resize(n, None);
@@ -577,12 +543,11 @@ pub(crate) fn inventory_events(
                     }
                 }
                 tracing::info!("📐 物品槽位变化 uid={} size={}", unique_id, slot_size);
-                dirty = true;
             }
             ServerEvent::ItemUpgraded { item } => {
                 // #258：物品升级 → 按 unique_id 替换背包/装备栏物品
                 let mut updated = false;
-                for slot in hud.inventory.items.iter_mut().flatten() {
+                for slot in inv.items.iter_mut().flatten() {
                     if slot.unique_id == item.unique_id {
                         *slot = item.clone();
                         updated = true;
@@ -590,7 +555,7 @@ pub(crate) fn inventory_events(
                     }
                 }
                 if !updated {
-                    for slot in hud.equipment.iter_mut().flatten() {
+                    for slot in loadout.slots.iter_mut().flatten() {
                         if slot.unique_id == item.unique_id {
                             *slot = item.clone();
                             break;
@@ -598,48 +563,33 @@ pub(crate) fn inventory_events(
                     }
                 }
                 tracing::info!("⬆️ 物品升级替换: {}", item.name);
-                dirty = true;
             }
             ServerEvent::ItemDeleted { unique_id } => {
                 // #228：背包按 unique_id 删除（消耗/删除）
-                let idx = hud
-                    .inventory
+                let idx = inv
                     .items
                     .iter()
                     .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
                 if let Some(idx) = idx {
-                    hud.inventory.items[idx] = None;
+                    inv.items[idx] = None;
                     tracing::info!("🗑️ 删除物品 uid={}", unique_id);
-                    dirty = true;
                 }
             }
             ServerEvent::ItemGained { item } => {
                 // #228：获得物品 → 放入第一个空格
-                if let Some(slot) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                if let Some(slot) = inv.items.iter_mut().find(|s| s.is_none()) {
                     *slot = Some(item.clone());
                     tracing::info!("🎁 获得物品入包: {} (uid={})", item.name, item.unique_id);
                 } else {
                     tracing::warn!("🎒 背包已满，无法放入: {}", item.name);
                 }
-                dirty = true;
             }
             ServerEvent::InventoryResized { size } => {
                 // #276：背包扩容（C# S.ResizeInventory → Array.Resize）
-                hud.inventory.resize(*size);
-                tracing::info!("🎒 背包扩容 -> {} 格", hud.inventory.items.len());
-                dirty = true;
+                inv.resize(*size);
+                tracing::info!("🎒 背包扩容 -> {} 格", inv.items.len());
             }
             _ => {}
-        }
-    }
-    // 双写过渡：把 HudState 背包/装备结果整体镜像到玩家组件（实体未生成则跳过，R1）。
-    if dirty {
-        if let Ok((mut inv, mut loadout)) = inv_q.single_mut() {
-            inv.items = hud.inventory.items.clone();
-            inv.weight = hud.inventory.weight;
-            inv.max_weight = hud.inventory.max_weight;
-            inv.quest_inventory = hud.inventory.quest_inventory.clone();
-            loadout.slots = hud.equipment.clone();
         }
     }
 }
@@ -2955,33 +2905,33 @@ mod tests {
     #[test]
     fn guard_hero_skips_fishing() {
         // #1546：英雄格 check_fishing=false → 钓鱼中也可使用（C# !HeroGridType && User.Fishing）
-        let mut hud = HudState::default();
-        hud.fishing = true;
+        // #2633 步9：装备槽读 `Loadout` 组件（HudState 已删；默认 14 空槽）
+        let loadout = Loadout::default();
         let mut fb = ItemUseFeedback::default();
         let potion = item_with_type(ItemType::Potion);
         let ctx_hero = UseItemCtx {
             grid: MirGridType::HeroInventory,
-            equipment: &hud.equipment,
+            equipment: &loadout.slots,
             gender: 0,
             class: 0,
             level: 1,
             check_fishing: false,
             allow_consumable: true,
         };
-        assert!(use_item_guard(&potion, hud.riding, hud.fishing, &hud.equipment, ctx_hero, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&potion, false, true, &loadout.slots, ctx_hero, 0.0, &mut fb).is_some());
         // 主背包 check_fishing=true → 钓鱼拦截
-        let ctx_player = UseItemCtx::player(&hud.equipment, hud.gender, hud.class, hud.level);
-        assert!(use_item_guard(&potion, hud.riding, hud.fishing, &hud.equipment, ctx_player, 0.0, &mut fb).is_none());
+        let ctx_player = UseItemCtx::player(&loadout.slots, 0, 0, 1);
+        assert!(use_item_guard(&potion, false, true, &loadout.slots, ctx_player, 0.0, &mut fb).is_none());
     }
 
     #[test]
     fn guard_storage_blocks_consumable_but_allows_equip() {
         // #1546：仓库格 allow_consumable=false → 消耗品拦截；装备放行
-        let mut hud = HudState::default();
+        let loadout = Loadout::default();
         let mut fb = ItemUseFeedback::default();
         let ctx_storage = UseItemCtx {
             grid: MirGridType::Storage,
-            equipment: &hud.equipment,
+            equipment: &loadout.slots,
             gender: 0,
             class: 0,
             level: 1,
@@ -2990,24 +2940,22 @@ mod tests {
         };
         // 守卫本身通过（消耗品拦截在 use_item_core 第 8 步）
         let potion = item_with_type(ItemType::Potion);
-        assert!(use_item_guard(&potion, hud.riding, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&potion, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb).is_some());
         // 装备放行
         let sword = item_with_type(ItemType::Weapon);
-        assert!(use_item_guard(&sword, hud.riding, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&sword, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb).is_some());
     }
 
     #[test]
     fn use_item_core_storage_blocks_consumable() {
         // 仓库双击药水 → Blocked（不发包）；仓库双击武器且槽空 → Sent
         let net = NetConnection::default();
-        let mut hud = HudState::default();
-        // 仓库双击药水 → Blocked（不发包）；仓库双击武器且槽空 → Sent
-        let mut hud = HudState::default();
+        let loadout = Loadout::default();
         let mut fb = ItemUseFeedback::default();
         let mut confirm = InvDropConfirm::default();
         let ctx_storage = UseItemCtx {
             grid: MirGridType::Storage,
-            equipment: &hud.equipment,
+            equipment: &loadout.slots,
             gender: 0,
             class: 0,
             level: 1,
@@ -3016,12 +2964,12 @@ mod tests {
         };
         let potion = item_with_type(ItemType::Potion);
         assert_eq!(
-            use_item_core(&potion, &net, hud.riding, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(&potion, &net, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb, &mut confirm),
             UseOutcome::Blocked
         );
         let sword = item_with_type(ItemType::Weapon);
         assert_eq!(
-            use_item_core(&sword, &net, hud.riding, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(&sword, &net, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb, &mut confirm),
             UseOutcome::Sent
         );
     }
@@ -3030,7 +2978,7 @@ mod tests {
     fn use_item_core_hero_equips_with_hero_equipment() {
         let net = NetConnection::default();
         // #1546：英雄格装备用英雄装备槽判断（ctx.equipment）
-        let hud = HudState::default();
+        let loadout = Loadout::default();
         let mut fb = ItemUseFeedback::default();
         let mut confirm = InvDropConfirm::default();
         // Bracelet 智能槽：右(5)空 → Sent；右占回退左(4)；双占 → Blocked
@@ -3047,7 +2995,7 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, hud.riding, hud.fishing, &hud.equipment, ctx_empty, 0.0, &mut fb, &mut confirm),
+            use_item_core(&bracelet, &net, false, false, &loadout.slots, ctx_empty, 0.0, &mut fb, &mut confirm),
             UseOutcome::Sent
         );
         // 左右手镯都占用 → 不装备（C# BraceletR/L 都占用 → 不装备）
@@ -3068,7 +3016,7 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, hud.riding, hud.fishing, &hud.equipment, ctx_full, 0.0, &mut fb, &mut confirm),
+            use_item_core(&bracelet, &net, false, false, &loadout.slots, ctx_full, 0.0, &mut fb, &mut confirm),
             UseOutcome::Blocked
         );
     }

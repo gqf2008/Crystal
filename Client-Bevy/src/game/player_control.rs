@@ -15,8 +15,7 @@ use crate::actor::{
     ActorAnim, ActorAppearance, GroundItem, LocalPlayer, Monster, MountState, NetObjectId, Npc,
     Player,
 };
-use crate::game::hud::HudState;
-use crate::game::player_state::{CombatStats, Inventory, Loadout, Progression, StatusFlags};
+use crate::game::player_state::{CombatStats, Inventory, Loadout, PetModeState, Progression, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
@@ -1214,14 +1213,15 @@ pub fn build_change_pmode(mode: mir2_shared::enums::PetMode) -> mir2_shared::pac
 /// 宠物模式切换（#1562，C# KeybindOptions.ChangePetmode → GameScene.ChangePetMode）：
 /// - 默认 Ctrl+T（C# 默认 Ctrl+A，但 Bevy 中 A 用于相机平移，避免冲突改 Ctrl+T）；
 /// - 500ms 冷却（C# ChangePModeTime = Time + 500）；
-/// - 发送后由服务端 S.ChangePMode 确认更新 HudState.pet_mode（不本地抢改）。
+/// - 发送后由服务端 S.ChangePMode 确认更新 `PetModeState` 组件（不本地抢改）。
+/// #2633 批次4 步9：pet_mode 直读 `PetModeState` 组件（HudState 已删）；实体缺失回退 Both。
 fn pet_mode_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
     gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
     time: Res<Time>,
-    hud: Res<crate::game::hud::HudState>,
+    pet_q: Query<&PetModeState, With<LocalPlayer>>,
     mut last_toggle: Local<f32>,
 ) {
     // #2595：文本输入聚焦让路（Ctrl+T 不在 C# ChatTextBox 转发表内；
@@ -1239,9 +1239,10 @@ fn pet_mode_system(
         return;
     }
     *last_toggle = time.elapsed_secs();
-    let next = next_pet_mode(hud.pet_mode);
+    let cur = pet_q.single().map(|p| p.0).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let next = next_pet_mode(cur);
     net.send_packet(&build_change_pmode(next));
-    tracing::info!("🐾 宠物模式切换 {:?} -> {:?}", hud.pet_mode, next);
+    tracing::info!("🐾 宠物模式切换 {:?} -> {:?}", cur, next);
 }
 
 /// C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC
@@ -1321,19 +1322,29 @@ mod tests {
 
     #[test]
     fn test_can_run_weight_and_trap_conditions() {
-        // #1550：C# CanRun（GameScene.cs:12139）——负重/陷阱决定能否跑
-        let mut hud = HudState::default();
-        hud.inventory.weight = 10;
-        hud.inventory.max_weight = 100;
-        assert!(hud.inventory.weight <= hud.inventory.max_weight);
-        let wear: u32 = hud.equipment.iter().flatten().map(|i| i.weight as u32).sum();
-        assert!(wear <= hud.inventory.max_weight);
+        // #1550：C# CanRun（GameScene.cs:12139）——负重/陷阱决定能否跑（#2633 批次4 步9 改读组件）
+        let inv = Inventory {
+            weight: 10,
+            max_weight: 100,
+            ..Default::default()
+        };
+        assert!(inv.weight <= inv.max_weight);
+        let equip = Loadout::default();
+        let wear: u32 = equip.slots.iter().flatten().map(|i| i.weight as u32).sum();
+        assert!(wear <= inv.max_weight);
         // 背包超重 → 不可跑（C# CurrentBagWeight > BagWeight）
-        hud.inventory.weight = 200;
-        assert!(hud.inventory.weight > hud.inventory.max_weight);
-        // 陷阱 → 不可走/跑（C# InTrapRock）
-        hud.in_trap_rock = true;
-        assert!(hud.in_trap_rock);
+        let heavy = Inventory {
+            weight: 200,
+            max_weight: 100,
+            ..Default::default()
+        };
+        assert!(heavy.weight > heavy.max_weight);
+        // 陷阱 → 不可走/跑（C# InTrapRock；StatusFlags 组件）
+        let flags = StatusFlags {
+            in_trap_rock: true,
+            ..Default::default()
+        };
+        assert!(flags.in_trap_rock);
     }
 
     #[test]
@@ -1470,26 +1481,42 @@ mod tests {
 
     #[test]
     fn test_archer_detection() {
-        // #1554：弓手 = Class==Archer 且装备武器（C# HasClassWeapon 简化）
-        let mut hud = crate::game::hud::HudState::default();
-        hud.class = mir2_shared::enums::MirClass::Archer as u8;
+        // #1554：弓手 = Class==Archer 且装备武器（C# HasClassWeapon 简化；#2633 批次4 步9 改读组件）
+        let appearance = ActorAppearance {
+            class: mir2_shared::enums::MirClass::Archer,
+            gender: mir2_shared::enums::MirGender::Male,
+            armour: 0,
+            hair: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            wing_effect: 0,
+        };
         // 无武器 → 非弓手
-        let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
-            && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        let is_archer = appearance.class == mir2_shared::enums::MirClass::Archer
+            && Loadout::default().slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(!is_archer);
         // 装备武器 → 弓手（远程范围 9）
         let mut bow = crate::game::dialogs::inventory::InvItem::default();
         bow.item_type = mir2_shared::enums::ItemType::Weapon as u8;
-        hud.equipment[0] = Some(bow);
-        let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
-            && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        let mut loadout = Loadout::default();
+        loadout.slots[0] = Some(bow);
+        let is_archer = appearance.class == mir2_shared::enums::MirClass::Archer
+            && loadout.slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(is_archer);
         // 战士 → 近战
-        let mut warrior = crate::game::hud::HudState::default();
-        warrior.class = mir2_shared::enums::MirClass::Warrior as u8;
-        warrior.equipment[0] = Some(crate::game::dialogs::inventory::InvItem::default());
-        let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer as u8
-            && warrior.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        let warrior = ActorAppearance {
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+            armour: 0,
+            hair: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            wing_effect: 0,
+        };
+        let mut w_loadout = Loadout::default();
+        w_loadout.slots[0] = Some(crate::game::dialogs::inventory::InvItem::default());
+        let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer
+            && w_loadout.slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(!is_archer);
     }
 
