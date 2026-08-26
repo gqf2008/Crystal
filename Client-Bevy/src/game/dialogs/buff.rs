@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::StatusFlags;
+use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -113,9 +114,11 @@ pub struct BuffPlugin;
 impl Plugin for BuffPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(BuffState::load());
-                app.add_systems(
+        app.add_systems(
             Update,
-            buff_server_events.run_if(in_state(AppState::Game)),
+            buff_server_events
+                .run_if(in_state(AppState::Game))
+                .in_set(GameSet::PlayerState),
         );
 app.add_systems(OnEnter(AppState::Game), spawn_buff);
         app.add_systems(OnExit(AppState::Game), cleanup_buff);

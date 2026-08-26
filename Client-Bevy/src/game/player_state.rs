@@ -219,30 +219,30 @@ pub struct LocalPlayerStateBundle {
     pub auto_potion: AutoPotion,
 }
 
-/// 登录首帧 UserInformation 缓冲（#2633 §12 R1）。
+/// 登录首帧本地玩家事件缓冲（#2633 §12 R1 + 评审 M1）。
 ///
-/// R1 已证实：UserInformation（属性）先于本地 ObjectPlayer（生成实体）到达，且
-/// spawn_local_player_with 走 Commands 延迟到帧尾才生成实体。故 UserInformation 到达时
-/// `LocalPlayer` 实体尚不存在，组件写被跳过。此处暂存该快照（latest wins，后到覆盖先到），
-/// 待实体生成后由 `apply_pending_user_info` 应用一次。
-///
-/// 只缓冲 UserInformation——HealthChanged 等高频事件随后会自我纠正，不值得缓冲。
+/// R1 已证实：UserInformation（属性）先于本地 ObjectPlayer 到达，且 spawn_local_player_with
+/// 走 Commands 延迟到帧尾才生成实体。缓冲只装 UserInformation（latest wins）时，同一窗口内
+/// HealthChanged 等事件被静默丢弃——回放快照后会用旧值覆盖更新的值（评审 M1）。
+/// 故推广为**有序 Vec**：实体缺失期间全部可处理事件按到达顺序入队，实体生成后由
+/// `apply_pending_events` 按序回放（旧→新，新值胜）。窗口仅登录数帧、且 is_* 过滤只入队
+/// 已处理事件，无膨胀风险。
 #[derive(Resource, Default)]
-pub struct PendingUserInfo(pub Option<ServerEvent>);
+pub struct PendingPlayerEvents(pub Vec<ServerEvent>);
 
 // ============================================================================
 // ServerEvent 写系统（#2633 批次4 步2：拆 hud_server_events，设计 §10）
 //
-// 双写过渡（设计 §11 批1）：每个系统把值同时写进玩家组件与原 `HudState`
-// （CharacterState 已于步8 删除；HudState 已于步9 删除）。
+// 双写过渡（设计 §11 批1）：CS 双源已删（CharacterState 已于步8 删除、HudState 已于步9 删除）
+// ——唯一数据源是玩家实体组件。
 // 组件写用 `Query<&mut X, With<LocalPlayer>>` + `single_mut()`；实体未生成时
-// （UserInformation 可能先于 ObjectPlayer 到达，设计 §12 R1）跳过组件写、仅写
-// HudState 兜底，UserInformation 另由 PendingUserInfo 缓冲待实体生成后应用。
+// （UserInformation 可能先于 ObjectPlayer 到达，设计 §12 R1）跳过组件写，
+// 可处理事件另由 `PendingPlayerEvents` 缓冲待实体生成后按序回放（评审 M1）。
 // ============================================================================
 
 /// 从 UserInformation 事件把玩家属性/面板属性写入 Vitals/Progression/Gold/CombatStats。
 ///
-/// `player_vitals_events` 与 `apply_pending_user_info` 共用此一份字段映射，避免双份漂移
+/// `player_vitals_events` 与 `apply_pending_events` 共用此一份字段映射，避免双份漂移
 /// （#2633 R1）。非 UserInformation 事件为 no-op。只写组件，不写 HudState
 /// （HudState 已于步9 删除）。
 pub(crate) fn apply_user_info_stats(
@@ -318,7 +318,7 @@ pub(crate) fn apply_user_info_stats(
 
 /// 从 UserInformation 事件把背包/装备写入 Inventory/Loadout。
 ///
-/// `inventory_events` 与 `apply_pending_user_info` 共用此一份字段映射，避免双份漂移
+/// `inventory_events` 与 `apply_pending_events` 共用此一份字段映射，避免双份漂移
 /// （#2633 R1）。非 UserInformation 事件为 no-op。
 pub(crate) fn apply_user_info_items(ev: &ServerEvent, inventory: &mut Inventory, loadout: &mut Loadout) {
     let ServerEvent::UserInformation {
@@ -339,17 +339,121 @@ pub(crate) fn apply_user_info_items(ev: &ServerEvent, inventory: &mut Inventory,
     loadout.slots = equipment.clone();
 }
 
+/// 单一写映射：player_vitals_events / apply_pending_events 共用（#2633 R1，防双份漂移）。
+/// 命中任一已处理事件返回 true（供实体缺失时判别是否入队）。
+/// `name`：PlayerName 由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
+/// 缺失（None）时静默跳过——保持既有 R1 语义。
+#[allow(clippy::too_many_arguments)]
+fn apply_vitals_event(
+    ev: &ServerEvent,
+    vitals: &mut Vitals,
+    progression: &mut Progression,
+    gold: &mut Gold,
+    credit: &mut Credit,
+    base_stats: &mut BaseStats,
+    pet_mode: &mut PetModeState,
+    combat_stats: &mut CombatStats,
+    name: Option<&mut PlayerName>,
+) -> bool {
+    match ev {
+        ServerEvent::PetModeChanged { mode } => {
+            // #1388：HUD 宠物模式标签
+            pet_mode.0 = *mode;
+            true
+        }
+        ServerEvent::HealthChanged { hp, mp } => {
+            vitals.hp = *hp;
+            vitals.mp = *mp;
+            true
+        }
+        ServerEvent::GoldGained { gold: gained } => {
+            gold.0 = gold.0.saturating_add(*gained);
+            true
+        }
+        ServerEvent::BaseStats { stats } => {
+            // #268：基础属性（角色面板数据）
+            base_stats.0 = stats.clone();
+            tracing::info!("📊 基础属性: {:?}", stats);
+            true
+        }
+        ServerEvent::PlayerNameUpdated { name: new_name } => {
+            // #264：本地玩家改名（复用组件 `PlayerName`；object_state 亦有同名维护，值同）
+            if let Some(n) = name {
+                n.0 = new_name.clone();
+            }
+            tracing::info!("🏷️ 玩家改名 -> {}", new_name);
+            true
+        }
+        ServerEvent::CreditGained { credit: gained } => {
+            // #248：声望增加
+            credit.0 = credit.0.saturating_add(*gained);
+            tracing::info!("🏅 获得声望 +{}（当前 {}）", gained, credit.0);
+            true
+        }
+        ServerEvent::CreditLost { amount } => {
+            // #248：声望减少
+            credit.0 = credit.0.saturating_sub(*amount);
+            tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, credit.0);
+            true
+        }
+        ServerEvent::GoldLost { amount } => {
+            gold.0 = gold.0.saturating_sub(*amount);
+            tracing::info!("💸 失去金币 -{}（当前 {}）", amount, gold.0);
+            true
+        }
+        ServerEvent::ExperienceGained { amount } => {
+            progression.exp += *amount;
+            tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, progression.exp, progression.max_exp);
+            true
+        }
+        ServerEvent::LevelChanged {
+            level,
+            exp,
+            max_exp,
+        } => {
+            progression.level = *level;
+            progression.exp = *exp;
+            progression.max_exp = (*max_exp).max(1);
+            tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
+            true
+        }
+        ServerEvent::UserInformation { name: user_name, .. } => {
+            // —— 玩家组件：实体已生成就地写入（共享映射），未生成则由调用方缓冲待回放（R1/M1）——
+            // PlayerName 单独写：它由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
+            // 缺失时静默跳过（同其他写系统 R1 语义）。
+            apply_user_info_stats(ev, vitals, progression, gold, combat_stats);
+            // #2633 批次4 步7：补写复用组件 `PlayerName`
+            if let Some(n) = name {
+                n.0 = user_name.clone();
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// 判别 `apply_vitals_event` 的命中集——两侧新增分支须同步（评审 M1；分支测试兜底）。
+fn is_vitals_event(ev: &ServerEvent) -> bool {
+    matches!(ev,
+        ServerEvent::PetModeChanged { .. } | ServerEvent::HealthChanged { .. }
+        | ServerEvent::GoldGained { .. } | ServerEvent::BaseStats { .. }
+        | ServerEvent::PlayerNameUpdated { .. } | ServerEvent::CreditGained { .. }
+        | ServerEvent::CreditLost { .. } | ServerEvent::GoldLost { .. }
+        | ServerEvent::ExperienceGained { .. } | ServerEvent::LevelChanged { .. }
+        | ServerEvent::UserInformation { .. })
+}
+
 pub struct PlayerStatePlugin;
 
 impl Plugin for PlayerStatePlugin {
     fn build(&self, app: &mut App) {
         // 写方须排在读方前（设计 §12 R5）：先写玩家组件/HudState，后 sync_hud_data（Hud 集）读。
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
-        app.init_resource::<PendingUserInfo>();
-        // R1 reconcile：须在事件写系统之前运行——缓冲快照先应用，本帧新到事件后写（新值胜）。
+        app.init_resource::<PendingPlayerEvents>();
+        // R1/M1 reconcile：须在事件写系统之前运行——缓冲事件先回放，本帧新到事件后写（新值胜）。
         app.add_systems(
             Update,
-            apply_pending_user_info
+            apply_pending_events
                 .before(player_vitals_events)
                 .before(crate::game::dialogs::inventory::inventory_events)
                 .in_set(GameSet::PlayerState)
@@ -369,113 +473,103 @@ impl Plugin for PlayerStatePlugin {
 /// #2633 批次4 步8/9：CharacterState 双源已删、HudState 双写已删——唯一数据源是玩家实体组件。
 #[allow(clippy::too_many_arguments)]
 fn player_vitals_events(
+    mut warned_multi: Local<bool>,
     mut events: MessageReader<ServerEvent>,
-    mut pending: ResMut<PendingUserInfo>,
-    mut vitals_q: Query<&mut Vitals, With<LocalPlayer>>,
-    mut progression_q: Query<&mut Progression, With<LocalPlayer>>,
-    mut gold_q: Query<&mut Gold, With<LocalPlayer>>,
-    mut credit_q: Query<&mut Credit, With<LocalPlayer>>,
-    mut base_stats_q: Query<&mut BaseStats, With<LocalPlayer>>,
-    mut pet_mode_q: Query<&mut PetModeState, With<LocalPlayer>>,
-    mut combat_stats_q: Query<&mut CombatStats, With<LocalPlayer>>,
+    mut pending: ResMut<PendingPlayerEvents>,
+    mut q: Query<
+        (
+            &mut Vitals, &mut Progression, &mut Gold, &mut Credit,
+            &mut BaseStats, &mut PetModeState, &mut CombatStats,
+        ),
+        With<LocalPlayer>,
+    >,
     mut name_q: Query<&mut PlayerName, With<LocalPlayer>>,
 ) {
-    for ev in events.read() {
-        match ev {
-            ServerEvent::PetModeChanged { mode } => {
-                // #1388：HUD 宠物模式标签
-                if let Ok(mut p) = pet_mode_q.single_mut() {
-                    p.0 = *mode;
-                }
-            }
-            ServerEvent::HealthChanged { hp, mp } => {
-                if let Ok(mut v) = vitals_q.single_mut() {
-                    v.hp = *hp;
-                    v.mp = *mp;
-                }
-            }
-            ServerEvent::GoldGained { gold } => {
-                if let Ok(mut g) = gold_q.single_mut() {
-                    g.0 = g.0.saturating_add(*gold);
-                }
-            }
-            ServerEvent::BaseStats { stats } => {
-                // #268：基础属性（角色面板数据）
-                if let Ok(mut b) = base_stats_q.single_mut() {
-                    b.0 = stats.clone();
-                }
-                tracing::info!("📊 基础属性: {:?}", stats);
-            }
-            ServerEvent::PlayerNameUpdated { name } => {
-                // #264：本地玩家改名（复用组件 `PlayerName`；object_state 亦有同名维护，值同）
-                if let Ok(mut n) = name_q.single_mut() {
-                    n.0 = name.clone();
-                }
-                tracing::info!("🏷️ 玩家改名 -> {}", name);
-            }
-            ServerEvent::CreditGained { credit } => {
-                // #248：声望增加
-                if let Ok(mut c) = credit_q.single_mut() {
-                    c.0 = c.0.saturating_add(*credit);
-                    tracing::info!("🏅 获得声望 +{}（当前 {}）", credit, c.0);
-                }
-            }
-            ServerEvent::CreditLost { amount } => {
-                // #248：声望减少
-                if let Ok(mut c) = credit_q.single_mut() {
-                    c.0 = c.0.saturating_sub(*amount);
-                    tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, c.0);
-                }
-            }
-            ServerEvent::GoldLost { amount } => {
-                if let Ok(mut g) = gold_q.single_mut() {
-                    g.0 = g.0.saturating_sub(*amount);
-                    tracing::info!("💸 失去金币 -{}（当前 {}）", amount, g.0);
-                }
-            }
-            ServerEvent::ExperienceGained { amount } => {
-                if let Ok(mut p) = progression_q.single_mut() {
-                    p.exp += *amount;
-                    tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, p.exp, p.max_exp);
-                }
-            }
-            ServerEvent::LevelChanged {
-                level,
-                exp,
-                max_exp,
-            } => {
-                if let Ok(mut p) = progression_q.single_mut() {
-                    p.level = *level;
-                    p.exp = *exp;
-                    p.max_exp = (*max_exp).max(1);
-                }
-                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
-            }
-            ServerEvent::UserInformation { name, .. } => {
-                // —— 玩家组件：实体已生成就地写入（共享映射），未生成则缓冲快照待 reconcile（R1）——
-                // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），故单一查询成败即实体有无。
-                // PlayerName 单独写：它由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
-                // 缺失时静默跳过（同其他写系统 R1 语义）。
-                if let (Ok(mut v), Ok(mut p), Ok(mut g), Ok(mut cb)) = (
-                    vitals_q.single_mut(),
-                    progression_q.single_mut(),
-                    gold_q.single_mut(),
-                    combat_stats_q.single_mut(),
-                ) {
-                    apply_user_info_stats(ev, &mut v, &mut p, &mut g, &mut cb);
-                } else {
-                    // R1：UserInformation 先于 ObjectPlayer 到达、实体未生成——缓冲快照
-                    // （latest wins），待 apply_pending_user_info 在实体生成后应用一次。
-                    pending.0 = Some(ev.clone());
-                }
-                // #2633 批次4 步7：补写复用组件 `PlayerName`
-                if let Ok(mut n) = name_q.single_mut() {
-                    n.0 = name.clone();
-                }
-            }
-            _ => {}
+    // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），单一元组查询成败即实体有无。
+    let Ok((mut v, mut p, mut g, mut c, mut b, mut pm, mut cb)) = q.single_mut() else {
+        // R1/M1：实体未生成——本窗口全部可处理事件按到达顺序缓冲，待 apply_pending_events 回放
+        //（修复评审 M1：此前只缓冲 UserInformation、其余被丢弃）。正常窗口仅登录数帧。
+        // 另：若实际是"多个 LocalPlayer 实体"（异常，理论已由登出清理修复消除），给一次告警便于定位。
+        if !*warned_multi
+            && matches!(q.single_mut(), Err(bevy_ecs::query::QuerySingleError::MultipleEntities(_)))
+        {
+            *warned_multi = true;
+            tracing::warn!("⚠️ 多个 LocalPlayer 实体（登出未清理？CRITICAL-1）——本帧跳过组件写，事件按序缓冲");
         }
+        for ev in events.read() {
+            if is_vitals_event(ev) {
+                pending.0.push(ev.clone());
+            }
+        }
+        return;
+    };
+    let mut n = name_q.single_mut().ok();
+    for ev in events.read() {
+        apply_vitals_event(ev, &mut v, &mut p, &mut g, &mut c, &mut b, &mut pm, &mut cb, n.as_deref_mut());
     }
+}
+
+/// 单一写映射：player_status_events / apply_pending_events 共用（#2633 R1，防双份漂移）。
+/// 命中任一已处理事件返回 true（供实体缺失时判别是否入队）。
+/// 行为差异：实体缺失时 `death_ui.dismissed = false` 从"立即执行"变为"回放时执行"——
+/// PlayerDied 不可能落在实体缺失窗口（必在游戏中），且回放至迟一帧，可接受。
+fn apply_status_event(
+    ev: &ServerEvent,
+    flags: &mut StatusFlags,
+    death_ui: &mut crate::game::hud::DeathDialogState,
+) -> bool {
+    match ev {
+        ServerEvent::FishingUpdate { progress, .. } => {
+            // #1544：钓鱼中不可使用物品
+            flags.fishing = *progress != 0;
+            true
+        }
+        ServerEvent::TrapRockChanged { in_trap } => {
+            // #1550：陷阱中不可走/跑
+            flags.in_trap_rock = *in_trap;
+            true
+        }
+        ServerEvent::LocalPoisonChanged { paralysis } => {
+            // #1616：麻痹/冰冻毒锁定输入
+            flags.paralysis = *paralysis;
+            true
+        }
+        ServerEvent::MountUpdated { .. } => {
+            // #1544：本地玩家骑乘。MountState 组件由 object_state/spawn 路径维护
+            //（object_state.rs MountUpdated 分支插入/移除），HudState 镜像随资源删除。
+            // no-op：不缓冲（is_status_event 亦不含此变体）。
+            false
+        }
+        ServerEvent::PlayerDied => {
+            flags.dead = true;
+            // 死亡弹窗重新弹出（C# ShowReviveMessage 只弹一次，#46）
+            death_ui.dismissed = false;
+            true
+        }
+        ServerEvent::ReincarnationRequested => {
+            // 死门控（评审 MAJOR-2）：未死亡不发轮回请求
+            if flags.dead {
+                flags.reincarnation_offered = true;
+            }
+            true
+        }
+        ServerEvent::PlayerRevived => {
+            flags.dead = false;
+            flags.reincarnation_offered = false;
+            death_ui.dismissed = false;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// 判别 `apply_status_event` 的命中集（MountUpdated 为 no-op 不含在内；
+/// 两侧新增分支须同步（评审 M1；分支测试兜底））。
+fn is_status_event(ev: &ServerEvent) -> bool {
+    matches!(ev,
+        ServerEvent::FishingUpdate { .. } | ServerEvent::TrapRockChanged { .. }
+        | ServerEvent::LocalPoisonChanged { .. } | ServerEvent::PlayerDied
+        | ServerEvent::ReincarnationRequested | ServerEvent::PlayerRevived)
 }
 
 /// 玩家状态旗标（钓鱼/陷阱/麻痹/死亡/复活/轮回）。
@@ -483,99 +577,58 @@ fn player_vitals_events(
 /// MountUpdated 的 MountState 由 object_state/spawn 维护——步9 起本系统不再为该事件写任何值。）
 fn player_status_events(
     mut events: MessageReader<ServerEvent>,
-    mut death_ui: ResMut<crate::game::hud::DeathDialogState>,
+    mut pending: ResMut<PendingPlayerEvents>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
+    mut death_ui: ResMut<crate::game::hud::DeathDialogState>,
 ) {
-    for ev in events.read() {
-        match ev {
-            ServerEvent::FishingUpdate { progress, .. } => {
-                // #1544：钓鱼中不可使用物品
-                if let Ok(mut f) = flags_q.single_mut() {
-                    f.fishing = *progress != 0;
-                }
+    // R1/M1 同构：实体未生成（登录首帧）时全部可处理事件按到达顺序缓冲，待回放。
+    let Ok(mut f) = flags_q.single_mut() else {
+        for ev in events.read() {
+            if is_status_event(ev) {
+                pending.0.push(ev.clone());
             }
-            ServerEvent::TrapRockChanged { in_trap } => {
-                // #1550：陷阱中不可走/跑
-                if let Ok(mut f) = flags_q.single_mut() {
-                    f.in_trap_rock = *in_trap;
-                }
-            }
-            ServerEvent::LocalPoisonChanged { paralysis } => {
-                // #1616：麻痹/冰冻毒锁定输入
-                if let Ok(mut f) = flags_q.single_mut() {
-                    f.paralysis = *paralysis;
-                }
-            }
-            ServerEvent::MountUpdated { .. } => {
-                // #1544：本地玩家骑乘。MountState 组件由 object_state/spawn 路径维护
-                //（object_state.rs MountUpdated 分支插入/移除），HudState 镜像随资源删除。
-            }
-            ServerEvent::PlayerDied => {
-                if let Ok(mut f) = flags_q.single_mut() {
-                    f.dead = true;
-                }
-                // 死亡弹窗重新弹出（C# ShowReviveMessage 只弹一次，#46）
-                death_ui.dismissed = false;
-            }
-            ServerEvent::ReincarnationRequested => {
-                if flags_q.single().map(|f| f.dead).unwrap_or(false) {
-                    if let Ok(mut f) = flags_q.single_mut() {
-                        f.reincarnation_offered = true;
-                    }
-                }
-            }
-            ServerEvent::PlayerRevived => {
-                if let Ok(mut f) = flags_q.single_mut() {
-                    f.dead = false;
-                    f.reincarnation_offered = false;
-                }
-                death_ui.dismissed = false;
-            }
-            _ => {}
         }
+        return;
+    };
+    for ev in events.read() {
+        apply_status_event(ev, &mut f, &mut death_ui);
     }
 }
 
-/// R1 reconcile（#2633 §12 R1）：LocalPlayer 实体生成后，把缓冲的 UserInformation 快照
-/// 一次性应用到全部玩家组件（Vitals/Progression/Gold/CombatStats + Inventory/Loadout），
-/// 然后清空 pending。
-///
-/// 入 GameSet::PlayerState 并排在事件写系统与 Hud 集之前：实体在 ObjectPlayer 帧尾生成后，
-/// 下一帧本系统先应用缓冲、事件写系统再写本帧新值、Hud 集 sync_hud_data 最后读，无可见默认帧。
-/// 实体尚未生成则保留 pending 留待下帧。不重注入事件（避免重复触发 log/其他 ServerEvent
-/// 读者副作用）；组件写入与事件处理器共用 apply_user_info_stats/items 同一份映射。
+/// R1/M1 reconcile（#2633 §12 R1）：LocalPlayer 实体生成后，把缓冲的本地玩家事件
+/// **按到达顺序**回放——旧→新，新值胜（修复评审 M1：此前只缓冲 UserInformation 的
+/// latest-wins 快照，窗口内 HealthChanged 等被丢弃，回放后旧快照覆盖新值）。
+/// 组件写入与事件处理器共用 apply_vitals_event / apply_status_event /
+/// apply_user_info_items（对非 UserInformation 为 no-op，可安全重复调用）同一份映射；
+/// 回放会连带执行函数内日志（仅登录帧发生、至多重复一次，可接受）。
+/// 实体未生成则不 take、留待下帧。不重注入事件（避免触发 ServerEvent 其他读者副作用）。
 #[allow(clippy::too_many_arguments)]
-fn apply_pending_user_info(
-    mut pending: ResMut<PendingUserInfo>,
+fn apply_pending_events(
+    mut pending: ResMut<PendingPlayerEvents>,
     mut q: Query<
         (
-            &mut Vitals,
-            &mut Progression,
-            &mut Gold,
-            &mut CombatStats,
-            &mut Inventory,
-            &mut Loadout,
+            &mut Vitals, &mut Progression, &mut Gold, &mut Credit, &mut BaseStats,
+            &mut PetModeState, &mut CombatStats, &mut Inventory, &mut Loadout,
+            &mut StatusFlags,
         ),
         With<LocalPlayer>,
     >,
     mut name_q: Query<&mut PlayerName, With<LocalPlayer>>,
+    mut death_ui: ResMut<crate::game::hud::DeathDialogState>,
 ) {
-    let Some(ev) = pending.0.take() else {
+    if pending.0.is_empty() {
         return;
+    }
+    let Ok((mut v, mut p, mut g, mut c, mut b, mut pm, mut cb, mut inv, mut lo, mut f)) = q.single_mut()
+    else {
+        return; // 实体仍未生成：保留 pending 下一帧再试
     };
-    // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），单一元组查询成败即实体有无。
-    if let Ok((mut v, mut p, mut g, mut cb, mut inv, mut lo)) = q.single_mut() {
-        apply_user_info_stats(&ev, &mut v, &mut p, &mut g, &mut cb);
-        apply_user_info_items(&ev, &mut inv, &mut lo);
-        // #2633 批次4 步7：缓冲快照的 name 一并应用（PlayerName 由 spawn 插入，此时必在）
-        if let ServerEvent::UserInformation { name, .. } = &ev {
-            if let Ok(mut n) = name_q.single_mut() {
-                n.0 = name.clone();
-            }
-        }
-    } else {
-        // 实体仍未生成（ObjectPlayer 尚未到达/未生效）：放回 pending，下一帧再试。
-        pending.0 = Some(ev);
+    let mut n = name_q.single_mut().ok();
+    let buffered = std::mem::take(&mut pending.0);
+    for ev in &buffered {
+        apply_vitals_event(ev, &mut v, &mut p, &mut g, &mut c, &mut b, &mut pm, &mut cb, n.as_deref_mut());
+        apply_user_info_items(ev, &mut inv, &mut lo);
+        apply_status_event(ev, &mut f, &mut death_ui);
     }
 }
 
@@ -596,12 +649,14 @@ mod tests {
         app.add_message::<ServerEvent>();
         app.init_resource::<DeathDialogState>();
         app.init_resource::<PotionBeltState>();
-        app.init_resource::<PendingUserInfo>();
+        app.init_resource::<PendingPlayerEvents>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
+        // CRITICAL-1：登出回登录界面须清 LocalPlayer 实体（防"换角色重登出现双实体"，见 actor/mod.rs）
+        app.add_systems(OnExit(AppState::Game), crate::actor::despawn_local_player);
         app.add_systems(
             Update,
             (
-                apply_pending_user_info
+                apply_pending_events
                     .before(player_vitals_events)
                     .before(crate::game::dialogs::inventory::inventory_events),
                 player_vitals_events,
@@ -809,7 +864,7 @@ mod tests {
         assert!(inv.items.iter().flatten().any(|it| it.unique_id == 200));
     }
 
-    /// R1：实体未生成时组件写跳过、不 panic（无 HudState 兜底可断言，行为=写方静默跳过）
+    /// R1/M1：实体未生成时组件写改为缓冲入队（不 panic），等待实体生成后按序回放
     #[test]
     fn write_skips_when_entity_missing() {
         let mut app = test_app();
@@ -842,7 +897,7 @@ mod tests {
             "实体未生成时不应有 Vitals 组件"
         );
         // 快照已缓冲
-        assert!(app.world().resource::<PendingUserInfo>().0.is_some());
+        assert!(!app.world().resource::<PendingPlayerEvents>().0.is_empty());
 
         // 生成 LocalPlayer（挂默认组件）→ reconcile 应应用缓冲快照
         spawn_local(&mut app);
@@ -865,29 +920,54 @@ mod tests {
         let loadout: crate::game::player_state::Loadout = get(&mut app);
         assert_eq!(loadout.slots[0].as_ref().unwrap().unique_id, 900);
         // pending 已清空
-        assert!(app.world().resource::<PendingUserInfo>().0.is_none());
+        assert!(app.world().resource::<PendingPlayerEvents>().0.is_empty());
     }
 
-    /// R1：实体缺失时连发两个 UserInformation → 后到覆盖先到（latest wins）
+    /// M1（评审）：实体缺失时全部可处理事件按到达顺序缓冲，实体生成后按序回放——
+    /// HealthChanged/GoldGained/PlayerNameUpdated 不再被丢弃（原实现只缓冲 UserInformation
+    /// 的 latest-wins 快照，回放后旧值覆盖新值）。
     #[test]
-    fn pending_user_info_latest_wins() {
+    fn pending_events_replayed_in_order() {
         let mut app = test_app();
         // 不 spawn LocalPlayer
         enter_game(&mut app);
 
         app.world_mut().write_message(user_info(60, 800, 400));
-        app.world_mut().write_message(user_info(70, 999, 450));
+        app.world_mut()
+            .write_message(ServerEvent::HealthChanged { hp: 500, mp: 100 });
+        app.world_mut().write_message(ServerEvent::GoldGained { gold: 100 });
+        app.world_mut()
+            .write_message(ServerEvent::PlayerNameUpdated { name: "先改名后".to_string() });
+        app.update(); // 不应 panic
+
+        // 4 个可处理事件已按到达顺序入队
+        assert_eq!(app.world().resource::<PendingPlayerEvents>().0.len(), 4);
+
+        // 生成 LocalPlayer（挂默认组件 + PlayerName，后者由 spawn 路径插入）→ 按序回放
+        let e = spawn_local(&mut app);
+        app.world_mut().entity_mut(e).insert(PlayerName(String::new()));
         app.update();
 
-        // 生成实体 → reconcile 应应用**后到**的快照（level=70/hp=999）
-        spawn_local(&mut app);
-        app.update();
-
-        let p: Progression = get(&mut app);
-        assert_eq!(p.level, 70, "后者覆盖前者（latest wins）");
         let v: Vitals = get(&mut app);
-        assert_eq!(v.hp, 999);
-        assert!(app.world().resource::<PendingUserInfo>().0.is_none());
+        assert_eq!(
+            (v.hp, v.mp),
+            (500, 100),
+            "HealthChanged 后到覆盖 UserInfo（M1：此前被丢弃→旧值 800 胜）"
+        );
+        let g: Gold = get(&mut app);
+        assert_eq!(g.0, 4342, "GoldGained 在 UserInformation gold=4242 基础上 +100");
+        let p: Progression = get(&mut app);
+        assert_eq!(p.level, 60);
+        let pn = app
+            .world_mut()
+            .query_filtered::<&PlayerName, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .expect("应有 PlayerName")
+            .0
+            .clone();
+        assert_eq!(pn, "先改名后", "PlayerNameUpdated 应随缓冲回放");
+        assert!(app.world().resource::<PendingPlayerEvents>().0.is_empty());
     }
 
     /// 步7/9：PlayerNameUpdated / UserInformation 写 `PlayerName` 组件
@@ -930,9 +1010,10 @@ mod tests {
         assert_eq!(pn, "测试者", "UserInformation 应同步 PlayerName 组件");
     }
 
-    /// 步7：实体缺失时 PlayerName 写跳过不 panic（同 R1 语义）
+    /// M1（评审）：实体缺失时 PlayerNameUpdated 入队缓冲（不再静默丢弃），
+    /// 实体生成后回放应用到 `PlayerName` 组件。
     #[test]
-    fn player_name_write_skips_when_entity_missing() {
+    fn player_name_buffered_when_entity_missing() {
         let mut app = test_app();
         // 不 spawn LocalPlayer
         enter_game(&mut app);
@@ -941,6 +1022,112 @@ mod tests {
                 name: "无实体".to_string(),
             });
         app.update(); // 不应 panic
+        assert!(!app.world().resource::<PendingPlayerEvents>().0.is_empty());
+
+        let e = spawn_local(&mut app);
+        app.world_mut().entity_mut(e).insert(PlayerName(String::new()));
+        app.update();
+        let pn = app
+            .world_mut()
+            .query_filtered::<&PlayerName, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .expect("应有 PlayerName")
+            .0
+            .clone();
+        assert_eq!(pn, "无实体", "PlayerNameUpdated 应随缓冲回放");
+    }
+
+    /// M1（评审）：实体缺失时只缓冲可处理事件——不属于 vitals/status 命中集的变体不入队。
+    #[test]
+    fn pending_buffers_only_handled_events() {
+        let mut app = test_app();
+        // 不 spawn LocalPlayer
+        enter_game(&mut app);
+
+        app.world_mut().write_message(user_info(60, 800, 400));
+        app.world_mut().write_message(ServerEvent::LogOutFailed);
+        app.world_mut().write_message(ServerEvent::ReturnToLogin);
+        app.update(); // 不应 panic
+
+        assert_eq!(
+            app.world().resource::<PendingPlayerEvents>().0.len(),
+            1,
+            "仅 UserInformation 入队（非 vitals/status 事件不缓冲）"
+        );
+    }
+
+    /// MAJOR-2（评审）：ReincarnationRequested 须死门控——未死亡不发轮回弹窗。
+    #[test]
+    fn reincarnation_requested_requires_dead_gate() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        app.world_mut().write_message(ServerEvent::ReincarnationRequested);
+        app.update();
+        let f: StatusFlags = get(&mut app);
+        assert!(!f.reincarnation_offered, "未死亡时不应弹轮回");
+
+        app.world_mut().write_message(ServerEvent::PlayerDied);
+        app.world_mut().write_message(ServerEvent::ReincarnationRequested);
+        app.update();
+        let f: StatusFlags = get(&mut app);
+        assert!(f.dead, "PlayerDied 应置 dead");
+        assert!(f.reincarnation_offered, "死亡后轮回请求应生效");
+    }
+
+    /// MAJOR-2（评审）：PlayerRevived 复位 dead/reincarnation_offered + 死亡弹窗 dismissed。
+    #[test]
+    fn player_revived_resets_flags_and_death_ui() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        app.world_mut().write_message(ServerEvent::PlayerDied);
+        app.world_mut().write_message(ServerEvent::ReincarnationRequested);
+        app.update();
+        let f: StatusFlags = get(&mut app);
+        assert!(f.dead && f.reincarnation_offered);
+        assert!(!app.world().resource::<DeathDialogState>().dismissed);
+
+        app.world_mut().write_message(ServerEvent::PlayerRevived);
+        app.update();
+        let f: StatusFlags = get(&mut app);
+        assert!(!f.dead, "PlayerRevived 应复位 dead");
+        assert!(!f.reincarnation_offered, "PlayerRevived 应复位轮回请求");
+        assert!(!app.world().resource::<DeathDialogState>().dismissed);
+    }
+
+    /// CRITICAL-1（评审）：登出/ReturnToLogin 回登录界面时 OnExit(Game) 清掉 LocalPlayer
+    /// 实体——同进程换角色重登不再出现双实体 → 全库 Query::single() 静默 MultipleEntities。
+    #[test]
+    fn local_player_despawned_on_exit_game() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Vitals, With<LocalPlayer>>()
+                .iter(app.world())
+                .next()
+                .is_some(),
+            "进入游戏应存在 LocalPlayer"
+        );
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
+        app.update(); // 应触发 OnExit(Game) → despawn_local_player
+
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Vitals, With<LocalPlayer>>()
+                .iter(app.world())
+                .next()
+                .is_none(),
+            "退出游戏后 LocalPlayer 应被清除"
+        );
     }
 
     /// 构造 UserInformation 事件（背包 2 格、装备槽 0 有 uid=900）

@@ -352,8 +352,8 @@ fn cleanup_dialogs(mut commands: Commands, roots: Query<Entity, With<DialogRoot>
 /// 背包/装备写系统（#2633 批次4 步2：拆 hud_server_events 背包域，设计 §10）。
 ///
 /// #2633 批次4 步9：HudState 删除后直接操作玩家实体 `Inventory`/`Loadout` 组件（唯一数据源）；
-/// 实体未生成则本帧事件整体跳过（R1：UserInformation 由 PendingUserInfo 缓冲、其余事件
-/// 由 UserInformation 全量兜底）。UserInformation 玩家属性部分归 player_vitals_events（两系统
+/// 实体未生成则本帧事件整体跳过（R1：UserInformation 等状态事件由 PendingPlayerEvents
+/// 缓冲、实体生成后按序回放——其余事件由 UserInformation 全量兜底）。UserInformation 玩家属性部分归 player_vitals_events（两系统
 /// 读同一事件、各写不同字段，MessageReader 游标独立合法）；ItemUsed 的腰带补货段归
 /// potion_belt::belt_restock_events（须排在本系统扣减之前）。任务格增量由 quest_inventory_events 处理。
 pub(crate) fn inventory_events(

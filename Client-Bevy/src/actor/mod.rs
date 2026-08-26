@@ -89,5 +89,17 @@ impl Plugin for ActorPlugin {
                 .after(crate::network::network_system)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
+        // 登出/ReturnToLogin 回登录界面时清掉玩家实体（评审 CRITICAL-1）：
+        // 此前 dialog 侧只清 DialogManager/session，LocalPlayer 残留——同进程换角色重登
+        // 会出现双实体 → 全库 Query::single() 静默 MultipleEntities，状态冻结无日志。
+        // Bevy 0.16+ 关系层级 .despawn() 自动带子树（渲染层/名字标签），与全仓 idiom 一致。
+        app.add_systems(OnExit(crate::scenes::AppState::Game), despawn_local_player);
+    }
+}
+
+/// 登出/ReturnToLogin 回登录界面时清掉本地玩家实体（评审 CRITICAL-1）。
+pub(crate) fn despawn_local_player(mut commands: Commands, q: Query<Entity, With<LocalPlayer>>) {
+    for e in &q {
+        commands.entity(e).despawn();
     }
 }
