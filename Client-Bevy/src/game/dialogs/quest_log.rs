@@ -19,8 +19,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 use mir2_shared::data::client_data::ClientQuestInfo;
 use mir2_shared::data::shared_data::QuestItemReward;
@@ -283,7 +284,7 @@ impl Plugin for QuestLogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_quest_log);
         app.add_systems(
             Update,
-            (quest_log_ui_system, ui_button_system)
+            (quest_log_ui_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -301,7 +302,6 @@ fn spawn_quest_log(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -311,188 +311,78 @@ fn spawn_quest_log(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 961) {
-        let e = spawn_ui_sprite(&mut commands, h, 200.0, 60.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 标题 Title[15]（C# QuestDiaryDialog：Title[15] @(18,9)，绘制「QUEST DIARY」）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 15) {
-        let e = spawn_ui_sprite(&mut commands, h, 218.0, 69.0, 6.1, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        489.0,
-        63.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands.entity(e).insert((
-            QuestLogClose,
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-        ));
-    }
-    // 底部关闭按钮（C# QuestDiaryDialog：Title[193/194/195] @(200,436) 相对）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        193,
-        194,
-        195,
-        400.0,
-        496.0,
-        7.1,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            QuestLogClose,
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-        ));
-    }
-    // 任务行 8 + 详情 6（#2535：8 详情名 / 9 任务 / 10 奖励 / 11 固定 / 12 可选 / 13 消息）
-    for i in 0..14usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            218.0,
-            100.0 + i as f32 * 20.0,
-            12.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands.entity(e).insert((
-            QuestLogLine(i),
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-        ));
-    }
-    // 每行追踪按钮（对齐 C# QuestRow Track）
-    for i in 0..8usize {
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "追踪",
-            450.0,
-            100.0 + i as f32 * 20.0,
-            11.0,
-            Color::srgb(0.6, 0.9, 1.0),
-            8.1,
-        );
-        commands.entity(e).insert((
-            QuestLogTrack(i),
-            UiButton {
-                rect: (450.0, 100.0 + i as f32 * 20.0, 40.0, 18.0),
-                clicked: false,
-            },
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-        ));
-    }
-    // #2535 子批2：已接计数标签（C# _takenQuestsLabel @标题栏 (210,7)）
-    let e = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        218.0,
-        80.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(e).insert((
-        QuestLogLine(14),
-        DialogRoot(DialogKind::QuestLog),
-        QuestLogWidget,
-    ));
-    // 放弃按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        400.0,
-        345.0,
-        8.3,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            QuestLogAbandon,
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-        ));
-    }
-    // #2535 接受/完成按钮（C# Title[270-272]/[273-275]；初始隐藏，由状态机驱动显隐/置灰）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        270,
-        271,
-        272,
-        220.0,
-        345.0,
-        8.4,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            QuestLogAccept,
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        273,
-        274,
-        275,
-        310.0,
-        345.0,
-        8.4,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            QuestLogFinish,
-            DialogRoot(DialogKind::QuestLog),
-            QuestLogWidget,
-            Visibility::Hidden,
-        ));
-    }
+    // 面板 Prguse[961]（C# QuestDiaryDialog，316x466 @ (200,60)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 961) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 200.0, 60.0, 316.0, 466.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::QuestLog), QuestLogWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[15]（C# QuestDiaryDialog：Title[15] @(18,9)）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 15) {
+            let (iw, ih) = match libs.0.get_image(LibraryName::Title, 15) {
+                Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                None => (100.0, 17.0),
+            };
+            spawn_image(p, h, 18.0, 9.0, iw, ih, 8);
+        }
+        // 关闭 Prguse2[360-362] @(289,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 20.0, 20.0, 10).insert(QuestLogClose);
+        }
+        // 底部关闭 Title[193/194/195] @(200,436)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 193),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 194),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 195),
+        ) {
+            spawn_icon_button(p, n, h, pr, 200.0, 436.0, 76.0, 25.0, 10).insert(QuestLogClose);
+        }
+        // 已接计数标签 @(18,20)
+        spawn_label(p, &font, "", 18.0, 20.0, 12.0, Color::WHITE, 9).insert(QuestLogLine(14));
+        // 任务行 8 + 详情 6 @(18,40+20i)
+        for i in 0..14usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+                .insert(QuestLogLine(i));
+        }
+        // 每行追踪按钮（Text 节点本身作为 Button，C# QuestRow Track）
+        for i in 0..8usize {
+            spawn_label(p, &font, "追踪", 250.0, 40.0 + i as f32 * 20.0, 11.0, Color::srgb(0.6, 0.9, 1.0), 10)
+                .insert((Button, QuestLogTrack(i)));
+        }
+        // 放弃 @(200,285)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 200.0, 285.0, 76.0, 25.0, 10).insert(QuestLogAbandon);
+        }
+        // #2535 接受/完成（C# Title[270-272]/[273-275]；初始隐藏，状态机驱动显隐/置灰）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 270),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 271),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 272),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 285.0, 76.0, 25.0, 10)
+                .insert((QuestLogAccept, Visibility::Hidden));
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 273),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 274),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 275),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 285.0, 76.0, 25.0, 10)
+                .insert((QuestLogFinish, Visibility::Hidden));
+        }
+    });
 }
 
 /// 奖励物品显示名（目录无 ItemLibrary 全量名，未知名回退 物品#索引）
@@ -524,12 +414,10 @@ fn quest_log_ui_system(
     tracking: Res<crate::game::dialogs::quest_tracking::QuestTrackingState>,
     mut toggle_tracking: MessageWriter<crate::game::dialogs::quest_tracking::ToggleQuestTracking>,
     net: Res<NetConnection>,
-    close: Query<&UiButton, With<QuestLogClose>>,
-    abandon_btn: Query<&UiButton, With<QuestLogAbandon>>,
+    close: Query<(Entity, &Interaction, Option<&QuestLogClose>, Option<&QuestLogAbandon>)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    // #1290：Bevy B0001——两个 &mut Text2d Query 需用 Without 隔离（#1226 任务追踪合并后启动 panic）
-    // #2535：接受/完成按钮独立 Query 改 Visibility，与 widgets 需互相 Without 隔离
+    // #1290：Bevy B0001——多个 &mut Text/Visibility Query 需用 Without 隔离
     mut widgets: Query<
         &mut Visibility,
         (
@@ -538,17 +426,26 @@ fn quest_log_ui_system(
             Without<QuestLogFinish>,
         ),
     >,
-    mut lines: Query<(&mut Text2d, &mut TextColor, &QuestLogLine), Without<QuestLogTrack>>,
-    mut track_btns: Query<(&mut Text2d, &UiButton, &QuestLogTrack), Without<QuestLogLine>>,
+    mut lines: Query<(&mut Text, &mut TextColor, &QuestLogLine), Without<QuestLogTrack>>,
+    mut track_btns: Query<(Entity, &Interaction, &mut Text, &QuestLogTrack), Without<QuestLogLine>>,
     mut accept_btns: Query<
-        (&UiButton, &mut Sprite, &mut Visibility),
+        (Entity, &Interaction, &mut ImageNode, &mut Visibility),
         (With<QuestLogAccept>, Without<QuestLogFinish>),
     >,
     mut finish_btns: Query<
-        (&UiButton, &mut Sprite, &mut Visibility),
+        (Entity, &Interaction, &mut ImageNode, &mut Visibility),
         (With<QuestLogFinish>, Without<QuestLogAccept>),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::QuestLog);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
@@ -560,9 +457,26 @@ fn quest_log_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter, is_close, is_abandon) in &close {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        if is_close.is_some() {
             mgr.close(DialogKind::QuestLog);
+        } else if is_abandon.is_some() {
+            if let Some(i) = state.selected {
+                let q = state.quests[i].clone();
+                net.send_packet(&mir2_shared::packets::client::quest::AbandonQuest {
+                    quest_index: q.id,
+                });
+                state.quests.remove(i);
+                state.selected = None;
+                state.selected_reward = None;
+                state.message = format!("已放弃任务 {}", q.name);
+                tracing::info!("📜 放弃任务 {}", q.name);
+            } else {
+                state.message = "请先选中一个任务".to_string();
+            }
         }
     }
 
@@ -786,7 +700,7 @@ fn quest_log_ui_system(
     }
     // 追踪按钮：标签（追踪/取消）+ 点击切换（C# QuestRow Track，上限 5）；
     // #2535 子批2：行模型映射——仅任务行显示，组头/可接行/空行置空
-    for (mut text, btn, track) in &mut track_btns {
+    for (e, inter, mut text, track) in &mut track_btns {
         let quest = diary
             .get(track.0)
             .and_then(|r| match r {
@@ -803,7 +717,7 @@ fn quest_log_ui_system(
             Some(_) => "追踪".to_string(),
             None => String::new(),
         };
-        if btn.clicked {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(q) = quest {
                 // #2631：toggle + save 归 quest_tracking 处理（数据所有权），这里只发 Message。
                 // toggle() 返回值恒等于「点击前未追踪」，故 now_tracked = !tracked（只读推导，
@@ -826,7 +740,7 @@ fn quest_log_ui_system(
         }
     }
     // #2535 接受按钮（可接行选中才显示；本列表只列 Accept 行，故显示即可点）
-    for (btn, mut sprite, mut vis) in &mut accept_btns {
+    for (e, inter, mut img, mut vis) in &mut accept_btns {
         let show = state.selected_avail.is_some()
             && state
                 .selected_avail
@@ -837,8 +751,8 @@ fn quest_log_ui_system(
         } else {
             Visibility::Hidden
         };
-        sprite.color = Color::WHITE;
-        if show && btn.clicked {
+        img.color = Color::WHITE;
+        if show && edge(e, inter, &mut prev_inter) {
             if let Some(i) = state.selected_avail {
                 if let Some(info) = avail.get(i) {
                     net.send_packet(&mir2_shared::packets::client::quest::AcceptQuest {
@@ -858,7 +772,7 @@ fn quest_log_ui_system(
         }
     }
     // #2535 完成按钮（已接行选中才显示；未完成置灰）
-    for (btn, mut sprite, mut vis) in &mut finish_btns {
+    for (e, inter, mut img, mut vis) in &mut finish_btns {
         let sel = state.selected.and_then(|i| state.quests.get(i)).cloned();
         let show = sel.is_some();
         let enabled = sel.as_ref().map(|q| q.completed).unwrap_or(false);
@@ -867,12 +781,12 @@ fn quest_log_ui_system(
         } else {
             Visibility::Hidden
         };
-        sprite.color = if enabled {
+        img.color = if enabled {
             Color::WHITE
         } else {
             Color::srgb(0.45, 0.45, 0.45)
         };
-        if show && enabled && btn.clicked {
+        if show && enabled && edge(e, inter, &mut prev_inter) {
             let q = sel.unwrap();
             let select_rewards: &[QuestItemReward] = catalog
                 .infos
@@ -900,24 +814,6 @@ fn quest_log_ui_system(
                     state.message = msg.to_string();
                     tracing::info!("📜 交付任务 #{} 被阻止: {}", q.id, msg);
                 }
-            }
-        }
-    }
-    // 放弃选中任务
-    for btn in &abandon_btn {
-        if btn.clicked {
-            if let Some(i) = state.selected {
-                let q = state.quests[i].clone();
-                net.send_packet(&mir2_shared::packets::client::quest::AbandonQuest {
-                    quest_index: q.id,
-                });
-                state.quests.remove(i);
-                state.selected = None;
-                state.selected_reward = None;
-                state.message = format!("已放弃任务 {}", q.name);
-                tracing::info!("📜 放弃任务 {}", q.name);
-            } else {
-                state.message = "请先选中一个任务".to_string();
             }
         }
     }
