@@ -25,9 +25,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{ItemCellData, ItemCellIcon, spawn_item_cell};
-use crate::ui::sprite_ui::{
-    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label, spawn_panel,
+    UiItemCellData, UiItemCellIcon,
 };
 
 // 布局常量（相对对话框左上角；C# HeroInventoryDialog）
@@ -102,12 +103,7 @@ impl Plugin for HeroInventoryPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero_inventory);
         app.add_systems(
             Update,
-            (
-                hero_inv_visibility_system,
-                hero_inv_data_system,
-                hero_inv_click_system,
-                ui_button_system,
-            )
+            (hero_inv_visibility_system, hero_inv_data_system, hero_inv_click_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -125,7 +121,6 @@ fn spawn_hero_inventory(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -135,243 +130,84 @@ fn spawn_hero_inventory(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1422]，原点 (0,0)（C# 构造器未设 Location → MirControl 默认）
-    let Some(bg) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1422,
-    ) else {
+    // 背景 Prguse[1422]（C# HeroInventoryDialog Index=1422，324x266 @ (0,0)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1422) else {
         return;
     };
-    let (_bw, bh) = libs
-        .0
-        .get_image(LibraryName::Prguse, 1422)
-        .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
-        .unwrap_or((320.0, 250.0));
-    let dx = DIALOG_X;
-    let dy = DIALOG_Y;
+    let (bw, bh) = (
+        libs.0
+            .get_image(LibraryName::Prguse, 1422)
+            .map(|i| i.width.max(0) as f32)
+            .unwrap_or(324.0),
+        libs.0
+            .get_image(LibraryName::Prguse, 1422)
+            .map(|i| i.height.max(0) as f32)
+            .unwrap_or(266.0),
+    );
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, bw, bh, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::HeroInventory), HeroInvWidget));
 
-    let e = spawn_ui_sprite(&mut commands, bg, dx, dy, 6.0, 1.0);
-    commands.entity(e).insert((
-        DialogRoot(DialogKind::HeroInventory),
-        HeroInvWidget,
-        Visibility::Hidden,
-    ));
-
-    // 关闭（C# Prguse2 360/361/362 at (299,2)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        dx + 299.0,
-        dy + 2.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands.entity(e).insert((
-            HeroInvClose,
-            DialogRoot(DialogKind::HeroInventory),
-            HeroInvWidget,
-        ));
-    }
-
-    // 40 格（通用 ItemCell；渲染交给 item_cell_system，#90）
-    for i in 0..(GRID_COLS * GRID_ROWS) {
-        let (cx, cy) = hero_cell_pos(i);
-        let cell = spawn_item_cell(
-            &mut commands,
-            &mut images,
-            &font,
-            dx + cx,
-            dy + cy,
-            7.5,
-            CELL_W,
-            CELL_H,
-            i,
-        );
-        commands.entity(cell).insert((
-            HeroInvSlot(i),
-            DialogRoot(DialogKind::HeroInventory),
-            HeroInvWidget,
-        ));
-    }
-
-    // 4 行锁条（C# Prguse[1423] at (14, 56+i*33)；固定 40 格时始终隐藏）
-    for i in 0..4usize {
-        if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
-            LibraryName::Prguse,
-            1423,
+    commands.entity(panel).with_children(|p| {
+        // 关闭（C# Prguse2 360/361/362 at (299,2)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            let le = spawn_ui_sprite(
-                &mut commands,
-                h,
-                dx + 14.0,
-                dy + 56.0 + i as f32 * 33.0,
-                7.2,
-                1.0,
-            );
-            commands.entity(le).insert((
-                HeroInvLockBar(i),
-                DialogRoot(DialogKind::HeroInventory),
-                HeroInvWidget,
-                Visibility::Hidden,
-            ));
+            spawn_icon_button(p, n, h, pr, 299.0, 2.0, 20.0, 20.0, 10).insert(HeroInvClose);
         }
-    }
-    // HP/MP 锁条（1428/1429 at (57,196)/(162,196)，!AutoPot 时显示）
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1428,
-    ) {
-        let le = spawn_ui_sprite(&mut commands, h, dx + 57.0, dy + 196.0, 7.2, 1.0);
-        commands.entity(le).insert((
-            HeroInvHpLock,
-            DialogRoot(DialogKind::HeroInventory),
-            HeroInvWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        1429,
-    ) {
-        let le = spawn_ui_sprite(&mut commands, h, dx + 162.0, dy + 196.0, 7.2, 1.0);
-        commands.entity(le).insert((
-            HeroInvMpLock,
-            DialogRoot(DialogKind::HeroInventory),
-            HeroInvWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // HP/MP 自动药按钮（Title 560-565 at (58/206, h-60)，AutoPot 时显示）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        560,
-        561,
-        562,
-        dx + 58.0,
-        dy + bh - 60.0,
-        8.3,
-        60.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            HeroInvHpBtn,
-            DialogRoot(DialogKind::HeroInventory),
-            HeroInvWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        563,
-        564,
-        565,
-        dx + 206.0,
-        dy + bh - 60.0,
-        8.3,
-        60.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            HeroInvMpBtn,
-            DialogRoot(DialogKind::HeroInventory),
-            HeroInvWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 百分比标签（按钮下方）
-    let hp_label = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        dx + 58.0,
-        dy + bh - 33.0,
-        12.0,
-        Color::WHITE,
-        8.4,
-    );
-    commands.entity(hp_label).insert((
-        HeroInvHpLabel,
-        DialogRoot(DialogKind::HeroInventory),
-        HeroInvWidget,
-        Visibility::Hidden,
-    ));
-    let mp_label = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        dx + 206.0,
-        dy + bh - 33.0,
-        12.0,
-        Color::WHITE,
-        8.4,
-    );
-    commands.entity(mp_label).insert((
-        HeroInvMpLabel,
-        DialogRoot(DialogKind::HeroInventory),
-        HeroInvWidget,
-        Visibility::Hidden,
-    ));
-    // HP/MP 物品格（C# HPItem at (122, h-55) / MPItem at (166, h-55)）
-    let hp_item = spawn_item_cell(
-        &mut commands,
-        &mut images,
-        &font,
-        dx + 122.0,
-        dy + bh - 55.0,
-        7.5,
-        34.0,
-        30.0,
-        40,
-    );
-    commands.entity(hp_item).insert((
-        HeroInvHpItem,
-        DialogRoot(DialogKind::HeroInventory),
-        HeroInvWidget,
-    ));
-    let mp_item = spawn_item_cell(
-        &mut commands,
-        &mut images,
-        &font,
-        dx + 166.0,
-        dy + bh - 55.0,
-        7.5,
-        34.0,
-        30.0,
-        41,
-    );
-    commands.entity(mp_item).insert((
-        HeroInvMpItem,
-        DialogRoot(DialogKind::HeroInventory),
-        HeroInvWidget,
-    ));
+        // 40 格（通用 UiItemCell；渲染交给 item_cell_ui_system，#90）
+        for i in 0..(GRID_COLS * GRID_ROWS) {
+            let (cx, cy) = hero_cell_pos(i);
+            spawn_item_cell_ui(p, &mut images, &font, cx, cy, CELL_W, CELL_H, 9, i)
+                .insert(HeroInvSlot(i));
+        }
+        // 4 行锁条（C# Prguse[1423] at (14, 56+i*33)；固定 40 格时始终隐藏）
+        for i in 0..4usize {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1423) {
+                spawn_image(p, h, 14.0, 56.0 + i as f32 * 33.0, 300.0, 33.0, 8)
+                    .insert((HeroInvLockBar(i), Visibility::Hidden));
+            }
+        }
+        // HP/MP 锁条（1428/1429 at (57,196)/(162,196)，!AutoPot 时显示）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1428) {
+            spawn_image(p, h, 57.0, 196.0, 108.0, 62.0, 8)
+                .insert((HeroInvHpLock, Visibility::Hidden));
+        }
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1429) {
+            spawn_image(p, h, 162.0, 196.0, 108.0, 62.0, 8)
+                .insert((HeroInvMpLock, Visibility::Hidden));
+        }
+        // HP/MP 自动药按钮（Title 560-565 at (58/206, h-60)，AutoPot 时显示）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 560),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 561),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 562),
+        ) {
+            spawn_icon_button(p, n, h, pr, 58.0, bh - 60.0, 60.0, 25.0, 10)
+                .insert((HeroInvHpBtn, Visibility::Hidden));
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 563),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 564),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 565),
+        ) {
+            spawn_icon_button(p, n, h, pr, 206.0, bh - 60.0, 60.0, 25.0, 10)
+                .insert((HeroInvMpBtn, Visibility::Hidden));
+        }
+        // 百分比标签（按钮下方）
+        spawn_label(p, &font, "", 58.0, bh - 33.0, 12.0, Color::WHITE, 10)
+            .insert((HeroInvHpLabel, Visibility::Hidden));
+        spawn_label(p, &font, "", 206.0, bh - 33.0, 12.0, Color::WHITE, 10)
+            .insert((HeroInvMpLabel, Visibility::Hidden));
+        // HP/MP 物品格（C# HPItem at (122, h-55) / MPItem at (166, h-55)）
+        spawn_item_cell_ui(p, &mut images, &font, 122.0, bh - 55.0, 34.0, 30.0, 9, 40)
+            .insert(HeroInvHpItem);
+        spawn_item_cell_ui(p, &mut images, &font, 166.0, bh - 55.0, 34.0, 30.0, 9, 41)
+            .insert(HeroInvMpItem);
+    });
 }
 
 /// 显隐 + 关闭 + 标签/锁条/自动药组（依赖 ui_button_system 先跑，chain 保证）
@@ -380,14 +216,14 @@ fn hero_inv_visibility_system(
     mut mgr: ResMut<DialogManager>,
     hero: Res<HeroState>,
     net: Res<NetConnection>,
-    close: Query<&UiButton, With<HeroInvClose>>,
-    hp_btn: Query<&UiButton, With<HeroInvHpBtn>>,
-    mp_btn: Query<&UiButton, With<HeroInvMpBtn>>,
+    close: Query<(Entity, &Interaction), With<HeroInvClose>>,
+    hp_btn: Query<(Entity, &Interaction), With<HeroInvHpBtn>>,
+    mp_btn: Query<(Entity, &Interaction), With<HeroInvMpBtn>>,
     // 单查询统一处理显隐（Option 组件区分角色，避免多个 &mut Visibility 查询冲突 B0001）
     mut widgets: Query<
         (
             &mut Visibility,
-            Option<&mut Text2d>,
+            Option<&mut Text>,
             Option<&HeroInvHpBtn>,
             Option<&HeroInvMpBtn>,
             Option<&HeroInvHpLabel>,
@@ -398,7 +234,16 @@ fn hero_inv_visibility_system(
         ),
         With<HeroInvWidget>,
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::HeroInventory);
     for (mut vis, mut text, hp_btn_c, mp_btn_c, hp_label, mp_label, hp_lock, mp_lock, lockbar) in
         &mut widgets
@@ -446,14 +291,14 @@ fn hero_inv_visibility_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::HeroInventory);
         }
     }
     // HP/MP 阈值循环（C# HPButton → SetAutoPotValue）
-    for btn in &hp_btn {
-        if btn.clicked {
+    for (e, inter) in &hp_btn {
+        if edge(e, inter, &mut prev_inter) {
             let v = next_autopot(hero.auto_pot_hp);
             net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue {
                 stat: STAT_HP,
@@ -461,8 +306,8 @@ fn hero_inv_visibility_system(
             });
         }
     }
-    for btn in &mp_btn {
-        if btn.clicked {
+    for (e, inter) in &mp_btn {
+        if edge(e, inter, &mut prev_inter) {
             let v = next_autopot(hero.auto_pot_mp);
             net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue {
                 stat: STAT_MP,
@@ -479,25 +324,24 @@ fn hero_inv_data_system(
     click: Res<InvClickState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut cells: Query<
-        (&HeroInvSlot, &mut ItemCellData),
+        (&HeroInvSlot, &mut UiItemCellData),
         (
-            Without<ItemCellIcon>,
+            Without<UiItemCellIcon>,
             Without<HeroInvHpItem>,
             Without<HeroInvMpItem>,
         ),
     >,
-    mut cell_sprites: Query<
-        (&mut Sprite, &HeroInvSlot),
+    mut cell_bg: Query<
+        (&HeroInvSlot, &mut BackgroundColor),
         (
-            Without<ItemCellIcon>,
+            Without<UiItemCellIcon>,
             Without<HeroInvHpItem>,
             Without<HeroInvMpItem>,
         ),
     >,
     mut hp_item: Query<
-        &mut ItemCellData,
+        &mut UiItemCellData,
         (
             With<HeroInvHpItem>,
             Without<HeroInvMpItem>,
@@ -505,7 +349,7 @@ fn hero_inv_data_system(
         ),
     >,
     mut mp_item: Query<
-        &mut ItemCellData,
+        &mut UiItemCellData,
         (
             With<HeroInvMpItem>,
             Without<HeroInvHpItem>,
@@ -518,10 +362,9 @@ fn hero_inv_data_system(
         let item = hero.inventory.get(2 + slot.0).and_then(|s| s.as_ref());
         match item {
             Some(item) => {
-                data.icon = ui_image(
+                data.icon = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     crate::resources::libraries::LibraryName::Items,
                     item.image as usize,
                 );
@@ -544,23 +387,22 @@ fn hero_inv_data_system(
         }
     }
     // 选中高亮（黄色半透明，C# SelectedCell 语义；hero_selected 存原始槽位 2+idx）
-    for (mut sprite, slot) in &mut cell_sprites {
+    for (slot, mut bg) in &mut cell_bg {
         let target = if click.hero_selected() == Some(2 + slot.0) {
             Color::srgba(1.0, 0.9, 0.2, 0.35)
         } else {
             Color::srgba(0.0, 0.0, 0.0, 0.18)
         };
-        if sprite.color != target {
-            sprite.color = target;
+        if bg.0 != target {
+            bg.0 = target;
         }
     }
     // HP/MP 物品格（配置的自动药物品图标）
     for mut data in &mut hp_item {
         data.icon = if hero.hp_item_index >= 0 {
-            ui_image(
+            load_lib_image(
                 &mut libs,
                 &mut images,
-                &mut cache,
                 LibraryName::Items,
                 hero.hp_item_index as usize,
             )
@@ -572,10 +414,9 @@ fn hero_inv_data_system(
     }
     for mut data in &mut mp_item {
         data.icon = if hero.mp_item_index >= 0 {
-            ui_image(
+            load_lib_image(
                 &mut libs,
                 &mut images,
-                &mut cache,
                 LibraryName::Items,
                 hero.mp_item_index as usize,
             )
