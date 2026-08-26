@@ -18,9 +18,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCellIcon};
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, UiItemCellData,
 };
 
 const DIALOG_X: f32 = 1024.0 - 264.0;
@@ -46,9 +46,7 @@ impl Plugin for HeroEquipmentPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero_equipment);
         app.add_systems(
             Update,
-            (hero_equip_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            hero_equip_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -64,7 +62,6 @@ fn spawn_hero_equipment(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -74,73 +71,48 @@ fn spawn_hero_equipment(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Title[504]（C# CharacterDialog.Index）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 504) {
-        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::HeroEquipment),
-            HeroEquipWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 角色页 Prguse[340]（C# CharacterPage at (8,90)）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 340) {
-        let e = spawn_ui_sprite(
-            &mut commands,
-            h,
-            DIALOG_X + PAGE_X,
-            DIALOG_Y + PAGE_Y,
-            6.1,
-            1.0,
-        );
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::HeroEquipment),
-            HeroEquipWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭（C# CharacterDialog CloseButton at (241,3)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        DIALOG_X + 241.0,
-        DIALOG_Y + 3.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands.entity(e).insert((
-            HeroEquipClose,
-            DialogRoot(DialogKind::HeroEquipment),
-            HeroEquipWidget,
-        ));
-    }
+    // 背景 Title[504]（C# CharacterDialog.Index，264x380 @ (760,0)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 504) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 264.0, 380.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::HeroEquipment), HeroEquipWidget));
 
-    // 14 个装备槽（通用 ItemCell；数据渲染交给 item_cell_system，#90）
-    for (pos, (rx, ry)) in EQUIP_SLOTS.iter().enumerate() {
-        let cell = spawn_item_cell(
-            &mut commands,
-            &mut images,
-            &font,
-            DIALOG_X + PAGE_X + rx,
-            DIALOG_Y + PAGE_Y + ry,
-            6.5,
-            SLOT_W,
-            SLOT_H,
-            pos,
-        );
-        commands.entity(cell).insert((
-            HeroEquipSlot(pos),
-            DialogRoot(DialogKind::HeroEquipment),
-            HeroEquipWidget,
-        ));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 角色页 Prguse[340]（C# CharacterPage at (8,90)，原生尺寸）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 340) {
+            let (iw, ih) = match libs.0.get_image(LibraryName::Prguse, 340) {
+                Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                None => (190.0, 259.0),
+            };
+            crate::ui::theme::spawn_image(p, h, PAGE_X, PAGE_Y, iw, ih, 8);
+        }
+        // 关闭（C# CharacterDialog CloseButton at (241,3)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(HeroEquipClose);
+        }
+        // 14 个装备槽（通用 UiItemCell；数据渲染交给 item_cell_ui_system，#90）
+        for (pos, (rx, ry)) in EQUIP_SLOTS.iter().enumerate() {
+            spawn_item_cell_ui(
+                p,
+                &mut images,
+                &font,
+                PAGE_X + rx,
+                PAGE_Y + ry,
+                SLOT_W,
+                SLOT_H,
+                9,
+                pos,
+            )
+            .insert(HeroEquipSlot(pos));
+        }
+    });
 }
 
 /// 显隐 + 数据渲染 + 点击卸下
@@ -150,13 +122,21 @@ fn hero_equip_ui_system(
     net: Res<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    close: Query<&UiButton, With<HeroEquipClose>>,
+    close: Query<(Entity, &Interaction), With<HeroEquipClose>>,
     mut widgets: Query<&mut Visibility, With<HeroEquipWidget>>,
-    mut cells: Query<(&HeroEquipSlot, &mut ItemCellData), Without<ItemCellIcon>>,
+    mut cells: Query<(&HeroEquipSlot, &mut UiItemCellData), Without<crate::ui::theme::UiItemCellIcon>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::HeroEquipment);
     for mut vis in &mut widgets {
         *vis = if open {
@@ -168,8 +148,8 @@ fn hero_equip_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::HeroEquipment);
         }
     }
@@ -181,10 +161,9 @@ fn hero_equip_ui_system(
             .and_then(|s| s.as_ref());
         match item {
             Some(item) => {
-                data.icon = ui_image(
+                data.icon = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     crate::resources::libraries::LibraryName::Items,
                     item.image as usize,
                 );
