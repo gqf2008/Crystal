@@ -18,8 +18,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 use bevy::prelude::*;
 
@@ -76,6 +77,10 @@ pub struct GroupSwitch;
 #[derive(Component)]
 pub struct GroupMemberLine(usize);
 
+/// bevy_ui 成员行文本子节点
+#[derive(Component)]
+pub struct GroupMemberText(usize);
+
 /// #1349：按名邀请按钮（C# GroupDialog AddButton Title[133-135] (70,219)）
 #[derive(Component)]
 pub struct GroupAddBtn;
@@ -130,7 +135,6 @@ impl Plugin for GroupPlugin {
                 group_invite_player_system,
                 group_del_system,
                 group_add_system,
-                ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -148,7 +152,6 @@ fn spawn_group(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -157,318 +160,170 @@ fn spawn_group(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-    // 窗口原点（屏幕中心，C# Location = Center；随背景真实尺寸计算）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     let (dx, dy) = group_dialog_origin(&mut libs);
 
-    // 背景 Prguse[120]（C# GroupDialog.Index=120；旧 964 实为 16x18 小图）
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        GROUP_BG_INDEX,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, dx, dy, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 标题 Title[5]（C# GroupDialog.TitleLabel）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 5) {
-        let e = spawn_ui_sprite(&mut commands, h, dx + 18.0, dy + 8.0, 6.2, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        dx + 206.0,
-        dy + 3.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((GroupClose, DialogRoot(DialogKind::Group), GroupWidget));
-    }
-    // 允许组队开关（C# SwitchButton Prguse[114/115] (25,219)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        114,
-        115,
-        116,
-        dx + 25.0,
-        dy + 219.0,
-        7.0,
-        60.0,
-        23.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((GroupSwitch, DialogRoot(DialogKind::Group), GroupWidget));
-    }
-    // #1349：按名邀请按钮（C# GroupDialog AddButton Title[133-135] (70,219)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        133,
-        134,
-        135,
-        dx + 70.0,
-        dy + 219.0,
-        7.0,
-        60.0,
-        23.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((GroupAddBtn, DialogRoot(DialogKind::Group), GroupWidget));
-    }
-    // 成员列表（C# GroupMembers 2 列布局）
-    for i in 0..8usize {
-        let (x, y) = if i == 0 {
-            (16.0, 33.0)
-        } else {
-            (
-                ((i + 1) % 2) as f32 * 100.0 + 16.0,
-                55.0 + ((i - 1) / 2) as f32 * 20.0,
-            )
-        };
-        let e = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            dx + x,
-            dy + y,
-            12.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands.entity(e).insert((
-            GroupMemberLine(i),
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-        ));
-    }
+    // 面板 Prguse[120]（232x249 @ 居中）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, GROUP_BG_INDEX) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, dx, dy, 232.0, 249.0, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Group), GroupWidget));
 
-    // 移除成员（C# GroupDialog DelButton Title[136-138] (140,219) → MirInputBox → C.DellMember{Name}）
-    let del_btn = spawn_ui_text(
-        &mut commands,
-        &font,
-        "移除",
-        dx + 140.0,
-        dy + 219.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(del_btn).insert((
-        GroupDelBtn,
-        UiButton {
-            rect: (dx + 140.0, dy + 219.0, 44.0, 22.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Group),
-        GroupWidget,
-    ));
-    // 移除输入框（TextInput id 32）+ 确认按钮（C# MirInputBox 语义）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    let input_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-            GroupDelInput,
-            TextInputField(32),
-            TextInputRect(dx + 25.0, dy + 180.0, 120.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(120.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(dx + 25.0, -(dy + 180.0), 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(input_e).with_children(|p| {
-        p.spawn((
-            TextInputDisplay(32),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[5] @(18,8)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 5) {
+            spawn_image(p, h, 18.0, 8.0, 57.0, 15.0, 9);
+        }
+        // 关闭 Prguse2[360/361/362] @(206,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 206.0, 3.0, 20.0, 20.0, 10).insert(GroupClose);
+        }
+        // 允许组队开关 Prguse[114/115/116] @(25,219)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 114),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 115),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
+        ) {
+            spawn_icon_button(p, n, h, pr, 25.0, 219.0, 60.0, 23.0, 10).insert(GroupSwitch);
+        }
+        // 按名邀请 Title[133/134/135] @(70,219)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 133),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 134),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 135),
+        ) {
+            spawn_icon_button(p, n, h, pr, 70.0, 219.0, 60.0, 23.0, 10).insert(GroupAddBtn);
+        }
+        // 移除成员按钮 Title[136/137/138] @(140,219)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 136),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 137),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 138),
+        ) {
+            spawn_icon_button(p, n, h, pr, 140.0, 219.0, 44.0, 22.0, 10).insert(GroupDelBtn);
+        }
+        // 成员列表（C# GroupMembers 2 列布局，TextInput 行可点击 Button + 文本）
+        for i in 0..8usize {
+            let (x, y) = if i == 0 {
+                (16.0, 33.0)
+            } else {
+                (
+                    ((i + 1) % 2) as f32 * 100.0 + 16.0,
+                    55.0 + ((i - 1) / 2) as f32 * 20.0,
+                )
+            };
+            spawn_container(p, x, y, 100.0, 18.0, 9)
+                .insert((GroupMemberLine(i),))
+                .with_children(|rc| {
+                    rc.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            ..default()
+                        },
+                        Text::new(String::new()),
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(10),
+                        GroupMemberText(i),
+                    ));
+                });
+        }
+        // 移除输入框（TextInput id 32）+ 确认
+        spawn_container(p, 25.0, 180.0, 120.0, 20.0, 10)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GroupDelInput,
+                crate::game::dialogs::text_input::TextInputField(32),
+                crate::game::dialogs::text_input::TextInputRect(dx + 25.0, dy + 180.0, 120.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(32),
+                ));
+            });
+        spawn_label(p, &font, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
+            .insert((Button, GroupDelOk));
+        // 邀请输入框（TextInput id 33）+ 确认
+        spawn_container(p, 25.0, 180.0, 120.0, 20.0, 10)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GroupAddInput,
+                crate::game::dialogs::text_input::TextInputField(33),
+                crate::game::dialogs::text_input::TextInputRect(dx + 25.0, dy + 180.0, 120.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(33),
+                ));
+            });
+        spawn_label(p, &font, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
+            .insert((Button, GroupAddOk));
     });
-    let ok_btn = spawn_ui_text(
-        &mut commands,
-        &font,
-        "确认",
-        dx + 150.0,
-        dy + 180.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(ok_btn).insert((
-        GroupDelOk,
-        UiButton {
-            rect: (dx + 150.0, dy + 180.0, 40.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Group),
-        GroupWidget,
-    ));
-    // #1349：按名邀请输入框（TextInput id 33）+ 确认按钮
-    let add_input = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-            GroupAddInput,
-            TextInputField(33),
-            TextInputRect(dx + 25.0, dy + 180.0, 120.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(120.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(dx + 25.0, -(dy + 180.0), 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(add_input).with_children(|p| {
-        p.spawn((
-            TextInputDisplay(33),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    let add_ok = spawn_ui_text(
-        &mut commands,
-        &font,
-        "确认",
-        dx + 150.0,
-        dy + 180.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(add_ok).insert((
-        GroupAddOk,
-        UiButton {
-            rect: (dx + 150.0, dy + 180.0, 40.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Group),
-        GroupWidget,
-        Visibility::Hidden,
-    ));
-    // 邀请提示（MirMessageBox：Prguse[360] 居中，Yes Title[206-208] / No Title[210-212]）
+
+    // 邀请提示（MirMessageBox：Prguse[360] @(284,289) 独立根节点）
     let (bx, by) = (284.0, 289.0);
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
-        commands.entity(e).insert((
-            GroupInviteWidget,
-            DialogRoot(DialogKind::Group),
-            Visibility::Hidden,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        bx + 35.0,
-        by + 40.0,
-        12.0,
-        Color::WHITE,
-        9.6,
-    );
-    commands.entity(t).insert((
-        GroupInviteText,
-        GroupInviteWidget,
-        DialogRoot(DialogKind::Group),
-    ));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        bx + 240.0,
-        by + 150.0,
-        9.7,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            GroupInviteYes,
-            GroupInviteWidget,
-            DialogRoot(DialogKind::Group),
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        210,
-        211,
-        212,
-        bx + 340.0,
-        by + 150.0,
-        9.7,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((
-            GroupInviteNo,
-            GroupInviteWidget,
-            DialogRoot(DialogKind::Group),
-        ));
+    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let inv = spawn_panel(&mut commands, h, bx, by, 260.0, 120.0, 45);
+        commands.entity(inv).insert((DialogRoot(DialogKind::Group), GroupInviteWidget));
+        commands.entity(inv).with_children(|ip| {
+            spawn_label(ip, &font, "", 35.0, 40.0, 12.0, Color::WHITE, 9)
+                .insert(GroupInviteText);
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(ip, n, h, pr, 240.0, 150.0, 76.0, 25.0, 10)
+                    .insert(GroupInviteYes);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(ip, n, h, pr, 340.0, 150.0, 76.0, 25.0, 10)
+                    .insert(GroupInviteNo);
+            }
+        });
     }
 }
 
@@ -477,21 +332,26 @@ fn spawn_group(
 fn group_ui_system(
     mut mgr: ResMut<DialogManager>,
     group: Res<GroupState>,
-    close: Query<&UiButton, With<GroupClose>>,
+    close: Query<(Entity, &Interaction), With<GroupClose>>,
     mut widgets: Query<
-        (&mut Visibility, Option<&GroupMemberLine>),
-        (
-            With<GroupWidget>,
-            Without<GroupInviteWidget>,
-            Without<GroupInviteText>,
-        ),
+        &mut Visibility,
+        (With<GroupWidget>, Without<GroupInviteWidget>, Without<GroupMemberText>),
     >,
-    mut lines: Query<(&mut Text2d, &GroupMemberLine), Without<GroupInviteText>>,
+    mut lines: Query<(&mut Text, &GroupMemberText), Without<GroupInviteText>>,
     mut invite_widgets: Query<&mut Visibility, (With<GroupInviteWidget>, Without<GroupWidget>)>,
-    mut invite_texts: Query<(&mut Text2d, &GroupInviteText), Without<GroupMemberLine>>,
+    mut invite_texts: Query<(&mut Text, &GroupInviteText), Without<GroupMemberText>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Group);
-    for (mut vis, _line) in &mut widgets {
+    for mut vis in widgets.iter_mut() {
         *vis = if open {
             Visibility::Visible
         } else {
@@ -499,18 +359,16 @@ fn group_ui_system(
         };
     }
     if !open {
-        // 邀请框（GroupInviteWidget）只在 open 分支管理显隐，关闭时必须隐藏
         for mut vis in &mut invite_widgets {
             *vis = Visibility::Hidden;
         }
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Group);
         }
     }
-    // 成员列表（队长/离线标记，原版 C# 语义）
     for (mut text, line) in &mut lines {
         text.0 = match group.members.get(line.0) {
             Some(m) if m.is_leader => format!("★{}", m.name),
@@ -519,7 +377,6 @@ fn group_ui_system(
             None => String::new(),
         };
     }
-    // 邀请提示
     let has_invite = group.invite.is_some();
     for mut vis in &mut invite_widgets {
         *vis = if has_invite {
@@ -540,20 +397,29 @@ fn group_ui_system(
 fn group_invite_system(
     mut group: ResMut<GroupState>,
     net: Res<NetConnection>,
-    yes: Query<&UiButton, With<GroupInviteYes>>,
-    no: Query<&UiButton, With<GroupInviteNo>>,
+    yes: Query<(Entity, &Interaction), With<GroupInviteYes>>,
+    no: Query<(Entity, &Interaction), With<GroupInviteNo>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     if group.invite.is_none() {
         return;
     }
     let mut accept: Option<bool> = None;
-    for btn in &yes {
-        if btn.clicked {
+    for (e, inter) in &yes {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(true);
         }
     }
-    for btn in &no {
-        if btn.clicked {
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(false);
         }
     }
@@ -576,10 +442,19 @@ fn group_invite_system(
 fn group_switch_system(
     mut group: ResMut<GroupState>,
     net: Res<NetConnection>,
-    btns: Query<&UiButton, With<GroupSwitch>>,
+    btns: Query<(Entity, &Interaction), With<GroupSwitch>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
-    for btn in &btns {
-        if btn.clicked {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    for (e, inter) in &btns {
+        if edge(e, inter, &mut prev_inter) {
             group.allow_group = !group.allow_group;
             net.send_packet(&mir2_shared::packets::client::group::SwitchGroup {
                 allow_group: group.allow_group,
@@ -634,8 +509,8 @@ fn group_del_system(
     net: Res<NetConnection>,
     mut input: ResMut<TextInputState>,
     mut submit: MessageReader<TextInputSubmit>,
-    del_btn: Query<&UiButton, With<GroupDelBtn>>,
-    ok_btn: Query<&UiButton, With<GroupDelOk>>,
+    del_btn: Query<(Entity, &Interaction), With<GroupDelBtn>>,
+    ok_btn: Query<(Entity, &Interaction), With<GroupDelOk>>,
     local_player: Query<&PlayerName, With<LocalPlayer>>,
     // #1290：Bevy B0001——三个 &mut Visibility Query 需 Without 隔离（#1288 组队踢人合并后启动 panic）
     mut del_btn_vis: Query<
@@ -662,7 +537,16 @@ fn group_del_system(
             Without<GroupDelInput>,
         ),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Group);
     if !open {
         group.del_open = false;
@@ -706,16 +590,16 @@ fn group_del_system(
         };
     }
     // 点击移除 → 打开输入框
-    for btn in &del_btn {
-        if btn.clicked && is_leader {
+    for (e, inter) in &del_btn {
+        if edge(e, inter, &mut prev_inter) && is_leader {
             group.del_open = true;
             input.active = Some(32);
         }
     }
     // 确认 / Enter → 发送 DellMember{Name}
     let mut confirmed = false;
-    for btn in &ok_btn {
-        if btn.clicked {
+    for (e, inter) in &ok_btn {
+        if edge(e, inter, &mut prev_inter) {
             confirmed = true;
         }
     }
@@ -748,8 +632,8 @@ fn group_add_system(
     net: Res<NetConnection>,
     mut input: ResMut<TextInputState>,
     mut submit: MessageReader<TextInputSubmit>,
-    add_btn: Query<&UiButton, With<GroupAddBtn>>,
-    ok_btn: Query<&UiButton, With<GroupAddOk>>,
+    add_btn: Query<(Entity, &Interaction), With<GroupAddBtn>>,
+    ok_btn: Query<(Entity, &Interaction), With<GroupAddOk>>,
     local_player: Query<&PlayerName, With<LocalPlayer>>,
     // #1290：Bevy B0001——三个 &mut Visibility Query 需 Without 隔离
     mut add_btn_vis: Query<
@@ -776,7 +660,16 @@ fn group_add_system(
             Without<GroupAddInput>,
         ),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Group);
     if !open {
         group.add_open = false;
@@ -820,16 +713,16 @@ fn group_add_system(
         };
     }
     // 点击邀请 → 打开输入框
-    for btn in &add_btn {
-        if btn.clicked && is_leader {
+    for (e, inter) in &add_btn {
+        if edge(e, inter, &mut prev_inter) && is_leader {
             group.add_open = true;
             input.active = Some(33);
         }
     }
     // 确认 / Enter → 发送 AddMember{Name}
     let mut confirmed = false;
-    for btn in &ok_btn {
-        if btn.clicked {
+    for (e, inter) in &ok_btn {
+        if edge(e, inter, &mut prev_inter) {
             confirmed = true;
         }
     }
