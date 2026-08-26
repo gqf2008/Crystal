@@ -17,8 +17,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 /// 领地行（GuildTerritoryPage 写入）
@@ -80,9 +81,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_guild_territory);
         app.add_systems(OnExit(AppState::Game), cleanup_guild_territory);
         app.add_systems(
             Update,
-            (guild_territory_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            guild_territory_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -97,7 +96,6 @@ fn spawn_guild_territory(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -107,143 +105,96 @@ fn spawn_guild_territory(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[680]（C# GuildTerritoryDialog.Index=680）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 680) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 标题 Title[54]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 54) {
-        let e = spawn_ui_sprite(&mut commands, h, 298.0, 88.0, 6.2, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭（C# Prguse 361/362/363）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 361, 362, 363,
-        280.0 + 480.0, 88.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            GuildTerritoryClose,
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
-    // 领地列表 7 行（C# 每页 7 行）
-    for i in 0..7usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 125.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            GuildTerritoryLine(i),
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
-    // 状态/页签/宣战结果行
-    for i in 7..=9usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 285.0 + (i - 7) as f32 * 18.0,
-            12.0, Color::srgb(1.0, 0.9, 0.5), 8.0,
-        );
-        commands.entity(e).insert((
-            GuildTerritoryLine(i),
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
-    // 上一页/下一页（C# Prguse2 240/241/242, 243/244/245）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 240, 241, 242,
-        300.0, 350.0, 8.3, 20.0, 16.0,
-    ) {
-        commands.entity(e).insert((
-            GuildTerritoryPrev,
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 243, 244, 245,
-        340.0, 350.0, 8.3, 20.0, 16.0,
-    ) {
-        commands.entity(e).insert((
-            GuildTerritoryNext,
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
-    // 购买按钮（C# Prguse 437/438/439）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 437, 438, 439,
-        390.0, 345.0, 8.3, 60.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildTerritoryBuy,
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
-    // 宣战：目标行会输入框（TextInput id 7）+ 宣战按钮
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let war_box = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-            GuildTerritoryWarField,
-            crate::game::dialogs::text_input::TextInputField(7),
-            crate::game::dialogs::text_input::TextInputRect(298.0, 390.0, 180.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(180.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(298.0, -390.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(war_box).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(7),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
+    // 面板 Prguse[680]（C# GuildTerritoryDialog Index=680，568x241 @ (280,80)）。
+    // 加高到 340：旧 sprite 布局宣战输入/按钮在 rel y=308-333 悬空 241 高面板外
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 680) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 568.0, 340.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::GuildTerritory), GuildTerritoryWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[54] @(18,8)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 54) {
+            crate::ui::theme::spawn_image(p, h, 18.0, 8.0, 133.0, 15.0, 8);
+        }
+        // 关闭（C# Prguse 361/362/363 @(544,8)；旧 sprite rel(480,8) 保留）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 362),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 363),
+        ) {
+            spawn_icon_button(p, n, h, pr, 480.0, 8.0, 20.0, 20.0, 10)
+                .insert(GuildTerritoryClose);
+        }
+        // 领地列表 7 行 @(18,45+22i)
+        for i in 0..7usize {
+            spawn_label(p, &font, "", 18.0, 45.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(GuildTerritoryLine(i));
+        }
+        // 状态/页签/宣战结果行 @(18,205+18i)
+        for i in 7..=9usize {
+            spawn_label(p, &font, "", 18.0, 205.0 + (i - 7) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+                .insert(GuildTerritoryLine(i));
+        }
+        // 上一页/下一页（C# Prguse2 240/241/242, 243/244/245）@(20/60,270)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 240),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 241),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 242),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 270.0, 20.0, 16.0, 10)
+                .insert(GuildTerritoryPrev);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 243),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 244),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 245),
+        ) {
+            spawn_icon_button(p, n, h, pr, 60.0, 270.0, 20.0, 16.0, 10)
+                .insert(GuildTerritoryNext);
+        }
+        // 购买按钮（C# Prguse 437/438/439）@(110,265)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 437),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 438),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 439),
+        ) {
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 265.0, 60.0, 25.0, 10)
+                .insert(GuildTerritoryBuy);
+            // 宣战按钮（同图）@(210,308)
+            spawn_icon_button(p, n, h, pr, 210.0, 308.0, 60.0, 25.0, 10)
+                .insert(GuildTerritoryWar);
+        }
+        // 宣战目标行会输入框（TextInput 7）@(18,310)，命中矩形 (298,390,180,20)
+        spawn_container(p, 18.0, 310.0, 180.0, 20.0, 10)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                crate::game::dialogs::text_input::TextInputField(7),
+                crate::game::dialogs::text_input::TextInputRect(298.0, 390.0, 180.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(7),
+                ));
+            });
     });
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 437, 438, 439,
-        490.0, 388.0, 8.3, 60.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildTerritoryWar,
-            DialogRoot(DialogKind::GuildTerritory),
-            GuildTerritoryWidget,
-        ));
-    }
 }
 
 /// 显隐 + 渲染 + 请求/翻页/购买/宣战
@@ -253,17 +204,26 @@ fn guild_territory_ui_system(
     mut state: ResMut<GuildTerritoryState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    close: Query<&UiButton, With<GuildTerritoryClose>>,
-    buy_btn: Query<&UiButton, With<GuildTerritoryBuy>>,
-    war_btn: Query<&UiButton, With<GuildTerritoryWar>>,
-    prev_btn: Query<&UiButton, With<GuildTerritoryPrev>>,
-    next_btn: Query<&UiButton, With<GuildTerritoryNext>>,
+    close: Query<(Entity, &Interaction), With<GuildTerritoryClose>>,
+    buy_btn: Query<(Entity, &Interaction), With<GuildTerritoryBuy>>,
+    war_btn: Query<(Entity, &Interaction), With<GuildTerritoryWar>>,
+    prev_btn: Query<(Entity, &Interaction), With<GuildTerritoryPrev>>,
+    next_btn: Query<(Entity, &Interaction), With<GuildTerritoryNext>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<GuildTerritoryWidget>>,
-    mut lines: Query<(&mut Text2d, &GuildTerritoryLine)>,
+    mut lines: Query<(&mut Text, &GuildTerritoryLine)>,
     mut requested: Local<bool>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::GuildTerritory);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -279,8 +239,8 @@ fn guild_territory_ui_system(
         net.send_packet(&crate::network::GuildTerritoryPageWire { page: 0 });
         tracing::info!("🏯 请求行会领地列表");
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::GuildTerritory);
         }
     }
@@ -336,16 +296,16 @@ fn guild_territory_ui_system(
         }
     }
     // 翻页
-    for btn in &prev_btn {
-        if btn.clicked && state.page > 0 {
+    for (e, inter) in &prev_btn {
+        if edge(e, inter, &mut prev_inter) && state.page > 0 {
             state.page -= 1;
             net.send_packet(&crate::network::GuildTerritoryPageWire {
                 page: state.page as u32,
             });
         }
     }
-    for btn in &next_btn {
-        if btn.clicked && (state.page + 1) * 7 < state.rows.len() {
+    for (e, inter) in &next_btn {
+        if edge(e, inter, &mut prev_inter) && (state.page + 1) * 7 < state.rows.len() {
             state.page += 1;
             net.send_packet(&crate::network::GuildTerritoryPageWire {
                 page: state.page as u32,
@@ -353,8 +313,8 @@ fn guild_territory_ui_system(
         }
     }
     // 购买选中的无主领地（C# BuyButton → C.PurchaseGuildTerritory）
-    for btn in &buy_btn {
-        if btn.clicked {
+    for (e, inter) in &buy_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = state.selected {
                 let r = &state.rows[idx];
                 if r.owner.is_empty() {
@@ -373,8 +333,8 @@ fn guild_territory_ui_system(
         }
     }
     // 宣战（输入目标行会名 → C.GuildWarReturn）
-    for btn in &war_btn {
-        if btn.clicked {
+    for (e, inter) in &war_btn {
+        if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(7).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() {
