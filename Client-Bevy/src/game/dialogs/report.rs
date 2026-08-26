@@ -4,7 +4,7 @@
 // 网络（ServerRust gate 实际 wire）：
 //   C: ReportIssue[type u32][description dotnet]（与 SharedRust [message dotnet] 不一致，手动构造）
 // 结果通过系统聊天消息返回
-// bevy_ui 迁移（批 13）：面板 Prguse[170] @(280,80) 244x207，全节点化
+// bevy_ui 迁移（批 13）：面板 Prguse[170] @(280,80) 320x262，全节点化
 //   - 关闭 Prguse2[360/361/362] @(300,3)
 //   - 状态行 3 + 类型下拉（bevy_ui UiDropDown）+ 描述输入（TextInput 12）+ 提交 Title[206/207/208]
 // ============================================================================
@@ -76,11 +76,11 @@ fn spawn_report(
     }
     let font = ui_font.0.clone();
 
-    // 面板 Prguse[170]（C# ReportDialog.Index=170，244x207 @ 280,80）
+    // 面板 Prguse[170]（C# ReportDialog.Index=170，320x262 @ 280,80）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Report), ReportWidget));

@@ -5,7 +5,7 @@
 //   C: MarriageRequest[target dotnet] / MarriageReply[bool] / ChangeMarriage(空)
 //      DivorceRequest[partner dotnet] / DivorceReply[bool]
 //   S: MarriageRequest[lover dotnet] / LoverUpdate[Name dotnet][Date i64][MapName dotnet][MarriedDays i16] / DivorceRequest[lover dotnet]
-// bevy_ui 迁移（批 14）：面板 Prguse[170] @(280,80) 244x207，全节点化；
+// bevy_ui 迁移（批 14）：面板 Prguse[170] @(280,80) 320x262，全节点化；
 //   邀请弹窗 = C# MirMessageBox（Prguse[360] 原生 456x190 居中 @(284,289)，
 //   Label(35,35)、Yes Title[206/207/208] (260,157)、No Title[210/211/212] (360,157)）
 // ============================================================================
@@ -113,11 +113,11 @@ fn spawn_relationship(
     }
     let font = ui_font.0.clone();
 
-    // 面板 Prguse[170]（244x207 @ 280,80）
+    // 面板 Prguse[170]（320x262 @ 280,80）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Relationship), RelationshipWidget));

@@ -1,7 +1,7 @@
 // ============================================================================
 // 计时器对话框（M50）
 // 纯客户端对话框（无网络依赖）
-// bevy_ui 迁移（批 16）：面板 Prguse[170] @(280,80) 244x207，全节点化
+// bevy_ui 迁移（批 16）：面板 Prguse[170] @(280,80) 320x262，全节点化
 // 注：C# TimerDialog 实际是 Prguse2 沙漏动画+数字位（Index=960/_libraryOffset=900，
 //     起点 (ScreenWidth-120, ScreenHeight-230)）；本实现沿用既有 Bevy 简化面板
 //     （Prguse[170] + 文本行），仅迁移渲染层，C# 逐帧对齐留待后续
@@ -73,7 +73,7 @@ fn spawn_timer(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Timer), TimerWidget));
