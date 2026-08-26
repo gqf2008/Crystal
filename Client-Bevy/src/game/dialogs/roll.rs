@@ -16,9 +16,8 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_image, UiFont, UiImageCache,
-};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_container, spawn_label, spawn_panel};
 
 /// 掷骰状态（网络 Roll 包填充）
 #[derive(Resource, Default)]
@@ -75,7 +74,6 @@ fn spawn_roll(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -85,32 +83,50 @@ fn spawn_roll(
     }
     let font = ui_font.0.clone();
 
-    // 结果图（骰子默认图）
+    // bevy_ui 结果图（骰子默认图，白 1x1 占位；roll_ui_system 换图 + 尺寸）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let img = spawn_ui_sprite(&mut commands, white.clone(), 512.0 - 38.0, 384.0 - 40.0, 9.0, 1.0);
-    commands.entity(img).insert((
-        Sprite {
-            image: white,
-            custom_size: Some(Vec2::new(65.0, 65.0)),
-            ..default()
-        },
-        RollResultImage,
-        DialogRoot(DialogKind::Roll),
-        RollWidget,
-        Visibility::Hidden,
-    ));
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(512.0 - 38.0),
+                top: Val::Px(384.0 - 40.0),
+                width: Val::Px(65.0),
+                height: Val::Px(65.0),
+                ..default()
+            },
+            ImageNode::new(white),
+            GlobalZIndex(50),
+            RollResultImage,
+            DialogRoot(DialogKind::Roll),
+            RollWidget,
+            Visibility::Hidden,
+        ))
+        .id();
 
     // 提示文字
-    let txt = spawn_ui_text(
-        &mut commands, &font, "点击继续",
-        512.0 - 40.0, 384.0 + 45.0, 12.0, Color::WHITE, 9.1,
-    );
-    commands.entity(txt).insert((
-        RollPrompt,
-        DialogRoot(DialogKind::Roll),
-        RollWidget,
-        Visibility::Hidden,
-    ));
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(512.0 - 40.0),
+                top: Val::Px(384.0 + 45.0),
+                ..default()
+            },
+            Text::new("点击继续"),
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            GlobalZIndex(51),
+            RollPrompt,
+            DialogRoot(DialogKind::Roll),
+            RollWidget,
+            Visibility::Hidden,
+        ))
+        .id();
 }
 
 fn roll_ui_system(
@@ -119,10 +135,9 @@ fn roll_ui_system(
     net: ResMut<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut widgets: Query<&mut Visibility, With<RollWidget>>,
-    mut img: Query<(&mut Sprite, &RollResultImage), Without<RollPrompt>>,
-    mut prompt: Query<&mut Text2d, (With<RollPrompt>, Without<RollResultImage>)>,
+    mut img: Query<(&mut ImageNode, &mut Node, &RollResultImage), Without<RollPrompt>>,
+    mut prompt: Query<&mut Text, (With<RollPrompt>, Without<RollResultImage>)>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut logged: Local<bool>,
 ) {
@@ -137,26 +152,28 @@ fn roll_ui_system(
         *vis = Visibility::Visible;
     }
 
-    // 首次显示：记录起始时间 + 设置结果图
     if state.started_at == 0.0 {
         state.started_at = time.elapsed_secs();
     }
     if !*logged {
-        let (lib, idx, x, y, w, ih) = if state.r#type == 1 {
-            (LibraryName::Items, 2587 + state.result.clamp(1, 6), 512.0 - 90.0, 384.0 - 65.0, 180.0, 130.0)
+        let (lib, idx, w, ih) = if state.r#type == 1 {
+            (LibraryName::Items, 2587 + state.result.clamp(1, 6), 180.0, 130.0)
         } else {
-            (LibraryName::Prguse, 281 + state.result.clamp(1, 6), 512.0 - 38.0, 384.0 - 40.0, 65.0, 65.0)
+            (LibraryName::Prguse, 281 + state.result.clamp(1, 6), 65.0, 65.0)
         };
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, lib, idx as usize) {
-            for (mut sprite, _) in &mut img {
-                sprite.image = h.clone();
-                sprite.custom_size = Some(Vec2::new(w, ih));
-                sprite.rect = None;
+        if let Some(h) = load_lib_image(&mut libs, &mut images, lib, idx as usize) {
+            for (mut node, mut n, _) in &mut img {
+                node.image = h.clone();
+                n.width = Val::Px(w);
+                n.height = Val::Px(ih);
             }
-            let _ = (x, y);
         }
         for mut text in &mut prompt {
-            text.0 = if state.auto_roll { "掷骰中..." } else { "点击掷骰" }.to_string();
+            text.0 = if state.auto_roll {
+                "掷骰中...".to_string()
+            } else {
+                "点击掷骰".to_string()
+            };
         }
         tracing::info!(
             "🎲 掷骰子: type={} result={} page={} auto={}",
@@ -168,7 +185,6 @@ fn roll_ui_system(
         *logged = true;
     }
 
-    // 完成条件：autoRoll 计时 2 秒 / 手动点击
     let finish = if state.auto_roll {
         time.elapsed_secs() - state.started_at >= 2.0
     } else {
@@ -185,7 +201,6 @@ fn roll_ui_system(
         state.started_at = 0.0;
     }
 }
-
 
 /// 消费服务端 Roll 事件（网络层只广播 ServerEvent）
 fn roll_server_events(
