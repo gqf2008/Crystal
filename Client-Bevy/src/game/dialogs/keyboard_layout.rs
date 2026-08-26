@@ -28,10 +28,10 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
-use crate::ui::controls::{spawn_checkbox, CheckBox};
 
 /// 单个键位绑定（动作 + 组 + 当前键）
 #[derive(Clone)]
@@ -373,6 +373,13 @@ pub struct KeyboardReset;
 #[derive(Component)]
 pub struct KeyboardEnforce;
 
+/// 严格规则复选框三态帧（off 1346 / on 1347）
+#[derive(Component)]
+pub struct KeyboardEnforceFrames {
+    pub off: Handle<Image>,
+    pub on: Handle<Image>,
+}
+
 #[derive(Component)]
 pub struct KeyboardPositionBar(pub f32);
 
@@ -388,7 +395,7 @@ impl Plugin for KeyboardPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_keyboard_layout);
         app.add_systems(
             Update,
-            (dialog_hotkey_system, secondary_hotkey_system, keyboard_layout_ui_system, ui_button_system)
+            (dialog_hotkey_system, secondary_hotkey_system, keyboard_layout_ui_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -405,7 +412,6 @@ fn spawn_keyboard_layout(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -423,142 +429,105 @@ fn spawn_keyboard_layout(
     let px = (1024.0 - pw) / 2.0;
     let py = (768.0 - ph) / 2.0;
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 119) {
-        let e = spawn_ui_sprite(&mut commands, h, px, py, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-            Visibility::Hidden,
-        ));
-    }
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 119) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, px, py, pw, ph, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::KeyboardLayout), KeyboardWidget));
 
-    // 标题“键位设置”（C# PageLabel (135,34)）
-    let t = spawn_ui_text(
-        &mut commands, &font, "键位设置",
-        px + 135.0, py + 34.0, 15.0, Color::WHITE, 8.0,
-    );
-    commands.entity(t).insert((
-        KeyboardWidget,
-        DialogRoot(DialogKind::KeyboardLayout),
-    ));
-
-    // 关闭按钮 (489,3)
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        px + 489.0, py + 3.0, 7.0, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            KeyboardClose,
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
-
-    // 上滚 (491,88) / 下滚 (491,363)
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 197, 198, 199,
-        px + 491.0, py + 88.0, 7.0, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            KeyboardScrollUp,
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 207, 208, 209,
-        px + 491.0, py + 363.0, 7.0, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            KeyboardScrollDown,
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
-
-    // 位置条 (491,101)
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, 205) {
-        let e = spawn_ui_sprite(&mut commands, h, px + 491.0, py + 101.0, 7.0, 1.0);
-        commands.entity(e).insert((
-            KeyboardPositionBar(py + 101.0),
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
-
-    // 重置按钮 Title[120/121/122] (30,400) 72x25
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 120, 121, 122,
-        px + 30.0, py + 400.0, 7.0, 72.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            KeyboardReset,
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-            // #93 通用 Tooltip：C# 重置按钮 Hint
-            crate::ui::tooltip::TooltipHint("重置为默认键位".to_string()),
-        ));
-    }
-
-    // 严格规则复选框（#90 通用 CheckBox：Prguse[1346] 未勾 / [1347] 勾选）
-    if let Some(e) = spawn_checkbox(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse,
-        [1346, 1346, 1346],
-        [1347, 1347, 1347],
-        px + 105.0, py + 406.0, 7.0, 16.0, 14.0,
-        false,
-    ) {
-        commands.entity(e).insert((
-            KeyboardEnforce,
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
-    let e = spawn_ui_text(
-        &mut commands, &font, "严格规则",
-        px + 125.0, py + 405.0, 12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((
-        KeyboardWidget,
-        DialogRoot(DialogKind::KeyboardLayout),
-    ));
-
-    // 行区文字实体（16 个槽，位置每帧按 build_rows 更新）
-    for i in 0..16usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            px + 20.0, py + 90.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            KeyboardRow(i, py + 90.0),
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 标题“键位设置”（C# PageLabel (135,34)）
+        spawn_label(p, &font, "键位设置", 135.0, 34.0, 15.0, Color::WHITE, 9);
+        // 关闭按钮 (489,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 489.0, 3.0, 16.0, 14.0, 10).insert(KeyboardClose);
+        }
+        // 上滚 (491,88) / 下滚 (491,363)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(p, n, h, pr, 491.0, 88.0, 16.0, 14.0, 10).insert(KeyboardScrollUp);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(p, n, h, pr, 491.0, 363.0, 16.0, 14.0, 10).insert(KeyboardScrollDown);
+        }
+        // 位置条 (491,101)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205) {
+            spawn_image(p, h, 491.0, 101.0, 12.0, 18.0, 9)
+                .insert(KeyboardPositionBar(101.0));
+        }
+        // 重置按钮 Title[120/121/122] (30,400) 72x25
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 120),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 121),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 122),
+        ) {
+            spawn_icon_button(p, n, h, pr, 30.0, 400.0, 72.0, 25.0, 10)
+                .insert((
+                    KeyboardReset,
+                    // #93 通用 Tooltip：C# 重置按钮 Hint
+                    crate::ui::tooltip::TooltipHint("重置为默认键位".to_string()),
+                ));
+        }
+        // 严格规则复选框（C# CheckBox：Prguse[1346] 未勾 / [1347] 勾选；本系统内联处理）
+        if let (Some(off), Some(on)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1346),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1347),
+        ) {
+            spawn_container(p, 105.0, 406.0, 16.0, 14.0, 10)
+                .insert((
+                    Button,
+                    ImageNode::new(off.clone()),
+                    KeyboardEnforce,
+                    KeyboardEnforceFrames { off, on },
+                ));
+        }
+        spawn_label(p, &font, "严格规则", 125.0, 405.0, 12.0, Color::WHITE, 9);
+        // 行区文字实体（16 个槽，位置每帧按 build_rows 更新）
+        for i in 0..16usize {
+            spawn_label(p, &font, "", 20.0, 90.0, 12.0, Color::WHITE, 9)
+                .insert(KeyboardRow(i, 90.0));
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
 fn keyboard_layout_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<KeyboardState>,
-    close: Query<&UiButton, With<KeyboardClose>>,
-    scroll_up: Query<&UiButton, With<KeyboardScrollUp>>,
-    scroll_down: Query<&UiButton, With<KeyboardScrollDown>>,
-    reset: Query<&UiButton, With<KeyboardReset>>,
-    enforce: Query<&CheckBox, With<KeyboardEnforce>>,
+    close: Query<(Entity, &Interaction), With<KeyboardClose>>,
+    scroll_up: Query<(Entity, &Interaction), With<KeyboardScrollUp>>,
+    scroll_down: Query<(Entity, &Interaction), With<KeyboardScrollDown>>,
+    reset: Query<(Entity, &Interaction), With<KeyboardReset>>,
+    mut enforce: Query<(Entity, &Interaction, &mut ImageNode, &KeyboardEnforceFrames), With<KeyboardEnforce>>,
     mut widgets: Query<&mut Visibility, With<KeyboardWidget>>,
-    mut pos_bar: Query<(&mut Transform, &KeyboardPositionBar), Without<KeyboardRow>>,
-    mut rows: Query<(&mut Text2d, &mut Transform, &KeyboardRow)>,
+    mut pos_bar: Query<(&mut Node, &KeyboardPositionBar), Without<KeyboardRow>>,
+    mut rows: Query<(&mut Text, &mut Node, &KeyboardRow)>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::KeyboardLayout);
     for mut vis in &mut widgets {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -568,27 +537,27 @@ fn keyboard_layout_ui_system(
         return;
     }
 
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             state.rebinding = None;
             mgr.close(DialogKind::KeyboardLayout);
         }
     }
-    for btn in &scroll_up {
-        if btn.clicked && state.top_line > 0 {
+    for (e, inter) in &scroll_up {
+        if edge(e, inter, &mut prev_inter) && state.top_line > 0 {
             state.top_line -= 1;
             tracing::info!("🎹 上滚 top_line={}", state.top_line);
         }
     }
     let max_scroll = total_rows(&state).saturating_sub(12).max(1);
-    for btn in &scroll_down {
-        if btn.clicked && state.top_line < max_scroll - 1 {
+    for (e, inter) in &scroll_down {
+        if edge(e, inter, &mut prev_inter) && state.top_line < max_scroll - 1 {
             state.top_line += 1;
             tracing::info!("🎹 下滚 top_line={}", state.top_line);
         }
     }
-    for btn in &reset {
-        if btn.clicked {
+    for (e, inter) in &reset {
+        if edge(e, inter, &mut prev_inter) {
             state.bindings = state.defaults.clone();
             state.top_line = 0;
             state.rebinding = None;
@@ -596,9 +565,15 @@ fn keyboard_layout_ui_system(
             tracing::info!("🎹 键位已重置为默认");
         }
     }
-    // #90 通用 CheckBox：点击切换由 checkbox_system 处理，这里同步状态
-    if let Ok(cb) = enforce.single() {
-        state.enforce = cb.checked;
+    // 严格规则复选框：点击切换 + 换帧（C# CheckBox 语义）
+    if let Ok((e, inter, mut img, frames)) = enforce.single_mut() {
+        if edge(e, inter, &mut prev_inter) {
+            state.enforce = !state.enforce;
+        }
+        let want = if state.enforce { frames.on.clone() } else { frames.off.clone() };
+        if img.image != want {
+            img.image = want;
+        }
     }
 
     // 点击绑定行 → 进入等待重绑（C# KeybindRow.Click）
@@ -657,23 +632,23 @@ fn keyboard_layout_ui_system(
     }
 
 
-    // 位置条
-    for (mut tf, bar) in &mut pos_bar {
+    // 位置条（面板子节点，相对坐标）
+    for (mut node, bar) in &mut pos_bar {
         let pct = state.top_line as f32 / max_scroll as f32;
-        tf.translation.y = -(bar.0 + 13.0 + pct * 262.0);
+        node.top = Val::Px(bar.0 + 13.0 + pct * 262.0);
     }
 
-    // 行文字 + 位置
+    // 行文字 + 位置（面板子节点，相对坐标）
     let specs = build_rows(&state);
-    for (mut text, mut tf, row) in &mut rows {
+    for (mut text, mut node, row) in &mut rows {
         match specs.get(row.0) {
             Some(RowSpec::Group { y, text: t }) => {
                 text.0 = format!("◆ {}", t);
-                tf.translation.y = -(row.1 + *y);
+                node.top = Val::Px(row.1 + *y);
             }
             Some(RowSpec::Bind { y, text: t, .. }) => {
                 text.0 = t.clone();
-                tf.translation.y = -(row.1 + *y);
+                node.top = Val::Px(row.1 + *y);
             }
             None => {
                 text.0 = String::new();
