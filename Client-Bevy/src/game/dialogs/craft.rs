@@ -101,12 +101,13 @@ fn spawn_craft(
     }
     let font = ui_font.0.clone();
 
-    // 面板 Prguse[170] @ (280,80)。加宽到 320x207：关闭按钮(300,3)+合成按钮都在面板内
-    // （批 20 同款：244 宽会裁掉关闭按钮）
+    // 面板 Prguse[170] @ (280,80)。批 20 同款统一 320x262：原生 244x207
+    // 会裁掉关闭按钮(300,3)，且高度与其他 Prguse[170] 面板（mentor/report/
+    // relationship/timer/buff/refine 均 320x262）保持观感一致（批次19-23 评审 F1）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 207.0, 30);
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Craft), CraftWidget));

@@ -134,6 +134,10 @@ fn spawn_fishing(
         let frames: Vec<Handle<Image>> = (0..10usize)
             .filter_map(|i| load_lib_image(&mut libs, &mut images, LibraryName::Title, 170 + i))
             .collect();
+        // （批次19-23 评审 F5）帧缺失静默降级：资源缺帧时打日志便于排查
+        if frames.len() < 10 {
+            tracing::warn!("抛竿按钮动画帧缺失：{}/10（Title[170..179]）", frames.len());
+        }
         if !frames.is_empty() {
             let pressed = load_lib_image(&mut libs, &mut images, LibraryName::Title, 142);
             spawn_animated_icon_button(

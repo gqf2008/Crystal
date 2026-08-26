@@ -14,7 +14,6 @@ use crate::actor::{LocalPlayer, PlayerName};
 use crate::game::dialogs::quest_log::QuestLogState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
-use crate::ui::theme::spawn_label;
 
 /// 最多同时追踪 5 个任务（C# QuestTrackingDialog：Count >= 5 return）
 pub const MAX_TRACKED: usize = 5;
@@ -141,7 +140,11 @@ impl Plugin for QuestTrackingPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_quest_tracking);
         app.add_systems(
             Update,
-            (quest_tracking_toggle_system, quest_tracking_ui_system)
+            (
+                quest_tracking_toggle_system,
+                quest_tracking_ui_system,
+                crate::ui::outlined_text::sync_outline_ui_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -187,8 +190,20 @@ fn spawn_quest_tracking(
         .id();
     commands.entity(panel).with_children(|p| {
         for i in 0..TEXT_LINES {
-            spawn_label(p, &font, "", 0.0, 0.0, 11.0, Color::WHITE, 1)
-                .insert(QuestTrackingText(i));
+            // 批次19-23 评审 F3：C# QuestDialogs.cs:841/861 OutLine=true 黑描边。
+            // UI 版描边用兄弟层级（4 副本 z-1 先画、正文 z 后画）——bevy_ui 的
+            // 子实体恒画在父后，把副本挂成正文子实体会盖住正文（见 outlined_text.rs）
+            let mut e = crate::ui::outlined_text::spawn_outlined_label(
+                p,
+                font.clone(),
+                "",
+                0.0,
+                0.0,
+                11.0,
+                Color::WHITE,
+                1,
+            );
+            e.insert(QuestTrackingText(i));
         }
     });
 }
