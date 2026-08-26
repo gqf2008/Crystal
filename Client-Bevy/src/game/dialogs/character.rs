@@ -310,7 +310,8 @@ fn spawn_character_dialog(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：class 读 `ActorAppearance`（hud.class 双写保留，步9 删）
+    appearance_q: Query<&crate::actor::ActorAppearance, With<crate::actor::LocalPlayer>>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -381,7 +382,11 @@ fn spawn_character_dialog(
     }
 
     // C# ClassImage = Prguse[100+职业] @ (15,33)（CharacterDialog.cs:218-225，Parent=this 常显不随页）
-    let class_idx = 100 + (hud.class as usize).min(4); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
+    // #2633 批次4 步7：实体缺失默认 Warrior=0，同原 hud.class 默认
+    let class_idx = 100 + appearance_q
+        .single()
+        .map(|a| (a.class as usize).min(4))
+        .unwrap_or(0); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
     if let Some(h) = ui_image(
         &mut libs,
         &mut images,

@@ -553,7 +553,8 @@ fn trade_reset(trade: &mut TradeState) {
 #[allow(clippy::type_complexity)]
 fn trade_ui_system(
     trade: Res<TradeState>,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：MyName 改读 `PlayerName`（hud.name 双写保留，步9 删）
+    name_q: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -624,8 +625,10 @@ fn trade_ui_system(
 
     // 四枚标签（C# RefreshInterface:142-150）+ 描边副本直同步
     // （sync_outline_system 排序不可控，同帧晚写会陈旧——同行会名改名方案）
+    // 实体缺失默认空串，同原 hud.name 默认
+    let my_name = name_q.single().map(|n| n.0.clone()).unwrap_or_default();
     let new_texts = [
-        (TradeText::MyName, hud.name.clone()),
+        (TradeText::MyName, my_name),
         (TradeText::MyGold, format_thousands(trade.my_gold)),
         (TradeText::GuestName, trade.partner_name.clone()),
         (TradeText::GuestGold, format_thousands(trade.their_gold)),

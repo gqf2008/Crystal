@@ -7,7 +7,6 @@
 use bevy::prelude::*;
 
 use crate::actor::{ActorAnim, LocalPlayer, MonsterAppearance, NetObjectId};
-use crate::game::hud::HudState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use bevy::sprite::Anchor;
@@ -186,7 +185,9 @@ fn attack_mode_system(
 /// 应用受击/死亡事件 + 生成伤害飘字
 fn apply_combat_events(
     mut commands: Commands,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：本地判定改读 `NetObjectId`/`ActorAppearance`（hud 双写保留，步9 删）；
+    // 实体缺失 = 非本地/未生成（同原 local_id=None、gender=0 默认）
+    local_q: Query<(&NetObjectId, &crate::actor::ActorAppearance), With<LocalPlayer>>,
     loadout_q: Query<&crate::game::player_state::Loadout, With<LocalPlayer>>,
     mut probe: ResMut<RealHitProbe>,
     ui_font: Res<UiFont>,
@@ -201,6 +202,9 @@ fn apply_combat_events(
         Option<&MonsterAppearance>,
     )>,
 ) {
+    let local = local_q.single().ok();
+    let local_id = local.map(|(id, _)| id.0);
+    let local_gender = local.map(|(_, a)| a.gender as u8).unwrap_or(0);
     for ev in events.read() {
         match ev {
             CombatEvent::Struck { object_id, attacker_id, direction } => {
@@ -213,7 +217,7 @@ fn apply_combat_events(
                     .and_then(|s| s.as_ref())
                     .map(|i| i.shape)
                     .unwrap_or(-1);
-                let struck_sound = if hud.player_object_id == Some(*attacker_id) {
+                let struck_sound = if local_id == Some(*attacker_id) {
                     crate::game::sound::monster_struck_sound(weapon_shape)
                 } else {
                     Some(10060) // 默认 StruckShort（非本地玩家攻击者武器未知）
@@ -249,10 +253,10 @@ fn apply_combat_events(
                     &mut commands,
                     &mut audio_assets,
                     &sound_bank,
-                    crate::game::sound::player_flinch_sound(hud.gender),
+                    crate::game::sound::player_flinch_sound(local_gender),
                 );
                 for (e, id, mut anim, _mon, _appr) in &mut actors {
-                    if hud.player_object_id == Some(id.0) {
+                    if local_id == Some(id.0) {
                         anim.action = mir2_shared::enums::MirAction::Struck;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
@@ -305,25 +309,25 @@ fn apply_combat_events(
             }
             CombatEvent::Died { object_id, death_type } => {
                 // #1564：本地玩家死亡音（C# PlayDieSound 按性别）
-                if hud.player_object_id == Some(*object_id) {
+                if local_id == Some(*object_id) {
                     crate::game::sound::play_sound(
                         &mut commands,
                         &mut audio_assets,
                         &sound_bank,
-                        crate::game::sound::player_die_sound(hud.gender),
+                        crate::game::sound::player_die_sound(local_gender),
                     );
                 }
                 for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
                         // #1790：C# ObjectDied.Type 1/2——特效+立即移除，不播尸体动画
-                        if *death_type != 0 && hud.player_object_id != Some(*object_id) {
+                        if *death_type != 0 && local_id != Some(*object_id) {
                             commands.entity(e).despawn();
                             break;
                         }
                         anim.action = mir2_shared::enums::MirAction::Dead;
                         anim.frame_index = 0;
                         // 本地玩家死亡由 Death 包管理（复活时恢复），不自动 despawn
-                        if hud.player_object_id != Some(*object_id) {
+                        if local_id != Some(*object_id) {
                             commands.entity(e).insert(DeathTimer(3.0));
                             // #1570：怪物死亡音（C# PlayDieSound → BaseSound+3；本地玩家走性别死亡音）
                             if mon.is_some() {
@@ -480,7 +484,7 @@ fn apply_combat_events(
             // 伤害飘字（挂到目标实体上自动跟随）
             CombatEvent::Damage { object_id, damage, dmg_type } => {
                 // 命中探测：非本地玩家的伤害事件 = 玩家攻击命中目标（#57）
-                if hud.player_object_id != Some(*object_id) {
+                if local_id != Some(*object_id) {
                     probe.hits += 1;
                 }
                 if !ui_font.0.is_strong() {

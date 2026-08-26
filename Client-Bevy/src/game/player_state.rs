@@ -17,7 +17,7 @@
 use bevy::prelude::*;
 use mir2_shared::enums::PetMode;
 
-use crate::actor::LocalPlayer;
+use crate::actor::{LocalPlayer, PlayerName};
 use crate::game::dialogs::character::CharacterState;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::hud::HudState;
@@ -383,6 +383,7 @@ fn player_vitals_events(
     mut base_stats_q: Query<&mut BaseStats, With<LocalPlayer>>,
     mut pet_mode_q: Query<&mut PetModeState, With<LocalPlayer>>,
     mut combat_stats_q: Query<&mut CombatStats, With<LocalPlayer>>,
+    mut name_q: Query<&mut PlayerName, With<LocalPlayer>>,
 ) {
     for ev in events.read() {
         match ev {
@@ -416,9 +417,12 @@ fn player_vitals_events(
                 tracing::info!("📊 基础属性: {:?}", stats);
             }
             ServerEvent::PlayerNameUpdated { name } => {
-                // #264：本地玩家改名。复用组件 PlayerName 的写随读者迁移（批6）一并处理，
-                // 本批严格行为等价、不动既有 PlayerName 维护路径（spawn/object_state）。
+                // #264：本地玩家改名。双写：hud.name（过渡，步9 删）+ 复用组件 `PlayerName`
+                //（#2633 批次4 步7 补写；object_state 亦有同名维护，值同，重复写无害）。
                 hud.name = name.clone();
+                if let Ok(mut n) = name_q.single_mut() {
+                    n.0 = name.clone();
+                }
                 tracing::info!("🏷️ 玩家改名 -> {}", name);
             }
             ServerEvent::CreditGained { credit } => {
@@ -545,6 +549,8 @@ fn player_vitals_events(
                 char_state.poison_atk = *poison_atk;
                 // —— 玩家组件：实体已生成就地写入（共享映射），未生成则缓冲快照待 reconcile（R1）——
                 // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），故单一查询成败即实体有无。
+                // PlayerName 单独写：它由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
+                // 缺失时静默跳过（同其他写系统 R1 语义）。
                 if let (Ok(mut v), Ok(mut p), Ok(mut g), Ok(mut cb)) = (
                     vitals_q.single_mut(),
                     progression_q.single_mut(),
@@ -556,6 +562,10 @@ fn player_vitals_events(
                     // R1：UserInformation 先于 ObjectPlayer 到达、实体未生成——缓冲快照
                     // （latest wins），待 apply_pending_user_info 在实体生成后应用一次。
                     pending.0 = Some(ev.clone());
+                }
+                // #2633 批次4 步7：补写复用组件 `PlayerName`（读者已迁该组件；hud.name 双写保留）
+                if let Ok(mut n) = name_q.single_mut() {
+                    n.0 = name.clone();
                 }
             }
             _ => {}
@@ -658,6 +668,7 @@ fn apply_pending_user_info(
         ),
         With<LocalPlayer>,
     >,
+    mut name_q: Query<&mut PlayerName, With<LocalPlayer>>,
 ) {
     let Some(ev) = pending.0.take() else {
         return;
@@ -666,6 +677,12 @@ fn apply_pending_user_info(
     if let Ok((mut v, mut p, mut g, mut cb, mut inv, mut lo)) = q.single_mut() {
         apply_user_info_stats(&ev, &mut v, &mut p, &mut g, &mut cb);
         apply_user_info_items(&ev, &mut inv, &mut lo);
+        // #2633 批次4 步7：缓冲快照的 name 一并应用（PlayerName 由 spawn 插入，此时必在）
+        if let ServerEvent::UserInformation { name, .. } = &ev {
+            if let Ok(mut n) = name_q.single_mut() {
+                n.0 = name.clone();
+            }
+        }
     } else {
         // 实体仍未生成（ObjectPlayer 尚未到达/未生效）：放回 pending，下一帧再试。
         pending.0 = Some(ev);
@@ -1018,6 +1035,65 @@ mod tests {
         let v: Vitals = get(&mut app);
         assert_eq!(v.hp, 999);
         assert!(app.world().resource::<PendingUserInfo>().0.is_none());
+    }
+
+    /// 步7：PlayerNameUpdated / UserInformation 双写——hud.name 与 `PlayerName` 组件同步
+    /// （读者基于组件，写者须保证镜像成立；PlayerName 由 spawn 路径插入，测试须显式挂载）。
+    #[test]
+    fn player_name_component_dual_written() {
+        let mut app = test_app();
+        app.world_mut().spawn((
+            LocalPlayer,
+            LocalPlayerStateBundle::default(),
+            PlayerName(String::new()),
+        ));
+        enter_game(&mut app);
+
+        app.world_mut()
+            .write_message(ServerEvent::PlayerNameUpdated {
+                name: "改名后".to_string(),
+            });
+        app.update();
+        let hud = app.world().resource::<HudState>();
+        assert_eq!(hud.name, "改名后", "hud.name 双写保留");
+        let pn = app
+            .world_mut()
+            .query_filtered::<&PlayerName, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .expect("应有 PlayerName")
+            .0
+            .clone();
+        assert_eq!(pn, "改名后", "PlayerNameUpdated 应同步 PlayerName 组件");
+
+        app.world_mut().write_message(user_info(10, 100, 50));
+        app.update();
+        let hud = app.world().resource::<HudState>();
+        assert_eq!(hud.name, "测试者");
+        let pn = app
+            .world_mut()
+            .query_filtered::<&PlayerName, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .expect("应有 PlayerName")
+            .0
+            .clone();
+        assert_eq!(pn, "测试者", "UserInformation 应同步 PlayerName 组件");
+    }
+
+    /// 步7：实体缺失时 PlayerName 写跳过不 panic（同 R1 语义），hud.name 照写
+    #[test]
+    fn player_name_write_skips_when_entity_missing() {
+        let mut app = test_app();
+        // 不 spawn LocalPlayer
+        enter_game(&mut app);
+        app.world_mut()
+            .write_message(ServerEvent::PlayerNameUpdated {
+                name: "无实体".to_string(),
+            });
+        app.update(); // 不应 panic
+        let hud = app.world().resource::<HudState>();
+        assert_eq!(hud.name, "无实体");
     }
 
     /// 构造 UserInformation 事件（背包 2 格、装备槽 0 有 uid=900）

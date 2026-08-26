@@ -201,7 +201,8 @@ pub(crate) fn real_verify_system(
     mut control: ResMut<client_bevy::game::player_control::ControlState>,
     game_data: Res<client_bevy::map_renderer::GameData>,
     mut chat: ResMut<client_bevy::game::chat::ChatState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步7：聊天前缀读 `PlayerName`（hud.name 双写保留，步9 删）
+    name_q: Query<&client_bevy::actor::PlayerName, With<client_bevy::actor::LocalPlayer>>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
     probe: Res<client_bevy::game::combat::RealHitProbe>,
     actors: Query<(
@@ -265,9 +266,9 @@ pub(crate) fn real_verify_system(
                     linked_items: vec![],
                 });
                 // 真实服务器不回发给自己（设计）；本地回显由 chat_input_system 负责（C# 行为），
-                // 这里模拟用户路径 add_line，验证显示链路
+                // 这里模拟用户路径 add_line，验证显示链路；实体缺失默认空串（同原 hud.name 默认）
                 chat.add_line(
-                    format!("[{}]: 真实服务器验证：你好！", hud.name),
+                    format!("[{}]: 真实服务器验证：你好！", name_q.single().map(|n| n.0.as_str()).unwrap_or("")),
                     Color::WHITE,
                     client_bevy::game::chat::ChatChannel::Nearby,
                 );

@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::actor::LocalPlayer;
+use crate::actor::PlayerName;
 use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::dura_status::{dura_btn_y, MINIMAP_X};
 use crate::game::dialogs::inventory::InvItem;
@@ -1043,18 +1044,17 @@ fn attack_mode_text_system(
     }
 }
 
-/// #2633 批次4 步3：hp/max_hp/mp/max_mp→`Vitals`、exp/max_exp/level→`Progression`、
-/// gold→`Gold`；`name` 仍读 `hud.name`（身份字段待批6 复用 `PlayerName`）。
+/// #2633 批次4 步3/步7：hp/max_hp/mp/max_mp→`Vitals`、exp/max_exp/level→`Progression`、
+/// gold→`Gold`、name→复用 `PlayerName`（步7 迁；hud.name 仍双写，步9 删）。
 /// R3：保留 `Changed<HudData>` 跳帧门控——仍「值变才写 HudData」（`if *data != new`），
 /// 不改成每帧无条件写；R4：一律读组件当前值，不加 `Changed<组件>` 过滤。
 /// 实体缺失跳过（登录前无 LocalPlayer，HudData 保持默认，与组件默认值一致）。
 fn sync_hud_data(
     mut roots: Query<&mut HudData>,
-    hud: Res<HudState>,
-    player: Query<(&Vitals, &Progression, &Gold), With<LocalPlayer>>,
+    player: Query<(&Vitals, &Progression, &Gold, &PlayerName), With<LocalPlayer>>,
 ) {
     let Ok(mut data) = roots.single_mut() else { return };
-    let Ok((vitals, progression, gold)) = player.single() else { return };
+    let Ok((vitals, progression, gold, player_name)) = player.single() else { return };
     let new = HudData {
         hp: vitals.hp,
         max_hp: vitals.max_hp,
@@ -1064,21 +1064,20 @@ fn sync_hud_data(
         max_exp: progression.max_exp,
         level: progression.level,
         gold: gold.0,
-        name: hud.name.clone(),
+        name: player_name.0.clone(),
     };
     if *data != new {
         *data = new;
     }
 }
 
-/// #2633 批次4 步3：血/蓝/经验/等级/金币改读 `Vitals`/`Progression`/`Gold` 组件；
-/// `name` 仍读 `hud.name`（批6 才迁 `PlayerName`）。门控不变：仍靠 `Changed<HudData>`
+/// #2633 批次4 步3/步7：血/蓝/经验/等级/金币/名字改读 `Vitals`/`Progression`/`Gold`/
+/// `PlayerName` 组件（步7 迁 name；hud.name 双写保留，步9 删）。门控不变：仍靠 `Changed<HudData>`
 /// 跳帧（#70），R4 读当前值不加组件 Changed 过滤。实体缺失跳过（HudData 默认帧不更新）。
 fn hud_update_system(
-    hud: Res<HudState>,
     opt: Res<crate::game::dialogs::option::OptionState>,
     hud_datas: Query<&HudData, Changed<HudData>>,
-    player: Query<(&Vitals, &Progression, &Gold), With<LocalPlayer>>,
+    player: Query<(&Vitals, &Progression, &Gold, &PlayerName), With<LocalPlayer>>,
     mut fills: Query<(
         &mut Sprite,
         &mut Transform,
@@ -1103,7 +1102,7 @@ fn hud_update_system(
     if hud_datas.single().is_err() {
         return;
     }
-    let Ok((vitals, progression, player_gold)) = player.single() else { return };
+    let Ok((vitals, progression, player_gold, player_name)) = player.single() else { return };
     let hp_pct = (vitals.hp as f32 / vitals.max_hp.max(1) as f32).clamp(0.0, 1.0);
     let mp_pct = (vitals.mp as f32 / vitals.max_mp.max(1) as f32).clamp(0.0, 1.0);
     let exp_pct = (progression.exp as f32 / progression.max_exp.max(1) as f32).clamp(0.0, 1.0);
@@ -1175,7 +1174,7 @@ fn hud_update_system(
             // C# GoldLabel = Gold.ToString("###,###,##0")（千分位）
             format_gold(player_gold.0)
         } else if name.is_some() {
-            hud.name.clone()
+            player_name.0.clone()
         } else {
             continue;
         };
@@ -1349,14 +1348,15 @@ mod tests {
             let mut opt = OptionState::default();
             opt.hp_view = hp_view;
             world.insert_resource(opt);
-            // #2633 步3：hud_update_system 改读玩家组件（Vitals/Progression/Gold），
-            // HudState 仅剩 name 等身份字段；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
+            // #2633 步3/步7：hud_update_system 改读玩家组件（Vitals/Progression/Gold/PlayerName），
+            // HudState 仅剩身份字段双写；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
             world.insert_resource(HudState::default());
             world.spawn((
                 LocalPlayer,
                 Vitals { hp: 100, max_hp: 200, mp: 50, max_mp: 100 },
                 Progression::default(),
                 Gold(0),
+                PlayerName(String::new()),
             ));
             world.insert_resource(MiniMapMode::default());
             world.run_system_once(spawn_hud).expect("spawn_hud 应成功");

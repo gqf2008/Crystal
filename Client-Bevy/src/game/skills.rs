@@ -769,9 +769,12 @@ mod tests {
 fn skills_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut magics: ResMut<MagicsState>,
-    hud: Res<crate::game::hud::HudState>,
+    // #2633 批次4 步7：本地判定改读 `NetObjectId`（hud.player_object_id 双写保留，步9 删）；
+    // 实体缺失视同非本地（原 hud.player_object_id=None 默认）
+    local_q: Query<&crate::actor::NetObjectId, With<crate::actor::LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
+    let local_id = local_q.single().ok().map(|id| id.0);
     for ev in events.read() {
         match ev {
             ServerEvent::MagicLearned { magic } => {
@@ -785,7 +788,7 @@ fn skills_server_events(
                 ..
             } => {
                 // #220：仅本地玩家的升级更新 MagicsState（英雄的由 hero.rs 按 object_id 路由）
-                if hud.player_object_id != Some(*object_id) {
+                if local_id != Some(*object_id) {
                     continue;
                 }
                 // C# S.MagicLeveled：更新技能等级/经验（技能窗口即时刷新）

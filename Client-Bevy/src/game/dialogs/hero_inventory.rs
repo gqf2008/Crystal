@@ -13,14 +13,13 @@
 
 use bevy::prelude::*;
 
-use crate::actor::LocalPlayer;
+use crate::actor::{LocalPlayer, MountState};
 use crate::game::dialogs::hero::{HeroState, STAT_HP, STAT_MP, next_autopot};
 use crate::game::dialogs::inventory::{
     InvClickState, InvDropConfirm, InvUiState, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
     item_use_sound_id, use_item_core,
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
 use crate::game::player_state::{Inventory, Loadout};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -591,7 +590,6 @@ fn hero_inv_data_system(
 /// 点击转移：主背包选中 → 英雄格 = TransferHeroItem；英雄格选中/取消
 fn hero_inv_click_system(
     mgr: Res<DialogManager>,
-    hud: Res<HudState>,
     hero: Res<HeroState>,
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
@@ -603,7 +601,9 @@ fn hero_inv_click_system(
         Res<InvUiState>,
         Res<crate::game::dialogs::inventory::InventoryOrigin>,
     ),
-    player_q: Query<(&Inventory, &Loadout), With<LocalPlayer>>,
+    // #2633 批次4 步7：riding 读 `MountState`（hud.riding 双写保留，步9 删）；
+    // 英雄性别/职业/等级走 HeroState（不属本地玩家组件）
+    player_q: Query<(&Inventory, &Loadout, Option<&MountState>), With<LocalPlayer>>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_hero_click: Local<Option<(usize, f64)>>,
@@ -630,7 +630,7 @@ fn hero_inv_click_system(
         cursor.x,
         cursor.y,
         inv_res.0.page,
-        player_q.single().map(|(inv, _)| inv.items.len()).unwrap_or(0),
+        player_q.single().map(|(inv, _, _)| inv.items.len()).unwrap_or(0),
         (inv_res.1.0, inv_res.1.1),
     )
     .is_some()
@@ -683,11 +683,13 @@ fn hero_inv_click_system(
                     allow_consumable: true,
                 };
                 // 槽物品前置恒看主角色装备（C# CanUseItem User 侧）→ 主角色 Loadout slots（步6）
-                let player_equipment = player_q
-                    .single()
-                    .map(|(_, l)| l.slots.as_slice())
+                let player_state = player_q.single().ok();
+                let player_equipment = player_state
+                    .map(|(_, l, _)| l.slots.as_slice())
                     .unwrap_or(&[]);
-                if use_item_core(item, &net, &hud, false, &player_equipment, ctx, now, &mut feedback, &mut confirm)
+                // 骑乘判定读 `MountState`（实体缺失视同未骑乘，同原 hud.riding=false）
+                let riding = player_state.map(|(_, _, m)| m.is_some()).unwrap_or(false);
+                if use_item_core(item, &net, riding, false, &player_equipment, ctx, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
                     // #2611：腰带格（0/1）使用时武装补货（C# :574 Item.Count==1

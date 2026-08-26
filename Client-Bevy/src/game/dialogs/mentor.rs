@@ -267,7 +267,15 @@ fn mentor_ui_system(
     mut state: ResMut<MentorState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    hud: Res<crate::game::hud::HudState>,
+    // #2633 批次4 步7：name→`PlayerName`、level→`Progression`（hud 双写保留，步9 删）；
+    // 实体缺失按 HudState 默认（level=1/name=""）
+    player_q: Query<
+        (
+            &crate::game::player_state::Progression,
+            &crate::actor::PlayerName,
+        ),
+        With<crate::actor::LocalPlayer>,
+    >,
     close: Query<&UiButton, With<MentorClose>>,
     allow_btn: Query<&UiButton, With<MentorAllow>>,
     add_btn: Query<&UiButton, With<MentorAdd>>,
@@ -289,7 +297,11 @@ fn mentor_ui_system(
     }
     // 渲染（C# UpdateInterface：等级高者即师父；无关系时隐藏信息）
     let has = !state.mentor_name.is_empty() && state.mentor_level != 0;
-    let self_is_mentor = has && (hud.level as u32) > state.mentor_level;
+    let (me_level, me_name) = player_q
+        .single()
+        .map(|(p, n)| (p.level, n.0.clone()))
+        .unwrap_or((1, String::new()));
+    let self_is_mentor = has && (me_level as u32) > state.mentor_level;
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             0 => "师徒".to_string(),
@@ -297,7 +309,7 @@ fn mentor_ui_system(
                 if !has {
                     "师父: 无".to_string()
                 } else if self_is_mentor {
-                    format!("师父: {} Lv.{}", hud.name, hud.level)
+                    format!("师父: {} Lv.{}", me_name, me_level)
                 } else {
                     format!(
                         "师父: {} Lv.{}{}",
@@ -318,7 +330,7 @@ fn mentor_ui_system(
                         if state.mentor_online { "（在线）" } else { "（离线）" }
                     )
                 } else {
-                    format!("徒弟: {} Lv.{}", hud.name, hud.level)
+                    format!("徒弟: {} Lv.{}", me_name, me_level)
                 }
             }
             3 => {

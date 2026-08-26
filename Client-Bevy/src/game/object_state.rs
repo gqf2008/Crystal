@@ -51,7 +51,9 @@ impl Plugin for ObjectStatePlugin {
 fn apply_object_state_events(
     mut commands: Commands,
     mut events: MessageReader<ServerEvent>,
-    hud: Res<crate::game::hud::HudState>,
+    // #2633 批次4 步7：本地判定改读 `NetObjectId`（hud.player_object_id 双写保留，步9 删）；
+    // 实体缺失视同非本地（原 hud.player_object_id=None 默认）
+    local_q: Query<&NetObjectId, With<LocalPlayer>>,
     mut vis: Query<(&NetObjectId, &mut Visibility)>,
     mut anim: Query<(Entity, &NetObjectId, &mut ActorAnim)>,
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
@@ -78,12 +80,13 @@ fn apply_object_state_events(
     if pending.is_empty() {
         return;
     }
+    let local_id = local_q.single().ok().map(|id| id.0);
     for ev in pending {
         match ev {
             ServerEvent::ObjectHidden { object_id } => {
                 // #1552：本地玩家潜行/隐身 → 半透明（C# ApplyDrawColour 半隐身），
                 // 远程对象 → 完全隐藏（B0001：query 冲突用本地 id 判断）
-                let is_local = hud.player_object_id == Some(object_id);
+                let is_local = local_id == Some(object_id);
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
                         if is_local {
@@ -104,7 +107,7 @@ fn apply_object_state_events(
                     if id.0 == object_id {
                         *v = Visibility::Visible;
                         // #1552：本地玩家恢复不透明
-                        if hud.player_object_id == Some(object_id) {
+                        if local_id == Some(object_id) {
                             for mut layer in &mut layers {
                                 layer.alpha = 1.0;
                             }

@@ -11,7 +11,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, SystemCursorIcon};
 
-use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
+use crate::actor::{
+    ActorAnim, ActorAppearance, GroundItem, LocalPlayer, Monster, MountState, NetObjectId, Npc,
+    Player,
+};
 use crate::game::hud::HudState;
 use crate::game::player_state::{Inventory, Loadout, StatusFlags};
 use crate::game::sets::GameSet;
@@ -584,8 +587,10 @@ fn auto_attack_system(
     game_data: Res<GameData>,
     players: Query<(Entity, &Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
-    hud: Res<HudState>,
-    loadout_q: Query<&Loadout, With<LocalPlayer>>,
+    // #2633 批次4 步7：class/riding/mount_type 改读 `ActorAppearance`/`MountState`、
+    // 武器 shape 读 `Loadout`（步6；hud 双写保留，步9 删）；实体缺失按 HudState 默认
+    // （class=0/riding=false/mount_type=0/shape=-1）
+    player_q: Query<(&Loadout, &ActorAppearance, Option<&MountState>), With<LocalPlayer>>,
     character_state: Res<crate::game::dialogs::character::CharacterState>,
     magics: Res<crate::game::skills::MagicsState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
@@ -603,14 +608,24 @@ fn auto_attack_system(
     let Ok((pe, player_tf, lm_opt)) = players.single() else { return };
 
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
-    // （武器槽读 `Loadout` 组件，#2633 批次4 步6）
-    let weapon_equipped = loadout_q
-        .single()
-        .ok()
-        .and_then(|l| l.slots.get(0))
+    // 武器槽/职业/骑乘读 `Loadout`/`ActorAppearance`/`MountState`（#2633 批次4 步6/步7）
+    let player_state = player_q.single().ok();
+    let class = player_state.map(|(_, a, _)| a.class as u8).unwrap_or(0);
+    let weapon_equipped = player_state
+        .and_then(|(l, _, _)| l.slots.get(0))
         .and_then(|s| s.as_ref())
         .is_some();
-    let attack_kind = player_attack_kind(hud.class, weapon_equipped);
+    let riding = player_state.map(|(_, _, m)| m.is_some()).unwrap_or(false);
+    let mount_type = player_state
+        .and_then(|(_, _, m)| m)
+        .map(|m| m.mount_type)
+        .unwrap_or(0);
+    let weapon_shape = player_state
+        .and_then(|(l, _, _)| l.slots.get(0))
+        .and_then(|s| s.as_ref())
+        .map(|i| i.shape)
+        .unwrap_or(-1);
+    let attack_kind = player_attack_kind(class, weapon_equipped);
     let is_archer = attack_kind == PlayerAttackKind::Ranged;
     let max_range = if is_archer { 9 } else { 1 };
     // #1602：C# AttackTime = User.AttackSpeed（弓手远程 +200ms）——按攻速/等级动态计算
@@ -699,12 +714,9 @@ fn auto_attack_system(
             spell: attack_spell,
         });
         // #1564：近战挥击音按武器/职业/骑乘选择（C# PlayAttackSound；弓手无挥击音）
-        if let Some(sound_id) = crate::game::sound::attack_swing_sound(
-            hud.class,
-            hud.riding,
-            hud.mount_type,
-            hud.equipment.get(0).and_then(|s| s.as_ref()).map(|i| i.shape).unwrap_or(-1),
-        ) {
+        if let Some(sound_id) =
+            crate::game::sound::attack_swing_sound(class, riding, mount_type, weapon_shape)
+        {
             crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
         }
     }
@@ -745,10 +757,9 @@ fn hold_move_system(
         ),
     >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
-    hud: Res<HudState>,
     // #2633 批次4：in_trap_rock/sprint/sneaking 读 StatusFlags（步4）、背包负重读 Inventory（步5）、
-    // 装备负重读 Loadout（步6）；riding 仍读 hud（步7）
-    flags: Query<(&StatusFlags, &Inventory, &Loadout), With<LocalPlayer>>,
+    // 装备负重读 Loadout（步6）、riding 读 MountState（步7，骑乘=组件存在，缺席 0.2s 窗口可接受）
+    flags: Query<(&StatusFlags, &Inventory, &Loadout, Option<&MountState>), With<LocalPlayer>>,
     dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
@@ -845,11 +856,12 @@ fn hold_move_system(
             }
 
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
-            // #2633 步4/步5/步6：in_trap_rock/sprint/sneaking 读 StatusFlags、背包负重读 Inventory、
-            // 装备负重读 Loadout；实体缺失视同无旗标/空负重（同原 hud 默认 false/0）
-            let (in_trap, sprint, sneaking, bag_weight, bag_max, wear_weight) = flags
+            // #2633 步4/步5/步6/步7：in_trap_rock/sprint/sneaking 读 StatusFlags、背包负重读 Inventory、
+            // 装备负重读 Loadout、riding 读 MountState；实体缺失视同无旗标/空负重/未骑乘
+            //（同原 hud 默认 false/0/false）
+            let (in_trap, sprint, sneaking, bag_weight, bag_max, wear_weight, riding) = flags
                 .single()
-                .map(|(f, inv, lo)| {
+                .map(|(f, inv, lo, m)| {
                     (
                         f.in_trap_rock,
                         f.sprint,
@@ -857,9 +869,10 @@ fn hold_move_system(
                         inv.weight,
                         inv.max_weight,
                         lo.slots.iter().flatten().map(|i| i.weight as u32).sum::<u32>(),
+                        m.is_some(),
                     )
                 })
-                .unwrap_or((false, false, false, 0, 0, 0));
+                .unwrap_or((false, false, false, 0, 0, 0, false));
 
             // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
             // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
@@ -907,15 +920,9 @@ fn hold_move_system(
                 // 骑乘或冲刺（且非潜行）→ 3 格（C# GameScene.cs:12143-12147）
                 // 潜行且非冲刺 → 不可跑（C# CheckInput 11528：!Sneaking || (Sneaking && Sprint)）
                 let bag_ok = bag_weight <= bag_max;
-                let wear_ok = hud
-                    .equipment
-                    .iter()
-                    .flatten()
-                    .map(|i| i.weight as u32)
-                    .sum::<u32>()
-                    <= bag_max;
+                let wear_ok = wear_weight <= bag_max;
                 let can_run_base = !in_trap && bag_ok && wear_ok && !(sneaking && !sprint);
-                let run_dist = if hud.riding || (sprint && !sneaking) { 3 } else { 2 };
+                let run_dist = if riding || (sprint && !sneaking) { 3 } else { 2 };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {
                     if !can_run_base {
                         break;

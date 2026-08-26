@@ -1899,7 +1899,8 @@ pub(crate) fn auto_name_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    // #2633 批次4 步7：读 `PlayerName`（hud.name 双写保留，步9 删）
+    name_q: Query<&client_bevy::actor::PlayerName, With<client_bevy::actor::LocalPlayer>>,
     names: Query<(
         &client_bevy::actor::NetObjectId,
         Option<&client_bevy::actor::MonsterName>,
@@ -1991,7 +1992,7 @@ pub(crate) fn auto_name_test(
                 let obj = names
                     .iter()
                     .any(|(id, m)| id.0 == 101 && m.map(|m| m.0 == "稻草人·改").unwrap_or(false));
-                let player = hud.name == "刀客·改名";
+                let player = name_q.single().map(|n| n.0 == "刀客·改名").unwrap_or(false);
                 tracing::info!("[NAME] 对象改名={} 玩家改名={}", obj, player);
                 if obj && player {
                     tracing::info!("[NAME] ✅ 名称同步通过");

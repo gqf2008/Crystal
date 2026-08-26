@@ -660,8 +660,18 @@ fn storage_ui_system(
 fn storage_action_system(
     mut state: ResMut<StorageState>,
     mut inv_click: ResMut<InvClickState>,
-    hud: Res<HudState>,
-    player_q: Query<(&Inventory, &StatusFlags, &Loadout), With<LocalPlayer>>,
+    // #2633 批次4 步7：gender/class/level/riding 改读组件（hud 双写保留，步9 删）
+    player_q: Query<
+        (
+            &Inventory,
+            &StatusFlags,
+            &Loadout,
+            &crate::actor::ActorAppearance,
+            &crate::game::player_state::Progression,
+            Option<&crate::actor::MountState>,
+        ),
+        With<LocalPlayer>,
+    >,
     inv_ui: Res<InvUiState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -686,7 +696,9 @@ fn storage_action_system(
         cursor.x,
         cursor.y,
         inv_ui.page,
-        player.map(|(inv, _, _)| inv.items.len()).unwrap_or(0),
+        player
+            .map(|(inv, _, _, _, _, _)| inv.items.len())
+            .unwrap_or(0),
         (inv_origin.0, inv_origin.1),
     );
 
@@ -713,19 +725,26 @@ fn storage_action_system(
         {
             let ctx = UseItemCtx {
                 grid: mir2_shared::enums::MirGridType::Storage,
-                equipment: player.map(|(_, _, l)| l.slots.as_slice()).unwrap_or(&[]),
-                gender: hud.gender,
-                class: hud.class,
-                level: hud.level,
+                equipment: player
+                    .map(|(_, _, l, _, _, _)| l.slots.as_slice())
+                    .unwrap_or(&[]),
+                gender: player.map(|(_, _, _, a, _, _)| a.gender as u8).unwrap_or(0),
+                class: player.map(|(_, _, _, a, _, _)| a.class as u8).unwrap_or(0),
+                level: player.map(|(_, _, _, _, p, _)| p.level).unwrap_or(1),
                 check_fishing: true,
                 allow_consumable: false,
             };
             if use_item_core(
                 item,
                 &net,
-                &hud,
-                player.map(|(_, f, _)| f.fishing).unwrap_or(false),
-                player.map(|(_, _, l)| l.slots.as_slice()).unwrap_or(&[]),
+                // 实体缺失视同未骑乘（原 hud.riding=false 默认）
+                player
+                    .map(|(_, _, _, _, _, m)| m.is_some())
+                    .unwrap_or(false),
+                player.map(|(_, f, _, _, _, _)| f.fishing).unwrap_or(false),
+                player
+                    .map(|(_, _, l, _, _, _)| l.slots.as_slice())
+                    .unwrap_or(&[]),
                 ctx,
                 now,
                 &mut feedback,
