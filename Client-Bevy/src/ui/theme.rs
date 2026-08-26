@@ -95,3 +95,86 @@ pub fn image_button_system(
         }
     }
 }
+
+// ============================================================================
+// bevy_ui 迁移基座：绝对定位（Val::Px == UI 逻辑像素，左上角原点，y 向下），
+// 与 Sprite UI 的 1024x768 逻辑坐标完全对齐（见 sprite_ui.rs spawn_ui_camera
+// 的 IsDefaultUiCamera）。每个对话框 = 一个根面板 Node + 子节点（标签/图按钮）。
+// ============================================================================
+
+/// 绝对定位的基础 Node
+fn abs_node(x: f32, y: f32, w: Option<f32>, h: Option<f32>) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(x),
+        top: Val::Px(y),
+        width: w.map_or(Val::Auto, Val::Px),
+        height: h.map_or(Val::Auto, Val::Px),
+        ..default()
+    }
+}
+
+/// 生成 .Lib 背景面板（bevy_ui Node + ImageNode）。返回根面板实体（DialogRoot 由调用方挂）。
+pub fn spawn_panel(
+    commands: &mut Commands,
+    image: Handle<Image>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+) -> Entity {
+    commands
+        .spawn((
+            abs_node(x, y, Some(w), Some(h)),
+            ImageNode::new(image),
+            GlobalZIndex(z),
+            Visibility::Hidden,
+        ))
+        .id()
+}
+
+/// 子节点：绝对定位文本标签（相对父面板左上角）
+pub fn spawn_label<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    x: f32,
+    y: f32,
+    size: f32,
+    color: Color,
+    z: i32,
+) -> EntityCommands<'a> {
+    parent.spawn((
+        abs_node(x, y, None, None),
+        Text::new(text),
+        TextFont {
+            font: FontSource::Handle(font.clone()),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+        ZIndex(z),
+    ))
+}
+
+/// 子节点：绝对定位三帧图按钮（.Lib normal/hover/pressed）
+pub fn spawn_icon_button<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    normal: Handle<Image>,
+    hover: Handle<Image>,
+    pressed: Handle<Image>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+) -> EntityCommands<'a> {
+    parent.spawn((
+        Button,
+        abs_node(x, y, Some(w), Some(h)),
+        ImageNode::new(normal.clone()),
+        ImageButton { normal, hover, pressed },
+        ZIndex(z),
+    ))
+}

@@ -313,8 +313,11 @@ pub fn spawn_ui_camera(mut commands: Commands) {
             order: 1,
             ..default()
         },
+        // bevy_ui 迁移：本相机作为默认 UI 相机（IsDefaultUiCamera），使 bevy_ui Node
+        // 渲染到同一 1024x768 逻辑坐标，与 Sprite UI 对齐（Val::Px == UI 逻辑像素）。
         // 只渲染 UI 层，避免把地图实体也画一遍（见 game/mod.rs）
         bevy::camera::visibility::RenderLayers::from_layers(&[1, 2]),
+        bevy::ui::IsDefaultUiCamera,
     ));
 }
 
