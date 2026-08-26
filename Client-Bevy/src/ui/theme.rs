@@ -619,3 +619,174 @@ pub fn animated_button_ui_system(
         }
     }
 }
+
+// ============================================================================
+// bevy_ui 物品格（C# MirItemCell）
+// 结构：格子实体（UiItemCell{slot} + UiItemCellData）→ 子实体
+// UiItemCellIcon/UiItemCellCount/UiItemCellDura；渲染由 item_cell_ui_system
+// 统一处理；对话框只需写 UiItemCellData。
+// ============================================================================
+
+/// 物品格数据（对话框每帧写入）
+#[derive(Component, Default, Clone)]
+pub struct UiItemCellData {
+    /// 物品图标（Items 库图柄）
+    pub icon: Option<Handle<Image>>,
+    /// 堆叠数量（None 或 1 不显示数字）
+    pub count: Option<u32>,
+    /// 耐久比例 0.0-1.0（装备显示耐久条；None 不显示，C# MirItemCell DrawDurability）
+    pub dura_ratio: Option<f32>,
+}
+
+/// 物品格（槽位）
+#[derive(Component)]
+pub struct UiItemCell {
+    pub slot: usize,
+}
+
+/// 物品图标子实体
+#[derive(Component)]
+pub struct UiItemCellIcon(pub usize);
+
+/// 堆叠数量子实体
+#[derive(Component)]
+pub struct UiItemCellCount(pub usize);
+
+/// 耐久条子实体（装备显示，红色随耐久缩短）
+#[derive(Component)]
+pub struct UiItemCellDura(pub usize, pub f32);
+
+/// 耐久条宽度（C# MirItemCell DrawDurability：满耐久=整格宽度，随比例缩短，最小 1px）
+fn item_cell_dura_width(full: f32, ratio: f32) -> f32 {
+    (full * ratio).max(1.0)
+}
+
+/// 生成 bevy_ui 通用物品格（底格 + 图标 + 数量 + 耐久条），返回格子实体
+pub fn spawn_item_cell_ui<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    images: &mut Assets<Image>,
+    font: &Handle<Font>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+    slot: usize,
+) -> EntityCommands<'a> {
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let mut cmds = parent.spawn((
+        abs_node(x, y, Some(w), Some(h)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.18)),
+        UiItemCell { slot },
+        UiItemCellData::default(),
+        ZIndex(z),
+    ));
+    cmds.with_children(|p| {
+            // 物品图标（白图占位，系统换物品图）
+            p.spawn((
+                abs_node(2.0, 2.0, Some(w - 4.0), Some(h - 4.0)),
+                ImageNode::new(white.clone()),
+                UiItemCellIcon(slot),
+                Visibility::Hidden,
+                ZIndex(z + 1),
+            ));
+            // 堆叠数量（右下角）
+            p.spawn((
+                abs_node(w - 16.0, h - 13.0, None, None),
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(10.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 1.0, 0.6)),
+                UiItemCellCount(slot),
+                Visibility::Hidden,
+                ZIndex(z + 2),
+            ));
+            // 耐久条（C# MirItemCell DrawDurability：红色随耐久缩短）
+            p.spawn((
+                abs_node(2.0, h - 4.0, Some(w - 4.0), Some(2.0)),
+                BackgroundColor(Color::srgb(1.0, 0.2, 0.2)),
+                UiItemCellDura(slot, w - 4.0),
+                Visibility::Hidden,
+                ZIndex(z + 3),
+            ));
+    });
+    cmds
+}
+
+/// bevy_ui 物品格渲染系统：按 UiItemCellData 刷新图标/数量/耐久条
+pub fn item_cell_ui_system(
+    cells: Query<
+        &UiItemCellData,
+        (
+            With<UiItemCell>,
+            Without<UiItemCellIcon>,
+            Without<UiItemCellCount>,
+            Without<UiItemCellDura>,
+        ),
+    >,
+    mut icons: Query<
+        (&ChildOf, &mut ImageNode, &mut Visibility, &UiItemCellIcon),
+        (Without<UiItemCellCount>, Without<UiItemCellDura>),
+    >,
+    mut counts: Query<
+        (&ChildOf, &mut Text, &mut Visibility, &UiItemCellCount),
+        (Without<UiItemCellIcon>, Without<UiItemCellDura>),
+    >,
+    mut duras: Query<
+        (&ChildOf, &mut Node, &mut Visibility, &UiItemCellDura),
+        (Without<UiItemCellIcon>, Without<UiItemCellCount>),
+    >,
+) {
+    for (child_of, mut node, mut vis, _icon) in &mut icons {
+        let data = cells.get(child_of.parent()).ok();
+        if let Some(h) = data.and_then(|d| d.icon.clone()) {
+            if node.image != h {
+                node.image = h;
+            }
+        }
+        let show = data
+            .and_then(|d| d.icon.as_ref())
+            .is_some_and(|h| h.is_strong());
+        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for (child_of, mut text, mut vis, _count) in &mut counts {
+        let data = cells.get(child_of.parent()).ok();
+        let s = data
+            .and_then(|d| d.count)
+            .filter(|n| *n > 1)
+            .map(|n| n.to_string())
+            .unwrap_or_default();
+        let show = !s.is_empty();
+        if text.0 != s {
+            text.0 = s;
+        }
+        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for (child_of, mut node, mut vis, dura) in &mut duras {
+        let data = cells.get(child_of.parent()).ok();
+        match data.and_then(|d| d.dura_ratio) {
+            Some(ratio) if (0.0..=1.0).contains(&ratio) => {
+                node.width = Val::Px(item_cell_dura_width(dura.1, ratio));
+                *vis = Visibility::Visible;
+            }
+            _ => *vis = Visibility::Hidden,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::item_cell_dura_width;
+
+    /// 耐久条宽度：满耐久=整格，随比例缩短，最小 1px（C# MirItemCell DrawDurability）
+    #[test]
+    fn item_cell_dura_width_clamps() {
+        assert_eq!(item_cell_dura_width(60.0, 1.0), 60.0);
+        assert_eq!(item_cell_dura_width(60.0, 0.5), 30.0);
+        assert_eq!(item_cell_dura_width(60.0, 0.0), 1.0);
+        assert_eq!(item_cell_dura_width(60.0, 0.01), 1.0);
+    }
+}
