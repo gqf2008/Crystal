@@ -18,9 +18,9 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton,
-    UiEntity, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
 const MINIMAP_X: f32 = 1024.0 - 126.0;
@@ -140,7 +140,6 @@ impl Plugin for MiniMapPlugin {
                 minimap_member_events,
                 current_map_index_events,
                 minimap_member_dots_system,
-                ui_button_system,
             )
                 .chain()
                 .after(crate::network::network_system)
@@ -159,7 +158,6 @@ fn spawn_minimap(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -173,212 +171,122 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
     }
     let font = ui_font.0.clone();
 
-    let big_h = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, BG_BIG);
-    let small_h = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, BG_SMALL);
-
-    // 背景 Prguse[2090]（大模式默认，C# Index=2090）
-    if let (Some(big), Some(small)) = (big_h, small_h) {
-        let e = spawn_ui_sprite(&mut commands, big.clone(), MINIMAP_X, MINIMAP_Y, 5.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Minimap),
-            MiniMapWidget,
-            MiniMapBg { big, small },
-            Visibility::Hidden,
-        ));
-    }
-
-    // 地图区域底色（深绿矩形，仅大模式显示）
-    let green = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    commands.spawn((
-        UiEntity,
+    // 背景 Prguse[2090]（大模式默认 128x154 @ (898,0)；ui_system 随模式换图+改尺寸）
+    let Some(big) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, BG_BIG) else {
+        return;
+    };
+    let small = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, BG_SMALL);
+    let panel = spawn_panel(&mut commands, big.clone(), MINIMAP_X, MINIMAP_Y, 128.0, 154.0, 20);
+    commands.entity(panel).insert((
         DialogRoot(DialogKind::Minimap),
         MiniMapWidget,
-        MiniMapMapArea,
-        Sprite {
-            image: green.clone(),
-            color: Color::srgb(0.12, 0.16, 0.12),
-            custom_size: Some(Vec2::new(MAP_RECT.2, MAP_RECT.3)),
-            ..default()
-        },
-        Anchor::TOP_LEFT,
-        Transform::from_xyz(MINIMAP_X + MAP_RECT.0, -(MINIMAP_Y + MAP_RECT.1), 5.1),
+        MiniMapBg { big: big.clone(), small: small.clone().unwrap_or_else(|| big.clone()) },
         Visibility::Hidden,
     ));
 
-    // 玩家位置点（C# 玩家为白点 4x4）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    commands.spawn((
-        UiEntity,
-        DialogRoot(DialogKind::Minimap),
-        // 注意：不能带 MiniMapWidget —— minimap_ui_system 的 dot 查询用 Without<MiniMapWidget> 排除
-        MiniMapPlayerDot,
-        Sprite {
-            image: white.clone(),
-            color: Color::WHITE,
-            custom_size: Some(Vec2::new(4.0, 4.0)),
-            ..default()
-        },
-        Anchor::TOP_LEFT,
-        Transform::from_xyz(MINIMAP_X + MAP_RECT.0, -(MINIMAP_Y + MAP_RECT.1), 5.2),
-        Visibility::Hidden,
-    ));
-
-    // 对象光点（最多 24 个：玩家/怪物/NPC，#120 C# MiniMap RadarTexture 2x2）
-    for i in 0..24usize {
-        commands.spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Minimap),
-            MiniMapActorDot(i),
-            Sprite {
-                image: white.clone(),
-                custom_size: Some(Vec2::new(2.0, 2.0)),
-                color: Color::WHITE,
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(-999.0, -999.0, 5.2),
-            Visibility::Hidden,
-        ));
-    }
-
-    // #254：小队成员光点（最多 10 个，黄色 2x2）
-    for i in 0..10usize {
-        commands.spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Minimap),
-            MiniMapMemberDot(i),
-            Sprite {
-                image: white.clone(),
-                custom_size: Some(Vec2::new(2.0, 2.0)),
-                color: Color::srgb(1.0, 0.9, 0.2),
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(-999.0, -999.0, 5.2),
-            Visibility::Hidden,
-        ));
-    }
-
-    // 地图名（居中，C# MapNameLabel (2,2) 120x18）
-    let name = spawn_ui_text(
-        &mut commands, &font, "",
-        MINIMAP_X + 2.0 + 10.0, MINIMAP_Y + 2.0,
-        12.0, Color::WHITE, 5.3,
-    );
-    commands.entity(name).insert((
-        DialogRoot(DialogKind::Minimap),
-        MiniMapWidget,
-        MiniMapNameText,
-    ));
-
-    // 坐标（C# LocationLabel (46, Height-23) 56x18）
-    let pos = spawn_ui_text(
-        &mut commands, &font, "",
-        MINIMAP_X + 46.0 + 8.0, MINIMAP_Y + BOTTOM_Y_BIG,
-        12.0, Color::WHITE, 5.3,
-    );
-    commands.entity(pos).insert((
-        DialogRoot(DialogKind::Minimap),
-        MiniMapWidget,
-        MiniMapPosText,
-    ));
-
-    // 大小切换按钮（C# ToggleButton Prguse[2102/2103/2104] (109,3)）
-    if let Some(e) = spawn_minimap_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        2102, 2103, 2104, MINIMAP_X + 109.0, MINIMAP_Y + 3.0, 5.4,
-    ) {
-        commands.entity(e).insert((
-            MiniMapToggle,
-            DialogRoot(DialogKind::Minimap),
-            MiniMapWidget,
-        ));
-    }
-
-    // 邮件按钮（C# MailButton Prguse[2099/2100/2101] (4, bottom_y)）
-    if let Some(e) = spawn_minimap_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        2099, 2100, 2101, MINIMAP_X + 4.0, MINIMAP_Y + BOTTOM_Y_BIG, 5.4,
-    ) {
-        commands.entity(e).insert((
-            MiniMapMailButton,
-            DialogRoot(DialogKind::Minimap),
-            MiniMapWidget,
-        ));
-    }
-
-    // 大地图按钮（C# BigMapButton Prguse[2096/2097/2098] (25, bottom_y)）
-    if let Some(e) = spawn_minimap_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        2096, 2097, 2098, MINIMAP_X + 25.0, MINIMAP_Y + BOTTOM_Y_BIG, 5.4,
-    ) {
-        commands.entity(e).insert((
-            MiniMapBigMapButton,
-            DialogRoot(DialogKind::Minimap),
-            MiniMapWidget,
-        ));
-    }
-
-    // 灯光状态指示（C# LightSetting：Prguse[2093] Normal/Day、[2095] Dawn、[2094] Evening、[2092] Night）
-    if let (Some(normal), Some(dawn), Some(evening), Some(night)) = (
-        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2093),
-        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2095),
-        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2094),
-        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2092),
-    ) {
-        let e = spawn_ui_sprite(&mut commands, normal.clone(), MINIMAP_X + 102.0, MINIMAP_Y + BOTTOM_Y_BIG, 5.4, 1.0);
-        commands.entity(e).insert((
-            MiniMapLightSetting { normal, dawn, evening, night },
-            DialogRoot(DialogKind::Minimap),
-            MiniMapWidget,
-        ));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 地图区域底色（深绿矩形，仅大模式显示）
+        spawn_container(p, MAP_RECT.0, MAP_RECT.1, MAP_RECT.2, MAP_RECT.3, 1)
+            .insert((
+                MiniMapMapArea,
+                BackgroundColor(Color::srgb(0.12, 0.16, 0.12)),
+                Visibility::Hidden,
+            ));
+        // 玩家位置点（C# 玩家为白点 4x4）
+        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        spawn_image(p, white.clone(), MAP_RECT.0, MAP_RECT.1, 4.0, 4.0, 2)
+            .insert((MiniMapPlayerDot, Visibility::Hidden));
+        // 对象光点（最多 24 个，#120 C# MiniMap RadarTexture 2x2）
+        for i in 0..24usize {
+            spawn_image(p, white.clone(), -999.0, -999.0, 2.0, 2.0, 2)
+                .insert((MiniMapActorDot(i), Visibility::Hidden));
+        }
+        // #254：小队成员光点（最多 10 个，黄色 2x2）
+        for i in 0..10usize {
+            spawn_image(p, white.clone(), -999.0, -999.0, 2.0, 2.0, 2)
+                .insert((MiniMapMemberDot(i), Visibility::Hidden));
+        }
+        // 地图名（C# MapNameLabel (2,2) 120x18）
+        spawn_label(p, &font, "", 12.0, 2.0, 12.0, Color::WHITE, 3).insert(MiniMapNameText);
+        // 坐标（C# LocationLabel (46, Height-23)）
+        spawn_label(p, &font, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3)
+            .insert(MiniMapPosText);
+        // 大小切换按钮（C# ToggleButton Prguse[2102/2103/2104] (109,3)）
+        spawn_minimap_button(p, &mut libs, &mut images, 2102, 2103, 2104, 109.0, 3.0, 4)
+            .insert(MiniMapToggle);
+        // 邮件按钮（C# MailButton Prguse[2099/2100/2101] (4, bottom_y)）
+        spawn_minimap_button(p, &mut libs, &mut images, 2099, 2100, 2101, 4.0, BOTTOM_Y_BIG, 4)
+            .insert(MiniMapMailButton);
+        // 大地图按钮（C# BigMapButton Prguse[2096/2097/2098] (25, bottom_y)）
+        spawn_minimap_button(p, &mut libs, &mut images, 2096, 2097, 2098, 25.0, BOTTOM_Y_BIG, 4)
+            .insert(MiniMapBigMapButton);
+        // 灯光状态指示（C# LightSetting：2093 Normal/Day、2095 Dawn、2094 Evening、2092 Night）
+        if let (Some(normal), Some(dawn), Some(evening), Some(night)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2093),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2095),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2094),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2092),
+        ) {
+            spawn_image(p, normal.clone(), 102.0, BOTTOM_Y_BIG, 14.0, 14.0, 4)
+                .insert(MiniMapLightSetting { normal, dawn, evening, night });
+        }
+    });
 }
 
-/// 按图像实际尺寸生成小地图三态按钮
-fn spawn_minimap_button(
-    commands: &mut Commands,
+/// 按图像实际尺寸生成小地图三态按钮（面板子节点）
+fn spawn_minimap_button<'a>(
+    parent: &'a mut bevy::ecs::hierarchy::ChildSpawnerCommands,
     libs: &mut GameLibraries,
     images: &mut Assets<Image>,
-    cache: &mut UiImageCache,
     normal: usize,
     hover: usize,
     pressed: usize,
     x: f32,
     y: f32,
-    z: f32,
-) -> Option<Entity> {
+    z: i32,
+) -> EntityCommands<'a> {
     let (w, h) = match libs.0.get_image(LibraryName::Prguse, normal) {
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
         None => (14.0, 14.0),
     };
-    spawn_ui_button(
-        commands, libs, images, cache,
-        LibraryName::Prguse, normal, hover, pressed,
-        x, y, z, w, h,
-    )
+    let (n, hov, pr) = (
+        load_lib_image(libs, images, LibraryName::Prguse, normal).unwrap(),
+        load_lib_image(libs, images, LibraryName::Prguse, hover).unwrap(),
+        load_lib_image(libs, images, LibraryName::Prguse, pressed).unwrap(),
+    );
+    spawn_icon_button(parent, n, hov, pr, x, y, w, h, z)
 }
+
 
 /// 按钮点击：大小切换 / 打开邮件 / 打开大地图（C# Click 处理）
 fn minimap_toggle_system(
     mut mode: ResMut<MiniMapMode>,
     mut mgr: ResMut<DialogManager>,
-    toggle: Query<&UiButton, With<MiniMapToggle>>,
-    mail: Query<&UiButton, With<MiniMapMailButton>>,
-    bigmap: Query<&UiButton, With<MiniMapBigMapButton>>,
+    toggle: Query<(Entity, &Interaction), With<MiniMapToggle>>,
+    mail: Query<(Entity, &Interaction), With<MiniMapMailButton>>,
+    bigmap: Query<(Entity, &Interaction), With<MiniMapBigMapButton>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
-    if let Ok(btn) = toggle.single() {
-        if btn.clicked {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if let Ok((e, inter)) = toggle.single() {
+        if edge(e, inter, &mut prev_inter) {
             mode.big = !mode.big;
         }
     }
-    if let Ok(btn) = mail.single() {
-        if btn.clicked {
+    if let Ok((e, inter)) = mail.single() {
+        if edge(e, inter, &mut prev_inter) {
             mgr.toggle(DialogKind::Mail);
         }
     }
-    if let Ok(btn) = bigmap.single() {
-        if btn.clicked {
+    if let Ok((e, inter)) = bigmap.single() {
+        if edge(e, inter, &mut prev_inter) {
             mgr.toggle(DialogKind::BigMap);
         }
     }
@@ -402,91 +310,28 @@ fn minimap_ui_system(
             Without<MiniMapBigMapButton>,
         ),
     >,
-    mut widgets: Query<
-        &mut Visibility,
-        (With<MiniMapWidget>, Without<MiniMapMapArea>, Without<MiniMapPlayerDot>),
-    >,
-    mut bg: Query<(&mut Sprite, &MiniMapBg), (Without<MiniMapMapArea>, Without<MiniMapLightSetting>)>,
+    mut widgets: Query<&mut Visibility, With<MiniMapWidget>>,
+    mut bg: Query<(&mut Node, &mut ImageNode, &MiniMapBg)>,
     mut map_area: Query<&mut Visibility, (With<MiniMapMapArea>, Without<MiniMapPlayerDot>)>,
     mut dot: Query<
-        (&mut Visibility, &mut Transform),
-        (
-            With<MiniMapPlayerDot>,
-            Without<MiniMapWidget>,
-            Without<MiniMapPosText>,
-            Without<MiniMapLightSetting>,
-            Without<MiniMapMailButton>,
-            Without<MiniMapBigMapButton>,
-        ),
+        (&mut Node, &mut Visibility),
+        (With<MiniMapPlayerDot>, Without<MiniMapActorDot>),
     >,
     mut actor_dots: Query<
-        (&mut Transform, &mut Sprite, &mut Visibility, &MiniMapActorDot),
-        (
-            Without<MiniMapWidget>,
-            Without<MiniMapPlayerDot>,
-            Without<LocalPlayer>,
-            Without<MiniMapBg>,
-            Without<MiniMapMapArea>,
-            Without<MiniMapPosText>,
-            Without<MiniMapLightSetting>,
-            Without<MiniMapMailButton>,
-            Without<MiniMapBigMapButton>,
-        ),
+        (&mut Node, &mut ImageNode, &mut Visibility, &MiniMapActorDot),
+        (Without<MiniMapPlayerDot>, Without<MiniMapBg>, Without<MiniMapMapArea>),
     >,
-    mut name_texts: Query<&mut Text2d, (With<MiniMapNameText>, Without<MiniMapPosText>)>,
+    mut name_texts: Query<&mut Text, (With<MiniMapNameText>, Without<MiniMapPosText>)>,
     mut pos_texts: Query<
-        (&mut Text2d, &mut Transform),
-        (
-            With<MiniMapPosText>,
-            Without<MiniMapNameText>,
-            Without<MiniMapLightSetting>,
-            Without<MiniMapMailButton>,
-            Without<MiniMapBigMapButton>,
-            Without<MiniMapPlayerDot>,
-            Without<MiniMapActorDot>,
-            Without<LocalPlayer>,
-        ),
+        (&mut Text, &mut Node),
+        (With<MiniMapPosText>, Without<MiniMapNameText>),
     >,
     mut light: Query<
-        (&mut Transform, &mut Sprite, &MiniMapLightSetting),
-        (
-            With<MiniMapLightSetting>,
-            Without<MiniMapPosText>,
-            Without<MiniMapMailButton>,
-            Without<MiniMapBigMapButton>,
-            Without<MiniMapPlayerDot>,
-            Without<MiniMapActorDot>,
-            Without<LocalPlayer>,
-        ),
+        (&mut Node, &mut ImageNode, &MiniMapLightSetting),
+        Without<MiniMapPosText>,
     >,
-    mut mail_btn: Query<
-        (&mut UiButton, &mut Transform),
-        (
-            With<MiniMapMailButton>,
-            Without<MiniMapBigMapButton>,
-            Without<MiniMapToggle>,
-            Without<MiniMapMapArea>,
-            Without<MiniMapPosText>,
-            Without<MiniMapLightSetting>,
-            Without<MiniMapPlayerDot>,
-            Without<MiniMapActorDot>,
-            Without<LocalPlayer>,
-        ),
-    >,
-    mut bigmap_btn: Query<
-        (&mut UiButton, &mut Transform),
-        (
-            With<MiniMapBigMapButton>,
-            Without<MiniMapMailButton>,
-            Without<MiniMapToggle>,
-            Without<MiniMapMapArea>,
-            Without<MiniMapPosText>,
-            Without<MiniMapLightSetting>,
-            Without<MiniMapPlayerDot>,
-            Without<MiniMapActorDot>,
-            Without<LocalPlayer>,
-        ),
-    >,
+    mut mail_btn: Query<&mut Node, (With<MiniMapMailButton>, Without<MiniMapBigMapButton>, Without<MiniMapToggle>)>,
+    mut bigmap_btn: Query<&mut Node, (With<MiniMapBigMapButton>, Without<MiniMapMailButton>, Without<MiniMapToggle>)>,
 ) {
     let open = mgr.is_open(DialogKind::Minimap);
     let big = mode.big;
@@ -496,12 +341,14 @@ fn minimap_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
 
-    // 背景换图（2090 大 / 2091 小）
-    for (mut sp, bg) in &mut bg {
+    // 背景换图 + 尺寸（2090 大 128x154 / 2091 小 128x45）
+    for (mut node, mut img, bg) in &mut bg {
         let want = if big { bg.big.clone() } else { bg.small.clone() };
-        if sp.image != want {
-            sp.image = want;
+        if img.image != want {
+            img.image = want;
         }
+        node.width = Val::Px(128.0);
+        node.height = Val::Px(if big { 154.0 } else { 45.0 });
     }
 
     let (map_w, map_h) = match &game_data.map {
@@ -514,25 +361,25 @@ fn minimap_ui_system(
         *vis = if open && big { Visibility::Visible } else { Visibility::Hidden };
     }
 
-    if let Ok((mut dot_vis, mut dot_tf)) = dot.single_mut() {
+    if let Ok((mut dot_node, mut dot_vis)) = dot.single_mut() {
         if !open || !big {
             *dot_vis = Visibility::Hidden;
         } else {
             *dot_vis = Visibility::Visible;
-            // 玩家格子坐标 → 小地图像素
+            // 玩家格子坐标 → 小地图像素（面板子节点，相对坐标；面板原点 (898,0)）
             if let Ok(player_tf) = players.single() {
                 let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
-                let px = MINIMAP_X + MAP_RECT.0 + (tx as f32 / map_w) * MAP_RECT.2;
-                let py = MINIMAP_Y + MAP_RECT.1 + (ty as f32 / map_h) * MAP_RECT.3;
-                dot_tf.translation.x = px - 2.0;
-                dot_tf.translation.y = -(py - 2.0);
+                let px = MAP_RECT.0 + (tx as f32 / map_w) * MAP_RECT.2;
+                let py = MAP_RECT.1 + (ty as f32 / map_h) * MAP_RECT.3;
+                dot_node.left = Val::Px(px - 2.0);
+                dot_node.top = Val::Px(py - 2.0);
                 if let Ok((mut t, mut tf)) = pos_texts.single_mut() {
                     let s = format!("{},{}", tx, ty);
                     if t.0 != s {
                         t.0 = s; // 变化才更新，避免每帧重排文本（ICU4X/CPU，#31）
                     }
-                    tf.translation.x = MINIMAP_X + 46.0 + 8.0;
-                    tf.translation.y = -(MINIMAP_Y + bottom_y);
+                    tf.left = Val::Px(54.0);
+                    tf.top = Val::Px(bottom_y);
                 }
             }
         }
@@ -544,8 +391,8 @@ fn minimap_ui_system(
             .iter()
             .map(|(tf, mon, npc)| {
                 let (tx, ty) = world_to_tile(tf.translation.x, tf.translation.y);
-                let px = MINIMAP_X + MAP_RECT.0 + (tx as f32 / map_w) * MAP_RECT.2;
-                let py = MINIMAP_Y + MAP_RECT.1 + (ty as f32 / map_h) * MAP_RECT.3;
+                let px = MAP_RECT.0 + (tx as f32 / map_w) * MAP_RECT.2;
+                let py = MAP_RECT.1 + (ty as f32 / map_h) * MAP_RECT.3;
                 let color = if npc.is_some() {
                     Color::srgb(0.0, 1.0, 0.2)
                 } else if mon.is_some() {
@@ -556,13 +403,13 @@ fn minimap_ui_system(
                 (px, py, color)
             })
             .collect();
-        for (mut tf, mut sp, mut vis, idx) in &mut actor_dots {
+        for (mut node, mut img, mut vis, idx) in &mut actor_dots {
             match points.get(idx.0) {
                 Some((px, py, color)) => {
-                    tf.translation.x = px - 1.0;
-                    tf.translation.y = -(py - 1.0);
-                    if sp.color != *color {
-                        sp.color = *color;
+                    node.left = Val::Px(px - 1.0);
+                    node.top = Val::Px(py - 1.0);
+                    if img.color != *color {
+                        img.color = *color;
                     }
                     *vis = Visibility::Visible;
                 }
@@ -583,34 +430,29 @@ fn minimap_ui_system(
     }
 
     // 灯光指示 y + 图标（C# GameScene.TimeOfDay：Normal/Day→2093 Dawn→2095 Evening→2094 Night→2092）
-    for (mut tf, mut sp, lset) in &mut light {
-        tf.translation.y = -(MINIMAP_Y + bottom_y);
+    for (mut node, mut img, lset) in &mut light {
+        node.top = Val::Px(bottom_y);
         let want = match dn.light {
             mir2_shared::enums::LightSetting::Dawn => lset.dawn.clone(),
             mir2_shared::enums::LightSetting::Evening => lset.evening.clone(),
             mir2_shared::enums::LightSetting::Night => lset.night.clone(),
             _ => lset.normal.clone(),
         };
-        if sp.image != want {
-            sp.image = want;
+        if img.image != want {
+            img.image = want;
         }
     }
 
-    // 底部按钮位置 + 命中矩形（C# MailButton (4,y) / BigMapButton (25,y)）
-    for (mut btn, mut tf) in &mut mail_btn {
-        btn.rect.0 = MINIMAP_X + 4.0;
-        btn.rect.1 = bottom_y;
-        tf.translation.x = MINIMAP_X + 4.0;
-        tf.translation.y = -(MINIMAP_Y + bottom_y);
+    // 底部按钮位置（C# MailButton (4,y) / BigMapButton (25,y)）
+    for mut node in &mut mail_btn {
+        node.left = Val::Px(4.0);
+        node.top = Val::Px(bottom_y);
     }
-    for (mut btn, mut tf) in &mut bigmap_btn {
-        btn.rect.0 = MINIMAP_X + 25.0;
-        btn.rect.1 = bottom_y;
-        tf.translation.x = MINIMAP_X + 25.0;
-        tf.translation.y = -(MINIMAP_Y + bottom_y);
+    for mut node in &mut bigmap_btn {
+        node.left = Val::Px(25.0);
+        node.top = Val::Px(bottom_y);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -686,7 +528,7 @@ fn minimap_member_dots_system(
     locs: Res<MemberLocations>,
     current: Res<CurrentMapIndex>,
     mut dots: Query<
-        (&mut Transform, &mut Visibility, &MiniMapMemberDot),
+        (&mut Node, &mut Visibility, &MiniMapMemberDot),
         (
             Without<MiniMapWidget>,
             Without<MiniMapPlayerDot>,
@@ -700,7 +542,7 @@ fn minimap_member_dots_system(
         Some(m) => (m.width as f32, m.height as f32),
         None => (1.0, 1.0),
     };
-    for (mut tf, mut vis, idx) in &mut dots {
+    for (mut node, mut vis, idx) in &mut dots {
         let Some((_, map_idx, tx, ty)) = locs.members.get(idx.0) else {
             *vis = Visibility::Hidden;
             continue;
@@ -715,9 +557,9 @@ fn minimap_member_dots_system(
             continue;
         }
         *vis = Visibility::Visible;
-        let px = MINIMAP_X + MAP_RECT.0 + (*tx as f32 / map_w) * MAP_RECT.2;
-        let py = MINIMAP_Y + MAP_RECT.1 + (*ty as f32 / map_h) * MAP_RECT.3;
-        tf.translation.x = px - 1.0;
-        tf.translation.y = -(py - 1.0);
+        let px = MAP_RECT.0 + (*tx as f32 / map_w) * MAP_RECT.2;
+        let py = MAP_RECT.1 + (*ty as f32 / map_h) * MAP_RECT.3;
+        node.left = Val::Px(px - 1.0);
+        node.top = Val::Px(py - 1.0);
     }
 }
