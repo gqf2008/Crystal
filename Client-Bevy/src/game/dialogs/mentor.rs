@@ -17,8 +17,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
 /// 师徒状态（MentorUpdate 写入；mentor_* 字段语义同 C# MentorDialog：对方信息）
@@ -89,7 +90,6 @@ app.add_systems(OnEnter(AppState::Game), spawn_mentor);
             (
                 mentor_ui_system,
                 mentor_invite_system,
-                ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -107,7 +107,6 @@ fn spawn_mentor(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -117,146 +116,108 @@ fn spawn_mentor(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[170]（C# MentorDialog.Index=170）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 标题 Title[51]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 51) {
-        let e = spawn_ui_sprite(&mut commands, h, 298.0, 88.0, 6.2, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭 Prguse2 360/361/362
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            MentorClose,
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-        ));
-    }
-    // 信息行（0 标题 / 1 师父 / 2 徒弟 / 3 拜师经验 / 4 允许拜师状态）
-    for i in 0..5usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            290.0, 125.0 + i as f32 * 26.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            MentorLine(i),
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-        ));
-    }
-    // 允许拜师按钮（C# Prguse 114/115/116）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 114, 115, 116,
-        300.0, 275.0, 8.3, 60.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            MentorAllow,
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-        ));
-    }
-    // 添加师父按钮（C# Title 213/214/215）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 213, 214, 215,
-        370.0, 275.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            MentorAdd,
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-        ));
-    }
-    // 解除师徒按钮（C# Title 216/217/218）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 216, 217, 218,
-        460.0, 275.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            MentorRemove,
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-        ));
-    }
-    // 师父名字输入框（TextInput id 4）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let name_box = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Mentor),
-            MentorWidget,
-            MentorNameField,
-            crate::game::dialogs::text_input::TextInputField(4),
-            crate::game::dialogs::text_input::TextInputRect(300.0, 315.0, 180.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(180.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(300.0, -315.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(name_box).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(4),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
+    // 面板 Prguse[170]（C# MentorDialog.Index=170，244x207 @ 280,80）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Mentor), MentorWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[51] @(18,8)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 51) {
+            spawn_image(p, h, 18.0, 8.0, 103.0, 17.0, 9);
+        }
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(MentorClose);
+        }
+        // 信息行（0 标题 / 1 师父 / 2 徒弟 / 3 拜师经验 / 4 允许拜师状态）@(10,45+26i)
+        for i in 0..5usize {
+            spawn_label(p, &font, "", 10.0, 45.0 + i as f32 * 26.0, 12.0, Color::WHITE, 9)
+                .insert(MentorLine(i));
+        }
+        // 允许拜师（Prguse[114/115/116] @(20,195)）、添加（Title[213/214/215] @(90,195)）、
+        // 解除（Title[216/217/218] @(180,195)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 114),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 115),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 195.0, 60.0, 25.0, 10).insert(MentorAllow);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 213),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 214),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 215),
+        ) {
+            spawn_icon_button(p, n, h, pr, 90.0, 195.0, 76.0, 25.0, 10).insert(MentorAdd);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 216),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 217),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 218),
+        ) {
+            spawn_icon_button(p, n, h, pr, 180.0, 195.0, 76.0, 25.0, 10).insert(MentorRemove);
+        }
+        // 师父名字输入框（TextInput id 4）@(20,235)
+        spawn_container(p, 20.0, 235.0, 180.0, 20.0, 10)
+            .insert((
+                MentorNameField,
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                crate::game::dialogs::text_input::TextInputField(4),
+                crate::game::dialogs::text_input::TextInputRect(300.0, 315.0, 180.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(4),
+                ));
+            });
     });
 
-    // 邀请提示（MirMessageBox，同行会邀请）
+    // 邀请提示（MirMessageBox @(284,289) 独立根节点）
     let (bx, by) = (284.0, 289.0);
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
-        commands
-            .entity(e)
-            .insert((MentorInviteWidget, Visibility::Hidden));
-    }
-    let t = spawn_ui_text(
-        &mut commands, &font, "", bx + 35.0, by + 40.0, 12.0, Color::WHITE, 9.6,
-    );
-    commands.entity(t).insert((MentorInviteText, MentorInviteWidget));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        bx + 240.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MentorInviteYes, MentorInviteWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        bx + 340.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MentorInviteNo, MentorInviteWidget));
+    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let inv = spawn_panel(&mut commands, h, bx, by, 260.0, 120.0, 45);
+        commands.entity(inv).insert(MentorInviteWidget);
+        commands.entity(inv).with_children(|ip| {
+            spawn_label(ip, &font, "", 35.0, 40.0, 12.0, Color::WHITE, 9)
+                .insert(MentorInviteText);
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(ip, n, h, pr, 240.0, 150.0, 76.0, 25.0, 10)
+                    .insert(MentorInviteYes);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(ip, n, h, pr, 340.0, 150.0, 76.0, 25.0, 10)
+                    .insert(MentorInviteNo);
+            }
+        });
     }
 }
 
@@ -268,13 +229,22 @@ fn mentor_ui_system(
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     hud: Res<crate::game::hud::HudState>,
-    close: Query<&UiButton, With<MentorClose>>,
-    allow_btn: Query<&UiButton, With<MentorAllow>>,
-    add_btn: Query<&UiButton, With<MentorAdd>>,
-    remove_btn: Query<&UiButton, With<MentorRemove>>,
+    close: Query<(Entity, &Interaction), With<MentorClose>>,
+    allow_btn: Query<(Entity, &Interaction), With<MentorAllow>>,
+    add_btn: Query<(Entity, &Interaction), With<MentorAdd>>,
+    remove_btn: Query<(Entity, &Interaction), With<MentorRemove>>,
     mut widgets: Query<&mut Visibility, With<MentorWidget>>,
-    mut lines: Query<(&mut Text2d, &MentorLine)>,
+    mut lines: Query<(&mut Text, &MentorLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Mentor);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -282,12 +252,11 @@ fn mentor_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Mentor);
         }
     }
-    // 渲染（C# UpdateInterface：等级高者即师父；无关系时隐藏信息）
     let has = !state.mentor_name.is_empty() && state.mentor_level != 0;
     let self_is_mentor = has && (hud.level as u32) > state.mentor_level;
     for (mut text, line) in &mut lines {
@@ -335,9 +304,8 @@ fn mentor_ui_system(
             _ => String::new(),
         };
     }
-    // 允许拜师开关（C# AllowButton 点击 → C.AllowMentor）
-    for btn in &allow_btn {
-        if btn.clicked {
+    for (e, inter) in &allow_btn {
+        if edge(e, inter, &mut prev_inter) {
             state.allow_mentor = !state.allow_mentor;
             net.send_packet(&crate::network::AllowMentorWire {
                 allow: state.allow_mentor,
@@ -345,9 +313,8 @@ fn mentor_ui_system(
             tracing::info!("🧑‍🏫 允许拜师: {}", state.allow_mentor);
         }
     }
-    // 添加师父（C# AddButton → 输入名字 → C.AddMentor）
-    for btn in &add_btn {
-        if btn.clicked {
+    for (e, inter) in &add_btn {
+        if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(4).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() && !has {
@@ -362,9 +329,8 @@ fn mentor_ui_system(
             }
         }
     }
-    // 解除师徒（C# RemoveButton → C.CancelMentor）
-    for btn in &remove_btn {
-        if btn.clicked && has {
+    for (e, inter) in &remove_btn {
+        if edge(e, inter, &mut prev_inter) && has {
             net.send_packet(&mir2_shared::packets::client::misc::CancelMentor);
             tracing::info!("🧑‍🏫 解除师徒关系");
         }
@@ -375,11 +341,20 @@ fn mentor_ui_system(
 fn mentor_invite_system(
     mut state: ResMut<MentorState>,
     net: Res<NetConnection>,
-    yes: Query<&UiButton, With<MentorInviteYes>>,
-    no: Query<&UiButton, With<MentorInviteNo>>,
+    yes: Query<(Entity, &Interaction), With<MentorInviteYes>>,
+    no: Query<(Entity, &Interaction), With<MentorInviteNo>>,
     mut widgets: Query<&mut Visibility, With<MentorInviteWidget>>,
-    mut texts: Query<(&mut Text2d, &MentorInviteText)>,
+    mut texts: Query<(&mut Text, &MentorInviteText)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let has_invite = state.invite.is_some();
     for mut vis in widgets.iter_mut() {
         *vis = if has_invite {
@@ -398,13 +373,13 @@ fn mentor_invite_system(
         return;
     }
     let mut accept: Option<bool> = None;
-    for btn in &yes {
-        if btn.clicked {
+    for (e, inter) in &yes {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(true);
         }
     }
-    for btn in &no {
-        if btn.clicked {
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(false);
         }
     }
@@ -416,7 +391,6 @@ fn mentor_invite_system(
         state.invite = None;
     }
 }
-
 
 /// 消费服务端师徒事件（网络层只广播 ServerEvent）
 fn mentor_server_events(
