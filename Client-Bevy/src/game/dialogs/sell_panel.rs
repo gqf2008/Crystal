@@ -20,9 +20,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
-    ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 use mir2_shared::enums::PanelType;
 
@@ -70,11 +70,7 @@ impl Plugin for SellPanelPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_sell_panel);
         app.add_systems(
             Update,
-            (
-                sell_panel_ui_system,
-                sell_panel_action_system,
-                ui_button_system,
-            )
+            (sell_panel_ui_system, sell_panel_action_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -91,7 +87,6 @@ fn spawn_sell_panel(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -101,89 +96,42 @@ fn spawn_sell_panel(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[392]（C# NPCDropDialog）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 392) {
-        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
-        commands.entity(e).insert((
-            SellPanelWidget,
-            DialogRoot(DialogKind::Npc),
-            Visibility::Hidden,
-        ));
-    }
-
-    // 确认按钮 Title[290/291/292]（C# ConfirmButton）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        290,
-        291,
-        292,
-        DIALOG_X + 114.0,
-        DIALOG_Y + 62.0,
-        7.0,
-        32.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            SellPanelConfirm,
-            SellPanelWidget,
-            DialogRoot(DialogKind::Npc),
-        ));
-    }
-
-    // 提示文本（C# InfoLabel (30,10)）
-    let info = spawn_ui_text(
-        &mut commands,
-        &font,
-        "把物品放入面板后点确认",
-        DIALOG_X + 30.0,
-        DIALOG_Y + 10.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
+    // 背景 Prguse[392]（C# NPCDropDialog，176x146 @ (264,224)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 392) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 176.0, 146.0, 30);
     commands
-        .entity(info)
-        .insert((SellPanelInfo, SellPanelWidget, DialogRoot(DialogKind::Npc)));
+        .entity(panel)
+        .insert((SellPanelWidget, DialogRoot(DialogKind::Npc)));
 
-    // 拖放区（C# ItemCell (38,72)，36x32 格子 + 边框底色）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    let cell = commands
-        .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Npc),
-            SellPanelWidget,
-            SellPanelDrop,
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.0, 0.0, 0.0, 0.35),
-                custom_size: Some(Vec2::new(75.0, 75.0)),
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(DIALOG_X + 20.0, -(DIALOG_Y + 55.0), 6.5),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(cell).with_children(|p| {
-        p.spawn((
-            SellPanelIcon,
-            Sprite {
-                image: white.clone(),
-                custom_size: Some(Vec2::new(68.0, 68.0)),
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(3.0, -3.0, 6.6),
-            Visibility::Hidden,
-        ));
+    commands.entity(panel).with_children(|p| {
+        // 确认按钮 Title[290/291/292]（C# ConfirmButton (114,62)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 290),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 291),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 292),
+        ) {
+            spawn_icon_button(p, n, h, pr, 114.0, 62.0, 48.0, 25.0, 10)
+                .insert(SellPanelConfirm);
+        }
+        // 提示文本（C# InfoLabel (30,10)）
+        spawn_label(p, &font, "把物品放入面板后点确认", 30.0, 10.0, 12.0, Color::WHITE, 9)
+            .insert(SellPanelInfo);
+        // 拖放区（C# ItemCell (38,72) 区域 (20,55,75,75)）+ 目标图标
+        spawn_container(p, 20.0, 55.0, 75.0, 75.0, 9)
+            .insert((
+                SellPanelDrop,
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            ))
+            .with_children(|c| {
+                let white = images.add(crate::map_renderer::make_image(
+                    vec![255, 255, 255, 255],
+                    1,
+                    1,
+                ));
+                spawn_image(c, white, 3.0, 3.0, 68.0, 68.0, 10).insert(SellPanelIcon);
+            });
     });
 }
 
@@ -192,20 +140,11 @@ fn sell_panel_ui_system(
     state: Res<SellPanelState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    mut widgets: Query<
-        (&mut Visibility, Option<&SellPanelInfo>),
-        (With<SellPanelWidget>, Without<SellPanelIcon>),
-    >,
-    mut icons: Query<
-        (&mut Sprite, &mut Visibility),
-        (With<SellPanelIcon>, Without<SellPanelWidget>),
-    >,
-    mut info_texts: Query<(&mut Text2d, &SellPanelInfo)>,
+    mut widgets: Query<&mut Visibility, (With<SellPanelWidget>, Without<SellPanelIcon>)>,
+    mut icons: Query<(&mut ImageNode, &mut Visibility), With<SellPanelIcon>>,
+    mut info_texts: Query<(&mut Text, &SellPanelInfo)>,
 ) {
-    for (mut vis, _info) in &mut widgets {
-        // 提示文本也随面板显隐（此前跳过 SellPanelInfo，导致“放入物品后点确认出售”
-        // 在面板关闭时仍渲染在屏幕上）
+    for mut vis in &mut widgets {
         *vis = if state.visible {
             Visibility::Visible
         } else {
@@ -224,22 +163,21 @@ fn sell_panel_ui_system(
     }
 
     // 目标物品图标
-    for (mut sprite, mut vis) in &mut icons {
+    for (mut node, mut vis) in &mut icons {
         match state.target.as_ref() {
             Some(item) => {
-                let handle = ui_image(
+                let handle = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     LibraryName::Items,
                     item.image as usize,
                 );
                 match handle {
-                    Some(h) if sprite.image != h => sprite.image = h,
+                    Some(h) if node.image != h => node.image = h,
                     None => *vis = Visibility::Hidden,
                     _ => {}
                 }
-                if sprite.image.is_strong() {
+                if node.image.is_strong() {
                     *vis = Visibility::Visible;
                 }
             }
@@ -257,8 +195,17 @@ fn sell_panel_action_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    confirm_btns: Query<&UiButton, With<SellPanelConfirm>>,
+    confirm_btns: Query<(Entity, &Interaction), With<SellPanelConfirm>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     if !state.visible {
         return;
     }
@@ -297,8 +244,8 @@ fn sell_panel_action_system(
     // （这里只负责面板拖放区与确认）
 
     // 确认按钮
-    for btn in &confirm_btns {
-        if !btn.clicked {
+    for (e, inter) in &confirm_btns {
+        if !edge(e, inter, &mut prev_inter) {
             continue;
         }
         let Some(item) = state.target.take() else {
