@@ -20,10 +20,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
+    spawn_scroll_bar_ui, UiScrollList,
 };
-use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 市场商品条目（NPCMarketPage 写入）
 #[derive(Debug, Clone, Default)]
@@ -110,7 +111,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
         app.add_systems(OnExit(AppState::Game), cleanup_market);
         app.add_systems(
             Update,
-            (market_ui_system, market_action_system, ui_button_system)
+            (market_ui_system, market_action_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -127,7 +128,6 @@ fn spawn_market(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -137,185 +137,133 @@ fn spawn_market(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
+    // 面板 Prguse[170] @ (280,80)。加宽加高到 320x400：8 按钮 + 2 输入框 + 滚动条
+    // 全在面板内（旧 sprite 布局底部按钮 rel y=265-385 悬空 207 高面板外）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 400.0, 30);
+    commands.entity(panel).insert((
+        DialogRoot(DialogKind::Market),
+        MarketWidget,
         // #89 市场列表滚轮翻页：1 格 = 1 页（10 行）
-        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (495.0, 120.0, 4.0, 180.0), 6.3);
-        commands.entity(track).insert((DialogRoot(DialogKind::Market), MarketWidget, Visibility::Visible));
-        commands.entity(thumb).insert((
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-            Visibility::Hidden,
-            ScrollList {
-                rect_rel: (15.0, 40.0, 200.0, 180.0),
-                row_h: 18.0,
-                visible: 10,
-                total: 0,
-                offset: 0,
-                step: 10,
-                track_rel: (215.0, 40.0, 4.0, 180.0),
-                thumb: Some(thumb),
-                z: 8.0,
-            },
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            MarketClose,
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-        ));
-    }
-    // 商品列表 10 行
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            295.0, 120.0 + i as f32 * 18.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            MarketLine(i),
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-        ));
-    }
-    // 页签 + 消息行
-    for i in 10..=11usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            295.0, 305.0 + (i - 10) as f32 * 18.0,
-            12.0, Color::srgb(1.0, 0.9, 0.5), 8.0,
-        );
-        commands.entity(e).insert((
-            MarketLine(i),
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-        ));
-    }
-    // 按钮行 1：刷新 / 搜索 / 购买
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 345.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarketRefreshBtn, DialogRoot(DialogKind::Market), MarketWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        390.0, 345.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarketSearchBtn, DialogRoot(DialogKind::Market), MarketWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        480.0, 345.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarketBuyBtn, DialogRoot(DialogKind::Market), MarketWidget));
-    }
-    // 按钮行 2：寄售 / 取回 / 立即售出
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 380.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarketConsignBtn, DialogRoot(DialogKind::Market), MarketWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 380.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarketGetBackBtn, DialogRoot(DialogKind::Market), MarketWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        480.0, 380.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarketSellNowBtn, DialogRoot(DialogKind::Market), MarketWidget));
-    }
-    // 翻页
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 197, 198, 199,
-        300.0, 415.0, 8.3, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            MarketPrevBtn,
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 207, 208, 209,
-        320.0, 415.0, 8.3, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            MarketNextBtn,
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
-        ));
-    }
-    // 搜索/价格输入框
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    spawn_market_input(&mut commands, &white, &font, 5, 300.0, 445.0, 120.0);
-    spawn_market_input(&mut commands, &white, &font, 6, 460.0, 445.0, 120.0);
+        UiScrollList {
+            rect_rel: (15.0, 40.0, 200.0, 180.0),
+            row_h: 18.0,
+            visible: 10,
+            total: 0,
+            offset: 0,
+            step: 10,
+            track_rel: (215.0, 40.0, 4.0, 180.0),
+            thumb: None,
+            z: 9,
+        },
+    ));
+
+    commands.entity(panel).with_children(|p| {
+        // 滚动条（面板子节点）
+        spawn_scroll_bar_ui(p, (215.0, 40.0, 4.0, 180.0), 9);
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(MarketClose);
+        }
+        // 商品列表 10 行 @(15,40+18i)
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 15.0, 40.0 + i as f32 * 18.0, 12.0, Color::WHITE, 9)
+                .insert(MarketLine(i));
+        }
+        // 页签 + 消息行 @(15,225+18i)
+        for i in 10..=11usize {
+            spawn_label(p, &font, "", 15.0, 225.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+                .insert(MarketLine(i));
+        }
+        // 按钮行 1：刷新/搜索/购买 @(20/110/200,265)；行 2：寄售/取回/立即售出 @(20/110/200,300)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 20.0, 265.0, 76.0, 25.0, 10)
+                .insert(MarketRefreshBtn);
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 265.0, 76.0, 25.0, 10)
+                .insert(MarketSearchBtn);
+            spawn_icon_button(p, n, h, pr, 20.0, 300.0, 76.0, 25.0, 10).insert(MarketConsignBtn);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 200.0, 265.0, 76.0, 25.0, 10)
+                .insert(MarketBuyBtn);
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 300.0, 76.0, 25.0, 10)
+                .insert(MarketGetBackBtn);
+            spawn_icon_button(p, n, h, pr, 200.0, 300.0, 76.0, 25.0, 10).insert(MarketSellNowBtn);
+        }
+        // 翻页 @(20/40,335)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 335.0, 16.0, 14.0, 10).insert(MarketPrevBtn);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(p, n, h, pr, 40.0, 335.0, 16.0, 14.0, 10).insert(MarketNextBtn);
+        }
+        // 搜索/价格输入框（TextInput 5/6）@(20/180,365)
+        spawn_market_input(p, &mut images, &font, 5, 20.0, 365.0, 120.0, 300.0, 445.0);
+        spawn_market_input(p, &mut images, &font, 6, 180.0, 365.0, 120.0, 460.0, 445.0);
+    });
 }
 
-/// 市场输入框（TextInputField(id) + 子 TextInputDisplay(id)）
+/// 市场输入框（TextInputField(id) + 子 TextInputDisplay(id)）；面板子节点
+#[allow(clippy::too_many_arguments)]
 fn spawn_market_input(
-    commands: &mut Commands,
-    white: &Handle<Image>,
+    parent: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    images: &mut Assets<Image>,
     font: &Handle<Font>,
     id: usize,
     x: f32,
     y: f32,
     w: f32,
+    rect_x: f32,
+    rect_y: f32,
 ) {
-    let box_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Market),
-            MarketWidget,
+    spawn_container(parent, x, y, w, 20.0, 10)
+        .insert((
             crate::game::dialogs::text_input::TextInputField(id),
-            crate::game::dialogs::text_input::TextInputRect(x, y, w, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(w, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(x, -y, 8.1),
-            Visibility::Hidden,
+            crate::game::dialogs::text_input::TextInputRect(rect_x, rect_y, w, 20.0),
+            BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
         ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(id),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
+        .with_children(|ic| {
+            ic.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(4.0),
+                    top: Val::Px(2.0),
+                    ..default()
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                ZIndex(11),
+                crate::game::dialogs::text_input::TextInputDisplay(id),
+            ));
+        });
+    let _ = images;
 }
 
 /// 显隐 + 渲染 + 按钮
@@ -325,18 +273,27 @@ fn market_ui_system(
     mut market: ResMut<MarketState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    close: Query<&UiButton, With<MarketClose>>,
-    refresh_btn: Query<&UiButton, With<MarketRefreshBtn>>,
-    search_btn: Query<&UiButton, With<MarketSearchBtn>>,
-    prev_btn: Query<&UiButton, With<MarketPrevBtn>>,
-    next_btn: Query<&UiButton, With<MarketNextBtn>>,
+    close: Query<(Entity, &Interaction), With<MarketClose>>,
+    refresh_btn: Query<(Entity, &Interaction), With<MarketRefreshBtn>>,
+    search_btn: Query<(Entity, &Interaction), With<MarketSearchBtn>>,
+    prev_btn: Query<(Entity, &Interaction), With<MarketPrevBtn>>,
+    next_btn: Query<(Entity, &Interaction), With<MarketNextBtn>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<MarketWidget>>,
-    mut lines: Query<(&mut Text2d, &MarketLine)>,
-    mut scroll: Query<&mut ScrollList, With<MarketWidget>>,
+    mut lines: Query<(&mut Text, &MarketLine)>,
+    mut scroll: Query<&mut UiScrollList, With<MarketWidget>>,
     mut requested: Local<bool>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Market);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -351,8 +308,8 @@ fn market_ui_system(
         net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
         tracing::info!("🏪 刷新市场");
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Market);
         }
     }
@@ -430,15 +387,15 @@ fn market_ui_system(
         }
     }
     // 刷新
-    for btn in &refresh_btn {
-        if btn.clicked {
+    for (e, inter) in &refresh_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
             tracing::info!("🏪 刷新市场");
         }
     }
     // 搜索（C# TrustMerchantDialog FindButton → MarketSearch{Match}，名称子串；纯数字兼容编号）
-    for btn in &search_btn {
-        if btn.clicked {
+    for (e, inter) in &search_btn {
+        if edge(e, inter, &mut prev_inter) {
             let kw = input.texts.get(5).cloned().unwrap_or_default().trim().to_string();
             net.send_packet(&crate::network::MarketSearchWire { keyword: kw.clone() });
             tracing::info!("🏪 搜索市场: {}", kw);
@@ -447,16 +404,16 @@ fn market_ui_system(
         }
     }
     // 翻页
-    for btn in &prev_btn {
-        if btn.clicked {
+    for (e, inter) in &prev_btn {
+        if edge(e, inter, &mut prev_inter) {
             if market.page > 0 {
                 market.page -= 1;
                 net.send_packet(&crate::network::MarketPageWire { page: market.page as u32 });
             }
         }
     }
-    for btn in &next_btn {
-        if btn.clicked && market.page + 1 < market.pages.max(1) {
+    for (e, inter) in &next_btn {
+        if edge(e, inter, &mut prev_inter) && market.page + 1 < market.pages.max(1) {
             market.page += 1;
             net.send_packet(&crate::network::MarketPageWire { page: market.page as u32 });
         }
@@ -472,17 +429,26 @@ fn market_action_system(
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
-    buy_btn: Query<&UiButton, With<MarketBuyBtn>>,
-    consign_btn: Query<&UiButton, With<MarketConsignBtn>>,
-    getback_btn: Query<&UiButton, With<MarketGetBackBtn>>,
-    sellnow_btn: Query<&UiButton, With<MarketSellNowBtn>>,
+    buy_btn: Query<(Entity, &Interaction), With<MarketBuyBtn>>,
+    consign_btn: Query<(Entity, &Interaction), With<MarketConsignBtn>>,
+    getback_btn: Query<(Entity, &Interaction), With<MarketGetBackBtn>>,
+    sellnow_btn: Query<(Entity, &Interaction), With<MarketSellNowBtn>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     if !mgr.is_open(DialogKind::Market) {
         return;
     }
     // 购买（选中行）
-    for btn in &buy_btn {
-        if btn.clicked {
+    for (e, inter) in &buy_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = market.selected {
                 let it = &market.listings[idx];
                 let id = it.auction_id;
@@ -509,8 +475,8 @@ fn market_action_system(
     }
     // 寄售（选中背包物品 + 价格）
     let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
-    for btn in &consign_btn {
-        if btn.clicked {
+    for (e, inter) in &consign_btn {
+        if edge(e, inter, &mut prev_inter) {
             let price = input
                 .texts
                 .get(6)
@@ -549,8 +515,8 @@ fn market_action_system(
         }
     }
     // 取回（选中行）
-    for btn in &getback_btn {
-        if btn.clicked {
+    for (e, inter) in &getback_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = market.selected {
                 let id = market.listings[idx].auction_id;
                 // C# C.MarketGetBack：Mode=Any(0)（服务端按记录状态取回物品/领取金币）
@@ -562,8 +528,8 @@ fn market_action_system(
         }
     }
     // 立即售出（选中行）
-    for btn in &sellnow_btn {
-        if btn.clicked {
+    for (e, inter) in &sellnow_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = market.selected {
                 let it = &market.listings[idx];
                 // C# C.MarketSellNow：仅 AuctionID
