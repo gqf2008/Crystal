@@ -16,10 +16,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel, UiDropDown,
 };
-use crate::ui::controls::{spawn_dropdown, DropDown};
 
 /// #1356：觉醒面板服务模式（C# PanelType：Awakening/Disassemble/Downgrade/Reset）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -120,7 +121,7 @@ impl Plugin for NpcAwakePlugin {
         );
         app.add_systems(
             Update,
-            (npc_awake_ui_system, npc_awake_render_system, ui_button_system)
+            (npc_awake_ui_system, npc_awake_render_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -137,7 +138,6 @@ fn spawn_npc_awake(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -148,142 +148,94 @@ fn spawn_npc_awake(
     let font = ui_font.0.clone();
 
     // 面板 Title[710]（360x420）C# Location (0,0)
-    let (pw, ph) = match libs.0.get_image(LibraryName::Title, 710) {
-        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-        None => (360.0, 420.0),
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 710) else {
+        return;
     };
-    let px = 0.0;
-    let py = 0.0;
+    let panel = spawn_panel(&mut commands, bg, 0.0, 0.0, 360.0, 420.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::NpcAwake), NpcAwakeWidget));
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 710) {
-        let e = spawn_ui_sprite(&mut commands, h, px, py, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::NpcAwake),
-            NpcAwakeWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // 关闭 (284,4)
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        px + 284.0, py + 4.0, 7.0, 24.0, 21.0,
-    ) {
-        commands.entity(e).insert((
-            NpcAwakeClose,
-            DialogRoot(DialogKind::NpcAwake),
-            NpcAwakeWidget,
-        ));
-    }
-
-    // 升级按钮 Title[712/713/714] (115,391) 80x25
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 712, 713, 714,
-        px + 115.0, py + 391.0, 7.0, 80.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            NpcAwakeUpgrade,
-            DialogRoot(DialogKind::NpcAwake),
-            NpcAwakeWidget,
-            // #93 通用 Tooltip：C# 升级按钮 Hint
-            crate::ui::tooltip::TooltipHint("消耗材料执行觉醒".to_string()),
-        ));
-    }
-
-    // 觉醒类型下拉（#90 通用 DropDown；C# SelectAwakeType (35,141)）
-    let dd = spawn_dropdown(
-        &mut commands, &mut images, &font,
-        vec!["攻".to_string(), "魔".to_string(), "道".to_string()],
-        None,
-        px + 35.0, py + 141.0,
-        72.0, 18.0,
-        3,
-        8.0,
-    );
-    commands.entity(dd).insert((
-        NpcAwakeTypeDrop,
-        DialogRoot(DialogKind::NpcAwake),
-        NpcAwakeWidget,
-    ));
-
-    // #1356：服务模式按钮（C# PanelType：觉醒/分解/降级/重置）
-    for (i, label) in ["觉醒", "分解", "降级", "重置"].iter().enumerate() {
-        let e = spawn_ui_text(
-            &mut commands, &font, label,
-            px + 30.0 + i as f32 * 72.0, py + 26.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            NpcAwakeServiceBtn(i as u8),
-            UiButton {
-                rect: (px + 30.0 + i as f32 * 72.0, py + 26.0, 64.0, 20.0),
-                clicked: false,
-            },
-            DialogRoot(DialogKind::NpcAwake),
-            NpcAwakeWidget,
-        ));
-    }
-    // #1356：操作按钮文字
-    let action = spawn_ui_text(
-        &mut commands, &font, "觉醒",
-        px + 118.0, py + 396.0, 12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(action).insert((
-        NpcAwakeActionLabel,
-        DialogRoot(DialogKind::NpcAwake),
-        NpcAwakeWidget,
-    ));
-
-    // 主物品格 (202,91)：图标 + 名字
-    let empty = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let icon = spawn_ui_sprite(&mut commands, empty.clone(), px + 202.0, py + 91.0, 7.0, 1.0);
-    commands.entity(icon).insert((
-        Sprite {
-            image: empty,
-            custom_size: Some(Vec2::new(36.0, 28.0)),
-            ..default()
-        },
-        NpcAwakeMainIcon,
-        DialogRoot(DialogKind::NpcAwake),
-        NpcAwakeWidget,
-    ));
-    let name = spawn_ui_text(
-        &mut commands, &font, "",
-        px + 202.0, py + 122.0, 11.0, Color::WHITE, 8.0,
-    );
-    commands.entity(name).insert((
-        NpcAwakeMainName,
-        DialogRoot(DialogKind::NpcAwake),
-        NpcAwakeWidget,
-    ));
-
-    // 材料需求标签 (67,317)/(192,317)
-    for (x, _) in [(67.0, 0usize), (192.0, 1usize)] {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            px + x, py + 317.0, 11.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            NpcAwakeMaterialText,
-            DialogRoot(DialogKind::NpcAwake),
-            NpcAwakeWidget,
-        ));
-    }
-
-    // 结果标签 (112,354)
-    let res = spawn_ui_text(
-        &mut commands, &font, "",
-        px + 112.0, py + 354.0, 11.0, Color::srgb(1.0, 0.9, 0.1), 8.0,
-    );
-    commands.entity(res).insert((
-        NpcAwakeResultText,
-        DialogRoot(DialogKind::NpcAwake),
-        NpcAwakeWidget,
-    ));
-
-    let _ = (pw, ph);
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362]（C# (284,4)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 284.0, 4.0, 24.0, 21.0, 10).insert(NpcAwakeClose);
+        }
+        // 升级按钮 Title[712/713/714]（C# (115,391)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 712),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 713),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 714),
+        ) {
+            spawn_icon_button(p, n, h, pr, 115.0, 391.0, 80.0, 25.0, 10)
+                .insert((
+                    NpcAwakeUpgrade,
+                    // #93 通用 Tooltip：C# 升级按钮 Hint
+                    crate::ui::tooltip::TooltipHint("消耗材料执行觉醒".to_string()),
+                ));
+        }
+        // 觉醒类型下拉（C# SelectAwakeType (35,141)）
+        spawn_dropdown_ui(
+            p,
+            &font,
+            vec!["攻".to_string(), "魔".to_string(), "道".to_string()],
+            None,
+            (0.0, 0.0),
+            35.0,
+            141.0,
+            72.0,
+            18.0,
+            3,
+            9,
+        )
+        .insert(NpcAwakeTypeDrop);
+        // #1356：服务模式按钮（C# PanelType：觉醒/分解/降级/重置）@(30+72i,26)
+        for (i, label) in ["觉醒", "分解", "降级", "重置"].iter().enumerate() {
+            spawn_container(p, 30.0 + i as f32 * 72.0, 26.0, 64.0, 20.0, 9)
+                .insert((
+                    Button,
+                    NpcAwakeServiceBtn(i as u8),
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(2.0),
+                            top: Val::Px(4.0),
+                            ..default()
+                        },
+                        Text::new(*label),
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(1),
+                    ));
+                });
+        }
+        // #1356：操作按钮文字（升级按钮下方）
+        spawn_label(p, &font, "觉醒", 118.0, 396.0, 12.0, Color::WHITE, 10)
+            .insert(NpcAwakeActionLabel);
+        // 主物品格（C# (202,91)）：图标 + 名字（白图占位，render 系统换物品图）
+        let empty = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        spawn_image(p, empty, 202.0, 91.0, 36.0, 28.0, 9).insert(NpcAwakeMainIcon);
+        spawn_label(p, &font, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
+        // 材料需求标签（C# (67,317)/(192,317)）
+        for x in [67.0, 192.0] {
+            spawn_label(p, &font, "", x, 317.0, 11.0, Color::WHITE, 9)
+                .insert(NpcAwakeMaterialText);
+        }
+        // 结果标签（C# GoldLabel (112,354)）
+        spawn_label(p, &font, "", 112.0, 354.0, 11.0, Color::srgb(1.0, 0.9, 0.1), 9)
+            .insert(NpcAwakeResultText);
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -292,18 +244,27 @@ fn npc_awake_ui_system(
     mut state: ResMut<NpcAwakeState>,
     net: ResMut<NetConnection>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
-    close: Query<&UiButton, With<NpcAwakeClose>>,
-    upgrade: Query<&UiButton, With<NpcAwakeUpgrade>>,
-    mut type_dd: Query<(&mut DropDown, &NpcAwakeTypeDrop)>,
-    mut widgets: Query<&mut Visibility, (With<NpcAwakeWidget>, Without<NpcAwakeTypeDrop>, Without<NpcAwakeMaterialText>, Without<NpcAwakeActionLabel>)>,
-    service_btns: Query<(&UiButton, &NpcAwakeServiceBtn)>,
-    mut action: Query<(&mut Text2d, &mut Visibility), With<NpcAwakeActionLabel>>,
-    mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeMaterialText>, Without<NpcAwakeActionLabel>)>,
+    close: Query<(Entity, &Interaction), With<NpcAwakeClose>>,
+    upgrade: Query<(Entity, &Interaction), With<NpcAwakeUpgrade>>,
+    mut type_dd: Query<(&mut UiDropDown, &NpcAwakeTypeDrop)>,
+    mut widgets: Query<&mut Visibility, With<NpcAwakeWidget>>,
+    service_btns: Query<(Entity, &Interaction, &NpcAwakeServiceBtn)>,
+    mut action: Query<(&mut Text, &mut Visibility), With<NpcAwakeActionLabel>>,
+    mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
     mut mat_vis: Query<&mut Visibility, (With<NpcAwakeMaterialText>, Without<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut last_uid: Local<Option<u64>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     use mir2_shared::packets::client::misc::{Awakening, AwakeningNeedMaterials};
 
     let open = mgr.is_open(DialogKind::NpcAwake);
@@ -336,8 +297,8 @@ fn npc_awake_ui_system(
         *vis = if state.service == NpcAwakeService::Awaken { Visibility::Visible } else { Visibility::Hidden };
     }
     // #1356：服务模式切换（C# PanelType）
-    for (btn, svc) in &service_btns {
-        if btn.clicked {
+    for (e, inter, svc) in &service_btns {
+        if edge(e, inter, &mut prev_inter) {
             let new_svc = NpcAwakeService::from_u8(svc.0);
             if new_svc != state.service {
                 state.service = new_svc;
@@ -350,8 +311,8 @@ fn npc_awake_ui_system(
         }
     }
 
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::NpcAwake);
         }
     }
@@ -363,6 +324,10 @@ fn npc_awake_ui_system(
         mir2_shared::enums::AwakeType::Sc,
     ];
     if let Ok((mut dd, _)) = type_dd.single_mut() {
+        // 非觉醒模式：收起下拉（防止弹出面板残留）
+        if state.service != NpcAwakeService::Awaken {
+            dd.open = false;
+        }
         // 换了主物品 → 清空类型选择
         if *last_uid != state.selected_uid {
             *last_uid = state.selected_uid;
@@ -420,8 +385,8 @@ fn npc_awake_ui_system(
     }
 
     // 操作按钮：按服务发包（C# PanelType 语义）
-    for btn in &upgrade {
-        if btn.clicked {
+    for (e, inter) in &upgrade {
+        if edge(e, inter, &mut prev_inter) {
             match state.service {
                 NpcAwakeService::Awaken => {
                     if let (Some(uid), Some(at)) = (state.selected_uid, state.awake_type) {
@@ -463,26 +428,18 @@ fn npc_awake_render_system(
     state: Res<NpcAwakeState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    mut icon: Query<(&mut Sprite, &NpcAwakeMainIcon), Without<NpcAwakeMainName>>,
-    mut name: Query<&mut Text2d, (With<NpcAwakeMainName>, Without<NpcAwakeMainIcon>, Without<NpcAwakeMaterialText>, Without<NpcAwakeResultText>)>,
-    mut mats: Query<&mut Text2d, (With<NpcAwakeMaterialText>, Without<NpcAwakeResultText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
-    mut res: Query<&mut Text2d, (With<NpcAwakeResultText>, Without<NpcAwakeMaterialText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
+    mut icon: Query<(&mut ImageNode, &NpcAwakeMainIcon), Without<NpcAwakeMainName>>,
+    mut name: Query<&mut Text, (With<NpcAwakeMainName>, Without<NpcAwakeMainIcon>, Without<NpcAwakeMaterialText>, Without<NpcAwakeResultText>)>,
+    mut mats: Query<&mut Text, (With<NpcAwakeMaterialText>, Without<NpcAwakeResultText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
+    mut res: Query<&mut Text, (With<NpcAwakeResultText>, Without<NpcAwakeMaterialText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
 ) {
     if !mgr.is_open(crate::game::dialogs::DialogKind::NpcAwake) {
         return;
     }
-    for (mut sprite, _) in &mut icon {
+    for (mut node, _) in &mut icon {
         if let Some(item) = &state.selected_item {
-            if let Some(h) = ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Items,
-                item.image as usize,
-            ) {
-                sprite.image = h;
-                sprite.custom_size = None;
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Items, item.image as usize) {
+                node.image = h;
             }
         }
     }
