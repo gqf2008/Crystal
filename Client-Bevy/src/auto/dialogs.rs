@@ -544,12 +544,13 @@ pub(crate) fn auto_ui_dialog_test(
 
 /// --upgrade-test：施法 → mock 回发 ItemUpgraded/RemoveMagic/SendOutputMessage 等，
 /// 断言 背包物品升级 + 技能移除 + 聊天消息（#258）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_upgrade_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     magics: Res<client_bevy::game::skills::MagicsState>,
     chat: Res<client_bevy::game::chat::ChatState>,
     mut t: Local<f32>,
@@ -635,12 +636,16 @@ pub(crate) fn auto_upgrade_test(
         }
         2 => {
             if *t >= 2.5 {
-                let upgraded = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .flatten()
-                    .any(|it| it.unique_id == 9005 && it.item_index == 6);
+                let upgraded = inv_q
+                    .single()
+                    .ok()
+                    .map(|inv| {
+                        inv.items
+                            .iter()
+                            .flatten()
+                            .any(|it| it.unique_id == 9005 && it.item_index == 6)
+                    })
+                    .unwrap_or(false);
                 let removed = !magics
                     .magics
                     .iter()

@@ -12,9 +12,10 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::actor::{LocalPlayer, PlayerGuildName, PlayerName};
 use crate::game::dialogs::assign_key::AssignKeyState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
+use crate::game::player_state::{CombatStats, Loadout, Progression, Vitals};
 use crate::game::skills::MagicsState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -25,78 +26,6 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
     spawn_label_center, spawn_panel,
 };
-
-/// 角色状态（网络写入；当前服务器未下发属性，先默认值）
-#[derive(Resource)]
-pub struct CharacterState {
-    pub name: String,
-    pub guild: String,
-    pub level: u16,
-    pub hp: i32,
-    pub max_hp: i32,
-    pub mp: i32,
-    pub max_mp: i32,
-    /// [min, max] AC/MAC/DC/MC/SC
-    pub stats: [[i32; 2]; 5],
-    /// #208：暴击率/暴击伤害/攻速/命中/敏捷/幸运
-    pub critical_rate: i32,
-    pub critical_damage: i32,
-    pub attack_speed: i32,
-    pub accuracy: i32,
-    pub agility: i32,
-    pub luck: i32,
-    /// #210：State 页数据
-    pub exp: i64,
-    pub max_exp: i64,
-    pub bag_weight: i32,
-    pub wear_weight: i32,
-    pub hand_weight: i32,
-    pub magic_resist: i32,
-    pub poison_resist: i32,
-    pub health_recovery: i32,
-    pub spell_recovery: i32,
-    pub poison_recovery: i32,
-    pub holy: i32,
-    pub freezing: i32,
-    pub poison_atk: i32,
-    /// 14 装备槽
-    pub equipment: Vec<Option<u32>>,
-}
-
-impl Default for CharacterState {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            guild: String::new(),
-            level: 1,
-            hp: 1,
-            max_hp: 1000,
-            mp: 1,
-            max_mp: 600,
-            stats: [[0; 2]; 5],
-            critical_rate: 0,
-            critical_damage: 0,
-            attack_speed: 0,
-            accuracy: 0,
-            agility: 0,
-            luck: 0,
-            exp: 0,
-            max_exp: 1,
-            bag_weight: 0,
-            wear_weight: 0,
-            hand_weight: 0,
-            magic_resist: 0,
-            poison_resist: 0,
-            health_recovery: 0,
-            spell_recovery: 0,
-            poison_recovery: 0,
-            holy: 0,
-            freezing: 0,
-            poison_atk: 0,
-            equipment: vec![None; 14],
-        }
-    }
-}
 
 pub const DIALOG_X: f32 = 1024.0 - 264.0;
 pub const DIALOG_Y: f32 = 0.0;
@@ -218,21 +147,22 @@ fn equip_slot_screen_rect(server_slot: usize) -> Option<(f32, f32, f32, f32)> {
 
 /// 状态页数值标签文本（逐项对齐 C# StatusPage.BeforeDraw，CharacterDialog.cs:96-108）。
 /// 关键差异：CritD（index 8）C# 是 `{0}` 不带 %（:104），仅 CritR（index 7）带 %（:103）。
-fn stat_label_text(idx: usize, state: &CharacterState) -> String {
+/// #2633 批次4 步8：改读玩家组件（Vitals/CombatStats），删除 CharacterState 双源。
+fn stat_label_text(idx: usize, vitals: &Vitals, combat: &CombatStats) -> String {
     match idx {
-        0 => format!("{}/{}", state.hp, state.max_hp), // HP {0}/{1}
-        1 => format!("{}/{}", state.mp, state.max_mp), // MP {0}/{1}
-        2 => format!("{}-{}", state.stats[0][0], state.stats[0][1]), // AC {0}-{1}
-        3 => format!("{}-{}", state.stats[1][0], state.stats[1][1]), // MAC
-        4 => format!("{}-{}", state.stats[2][0], state.stats[2][1]), // DC
-        5 => format!("{}-{}", state.stats[3][0], state.stats[3][1]), // MC
-        6 => format!("{}-{}", state.stats[4][0], state.stats[4][1]), // SC
-        7 => format!("{}%", state.critical_rate),      // CritR {0}%
-        8 => format!("{}", state.critical_damage),     // CritD {0}（C# 无 %）
-        9 => format!("{}", state.attack_speed),        // AtkSpd {0}
-        10 => format!("+{}", state.accuracy),          // Acc +{0}
-        11 => format!("+{}", state.agility),           // Agil +{0}
-        12 => format!("{}", state.luck),               // Luck {0}
+        0 => format!("{}/{}", vitals.hp, vitals.max_hp), // HP {0}/{1}
+        1 => format!("{}/{}", vitals.mp, vitals.max_mp), // MP {0}/{1}
+        2 => format!("{}-{}", combat.stats[0][0], combat.stats[0][1]), // AC {0}-{1}
+        3 => format!("{}-{}", combat.stats[1][0], combat.stats[1][1]), // MAC
+        4 => format!("{}-{}", combat.stats[2][0], combat.stats[2][1]), // DC
+        5 => format!("{}-{}", combat.stats[3][0], combat.stats[3][1]), // MC
+        6 => format!("{}-{}", combat.stats[4][0], combat.stats[4][1]), // SC
+        7 => format!("{}%", combat.critical_rate),  // CritR {0}%
+        8 => format!("{}", combat.critical_damage), // CritD {0}（C# 无 %）
+        9 => format!("{}", combat.attack_speed),    // AtkSpd {0}
+        10 => format!("+{}", combat.accuracy),      // Acc +{0}
+        11 => format!("+{}", combat.agility),       // Agil +{0}
+        12 => format!("{}", combat.luck),           // Luck {0}
         _ => String::new(),
     }
 }
@@ -241,7 +171,7 @@ fn stat_label_text(idx: usize, state: &CharacterState) -> String {
 fn char_equip_tooltip_system(
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
-    inv: Res<HudState>,
+    loadout_q: Query<&Loadout, With<LocalPlayer>>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
 ) {
@@ -251,11 +181,16 @@ fn char_equip_tooltip_system(
     }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+    // #2633 批次4 步6：读 Loadout 组件（实体缺失默认空，同旧 HudState.equipment 默认 [None;14]）
+    let equipment = loadout_q
+        .single()
+        .map(|l| l.slots.as_slice())
+        .unwrap_or(&[]);
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
     for server_slot in 0..14usize {
         if let Some((sx, sy, w, h)) = equip_slot_screen_rect(server_slot) {
             if cursor.x >= sx && cursor.x <= sx + w && cursor.y >= sy && cursor.y <= sy + h {
-                hit = inv.equipment.get(server_slot).and_then(|s| s.as_ref()).cloned();
+                hit = equipment.get(server_slot).and_then(|s| s.as_ref()).cloned();
                 break;
             }
         }
@@ -280,7 +215,6 @@ pub(crate) const SERVER_SLOT_TO_POS: [usize; 14] = [0, 1, 2, 4, 5, 6, 7, 8, 11, 
 
 impl Plugin for CharacterDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CharacterState>();
         app.init_resource::<CharPage>();
         app.init_resource::<CharSkillStart>();
         app.add_systems(OnEnter(AppState::Game), spawn_character_dialog);
@@ -306,7 +240,7 @@ fn spawn_character_dialog(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
-    hud: Res<HudState>,
+    appearance_q: Query<&crate::actor::ActorAppearance, With<LocalPlayer>>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -340,7 +274,11 @@ fn spawn_character_dialog(
             spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(CharClose);
         }
         // 职业图（Prguse[100+职业] @(15,33)）
-        let class_idx = 100 + (hud.class as usize).min(4);
+        // #2633 批次4 步7：实体缺失默认 Warrior=0，同原 hud.class 默认
+        let class_idx = 100 + appearance_q
+            .single()
+            .map(|a| (a.class as usize).min(4))
+            .unwrap_or(0); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, class_idx) {
             spawn_image(p, h, CLASS_IMG_X, CLASS_IMG_Y, 30.0, 30.0, 9);
         }
@@ -486,7 +424,7 @@ fn spawn_character_dialog(
 
 fn character_ui_system(
     mut mgr: ResMut<DialogManager>,
-    state: Res<CharacterState>,
+    player_q: Query<(&PlayerName, &PlayerGuildName, &Vitals, &CombatStats, &Progression), With<LocalPlayer>>,
     assign_key: Res<AssignKeyState>,
     mut page: ResMut<CharPage>,
     mut widgets: Query<&mut Visibility, (With<CharDialogWidget>, Without<CharPageBg>)>,
@@ -565,46 +503,48 @@ fn character_ui_system(
             }
         }
     }
-    // 文本
-    if let Ok(mut t) = name_texts.single_mut() {
-        t.0 = state.name.clone();
-    }
-    if let Ok(mut t) = guild_texts.single_mut() {
-        t.0 = state.guild.clone();
-    }
-    for (mut t, idx) in &mut stat_texts {
-        t.0 = stat_label_text(idx.0, &state);
-    }
-    for (mut t, idx) in &mut state2_texts {
-        t.0 = match idx.0 {
-            0 => format!(
-                "{:.2}%",
-                if state.max_exp > 0 {
-                    state.exp as f64 * 100.0 / state.max_exp as f64
-                } else {
-                    0.0
-                }
-            ),
-            1 => format!("{}", state.bag_weight),
-            2 => format!("{}", state.wear_weight),
-            3 => format!("{}", state.hand_weight),
-            4 => format!("+{}", state.magic_resist),
-            5 => format!("+{}", state.poison_resist),
-            6 => format!("+{}", state.health_recovery),
-            7 => format!("+{}", state.spell_recovery),
-            8 => format!("+{}", state.poison_recovery),
-            9 => format!("+{}", state.holy),
-            10 => format!("+{}", state.freezing),
-            11 => format!("+{}", state.poison_atk),
-            _ => String::new(),
-        };
+    // 文本（#2633 批次4 步8：读玩家组件；实体未生成跳过、保持标签初始值，同旧 state 资源默认）
+    if let Ok((pname, pguild, vitals, combat, progression)) = player_q.single() {
+        if let Ok(mut t) = name_texts.single_mut() {
+            t.0 = pname.0.clone();
+        }
+        if let Ok(mut t) = guild_texts.single_mut() {
+            t.0 = pguild.0.clone();
+        }
+        for (mut t, idx) in &mut stat_texts {
+            t.0 = stat_label_text(idx.0, vitals, combat);
+        }
+        for (mut t, idx) in &mut state2_texts {
+            t.0 = match idx.0 {
+                0 => format!(
+                    "{:.2}%",
+                    if progression.max_exp > 0 {
+                        progression.exp as f64 * 100.0 / progression.max_exp as f64
+                    } else {
+                        0.0
+                    }
+                ),
+                1 => format!("{}", combat.bag_weight),
+                2 => format!("{}", combat.wear_weight),
+                3 => format!("{}", combat.hand_weight),
+                4 => format!("+{}", combat.magic_resist),
+                5 => format!("+{}", combat.poison_resist),
+                6 => format!("+{}", combat.health_recovery),
+                7 => format!("+{}", combat.spell_recovery),
+                8 => format!("+{}", combat.poison_recovery),
+                9 => format!("+{}", combat.holy),
+                10 => format!("+{}", combat.freezing),
+                11 => format!("+{}", combat.poison_atk),
+                _ => String::new(),
+            };
+        }
     }
 }
 
-/// 装备图标（从 HudState.equipment 渲染 Items 库图标）+ 右键卸下装备
+/// 装备图标（#2633 批次4 步6：从 `Loadout` 组件渲染 Items 库图标）+ 右键卸下装备
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn char_equip_system(
-    hud: Res<HudState>,
+    loadout_q: Query<&Loadout, With<LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut icons: Query<
@@ -618,6 +558,11 @@ fn char_equip_system(
     page: Res<CharPage>,
 ) {
     // 右键卸下装备（原版 C# MirItemCell 右键 → UseItem → Equipment → RemoveItem）
+    // #2633 批次4 步6：读 Loadout 组件（实体缺失默认空，同旧 HudState.equipment 默认 [None;14]）
+    let equipment = loadout_q
+        .single()
+        .map(|l| l.slots.as_slice())
+        .unwrap_or(&[]);
     if mouse.just_pressed(MouseButton::Right) && mgr.is_open(DialogKind::Character) && page.0 == 0
     {
         if let Ok(window) = windows.single() {
@@ -632,8 +577,7 @@ fn char_equip_system(
                         && cursor.y <= sy + SLOT_H
                     {
                         if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
-                            if let Some(item) = hud
-                                .equipment
+                            if let Some(item) = equipment
                                 .get(server_idx)
                                 .and_then(|s| s.as_ref())
                             {
@@ -657,7 +601,7 @@ fn char_equip_system(
     }
     // 装备图标（ImageNode）
     for (mut node, mut vis, icon) in &mut icons {
-        let item = hud.equipment.get(icon.0).and_then(|s| s.as_ref());
+        let item = equipment.get(icon.0).and_then(|s| s.as_ref());
         match item {
             Some(item) => {
                 let handle = load_lib_image(
@@ -871,7 +815,6 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(UiFont::default());
-        world.insert_resource(HudState::default());
         world
             .run_system_once(spawn_character_dialog)
             .expect("spawn_character_dialog 应成功");
@@ -910,32 +853,30 @@ mod tests {
 
     /// 状态页数值格式护栏：逐项对照 C# StatusPage.BeforeDraw 字面值（CharacterDialog.cs:96-108）。
     /// 关键：CritD(index 8) C# 无 %（:104），与 CritR(index 7) 的 {0}%（:103）区分。
+    /// #2633 批次4 步8：改用玩家组件构造（Vitals/CombatStats）。
     #[test]
     fn stat_label_text_matches_csharp() {
-        let mut s = CharacterState::default();
-        s.hp = 120;
-        s.max_hp = 130;
-        s.mp = 40;
-        s.max_mp = 50;
-        s.stats = [[1, 9], [2, 8], [3, 7], [4, 6], [5, 10]]; // AC/MAC/DC/MC/SC [min,max]
-        s.critical_rate = 15;
-        s.critical_damage = 150;
-        s.attack_speed = 3;
-        s.accuracy = 7;
-        s.agility = 9;
-        s.luck = 2;
-        assert_eq!(stat_label_text(0, &s), "120/130"); // HP {0}/{1}
-        assert_eq!(stat_label_text(1, &s), "40/50"); // MP {0}/{1}
-        assert_eq!(stat_label_text(2, &s), "1-9"); // AC {0}-{1}
-        assert_eq!(stat_label_text(3, &s), "2-8"); // MAC
-        assert_eq!(stat_label_text(4, &s), "3-7"); // DC
-        assert_eq!(stat_label_text(5, &s), "4-6"); // MC
-        assert_eq!(stat_label_text(6, &s), "5-10"); // SC
-        assert_eq!(stat_label_text(7, &s), "15%"); // CritR {0}%
-        assert_eq!(stat_label_text(8, &s), "150"); // CritD {0}（C# 无 %）
-        assert_eq!(stat_label_text(9, &s), "3"); // AtkSpd {0}
-        assert_eq!(stat_label_text(10, &s), "+7"); // Acc +{0}
-        assert_eq!(stat_label_text(11, &s), "+9"); // Agil +{0}
-        assert_eq!(stat_label_text(12, &s), "2"); // Luck {0}
+        let vitals = Vitals { hp: 120, max_hp: 130, mp: 40, max_mp: 50 };
+        let mut combat = CombatStats::default();
+        combat.stats = [[1, 9], [2, 8], [3, 7], [4, 6], [5, 10]]; // AC/MAC/DC/MC/SC [min,max]
+        combat.critical_rate = 15;
+        combat.critical_damage = 150;
+        combat.attack_speed = 3;
+        combat.accuracy = 7;
+        combat.agility = 9;
+        combat.luck = 2;
+        assert_eq!(stat_label_text(0, &vitals, &combat), "120/130"); // HP {0}/{1}
+        assert_eq!(stat_label_text(1, &vitals, &combat), "40/50"); // MP {0}/{1}
+        assert_eq!(stat_label_text(2, &vitals, &combat), "1-9"); // AC {0}-{1}
+        assert_eq!(stat_label_text(3, &vitals, &combat), "2-8"); // MAC
+        assert_eq!(stat_label_text(4, &vitals, &combat), "3-7"); // DC
+        assert_eq!(stat_label_text(5, &vitals, &combat), "4-6"); // MC
+        assert_eq!(stat_label_text(6, &vitals, &combat), "5-10"); // SC
+        assert_eq!(stat_label_text(7, &vitals, &combat), "15%"); // CritR {0}%
+        assert_eq!(stat_label_text(8, &vitals, &combat), "150"); // CritD {0}（C# 无 %）
+        assert_eq!(stat_label_text(9, &vitals, &combat), "3"); // AtkSpd {0}
+        assert_eq!(stat_label_text(10, &vitals, &combat), "+7"); // Acc +{0}
+        assert_eq!(stat_label_text(11, &vitals, &combat), "+9"); // Agil +{0}
+        assert_eq!(stat_label_text(12, &vitals, &combat), "2"); // Luck {0}
     }
 }

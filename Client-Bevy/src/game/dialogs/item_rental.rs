@@ -333,7 +333,7 @@ fn item_rental_action_system(
     mut state: ResMut<ItemRentalState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
     deposit_btn: Query<&UiButton, With<ItemRentalDeposit>>,
     fee_btn: Query<&UiButton, With<ItemRentalSetFee>>,
@@ -349,12 +349,13 @@ fn item_rental_action_system(
     // 存入（物主）：选中背包物品
     for btn in &deposit_btn {
         if btn.clicked {
+            let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
             let idx = inv_click
                 .selected
-                .filter(|i| hud.inventory.items.get(*i).and_then(|s| s.as_ref()).is_some())
-                .or_else(|| hud.inventory.items.iter().position(|s| s.is_some()));
+                .filter(|i| items.get(*i).and_then(|s| s.as_ref()).is_some())
+                .or_else(|| items.iter().position(|s| s.is_some()));
             if let Some(i) = idx {
-                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if let Some(item) = items.get(i).and_then(|s| s.as_ref()) {
                     net.send_packet(&crate::network::RentalDepositWire {
                         unique_id: item.unique_id,
                     });

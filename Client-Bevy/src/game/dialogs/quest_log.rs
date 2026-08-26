@@ -511,7 +511,15 @@ fn quest_log_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<QuestLogState>,
     catalog: Res<QuestCatalog>,
-    hud: Res<crate::game::hud::HudState>,
+    // #2633 批次4 步7：level→`Progression`、class→`ActorAppearance`（HudState 已于步9 删除）；
+    // 实体缺失按 HudState 默认（level=1/class=0）
+    player_q: Query<
+        (
+            &crate::game::player_state::Progression,
+            &crate::actor::ActorAppearance,
+        ),
+        With<crate::actor::LocalPlayer>,
+    >,
     // #2631：追踪状态只读（渲染追踪/取消按钮）；切换改发 ToggleQuestTracking 由 quest_tracking 处理
     tracking: Res<crate::game::dialogs::quest_tracking::QuestTrackingState>,
     mut toggle_tracking: MessageWriter<crate::game::dialogs::quest_tracking::ToggleQuestTracking>,
@@ -559,7 +567,12 @@ fn quest_log_ui_system(
     }
 
     // #2535 可接任务段（已接在前、可接在后）
-    let avail = available_quests(&catalog, &state, hud.level, hud.class);
+    // #2633 批次4 步7：level/class 读组件；实体缺失按 HudState 默认（level=1/class=0）
+    let (me_level, me_class) = player_q
+        .single()
+        .map(|(p, a)| (p.level, a.class as u8))
+        .unwrap_or((1, 0));
+    let avail = available_quests(&catalog, &state, me_level, me_class);
     // #2535 子批2：日记行模型（组头+展开组内已接+可接，前 8 行入视窗）
     let groups = diary_groups(&state.quests, &catalog.infos);
     let diary = diary_rows(
@@ -604,7 +617,7 @@ fn quest_log_ui_system(
                     let info = catalog.infos.iter().find(|c| c.index == q.id);
                     // C# L1900/1919 颜色优先级：低级任务灰 > 新任务黄 > 白（完成绿为沿用）
                     let low_level = info
-                        .map(|c| (hud.level as i32 - c.min_level_needed) > 10)
+                        .map(|c| (me_level as i32 - c.min_level_needed) > 10)
                         .unwrap_or(false);
                     let c = if low_level {
                         Color::srgb(0.5, 0.5, 0.5)

@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use super::*;
 
 /// --shop-test：自动 NPC 商店买卖链路（CallNPC → [@Buy] → BuyItem → SellItem）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_shop_test(
     net: ResMut<client_bevy::network::NetConnection>,
@@ -12,7 +13,7 @@ pub(crate) fn auto_shop_test(
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
     mut npc_goods: ResMut<client_bevy::game::dialogs::npc_goods::NpcGoodsState>,
     sell_panel: Res<client_bevy::game::dialogs::sell_panel::SellPanelState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -86,18 +87,22 @@ pub(crate) fn auto_shop_test(
             }
             // 出售刚购买的物品（按 item_index 匹配，uid 每次服务端启动都会重新分配）
             if let Some(idx) = *bought_idx {
-                if let Some(item) = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .flatten()
-                    .find(|i| i.item_index == idx)
-                {
+                let sell_uid = inv_q
+                    .single()
+                    .ok()
+                    .and_then(|inv| {
+                        inv.items
+                            .iter()
+                            .flatten()
+                            .find(|i| i.item_index == idx)
+                            .map(|it| it.unique_id)
+                    });
+                if let Some(uid) = sell_uid {
                     net.send_packet(&mir2_shared::packets::client::npc::SellItem {
-                        unique_id: item.unique_id,
+                        unique_id: uid,
                         count: 1,
                     });
-                    tracing::info!("[SHOPTEST] 出售 {} (uid={})", item.name, item.unique_id);
+                    tracing::info!("[SHOPTEST] 出售 idx={} (uid={})", idx, uid);
                 }
             }
             *stage = 4;
@@ -139,7 +144,11 @@ pub(crate) fn auto_shop_test(
                 return;
             }
             if let Some(idx) = *bought_idx {
-                if hud.inventory.items.iter().flatten().any(|i| i.item_index == idx) {
+                let found = inv_q
+                    .single()
+                    .map(|inv| inv.items.iter().flatten().any(|i| i.item_index == idx))
+                    .unwrap_or(false);
+                if found {
                     tracing::info!("[SHOPTEST] ✅ 回购完成：物品已回背包");
                 } else {
                     tracing::warn!("[SHOPTEST] ❌ 回购后背包未找到物品");
@@ -185,7 +194,7 @@ pub(crate) fn auto_storage_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     storage: Res<client_bevy::game::dialogs::storage::StorageState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -263,7 +272,11 @@ pub(crate) fn auto_storage_test(
                 return;
             }
             if storage.visible {
-                if let Some(idx) = hud.inventory.items.iter().position(|s| s.is_some()) {
+                if let Some(idx) = inv_q
+                    .single()
+                    .ok()
+                    .and_then(|inv| inv.items.iter().position(|s| s.is_some()))
+                {
                     *inv_slot = Some(idx);
                     net.send_packet(&mir2_shared::packets::client::item::StoreItem {
                         from: idx as i32,
@@ -296,13 +309,14 @@ pub(crate) fn auto_storage_test(
 
 
 /// --storage-equip-test：仓库格双击装备链路（#1546：Storage EquipItem → mock 处理 → 客户端装备槽更新）
+/// #2633 批次4 步9：装备槽读 `Loadout` 组件（HudState 已删）；实体缺失视同无装备。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_storage_equip_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     storage: Res<client_bevy::game::dialogs::storage::StorageState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    loadout_q: Query<&client_bevy::game::player_state::Loadout, With<client_bevy::actor::LocalPlayer>>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -394,9 +408,10 @@ pub(crate) fn auto_storage_equip_test(
             if *t < 2.0 {
                 return;
             }
-            let equipped = hud
-                .equipment
-                .get(0)
+            let equipped = loadout_q
+                .single()
+                .ok()
+                .and_then(|l| l.slots.get(0))
                 .and_then(|s| s.as_ref())
                 .map(|i| i.name.clone())
                 .unwrap_or_default();
@@ -414,13 +429,14 @@ pub(crate) fn auto_storage_equip_test(
 
 
 /// --refine-test：精炼全流程（存入 → 开始 60 秒 → 查看 → 取回）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_refine_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     chat: Res<client_bevy::game::chat::ChatState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -443,24 +459,23 @@ pub(crate) fn auto_refine_test(
             if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Refine) {
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Refine);
             }
-            let first = hud
-                .inventory
-                .items
-                .iter()
-                .enumerate()
-                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+            let first = inv_q
+                .single()
+                .ok()
+                .and_then(|inv| {
+                    inv.items
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, s)| s.as_ref().map(|it| (i, it.unique_id)))
+                });
             match first {
-                Some((i, item)) => {
-                    *uid = Some(item.unique_id);
+                Some((i, item_uid)) => {
+                    *uid = Some(item_uid);
                     net.send_packet(&client_bevy::network::RefineDepositWire {
                         from: i as i32,
                         to: 0,
                     });
-                    tracing::info!(
-                        "[REFINETEST] 存入精炼物品 uid={} #{}",
-                        item.unique_id,
-                        item.item_index
-                    );
+                    tracing::info!("[REFINETEST] 存入精炼物品 uid={}", item_uid);
                     *stage = 1;
                     *t = 0.0;
                 }
@@ -524,7 +539,11 @@ pub(crate) fn auto_refine_test(
                     *stage = 9;
                     return;
                 }
-                match hud.inventory.items.iter().position(|s| s.is_none()) {
+                match inv_q
+                    .single()
+                    .ok()
+                    .and_then(|inv| inv.items.iter().position(|s| s.is_none()))
+                {
                     Some(grid) => {
                         net.send_packet(&client_bevy::network::RefineRetrieveWire {
                             from: 0,
@@ -693,13 +712,14 @@ pub(crate) fn auto_rental_test(
 }
 
 /// --rental-owner（物主）：等请求 → 存入物品 → 设费/期 → 锁定物品 → 等可确认
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_rental_owner(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -718,21 +738,21 @@ pub(crate) fn auto_rental_owner(
             if rental.request_received {
                 tracing::info!("[RENTALOWNER] ✅ 收到租赁请求");
                 // 存入第一个背包物品
-                let first = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+                let first = inv_q
+                    .single()
+                    .ok()
+                    .and_then(|inv| {
+                        inv.items
+                            .iter()
+                            .enumerate()
+                            .find_map(|(i, s)| s.as_ref().map(|it| (i, it.unique_id)))
+                    });
                 match first {
-                    Some((_i, item)) => {
+                    Some((_i, item_uid)) => {
                         net.send_packet(&client_bevy::network::RentalDepositWire {
-                            unique_id: item.unique_id,
+                            unique_id: item_uid,
                         });
-                        tracing::info!(
-                            "[RENTALOWNER] 存入物品 uid={}",
-                            item.unique_id
-                        );
+                        tracing::info!("[RENTALOWNER] 存入物品 uid={}", item_uid);
                         *stage = 1;
                         *t = 0.0;
                     }
@@ -778,13 +798,14 @@ pub(crate) fn auto_rental_owner(
 }
 
 /// --socket-test：打开镶嵌面板 → 孔位/宝石渲染 → 关闭
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_socket_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut socket: ResMut<client_bevy::game::dialogs::socket::SocketState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
@@ -804,12 +825,10 @@ pub(crate) fn auto_socket_test(
         if *t - *phase < 2.0 {
             return;
         }
-        let sock = hud
-            .inventory
-            .items
-            .iter()
-            .flatten()
-            .find(|it| !it.slots.is_empty())
+        let sock = inv_q
+            .single()
+            .ok()
+            .and_then(|inv| inv.items.iter().flatten().find(|it| !it.slots.is_empty()))
             .cloned();
         if let Some(item) = sock {
             socket.item = Some(item.clone());
@@ -863,11 +882,12 @@ pub(crate) fn auto_socket_test(
 }
 
 /// --dura-test：打开耐久面板 → 装备耐久三态渲染 → 关闭
+/// #2633 批次4 步9：装备槽读 `Loadout` 组件（HudState 已删）；实体缺失视同无装备。
 pub(crate) fn auto_dura_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    loadout_q: Query<&client_bevy::game::player_state::Loadout, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
@@ -888,12 +908,16 @@ pub(crate) fn auto_dura_test(
         return;
     }
     if *stage == 1 && *t - *phase >= 1.0 {
-        let equipped: Vec<String> = hud
-            .equipment
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.as_ref().map(|it| format!("slot{}={}({}/{})", i, it.name, it.current_dura, it.max_dura)))
-            .collect();
+        let equipped: Vec<String> = loadout_q
+            .single()
+            .map(|l| {
+                l.slots
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, s)| s.as_ref().map(|it| format!("slot{}={}({}/{})", i, it.name, it.current_dura, it.max_dura)))
+                    .collect()
+            })
+            .unwrap_or_default();
         tracing::info!("[DURA] ✅ 装备耐久数据: {}", if equipped.is_empty() { "无".to_string() } else { equipped.join(", ") });
         *stage = 2;
         *phase = *t;
@@ -913,13 +937,14 @@ pub(crate) fn auto_dura_test(
 }
 
 /// --awake-test：打开觉醒 → 选武器 → 选类型/材料 → 执行觉醒（可重试）→ 关闭
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_awake_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut aw: ResMut<client_bevy::game::dialogs::npc_awake::NpcAwakeState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     net: ResMut<client_bevy::network::NetConnection>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -944,7 +969,12 @@ pub(crate) fn auto_awake_test(
         return;
     }
     if *stage == 1 && *t - *phase >= 1.0 {
-        for (i, it) in hud.inventory.items.iter().enumerate() {
+        for (i, it) in inv_q
+            .single()
+            .ok()
+            .map(|inv| inv.items.iter().enumerate().collect::<Vec<_>>())
+            .unwrap_or_default()
+        {
             if let Some(item) = it {
                 tracing::info!(
                     "[AWAKE] inv[{}] uid={} idx={} name={}",
@@ -955,12 +985,10 @@ pub(crate) fn auto_awake_test(
                 );
             }
         }
-        let sword = hud
-            .inventory
-            .items
-            .iter()
-            .flatten()
-            .find(|it| it.item_index == 221)
+        let sword = inv_q
+            .single()
+            .ok()
+            .and_then(|inv| inv.items.iter().flatten().find(|it| it.item_index == 221))
             .cloned();
         if let Some(item) = sword {
             aw.selected_uid = Some(item.unique_id);
@@ -1027,13 +1055,11 @@ pub(crate) fn auto_awake_test(
                 aw.result,
                 aw.result_text
             );
-            let swords: Vec<_> = hud
-                .inventory
-                .items
-                .iter()
-                .flatten()
-                .filter(|it| it.item_index == 221)
-                .collect();
+            let swords: Vec<_> = inv_q
+                .single()
+                .ok()
+                .map(|inv| inv.items.iter().flatten().filter(|it| it.item_index == 221).collect())
+                .unwrap_or_default();
             let next = swords
                 .get((*attempts) as usize % swords.len().max(1))
                 .cloned();
@@ -1066,12 +1092,13 @@ pub(crate) fn auto_awake_test(
 
 /// --item-state-test：施法 → mock 回发 DuraChanged/GainedItem/DeleteItem，
 /// 断言背包耐久更新/物品获得/物品删除（#228）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_item_state_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
@@ -1155,21 +1182,14 @@ pub(crate) fn auto_item_state_test(
         }
         2 => {
             if *t >= 3.0 {
-                let gained = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .flatten()
-                    .any(|it| it.unique_id == 9002);
-                let deleted = !hud
-                    .inventory
-                    .items
-                    .iter()
-                    .flatten()
-                    .any(|it| it.unique_id == 9010);
-                let dura = hud
-                    .inventory
-                    .items
+                let inv = inv_q
+                    .single()
+                    .ok()
+                    .map(|inv| inv.items.clone())
+                    .unwrap_or_default();
+                let gained = inv.iter().flatten().any(|it| it.unique_id == 9002);
+                let deleted = !inv.iter().flatten().any(|it| it.unique_id == 9010);
+                let dura = inv
                     .iter()
                     .flatten()
                     .any(|it| it.unique_id == 9005 && it.current_dura == 3);
@@ -1193,12 +1213,13 @@ pub(crate) fn auto_item_state_test(
 
 /// --repair-test：施法 → mock 回发 ItemRepaired(9007: 12/8) + ItemSlotSizeChanged(1)，
 /// 断言背包物品耐久/最大耐久/槽位数更新（#240）
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_repair_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
@@ -1282,12 +1303,10 @@ pub(crate) fn auto_repair_test(
         }
         2 => {
             if *t >= 2.5 {
-                let item = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .flatten()
-                    .find(|it| it.unique_id == 9007);
+                let item = inv_q
+                    .single()
+                    .ok()
+                    .and_then(|inv| inv.items.iter().flatten().find(|it| it.unique_id == 9007));
                 let dura = item
                     .map(|it| it.current_dura == 8 && it.max_dura == 12)
                     .unwrap_or(false);
@@ -1307,11 +1326,12 @@ pub(crate) fn auto_repair_test(
 
 /// --resize-test：背包扩容链路（#276）
 /// 流程：进游戏 → 施法（mock 回发 ResizeInventory(56)）→ 校验 items.len()==56
+/// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包（等 UserInformation）。
 pub(crate) fn auto_resize_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -1325,7 +1345,8 @@ pub(crate) fn auto_resize_test(
             if *t < 6.0 {
                 return;
             }
-            if hud.inventory.items.len() < 40 {
+            let len = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
+            if len < 40 {
                 return; // 等 UserInformation 完成
             }
             net.send_packet(&mir2_shared::packets::client::combat::Magic {
@@ -1344,13 +1365,11 @@ pub(crate) fn auto_resize_test(
             if *t < 2.0 {
                 return;
             }
-            if hud.inventory.items.len() == 56 {
+            let len = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
+            if len == 56 {
                 tracing::info!("[RESIZE] ✅ PASS 背包扩容 size=56");
             } else {
-                tracing::error!(
-                    "[RESIZE] ❌ FAIL size={} 期望 56",
-                    hud.inventory.items.len()
-                );
+                tracing::error!("[RESIZE] ❌ FAIL size={} 期望 56", len);
             }
             *stage = 9;
         }

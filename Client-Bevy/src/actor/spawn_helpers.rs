@@ -191,6 +191,11 @@ pub(crate) fn spawn_local_player_with(
             Visibility::default(),
         ))
         .id();
+    // #2633 批次4：挂本地玩家状态组件默认值（Vitals/Inventory/…，设计 §7 挂载 A）。
+    // 各 ServerEvent 写系统按 LocalPlayer 定位就地更新；实体未生成时写系统跳过（§12 R1）。
+    commands
+        .entity(root)
+        .insert(crate::game::player_state::LocalPlayerStateBundle::default());
     attach_player_layers(commands, root, armour, hair, weapon, weapon_effect, wing_effect);
     if is_mounted && mount_type >= 0 {
         commands.entity(root).insert(MountState { mount_type });

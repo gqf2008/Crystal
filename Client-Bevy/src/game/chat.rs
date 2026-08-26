@@ -11,7 +11,6 @@ use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::scenes::AppState;
@@ -729,7 +728,8 @@ pub(crate) fn chat_input_system(
     mut chat: ResMut<ChatState>,
     net: Res<NetConnection>,
     net_mode: Res<crate::network::NetMode>,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：本地回显名字改读 `PlayerName`（HudState 已于步9 删除）
+    name_q: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
     filter: Res<ChatFilter>,
 ) {
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
@@ -769,8 +769,10 @@ pub(crate) fn chat_input_system(
                         && !is_cmd
                         && !filter.normal
                     {
+                        // 实体缺失（登录前）默认空串，同原 hud.name 默认
+                        let my_name = name_q.single().map(|n| n.0.as_str()).unwrap_or("");
                         chat.add_line(
-                            format!("[{}]: {}", hud.name, msg),
+                            format!("[{}]: {}", my_name, msg),
                             Color::WHITE,
                             ChatChannel::Nearby,
                         );
@@ -1231,7 +1233,6 @@ mod tests {
         app.insert_resource(crate::network::NetMode(
             crate::network::NetworkMode::Mock,
         ));
-        app.init_resource::<crate::game::hud::HudState>();
         app.init_resource::<ChatFilter>();
         app.add_systems(Update, chat_input_system);
         app.world_mut()

@@ -5,7 +5,7 @@
 //     @ (MiniMap.X+86+20, MiniMap.Height) = (1004, 大154/小45)（随小地图大/小模式）
 //   - 面板 Prguse[2105]（64x85）@ (963,200)，装备部位按耐久阈值切换
 //     Prguse 索引：正常/警告/损坏 三态（2122-2160）
-// 纯客户端：数据来自 HudState.equipment（UserInformation 下发，含 current_dura/max_dura）
+// 纯客户端：数据来自 `Loadout` 组件（#2633 批次4 步6；UserInformation 下发，含 current_dura/max_dura）
 // ============================================================================
 
 use bevy::prelude::*;
@@ -13,7 +13,6 @@ use bevy::prelude::*;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::minimap::MiniMapMode;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -220,7 +219,7 @@ fn dura_index(item: &InvItem, kind: DuraPieceKind) -> i32 {
 
 fn dura_status_ui_system(
     mut mgr: ResMut<DialogManager>,
-    hud: Res<HudState>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
     mode: Res<MiniMapMode>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -238,9 +237,13 @@ fn dura_status_ui_system(
     mut logged: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::DuraStatus);
+    let equipment = loadout_q
+        .single()
+        .map(|l| l.slots.as_slice())
+        .unwrap_or(&[]);
     if open && !*logged {
         for def in &PIECES {
-            if let Some(item) = hud.equipment.get(def.server_slot).and_then(|s| s.as_ref()) {
+            if let Some(item) = equipment.get(def.server_slot).and_then(|s| s.as_ref()) {
                 tracing::info!(
                     "🔧 耐久部位: {:?} idx={} ({}/{})",
                     def.kind,
@@ -288,8 +291,7 @@ fn dura_status_ui_system(
     for (mut vis, mut sprite, piece) in &mut pieces {
         let mut show = false;
         if let Some(def) = PIECES.iter().find(|d| d.kind == piece.0) {
-            if let Some(item) = hud
-                .equipment
+            if let Some(item) = equipment
                 .get(def.server_slot)
                 .and_then(|s| s.as_ref())
             {
@@ -356,7 +358,6 @@ mod tests {
         world.insert_resource(GameLibraries(Libraries::new(data_path)));
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(UiImageCache::default());
-        world.insert_resource(HudState::default());
         world.insert_resource(DialogManager::default()); // DuraStatus 默认关闭
         world.insert_resource(MiniMapMode::default()); // 默认大模式
         world

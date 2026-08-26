@@ -13,13 +13,14 @@
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{
-    InvClickState, InvDropConfirm, InvItem, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
-    item_use_sound_id, use_item_core,
+    InvClickState, InvDropConfirm, InvItem, InvUiState, ItemUseFeedback, UseItemCtx, UseOutcome,
+    inv_slot_at, item_use_sound_id, use_item_core,
 };
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
+use crate::game::player_state::{Inventory, Loadout, StatusFlags};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -658,7 +659,19 @@ fn storage_ui_system(
 fn storage_action_system(
     mut state: ResMut<StorageState>,
     mut inv_click: ResMut<InvClickState>,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：gender/class/level/riding 改读组件（HudState 已于步9 删除）
+    player_q: Query<
+        (
+            &Inventory,
+            &StatusFlags,
+            &Loadout,
+            &crate::actor::ActorAppearance,
+            &crate::game::player_state::Progression,
+            Option<&crate::actor::MountState>,
+        ),
+        With<LocalPlayer>,
+    >,
+    inv_ui: Res<InvUiState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -676,12 +689,15 @@ fn storage_action_system(
         return;
     };
 
+    let player = player_q.single().ok();
     let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len());
     let inv_slot = inv_slot_at(
         cursor.x,
         cursor.y,
-        hud.inventory.page,
-        hud.inventory.items.len(),
+        inv_ui.page,
+        player
+            .map(|(inv, _, _, _, _, _)| inv.items.len())
+            .unwrap_or(0),
         (inv_origin.0, inv_origin.1),
     );
 
@@ -708,15 +724,31 @@ fn storage_action_system(
         {
             let ctx = UseItemCtx {
                 grid: mir2_shared::enums::MirGridType::Storage,
-                equipment: &hud.equipment,
-                gender: hud.gender,
-                class: hud.class,
-                level: hud.level,
+                equipment: player
+                    .map(|(_, _, l, _, _, _)| l.slots.as_slice())
+                    .unwrap_or(&[]),
+                gender: player.map(|(_, _, _, a, _, _)| a.gender as u8).unwrap_or(0),
+                class: player.map(|(_, _, _, a, _, _)| a.class as u8).unwrap_or(0),
+                level: player.map(|(_, _, _, _, p, _)| p.level).unwrap_or(1),
                 check_fishing: true,
                 allow_consumable: false,
             };
-            if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
-                == UseOutcome::Sent
+            if use_item_core(
+                item,
+                &net,
+                // 实体缺失视同未骑乘（原 hud.riding=false 默认）
+                player
+                    .map(|(_, _, _, _, _, m)| m.is_some())
+                    .unwrap_or(false),
+                player.map(|(_, f, _, _, _, _)| f.fishing).unwrap_or(false),
+                player
+                    .map(|(_, _, l, _, _, _)| l.slots.as_slice())
+                    .unwrap_or(&[]),
+                ctx,
+                now,
+                &mut feedback,
+                &mut confirm,
+            ) == UseOutcome::Sent
             {
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);
@@ -776,16 +808,17 @@ fn storage_action_system(
 }
 
 /// 消费服务端仓库事件（网络层只广播 ServerEvent；仓库/背包打开逻辑归本模块）
+/// #2633 批次4 步9：ItemStored/ItemTakenBack 移动背包格直接写 `Inventory` 组件（HudState 已删）。
 fn storage_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut storage: ResMut<StorageState>,
-    mut hud: ResMut<HudState>,
     mut mgr: ResMut<DialogManager>,
     mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
     mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
     // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
     // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
     mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
+    mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -869,14 +902,16 @@ fn storage_server_events(
             // #512：C# S.StoreItem —— 背包 -> 仓库（success 时移动物品）
             if *success {
                 let (fi, ti) = (*from as usize, *to as usize);
-                if fi < hud.inventory.items.len() && ti < storage.items.len() {
-                    if let Some(item) = hud.inventory.items[fi].take() {
-                        if storage.items[ti].is_none() {
-                            storage.items[ti] = Some(item);
-                            tracing::info!("📦 存入仓库 {} -> {}（{}）", from, to, "成功");
-                        } else {
-                            hud.inventory.items[fi] = Some(item);
-                            tracing::warn!("📦 存入仓库 {} -> {} 失败：目标格已占用", from, to);
+                if let Ok(mut inv) = inv_q.single_mut() {
+                    if fi < inv.items.len() && ti < storage.items.len() {
+                        if let Some(item) = inv.items[fi].take() {
+                            if storage.items[ti].is_none() {
+                                storage.items[ti] = Some(item);
+                                tracing::info!("📦 存入仓库 {} -> {}（{}）", from, to, "成功");
+                            } else {
+                                inv.items[fi] = Some(item);
+                                tracing::warn!("📦 存入仓库 {} -> {} 失败：目标格已占用", from, to);
+                            }
                         }
                     }
                 }
@@ -886,14 +921,16 @@ fn storage_server_events(
             // #512：C# S.TakeBackItem —— 仓库 -> 背包（success 时移动物品）
             if *success {
                 let (fi, ti) = (*from as usize, *to as usize);
-                if fi < storage.items.len() && ti < hud.inventory.items.len() {
-                    if let Some(item) = storage.items[fi].take() {
-                        if hud.inventory.items[ti].is_none() {
-                            hud.inventory.items[ti] = Some(item);
-                            tracing::info!("📦 取出仓库 {} -> {}（{}）", from, to, "成功");
-                        } else {
-                            storage.items[fi] = Some(item);
-                            tracing::warn!("📦 取出仓库 {} -> {} 失败：目标格已占用", from, to);
+                if let Ok(mut inv) = inv_q.single_mut() {
+                    if fi < storage.items.len() && ti < inv.items.len() {
+                        if let Some(item) = storage.items[fi].take() {
+                            if inv.items[ti].is_none() {
+                                inv.items[ti] = Some(item);
+                                tracing::info!("📦 取出仓库 {} -> {}（{}）", from, to, "成功");
+                            } else {
+                                storage.items[fi] = Some(item);
+                                tracing::warn!("📦 取出仓库 {} -> {} 失败：目标格已占用", from, to);
+                            }
                         }
                     }
                 }
@@ -1118,5 +1155,109 @@ mod tests {
         assert_eq!(DIALOG_Y + 60.0 + 0.0 * (CELL_H + 1.0), 60.0);
         assert_eq!(DIALOG_X + 9.0 + 9.0 * (CELL_W + 1.0), 342.0);
         assert_eq!(DIALOG_Y + 60.0 + 7.0 * (CELL_H + 1.0), 291.0);
+    }
+
+    fn mk_item(uid: u64) -> InvItem {
+        InvItem {
+            unique_id: uid,
+            ..Default::default()
+        }
+    }
+
+    fn storage_test_app() -> App {
+        use crate::network::server_event::ServerEvent;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<StorageState>();
+        app.init_resource::<DialogManager>();
+        app.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
+        app.add_systems(Update, storage_server_events);
+        app
+    }
+
+    fn inv_items(app: &mut App) -> Vec<Option<u64>> {
+        app.world_mut()
+            .query_filtered::<&Inventory, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .map(|inv| {
+                inv.items
+                    .iter()
+                    .map(|s| s.as_ref().map(|it| it.unique_id))
+                    .collect()
+            })
+            .expect("LocalPlayer 应有 Inventory")
+    }
+
+    /// 存入仓库成功后背包物品直接从 `Inventory` 组件移除（#2633 批次4 步9 直写组件，R1 实体缺失跳过）。
+    #[test]
+    fn item_stored_removes_from_component() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![Some(mk_item(31)), None],
+                ..Default::default()
+            },
+        ));
+        {
+            let mut storage = app.world_mut().resource_mut::<StorageState>();
+            storage.items = vec![None, None];
+        }
+        app.update(); // 初始化消息缓冲/系统状态
+
+        // 背包格 0 (uid=31) 存入仓库格 0 → Inventory 组件背包格 0 清空
+        app.world_mut().write_message(ServerEvent::ItemStored {
+            from: 0,
+            to: 0,
+            success: true,
+        });
+        app.update();
+        let storage = app.world().resource::<StorageState>();
+        assert!(
+            storage.items[0].as_ref().map(|it| it.unique_id) == Some(31),
+            "仓库格 0 应收下 uid=31"
+        );
+        assert_eq!(
+            inv_items(&mut app),
+            vec![None, None],
+            "Inventory 组件背包格 0 应被存入移除"
+        );
+    }
+
+    /// 从仓库取回成功后背包物品直接写入 `Inventory` 组件（#2633 批次4 步9 直写组件，R1 实体缺失跳过）。
+    #[test]
+    fn item_taken_back_writes_component() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![None, None],
+                ..Default::default()
+            },
+        ));
+        {
+            let mut storage = app.world_mut().resource_mut::<StorageState>();
+            storage.items = vec![Some(mk_item(47)), None];
+        }
+        app.update();
+
+        // 仓库格 0 (uid=47) 取回背包格 1 → Inventory 组件背包格 1 收下
+        app.world_mut().write_message(ServerEvent::ItemTakenBack {
+            from: 0,
+            to: 1,
+            success: true,
+        });
+        app.update();
+        let storage = app.world().resource::<StorageState>();
+        assert!(storage.items[0].is_none(), "仓库格 0 应被取回清空");
+        assert_eq!(
+            inv_items(&mut app),
+            vec![None, Some(47)],
+            "Inventory 组件背包格 1 应收下 uid=47"
+        );
     }
 }

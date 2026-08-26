@@ -10,8 +10,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use mir2_shared::enums::MirDirection;
 
-use crate::actor::{depth_z, ActorAnim, LocalPlayer, NetObjectId, Sitting};
-use crate::game::hud::HudState;
+use crate::actor::{depth_z, ActorAnim, LocalPlayer, MountState, NetObjectId, Sitting};
 use crate::game::sound::SoundBank;
 use crate::map_renderer::{GameData, TILE_HEIGHT, TILE_WIDTH};
 use crate::network::{NetConnection, SessionState};
@@ -348,7 +347,9 @@ fn advance_local_move(
     time: Res<Time>,
     net: Res<NetConnection>,
     game_data: Res<GameData>,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：步声骑乘参数改读 `MountState`（HudState 已于步9 删除）；
+    // 实体缺失视同未骑乘（原 hud.riding=false 默认）
+    mount_q: Query<&MountState, With<LocalPlayer>>,
     sound_bank: Res<SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
     mut players: Query<(Entity, &mut LocalMove, &mut Transform, &mut ActorAnim), With<LocalPlayer>>,
@@ -448,7 +449,7 @@ fn advance_local_move(
                         if let Some(sound_id) = crate::game::sound::step_sound_for_cell(
                             cell,
                             use_run,
-                            hud.riding,
+                            mount_q.single().is_ok(),
                             anim.frame_index.clamp(0, 255) as u8,
                         ) {
                             crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
@@ -585,7 +586,6 @@ mod tests {
             desired_map: None,
             player_spawn: None,
         });
-        app.insert_resource(crate::game::hud::HudState::default());
         app.insert_resource(crate::game::sound::SoundBank::default());
         app.insert_resource(bevy::asset::Assets::<bevy::audio::AudioSource>::default());
         app.add_systems(Update, advance_local_move);

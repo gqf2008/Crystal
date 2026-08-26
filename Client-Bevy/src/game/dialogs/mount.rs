@@ -10,7 +10,6 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -152,7 +151,7 @@ fn spawn_mount(
 #[allow(clippy::too_many_arguments)]
 fn mount_ui_system(
     mut mgr: ResMut<DialogManager>,
-    hud: Res<HudState>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
     net: ResMut<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -201,8 +200,12 @@ fn mount_ui_system(
         }
     }
 
-    // 坐骑物品 = 装备槽 10（Mount）
-    let mount = hud.equipment.get(10).and_then(|s| s.as_ref());
+    // 坐骑物品 = 装备槽 10（Mount；#2633 批次4 步6 读 Loadout 组件）
+    let mount = loadout_q
+        .single()
+        .ok()
+        .and_then(|l| l.slots.get(10))
+        .and_then(|s| s.as_ref());
 
     // 面板按坐骑孔数换图（4→160, 5→167）
     if let Ok((mut node, _)) = panel.single_mut() {

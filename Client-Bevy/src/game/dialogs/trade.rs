@@ -21,10 +21,11 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::inventory::{InvItem, InvSlot, InventoryShiftRight};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::game::hud::HudState;
+use crate::game::player_state::{Gold, Inventory};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -551,7 +552,8 @@ fn trade_reset(trade: &mut TradeState) {
 #[allow(clippy::type_complexity)]
 fn trade_ui_system(
     trade: Res<TradeState>,
-    hud: Res<HudState>,
+    // #2633 批次4 步7：MyName 改读 `PlayerName`（HudState 已于步9 删除）
+    name_q: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -622,8 +624,10 @@ fn trade_ui_system(
 
     // 四枚标签（C# RefreshInterface:142-150）+ 描边副本直同步
     // （sync_outline_system 排序不可控，同帧晚写会陈旧——同行会名改名方案）
+    // 实体缺失默认空串，同原 hud.name 默认
+    let my_name = name_q.single().map(|n| n.0.clone()).unwrap_or_default();
     let new_texts = [
-        (TradeText::MyName, hud.name.clone()),
+        (TradeText::MyName, my_name),
         (TradeText::MyGold, format_thousands(trade.my_gold)),
         (TradeText::GuestName, trade.partner_name.clone()),
         (TradeText::GuestGold, format_thousands(trade.their_gold)),
@@ -690,10 +694,12 @@ fn trade_ui_system(
 }
 
 /// 交易交互：存/取物品、金币输入、锁定、关闭
+/// #2633 批次4 步9：金币读改 `Gold` 组件（HudState 已删）；实体缺失默认 0（同原 HudState 默认）。
 #[allow(clippy::too_many_arguments)]
 fn trade_action_system(
     mut trade: ResMut<TradeState>,
-    hud: Res<HudState>,
+    gold_q: Query<&Gold, With<LocalPlayer>>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -776,7 +782,7 @@ fn trade_action_system(
         let cy = -tf.translation.y;
         if (cursor.x - cx).abs() <= GOLD_W / 2.0 && (cursor.y - cy).abs() <= GOLD_H / 2.0 {
             if !trade.my_locked {
-                amount.ask("输入交易金币", hud.gold);
+                amount.ask("输入交易金币", gold_q.single().map(|g| g.0).unwrap_or(0));
             }
             return;
         }
@@ -784,6 +790,7 @@ fn trade_action_system(
     // 点击背包物品 → 存入（C# DepositTradeItem：点击空槽/找空槽，MirItemCell.cs:1553-1565；
     // 按背包格实体实际 Transform 命中——背包可能已被推到右侧或拖动过）
     if !trade.my_locked {
+        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
         for (tf, InvSlot(idx), vis) in &inv_cells {
             if *vis != Visibility::Visible {
                 continue;
@@ -791,7 +798,7 @@ fn trade_action_system(
             let x = tf.translation.x;
             let y = -tf.translation.y;
             if cursor.x >= x && cursor.x <= x + CELL_W && cursor.y >= y && cursor.y <= y + CELL_H {
-                if let Some(item) = hud.inventory.items.get(*idx).and_then(|s| s.as_ref()) {
+                if let Some(item) = items.get(*idx).and_then(|s| s.as_ref()) {
                     if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
                         net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {
                             from: *idx as i32,
@@ -852,9 +859,10 @@ fn trade_invite_system(
 fn trade_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut trade: ResMut<TradeState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
+    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
     for ev in events.read() {
         match ev {
             ServerEvent::TradeGold { amount } => {
@@ -925,7 +933,7 @@ fn trade_server_events(
                 if *success {
                     if let Some((from2, to2)) = trade.pending_deposit.take() {
                         let from = (*from).max(from2 as i32) as usize;
-                        if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
+                        if let Some(item) = items.get(from).and_then(|s| s.as_ref()) {
                             if let Some(slot) = trade.my_items.get_mut(to2.max(*to as usize)) {
                                 *slot = Some(TradeItem::from(item));
                             }
