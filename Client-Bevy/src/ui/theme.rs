@@ -1102,6 +1102,11 @@ pub fn scroll_list_ui_system(
 
 /// 生成根级 bevy_ui 通用物品格（动态网格用；面板原点为 (0,0) 时坐标即绝对坐标）。
 /// 返回格子实体。子节点（图标/数量/耐久条）与 spawn_item_cell_ui 同构。
+///
+/// 注意 z 语义：本函数挂的是 `GlobalZIndex`（根节点跨 UI 树全局层级），而面板
+/// 背景也是根节点 GlobalZIndex——bevy 0.19 根节点按 `GlobalZIndex` 升序绘制
+/// （ui_layout/stack.rs root_nodes 排序），故格子的 z **必须高于所属面板** z
+/// 才不被面板背景盖住；若格子挂为面板子实体则应改用 `ZIndex`（兄弟序）。
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_item_cell_ui_root(
     commands: &mut Commands,

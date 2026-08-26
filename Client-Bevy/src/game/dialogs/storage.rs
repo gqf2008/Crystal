@@ -72,6 +72,11 @@ const COLS: usize = 10;
 const ROWS: usize = 8;
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
+/// 面板/格子 GlobalZIndex：格子是根节点（非面板子实体），bevy 0.19 根节点按
+/// GlobalZIndex 升序绘制——格子 z 必须高于面板 z，否则被面板背景盖住
+/// （批38-40 评审 P0；密码/解锁覆盖层 45/46 之上不可盖）
+pub const STORAGE_PANEL_Z: i32 = 30;
+pub const STORAGE_CELL_Z: i32 = 31;
 
 #[derive(Component)]
 pub struct StorageWidget;
@@ -159,7 +164,7 @@ fn spawn_storage_dialog(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 586) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, STORAGE_W, 346.0, 30);
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, STORAGE_W, 346.0, STORAGE_PANEL_Z);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Storage), StorageWidget));
@@ -210,7 +215,9 @@ fn spawn_storage_dialog(
                     .insert((
                         BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                         crate::game::dialogs::text_input::TextInputField(id),
-                        crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 100.0, y, 200.0, 20.0),
+                        // 屏幕系命中框：容器是密码面板（根 @ x+18）的子实体，
+                        // 相对 x=100 → 绝对 x+18+100=118（旧值漏加面板 18 偏移）
+                        crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 18.0 + 100.0, y, 200.0, 20.0),
                     ))
                     .with_children(|ic| {
                         ic.spawn((
@@ -279,7 +286,8 @@ fn spawn_storage_dialog(
                 .insert((
                     BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                     crate::game::dialogs::text_input::TextInputField(2),
-                    crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 100.0, DIALOG_Y + 195.0, 200.0, 20.0),
+                    // 同上：解锁面板根 @ x+18，容器相对 x=100 → 绝对 118
+                    crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 18.0 + 100.0, DIALOG_Y + 195.0, 200.0, 20.0),
                 ))
                 .with_children(|ic| {
                     ic.spawn((
@@ -903,7 +911,7 @@ fn storage_grid_sync_system(
             sy,
             CELL_W,
             CELL_H,
-            9,
+            STORAGE_CELL_Z,
             i,
         );
         commands.entity(cell).insert((
@@ -929,6 +937,17 @@ mod tests {
         assert_eq!(DIALOG_Y + 60.0 + 0.0 * (CELL_H + 1.0), 60.0);
         assert_eq!(DIALOG_X + 9.0 + 9.0 * (CELL_W + 1.0), 342.0);
         assert_eq!(DIALOG_Y + 60.0 + 7.0 * (CELL_H + 1.0), 291.0);
+    }
+
+    /// 格子与面板同为根节点（GlobalZIndex 参与根排序）：格子必须高于面板
+    /// （否则被面板背景盖住），且低于密码/解锁覆盖层 45/46（覆盖层应罩住格子）
+    #[test]
+    fn storage_cell_z_above_panel() {
+        assert!(
+            STORAGE_CELL_Z > STORAGE_PANEL_Z,
+            "格子 z({STORAGE_CELL_Z}) 必须高于面板 z({STORAGE_PANEL_Z})"
+        );
+        assert!(STORAGE_CELL_Z < 45, "格子应低于密码/解锁覆盖层(45/46)");
     }
 
     fn mk_item(uid: u64) -> InvItem {

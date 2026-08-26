@@ -310,28 +310,86 @@ fn minimap_ui_system(
             Without<MiniMapBigMapButton>,
         ),
     >,
-    mut widgets: Query<&mut Visibility, With<MiniMapWidget>>,
+    // 批38-40 评审 P0（B0001）：迁移删掉了旧互斥矩阵，下方多个查询同写
+    // Visibility/Node/ImageNode → 调度器初始化即 panic（app.run() 首帧即崩；
+    // run_if 只拦执行不拦初始化）。补回**完备**互斥：每对"同系统内共享
+    // 组件且至少一方写"的查询，至少一侧含对方 With 标记的 Without。
+    // 实体标记互斥（spawn 处保证）：dot/actor_dots/pos_texts/light/mail/
+    // bigmap/bg 各只带自己的标记 → Without 不错杀。
+    mut widgets: Query<
+        &mut Visibility,
+        (
+            With<MiniMapWidget>,
+            Without<MiniMapMapArea>,
+            Without<MiniMapPlayerDot>,
+            Without<MiniMapActorDot>,
+        ),
+    >,
     mut bg: Query<(&mut Node, &mut ImageNode, &MiniMapBg)>,
     mut map_area: Query<&mut Visibility, (With<MiniMapMapArea>, Without<MiniMapPlayerDot>)>,
     mut dot: Query<
         (&mut Node, &mut Visibility),
-        (With<MiniMapPlayerDot>, Without<MiniMapActorDot>),
+        (
+            With<MiniMapPlayerDot>,
+            Without<MiniMapActorDot>,
+            Without<MiniMapBg>,
+            Without<MiniMapPosText>,
+            Without<MiniMapLightSetting>,
+            Without<MiniMapMailButton>,
+            Without<MiniMapBigMapButton>,
+        ),
     >,
     mut actor_dots: Query<
         (&mut Node, &mut ImageNode, &mut Visibility, &MiniMapActorDot),
-        (Without<MiniMapPlayerDot>, Without<MiniMapBg>, Without<MiniMapMapArea>),
+        (
+            Without<MiniMapPlayerDot>,
+            Without<MiniMapBg>,
+            Without<MiniMapMapArea>,
+            Without<MiniMapPosText>,
+            Without<MiniMapLightSetting>,
+            Without<MiniMapMailButton>,
+            Without<MiniMapBigMapButton>,
+        ),
     >,
     mut name_texts: Query<&mut Text, (With<MiniMapNameText>, Without<MiniMapPosText>)>,
     mut pos_texts: Query<
         (&mut Text, &mut Node),
-        (With<MiniMapPosText>, Without<MiniMapNameText>),
+        (
+            With<MiniMapPosText>,
+            Without<MiniMapNameText>,
+            Without<MiniMapBg>,
+            Without<MiniMapLightSetting>,
+            Without<MiniMapMailButton>,
+            Without<MiniMapBigMapButton>,
+        ),
     >,
     mut light: Query<
         (&mut Node, &mut ImageNode, &MiniMapLightSetting),
-        Without<MiniMapPosText>,
+        (
+            Without<MiniMapPosText>,
+            Without<MiniMapBg>,
+            Without<MiniMapMailButton>,
+            Without<MiniMapBigMapButton>,
+        ),
     >,
-    mut mail_btn: Query<&mut Node, (With<MiniMapMailButton>, Without<MiniMapBigMapButton>, Without<MiniMapToggle>)>,
-    mut bigmap_btn: Query<&mut Node, (With<MiniMapBigMapButton>, Without<MiniMapMailButton>, Without<MiniMapToggle>)>,
+    mut mail_btn: Query<
+        &mut Node,
+        (
+            With<MiniMapMailButton>,
+            Without<MiniMapBigMapButton>,
+            Without<MiniMapToggle>,
+            Without<MiniMapBg>,
+        ),
+    >,
+    mut bigmap_btn: Query<
+        &mut Node,
+        (
+            With<MiniMapBigMapButton>,
+            Without<MiniMapMailButton>,
+            Without<MiniMapToggle>,
+            Without<MiniMapBg>,
+        ),
+    >,
 ) {
     let open = mgr.is_open(DialogKind::Minimap);
     let big = mode.big;
@@ -458,6 +516,34 @@ fn minimap_ui_system(
 mod tests {
     use super::*;
     use crate::resources::libraries::{resolve_data_path, Libraries};
+
+    /// 批38-40 评审 P0（B0001 实证）：小地图系统多个查询同写 Visibility/Node/
+    /// ImageNode 且互斥矩阵在迁移中被删——调度器初始化即 panic（`run_if` 只拦
+    /// 执行不拦初始化 → 真实游戏 `app.run()` 首帧即崩）。修复 = 补回完备互斥
+    /// （见系统签名）。探针断言必须 downcast 消息判 "B0001"——`{e:?}` 只打
+    /// `Any{..}` 会假绿（反向验证过：破坏互斥本探针必红）。
+    #[test]
+    fn minimap_ui_system_no_b0001_query_conflict() {
+        use bevy::app::{App, Update};
+        let mut app = App::new();
+        app.add_systems(Update, minimap_ui_system);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            app.update();
+        }));
+        let msg = r.err().map(|e| {
+            if let Some(s) = e.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                format!("{e:?}")
+            }
+        });
+        assert!(
+            msg.as_ref().map(|m| !m.contains("B0001")).unwrap_or(true),
+            "minimap_ui_system 查询冲突：{msg:?}"
+        );
+    }
 
     /// 小地图布局对齐 C# MainDialogs.cs MiniMapDialog：
     /// - 背景 Prguse[2090] 128x154 / Prguse[2091] 128x45

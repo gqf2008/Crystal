@@ -247,7 +247,17 @@ fn npc_awake_ui_system(
     close: Query<(Entity, &Interaction), With<NpcAwakeClose>>,
     upgrade: Query<(Entity, &Interaction), With<NpcAwakeUpgrade>>,
     mut type_dd: Query<(&mut UiDropDown, &NpcAwakeTypeDrop)>,
-    mut widgets: Query<&mut Visibility, With<NpcAwakeWidget>>,
+    // B0001 互斥：widgets 与 action/type_vis/mat_vis 同写 Visibility——
+    // widgets 侧补三对 Without（实体标记互斥，spawn 处各只挂自己的标记）
+    mut widgets: Query<
+        &mut Visibility,
+        (
+            With<NpcAwakeWidget>,
+            Without<NpcAwakeActionLabel>,
+            Without<NpcAwakeTypeDrop>,
+            Without<NpcAwakeMaterialText>,
+        ),
+    >,
     service_btns: Query<(Entity, &Interaction, &NpcAwakeServiceBtn)>,
     mut action: Query<(&mut Text, &mut Visibility), With<NpcAwakeActionLabel>>,
     mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
