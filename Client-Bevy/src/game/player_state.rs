@@ -511,6 +511,11 @@ fn player_vitals_events(
             *warned = true;
             tracing::warn!("⚠️ 多个 LocalPlayer 实体（登出未清理？CRITICAL-1）——本帧跳过组件写，事件按序缓冲");
         }
+        // 命中集仅 is_vitals_event：QuestItemGained/Deleted **不入 pending**——
+        // 由 quest_inventory_events 迟读递延处理（与 inventory_events/belt_restock_events
+        // 同构：实体缺失先 return 后读，游标不动，实体生成帧连同窗口事件按序应用）。
+        // 曾改入 pending 回放（评审 finding 3/复审 FINDING 1），但回放帧 inventory_events
+        // 迟读会重写 UserInformation 快照、抹掉回放刚写入的任务格增量（实测 [7]≠[7,8]）。
         for ev in events.read() {
             if is_vitals_event(ev) {
                 push_pending(&mut pending.0, ev.clone(), &mut warned);
@@ -607,50 +612,13 @@ fn is_status_event(ev: &ServerEvent) -> bool {
         | ServerEvent::ReincarnationRequested | ServerEvent::PlayerRevived)
 }
 
-/// 任务格增量写（QuestItemGained/Deleted）：apply_pending_events 回放共用
-/// （#2633 批次4 补充：实体缺失窗口 quest_inventory_events 消费即弃，须随缓冲回放）。
-fn apply_quest_inventory_event(ev: &ServerEvent, inventory: &mut Inventory) -> bool {
-    use crate::game::dialogs::inventory::QUEST_GRID_SIZE;
-    match ev {
-        ServerEvent::QuestItemGained { item } => {
-            if let Some(slot) = inventory.quest_inventory.iter_mut().find(|s| s.is_none()) {
-                *slot = Some(item.clone());
-            } else {
-                inventory.quest_inventory.push(Some(item.clone()));
-            }
-            inventory.quest_inventory.truncate(QUEST_GRID_SIZE);
-            true
-        }
-        ServerEvent::QuestItemDeleted { unique_id, count } => {
-            for slot in inventory.quest_inventory.iter_mut() {
-                if let Some(it) = slot {
-                    if it.unique_id == *unique_id {
-                        if it.count > *count {
-                            it.count -= *count;
-                        } else {
-                            *slot = None;
-                        }
-                        break;
-                    }
-                }
-            }
-            true
-        }
-        _ => false,
-    }
-}
+/// 任务格增量（QuestItemGained/Deleted）**不入 pending**：由 quest_inventory_events
+/// 迟读递延（实体缺失先 return 后读，与 inventory_events/belt_restock_events 同构）。
+/// 曾实现 apply_quest_inventory_event/is_quest_inventory_event 回放映射（评审 finding 3），
+/// 因回放帧 inventory_events 迟读重写快照会抹掉增量而撤除（详见 git 历史与 PR #2656）。
 
-/// 判别 `apply_quest_inventory_event` 的命中集（与 apply_status_event 同规则：
-/// 两侧新增分支须同步）。
-fn is_quest_inventory_event(ev: &ServerEvent) -> bool {
-    matches!(
-        ev,
-        ServerEvent::QuestItemGained { .. } | ServerEvent::QuestItemDeleted { .. }
-    )
-}
-
-/// 玩家状态旗标（钓鱼/陷阱/麻痹/死亡/复活/轮回）。
-/// （设计 §10 `player_status_events`；sprint/sneaking 由 buff.rs 写；
+/// 玩家状态旗标（钓鱼/陷阱/麻痹/死亡/复活/轮回；sprint/sneaking 经 apply_status_event
+/// 的 BuffAdded/BuffRemoved 臂在本系统与回放两处写入，buff.rs 活写者同值幂等；
 /// MountUpdated 的 MountState 由 object_state/spawn 维护——步9 起本系统不再为该事件写任何值。）
 fn player_status_events(
     mut warned: Local<bool>,
@@ -663,11 +631,11 @@ fn player_status_events(
         return; // 无事件帧不做组件查找
     }
     // R1/M1 同构：实体未生成（登录首帧）时全部可处理事件按到达顺序缓冲，待回放。
-    // 命中集 = is_status_event ∪ is_quest_inventory_event（任务格增量事件一样会因实体
-    // 缺失被 quest_inventory_events 消费即弃，这里入队后由 apply_pending_events 回放）。
+    // 命中集仅 is_status_event——QuestItemGained/Deleted 不入 pending，由
+    // quest_inventory_events 迟读递延（见 player_vitals_events 缓冲段备注）。
     let Ok(mut f) = flags_q.single_mut() else {
         for ev in events.read() {
-            if is_status_event(ev) || is_quest_inventory_event(ev) {
+            if is_status_event(ev) {
                 push_pending(&mut pending.0, ev.clone(), &mut warned);
             }
         }
@@ -712,7 +680,6 @@ fn apply_pending_events(
         apply_vitals_event(ev, &mut v, &mut p, &mut g, &mut c, &mut b, &mut pm, &mut cb, n.as_deref_mut());
         apply_user_info_items(ev, &mut inv, &mut lo);
         apply_status_event(ev, &mut f, &mut death_ui);
-        apply_quest_inventory_event(ev, &mut inv);
     }
 }
 
@@ -757,6 +724,7 @@ mod tests {
         app.init_resource::<DeathDialogState>();
         app.init_resource::<PotionBeltState>();
         app.init_resource::<PendingPlayerEvents>();
+        app.init_resource::<crate::game::dialogs::buff::BuffState>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
         // CRITICAL-1：登出回登录界面须清 LocalPlayer 实体（防"换角色重登出现双实体"）。
         // ⚠️ 同步注：生产注册在 actor/mod.rs ActorPlugin——本行仅测试装配，勿只改一边
@@ -772,9 +740,11 @@ mod tests {
                     .before(player_status_events)
                     .before(crate::game::dialogs::inventory::inventory_events)
                     .before(crate::game::dialogs::inventory::quest_inventory_events)
-                    .before(crate::game::dialogs::potion_belt::belt_restock_events),
+                    .before(crate::game::dialogs::potion_belt::belt_restock_events)
+                    .before(crate::game::dialogs::buff::buff_server_events),
                 player_vitals_events,
                 player_status_events,
+                crate::game::dialogs::buff::buff_server_events,
                 crate::game::dialogs::potion_belt::belt_restock_events
                     .before(crate::game::dialogs::inventory::inventory_events),
                 // 评审 finding 7：同帧 UserInformation 快照须先于 QuestItemGained 增量
@@ -1302,15 +1272,16 @@ mod tests {
         );
     }
 
-    /// 评审 finding 3：实体缺失窗口内 QuestItemGained/QuestItemDeleted 被
-    /// quest_inventory_events 消费即弃（continue 于 single_mut 失败）——须随登录缓冲
-    /// 入队、实体生成后回放（修复前：pending 为 0，任务物品整局丢失）。
+    /// 评审 finding 3：实体缺失窗口内 QuestItemGained/Deleted 曾被 quest_inventory_events
+    /// 边读边弃（continue 于 single_mut 失败）→ 任务物品整局丢失。修复为迟读递延
+    /// （先查实体后读，与 inventory_events/belt_restock_events 同构）：不入 pending、
+    /// reader 游标留待实体生成帧按序应用（修复前红：生成后任务格为空）。
     #[test]
-    fn quest_item_events_buffered_when_entity_missing_then_replayed() {
+    fn quest_item_events_deferred_when_entity_missing_then_applied() {
         let mut app = test_app();
         enter_game(&mut app);
 
-        // 缺失窗口：任务物品获得 + 删除（删除对空格无效果，仅验证入队）
+        // 缺失窗口：任务物品获得 + 删除（删除对空格无效果）
         app.world_mut().write_message(ServerEvent::QuestItemGained {
             item: item(7, 70, 1),
         });
@@ -1320,13 +1291,12 @@ mod tests {
         });
         app.update();
 
-        assert_eq!(
-            app.world().resource::<PendingPlayerEvents>().0.len(),
-            2,
-            "QuestItemGained/Deleted 应随登录缓冲入队（修复前被消费即弃）"
+        assert!(
+            app.world().resource::<PendingPlayerEvents>().0.is_empty(),
+            "quest 事件不入 pending（迟读递延，游标留在 quest_inventory_events reader）"
         );
 
-        // 生成 LocalPlayer → 回放：获得入格、删除无匹配（不 panic）
+        // 生成 LocalPlayer → 迟读帧应用：获得入格、删除无匹配（不 panic）
         spawn_local(&mut app);
         app.update();
 
@@ -1338,9 +1308,8 @@ mod tests {
                 .map(|it| it.unique_id)
                 .collect::<Vec<_>>(),
             vec![7],
-            "回放的 QuestItemGained 应落入任务格"
+            "迟读的 QuestItemGained 应落入任务格（修复前被消费即弃）"
         );
-        assert!(app.world().resource::<PendingPlayerEvents>().0.is_empty());
     }
 
     /// 评审 finding 4：实体缺失窗口内 BuffAdded/BuffRemoved 被 buff_server_events 消费
@@ -1382,16 +1351,21 @@ mod tests {
         assert!(f.sneaking, "未移除的 sneaking 应保留");
     }
 
-    /// 评审 finding 9：登出（OnExit Game）须连同 `--demo` 演示角色（仅挂 DemoBehavior
-    /// 无 LocalPlayer 的怪物/NPC）一并清除——否则 DemoActorsSpawned 复位后重进 Game
-    /// 会再生成一批，逐轮累积（修复前 despawn_local_player 只清 LocalPlayer）。
+    /// 评审 finding 9：登出（OnExit Game）须连同演示/网络怪物 NPC 一并清除——
+    /// DemoBehavior 由 spawn_monster/spawn_npc **无条件**挂接（含网络对象路径，
+    /// 复审 FINDING 2 证实），非 --demo 专属；此前网络怪物/NPC 登出后无任何清理
+    ///（幽灵实体泄漏）。修复前 despawn_local_player 只清 LocalPlayer（本测试红）。
     #[test]
     fn demo_actors_despawned_on_exit_game() {
         let mut app = test_app();
-        app.world_mut().spawn(crate::actor::DemoBehavior::Idle {
-            timer: 0.0,
-            interval: 1.0,
-        });
+        // 网络怪物形态：NetObjectId + DemoBehavior（spawn.rs NetObject::Monster 路径）
+        app.world_mut().spawn((
+            crate::actor::NetObjectId(42),
+            crate::actor::DemoBehavior::Idle {
+                timer: 0.0,
+                interval: 1.0,
+            },
+        ));
         enter_game(&mut app);
         assert!(
             app.world_mut()
@@ -1399,7 +1373,7 @@ mod tests {
                 .iter(app.world())
                 .next()
                 .is_some(),
-            "进入游戏应存在演示实体"
+            "进入游戏应存在演示/网络怪物实体"
         );
 
         app.world_mut()
@@ -1413,7 +1387,7 @@ mod tests {
                 .iter(app.world())
                 .next()
                 .is_none(),
-            "退出游戏后演示实体（DemoBehavior）应一并清除"
+            "退出游戏后 DemoBehavior 实体（演示/网络怪物 NPC）应一并清除"
         );
     }
 
@@ -1451,6 +1425,79 @@ mod tests {
             got,
             vec![7, 8],
             "快照 [7] 后增量 8 → [7,8]；若先增量后快照会丢 8"
+        );
+    }
+
+    /// 复审 FINDING 1：缺失窗口同帧 [UserInformation 快照, QuestItemGained]——
+    /// 快照（经 inventory_events 迟读 + pending 回放）必先于增量（经 quest_inventory_events
+    /// 迟读）应用 → [7,8]。排序由 inventory_events.before(quest_inventory_events) 边
+    /// + apply_pending_events 先于两者的既有边共同保证；曾试"quest 入 pending 回放"，
+    /// 回放帧 inventory_events 迟读重写快照会抹掉增量（实测 [7]≠[7,8]），故统一递延。
+    #[test]
+    fn quest_gain_deferred_applies_after_user_info_snapshot() {
+        let mut app = test_app();
+        enter_game(&mut app);
+
+        // 同帧到达：快照(quest=[7]) 先于 增量(8)
+        let mut snapshot = user_info(60, 800, 400);
+        if let ServerEvent::UserInformation {
+            quest_inventory, ..
+        } = &mut snapshot
+        {
+            *quest_inventory = vec![Some(item(7, 70, 1))];
+        }
+        app.world_mut().write_message(snapshot);
+        app.world_mut().write_message(ServerEvent::QuestItemGained {
+            item: item(8, 80, 1),
+        });
+        app.update();
+
+        spawn_local(&mut app);
+        app.update();
+        let inv: Inventory = get(&mut app);
+        let got: Vec<u64> = inv
+            .quest_inventory
+            .iter()
+            .flatten()
+            .map(|it| it.unique_id)
+            .collect();
+        assert_eq!(
+            got,
+            vec![7, 8],
+            "快照[7]→增量8 应为 [7,8]（快照抹增量=丢物品；同 uid 重复=脏数据）"
+        );
+
+        // 边界：增量(9) 先于 快照([7,8]) 到达——递延语义下增量在快照后应用得 [7,8,9]。
+        // 注：该到达序实践中不可达（R1：UserInformation 必先于 ObjectPlayer/任何增量），
+        // 与旧 God 系统"立即处理得 [7,8]"的差异仅限此理论角，登记为已知。
+        let mut app = test_app();
+        enter_game(&mut app);
+        app.world_mut().write_message(ServerEvent::QuestItemGained {
+            item: item(9, 90, 1),
+        });
+        let mut snapshot = user_info(60, 800, 400);
+        if let ServerEvent::UserInformation {
+            quest_inventory, ..
+        } = &mut snapshot
+        {
+            *quest_inventory = vec![Some(item(7, 70, 1)), Some(item(8, 80, 1))];
+        }
+        app.world_mut().write_message(snapshot);
+        app.update();
+
+        spawn_local(&mut app);
+        app.update();
+        let inv: Inventory = get(&mut app);
+        let got: Vec<u64> = inv
+            .quest_inventory
+            .iter()
+            .flatten()
+            .map(|it| it.unique_id)
+            .collect();
+        assert_eq!(
+            got,
+            vec![7, 8, 9],
+            "增量9→快照[7,8]：递延后增量落于快照之后得 [7,8,9]（理论角，见上注）"
         );
     }
 

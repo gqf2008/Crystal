@@ -191,7 +191,7 @@ pub const ADD_BTN_W: f32 = 72.0;
 pub const ADD_BTN_H: f32 = 23.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
-pub(crate) const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory），player_state.rs 回放共用
+const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory）
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
@@ -305,16 +305,25 @@ impl Plugin for InventoryDialogPlugin {
 }
 
 /// #1342：GainedQuestItem/DeleteQuestItem 增量更新任务格（C# QuestInventory）
-/// #2633 批次4 步9：直接写 `Inventory` 组件（HudState 双写已删）；实体未生成跳过（R1）。
+/// #2633 批次4 步9：直接写 `Inventory` 组件（HudState 双写已删）。
+/// R1 迟读递延（与 inventory_events/belt_restock_events 同构）：实体未生成时**先查实体
+/// 后读事件**——reader 游标停在原地，实体生成帧连同登录窗口事件一起按到达序应用
+/// （评审 finding 3 根因：此前 `continue` 于 single_mut 失败 = 边读边弃，窗口内
+/// 任务物品整局丢失）。配合排序边 inventory_events.before(quest_inventory_events)，
+/// UserInformation 快照（全量覆盖）必先于本帧增量。
+/// 限制：Bevy 消息 2 帧寿命——实体若 2 帧内未生成，窗口事件过期丢失；与 inventory/belt
+/// 既有限制一致（登录 UserInformation→ObjectPlayer 正常 0-1 帧）。
 pub(crate) fn quest_inventory_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
+    let Ok(mut inv) = inv_q.single_mut() else {
+        return; // 迟读递延：不读事件，游标留待实体生成帧
+    };
     for ev in events.read() {
         match ev {
             ServerEvent::QuestItemGained { item } => {
-                let Ok(mut inv) = inv_q.single_mut() else { continue };
                 if let Some(slot) = inv
                     .quest_inventory
                     .iter_mut()
@@ -327,7 +336,6 @@ pub(crate) fn quest_inventory_events(
                 inv.quest_inventory.truncate(QUEST_GRID_SIZE);
             }
             ServerEvent::QuestItemDeleted { unique_id, count } => {
-                let Ok(mut inv) = inv_q.single_mut() else { continue };
                 for slot in inv.quest_inventory.iter_mut() {
                     if let Some(it) = slot {
                         if it.unique_id == *unique_id {
