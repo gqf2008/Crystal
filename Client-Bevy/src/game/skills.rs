@@ -12,9 +12,7 @@ use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{
-    spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
-};
+use crate::ui::sprite_ui::{UiEntity, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_scroll_bar_ui,
     UiScrollList,
@@ -348,7 +346,6 @@ impl Plugin for SkillsPlugin {
                 skill_bar_show_system,
                 skill_bar_icon_system,
                 skill_bar_cooldown_system,
-                ui_button_system,
                 skills_server_events,
                 skill_bar_system,
                 magic_cooldown_system,
@@ -725,18 +722,15 @@ mod tests {
         }
     }
 
-    /// #2517 回归：技能栏所有可渲染子/孙控件都必须挂 UiEntity。
-    /// RenderLayers 不随层级传播（Bevy 0.19 check_visibility 无父级回溯），UI 相机只画
-    /// layer 1/2；漏挂 UiEntity 的 Sprite/Text2d 留在默认 layer 0 → 被 UI 相机剔除、
-    /// 只被地图相机画到世界原点（整栏不可见）。空 Libraries 下格网/底图等 lib 精灵不生成，
-    /// 但标题文字/格子/图标/冷却/键名标签都会生成，足以守住这条不变量。
+    /// bevy_ui 迁移后回归：技能栏根实体为 bevy_ui Node（含 8 格子容器 + 图标/键名 Text），
+    /// UI 相机直接渲染 bevy_ui 节点，不再依赖 UiEntity/RenderLayers。空 Libraries 下
+    /// 格网/底图等 lib 图不生成，但格子/图标/键名标签都会生成，足以守住这条不变量。
     #[test]
     fn skill_bar_children_carry_ui_entity() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.init_resource::<Assets<Image>>()
             .init_resource::<Assets<Font>>()
-            .init_resource::<UiImageCache>()
             .init_resource::<UiFont>()
             .insert_resource(GameLibraries(crate::resources::libraries::Libraries::new(
                 "Data",
@@ -755,16 +749,21 @@ mod tests {
             "应生成 2 个技能栏根实体（C# 两条 SkillBarDialog）"
         );
 
+        // 根实体应带 bevy_ui Node（绝对定位）
+        let mut nq = app
+            .world_mut()
+            .query_filtered::<(), (With<SkillBarRoot>, With<Node>)>();
+        assert_eq!(
+            nq.iter(app.world()).count(),
+            2,
+            "技能栏根实体应为 bevy_ui Node"
+        );
+
+        // 可渲染子控件：8 格 × 2 栏 = 16 个 SkillBarSlot + 键名标签
         let mut q = app
             .world_mut()
-            .query::<(Has<Sprite>, Has<Text2d>, Has<UiEntity>)>();
-        let mut renderable = 0usize;
-        for (has_sprite, has_text, has_ui) in q.iter(app.world()) {
-            if has_sprite || has_text {
-                renderable += 1;
-                assert!(has_ui, "可渲染技能栏控件缺 UiEntity（会被 UI 相机剔除）");
-            }
-        }
+            .query_filtered::<Entity, Or<(With<SkillBarSlot>, With<SkillBarIcon>, With<SkillBarKey>)>>();
+        let renderable = q.iter(app.world()).count();
         assert!(renderable > 0, "应至少生成 1 个可渲染控件");
     }
 }
@@ -1053,7 +1052,6 @@ fn spawn_skill_bar(
     mut commands: Commands,
     mut libs: ResMut<crate::map_renderer::GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     bar: Res<SkillBarState>,
@@ -1073,7 +1071,6 @@ fn spawn_skill_bar(
             &mut commands,
             &mut libs,
             &mut images,
-            &mut cache,
             &font,
             bar_idx,
             bar.pos[bar_idx],
@@ -1094,131 +1091,69 @@ pub fn skill_key_label(bar_idx: usize, i: usize) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn spawn_one_skill_bar(
     commands: &mut Commands,
     libs: &mut crate::map_renderer::GameLibraries,
     images: &mut Assets<Image>,
-    cache: &mut crate::ui::sprite_ui::UiImageCache,
     font: &Handle<Font>,
     bar_idx: usize,
     pos: (f32, f32),
 ) {
-    // 根实体：整栏随拖动移动、随设置开关显隐（子控件全部挂在根下，z 相对叠加）
+    // 根实体：整栏随拖动移动、随设置开关显隐（子控件全部挂在根下）
     let root = commands
         .spawn((
-            UiEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(pos.0),
+                top: Val::Px(pos.1),
+                width: Val::Px(SKILL_BAR_W),
+                height: Val::Px(SKILL_BAR_H),
+                ..default()
+            },
             SkillBarRoot(bar_idx),
-            Transform::from_xyz(pos.0, -pos.1, 2.4),
+            GlobalZIndex(12),
             Visibility::Visible,
         ))
         .id();
     commands.entity(root).with_children(|p| {
-        // ⚠️ 每个子/孙控件都必须挂 UiEntity：RenderLayers 不随层级传播（Bevy 0.19
-        // check_visibility_cpu_culling 无父级回溯），仅 Added<UiEntity> 的实体才会被
-        // mark_ui_render_layers 挂到 layer 1，而 UI 相机只画 layer 1/2。漏挂 → 子控件留在
-        // 默认 layer 0 → 被 UI 相机剔除、只被地图相机画到世界原点，整栏不可见（#2517）。
         // C# BeforeDraw（L1659）：格网 Prguse[2193] @(+12,0) 50% 透明，画在底图之下
-        if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 2193) {
-            p.spawn((
-                UiEntity,
-                Sprite {
-                    image: h,
-                    color: Color::srgba(1.0, 1.0, 1.0, 0.5),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(SKILL_GRID_OFFSET_X, 0.0, -0.05),
-            ));
+        if let Some(h) = load_lib_image(libs, images, crate::resources::libraries::LibraryName::Prguse, 2193) {
+            crate::ui::theme::spawn_container(p, SKILL_GRID_OFFSET_X, 0.0, 204.0, 28.0, 0)
+                .insert(ImageNode::new(h).with_color(Color::srgba(1.0, 1.0, 1.0, 0.5)));
         }
         // 底图 Prguse[2190] @(0,0)
-        if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 2190) {
-            p.spawn((
-                UiEntity,
-                Sprite::from_image(h),
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(0.0, 0.0, 0.0),
-            ));
+        if let Some(h) = load_lib_image(libs, images, crate::resources::libraries::LibraryName::Prguse, 2190) {
+            crate::ui::theme::spawn_image(p, h, 0.0, 0.0, SKILL_BAR_W, SKILL_BAR_H, 1);
         }
-        // 切换绑定按钮 Prguse[2247]=16x28 @(0,0)（L1542-1550；C# 点击仅重绘，切换逻辑已注释）
-        if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 2247) {
-            p.spawn((
-                UiEntity,
-                Sprite::from_image(h),
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(0.0, 0.0, 0.05),
-            ));
+        // 切换绑定按钮 Prguse[2247]=16x28 @(0,0)
+        if let Some(h) = load_lib_image(libs, images, crate::resources::libraries::LibraryName::Prguse, 2247) {
+            crate::ui::theme::spawn_image(p, h, 0.0, 0.0, 16.0, 28.0, 2);
         }
-        // 栏位数字（C# BindNumberLabel：Text = (BarIndex+1)，Update L1670 → "1"/"2"）
-        // 8pt 白 @(0,1)（L1584-1593；C# 8pt ≈ 11px）
-        p.spawn((
-            UiEntity,
-            Text2d::new((bar_idx + 1).to_string()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(11.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(0.0, -1.0, 0.15),
-        ));
-        let white = images.add(crate::map_renderer::make_image(
-            vec![255, 255, 255, 255],
-            1,
-            1,
-        ));
+        // 栏位数字 @(0,1)
+        crate::ui::theme::spawn_label(p, font, &(bar_idx + 1).to_string(), 0.0, 1.0, 11.0, Color::WHITE, 3);
         for i in 0..8usize {
-            // 绝对格号 = bar*8 + i（键位 = +1；C# m.Key bar1:1..8、bar2:9..16，Update L1690/1697）
+            // 绝对格号 = bar*8 + i（键位 = +1）
             let abs = bar_idx * 8 + i;
-            // 技能格锚点 @(i*25+15, 3)（L1565）：空槽无暗盒，视觉来自 2193 格网
-            p.spawn((
-                UiEntity,
-                SkillBarSlot(abs),
-                Transform::from_xyz(skill_slot_x(i), -SKILL_SLOT_Y, 0.1),
-                Visibility::Visible,
-            ))
-            .with_children(|c| {
-                // 技能图标：MagIcon[icon*2] 自然尺寸（由 skill_bar_icon_system 填图，不设 custom_size）
-                c.spawn((
-                    UiEntity,
-                    SkillBarIcon(abs),
-                    Sprite {
-                        image: white.clone(),
-                        ..default()
-                    },
-                    bevy::sprite::Anchor::TOP_LEFT,
-                    Transform::from_xyz(0.0, 0.0, 0.1),
-                    Visibility::Hidden,
-                ));
-                // 冷却遮罩：Prguse2[1260+frame] 60% 透明（由 skill_bar_cooldown_system 驱动）
-                c.spawn((
-                    UiEntity,
-                    SkillBarCooldown(abs),
-                    Sprite {
-                        image: white.clone(),
-                        color: Color::srgba(1.0, 1.0, 1.0, 0.6),
-                        ..default()
-                    },
-                    bevy::sprite::Anchor::TOP_LEFT,
-                    Transform::from_xyz(0.0, 0.0, 0.2),
-                    Visibility::Hidden,
-                ));
-                // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)；8pt 白；有技能时隐藏。
-                // 文本 = GetKey(BarIndex, i)：bar1 "F1".."F8"、bar2 "Ctrl + F1".."Ctrl + F8"
-                c.spawn((
-                    UiEntity,
-                    SkillBarKey(abs),
-                    Text2d::new(skill_key_label(bar_idx, i)),
-                    bevy::sprite::Anchor::TOP_LEFT,
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(8.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    Transform::from_xyz(SKILL_KEY_X - SKILL_SLOT_X, SKILL_SLOT_Y, 0.3),
-                ));
-            });
+            // 技能格锚点 @(i*25+15, 3)
+            crate::ui::theme::spawn_container(p, skill_slot_x(i), SKILL_SLOT_Y, SKILL_SLOT_W, SKILL_SLOT_H, 4)
+                .insert(SkillBarSlot(abs))
+                .with_children(|c| {
+                    // 技能图标（由 skill_bar_icon_system 填图）
+                    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+                    crate::ui::theme::spawn_image(c, white.clone(), 0.0, 0.0, SKILL_SLOT_W, SKILL_SLOT_H, 1)
+                        .insert((SkillBarIcon(abs), Visibility::Hidden));
+                    // 冷却遮罩（由 skill_bar_cooldown_system 驱动）
+                    crate::ui::theme::spawn_container(c, 0.0, 0.0, SKILL_SLOT_W, SKILL_SLOT_H, 2)
+                        .insert((
+                            SkillBarCooldown(abs),
+                            ImageNode::new(white).with_color(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+                            Visibility::Hidden,
+                        ));
+                    // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)
+                    crate::ui::theme::spawn_label(c, font, &skill_key_label(bar_idx, i), SKILL_KEY_X - SKILL_SLOT_X, SKILL_SLOT_Y, 8.0, Color::WHITE, 3)
+                        .insert(SkillBarKey(abs));
+                });
         }
     });
 }
@@ -1252,7 +1187,7 @@ fn skill_bar_pointer_system(
     windows: Query<&Window>,
     opt: Res<crate::game::dialogs::option::OptionState>,
     magics: Res<MagicsState>,
-    mut roots: Query<(&mut Transform, &SkillBarRoot)>,
+    mut roots: Query<(&mut Node, &SkillBarRoot)>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
 ) {
     // 与 spawn_skill_bar 同一道门：UI_BITS 关掉 skill 时栏未生成，指针系统不应空转/误存（#2517）
@@ -1331,10 +1266,10 @@ fn skill_bar_pointer_system(
         }
     }
     // 整栏跟随拖动（根实体移动，子控件随层级联动；按 SkillBarRoot.0 栏号对位）
-    for (mut tf, root) in &mut roots {
+    for (mut node, root) in &mut roots {
         let pos = bar.pos[root.0];
-        tf.translation.x = pos.0;
-        tf.translation.y = -pos.1;
+        node.left = Val::Px(pos.0);
+        node.top = Val::Px(pos.1);
     }
 }
 
@@ -1366,25 +1301,23 @@ fn skill_bar_icon_system(
     magics: Res<MagicsState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    mut icons: Query<(&mut Sprite, &mut Visibility, &SkillBarIcon), Without<SkillBarKey>>,
+    mut icons: Query<(&mut ImageNode, &mut Visibility, &SkillBarIcon), Without<SkillBarKey>>,
     mut keys: Query<(&mut Visibility, &SkillBarKey), Without<SkillBarIcon>>,
 ) {
-    for (mut sprite, mut vis, slot) in &mut icons {
+    for (mut node, mut vis, slot) in &mut icons {
         let magic = magics.by_key(slot.0 as u8 + 1);
         match magic {
             Some(m) => {
-                let handle = ui_image(
+                let handle = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     LibraryName::MagIcon,
                     magic_icon_index(m.icon),
                 );
                 match handle {
                     Some(h) => {
-                        if sprite.image != h {
-                            sprite.image = h;
+                        if node.image != h {
+                            node.image = h;
                         }
                         *vis = Visibility::Visible;
                     }
@@ -1415,10 +1348,9 @@ fn skill_bar_cooldown_system(
     cds: Res<MagicCooldowns>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    mut overlays: Query<(&mut Sprite, &mut Visibility, &SkillBarCooldown)>,
+    mut overlays: Query<(&mut ImageNode, &mut Visibility, &SkillBarCooldown)>,
 ) {
-    for (mut sprite, mut vis, slot) in &mut overlays {
+    for (mut node, mut vis, slot) in &mut overlays {
         let magic = magics.by_key(slot.0 as u8 + 1);
         let state = magic.map(|m| (cds.remaining(m.spell), cds.total(m.spell)));
         match state {
@@ -1426,16 +1358,15 @@ fn skill_bar_cooldown_system(
             Some((Some(r), Some(_))) if r < 0.1 => *vis = Visibility::Hidden,
             Some((Some(r), Some(t))) if r > 0.0 => {
                 let idx = SKILL_COOLDOWN_BASE + cooldown_frame(r, t);
-                match ui_image(
+                match load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     LibraryName::Prguse2,
                     idx,
                 ) {
                     Some(h) => {
-                        if sprite.image != h {
-                            sprite.image = h;
+                        if node.image != h {
+                            node.image = h;
                         }
                         *vis = Visibility::Visible;
                     }
