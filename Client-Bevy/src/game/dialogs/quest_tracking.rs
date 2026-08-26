@@ -13,7 +13,8 @@ use bevy::prelude::*;
 use crate::actor::{LocalPlayer, PlayerName};
 use crate::game::dialogs::quest_log::QuestLogState;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{UiEntity, UiFont, spawn_ui_text};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::spawn_label;
 
 /// 最多同时追踪 5 个任务（C# QuestTrackingDialog：Count >= 5 return）
 pub const MAX_TRACKED: usize = 5;
@@ -155,7 +156,6 @@ fn cleanup_quest_tracking(mut commands: Commands, roots: Query<Entity, With<Ques
 
 fn spawn_quest_tracking(
     mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -167,39 +167,30 @@ fn spawn_quest_tracking(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    // 半透明面板（C# 无背景，这里用深色半透明便于阅读）
-    commands.spawn((
-        UiEntity,
-        QuestTrackingWidget,
-        Sprite {
-            image: white.clone(),
-            color: Color::srgba(0.1, 0.1, 0.14, 0.9),
-            custom_size: Some(Vec2::new(PANEL_W, PANEL_H)),
-            ..default()
-        },
-        bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(0.0, 0.0, 20.0),
-        Visibility::Hidden,
-    ));
-    for i in 0..TEXT_LINES {
-        let e = spawn_ui_text(&mut commands, &font, "", 0.0, 0.0, 11.0, Color::WHITE, 20.2);
-        commands.entity(e).insert((QuestTrackingText(i), UiEntity));
-        // C# QuestDialogs.cs _questNameLabel/_questTaskLabel OutLine=true：任务追踪文本黑色描边
-        crate::ui::outlined_text::outline_on(
-            &mut commands,
-            e,
-            "",
-            font.clone(),
-            11.0,
-            bevy::sprite::Anchor::TOP_LEFT,
-            false,
-        );
-    }
+
+    // 半透明面板（C# 无背景，这里用深色半透明便于阅读）+ 30 行文本
+    let panel = commands
+        .spawn((
+            QuestTrackingWidget,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Px(PANEL_W),
+                height: Val::Px(PANEL_H),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.14, 0.9)),
+            GlobalZIndex(20),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(panel).with_children(|p| {
+        for i in 0..TEXT_LINES {
+            spawn_label(p, &font, "", 0.0, 0.0, 11.0, Color::WHITE, 1)
+                .insert(QuestTrackingText(i));
+        }
+    });
 }
 
 /// 消费 [`ToggleQuestTracking`]：切换追踪并按角色持久化（#2631 跨对话框解耦）。
@@ -222,16 +213,11 @@ fn quest_tracking_ui_system(
     windows: Query<&Window>,
     local_player: Query<&PlayerName, (With<LocalPlayer>, Without<QuestTrackingWidget>)>,
     mut widgets: Query<
-        (&mut Transform, &mut Visibility),
+        (&mut Node, &mut Visibility),
         (With<QuestTrackingWidget>, Without<QuestTrackingText>),
     >,
     mut texts: Query<
-        (
-            &mut Transform,
-            &mut Text2d,
-            &mut TextColor,
-            &QuestTrackingText,
-        ),
+        (&mut Node, &mut Text, &mut TextColor, &QuestTrackingText),
         Without<QuestTrackingWidget>,
     >,
 ) {
@@ -278,22 +264,22 @@ fn quest_tracking_ui_system(
 
     // 无追踪任务或都不在当前任务列表 → 隐藏（C# questsToTrack.Count < 1 → Hide）
     let visible = !quests_to_track.is_empty();
-    for (mut tf, mut vis) in &mut widgets {
+    for (mut node, mut vis) in &mut widgets {
         *vis = if visible {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
         if visible {
-            tf.translation.x = state.pos.0;
-            tf.translation.y = -state.pos.1;
+            node.left = Val::Px(state.pos.0);
+            node.top = Val::Px(state.pos.1);
         }
     }
     if !visible {
         return;
     }
 
-    // 渲染：任务名（LimeGreen）+ 任务行（白色缩进）
+    // 渲染：任务名（LimeGreen）+ 任务行（白色缩进）（相对面板子节点）
     let mut lines: Vec<(String, Color, f32)> = Vec::new();
     for (name, tasks) in &quests_to_track {
         lines.push((name.clone(), Color::srgb(0.196, 0.804, 0.196), 20.0));
@@ -302,18 +288,19 @@ fn quest_tracking_ui_system(
         }
     }
     let mut y = 0.0f32;
-    for (mut tf, mut text, mut color, idx) in &mut texts {
+    for (mut node, mut text, mut color, idx) in &mut texts {
         if let Some((content, c, indent)) = lines.get(idx.0) {
             text.0 = content.clone();
             color.0 = *c;
-            tf.translation.x = state.pos.0 + indent;
-            tf.translation.y = -state.pos.1 - 20.0 - y;
+            node.left = Val::Px(*indent);
+            node.top = Val::Px(20.0 + y);
             y += 15.0;
         } else {
             text.0 = String::new();
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
