@@ -15,8 +15,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 const PANEL_X: f32 = 10.0;
@@ -44,6 +45,10 @@ pub struct MountLoyaltyText;
 #[derive(Component)]
 pub struct MountGearCell(pub usize);
 
+/// 坐骑宝石图标（格子子节点）
+#[derive(Component)]
+pub struct MountGearIcon(pub usize);
+
 pub struct MountPlugin;
 
 impl Plugin for MountPlugin {
@@ -52,7 +57,7 @@ impl Plugin for MountPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_mount);
         app.add_systems(
             Update,
-            (mount_ui_system, ui_button_system)
+            (mount_ui_system,)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -69,7 +74,6 @@ fn spawn_mount(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -78,100 +82,71 @@ fn spawn_mount(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
 
-    // 面板（默认 5 孔 167）
-    let panel = spawn_ui_sprite(&mut commands, white.clone(), PANEL_X, PANEL_Y, 6.0, 1.0);
+    // 面板（默认 5 孔 167；ui_system 按孔数换 Prguse[160/167]）
+    let panel = spawn_panel(&mut commands, white.clone(), PANEL_X, PANEL_Y, 324.0, 377.0, 30);
     commands.entity(panel).insert((
-        Sprite {
-            image: white.clone(),
-            custom_size: Some(Vec2::new(324.0, 377.0)),
-            ..default()
-        },
         MountPanel,
         DialogRoot(DialogKind::Mount),
         MountWidget,
-        Visibility::Hidden,
     ));
 
-    // 名称/忠诚度
-    let e = spawn_ui_text(
-        &mut commands, &font, "",
-        PANEL_X + 30.0, PANEL_Y + 40.0, 15.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((
-        MountNameText,
-        DialogRoot(DialogKind::Mount),
-        MountWidget,
-        Visibility::Hidden,
-    ));
-    let e = spawn_ui_text(
-        &mut commands, &font, "",
-        PANEL_X + 30.0, PANEL_Y + 60.0, 12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((
-        MountLoyaltyText,
-        DialogRoot(DialogKind::Mount),
-        MountWidget,
-        Visibility::Hidden,
-    ));
-
-    // 骑乘按钮 Prguse[155/156/157] (262,70) 36x32
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 155, 156, 157,
-        PANEL_X + 262.0, PANEL_Y + 70.0, 7.0, 36.0, 32.0,
-    ) {
-        commands.entity(e).insert((
-            MountRide,
-            DialogRoot(DialogKind::Mount),
-            MountWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // 关闭 Prguse2[360/361/362] (297,3)、帮助 Prguse2[257/258/259] (274,3)
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        PANEL_X + 297.0, PANEL_Y + 3.0, 7.0, 24.0, 21.0,
-    ) {
-        commands.entity(e).insert((
-            MountClose,
-            DialogRoot(DialogKind::Mount),
-            MountWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 257, 258, 259,
-        PANEL_X + 274.0, PANEL_Y + 3.0, 7.0, 24.0, 21.0,
-    ) {
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Mount),
-            MountWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // 坐骑装备格 5 个（(36/90/144/198/252, 323)）
-    for i in 0..5usize {
-        let x = 36.0 + i as f32 * 54.0;
-        let e = spawn_ui_sprite(&mut commands, white.clone(), PANEL_X + x, PANEL_Y + 323.0, 6.1, 1.0);
-        commands.entity(e).insert((
-            Sprite {
-                image: white.clone(),
-                custom_size: Some(Vec2::new(34.0, 30.0)),
-                ..default()
-            },
-            MountGearCell(i),
-            DialogRoot(DialogKind::Mount),
-            MountWidget,
-            Visibility::Hidden,
-        ));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 名称/忠诚度
+        spawn_label(p, &font, "", 30.0, 40.0, 15.0, Color::WHITE, 9)
+            .insert(MountNameText);
+        spawn_label(p, &font, "", 30.0, 60.0, 12.0, Color::WHITE, 9)
+            .insert(MountLoyaltyText);
+        // 骑乘按钮 Prguse[155/156/157] @(262,70)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 155),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 156),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 157),
+        ) {
+            spawn_icon_button(p, n, h, pr, 262.0, 70.0, 36.0, 32.0, 10).insert(MountRide);
+        }
+        // 关闭 Prguse2[360/361/362] @(297,3)、帮助 Prguse2[257/258/259] @(274,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 297.0, 3.0, 24.0, 21.0, 10).insert(MountClose);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 257),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 258),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 259),
+        ) {
+            spawn_icon_button(p, n, h, pr, 274.0, 3.0, 24.0, 21.0, 10);
+        }
+        // 坐骑装备格 5 个 @(36/90/144/198/252, 323)
+        for i in 0..5usize {
+            let x = 36.0 + i as f32 * 54.0;
+            spawn_container(p, x, 323.0, 34.0, 30.0, 9)
+                .insert((
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                    MountGearCell(i),
+                ))
+                .with_children(|gc| {
+                    gc.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            width: Val::Px(34.0),
+                            height: Val::Px(30.0),
+                            ..default()
+                        },
+                        ImageNode::new(white.clone()),
+                        MountGearIcon(i),
+                        Visibility::Hidden,
+                        ZIndex(10),
+                    ));
+                });
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -181,33 +156,43 @@ fn mount_ui_system(
     net: ResMut<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    close: Query<&UiButton, With<MountClose>>,
-    ride: Query<&UiButton, With<MountRide>>,
-    mut widgets: Query<&mut Visibility, (With<MountWidget>, Without<MountGearCell>)>,
-    mut panel: Query<(&mut Sprite, &MountPanel), Without<MountGearCell>>,
-    mut names: Query<(&mut Text2d, Option<&MountNameText>, Option<&MountLoyaltyText>)>,
-    mut gears: Query<(&mut Visibility, &mut Sprite, &MountGearCell)>,
+    close: Query<(Entity, &Interaction), With<MountClose>>,
+    ride: Query<(Entity, &Interaction), With<MountRide>>,
+    mut widgets: Query<
+        &mut Visibility,
+        (With<MountWidget>, Without<MountGearCell>, Without<MountGearIcon>),
+    >,
+    mut panel: Query<(&mut ImageNode, &MountPanel), Without<MountGearIcon>>,
+    mut names: Query<(&mut Text, Option<&MountNameText>, Option<&MountLoyaltyText>)>,
+    mut gears: Query<(&mut Visibility, &mut ImageNode, &MountGearIcon)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     mut logged: Local<bool>,
 ) {
     use mir2_shared::packets::client::chat::Chat;
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
 
     let open = mgr.is_open(DialogKind::Mount);
-    for mut vis in &mut widgets {
+    for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
         *logged = false;
         return;
     }
-
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Mount);
         }
     }
-    for btn in &ride {
-        if btn.clicked {
+    for (e, inter) in &ride {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&Chat {
                 message: "@ride".to_string(),
                 linked_items: Vec::new(),
@@ -220,13 +205,12 @@ fn mount_ui_system(
     let mount = hud.equipment.get(10).and_then(|s| s.as_ref());
 
     // 面板按坐骑孔数换图（4→160, 5→167）
-    if let Ok((mut sprite, _)) = panel.single_mut() {
+    if let Ok((mut node, _)) = panel.single_mut() {
         let slot_count = mount.map(|m| m.slots.len()).unwrap_or(0);
         let idx = if slot_count == 4 { 160 } else { 167 };
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, idx) {
-            if sprite.image != h {
-                sprite.image = h;
-                sprite.custom_size = None;
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx) {
+            if node.image != h {
+                node.image = h;
             }
         }
     }
@@ -243,22 +227,25 @@ fn mount_ui_system(
     }
 
     // 装备格：坐骑 gem 图标（slots[0..4]）
-    for (mut vis, mut sprite, cell) in &mut gears {
+    for (mut vis, mut node, cell) in &mut gears {
         let gem = mount
             .and_then(|m| m.slots.get(cell.0))
             .and_then(|s| s.as_ref());
         let mut show = false;
         if let Some(g) = gem {
-            if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Items, g.image as usize) {
-                sprite.image = h;
-                sprite.custom_size = None;
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Items,
+                g.image as usize,
+            ) {
+                node.image = h;
                 show = true;
             }
         }
         *vis = if show { Visibility::Visible } else { Visibility::Hidden };
     }
 
-    // E2E 日志
     if !*logged {
         match mount {
             Some(m) => tracing::info!(
@@ -274,3 +261,4 @@ fn mount_ui_system(
         *logged = true;
     }
 }
+
