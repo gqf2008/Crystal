@@ -7,7 +7,9 @@
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::player_state::StatusFlags;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -285,10 +287,13 @@ fn buff_ui_system(
 
 
 /// 消费服务端状态事件（网络层只广播 ServerEvent）
+/// #2633 批次4 步4：sprint/sneaking 写改双写 `StatusFlags` 组件 + 原 `hud.*`（hud.* 保留至
+/// 步9 统一删）；组件写 `single_mut()` 失败（实体未生成）跳过不 panic（R1 同理）。
 fn buff_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut buff: ResMut<BuffState>,
     mut hud: ResMut<crate::game::hud::HudState>,
+    mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -296,8 +301,18 @@ fn buff_server_events(
             ServerEvent::BuffAdded { tag, ticks } => {
                 // #1552：SwiftFeet(ServerRust MoveSpeedBoost tag=12) → Sprint；MoonLight/DarkBody(Invisibility tag=10) → Sneaking
                 match *tag {
-                    12 => hud.sprint = true,
-                    10 => hud.sneaking = true,
+                    12 => {
+                        hud.sprint = true;
+                        if let Ok(mut f) = flags_q.single_mut() {
+                            f.sprint = true;
+                        }
+                    }
+                    10 => {
+                        hud.sneaking = true;
+                        if let Ok(mut f) = flags_q.single_mut() {
+                            f.sneaking = true;
+                        }
+                    }
                     _ => {}
                 }
                 if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == *tag) {
@@ -310,8 +325,18 @@ fn buff_server_events(
             ServerEvent::BuffRemoved { tag } => {
                 // #1552：状态消失 → 清对应移动状态
                 match *tag {
-                    12 => hud.sprint = false,
-                    10 => hud.sneaking = false,
+                    12 => {
+                        hud.sprint = false;
+                        if let Ok(mut f) = flags_q.single_mut() {
+                            f.sprint = false;
+                        }
+                    }
+                    10 => {
+                        hud.sneaking = false;
+                        if let Ok(mut f) = flags_q.single_mut() {
+                            f.sneaking = false;
+                        }
+                    }
                     _ => {}
                 }
                 buff.buffs.retain(|b| b.tag != *tag);
