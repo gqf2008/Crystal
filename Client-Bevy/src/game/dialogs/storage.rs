@@ -25,10 +25,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{ItemCell, ItemCellData, ItemCellIcon, spawn_item_cell};
-use crate::ui::sprite_ui::{
-    UiButton, UiEntity, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system,
-    ui_image,
+use crate::ui::sprite_ui::{UiButton, UiFont};
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui_root, spawn_label,
+    spawn_panel, UiItemCell, UiItemCellData, UiItemCellIcon,
 };
 
 /// 仓库数据（网络 UserStorage 写入）
@@ -129,7 +129,6 @@ impl Plugin for StoragePlugin {
                 storage_tooltip_system,
                 storage_pwd_system,
                 storage_unlock_system,
-                ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -147,7 +146,6 @@ fn spawn_storage_dialog(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -157,422 +155,173 @@ fn spawn_storage_dialog(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[586]（C# StorageDialog.Index=586，实测 388x346；移植期曾无底板悬浮格子）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 586) {
-        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Storage), StorageWidget));
-    }
-
-    // 关闭按钮（Prguse2 360/361/362），右上角
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        DIALOG_X + 363.0,
-        DIALOG_Y + 3.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((StorageClose, DialogRoot(DialogKind::Storage), StorageWidget));
-    }
-
-    // 标题文字（原版 Title[0]：仓库）
-    let title = spawn_ui_text(
-        &mut commands,
-        &font,
-        "仓库",
-        DIALOG_X + 18.0,
-        DIALOG_Y + 8.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
+    // 背景 Prguse[586]（C# StorageDialog.Index=586，实测 388x346 @ (0,0)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 586) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, STORAGE_W, 346.0, 30);
     commands
-        .entity(title)
+        .entity(panel)
         .insert((DialogRoot(DialogKind::Storage), StorageWidget));
 
-    // 仓库密码按钮（C# StorageDialog ProtectButton）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        DIALOG_X + 18.0,
-        DIALOG_Y + 330.0,
-        7.0,
-        76.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            StoragePwdBtn,
-            DialogRoot(DialogKind::Storage),
-            StorageWidget,
-        ));
-    }
-    let pwd_label = spawn_ui_text(
-        &mut commands,
-        &font,
-        "仓库密码",
-        DIALOG_X + 34.0,
-        DIALOG_Y + 334.0,
-        12.0,
-        Color::WHITE,
-        8.2,
-    );
-    commands
-        .entity(pwd_label)
-        .insert((DialogRoot(DialogKind::Storage), StorageWidget));
+    commands.entity(panel).with_children(|p| {
+        // 关闭按钮（Prguse2 360/361/362）@(363,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 363.0, 3.0, 20.0, 20.0, 10).insert(StorageClose);
+        }
+        // 标题文字
+        spawn_label(p, &font, "仓库", 18.0, 8.0, 12.0, Color::WHITE, 9);
+        // 仓库密码按钮 + 标签 @(18,330)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 18.0, 330.0, 76.0, 23.0, 10).insert(StoragePwdBtn);
+        }
+        spawn_label(p, &font, "仓库密码", 34.0, 334.0, 12.0, Color::WHITE, 11);
+    });
 
-    // 密码面板（当前密码/新密码 + 设置/移除/关闭 + 结果提示）
-    let white2 = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    commands.spawn((
-        UiEntity,
-        DialogRoot(DialogKind::Storage),
-        StoragePwdPanel,
-        Sprite {
-            image: white2.clone(),
-            color: Color::srgba(0.1, 0.1, 0.15, 0.95),
-            custom_size: Some(Vec2::new(300.0, 150.0)),
-            ..default()
-        },
-        bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(DIALOG_X + 18.0, -(DIALOG_Y + 360.0), 9.0),
-        Visibility::Hidden,
-    ));
-    let fields: [(usize, &str, f32); 2] = [
-        (0, "当前密码:", DIALOG_Y + 370.0),
-        (1, "新密码:", DIALOG_Y + 400.0),
-    ];
-    for (id, label, y) in fields {
-        let t = spawn_ui_text(
-            &mut commands,
-            &font,
-            label,
-            DIALOG_X + 28.0,
-            y,
-            12.0,
-            Color::WHITE,
-            9.1,
-        );
-        commands
-            .entity(t)
-            .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
-        let box_e = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Storage),
-                StoragePwdPanel,
-                TextInputField(id),
-                TextInputRect(DIALOG_X + 100.0, y, 200.0, 20.0),
-                Sprite {
-                    image: white2.clone(),
-                    color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                    custom_size: Some(Vec2::new(200.0, 20.0)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(DIALOG_X + 100.0, -y, 9.1),
-                Visibility::Hidden,
-            ))
-            .id();
-        commands.entity(box_e).with_children(|p| {
-            p.spawn((
-                TextInputDisplay(id),
-                Text2d::new(String::new()),
-                bevy::sprite::Anchor::TOP_LEFT,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                Transform::from_xyz(4.0, -2.0, 9.2),
-            ));
-        });
-    }
-    // 结果提示
-    let msg = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        DIALOG_X + 28.0,
-        DIALOG_Y + 430.0,
-        12.0,
-        Color::srgb(1.0, 0.9, 0.4),
-        9.2,
-    );
-    commands.entity(msg).insert((
-        StoragePwdMsg,
-        DialogRoot(DialogKind::Storage),
-        StoragePwdPanel,
-    ));
-    // 设置/修改 / 移除 / 关闭
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        DIALOG_X + 28.0,
-        DIALOG_Y + 455.0,
-        9.3,
-        70.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            StoragePwdSet,
-            DialogRoot(DialogKind::Storage),
-            StoragePwdPanel,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "设置",
-        DIALOG_X + 43.0,
-        DIALOG_Y + 459.0,
-        12.0,
-        Color::WHITE,
-        9.4,
-    );
+    // 密码面板（根节点覆盖层 300x150 @ (18,360)，GlobalZIndex 45）
     commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        DIALOG_X + 108.0,
-        DIALOG_Y + 455.0,
-        9.3,
-        70.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            StoragePwdRemove,
-            DialogRoot(DialogKind::Storage),
-            StoragePwdPanel,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "移除",
-        DIALOG_X + 123.0,
-        DIALOG_Y + 459.0,
-        12.0,
-        Color::WHITE,
-        9.4,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        210,
-        211,
-        212,
-        DIALOG_X + 188.0,
-        DIALOG_Y + 455.0,
-        9.3,
-        70.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            StoragePwdClose,
-            DialogRoot(DialogKind::Storage),
-            StoragePwdPanel,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "关闭",
-        DIALOG_X + 203.0,
-        DIALOG_Y + 459.0,
-        12.0,
-        Color::WHITE,
-        9.4,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Storage), StoragePwdPanel));
-    // 解锁面板（#200：C# PromptStorageUnlock —— 输入密码 → C.UnlockStorage）
-    commands.spawn((
-        UiEntity,
-        DialogRoot(DialogKind::Storage),
-        StorageUnlockPanel,
-        Sprite {
-            image: white2.clone(),
-            color: Color::srgba(0.1, 0.1, 0.15, 0.95),
-            custom_size: Some(Vec2::new(300.0, 120.0)),
-            ..default()
-        },
-        bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(DIALOG_X + 18.0, -(DIALOG_Y + 180.0), 9.5),
-        Visibility::Hidden,
-    ));
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "请输入仓库密码",
-        DIALOG_X + 28.0,
-        DIALOG_Y + 190.0,
-        12.0,
-        Color::WHITE,
-        9.6,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
-    let unlock_input = commands
         .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Storage),
-            StorageUnlockPanel,
-            TextInputField(2),
-            TextInputRect(DIALOG_X + 100.0, DIALOG_Y + 195.0, 200.0, 20.0),
-            Sprite {
-                image: white2.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(200.0, 20.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(DIALOG_X + 18.0),
+                top: Val::Px(DIALOG_Y + 360.0),
+                width: Val::Px(300.0),
+                height: Val::Px(150.0),
                 ..default()
             },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(DIALOG_X + 100.0, -(DIALOG_Y + 195.0), 9.6),
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
+            StoragePwdPanel,
+            DialogRoot(DialogKind::Storage),
+            GlobalZIndex(45),
             Visibility::Hidden,
         ))
-        .id();
-    commands.entity(unlock_input).with_children(|p| {
-        p.spawn((
-            TextInputDisplay(2),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
+        .with_children(|p| {
+            for (id, label, y) in [(0usize, "当前密码:", 370.0f32), (1, "新密码:", 400.0)] {
+                spawn_label(p, &font, label, 28.0, y - 360.0, 12.0, Color::WHITE, 10);
+                spawn_container(p, 100.0, y - 360.0, 200.0, 20.0, 10)
+                    .insert((
+                        BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                        crate::game::dialogs::text_input::TextInputField(id),
+                        crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 100.0, y, 200.0, 20.0),
+                    ))
+                    .with_children(|ic| {
+                        ic.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(4.0),
+                                top: Val::Px(2.0),
+                                ..default()
+                            },
+                            Text::new(String::new()),
+                            TextFont {
+                                font: FontSource::Handle(font.clone()),
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                            ZIndex(11),
+                            crate::game::dialogs::text_input::TextInputDisplay(id),
+                        ));
+                    });
+            }
+            spawn_label(p, &font, "", 28.0, 70.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 11)
+                .insert(StoragePwdMsg);
+            // 设置 / 移除 / 关闭
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 28.0, 95.0, 70.0, 23.0, 10)
+                    .insert(StoragePwdSet);
+                spawn_label(p, &font, "设置", 43.0, 99.0, 12.0, Color::WHITE, 11);
+                spawn_icon_button(p, n, h, pr, 108.0, 95.0, 70.0, 23.0, 10).insert(StoragePwdRemove);
+                spawn_label(p, &font, "移除", 123.0, 99.0, 12.0, Color::WHITE, 11);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(p, n, h, pr, 188.0, 95.0, 70.0, 23.0, 10).insert(StoragePwdClose);
+                spawn_label(p, &font, "关闭", 203.0, 99.0, 12.0, Color::WHITE, 11);
+            }
+        });
+
+    // 解锁面板（根节点覆盖层 300x120 @ (18,180)，GlobalZIndex 46）
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(DIALOG_X + 18.0),
+                top: Val::Px(DIALOG_Y + 180.0),
+                width: Val::Px(300.0),
+                height: Val::Px(120.0),
                 ..default()
             },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 9.7),
-        ));
-    });
-    let unlock_msg = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        DIALOG_X + 28.0,
-        DIALOG_Y + 225.0,
-        12.0,
-        Color::srgb(1.0, 0.6, 0.4),
-        9.6,
-    );
-    commands.entity(unlock_msg).insert((
-        StorageUnlockMsg,
-        DialogRoot(DialogKind::Storage),
-        StorageUnlockPanel,
-    ));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        DIALOG_X + 100.0,
-        DIALOG_Y + 255.0,
-        9.7,
-        70.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            StorageUnlockOk,
-            DialogRoot(DialogKind::Storage),
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
             StorageUnlockPanel,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "确定",
-        DIALOG_X + 115.0,
-        DIALOG_Y + 259.0,
-        12.0,
-        Color::WHITE,
-        9.8,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        210,
-        211,
-        212,
-        DIALOG_X + 188.0,
-        DIALOG_Y + 255.0,
-        9.7,
-        70.0,
-        23.0,
-    ) {
-        commands.entity(e).insert((
-            StorageUnlockCancel,
             DialogRoot(DialogKind::Storage),
-            StorageUnlockPanel,
-        ));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "取消",
-        DIALOG_X + 203.0,
-        DIALOG_Y + 259.0,
-        12.0,
-        Color::WHITE,
-        9.8,
-    );
-    commands
-        .entity(t)
-        .insert((DialogRoot(DialogKind::Storage), StorageUnlockPanel));
+            GlobalZIndex(46),
+            Visibility::Hidden,
+        ))
+        .with_children(|p| {
+            spawn_label(p, &font, "请输入仓库密码", 28.0, 10.0, 12.0, Color::WHITE, 10);
+            spawn_container(p, 100.0, 15.0, 200.0, 20.0, 10)
+                .insert((
+                    BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                    crate::game::dialogs::text_input::TextInputField(2),
+                    crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 100.0, DIALOG_Y + 195.0, 200.0, 20.0),
+                ))
+                .with_children(|ic| {
+                    ic.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(4.0),
+                            top: Val::Px(2.0),
+                            ..default()
+                        },
+                        Text::new(String::new()),
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(11),
+                        crate::game::dialogs::text_input::TextInputDisplay(2),
+                    ));
+                });
+            spawn_label(p, &font, "", 28.0, 45.0, 12.0, Color::srgb(1.0, 0.6, 0.4), 11)
+                .insert(StorageUnlockMsg);
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 100.0, 75.0, 70.0, 23.0, 10)
+                    .insert(StorageUnlockOk);
+                spawn_label(p, &font, "确定", 115.0, 79.0, 12.0, Color::WHITE, 11);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(p, n, h, pr, 188.0, 75.0, 70.0, 23.0, 10).insert(StorageUnlockCancel);
+                spawn_label(p, &font, "取消", 203.0, 79.0, 12.0, Color::WHITE, 11);
+            }
+        });
 
-    // 格子底板不在此预生成：#281 由 storage_grid_sync_system 按 StorageState.items.len()
-    // 动态生成/移除（进图 UserStorage 到达前 items 为空，避免先建后删抖动）
+    // 格子底板不在此预生成：#281 由 storage_grid_sync_system 动态生成
 }
 
 /// 光标坐标 → 仓库格（按实际格数，#281）
@@ -596,12 +345,20 @@ fn storage_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut all_vis: Query<(&mut Visibility, Option<&StorageSlot>), With<StorageWidget>>,
-    mut cells: Query<(&mut ItemCellData, &ItemCell), With<StorageSlot>>,
-    buttons: Query<(&UiButton, Option<&StorageClose>), With<StorageWidget>>,
-    mut slots: Query<(&mut Sprite, &StorageSlot), Without<ItemCellIcon>>,
+    mut cells: Query<(&mut UiItemCellData, &UiItemCell), With<StorageSlot>>,
+    buttons: Query<(Entity, &Interaction, Option<&StorageClose>), With<StorageWidget>>,
+    mut slots: Query<(&StorageSlot, &mut BackgroundColor), Without<UiItemCellIcon>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = state.visible && mgr.is_open(DialogKind::Storage);
     for (mut vis, _slot) in &mut all_vis {
         *vis = if open {
@@ -611,14 +368,13 @@ fn storage_ui_system(
         };
     }
 
-    // 物品图标 + 数量（#90 通用 ItemCell：只写数据，渲染由 item_cell_system 处理）
+    // 物品图标 + 数量（#90 通用 UiItemCell：只写数据，渲染由 item_cell_ui_system 处理）
     for (mut data, cell) in &mut cells {
         let item = state.items.get(cell.slot).and_then(|s| s.as_ref());
         let icon = item.and_then(|it| {
-            ui_image(
+            load_lib_image(
                 &mut libs,
                 &mut images,
-                &mut cache,
                 LibraryName::Items,
                 it.image as usize,
             )
@@ -634,21 +390,21 @@ fn storage_ui_system(
     }
 
     // 选中高亮（原版 C# SelectedCell 黄色语义）
-    for (mut sprite, slot) in &mut slots {
+    for (slot, mut bg) in &mut slots {
         let selected = state.selected == Some(slot.0);
         let target = if selected {
             Color::srgba(1.0, 0.9, 0.2, 0.35)
         } else {
             Color::srgba(0.0, 0.0, 0.0, 0.18)
         };
-        if sprite.color != target {
-            sprite.color = target;
+        if bg.0 != target {
+            bg.0 = target;
         }
     }
 
     // 关闭按钮
-    for (btn, close) in &buttons {
-        if btn.clicked && close.is_some() {
+    for (e, inter, close) in &buttons {
+        if edge(e, inter, &mut prev_inter) && close.is_some() {
             mgr.close(DialogKind::Storage);
         }
     }
@@ -971,13 +727,22 @@ fn storage_pwd_system(
     mut storage: ResMut<StorageState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    pwd_btn: Query<&UiButton, With<StoragePwdBtn>>,
-    set_btn: Query<&UiButton, With<StoragePwdSet>>,
-    remove_btn: Query<&UiButton, With<StoragePwdRemove>>,
-    close_btn: Query<&UiButton, With<StoragePwdClose>>,
+    pwd_btn: Query<(Entity, &Interaction), With<StoragePwdBtn>>,
+    set_btn: Query<(Entity, &Interaction), With<StoragePwdSet>>,
+    remove_btn: Query<(Entity, &Interaction), With<StoragePwdRemove>>,
+    close_btn: Query<(Entity, &Interaction), With<StoragePwdClose>>,
     mut panel: Query<&mut Visibility, (With<StoragePwdPanel>, Without<StoragePwdBtn>)>,
-    mut msg: Query<&mut Text2d, With<StoragePwdMsg>>,
+    mut msg: Query<&mut Text, With<StoragePwdMsg>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = storage.pwd_panel;
     for mut vis in &mut panel {
         *vis = if open {
@@ -991,8 +756,8 @@ fn storage_pwd_system(
             t.0 = storage.pwd_msg.clone();
         }
     }
-    for btn in &pwd_btn {
-        if btn.clicked {
+    for (e, inter) in &pwd_btn {
+        if edge(e, inter, &mut prev_inter) {
             storage.pwd_panel = !storage.pwd_panel;
             storage.pwd_msg.clear();
             if input.texts.len() < 2 {
@@ -1001,8 +766,8 @@ fn storage_pwd_system(
             input.active = None;
         }
     }
-    for btn in &set_btn {
-        if btn.clicked && open {
+    for (e, inter) in &set_btn {
+        if edge(e, inter, &mut prev_inter) && open {
             let current = input.texts.get(0).cloned().unwrap_or_default();
             let new = input.texts.get(1).cloned().unwrap_or_default();
             net.send_packet(&mir2_shared::packets::client::storage::SetStoragePassword {
@@ -1012,8 +777,8 @@ fn storage_pwd_system(
             tracing::info!("🔒 设置仓库密码");
         }
     }
-    for btn in &remove_btn {
-        if btn.clicked && open {
+    for (e, inter) in &remove_btn {
+        if edge(e, inter, &mut prev_inter) && open {
             let current = input.texts.get(0).cloned().unwrap_or_default();
             net.send_packet(
                 &mir2_shared::packets::client::storage::RemoveStoragePassword {
@@ -1023,8 +788,8 @@ fn storage_pwd_system(
             tracing::info!("🔓 移除仓库密码");
         }
     }
-    for btn in &close_btn {
-        if btn.clicked && open {
+    for (e, inter) in &close_btn {
+        if edge(e, inter, &mut prev_inter) && open {
             storage.pwd_panel = false;
             input.active = None;
         }
@@ -1036,11 +801,20 @@ fn storage_unlock_system(
     mut storage: ResMut<StorageState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    ok_btn: Query<&UiButton, With<StorageUnlockOk>>,
-    cancel_btn: Query<&UiButton, With<StorageUnlockCancel>>,
+    ok_btn: Query<(Entity, &Interaction), With<StorageUnlockOk>>,
+    cancel_btn: Query<(Entity, &Interaction), With<StorageUnlockCancel>>,
     mut panel: Query<&mut Visibility, With<StorageUnlockPanel>>,
-    mut msg: Query<&mut Text2d, With<StorageUnlockMsg>>,
+    mut msg: Query<&mut Text, With<StorageUnlockMsg>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = storage.unlock_panel;
     for mut vis in &mut panel {
         *vis = if open {
@@ -1057,8 +831,8 @@ fn storage_unlock_system(
     if open && input.texts.len() < 3 {
         input.texts.resize(3, String::new());
     }
-    for btn in &ok_btn {
-        if btn.clicked && open {
+    for (e, inter) in &ok_btn {
+        if edge(e, inter, &mut prev_inter) && open {
             let password = input.texts.get(2).cloned().unwrap_or_default();
             net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage { password });
             tracing::info!("🔓 发送仓库解锁请求");
@@ -1068,8 +842,8 @@ fn storage_unlock_system(
             input.active = None;
         }
     }
-    for btn in &cancel_btn {
-        if btn.clicked && open {
+    for (e, inter) in &cancel_btn {
+        if edge(e, inter, &mut prev_inter) && open {
             storage.unlock_panel = false;
             storage.unlock_msg.clear();
             input.active = None;
@@ -1121,15 +895,15 @@ fn storage_grid_sync_system(
         let y = i / COLS;
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 60.0 + y as f32 * (CELL_H + 1.0);
-        let cell = spawn_item_cell(
+        let cell = spawn_item_cell_ui_root(
             &mut commands,
             &mut images,
             &font,
             sx,
             sy,
-            6.5,
             CELL_W,
             CELL_H,
+            9,
             i,
         );
         commands.entity(cell).insert((

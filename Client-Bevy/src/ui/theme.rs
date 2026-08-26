@@ -1099,3 +1099,66 @@ pub fn scroll_list_ui_system(
         tn.height = Val::Px(thumb_h);
     }
 }
+
+/// 生成根级 bevy_ui 通用物品格（动态网格用；面板原点为 (0,0) 时坐标即绝对坐标）。
+/// 返回格子实体。子节点（图标/数量/耐久条）与 spawn_item_cell_ui 同构。
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_item_cell_ui_root(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    font: &Handle<Font>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+    slot: usize,
+) -> Entity {
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let cell = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(x),
+                top: Val::Px(y),
+                width: Val::Px(w),
+                height: Val::Px(h),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.18)),
+            UiItemCell { slot },
+            UiItemCellData::default(),
+            GlobalZIndex(z),
+        ))
+        .id();
+    commands.entity(cell).with_children(|p| {
+        p.spawn((
+            abs_node(2.0, 2.0, Some(w - 4.0), Some(h - 4.0)),
+            ImageNode::new(white.clone()),
+            UiItemCellIcon(slot),
+            Visibility::Hidden,
+            ZIndex(1),
+        ));
+        p.spawn((
+            abs_node(w - 16.0, h - 13.0, None, None),
+            Text::new(String::new()),
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(10.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 0.6)),
+            UiItemCellCount(slot),
+            Visibility::Hidden,
+            ZIndex(2),
+        ));
+        p.spawn((
+            abs_node(2.0, h - 4.0, Some(w - 4.0), Some(2.0)),
+            BackgroundColor(Color::srgb(1.0, 0.2, 0.2)),
+            UiItemCellDura(slot, w - 4.0),
+            Visibility::Hidden,
+            ZIndex(3),
+        ));
+    });
+    cell
+}
