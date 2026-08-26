@@ -320,6 +320,7 @@ fn ranking_ui_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    close: Query<&UiButton, With<RankingClose>>,
     tabs: Query<(&UiButton, &RankingTab)>,
     prev: Query<&UiButton, (With<RankingPrev>, Without<RankingTab>)>,
     next: Query<&UiButton, (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>)>,
@@ -339,6 +340,13 @@ fn ranking_ui_system(
     if !open {
         *requested = false;
         return;
+    }
+    // 关闭按钮（走 UiButton.clicked，由 ui_button_system 经 viewport 换算命中，
+    // 避免 raw cursor_position 在窗口缩放/Retina 下与 Fixed UI 逻辑坐标不一致）
+    for btn in &close {
+        if btn.clicked {
+            mgr.close(DialogKind::Ranking);
+        }
     }
     // 打开瞬间请求排行榜（原版 C# RankingDialog.Show → GetRanking）
     if !*requested {
@@ -457,16 +465,6 @@ fn ranking_ui_system(
                     }
                 }
             }
-        }
-    }
-    // 点击右上角关闭
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    if mouse.just_pressed(MouseButton::Left) {
-        let x = 200.0 + 320.0 - 24.0;
-        let y = 150.0 + 4.0;
-        if cursor.x >= x && cursor.x <= x + 20.0 && cursor.y >= y && cursor.y <= y + 20.0 {
-            mgr.close(DialogKind::Ranking);
         }
     }
 }
