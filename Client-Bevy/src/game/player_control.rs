@@ -16,7 +16,7 @@ use crate::actor::{
     Player,
 };
 use crate::game::hud::HudState;
-use crate::game::player_state::{Inventory, Loadout, StatusFlags};
+use crate::game::player_state::{CombatStats, Inventory, Loadout, Progression, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
@@ -587,11 +587,19 @@ fn auto_attack_system(
     game_data: Res<GameData>,
     players: Query<(Entity, &Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
-    // #2633 批次4 步7：class/riding/mount_type 改读 `ActorAppearance`/`MountState`、
-    // 武器 shape 读 `Loadout`（步6；hud 双写保留，步9 删）；实体缺失按 HudState 默认
-    // （class=0/riding=false/mount_type=0/shape=-1）
-    player_q: Query<(&Loadout, &ActorAppearance, Option<&MountState>), With<LocalPlayer>>,
-    character_state: Res<crate::game::dialogs::character::CharacterState>,
+    // #2633 批次4 步6/7/8：class/riding/mount_type 改读 `ActorAppearance`/`MountState`、
+    // 武器 shape 读 `Loadout`、攻速/等级读 `CombatStats`/`Progression`（CharacterState 已删）；
+    // 实体缺失按默认值（class=0/riding=false/mount_type=0/shape=-1/attack_speed=0/level=1）
+    player_q: Query<
+        (
+            &Loadout,
+            &ActorAppearance,
+            Option<&MountState>,
+            &CombatStats,
+            &Progression,
+        ),
+        With<LocalPlayer>,
+    >,
     magics: Res<crate::game::skills::MagicsState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
     // C# OutputDelay=1000ms：范围外提示节流
@@ -610,18 +618,18 @@ fn auto_attack_system(
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
     // 武器槽/职业/骑乘读 `Loadout`/`ActorAppearance`/`MountState`（#2633 批次4 步6/步7）
     let player_state = player_q.single().ok();
-    let class = player_state.map(|(_, a, _)| a.class as u8).unwrap_or(0);
+    let class = player_state.map(|(_, a, _, _, _)| a.class as u8).unwrap_or(0);
     let weapon_equipped = player_state
-        .and_then(|(l, _, _)| l.slots.get(0))
+        .and_then(|(l, _, _, _, _)| l.slots.get(0))
         .and_then(|s| s.as_ref())
         .is_some();
-    let riding = player_state.map(|(_, _, m)| m.is_some()).unwrap_or(false);
+    let riding = player_state.map(|(_, _, m, _, _)| m.is_some()).unwrap_or(false);
     let mount_type = player_state
-        .and_then(|(_, _, m)| m)
+        .and_then(|(_, _, m, _, _)| m)
         .map(|m| m.mount_type)
         .unwrap_or(0);
     let weapon_shape = player_state
-        .and_then(|(l, _, _)| l.slots.get(0))
+        .and_then(|(l, _, _, _, _)| l.slots.get(0))
         .and_then(|s| s.as_ref())
         .map(|i| i.shape)
         .unwrap_or(-1);
@@ -629,7 +637,10 @@ fn auto_attack_system(
     let is_archer = attack_kind == PlayerAttackKind::Ranged;
     let max_range = if is_archer { 9 } else { 1 };
     // #1602：C# AttackTime = User.AttackSpeed（弓手远程 +200ms）——按攻速/等级动态计算
-    control.attack_interval = attack_interval_secs(character_state.attack_speed, character_state.level)
+    let (attack_speed, level) = player_state
+        .map(|(_, _, _, c, p)| (c.attack_speed, p.level))
+        .unwrap_or((0, 1));
+    control.attack_interval = attack_interval_secs(attack_speed, level)
         + if is_archer { 0.2 } else { 0.0 };
     let p_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
     let t_tile = world_to_tile(target_tf.translation.x, target_tf.translation.y);

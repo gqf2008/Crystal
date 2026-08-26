@@ -2,12 +2,10 @@
 // 本地玩家状态组件（#2633 批次4：HudState/CharacterState God Resource → 玩家实体组件）
 // 设计：ecsplayer-design.md §6 组件 schema、§7 挂载、§10 系统拆分。
 //
-// 迁移策略（设计 §11 批1）：本批「只加写路径，读者零改动」——
-//   · 这些组件挂在 `LocalPlayer` 实体上（spawn_local_player_with 生成时挂默认值）；
-//   · 各 ServerEvent 写系统（player_vitals_events / player_status_events /
-//     inventory_events）把值**同时**写进玩家组件与原 `HudState`（双写过渡），
-//     读者仍读 `HudState`，保证任何读者读到的值与之前完全一致（行为等价）。
-//   · 读者迁移到组件、删除 `HudState` 双写属后续批次。
+// 迁移策略（设计 §11）：批1-批7 双写过渡，读者逐批迁到组件；步8 删除 `CharacterState`
+// 双源（读者已迁 Vitals/Progression/CombatStats/PlayerName），步9 删除 `HudState` 双写
+// 与资源本身（读者已迁全套玩家组件）——终态各 ServerEvent 写系统只写 `LocalPlayer`
+// 实体上的组件，唯一数据源。
 //
 // 聚合原则（设计 §6）：谁一起变（同一事件写）、谁一起被读（同一批 Query）就聚成一个
 // 组件；并优先复用实体已有组件（PlayerName/NetObjectId/ActorAppearance/MountState，
@@ -18,7 +16,6 @@ use bevy::prelude::*;
 use mir2_shared::enums::PetMode;
 
 use crate::actor::{LocalPlayer, PlayerName};
-use crate::game::dialogs::character::CharacterState;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::hud::HudState;
 use crate::game::sets::GameSet;
@@ -237,18 +234,18 @@ pub struct PendingUserInfo(pub Option<ServerEvent>);
 // ============================================================================
 // ServerEvent 写系统（#2633 批次4 步2：拆 hud_server_events，设计 §10）
 //
-// 双写过渡（设计 §11 批1）：每个系统把值**同时**写进玩家组件与原 `HudState`
-// （CharacterState 双写同样保留），读者仍读 HudState/CharacterState，行为等价。
+// 双写过渡（设计 §11 批1）：每个系统把值同时写进玩家组件与原 `HudState`
+// （CharacterState 双写已在步8 删除；hud.* 保留至步9）。
 // 组件写用 `Query<&mut X, With<LocalPlayer>>` + `single_mut()`；实体未生成时
 // （UserInformation 可能先于 ObjectPlayer 到达，设计 §12 R1）跳过组件写、仅写
-// HudState 兜底——本批不缓冲，标 R1 待后续批处理。
+// HudState 兜底，UserInformation 另由 PendingUserInfo 缓冲待实体生成后应用。
 // ============================================================================
 
 /// 从 UserInformation 事件把玩家属性/面板属性写入 Vitals/Progression/Gold/CombatStats。
 ///
 /// `player_vitals_events` 与 `apply_pending_user_info` 共用此一份字段映射，避免双份漂移
-/// （#2633 R1）。非 UserInformation 事件为 no-op。只写组件，不写 HudState/CharacterState
-/// （那两份由调用方按双写过渡各自处理）。
+/// （#2633 R1）。非 UserInformation 事件为 no-op。只写组件，不写 HudState
+/// （hud 侧由调用方按双写过渡单独处理，步9 删）。
 pub(crate) fn apply_user_info_stats(
     ev: &ServerEvent,
     vitals: &mut Vitals,
@@ -370,11 +367,11 @@ impl Plugin for PlayerStatePlugin {
 
 /// 玩家生命/法、金币/声望、基础属性、经验/等级、宠物模式、面板属性 + UserInformation 玩家属性部分。
 /// （设计 §10 `player_vitals_events`；背包/装备部分归 inventory_events，二者读同一事件不同组件。）
+/// #2633 批次4 步8：CharacterState 双写已删除；hud.* 双写保留至步9。
 #[allow(clippy::too_many_arguments)]
 fn player_vitals_events(
     mut events: MessageReader<ServerEvent>,
     mut hud: ResMut<HudState>,
-    mut char_state: ResMut<CharacterState>,
     mut pending: ResMut<PendingUserInfo>,
     mut vitals_q: Query<&mut Vitals, With<LocalPlayer>>,
     mut progression_q: Query<&mut Progression, With<LocalPlayer>>,
@@ -418,7 +415,7 @@ fn player_vitals_events(
             }
             ServerEvent::PlayerNameUpdated { name } => {
                 // #264：本地玩家改名。双写：hud.name（过渡，步9 删）+ 复用组件 `PlayerName`
-                //（#2633 批次4 步7 补写；object_state 亦有同名维护，值同，重复写无害）。
+                //（object_state 亦有同名维护，值同，重复写无害）。
                 hud.name = name.clone();
                 if let Ok(mut n) = name_q.single_mut() {
                     n.0 = name.clone();
@@ -483,31 +480,10 @@ fn player_vitals_events(
                 object_id,
                 max_hp,
                 max_mp,
-                ac,
-                mac,
-                dc,
-                mc,
-                sc,
-                critical_rate,
-                critical_damage,
-                attack_speed,
-                accuracy,
-                agility,
-                luck,
-                bag_weight,
-                wear_weight,
-                hand_weight,
-                magic_resist,
-                poison_resist,
-                health_recovery,
-                spell_recovery,
-                poison_recovery,
-                holy,
-                freezing,
-                poison_atk,
                 ..
             } => {
-                // —— HudState 玩家属性部分（inventory/equipment 部分归 inventory_events）——
+                // —— HudState 玩家属性部分（inventory/equipment 部分归 inventory_events；
+                // CharacterState 双写已随资源删除，步8）——
                 hud.name = name.clone();
                 hud.level = *level;
                 hud.hp = *hp;
@@ -520,33 +496,6 @@ fn player_vitals_events(
                 hud.class = *class;
                 hud.gender = *gender;
                 hud.player_object_id = Some(*object_id);
-                // —— CharacterState 双写（过渡保留；批7 消双源时删除）——
-                char_state.name = name.clone();
-                char_state.level = *level;
-                char_state.hp = *hp;
-                char_state.max_hp = *max_hp;
-                char_state.mp = *mp;
-                char_state.max_mp = *max_mp;
-                char_state.stats = [*ac, *mac, *dc, *mc, *sc];
-                char_state.critical_rate = *critical_rate;
-                char_state.critical_damage = *critical_damage;
-                char_state.attack_speed = *attack_speed;
-                char_state.accuracy = *accuracy;
-                char_state.agility = *agility;
-                char_state.luck = *luck;
-                char_state.exp = *exp;
-                char_state.max_exp = (*max_exp).max(1);
-                char_state.bag_weight = *bag_weight;
-                char_state.wear_weight = *wear_weight;
-                char_state.hand_weight = *hand_weight;
-                char_state.magic_resist = *magic_resist;
-                char_state.poison_resist = *poison_resist;
-                char_state.health_recovery = *health_recovery;
-                char_state.spell_recovery = *spell_recovery;
-                char_state.poison_recovery = *poison_recovery;
-                char_state.holy = *holy;
-                char_state.freezing = *freezing;
-                char_state.poison_atk = *poison_atk;
                 // —— 玩家组件：实体已生成就地写入（共享映射），未生成则缓冲快照待 reconcile（R1）——
                 // 全部组件同挂 LocalPlayer 实体（LocalPlayerStateBundle），故单一查询成败即实体有无。
                 // PlayerName 单独写：它由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
@@ -704,7 +653,6 @@ mod tests {
         app.init_state::<AppState>();
         app.add_message::<ServerEvent>();
         app.init_resource::<HudState>();
-        app.init_resource::<CharacterState>();
         app.init_resource::<PotionBeltState>();
         app.init_resource::<PendingUserInfo>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
@@ -796,7 +744,7 @@ mod tests {
         assert!(f.dead);
     }
 
-    /// UserInformation：玩家属性/面板属性写组件 + HudState + CharacterState 三写等价
+    /// UserInformation：玩家属性/面板属性写组件 + HudState 双写（步8 起 CharacterState 已删）
     #[test]
     fn user_information_writes_vitals_progression_gold_combatstats() {
         let mut app = test_app();
@@ -821,11 +769,6 @@ mod tests {
         let cb: CombatStats = get(&mut app);
         assert_eq!(cb.critical_rate, 17);
         assert_eq!(cb.bag_weight, 250);
-
-        // CharacterState 双写保留（过渡）
-        let cs = app.world().resource::<CharacterState>();
-        assert_eq!(cs.level, 60);
-        assert_eq!(cs.critical_rate, 17);
     }
 
     /// 背包/装备写组件镜像 + HudState（ItemGained + UserInformation 背包部分）
