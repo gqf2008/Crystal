@@ -14,8 +14,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 /// 宠物条目
@@ -132,7 +133,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_creature);
         app.add_systems(OnExit(AppState::Game), cleanup_creature);
         app.add_systems(
             Update,
-            (creature_ui_system, creature_action_system, creature_options_system, ui_button_system)
+            (creature_ui_system, creature_action_system, creature_options_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -149,7 +150,6 @@ fn spawn_creature(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -159,200 +159,168 @@ fn spawn_creature(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Creature),
-            CreatureWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            CreatureClose,
-            DialogRoot(DialogKind::Creature),
-            CreatureWidget,
-        ));
-    }
-    // 8 行宠物 + 2 状态行
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            CreatureLine(i),
-            DialogRoot(DialogKind::Creature),
-            CreatureWidget,
-        ));
-    }
-    // 刷新按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        480.0, 345.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            CreatureRefresh,
-            DialogRoot(DialogKind::Creature),
-            CreatureWidget,
-        ));
-    }
+    // 面板 Prguse[170] @ (280,80)。加宽加高到 320x320：操作按钮/选项面板/输入框
+    // 全在面板内（旧 sprite 布局底部元素 rel y=225-270 悬空 207 高面板外）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 320.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Creature), CreatureWidget));
 
-    // 操作按钮（C# IntelligentCreatureDialog：改名/解散/释放/自动/半自动）
-    let e = spawn_ui_text(
-        &mut commands, &font, "改名",
-        298.0, 305.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureRenameBtn, UiButton { rect: (298.0, 305.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
-    let e = spawn_ui_text(
-        &mut commands, &font, "解散",
-        360.0, 305.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureDismissBtn, UiButton { rect: (360.0, 305.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
-    let e = spawn_ui_text(
-        &mut commands, &font, "召唤",
-        360.0, 305.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureSummonBtn, UiButton { rect: (360.0, 305.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
-    let e = spawn_ui_text(
-        &mut commands, &font, "释放",
-        420.0, 305.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureReleaseBtn, UiButton { rect: (420.0, 305.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
-    let e = spawn_ui_text(
-        &mut commands, &font, "自动",
-        298.0, 330.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureAutoBtn, UiButton { rect: (298.0, 330.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
-    let e = spawn_ui_text(
-        &mut commands, &font, "半自动",
-        360.0, 330.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureSemiBtn, UiButton { rect: (360.0, 330.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
-    let e = spawn_ui_text(
-        &mut commands, &font, "选项",
-        420.0, 330.0,
-        12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(e).insert((CreatureOptionsBtn, UiButton { rect: (420.0, 330.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
-
-    // 选项面板（C# IntelligentCreatureOptionsDialog：9 个过滤项 + 保存/取消）
-    for i in 0..9usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            300.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.5,
-        );
-        commands.entity(e).insert((
-            CreatureOptionsWidget,
-            CreatureOptionsLine(i),
-            UiButton { rect: (300.0, 120.0 + i as f32 * 22.0, 200.0, 20.0), clicked: false },
-            DialogRoot(DialogKind::Creature),
-            CreatureWidget,
-            Visibility::Hidden,
-        ));
-    }
-    let e = spawn_ui_text(
-        &mut commands, &font, "保存",
-        300.0, 335.0,
-        12.0, Color::WHITE, 8.5,
-    );
-    commands.entity(e).insert((CreatureOptionsWidget, CreatureOptionsSave, UiButton { rect: (300.0, 335.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
-    let e = spawn_ui_text(
-        &mut commands, &font, "取消",
-        360.0, 335.0,
-        12.0, Color::WHITE, 8.5,
-    );
-    commands.entity(e).insert((CreatureOptionsWidget, CreatureOptionsCancel, UiButton { rect: (360.0, 335.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
-    // 品质选择（C# OptionsGradeDialog：全部/普通/稀有/神话/传说/英雄，Prev/Next 循环）
-    let e = spawn_ui_text(
-        &mut commands, &font, "品质:全部",
-        300.0, 360.0,
-        12.0, Color::WHITE, 8.5,
-    );
-    commands.entity(e).insert((CreatureOptionsWidget, CreatureGradeText, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
-    let e = spawn_ui_text(
-        &mut commands, &font, "◀",
-        380.0, 360.0,
-        12.0, Color::WHITE, 8.5,
-    );
-    commands.entity(e).insert((CreatureOptionsWidget, CreatureGradePrev, UiButton { rect: (380.0, 360.0, 20.0, 20.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
-    let e = spawn_ui_text(
-        &mut commands, &font, "▶",
-        410.0, 360.0,
-        12.0, Color::WHITE, 8.5,
-    );
-    commands.entity(e).insert((CreatureOptionsWidget, CreatureGradeNext, UiButton { rect: (410.0, 360.0, 20.0, 20.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
-
-    // 改名/释放输入框（TextInput id 33/34，C# MirInputBox 语义）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    spawn_creature_input(&mut commands, &white, &font, 33, CreatureRenameInput, "确认改名", CreatureRenameOk);
-    spawn_creature_input(&mut commands, &white, &font, 34, CreatureReleaseInput, "确认释放", CreatureReleaseOk);
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(CreatureClose);
+        }
+        // 8 行宠物 + 2 状态行 @(18,40+22i)
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(CreatureLine(i));
+        }
+        // 刷新按钮 @(200,265)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 200.0, 265.0, 76.0, 25.0, 10).insert(CreatureRefresh);
+        }
+        // 操作文本按钮（改名/解散/召唤/释放/自动/半自动/选项）
+        for (x, y, marker, text) in [
+            (18.0, 225.0, "rename", "改名"),
+            (80.0, 225.0, "dismiss", "解散"),
+            (80.0, 225.0, "summon", "召唤"),
+            (140.0, 225.0, "release", "释放"),
+            (18.0, 250.0, "auto", "自动"),
+            (80.0, 250.0, "semi", "半自动"),
+            (140.0, 250.0, "opts", "选项"),
+        ] {
+            let mut cmds = spawn_container(p, x, y, 44.0, 22.0, 10);
+            cmds.insert((
+                Button,
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+            ));
+            match marker {
+                "rename" => cmds.insert(CreatureRenameBtn),
+                "dismiss" => cmds.insert(CreatureDismissBtn),
+                "summon" => cmds.insert((CreatureSummonBtn, Visibility::Hidden)),
+                "release" => cmds.insert(CreatureReleaseBtn),
+                "auto" => cmds.insert(CreatureAutoBtn),
+                "semi" => cmds.insert(CreatureSemiBtn),
+                _ => cmds.insert(CreatureOptionsBtn),
+            };
+            cmds.with_children(|c| {
+                spawn_label(c, &font, text, 0.0, 5.0, 12.0, Color::WHITE, 11);
+            });
+        }
+        // 选项面板覆盖层（C# IntelligentCreatureOptionsDialog：9 个过滤项 + 保存/取消 + 品质）
+        for i in 0..9usize {
+            spawn_container(p, 20.0, 40.0 + i as f32 * 22.0, 200.0, 20.0, 10)
+                .insert((
+                    Button,
+                    CreatureOptionsWidget,
+                    CreatureOptionsLine(i),
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                    Visibility::Hidden,
+                ))
+                .with_children(|c| {
+                    spawn_label(c, &font, "", 0.0, 4.0, 12.0, Color::WHITE, 11);
+                });
+        }
+        spawn_container(p, 20.0, 255.0, 44.0, 22.0, 10)
+            .insert((
+                Button,
+                CreatureOptionsWidget,
+                CreatureOptionsSave,
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                Visibility::Hidden,
+            ))
+            .with_children(|c| { spawn_label(c, &font, "保存", 0.0, 5.0, 12.0, Color::WHITE, 11); });
+        spawn_container(p, 80.0, 255.0, 44.0, 22.0, 10)
+            .insert((
+                Button,
+                CreatureOptionsWidget,
+                CreatureOptionsCancel,
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                Visibility::Hidden,
+            ))
+            .with_children(|c| { spawn_label(c, &font, "取消", 0.0, 5.0, 12.0, Color::WHITE, 11); });
+        spawn_label(p, &font, "品质:全部", 20.0, 280.0, 12.0, Color::WHITE, 11)
+            .insert((CreatureOptionsWidget, CreatureGradeText, Visibility::Hidden));
+        for (x, marker, text) in [(100.0, "prev", "◀"), (130.0, "next", "▶")] {
+            let mut cmds = spawn_container(p, x, 280.0, 20.0, 20.0, 10);
+            cmds.insert((
+                Button,
+                CreatureOptionsWidget,
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                Visibility::Hidden,
+            ));
+            if marker == "prev" {
+                cmds.insert(CreatureGradePrev);
+            } else {
+                cmds.insert(CreatureGradeNext);
+            }
+            cmds.with_children(|c| { spawn_label(c, &font, text, 0.0, 4.0, 12.0, Color::WHITE, 11); });
+        }
+        // 改名/释放输入框（TextInput id 33/34，C# MirInputBox 语义）@(18,270) + 确认 @(145,270)
+        spawn_creature_input(p, &mut images, &font, 33, CreatureRenameInput, "确认改名", CreatureRenameOk);
+        spawn_creature_input(p, &mut images, &font, 34, CreatureReleaseInput, "确认释放", CreatureReleaseOk);
+    });
 }
 
 /// 宠物输入框（TextInputField(id) + 子 TextInputDisplay(id) + 确认按钮，C# MirInputBox 语义）
+#[allow(clippy::too_many_arguments)]
 fn spawn_creature_input(
-    commands: &mut Commands,
-    white: &Handle<Image>,
+    parent: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    images: &mut Assets<Image>,
     font: &Handle<Font>,
     id: usize,
     input_comp: impl Component,
     ok_label: &str,
     ok_comp: impl Component,
 ) {
-    let box_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Creature),
-            CreatureWidget,
+    spawn_container(parent, 18.0, 270.0, 120.0, 20.0, 10)
+        .insert((
             input_comp,
-            TextInputField(id),
-            TextInputRect(298.0, 350.0, 120.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(120.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(298.0, -350.0, 8.1),
+            crate::game::dialogs::text_input::TextInputField(id),
+            crate::game::dialogs::text_input::TextInputRect(298.0, 350.0, 120.0, 20.0),
+            BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
             Visibility::Hidden,
         ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            TextInputDisplay(id),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    let ok = spawn_ui_text(commands, font, ok_label, 425.0, 350.0, 12.0, Color::WHITE, 8.0);
-    commands.entity(ok).insert((
-        ok_comp,
-        UiButton { rect: (425.0, 350.0, 60.0, 20.0), clicked: false },
-        DialogRoot(DialogKind::Creature),
-        CreatureWidget,
-        Visibility::Hidden,
-    ));
+        .with_children(|ic| {
+            ic.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(4.0),
+                    top: Val::Px(2.0),
+                    ..default()
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                ZIndex(11),
+                crate::game::dialogs::text_input::TextInputDisplay(id),
+            ));
+        });
+    spawn_container(parent, 145.0, 270.0, 60.0, 20.0, 10)
+        .insert((
+            Button,
+            ok_comp,
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+            Visibility::Hidden,
+        ))
+        .with_children(|c| { spawn_label(c, font, ok_label, 0.0, 4.0, 12.0, Color::WHITE, 11); });
+    let _ = images;
 }
 
 /// 显隐 + 渲染 + 刷新
@@ -363,12 +331,21 @@ fn creature_ui_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    close: Query<&UiButton, With<CreatureClose>>,
-    refresh_btn: Query<&UiButton, With<CreatureRefresh>>,
+    close: Query<(Entity, &Interaction), With<CreatureClose>>,
+    refresh_btn: Query<(Entity, &Interaction), With<CreatureRefresh>>,
     mut widgets: Query<&mut Visibility, With<CreatureWidget>>,
-    mut lines: Query<(&mut Text2d, &CreatureLine)>,
+    mut lines: Query<(&mut Text, &CreatureLine)>,
     mut requested: Local<bool>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Creature);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -383,8 +360,8 @@ fn creature_ui_system(
         net.send_packet(&crate::network::CreatureRequestWire { request: true });
         tracing::info!("🐾 请求宠物列表");
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Creature);
         }
     }
@@ -423,8 +400,8 @@ fn creature_ui_system(
             _ => String::new(),
         };
     }
-    for btn in &refresh_btn {
-        if btn.clicked {
+    for (e, inter) in &refresh_btn {
+        if edge(e, inter, &mut prev_inter) {
             net.send_packet(&crate::network::CreatureRequestWire { request: true });
             state.message = "已请求刷新".to_string();
             tracing::info!("🐾 刷新宠物列表");
@@ -441,7 +418,8 @@ fn creature_action_system(
     mut input: ResMut<TextInputState>,
     mut submit: MessageReader<TextInputSubmit>,
     buttons: Query<(
-        &UiButton,
+        Entity,
+        &Interaction,
         Has<CreatureRenameBtn>,
         Has<CreatureDismissBtn>,
         Has<CreatureSummonBtn>,
@@ -466,7 +444,17 @@ fn creature_action_system(
             Has<CreatureReleaseOk>,
         )>,
     )>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     let selected = state.creatures.get(state.selected).cloned();
     let creature_type = selected.as_ref().map(|c| c.creature_type).unwrap_or(0);
     let pet_mode = selected.as_ref().map(|c| c.pickup_mode).unwrap_or(0);
@@ -499,8 +487,8 @@ fn creature_action_system(
     let submits: Vec<usize> = submit.read().map(|s| s.0).collect();
     let mut rename_confirm = false;
     let mut release_confirm = false;
-    for (btn, is_rename, is_dismiss, is_summon, is_release, is_auto, is_semi, is_rok, is_relok) in &buttons {
-        if !btn.clicked {
+    for (e, inter, is_rename, is_dismiss, is_summon, is_release, is_auto, is_semi, is_rok, is_relok) in &buttons {
+        if !edge(e, inter, &mut prev_inter) {
             continue;
         }
         if is_rename {
@@ -658,12 +646,12 @@ fn creature_options_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    opts_btn: Query<&UiButton, With<CreatureOptionsBtn>>,
-    save_btn: Query<&UiButton, With<CreatureOptionsSave>>,
-    cancel_btn: Query<&UiButton, With<CreatureOptionsCancel>>,
-    grade_btns: Query<(&UiButton, Has<CreatureGradePrev>, Has<CreatureGradeNext>)>,
+    opts_btn: Query<(Entity, &Interaction), With<CreatureOptionsBtn>>,
+    save_btn: Query<(Entity, &Interaction), With<CreatureOptionsSave>>,
+    cancel_btn: Query<(Entity, &Interaction), With<CreatureOptionsCancel>>,
+    grade_btns: Query<(Entity, &Interaction, Has<CreatureGradePrev>, Has<CreatureGradeNext>)>,
     mut lines: Query<
-        (&mut Text2d, Option<&CreatureOptionsLine>, Has<CreatureGradeText>),
+        (&mut Text, Option<&CreatureOptionsLine>, Has<CreatureGradeText>),
         Or<(With<CreatureOptionsLine>, With<CreatureGradeText>)>,
     >,
     // #1299：Bevy B0001——四个 &mut Visibility Query 需互相 Without（#1298 合并后启动 panic）
@@ -703,9 +691,19 @@ fn creature_options_system(
             Without<CreatureOptionsSave>,
         ),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
-    for btn in &opts_btn {
-        if btn.clicked {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
+    for (e, inter) in &opts_btn {
+        if edge(e, inter, &mut prev_inter) {
             if !state.options_open {
                 state.options_open = true;
                 if let Some(c) = state.creatures.get(state.selected) {
@@ -732,8 +730,8 @@ fn creature_options_system(
             }
         }
     }
-    for btn in &save_btn {
-        if btn.clicked && state.options_open {
+    for (e, inter) in &save_btn {
+        if edge(e, inter, &mut prev_inter) && state.options_open {
             let mut filter = [0u8; 9];
             for i in 0..9 { filter[i] = if state.options[i] { 1 } else { 0 }; }
             let selected = state.creatures.get(state.selected).cloned();
@@ -754,14 +752,14 @@ fn creature_options_system(
             state.options_open = false;
         }
     }
-    for btn in &cancel_btn {
-        if btn.clicked {
+    for (e, inter) in &cancel_btn {
+        if edge(e, inter, &mut prev_inter) {
             state.options_open = false;
         }
     }
     // 品质切换（C# OptionsGradeDialog Prev/Next 循环）
-    for (btn, is_prev, is_next) in &grade_btns {
-        if btn.clicked && state.options_open {
+    for (e, inter, is_prev, is_next) in &grade_btns {
+        if edge(e, inter, &mut prev_inter) && state.options_open {
             if is_prev {
                 state.grade = creature_grade_cycle(state.grade, -1);
             } else if is_next {
