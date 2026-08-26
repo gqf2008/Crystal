@@ -15,7 +15,9 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, ImageButton,
+};
 
 /// 背包背景 Title[196] 缺失时的兜底尺寸（真实值运行时从库读取）
 const INV_W_FALLBACK: f32 = 316.0;
@@ -70,9 +72,7 @@ impl Plugin for SocketPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_socket);
         app.add_systems(
             Update,
-            (socket_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            socket_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -87,12 +87,12 @@ fn spawn_socket(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     inv_origin: Res<InventoryOrigin>,
 ) {
     libs.0.ensure_initialized();
 
-    // 面板（初始 1 孔，打开时按孔数换图并按背包真实尺寸重定位）
+    // 面板（初始 1 孔，打开时按孔数换图并按背包真实尺寸重定位；不加 Overflow::clip，
+    // 关闭按钮 left=w-23 时右缘与面板齐平）
     let (inv_w, inv_h) = inventory_real_size(&mut libs);
     let (pw, ph) = match libs.0.get_image(LibraryName::Prguse3, 20) {
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
@@ -100,74 +100,52 @@ fn spawn_socket(
     };
     let (px, py) = socket_origin((inv_origin.0, inv_origin.1), inv_w, inv_h, pw);
 
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    let panel = spawn_ui_sprite(&mut commands, white.clone(), px, py, 6.0, 1.0);
-    commands.entity(panel).insert((
-        Sprite {
-            image: white.clone(),
-            custom_size: Some(Vec2::new(pw, ph)),
-            ..default()
-        },
-        SocketPanel,
-        DialogRoot(DialogKind::Socket),
-        SocketWidget,
-        Visibility::Hidden,
-    ));
-
-    // 关闭按钮（W-23, 3）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        px + pw - 23.0,
-        py + 3.0,
-        7.0,
-        24.0,
-        21.0,
-    ) {
-        commands.entity(e).insert((
-            SocketClose,
-            DialogRoot(DialogKind::Socket),
-            SocketWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // 12 个镶嵌格（6x2；C# x*36+23+x, y*33+15+y）
-    for idx in 0..12usize {
-        let x = (idx % 6) as f32;
-        let y = (idx / 6) as f32;
-        let cell_x = x * 36.0 + 23.0 + x;
-        let cell_y = y * 33.0 + 15.0 + y;
-        let e = spawn_ui_sprite(
-            &mut commands,
-            white.clone(),
-            px + cell_x,
-            py + cell_y,
-            6.1,
-            1.0,
-        );
-        commands.entity(e).insert((
-            Sprite {
-                image: white.clone(),
-                custom_size: Some(Vec2::new(30.0, 30.0)),
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 20) else {
+        return;
+    };
+    let panel = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(px),
+                top: Val::Px(py),
+                width: Val::Px(pw),
+                height: Val::Px(ph),
                 ..default()
             },
-            SocketCell(idx),
+            ImageNode::new(bg),
+            SocketPanel,
             DialogRoot(DialogKind::Socket),
             SocketWidget,
+            GlobalZIndex(30),
             Visibility::Hidden,
+        ))
+        .id();
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭按钮（C# W-23, 3）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, pw - 23.0, 3.0, 24.0, 21.0, 10).insert(SocketClose);
+        }
+        // 12 个镶嵌格（6x2；C# x*36+23+x, y*33+15+y；白图占位，ui_system 换宝石图）
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
         ));
-    }
+        for idx in 0..12usize {
+            let x = (idx % 6) as f32;
+            let y = (idx / 6) as f32;
+            let cell_x = x * 36.0 + 23.0 + x;
+            let cell_y = y * 33.0 + 15.0 + y;
+            spawn_image(p, white.clone(), cell_x, cell_y, 30.0, 30.0, 9)
+                .insert(SocketCell(idx));
+        }
+    });
 }
 
 fn socket_ui_system(
@@ -176,19 +154,21 @@ fn socket_ui_system(
     inv_origin: Res<InventoryOrigin>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    close: Query<&UiButton, With<SocketClose>>,
-    // B0001：与 panel 双写 Transform，filter 必须可证互斥（Without<SocketPanel>）——
-    // run_if 不拦 schedule 初始化期的访问集检查（详见 LESSON_Bevy同系统多查询双写组件）
-    mut close_tf: Query<
-        &mut Transform,
-        (With<SocketClose>, Without<SocketCell>, Without<SocketPanel>),
-    >,
+    mut close: Query<(Entity, &Interaction, &mut Node), (With<SocketClose>, Without<SocketCell>, Without<SocketPanel>)>,
     mut widgets: Query<&mut Visibility, (With<SocketWidget>, Without<SocketCell>)>,
-    mut cells: Query<(&mut Visibility, &mut Sprite, &mut Transform, &SocketCell)>,
-    mut panel: Query<(&mut Sprite, &mut Transform), (With<SocketPanel>, Without<SocketCell>)>,
+    mut cells: Query<(&mut Visibility, &mut ImageNode, &SocketCell), Without<SocketPanel>>,
+    mut panel: Query<(&mut Node, &mut ImageNode), (With<SocketPanel>, Without<SocketCell>, Without<SocketClose>)>,
     mut logged: Local<bool>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Socket);
     for mut vis in &mut widgets {
         *vis = if open {
@@ -202,8 +182,8 @@ fn socket_ui_system(
         return;
     }
 
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter, _) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Socket);
         }
     }
@@ -221,33 +201,23 @@ fn socket_ui_system(
         .map(|i| i.width.max(0) as f32)
         .unwrap_or(81.0); // Prguse3 缺失兜底：1 孔面板宽（最小情形）
     let (px, py) = socket_origin((inv_origin.0, inv_origin.1), inv_w, inv_h, w);
-    if let Ok((mut sprite, mut tf)) = panel.single_mut() {
-        if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
-            LibraryName::Prguse3,
-            idx,
-        ) {
-            if sprite.image != h {
-                sprite.image = h.clone();
-                sprite.custom_size = None;
+    if let Ok((mut node, mut img)) = panel.single_mut() {
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, idx) {
+            if img.image != h {
+                img.image = h.clone();
             }
         }
-        tf.translation.x = px;
-        tf.translation.y = -py;
+        node.left = Val::Px(px);
+        node.top = Val::Px(py);
+        node.width = Val::Px(w);
+        node.height = Val::Px(libs.0.get_image(LibraryName::Prguse3, idx).map(|i| i.height.max(0) as f32).unwrap_or(62.0));
     }
-    for mut tf in &mut close_tf {
-        tf.translation.x = px + w - 23.0;
-        tf.translation.y = -(py + 3.0);
+    for (_, _, mut node) in &mut close {
+        node.left = Val::Px(w - 23.0);
     }
 
-    // 镶嵌格：idx < 孔数 且 有宝石 → 显示宝石图标；否则隐藏；位置随面板原点
-    for (mut vis, mut sprite, mut tf, cell) in &mut cells {
-        let gx = (cell.0 % 6) as f32;
-        let gy = (cell.0 / 6) as f32;
-        tf.translation.x = px + gx * 36.0 + 23.0 + gx;
-        tf.translation.y = -(py + gy * 33.0 + 15.0 + gy);
+    // 镶嵌格：idx < 孔数 且 有宝石 → 显示宝石图标；否则隐藏（相对面板子节点）
+    for (mut vis, mut node, cell) in &mut cells {
         let gem = state
             .item
             .as_ref()
@@ -256,15 +226,13 @@ fn socket_ui_system(
         let mut show = false;
         if cell.0 < slot_count {
             if let Some(g) = gem {
-                if let Some(h) = ui_image(
+                if let Some(h) = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     LibraryName::Items,
                     g.image as usize,
                 ) {
-                    sprite.image = h;
-                    sprite.custom_size = None;
+                    node.image = h;
                     show = true;
                 }
             }
