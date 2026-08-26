@@ -535,3 +535,87 @@ pub fn dropdown_ui_system(
         }
     }
 }
+
+// ============================================================================
+// bevy_ui 动画按钮（C# MirAnimatedButton：Index 起始帧轮播 + hover/pressed 状态帧）
+// ============================================================================
+
+/// 动画按钮状态（挂在闭合框实体上）
+#[derive(Component)]
+pub struct UiAnimatedButton {
+    /// 轮播帧（Index 起始帧起 count 帧）
+    pub frames: Vec<Handle<Image>>,
+    /// 悬停帧（可选）
+    pub hover: Option<Handle<Image>>,
+    /// 按下帧（可选）
+    pub pressed: Option<Handle<Image>>,
+    /// 当前轮播帧下标
+    pub frame: usize,
+    /// 每帧间隔（秒）
+    pub delay: f32,
+    pub timer: f32,
+    pub looping: bool,
+    pub playing: bool,
+}
+
+/// 生成 bevy_ui 动画按钮（Button + ImageNode + UiAnimatedButton）
+pub fn spawn_animated_icon_button<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    frames: Vec<Handle<Image>>,
+    hover: Option<Handle<Image>>,
+    pressed: Option<Handle<Image>>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+    delay: f32,
+    looping: bool,
+) -> EntityCommands<'a> {
+    parent.spawn((
+        Button,
+        abs_node(x, y, Some(w), Some(h)),
+        ImageNode::new(frames[0].clone()),
+        UiAnimatedButton {
+            frames,
+            hover,
+            pressed,
+            frame: 0,
+            delay,
+            timer: 0.0,
+            looping,
+            playing: true,
+        },
+        ZIndex(z),
+    ))
+}
+
+/// 动画按钮系统：时间步进轮播 + 状态帧（按下 > 悬停 > 轮播帧）
+pub fn animated_button_ui_system(
+    mut btns: Query<(&Interaction, &mut UiAnimatedButton, &mut ImageNode)>,
+    time: Res<Time>,
+) {
+    for (inter, mut ab, mut node) in &mut btns {
+        if ab.playing {
+            ab.timer += time.delta_secs();
+            while ab.timer >= ab.delay && !ab.frames.is_empty() {
+                ab.timer -= ab.delay;
+                if ab.looping {
+                    ab.frame = (ab.frame + 1) % ab.frames.len();
+                } else {
+                    ab.frame = (ab.frame + 1).min(ab.frames.len() - 1);
+                }
+            }
+        }
+        let target = match inter {
+            Interaction::Pressed => ab.pressed.as_ref().or_else(|| ab.frames.get(ab.frame)),
+            Interaction::Hovered => ab.hover.as_ref().or_else(|| ab.frames.get(ab.frame)),
+            Interaction::None => ab.frames.get(ab.frame),
+        };
+        if let Some(h) = target {
+            if node.image != *h {
+                node.image = h.clone();
+            }
+        }
+    }
+}
