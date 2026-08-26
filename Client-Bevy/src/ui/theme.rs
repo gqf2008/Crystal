@@ -124,9 +124,13 @@ pub fn spawn_panel(
     h: f32,
     z: i32,
 ) -> Entity {
+    let mut node = abs_node(x, y, Some(w), Some(h));
+    // 对话框内容默认裁剪到面板边界（对齐 C# 控件 ClipToParent；
+    // 内容超过面板的列表/文本被裁掉，不再悬空到窗外）
+    node.overflow = Overflow::clip();
     commands
         .spawn((
-            abs_node(x, y, Some(w), Some(h)),
+            node,
             ImageNode::new(image),
             GlobalZIndex(z),
             Visibility::Hidden,
@@ -175,6 +179,49 @@ pub fn spawn_icon_button<'a>(
         abs_node(x, y, Some(w), Some(h)),
         ImageNode::new(normal.clone()),
         ImageButton { normal, hover, pressed },
+        ZIndex(z),
+    ))
+}
+
+/// 子节点：水平居中文本（cx=中心 x，width=排版宽度，Justify::Center）
+pub fn spawn_label_center<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    cx: f32,
+    y: f32,
+    width: f32,
+    size: f32,
+    color: Color,
+    z: i32,
+) -> EntityCommands<'a> {
+    parent.spawn((
+        abs_node(cx - width / 2.0, y, Some(width), None),
+        Text::new(text),
+        TextFont {
+            font: FontSource::Handle(font.clone()),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+        TextLayout::justify(Justify::Center),
+        ZIndex(z),
+    ))
+}
+
+/// 子节点：绝对定位图片（.Lib 图，动态换图用）
+pub fn spawn_image<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    image: Handle<Image>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+) -> EntityCommands<'a> {
+    parent.spawn((
+        abs_node(x, y, Some(w), Some(h)),
+        ImageNode::new(image),
         ZIndex(z),
     ))
 }

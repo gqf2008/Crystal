@@ -22,8 +22,10 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_label_center, spawn_panel,
+    ImageButton,
 };
 
 /// 背景 Prguse[920] 实测 536x509；Location = Center = ((1024-536)/2, (768-509)/2)
@@ -190,7 +192,7 @@ impl Plugin for HelpPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_help);
         app.add_systems(
             Update,
-            (help_ui_system, ui_button_system)
+            (help_ui_system,)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -207,7 +209,6 @@ fn spawn_help(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -218,182 +219,76 @@ fn spawn_help(
     let font = ui_font.0.clone();
     let (ox, oy) = ORIGIN;
 
-    // 背景 Prguse[920] @ Center（C# :19-24）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 920) {
-        let e = spawn_ui_sprite(&mut commands, h, ox, oy, 6.0, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Help), HelpWidget, Visibility::Hidden));
-    }
-    // 标题图 Title[57] @(18,9)（C# :26-32）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 57) {
-        let e = spawn_ui_sprite(&mut commands, h, ox + 18.0, oy + 9.0, 6.1, 1.0);
-        commands
-            .entity(e)
-            .insert((DialogRoot(DialogKind::Help), HelpWidget, Visibility::Hidden));
-    }
-    // 关闭 [360-362] @(509,3)（C# :85-95）；Previous @(210,485) / Next @(310,485)（C# :34-72）
-    let buttons: [(HelpBtnKind, LibraryName, usize, usize, usize, f32, f32); 3] = [
-        (
-            HelpBtnKind::Close,
-            LibraryName::Prguse2,
-            360,
-            361,
-            362,
-            509.0,
-            3.0,
-        ),
-        (
-            HelpBtnKind::Prev,
-            LibraryName::Prguse2,
-            240,
-            241,
-            242,
-            210.0,
-            485.0,
-        ),
-        (
-            HelpBtnKind::Next,
-            LibraryName::Prguse2,
-            243,
-            244,
-            245,
-            310.0,
-            485.0,
-        ),
-    ];
-    for (kind, lib, n, h, p, rx, ry) in buttons {
-        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-            &mut commands,
-            &mut libs,
-            &mut images,
-            &mut cache,
-            lib,
-            n,
-            h,
-            p,
-            ox + rx,
-            oy + ry,
-            8.3,
-            16.0,
-            16.0,
-        ) {
-            commands
-                .entity(e)
-                .insert((HelpBtn(kind), DialogRoot(DialogKind::Help), HelpWidget));
+    // bevy_ui 面板 Prguse[920]（536x509 @ ox,oy）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 920) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, ox, oy, 536.0, 509.0, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Help), HelpWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 标题图 Title[57] @(18,9)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 57) {
+            spawn_image(p, h, 18.0, 9.0, 103.0, 17.0, 9);
         }
-    }
-    // 页标题（Bold10 居中 242x30 @(147,39) → TOP_CENTER 于 (268,54)；宋体无
-    // Bold 面，用常规 10px——有意偏差）
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        ox + 268.0,
-        oy + 54.0,
-        10.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(t).insert((
-        HelpTitleText,
-        bevy::sprite::Anchor::TOP_CENTER,
-        DialogRoot(DialogKind::Help),
-        HelpWidget,
-    ));
-    // 页码（9F 居中 80x20 @(230,480) → TOP_CENTER 于 (270,490)）
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        ox + 270.0,
-        oy + 490.0,
-        9.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(t).insert((
-        HelpPageLabelText,
-        bevy::sprite::Anchor::TOP_CENTER,
-        DialogRoot(DialogKind::Help),
-        HelpWidget,
-    ));
-    // 图文页精灵（Help 库图像按页切换；C# 绘制于页 (12, 35+40)）
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
-    commands.spawn((
-        DialogRoot(DialogKind::Help),
-        HelpWidget,
-        HelpPageImage,
-        Sprite {
-            image: white,
-            ..default()
-        },
-        Anchor::TOP_LEFT,
-        Transform::from_xyz(ox + 12.0, -(oy + 75.0), 8.0),
-        Visibility::Hidden,
-    ));
-    // 快捷键页两列表头（C# ShortcutInfoPage :308-330 坐标相对 ShortcutInfoPage，
-    // 其 Parent=HelpPage @(12,35)——折算到对话框坐标：表头中心 (12+13+50,35+75+15)
-    // =(75,125) / (12+114+202,125)；审查 m1 修正整页漏加 (12,35) 偏移）
-    let headers: [(&str, f32, f32); 2] = [("快捷键", 75.0, 125.0), ("信息", 328.0, 125.0)];
-    for (text, rx, ry) in headers {
-        let h = spawn_ui_text(
-            &mut commands,
-            &font,
-            text,
-            ox + rx,
-            oy + ry,
-            10.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands.entity(h).insert((
-            HelpShortcutHeader(text),
-            bevy::sprite::Anchor::TOP_CENTER,
-            DialogRoot(DialogKind::Help),
-            HelpWidget,
+        // 关闭 [360-362] @(509,3)；Previous @(210,485)；Next @(310,485)
+        let buttons: [(HelpBtnKind, usize, usize, usize, f32, f32); 3] = [
+            (HelpBtnKind::Close, 360, 361, 362, 509.0, 3.0),
+            (HelpBtnKind::Prev, 240, 241, 242, 210.0, 485.0),
+            (HelpBtnKind::Next, 243, 244, 245, 310.0, 485.0),
+        ];
+        for (kind, n, h, pr, rx, ry) in buttons {
+            if let (Some(nh), Some(hh), Some(ph)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, n),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, h),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, pr),
+            ) {
+                spawn_icon_button(p, nh, hh, ph, rx, ry, 16.0, 16.0, 10)
+                    .insert(HelpBtn(kind));
+            }
+        }
+        // 页标题（居中 @(268,54) 242x30）
+        spawn_label_center(p, &font, "", 268.0, 54.0, 242.0, 10.0, Color::WHITE, 9)
+            .insert(HelpTitleText);
+        // 页码（居中 @(270,490) 80x20）
+        spawn_label_center(p, &font, "", 270.0, 490.0, 80.0, 9.0, Color::WHITE, 9)
+            .insert(HelpPageLabelText);
+        // 图文页图像（@(12,75)，Auto 尺寸）
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
         ));
-    }
-    // 快捷键页行（黄键名/白说明 9F；C# @(18,107+20i)/(119,107+20i) 相对页 →
-    // 对话框 (30,142+20i)/(131,142+20i)，含 (12,35) 偏移）
-    for i in 0..SHORTCUT_ROWS {
-        let y = oy + 142.0 + i as f32 * 20.0;
-        let k = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            ox + 30.0,
-            y,
-            9.0,
-            Color::srgb(1.0, 1.0, 0.0),
-            8.0,
-        );
-        commands
-            .entity(k)
-            .insert((HelpShortcutKey(i), DialogRoot(DialogKind::Help), HelpWidget));
-        let v = spawn_ui_text(
-            &mut commands,
-            &font,
-            "",
-            ox + 131.0,
-            y,
-            9.0,
-            Color::WHITE,
-            8.0,
-        );
-        commands.entity(v).insert((
-            HelpShortcutInfo(i),
-            DialogRoot(DialogKind::Help),
-            HelpWidget,
+        p.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(75.0),
+                ..default()
+            },
+            ImageNode::new(white),
+            HelpPageImage,
+            Visibility::Hidden,
+            ZIndex(8),
         ));
-    }
+        // 快捷键页两列表头（居中）
+        for (text, cx, ry) in [("快捷键", 75.0, 125.0), ("信息", 328.0, 125.0)] {
+            spawn_label_center(p, &font, text, cx, ry, 100.0, 10.0, Color::WHITE, 9)
+                .insert(HelpShortcutHeader(text));
+        }
+        // 快捷键页行（黄键名/白说明）
+        for i in 0..SHORTCUT_ROWS {
+            let y = 142.0 + i as f32 * 20.0;
+            spawn_label(p, &font, "", 30.0, y, 9.0, Color::srgb(1.0, 1.0, 0.0), 9)
+                .insert(HelpShortcutKey(i));
+            spawn_label(p, &font, "", 131.0, y, 9.0, Color::WHITE, 9)
+                .insert(HelpShortcutInfo(i));
+        }
+    });
 }
 
 /// 显隐 + 分页渲染 + 关闭
+#[allow(clippy::type_complexity)]
 #[allow(clippy::type_complexity)]
 fn help_ui_system(
     mut mgr: ResMut<DialogManager>,
@@ -401,13 +296,11 @@ fn help_ui_system(
     keyboard: Res<KeyboardState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
-    buttons: Query<(&UiButton, &HelpBtn)>,
+    buttons: Query<(Entity, &Interaction, &HelpBtn)>,
     mut widgets: Query<&mut Visibility, (With<HelpWidget>, Without<HelpPageImage>)>,
-    mut page_img: Query<(&mut Sprite, &mut Visibility), With<HelpPageImage>>,
-    // #1319：Bevy B0001——各文本查询的 &mut Text2d 需 Without 隔离
+    mut page_img: Query<(&mut ImageNode, &mut Visibility), With<HelpPageImage>>,
     mut titles: Query<
-        &mut Text2d,
+        &mut Text,
         (
             With<HelpTitleText>,
             Without<HelpPageLabelText>,
@@ -416,7 +309,7 @@ fn help_ui_system(
         ),
     >,
     mut page_labels: Query<
-        &mut Text2d,
+        &mut Text,
         (
             With<HelpPageLabelText>,
             Without<HelpTitleText>,
@@ -425,7 +318,7 @@ fn help_ui_system(
         ),
     >,
     mut keys: Query<
-        (&mut Text2d, &HelpShortcutKey),
+        (&mut Text, &HelpShortcutKey),
         (
             Without<HelpTitleText>,
             Without<HelpPageLabelText>,
@@ -434,7 +327,7 @@ fn help_ui_system(
         ),
     >,
     mut infos: Query<
-        (&mut Text2d, &HelpShortcutInfo),
+        (&mut Text, &HelpShortcutInfo),
         (
             Without<HelpTitleText>,
             Without<HelpPageLabelText>,
@@ -443,7 +336,7 @@ fn help_ui_system(
         ),
     >,
     mut headers: Query<
-        (&mut Text2d, &HelpShortcutHeader),
+        (&mut Text, &HelpShortcutHeader),
         (
             Without<HelpTitleText>,
             Without<HelpPageLabelText>,
@@ -451,7 +344,17 @@ fn help_ui_system(
             Without<HelpShortcutInfo>,
         ),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     let open = mgr.is_open(DialogKind::Help);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
@@ -471,9 +374,9 @@ fn help_ui_system(
     if help.page >= total {
         help.page = 0;
     }
-    // 关闭 / 循环翻页（C# :45-72：越界回绕）
-    for (b, k) in buttons.iter() {
-        if !b.clicked {
+    // 关闭 / 循环翻页（bevy_ui Interaction 边沿触发）
+    for (e, inter, k) in buttons.iter() {
+        if !edge(e, inter, &mut prev_inter) {
             continue;
         }
         match k.0 {
@@ -497,14 +400,9 @@ fn help_ui_system(
     }
     match def {
         PageDef::Image(id) => {
-            // 图文页：Help[id] 图像；快捷键页控件整体隐藏（C# ShortcutPage
-            // 是 HelpPage.Page 子控件，翻到图文页 Visible=false）
-            if let Ok((mut sprite, mut vis)) = page_img.single_mut() {
-                if let Some(h) =
-                    ui_image(&mut libs, &mut images, &mut cache, LibraryName::Help, *id)
-                {
-                    sprite.image = h;
-                    sprite.custom_size = None;
+            if let Ok((mut node, mut vis)) = page_img.single_mut() {
+                if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Help, *id) {
+                    node.image = h;
                 }
                 *vis = Visibility::Visible;
             }
