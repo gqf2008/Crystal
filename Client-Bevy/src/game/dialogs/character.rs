@@ -424,7 +424,7 @@ fn spawn_character_dialog(
 
 fn character_ui_system(
     mut mgr: ResMut<DialogManager>,
-    player_q: Query<(&PlayerName, &PlayerGuildName, &Vitals, &CombatStats, &Progression), With<LocalPlayer>>,
+    player_q: Query<(&PlayerName, Option<&PlayerGuildName>, &Vitals, &CombatStats, &Progression), With<LocalPlayer>>,
     assign_key: Res<AssignKeyState>,
     mut page: ResMut<CharPage>,
     mut widgets: Query<&mut Visibility, (With<CharDialogWidget>, Without<CharPageBg>)>,
@@ -503,13 +503,14 @@ fn character_ui_system(
             }
         }
     }
-    // 文本（#2633 批次4 步8：读玩家组件；实体未生成跳过、保持标签初始值，同旧 state 资源默认）
+    // 文本（#2633 批次4 步8：读玩家组件；实体未生成跳过、保持标签初始值，同旧 state 资源默认；
+    // PlayerGuildName 仅行会玩家有（spawn.rs 非空才插）——此处 Option 兼容无行会玩家）
     if let Ok((pname, pguild, vitals, combat, progression)) = player_q.single() {
         if let Ok(mut t) = name_texts.single_mut() {
             t.0 = pname.0.clone();
         }
         if let Ok(mut t) = guild_texts.single_mut() {
-            t.0 = pguild.0.clone();
+            t.0 = pguild.map(|g| g.0.clone()).unwrap_or_default();
         }
         for (mut t, idx) in &mut stat_texts {
             t.0 = stat_label_text(idx.0, vitals, combat);
@@ -878,5 +879,49 @@ mod tests {
         assert_eq!(stat_label_text(10, &vitals, &combat), "+7"); // Acc +{0}
         assert_eq!(stat_label_text(11, &vitals, &combat), "+9"); // Agil +{0}
         assert_eq!(stat_label_text(12, &vitals, &combat), "2"); // Luck {0}
+    }
+
+    /// 评审 finding 1：无行会玩家（spawn.rs 行会非空才插 PlayerGuildName）——查询硬要求
+    /// 该组件会让 player_q.single() 每帧失败，整块文本（名字/行会/13 状态/12 State）
+    /// 永远停在生成时空标签。Option 兼容后照常渲染（修复前：名字断言失败——空串）。
+    #[test]
+    fn guildless_player_panel_renders() {
+        use crate::resources::libraries::Libraries;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new("Data")));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world
+            .run_system_once(spawn_character_dialog)
+            .expect("spawn_character_dialog 应成功");
+        world.insert_resource({
+            let mut mgr = DialogManager::default();
+            mgr.open(DialogKind::Character);
+            mgr
+        });
+        world.insert_resource(AssignKeyState::default());
+        world.insert_resource(CharPage::default());
+        // 无行会本地玩家：无 PlayerGuildName 组件
+        world.spawn((
+            LocalPlayer,
+            PlayerName("无行会者".to_string()),
+            Vitals { hp: 120, max_hp: 130, mp: 40, max_mp: 50 },
+            CombatStats::default(),
+            Progression::default(),
+        ));
+
+        world
+            .run_system_once(character_ui_system)
+            .expect("character_ui_system 应成功");
+
+        let mut name_q = world.query_filtered::<&Text, With<CharNameText>>();
+        let name = name_q.single(&world).expect("名字标签唯一");
+        assert_eq!(name.0, "无行会者", "无行会玩家名字标签应照常渲染");
+        let mut guild_q = world.query_filtered::<&Text, With<CharGuildText>>();
+        let guild = guild_q.single(&world).expect("行会标签唯一");
+        assert_eq!(guild.0, "", "无行会玩家行会标签应为空串");
     }
 }

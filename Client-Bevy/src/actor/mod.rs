@@ -105,7 +105,16 @@ impl Plugin for ActorPlugin {
 }
 
 /// 登出/ReturnToLogin 回登录界面时清掉本地玩家实体（评审 CRITICAL-1）。
-pub(crate) fn despawn_local_player(mut commands: Commands, q: Query<Entity, With<LocalPlayer>>) {
+/// 一并清掉全部怪物/NPC：spawn_monster/spawn_npc **无条件**挂 DemoBehavior
+///（在役行为组件——待机转向/周期攻击，非 --demo 专属；demo_drive 驱动全部挂接者，
+/// 网络对象路径 spawn.rs NetObject::Monster/Npc 同样经过），故本过滤器实际覆盖
+/// 网络怪物/NPC——此前它们登出后无任何清理、靠 #1813 去重兜底（幽灵实体泄漏），
+/// 登出清理由此顺带消除泄漏；重登服务端全量重发。已知不对称：远端玩家/地面物品
+/// 仍残留（复审 FINDING 2 登记，另案处理）。
+pub(crate) fn despawn_local_player(
+    mut commands: Commands,
+    q: Query<Entity, Or<(With<LocalPlayer>, With<DemoBehavior>)>>,
+) {
     for e in &q {
         commands.entity(e).despawn();
     }
