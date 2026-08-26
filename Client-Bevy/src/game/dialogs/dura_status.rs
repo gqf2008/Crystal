@@ -16,7 +16,6 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{ui_image, UiImageCache};
 use crate::ui::theme::{load_lib_image, spawn_image, spawn_panel, ImageButton};
 
 /// 面板位置（C#：ScreenWidth-61=963, y=200；背景图 (3,3) 内布局）
@@ -356,7 +355,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(GameLibraries(Libraries::new(data_path)));
         world.insert_resource(Assets::<Image>::default());
-        world.insert_resource(UiImageCache::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
         world.insert_resource(DialogManager::default()); // DuraStatus 默认关闭
         world.insert_resource(MiniMapMode::default()); // 默认大模式
         world

@@ -25,7 +25,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{UiButton, UiFont};
+use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui_root, spawn_label,
     spawn_panel, UiItemCell, UiItemCellData, UiItemCellIcon,
@@ -578,10 +578,8 @@ fn storage_server_events(
     mut storage: ResMut<StorageState>,
     mut mgr: ResMut<DialogManager>,
     mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
-    mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
-    // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
-    // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
-    mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
+    // bevy_ui 迁移：背包面板根 Node.left = 屏幕 x，子节点随根整体平移
+    mut inv_entities: Query<(&mut Node, &DialogRoot)>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
@@ -592,27 +590,23 @@ fn storage_server_events(
             // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
             // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
             // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
-            // min 取**屏幕**坐标（-tf.y；tf.y 是世界系、越往下越负，直接 min 会取到底缘）
-            let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
-            for (tf, root) in inv_entities.iter() {
+            let mut min_x = f32::MAX;
+            for (node, root) in inv_entities.iter() {
                 if root.0 == DialogKind::Inventory {
-                    min_x = min_x.min(tf.translation.x);
-                    min_y = min_y.min(-tf.translation.y);
+                    if let Val::Px(v) = node.left {
+                        min_x = min_x.min(v);
+                    }
                 }
             }
             if min_x < f32::MAX {
                 let dx = STORAGE_W + 5.0 - min_x;
-                let dy_screen = 0.0 - min_y;
-                for (mut tf, root) in &mut inv_entities {
+                for (mut node, root) in &mut inv_entities {
                     if root.0 == DialogKind::Inventory {
-                        tf.translation.x += dx;
-                        tf.translation.y -= dy_screen;
-                    }
-                }
-                for (mut btn, root) in &mut inv_buttons {
-                    if root.0 == DialogKind::Inventory {
-                        btn.rect.0 += dx;
-                        btn.rect.1 += dy_screen;
+                        let cur = match node.left {
+                            Val::Px(v) => v,
+                            _ => 0.0,
+                        };
+                        node.left = Val::Px(cur + dx);
                     }
                 }
                 *inv_origin =
