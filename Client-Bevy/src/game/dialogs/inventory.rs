@@ -23,9 +23,10 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use mir2_shared::enums::MirGridType;
 
-use crate::ui::controls::{ItemCellData, spawn_item_cell};
-use crate::ui::sprite_ui::{
-    UiButton, UiFont, UiImageCache, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label, spawn_panel,
+    UiItemCellData,
 };
 
 /// 背包物品条目（网络 UserInformation 写入）
@@ -230,7 +231,7 @@ pub struct InvWeightBar;
 /// 原 UI_32bit[471/470] 素材本机数据缺失——#2611 偏差）
 fn inv_weight_bar_system(
     inv_q: Query<&Inventory, With<LocalPlayer>>,
-    mut bars: Query<&mut Sprite, With<InvWeightBar>>,
+    mut bars: Query<(&mut Node, &mut ImageNode), With<InvWeightBar>>,
 ) {
     let (max, weight) = inv_q
         .single()
@@ -248,11 +249,10 @@ fn inv_weight_bar_system(
     } else {
         Color::srgb(1.0, 0.35, 0.25)
     };
-    for mut sp in &mut bars {
-        sp.color = tint;
-        // 左端对齐裁宽（锚点 TOP_LEFT，宽度按比例缩放；percent=0 不绘制——
-        // C# :402 早退；位置由 DialogRoot 随对话框拖动，本系统不写 Transform）
-        sp.custom_size = Some(Vec2::new((84.0 - 3.0) * percent, 6.0));
+    for (mut node, mut img) in &mut bars {
+        img.color = tint;
+        // 左端对齐裁宽（宽度按比例缩放；percent=0 不绘制——C# :402 早退）
+        node.width = Val::Px((84.0 - 3.0) * percent);
     }
 }
 
@@ -295,7 +295,6 @@ impl Plugin for InventoryDialogPlugin {
                 inv_confirm_system,
                 inv_add_del_buttons_system,
                 quest_inventory_events,
-                ui_button_system,
                 inv_sound_system,
             )
                 .chain()
@@ -576,7 +575,6 @@ fn spawn_inventory_dialog(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     mut origin: ResMut<InventoryOrigin>,
@@ -589,167 +587,68 @@ fn spawn_inventory_dialog(
     // 场景重入重置原点（实体按常量重生成；资源若残留上局的推位/拖动偏移会脱节）
     *origin = InventoryOrigin(DIALOG_X, DIALOG_Y);
 
-    // 背景 Title[196]
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        crate::resources::libraries::LibraryName::Title,
-        196,
-    ) {
-        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Inventory),
-            InventoryPanel,
-            DialogWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // 标签页按钮（Title 737/197 道具，738/168 道具2，739/198 任务）
-    // #1342：任务页签（QuestGrid 8x5，C# QuestInventory）
-    let tabs: [(usize, usize, usize, f32); 3] = [
-        (0, 737, 197, 6.0),
-        (1, 738, 168, 76.0),
-        (2, 739, 198, 146.0),
-    ];
-    for (idx, normal, hover, x) in tabs {
-        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-            &mut commands,
-            &mut libs,
-            &mut images,
-            &mut cache,
-            crate::resources::libraries::LibraryName::Title,
-            normal,
-            hover,
-            hover,
-            DIALOG_X + x,
-            DIALOG_Y + 7.0,
-            7.0,
-            72.0,
-            23.0,
-        ) {
-            commands.entity(e).insert((
-                InvTab(idx),
-                DialogRoot(DialogKind::Inventory),
-                DialogWidget,
-            ));
-        }
-    }
-
-    // 关闭按钮（Prguse2 360/361/362）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        crate::resources::libraries::LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        DIALOG_X + 289.0,
-        DIALOG_Y + 3.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((InvCloseBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
-    }
-
-    // 金币/负重文本
-    let gold = spawn_ui_text(
-        &mut commands,
-        &font,
-        "0",
-        DIALOG_X + GOLD_TEXT_X,
-        DIALOG_Y + GOLD_TEXT_Y,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands
-        .entity(gold)
-        .insert((InvGoldText, DialogRoot(DialogKind::Inventory), DialogWidget));
-    let weight = spawn_ui_text(
-        &mut commands,
-        &font,
-        "0/0",
-        DIALOG_X + WEIGHT_TEXT_X,
-        DIALOG_Y + WEIGHT_TEXT_Y,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(weight).insert((
-        InvWeightText,
+    // 背景 Title[196]（实测 316x236）@ (0,0)
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 196) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 316.0, 236.0, 30);
+    commands.entity(panel).insert((
         DialogRoot(DialogKind::Inventory),
+        InventoryPanel,
         DialogWidget,
     ));
 
-    // 负重条（C# WeightBar：Prguse[24] 实测 84x6，对话框内局部坐标 (182,217)——
-    // 批B 曾误把它当对话框原点，实为相对背包(0,0)的偏移）；按填充度裁宽
-    // (W-3)*percent，InventoryDialog.cs:396-426。
-    // #2611 偏差：本机数据无 UI_32bit.Lib（>50% 的黄/红段素材缺失），三段
-    // 全用 Prguse[24] + 色调（白/黄/红）近似；custom_size 缩放≈源矩形裁剪
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 24) {
-        let e = spawn_ui_sprite(
-            &mut commands,
-            h,
-            DIALOG_X + 182.0,
-            DIALOG_Y + 217.0,
-            6.2,
-            1.0,
-        );
-        commands.entity(e).insert((
-            InvWeightBar,
-            DialogRoot(DialogKind::Inventory),
-            DialogWidget,
-        ));
-    }
-
-    // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)，Size 72x23）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        483,
-        484,
-        485,
-        DIALOG_X + 235.0,
-        DIALOG_Y + 5.0,
-        7.0,
-        ADD_BTN_W,
-        ADD_BTN_H,
-    ) {
-        commands
-            .entity(e)
-            .insert((InvAddBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
-    }
-    // 删除模式按钮（C# InventoryDialog DelItemButton：Prguse2 366/367/368 @(291,212)）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        366,
-        367,
-        368,
-        DIALOG_X + 291.0,
-        DIALOG_Y + 212.0,
-        7.0,
-        20.0,
-        20.0,
-    ) {
-        commands
-            .entity(e)
-            .insert((InvDelBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
-    }
-
+    commands.entity(panel).with_children(|p| {
+        // 标签页按钮（Title 737/197 道具，738/168 道具2，739/198 任务）
+        // #1342：任务页签（QuestGrid 8x5，C# QuestInventory）
+        let tabs: [(usize, usize, usize, f32); 3] = [
+            (0, 737, 197, 6.0),
+            (1, 738, 168, 76.0),
+            (2, 739, 198, 146.0),
+        ];
+        for (idx, normal, hover, x) in tabs {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, normal),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, hover),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, hover),
+            ) {
+                spawn_icon_button(p, n, h, pr, x, 7.0, 72.0, 23.0, 8).insert(InvTab(idx));
+            }
+        }
+        // 关闭按钮（Prguse2 360/361/362）@(289,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 20.0, 20.0, 8).insert(InvCloseBtn);
+        }
+        // 金币/负重文本
+        spawn_label(p, &font, "0", GOLD_TEXT_X, GOLD_TEXT_Y, 12.0, Color::WHITE, 8)
+            .insert(InvGoldText);
+        spawn_label(p, &font, "0/0", WEIGHT_TEXT_X, WEIGHT_TEXT_Y, 12.0, Color::WHITE, 8)
+            .insert(InvWeightText);
+        // 负重条（C# WeightBar：Prguse[24] 实测 84x6 @(182,217)，按填充度裁宽）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 24) {
+            spawn_image(p, h, 182.0, 217.0, 84.0, 6.0, 7).insert(InvWeightBar);
+        }
+        // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 483),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 484),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 485),
+        ) {
+            spawn_icon_button(p, n, h, pr, 235.0, 5.0, ADD_BTN_W, ADD_BTN_H, 8).insert(InvAddBtn);
+        }
+        // 删除模式按钮（C# InventoryDialog DelItemButton：Prguse2 366/367/368 @(291,212)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 366),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 367),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 368),
+        ) {
+            spawn_icon_button(p, n, h, pr, 291.0, 212.0, 20.0, 20.0, 8).insert(InvDelBtn);
+        }
+    });
     // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 Inventory 组件 items.len()
     // 动态生成/移除（进图 UserInformation 到达前 items 为空，避免先建后删抖动）
 }
@@ -779,7 +678,7 @@ impl Default for InventoryOrigin {
 /// 交易打开时请求背包右移让位（#2631 跨对话框解耦 Message）。
 /// C# TradeDialog.TradeAccept（TradeDialogs.cs:152-161）：
 /// `InventoryDialog.Location = new Point(ScreenWidth - inv.W, 0)` —— 背包推到屏幕右侧。
-/// 所有权：背包实体 Transform / UiButton.rect / [`InventoryOrigin`] 仅由本模块改写；
+/// 所有权：背包面板 Node.left / [`InventoryOrigin`] 仅由本模块改写；
 /// 交易等外部对话框只发本 Message，由 [`inventory_shift_right_system`] 自我重排（幂等）。
 #[derive(Message, Debug)]
 pub struct InventoryShiftRight;
@@ -903,6 +802,10 @@ pub struct InvConfirmYes;
 #[derive(Component)]
 pub struct InvConfirmNo;
 
+/// 丢弃/删除/扩容确认文本（迁移补齐：原版该文本从未被渲染——spawn 空串且无系统写它）
+#[derive(Component)]
+pub struct InvConfirmText;
+
 /// 显示/隐藏 + 页切换 + 关闭 + 物品图标渲染 + 双击使用/装备
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inventory_ui_system(
@@ -911,7 +814,6 @@ fn inventory_ui_system(
     mut inv_ui: ResMut<InvUiState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     // 背景/标签/关闭/格子 统一显隐（格子带 InvSlot）
     mut all_vis: Query<
         (&mut Visibility, Option<&InvSlot>),
@@ -921,19 +823,23 @@ fn inventory_ui_system(
             Without<InvWeightText>,
         ),
     >,
-    mut cells_data: Query<(&InvSlot, &mut ItemCellData)>,
+    mut cells_data: Query<(&InvSlot, &mut UiItemCellData)>,
     buttons: Query<
-        (&UiButton, Option<&InvTab>),
+        (Entity, &Interaction, Option<&InvTab>),
         (
             With<DialogWidget>,
+            With<Button>,
             Without<InvSlot>,
             Without<InvGoldText>,
             Without<InvWeightText>,
+            // 加格/删格按钮由 inv_add_del_buttons_system 处理，排除避免误关窗口
+            Without<InvAddBtn>,
+            Without<InvDelBtn>,
         ),
     >,
     mut money: Query<
         (
-            &mut Text2d,
+            &mut Text,
             &mut Visibility,
             Option<&InvGoldText>,
             Option<&InvWeightText>,
@@ -944,7 +850,16 @@ fn inventory_ui_system(
             Without<InvSlot>,
         ),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let player = player_q.single().ok();
     let inv = player.map(|(inv, _)| inv);
     let open = mgr.is_open(DialogKind::Inventory);
@@ -979,7 +894,7 @@ fn inventory_ui_system(
         return;
     }
 
-    // 物品数据 → 通用 ItemCell（图标/数量/耐久条由 item_cell_system 渲染，#90 续）
+    // 物品数据 → 通用 ItemCell（图标/数量/耐久条由 item_cell_ui_system 渲染）
     for (slot, mut data) in &mut cells_data {
         let item = if inv_ui.page == 2 {
             inv.and_then(|i| i.quest_inventory.get(slot.0).and_then(|s| s.as_ref()))
@@ -988,10 +903,9 @@ fn inventory_ui_system(
         };
         match item {
             Some(item) => {
-                let handle = ui_image(
+                let handle = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     crate::resources::libraries::LibraryName::Items,
                     item.image as usize,
                 );
@@ -1014,16 +928,17 @@ fn inventory_ui_system(
             }
         }
     }
-    // 标签页切换 / 关闭按钮
-    for (btn, tab) in &buttons {
-        if btn.clicked {
-            match tab {
-                Some(t) => {
-                    inv_ui.page = t.0;
-                    tracing::debug!("背包页 -> {}", t.0);
-                }
-                None => mgr.close(DialogKind::Inventory),
+    // 标签页切换 / 关闭按钮（bevy_ui Interaction 边沿）
+    for (e, inter, tab) in &buttons {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        match tab {
+            Some(t) => {
+                inv_ui.page = t.0;
+                tracing::debug!("背包页 -> {}", t.0);
             }
+            None => mgr.close(DialogKind::Inventory),
         }
     }
     for (mut t, mut vis, gold, weight) in &mut money {
@@ -1244,11 +1159,11 @@ pub fn item_type_name(t: u8) -> &'static str {
 fn inv_grid_sync_system(
     mut commands: Commands,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
-    origin: Res<InventoryOrigin>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     slots: Query<(Entity, &InvSlot)>,
+    panel: Query<Entity, With<InventoryPanel>>,
 ) {
     let inv = inv_q.single().ok();
     let size = inv.map(|i| i.items.len()).unwrap_or(0).min(MAX_INV_SLOTS);
@@ -1270,7 +1185,10 @@ fn inv_grid_sync_system(
     if existing.len() == size {
         return;
     }
-    // 扩容：补缺失格子
+    // 扩容：补缺失格子（bevy_ui 子格，坐标相对面板根——面板可被交易推位/拖动）
+    let Ok(panel) = panel.single() else {
+        return;
+    };
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
@@ -1283,27 +1201,22 @@ fn inv_grid_sync_system(
         }
         let x = i % GRID_COLS;
         let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
-        let cell = spawn_item_cell(
-            &mut commands,
-            &mut images,
-            &font,
-            sx,
-            sy,
-            6.5,
-            CELL_W,
-            CELL_H,
-            i,
-        );
-        commands
-            .entity(cell)
-            .insert((DialogRoot(DialogKind::Inventory), DialogWidget, InvSlot(i)));
+        let sx = 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = 37.0 + y as f32 * (CELL_H + 1.0);
+        let mut cell = Entity::PLACEHOLDER;
+        commands.entity(panel).with_children(|p| {
+            cell = spawn_item_cell_ui(p, &mut images, &font, sx, sy, CELL_W, CELL_H, 6, i).id();
+        });
+        commands.entity(cell).insert((
+            DialogRoot(DialogKind::Inventory),
+            DialogWidget,
+            InvSlot(i),
+        ));
     }
 }
 
 /// 消费 [`InventoryShiftRight`]：交易开窗时背包自我右移让位（#2631 跨对话框解耦）。
-/// 逻辑等同 C# TradeDialog.TradeAccept；背包平移自身全部实体 Transform + UiButton.rect
+/// 逻辑等同 C# TradeDialog.TradeAccept；背包平移自身面板根 Node.left
 /// 并覆写 [`InventoryOrigin`]（幂等——重复推位时 min 已在目标处，delta=0）。
 /// 查询/过滤与旧 trade.rs `push_inventory_right` 完全一致（按 DialogKind::Inventory 过滤，
 /// 与本插件其它系统组件访问不重叠，无 B0001）。
@@ -1311,8 +1224,7 @@ fn inv_grid_sync_system(
 fn inventory_shift_right_system(
     mut events: MessageReader<InventoryShiftRight>,
     mut libs: ResMut<GameLibraries>,
-    mut inv_entities: Query<(&mut Transform, &DialogRoot), With<Visibility>>,
-    mut inv_buttons: Query<(&mut UiButton, &DialogRoot)>,
+    mut inv_entities: Query<(&mut Node, &DialogRoot)>,
     mut inv_origin: ResMut<InventoryOrigin>,
 ) {
     let mut shift = false;
@@ -1324,51 +1236,48 @@ fn inventory_shift_right_system(
     }
     let (inv_w, _) = inventory_real_size(&mut libs);
     let target_x = 1024.0 - inv_w;
+    // bevy_ui：背包面板根 Node.left = 屏幕 x；子节点（格/按钮/文本）随根整体平移
     let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX; // 屏幕 y
-    for (tf, root) in inv_entities.iter() {
+    for (node, root) in inv_entities.iter() {
         if root.0 != DialogKind::Inventory {
             continue;
         }
-        min_x = min_x.min(tf.translation.x);
-        min_y = min_y.min(-tf.translation.y);
+        if let Val::Px(v) = node.left {
+            min_x = min_x.min(v);
+        }
     }
     if min_x == f32::MAX {
         return; // 背包未生成
     }
     let dx = target_x - min_x;
-    let dy_screen = 0.0 - min_y;
-    for (mut tf, root) in inv_entities.iter_mut() {
+    for (mut node, root) in inv_entities.iter_mut() {
         if root.0 != DialogKind::Inventory {
             continue;
         }
-        tf.translation.x += dx;
-        tf.translation.y -= dy_screen;
-    }
-    // 推位必须同步按钮命中区（屏幕坐标 rect 不随 Transform 走）——
-    // 拖动系统同款义务（dialog_drag_system 移动对话框时同步 btn.rect）
-    for (mut btn, root) in inv_buttons.iter_mut() {
-        if root.0 != DialogKind::Inventory {
-            continue;
-        }
-        btn.rect.0 += dx;
-        btn.rect.1 += dy_screen;
+        let cur = match node.left {
+            Val::Px(v) => v,
+            _ => 0.0,
+        };
+        node.left = Val::Px(cur + dx);
     }
     // 同步 InventoryOrigin（镶嵌面板锚定 / Ctrl+右键入口等读背包当前原点的系统跟随推位）
     *inv_origin = InventoryOrigin(target_x, 0.0);
 }
 
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
-fn inv_selection_system(click: Res<InvClickState>, mut slots: Query<(&mut Sprite, &InvSlot)>) {
-    for (mut sprite, slot) in &mut slots {
+fn inv_selection_system(
+    click: Res<InvClickState>,
+    mut slots: Query<(&mut BackgroundColor, &InvSlot)>,
+) {
+    for (mut bg, slot) in &mut slots {
         let selected = click.selected == Some(slot.0);
         let target = if selected {
             Color::srgba(1.0, 0.9, 0.2, 0.35)
         } else {
             Color::srgba(0.0, 0.0, 0.0, 0.18)
         };
-        if sprite.color != target {
-            sprite.color = target;
+        if bg.0 != target {
+            bg.0 = target;
         }
     }
 }
@@ -1753,14 +1662,22 @@ fn inv_add_del_buttons_system(
     mut click: ResMut<InvClickState>,
     mut confirm: ResMut<InvDropConfirm>,
     mgr: Res<DialogManager>,
-    add_btn: Query<&UiButton, With<InvAddBtn>>,
-    del_btn: Query<&UiButton, With<InvDelBtn>>,
+    add_btn: Query<(Entity, &Interaction), With<InvAddBtn>>,
+    del_btn: Query<(Entity, &Interaction), With<InvDelBtn>>,
     mut add_vis: Query<&mut Visibility, With<InvAddBtn>>,
-    mut del_sprite: Query<&mut Sprite, With<InvDelBtn>>,
+    mut del_img: Query<&mut ImageNode, With<InvDelBtn>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let len = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
     // C# AddButton.Visible = openLevel < 10（上限 86 格）；
     // 必须先判断背包对话框是否打开，否则关闭后按钮残留成屏幕上的孤按钮
@@ -1774,19 +1691,13 @@ fn inv_add_del_buttons_system(
     }
     // 删除模式图标（C# DelItemButton.Index 366 ↔ 368）
     let del_idx = if click.delete_mode { 368 } else { 366 };
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        del_idx,
-    ) {
-        for mut s in &mut del_sprite {
-            s.image = h.clone();
+    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, del_idx) {
+        for mut img in &mut del_img {
+            img.image = h.clone();
         }
     }
-    for btn in &add_btn {
-        if btn.clicked && can_expand {
+    for (e, inter) in &add_btn {
+        if edge(e, inter, &mut prev_inter) && can_expand {
             // C# cost = 1M + openLevel*1M（openLevel = (len-46)/4；Rust 基线 40）
             let level = len.saturating_sub(GRID_COLS * GRID_ROWS) / 4;
             let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
@@ -1795,8 +1706,8 @@ fn inv_add_del_buttons_system(
             confirm.visible = true;
         }
     }
-    for btn in &del_btn {
-        if btn.clicked {
+    for (e, inter) in &del_btn {
+        if edge(e, inter, &mut prev_inter) {
             click.delete_mode = !click.delete_mode;
             if !click.delete_mode {
                 click.selected = None;
@@ -1810,7 +1721,6 @@ fn spawn_inv_confirm(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -1821,59 +1731,29 @@ fn spawn_inv_confirm(
     let font = ui_font.0.clone();
     // MirMessageBox 居中（原版 456x190 → (1024-456)/2=284, (768-190)/2=289）
     let (bx, by) = (284.0, 289.0);
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
-        commands
-            .entity(e)
-            .insert((InvConfirmWidget, Visibility::Hidden));
-    }
-    let t = spawn_ui_text(
-        &mut commands,
-        &font,
-        "",
-        bx + 35.0,
-        by + 35.0,
-        12.0,
-        Color::WHITE,
-        9.6,
-    );
-    commands
-        .entity(t)
-        .insert((InvConfirmWidget, Visibility::Hidden));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        bx + 260.0,
-        by + 157.0,
-        9.7,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((InvConfirmYes, InvConfirmWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        210,
-        211,
-        212,
-        bx + 360.0,
-        by + 157.0,
-        9.7,
-        76.0,
-        25.0,
-    ) {
-        commands.entity(e).insert((InvConfirmNo, InvConfirmWidget));
-    }
+    let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
+    commands.entity(panel).insert((InvConfirmWidget, Visibility::Hidden));
+    commands.entity(panel).with_children(|p| {
+        spawn_label(p, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
+            .insert((InvConfirmWidget, InvConfirmText));
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10).insert(InvConfirmYes);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10).insert(InvConfirmNo);
+        }
+    });
 }
 
 /// 丢弃确认框：Yes → DropItem；No → 关闭（原版 C# MirMessageBox YesNo）
@@ -1882,9 +1762,19 @@ fn inv_confirm_system(
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
     mut widgets: Query<&mut Visibility, With<InvConfirmWidget>>,
-    yes: Query<&UiButton, (With<InvConfirmYes>, Without<InvConfirmNo>)>,
-    no: Query<&UiButton, (With<InvConfirmNo>, Without<InvConfirmYes>)>,
+    mut texts: Query<&mut Text, With<InvConfirmText>>,
+    yes: Query<(Entity, &Interaction), (With<InvConfirmYes>, Without<InvConfirmNo>)>,
+    no: Query<(Entity, &Interaction), (With<InvConfirmNo>, Without<InvConfirmYes>)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     for mut vis in &mut widgets {
         *vis = if confirm.visible {
             Visibility::Visible
@@ -1892,60 +1782,68 @@ fn inv_confirm_system(
             Visibility::Hidden
         };
     }
+    // 迁移补齐：原版确认文本从未渲染（spawn 空串且无系统写它）
+    for mut t in &mut texts {
+        let s = confirm.text.clone();
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
     if !confirm.visible {
         return;
     }
-    for btn in &yes {
-        if btn.clicked {
-            match confirm.mode {
-                1 => {
-                    // #1346：删除模式（C# PromptDelete → C.DeleteItem），删除后退出删除模式
-                    net.send_packet(&mir2_shared::packets::client::item::DeleteItem {
-                        unique_id: confirm.unique_id,
-                        count: confirm.count,
-                        hero_inventory: false,
-                    });
-                    click.delete_mode = false;
-                    tracing::info!(
-                        "🗑️ 确认删除 uid={} count={}",
-                        confirm.unique_id,
-                        confirm.count
-                    );
-                }
-                3 => {
-                    // #1544：Potion Shape 4 确认后使用（C# AreYouWantUsePotion → UseItem）
-                    net.send_packet(&mir2_shared::packets::client::item::UseItem {
-                        unique_id: confirm.unique_id,
-                    });
-                    tracing::info!("🧪 确认使用 Shape4 药水 uid={}", confirm.unique_id);
-                }
-                2 => {
-                    // #1346：背包扩容（C# AddButton → C.Chat"@ADDINVENTORY"）
-                    net.send_packet(&mir2_shared::packets::client::chat::Chat {
-                        message: "@ADDINVENTORY".to_string(),
-                        linked_items: Vec::new(),
-                    });
-                    tracing::info!("📦 请求背包扩容");
-                }
-                _ => {
-                    net.send_packet(&mir2_shared::packets::client::item::DropItem {
-                        unique_id: confirm.unique_id,
-                        count: confirm.count as u32,
-                        hero_inventory: false,
-                    });
-                    tracing::info!(
-                        "🗑️ 确认丢弃 uid={} count={}",
-                        confirm.unique_id,
-                        confirm.count
-                    );
-                }
-            }
-            confirm.visible = false;
-            click.selected = None;
+    for (e, inter) in &yes {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
         }
+        match confirm.mode {
+            1 => {
+                // #1346：删除模式（C# PromptDelete → C.DeleteItem），删除后退出删除模式
+                net.send_packet(&mir2_shared::packets::client::item::DeleteItem {
+                    unique_id: confirm.unique_id,
+                    count: confirm.count as u16,
+                    hero_inventory: false,
+                });
+                click.delete_mode = false;
+                tracing::info!(
+                    "🗑️ 确认删除 uid={} count={}",
+                    confirm.unique_id,
+                    confirm.count
+                );
+            }
+            3 => {
+                // #1544：Potion Shape 4 确认后使用（C# AreYouWantUsePotion → UseItem）
+                net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                    unique_id: confirm.unique_id,
+                });
+                tracing::info!("🧪 确认使用 Shape4 药水 uid={}", confirm.unique_id);
+            }
+            2 => {
+                // #1346：背包扩容（C# AddButton → C.Chat"@ADDINVENTORY"）
+                net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                    message: "@ADDINVENTORY".to_string(),
+                    linked_items: Vec::new(),
+                });
+                tracing::info!("📦 请求背包扩容");
+            }
+            _ => {
+                net.send_packet(&mir2_shared::packets::client::item::DropItem {
+                    unique_id: confirm.unique_id,
+                    count: confirm.count as u32,
+                    hero_inventory: false,
+                });
+                tracing::info!(
+                    "🗑️ 确认丢弃 uid={} count={}",
+                    confirm.unique_id,
+                    confirm.count
+                );
+            }
+        }
+        confirm.visible = false;
+        click.selected = None;
     }
-    for btn in &no {
-        if btn.clicked {
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
             confirm.visible = false;
         }
     }
@@ -1997,27 +1895,34 @@ fn inv_socket_open_system(
     }
 }
 
-/// 点是否落在任一可见对话框实体精灵 bbox 内（丢弃门用）。
+/// 点是否落在任一可见对话框面板根节点矩形内（丢弃门用）。
 /// C# 语义：MirImageControl 构造器 `AutoSize = true`（MirImageControl.cs:170）
 /// → `Size = Library.GetTrueSize(Index)`——对话框按背景图全幅吞掉点击，
-/// 不落到地图 MouseDown（GameScene.cs:11361 的丢弃流程）。实体 bbox 取
-/// 实际 Transform+精灵尺寸，推位/拖动/换图后恒准（#2575：旧静态矩形失准）。
+/// 不落到地图 MouseDown（GameScene.cs:11361 的丢弃流程）。bevy_ui 迁移后
+/// 各对话框 = 根面板 Node（left/top/width/height 即屏幕矩形），随推位/拖动恒准。
 fn cursor_over_dialog<'a>(
     cursor: Vec2,
-    mut dialogs: impl Iterator<
-        Item = (
-            &'a Visibility,
-            &'a Transform,
-            Option<&'a Sprite>,
-            Option<&'a bevy::sprite::Anchor>,
-        ),
-    >,
-    image_assets: &Assets<Image>,
+    mut dialogs: impl Iterator<Item = (&'a Node, &'a Visibility)>,
 ) -> bool {
-    dialogs.any(|(vis, tf, sprite, anchor)| {
+    dialogs.any(|(node, vis)| {
         *vis == Visibility::Visible && {
-            let (x0, y0, x1, y1) = super::ui_sprite_rect(tf, sprite, anchor, image_assets);
-            cursor.x >= x0 && cursor.x <= x1 && cursor.y >= y0 && cursor.y <= y1
+            let x = match node.left {
+                Val::Px(v) => v,
+                _ => 0.0,
+            };
+            let y = match node.top {
+                Val::Px(v) => v,
+                _ => 0.0,
+            };
+            let w = match node.width {
+                Val::Px(v) => v,
+                _ => 0.0,
+            };
+            let h = match node.height {
+                Val::Px(v) => v,
+                _ => 0.0,
+            };
+            cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
         }
     })
 }
@@ -2052,22 +1957,13 @@ fn inv_item_action_system(
     mut confirm: ResMut<InvDropConfirm>,
     npc_goods: Res<crate::game::dialogs::npc_goods::NpcGoodsState>,
     mut pending: ResMut<InvPendingAmount>,
-    // 元组参数折叠（系统参数上限 16）：全部按钮 / 数量框结果 / 背包命中原点 /
-    // 对话框实体（丢弃门 bbox，#2575）/ 图像尺寸
+    // 元组参数折叠（系统参数上限 16）：全部 UI 按钮 Interaction / 数量框结果 /
+    // 背包命中原点 / 对话框根面板（丢弃门矩形）
     mut misc: (
-        Query<&UiButton>,
+        Query<&Interaction, With<Button>>,
         MessageReader<AmountBoxResult>,
         Res<InventoryOrigin>,
-        Query<
-            (
-                &Visibility,
-                &Transform,
-                Option<&Sprite>,
-                Option<&bevy::sprite::Anchor>,
-            ),
-            With<DialogRoot>,
-        >,
-        Res<Assets<Image>>,
+        Query<(&Node, &Visibility), With<DialogRoot>>,
     ),
     // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
     mut last_modal: Local<bool>,
@@ -2341,15 +2237,11 @@ fn inv_item_action_system(
         // 实体 bbox 覆盖一切对话框（背包面板/角色装备区等），推位/拖动后
         // 恒准——旧两处静态矩形（DIALOG+318x256 / character::DIALOG_X）
         // 在推位/拖动后失准（#2575）
-        if cursor_over_dialog(cursor, misc.3.iter(), &misc.4) {
+        if cursor_over_dialog(cursor, misc.3.iter()) {
             return;
         }
-        // 任意 UI 按钮上不触发
-        let over_btn = misc.0.iter().any(|b| {
-            let (x, y, w, h) = b.rect;
-            cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
-        });
-        if over_btn {
+        // 任意 UI 按钮上不触发（bevy_ui：Interaction 由 ui_focus_system 按命中计算）
+        if misc.0.iter().any(|i| *i != Interaction::None) {
             return;
         }
         let Some(item) = inv.items.get(sel).and_then(|s| s.as_ref()) else {
@@ -2410,8 +2302,8 @@ mod tests {
         );
     }
 
-    /// #2560：扩容补格按 InventoryOrigin 生成——背包推位/拖动后新格与既有格对齐
-    /// （否则按常量 spawn 在 (0,0) 基准处，与已平移格子错位）
+    /// #2560：扩容补格为面板子节点（bevy_ui 相对坐标）——背包推位/拖动后
+    /// 新格随面板整体平移，与既有格恒对齐
     #[test]
     fn inv_grid_sync_spawns_cells_at_inventory_origin() {
         use bevy::ecs::system::RunSystemOnce;
@@ -2430,27 +2322,60 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(crate::ui::sprite_ui::UiFont::default());
-        // 既有格 0（已在推位位置）
-        world.spawn((
-            InvSlot(0),
-            Transform::from_xyz(393.0 + 9.0, -(50.0 + 37.0), 6.5),
-        ));
+        // 面板根（bevy_ui Node @ 推位后的绝对坐标）
+        let panel = world
+            .spawn((
+                InventoryPanel,
+                DialogWidget,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(393.0),
+                    top: Val::Px(50.0),
+                    ..default()
+                },
+            ))
+            .id();
+        // 既有格 0（面板子节点，相对 (9,37)）
+        world.entity_mut(panel).with_children(|p| {
+            p.spawn((
+                InvSlot(0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(9.0),
+                    top: Val::Px(37.0),
+                    ..default()
+                },
+            ));
+        });
 
         world
             .run_system_once(inv_grid_sync_system)
             .expect("grid sync 应成功");
 
-        let mut q = world.query_filtered::<(&InvSlot, &Transform), ()>();
-        let (sx, sy) = (
-            393.0 + 9.0 + 1.0 * (CELL_W + 1.0),
-            -(50.0 + 37.0 + 0.0 * (CELL_H + 1.0)),
-        );
+        // 扩容补出格 1：面板子节点，相对坐标 (9+37, 37)——不随推位变绝对坐标
+        let mut q = world.query_filtered::<(&InvSlot, &Node, &ChildOf), ()>();
         let cell1 = q
             .iter(&world)
-            .find(|(s, _)| s.0 == 1)
-            .map(|(_, tf)| (tf.translation.x, tf.translation.y))
+            .find(|(s, _, _)| s.0 == 1)
+            .map(|(_, node, co)| {
+                (
+                    match node.left {
+                        Val::Px(v) => v,
+                        _ => -999.0,
+                    },
+                    match node.top {
+                        Val::Px(v) => v,
+                        _ => -999.0,
+                    },
+                    co.parent(),
+                )
+            })
             .expect("扩容应补出格 1");
-        assert_eq!(cell1, (sx, sy), "新格应在推位原点基准处（列 1）");
+        assert_eq!(
+            cell1,
+            (9.0 + 1.0 * (CELL_W + 1.0), 37.0, panel),
+            "新格应为面板子节点且相对坐标对齐"
+        );
     }
 
     /// R8：背包页签写入单一 InvUiState 资源（背包/英雄背包/仓库共读同一资源，翻页天然同步）。
@@ -2466,17 +2391,8 @@ mod tests {
         world.insert_resource(InvUiState::default());
         world.insert_resource(GameLibraries::default());
         world.insert_resource(Assets::<Image>::default());
-        world.insert_resource(UiImageCache::default());
-        // 任务页签按钮（已点击；带 Visibility 走 all_vis 分支，无 InvSlot → 恒可见）
-        world.spawn((
-            DialogWidget,
-            Visibility::Visible,
-            UiButton {
-                rect: (146.0, 7.0, 72.0, 23.0),
-                clicked: true,
-            },
-            InvTab(2),
-        ));
+        // 任务页签按钮（Pressed 边沿触发；带 Visibility 走 all_vis 分支，无 InvSlot → 恒可见）
+        world.spawn((DialogWidget, Button, Interaction::Pressed, InvTab(2)));
 
         world
             .run_system_once(inventory_ui_system)
@@ -2490,10 +2406,10 @@ mod tests {
     }
 
     /// #2631：InventoryShiftRight → 背包自我右移让位（替代旧 trade.rs push_inventory_right）。
-    /// 平移背包实体 Transform + UiButton.rect 并覆写 InventoryOrigin；非背包实体不动。
+    /// bevy_ui 迁移：平移面板根 Node.left 并覆写 InventoryOrigin；子节点随根整体移动，
+    /// 按钮命中区不再需要单独同步（bevy_ui Interaction 按布局命中）。
     #[test]
     fn inventory_shift_right_repositions_entities_and_origin() {
-        use crate::ui::sprite_ui::UiButton;
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
 
@@ -2502,29 +2418,33 @@ mod tests {
         // 未初始化的 GameLibraries → inventory_real_size 走缺省 (316,236)，无磁盘 IO
         world.insert_resource(GameLibraries::default());
         world.insert_resource(InventoryOrigin::default());
-        // 背包两枚实体（初始位 (0,0) 基准：背景 (0,0)、首格 (9,37)）
+        // 背包两枚实体（初始位 (0,0) 基准：背景 (0,0)、首格 (9,37)）——bevy_ui Node
         world.spawn((
             DialogRoot(DialogKind::Inventory),
-            Visibility::Visible,
-            Transform::from_xyz(0.0, 0.0, 6.0),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                ..default()
+            },
         ));
         world.spawn((
             DialogRoot(DialogKind::Inventory),
-            Visibility::Visible,
-            Transform::from_xyz(9.0, -37.0, 6.5),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(9.0),
+                top: Val::Px(37.0),
+                ..default()
+            },
         ));
         // 非背包实体（交易窗）不应被平移
         world.spawn((
             DialogRoot(DialogKind::Trade),
-            Visibility::Visible,
-            Transform::from_xyz(298.0, -418.0, 6.0),
-        ));
-        // 背包按钮命中区（屏幕坐标 rect，不随 Transform 走，需同步）
-        world.spawn((
-            DialogRoot(DialogKind::Inventory),
-            UiButton {
-                rect: (289.0, 3.0, 20.0, 20.0),
-                clicked: false,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(298.0),
+                top: Val::Px(418.0),
+                ..default()
             },
         ));
         world
@@ -2535,34 +2455,26 @@ mod tests {
             .run_system_once(inventory_shift_right_system)
             .expect("shift right 应成功");
 
-        // target_x = 1024 - 316 = 708；顶缘屏幕 y -> 0
-        let mut q = world.query_filtered::<(&Transform, &DialogRoot), ()>();
+        // target_x = 1024 - 316 = 708
+        let mut q = world.query_filtered::<(&Node, &DialogRoot), ()>();
         let inv_min_x = q
             .iter(&world)
             .filter(|(_, r)| r.0 == DialogKind::Inventory)
-            .map(|(tf, _)| tf.translation.x)
+            .map(|(n, _)| match n.left {
+                Val::Px(v) => v,
+                _ => f32::MAX,
+            })
             .fold(f32::MAX, f32::min);
         assert_eq!(inv_min_x, 708.0, "背包左缘应右移到 target_x");
-        let inv_top = q
-            .iter(&world)
-            .filter(|(_, r)| r.0 == DialogKind::Inventory)
-            .map(|(tf, _)| -tf.translation.y)
-            .fold(f32::MAX, f32::min);
-        assert_eq!(inv_top, 0.0, "背包顶缘应移到屏幕 y=0");
         let trade_x = q
             .iter(&world)
             .find(|(_, r)| r.0 == DialogKind::Trade)
-            .map(|(tf, _)| tf.translation.x)
+            .map(|(n, _)| match n.left {
+                Val::Px(v) => v,
+                _ => -999.0,
+            })
             .expect("交易实体存在");
         assert_eq!(trade_x, 298.0, "非背包实体不应移动");
-        // 按钮命中区同步平移（289 + 708）
-        let mut bq = world.query_filtered::<(&UiButton, &DialogRoot), ()>();
-        let btn_x = bq
-            .iter(&world)
-            .find(|(_, r)| r.0 == DialogKind::Inventory)
-            .map(|(b, _)| b.rect.0)
-            .expect("背包按钮存在");
-        assert_eq!(btn_x, 289.0 + 708.0, "按钮命中区应同步平移");
         // InventoryOrigin 覆写
         let origin = world.resource::<InventoryOrigin>();
         assert_eq!((origin.0, origin.1), (708.0, 0.0));
@@ -2649,57 +2561,38 @@ mod tests {
         assert_eq!(item_with_type(ItemType::Weapon).equip_slot(), Some(0));
     }
 
-    /// #2575：丢弃门用对话框实体 bbox——推位/拖动后旧静态矩形（背包
-    /// DIALOG+318x256 / character::DIALOG_X 装备格）失准
+    /// #2575：丢弃门用对话框根面板矩形——推位/拖动后旧静态矩形（背包
+    /// DIALOG+318x256 / character::DIALOG_X 装备格）失准；bevy_ui 面板根
+    /// Node.left/top/width/height 即屏幕矩形，随推位/拖动恒准
     #[test]
     fn drop_gate_uses_dialog_entity_bbox() {
         let mut world = World::new();
-        // 精灵均带 custom_size，无需真实图像句柄——空 Assets 即可
-        let assets = Assets::<Image>::default();
 
-        let mut q = world.query_filtered::<(
-            &Visibility,
-            &Transform,
-            Option<&Sprite>,
-            Option<&bevy::sprite::Anchor>,
-        ), With<DialogRoot>>();
+        let mut q = world.query_filtered::<(&Node, &Visibility), With<DialogRoot>>();
 
-        // 背包被推位到 (393,50)（交易/仓库推位），bg Title[196] 316x236。
-        // Sprite 会按 Bevy required-components 自动插入 Anchor（默认 CENTER），
-        // 显式 TOP_LEFT 与 spawn_ui_sprite 的真实 UI 精灵一致
+        // 背包被推位到 (393,50)（交易/仓库推位），面板根 Title[196] 316x236
         let inv = world
             .spawn((
                 DialogRoot(DialogKind::Inventory),
                 Visibility::Visible,
-                Transform::from_xyz(393.0, -50.0, 0.0),
-                Sprite {
-                    custom_size: Some(Vec2::new(316.0, 236.0)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(393.0),
+                    top: Val::Px(50.0),
+                    width: Val::Px(316.0),
+                    height: Val::Px(236.0),
                     ..default()
                 },
-                bevy::sprite::Anchor::TOP_LEFT,
             ))
             .id();
-        // 旧位置 (150,150)：旧静态门（0,0+318x256）会吞掉 → 误判不丢弃；
-        // 推位后不在实体 bbox 内 → 放行（丢弃流程应触发）
-        assert!(!cursor_over_dialog(
-            Vec2::new(150.0, 150.0),
-            q.iter(&world),
-            &assets
-        ));
+        // 旧位置 (150,150)：推位后不在面板内 → 放行（丢弃流程应触发）
+        assert!(!cursor_over_dialog(Vec2::new(150.0, 150.0), q.iter(&world)));
         // 推位后面板内 (500,150) 命中
-        assert!(cursor_over_dialog(
-            Vec2::new(500.0, 150.0),
-            q.iter(&world),
-            &assets
-        ));
+        assert!(cursor_over_dialog(Vec2::new(500.0, 150.0), q.iter(&world)));
 
         // 关闭（Hidden）的对话框不吞
         world.entity_mut(inv).insert(Visibility::Hidden);
-        assert!(!cursor_over_dialog(
-            Vec2::new(500.0, 150.0),
-            q.iter(&world),
-            &assets
-        ));
+        assert!(!cursor_over_dialog(Vec2::new(500.0, 150.0), q.iter(&world)));
         world.entity_mut(inv).insert(Visibility::Visible);
 
         // 角色对话框拖动到 (300,180)：装备区随实体命中（旧静态
@@ -2707,47 +2600,37 @@ mod tests {
         world.spawn((
             DialogRoot(DialogKind::Character),
             Visibility::Visible,
-            Transform::from_xyz(300.0, -180.0, 0.0),
-            Sprite {
-                custom_size: Some(Vec2::new(280.0, 340.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(300.0),
+                top: Val::Px(180.0),
+                width: Val::Px(280.0),
+                height: Val::Px(340.0),
                 ..default()
             },
-            bevy::sprite::Anchor::TOP_LEFT,
         ));
-        assert!(cursor_over_dialog(
-            Vec2::new(340.0, 200.0),
-            q.iter(&world),
-            &assets
-        ));
+        assert!(cursor_over_dialog(Vec2::new(340.0, 200.0), q.iter(&world)));
         // 旧角色对话框原点处不再命中
-        assert!(!cursor_over_dialog(
-            Vec2::new(60.0, 200.0),
-            q.iter(&world),
-            &assets
-        ));
+        assert!(!cursor_over_dialog(Vec2::new(60.0, 200.0), q.iter(&world)));
 
-        // 无 Sprite 的对话框实体退化为点（ui_sprite_rect 既有行为），不吞区域
+        // 无尺寸的对话框实体退化为点，不吞区域
         world.spawn((
             DialogRoot(DialogKind::Menu),
             Visibility::Visible,
-            Transform::from_xyz(600.0, -400.0, 0.0),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(600.0),
+                top: Val::Px(400.0),
+                ..default()
+            },
         ));
-        assert!(!cursor_over_dialog(
-            Vec2::new(650.0, 450.0),
-            q.iter(&world),
-            &assets
-        ));
+        assert!(!cursor_over_dialog(Vec2::new(650.0, 450.0), q.iter(&world)));
 
-        // 边界含端点（与旧门一致：>= / <=）
-        assert!(cursor_over_dialog(
-            Vec2::new(393.0, 50.0),
-            q.iter(&world),
-            &assets
-        ));
+        // 边界含端点（>= / <=）
+        assert!(cursor_over_dialog(Vec2::new(393.0, 50.0), q.iter(&world)));
         assert!(cursor_over_dialog(
             Vec2::new(393.0 + 316.0, 50.0 + 236.0),
-            q.iter(&world),
-            &assets
+            q.iter(&world)
         ));
     }
 
