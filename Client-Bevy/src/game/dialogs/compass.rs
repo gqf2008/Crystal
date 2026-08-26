@@ -16,7 +16,8 @@ use bevy::prelude::*;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{spawn_ui_sprite, ui_image, UiFont, UiImageCache};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::load_lib_image;
 
 /// 罗盘容器 X（C# CompassDialog.cs:14：ScreenWidth/2 - 25 = 512 - 25）
 pub const COMPASS_X: f32 = 487.0;
@@ -30,9 +31,9 @@ pub const COMPASS_FRAMES: usize = 40;
 /// #250 罗盘箭头（40 帧 Prguse2[1470..1509]，每帧带 Lib 偏移对齐 C# UseOffSet）
 #[derive(Component)]
 pub struct CompassArrow {
-    /// (图像句柄, Lib 偏移 ox, Lib 偏移 oy)——C# MirImageControl.cs:7
-    /// DisplayLocation = Location + GetOffSet(Index)，帧切换时位置同步变
-    frames: Vec<(Handle<Image>, f32, f32)>,
+    /// (图像句柄, Lib 偏移 ox, Lib 偏移 oy, 帧宽, 帧高)——C# MirImageControl.cs:7
+    /// DisplayLocation = Location + GetOffSet(Index)，帧切换时位置/尺寸同步变
+    frames: Vec<(Handle<Image>, f32, f32, f32, f32)>,
 }
 
 /// #250 罗盘目标状态（S.SetCompass 写入）
@@ -79,7 +80,6 @@ fn spawn_compass(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     _fonts: ResMut<Assets<Font>>,
     _ui_font: ResMut<UiFont>,
 ) {
@@ -87,30 +87,39 @@ fn spawn_compass(
         return;
     }
     libs.0.ensure_initialized();
-    // 40 帧一次性装载（C# Process 每帧换 Index；各帧尺寸/偏移不同，随帧记录偏移）
+    // 40 帧一次性装载（C# Process 每帧换 Index；各帧尺寸/偏移不同，随帧记录偏移+尺寸）
     let mut frames = Vec::with_capacity(COMPASS_FRAMES);
     for i in COMPASS_BASE..COMPASS_BASE + COMPASS_FRAMES {
         let Some(info) = libs.0.get_image(LibraryName::Prguse2, i) else {
             continue;
         };
-        let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, i) else {
+        let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, i) else {
             continue;
         };
-        frames.push((h, f32::from(info.offset_x), f32::from(info.offset_y)));
+        frames.push((
+            h,
+            f32::from(info.offset_x),
+            f32::from(info.offset_y),
+            info.width.max(0) as f32,
+            info.height.max(0) as f32,
+        ));
     }
-    if let Some((h, ox, oy)) = frames.first() {
+    if let Some((h, ox, oy, w, ht)) = frames.first() {
         // 首帧 N=1470；位置按帧偏移（C# UseOffSet）；C# Visible=false 默认隐藏
-        let e = spawn_ui_sprite(
-            &mut commands,
-            h.clone(),
-            COMPASS_X + ox,
-            COMPASS_Y + oy,
-            5.0,
-            1.0,
-        );
-        commands
-            .entity(e)
-            .insert((CompassArrow { frames }, Visibility::Hidden));
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(COMPASS_X + ox),
+                top: Val::Px(COMPASS_Y + oy),
+                width: Val::Px(*w),
+                height: Val::Px(*ht),
+                ..default()
+            },
+            ImageNode::new(h.clone()),
+            CompassArrow { frames },
+            GlobalZIndex(25),
+            Visibility::Hidden,
+        ));
     }
 }
 
@@ -130,7 +139,7 @@ fn compass_target_system(
 /// C# CompassDialog.Process：无目标/无玩家/已到目标瓦片 → 隐藏；否则显形并按方向换帧
 fn compass_frame_system(
     state: Res<CompassState>,
-    mut arrows: Query<(&mut Sprite, &mut Transform, &mut Visibility, &CompassArrow)>,
+    mut arrows: Query<(&mut ImageNode, &mut Node, &mut Visibility, &CompassArrow)>,
     players: Query<
         &Transform,
         (
@@ -140,7 +149,7 @@ fn compass_frame_system(
         ),
     >,
 ) {
-    let Ok((mut sprite, mut tf, mut vis, arrow)) = arrows.single_mut() else {
+    let Ok((mut img, mut node, mut vis, arrow)) = arrows.single_mut() else {
         return;
     };
     let Some((tx, ty)) = state.target else {
@@ -163,11 +172,14 @@ fn compass_frame_system(
         return;
     }
     let i = compass_index(px, py, tx, ty) - COMPASS_BASE;
-    if let Some((h, ox, oy)) = arrow.frames.get(i) {
-        if sprite.image != *h {
-            // 帧尺寸/偏移各不同 → 换帧同时按帧偏移重定位（C# UseOffSet）
-            sprite.image = h.clone();
-            tf.translation = Vec3::new(COMPASS_X + ox, -(COMPASS_Y + oy), tf.translation.z);
+    if let Some((h, ox, oy, w, ht)) = arrow.frames.get(i) {
+        if img.image != *h {
+            // 帧尺寸/偏移各不同 → 换帧同时按帧偏移重定位+改尺寸（C# UseOffSet）
+            img.image = h.clone();
+            node.left = Val::Px(COMPASS_X + ox);
+            node.top = Val::Px(COMPASS_Y + oy);
+            node.width = Val::Px(*w);
+            node.height = Val::Px(*ht);
         }
     }
     *vis = Visibility::Visible;
@@ -210,7 +222,6 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(GameLibraries(Libraries::new(data_path)));
         world.insert_resource(Assets::<Image>::default());
-        world.insert_resource(UiImageCache::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(UiFont::default());
         world.insert_resource(CompassState::default());
@@ -249,13 +260,13 @@ mod tests {
             assert_eq!(want.1, 9.0, "S 帧 Lib 偏移 ox（探针实测）");
             assert_eq!(want.2, 10.0, "S 帧 Lib 偏移 oy（探针实测）");
             let mut q =
-                world.query_filtered::<(&Sprite, &Transform, &Visibility), With<CompassArrow>>();
-            let (sprite, tf, vis) = q.get(&world, arrow).unwrap();
+                world.query_filtered::<(&ImageNode, &Node, &Visibility), With<CompassArrow>>();
+            let (img, node, vis) = q.get(&world, arrow).unwrap();
             assert_eq!(*vis, Visibility::Visible);
-            assert_eq!(sprite.image, want.0, "帧 = 1490");
+            assert_eq!(img.image, want.0, "帧 = 1490");
             // 绝对落位字面值：487+9=496、264+10=274（防常量漂移，与 ui_alignment 呼应）
-            assert_eq!(tf.translation.x, 496.0);
-            assert_eq!(tf.translation.y, -274.0);
+            assert_eq!(node.left, Val::Px(496.0));
+            assert_eq!(node.top, Val::Px(274.0));
         }
         // 已到目标瓦片 → 隐藏（C# :44）
         world.resource_mut::<CompassState>().target = Some((100, 100));
