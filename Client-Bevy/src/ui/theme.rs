@@ -865,6 +865,8 @@ pub fn spawn_scroll_bar_ui(
 }
 
 /// bevy_ui 滚轮滚动 + 滑块定位 + 滑块拖动
+/// 滑块为列表容器子节点（UiScrollThumb），按父子关系查找，无需存实体。
+/// thumb_read 只读用于查找/命中；thumb_write 用于每帧定位滑块。
 #[allow(clippy::type_complexity)]
 pub fn scroll_list_ui_system(
     mut wheels: MessageReader<MouseWheel>,
@@ -872,7 +874,8 @@ pub fn scroll_list_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut drag: ResMut<crate::ui::scroll_list::ScrollDrag>,
     mut lists: Query<(Entity, &mut UiScrollList, &Node), Without<UiScrollThumb>>,
-    mut thumbs: Query<(&mut Node, &UiScrollThumb)>,
+    thumb_read: Query<(&ChildOf, &UiScrollThumb)>,
+    mut thumb_write: Query<(&ChildOf, &mut Node, &UiScrollThumb)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -894,10 +897,21 @@ pub fn scroll_list_ui_system(
         (x, y)
     }
 
+    // 找某列表的子滑块（UiScrollThumb 且 parent == 列表实体）
+    fn list_thumb(
+        e: Entity,
+        thumbs: &Query<(&ChildOf, &UiScrollThumb)>,
+    ) -> Option<Entity> {
+        thumbs
+            .iter()
+            .find(|(co, _)| co.parent() == e)
+            .map(|(co, _)| co.0)
+    }
+
     // 滑块拖动（C# MirScrollBar movable）
     if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
-        for (_, list, node) in lists.iter() {
-            let Some(thumb) = list.thumb else {
+        for (e, list, node) in lists.iter() {
+            let Some(thumb) = list_thumb(e, &thumb_read) else {
                 continue;
             };
             let (ox, oy) = origin(node);
@@ -922,8 +936,8 @@ pub fn scroll_list_ui_system(
         if !mouse.pressed(MouseButton::Left) {
             drag.dragging = None;
         } else {
-            for (_, mut list, node) in lists.iter_mut() {
-                if list.thumb != Some(thumb_e) {
+            for (e, mut list, node) in lists.iter_mut() {
+                if list_thumb(e, &thumb_read) != Some(thumb_e) {
                     continue;
                 }
                 let (ox, oy) = origin(node);
@@ -979,11 +993,11 @@ pub fn scroll_list_ui_system(
     }
 
     // 每帧把滑块移到 offset 对应位置（跟随容器拖动）
-    for (_, list, _) in lists.iter() {
-        let Some(thumb) = list.thumb else {
+    for (e, list, _) in lists.iter() {
+        let Some(thumb) = list_thumb(e, &thumb_read) else {
             continue;
         };
-        let Ok((mut tn, _)) = thumbs.get_mut(thumb) else {
+        let Ok((_, mut tn, _)) = thumb_write.get_mut(thumb) else {
             continue;
         };
         let (tx, ty, tw, th) = list.track_rel;
