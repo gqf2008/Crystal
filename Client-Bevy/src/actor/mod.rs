@@ -105,7 +105,12 @@ impl Plugin for ActorPlugin {
 }
 
 /// 登出/ReturnToLogin 回登录界面时清掉本地玩家实体（评审 CRITICAL-1）。
-pub(crate) fn despawn_local_player(mut commands: Commands, q: Query<Entity, With<LocalPlayer>>) {
+/// 一并清掉 `--demo` 演示角色（LocalPlayer 脱出渲染层，但怪物/NPC 只有 DemoBehavior 标记——
+/// 若不清除则 DemoActorsSpawned 复位后重进 Game 会再生成一批，演示怪物/NPC 逐轮累积）。
+pub(crate) fn despawn_local_player(
+    mut commands: Commands,
+    q: Query<Entity, Or<(With<LocalPlayer>, With<DemoBehavior>)>>,
+) {
     for e in &q {
         commands.entity(e).despawn();
     }

@@ -191,7 +191,7 @@ pub const ADD_BTN_W: f32 = 72.0;
 pub const ADD_BTN_H: f32 = 23.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
-const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory）
+pub(crate) const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory），player_state.rs 回放共用
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
@@ -271,10 +271,13 @@ impl Plugin for InventoryDialogPlugin {
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
         app.add_systems(OnEnter(AppState::Game), spawn_inv_confirm);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
-        // #2633 批次4：背包/装备 ServerEvent 写系统（玩家状态集，先于 Hud 读）
+        // #2633 批次4：背包/装备 ServerEvent 写系统（玩家状态集，先于 Hud 读）。
+        // 排序备注：同一帧 UserInformation 快照（全量覆盖 quest_inventory）必须先于
+        // QuestItemGained 增量应用——否则先增量后快照会把本帧新任务物品抹掉。
         app.add_systems(
             Update,
             inventory_events
+                .before(quest_inventory_events)
                 .in_set(GameSet::PlayerState)
                 .run_if(in_state(AppState::Game)),
         );

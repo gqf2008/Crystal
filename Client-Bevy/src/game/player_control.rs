@@ -73,9 +73,14 @@ impl Default for ControlState {
 /// 条件不满足时系统整体不运行，与原早退等价——早退前本就无任何副作用）。
 /// #2633 批次4 步4：读改 `StatusFlags`；R2 门控默认放行——实体未生成 `single()` 失败
 /// 时 `return true`（未死亡/可输入），与原 HudState 默认 dead/fishing/paralysis=false 等价。
+/// 例外：多个 LocalPlayer 实体（CRITICAL-1 双实体异常）时**闭锁**输入——写侧
+/// player_status_events 同样挂起，放行等于"已死亡仍可移动/施法"。
 pub fn player_input_enabled(flags: Query<&StatusFlags, With<LocalPlayer>>) -> bool {
-    let Ok(f) = flags.single() else { return true };
-    !(f.dead || f.fishing || f.paralysis)
+    match flags.single() {
+        Ok(f) => !(f.dead || f.fishing || f.paralysis),
+        Err(bevy_ecs::query::QuerySingleError::NoEntities(_)) => true,
+        Err(bevy_ecs::query::QuerySingleError::MultipleEntities(_)) => false,
+    }
 }
 
 pub struct PlayerControlPlugin;
@@ -1283,6 +1288,35 @@ mod tests {
             world.spawn((LocalPlayer, flags));
             assert!(!enabled(&mut world), "{name} 置位应锁定输入");
         }
+    }
+
+    /// 评审 finding 5：MultipleEntities（CRITICAL-1 双实体异常，demo+mock/登出竞态仍可
+    /// 达）→ **闭锁**输入——写侧 player_status_events 同样挂起，放行等于"已死亡仍可
+    /// 移动/施法"；NoEntities 仍按 R2 默认放行（旧码任何 Err 一律放行 true，本测试
+    /// 修复前失败：双实体断言返回 true）。
+    #[test]
+    fn player_input_enabled_fail_closed_on_multiple_local_players() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        // 双 LocalPlayer 异常 → 闭锁（false）
+        let mut world = World::new();
+        world.spawn((LocalPlayer, StatusFlags::default()));
+        world.spawn((LocalPlayer, StatusFlags::default()));
+        assert!(
+            !world
+                .run_system_once(player_input_enabled)
+                .expect("门控应成功运行"),
+            "双 LocalPlayer 异常应闭锁输入"
+        );
+
+        // 对照：无实体仍默认放行（R2 门控语义不变）
+        let mut world = World::new();
+        assert!(
+            world
+                .run_system_once(player_input_enabled)
+                .expect("门控应成功运行"),
+            "无 LocalPlayer 实体应默认放行"
+        );
     }
 
     #[test]
