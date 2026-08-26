@@ -4,6 +4,9 @@
 // 网络（ServerRust gate 实际 wire）：
 //   C: ReportIssue[type u32][description dotnet]（与 SharedRust [message dotnet] 不一致，手动构造）
 // 结果通过系统聊天消息返回
+// bevy_ui 迁移（批 13）：面板 Prguse[170] @(280,80) 244x207，全节点化
+//   - 关闭 Prguse2[360/361/362] @(300,3)
+//   - 状态行 3 + 类型下拉（bevy_ui UiDropDown）+ 描述输入（TextInput 12）+ 提交 Title[206/207/208]
 // ============================================================================
 
 use bevy::prelude::*;
@@ -13,10 +16,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_label,
+    spawn_panel, UiDropDown,
 };
-use crate::ui::controls::{spawn_dropdown, DropDown};
 
 /// 举报状态
 #[derive(Resource, Default)]
@@ -48,9 +52,7 @@ impl Plugin for ReportPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_report);
         app.add_systems(
             Update,
-            (report_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            report_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -65,7 +67,6 @@ fn spawn_report(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -75,110 +76,78 @@ fn spawn_report(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Report),
-            ReportWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            ReportClose,
-            DialogRoot(DialogKind::Report),
-            ReportWidget,
-        ));
-    }
-    // 状态行 3 + 输入框（类型 TextInput 11 / 描述 12）
-    for i in 0..3usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            ReportLine(i),
-            DialogRoot(DialogKind::Report),
-            ReportWidget,
-        ));
-    }
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    // #90 举报类型下拉（C# ReportType DropDown）
-    let dd = spawn_dropdown(
-        &mut commands, &mut images, &font,
-        vec!["请选择类型".to_string(), "提交BUG".to_string(), "举报玩家".to_string()],
-        None,
-        298.0, 190.0,
-        80.0, 20.0,
-        3,
-        8.1,
-    );
-    commands.entity(dd).insert((
-        ReportTypeDrop,
-        DialogRoot(DialogKind::Report),
-        ReportWidget,
-    ));
-    spawn_report_input(&mut commands, &white, &font, 12, 298.0, 222.0, 200.0);
-    // 提交按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        360.0, 258.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            ReportSubmit,
-            DialogRoot(DialogKind::Report),
-            ReportWidget,
-        ));
-    }
-}
+    // 面板 Prguse[170]（C# ReportDialog.Index=170，244x207 @ 280,80）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Report), ReportWidget));
 
-/// 举报输入框（TextInputField(id) + 子 TextInputDisplay(id)）
-fn spawn_report_input(
-    commands: &mut Commands,
-    white: &Handle<Image>,
-    font: &Handle<Font>,
-    id: usize,
-    x: f32,
-    y: f32,
-    w: f32,
-) {
-    let box_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Report),
-            ReportWidget,
-            crate::game::dialogs::text_input::TextInputField(id),
-            crate::game::dialogs::text_input::TextInputRect(x, y, w, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(w, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(x, -y, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(id),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(ReportClose);
+        }
+        // 状态行 3（0 标题 / 1 说明 / 2 反馈）@(18,40+22i)
+        for i in 0..3usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(ReportLine(i));
+        }
+        // 类型下拉（C# ReportType DropDown）@(18,110)
+        spawn_dropdown_ui(
+            p,
+            &font,
+            vec!["请选择类型".to_string(), "提交BUG".to_string(), "举报玩家".to_string()],
+            None,
+            (280.0, 80.0),
+            18.0,
+            110.0,
+            80.0,
+            20.0,
+            3,
+            9,
+        )
+        .insert(ReportTypeDrop);
+        // 描述输入框（TextInput id 12）@(18,142)，命中矩形 = 屏幕坐标 (298,222,200,20)
+        spawn_container(p, 18.0, 142.0, 200.0, 20.0, 10)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                crate::game::dialogs::text_input::TextInputField(12),
+                crate::game::dialogs::text_input::TextInputRect(298.0, 222.0, 200.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(12),
+                ));
+            });
+        // 提交按钮 Title[206/207/208] @(80,178)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 80.0, 178.0, 76.0, 25.0, 11).insert(ReportSubmit);
+        }
     });
 }
 
@@ -189,12 +158,21 @@ fn report_ui_system(
     mut state: ResMut<ReportState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    close: Query<&UiButton, With<ReportClose>>,
-    submit_btn: Query<&UiButton, With<ReportSubmit>>,
-    type_dd: Query<&DropDown, With<ReportTypeDrop>>,
+    close: Query<(Entity, &Interaction), With<ReportClose>>,
+    submit_btn: Query<(Entity, &Interaction), With<ReportSubmit>>,
+    type_dd: Query<&UiDropDown, With<ReportTypeDrop>>,
     mut widgets: Query<&mut Visibility, With<ReportWidget>>,
-    mut lines: Query<(&mut Text2d, &ReportLine)>,
+    mut lines: Query<(&mut Text, &ReportLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Report);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -202,8 +180,8 @@ fn report_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Report);
         }
     }
@@ -215,8 +193,8 @@ fn report_ui_system(
             _ => String::new(),
         };
     }
-    for btn in &submit_btn {
-        if btn.clicked {
+    for (e, inter) in &submit_btn {
+        if edge(e, inter, &mut prev_inter) {
             // #90 类型来自下拉（0=未选择）
             let rtype = type_dd.single().ok().and_then(|dd| dd.selected).unwrap_or(0) as u32;
             let desc = input.texts.get(12).cloned().unwrap_or_default();
