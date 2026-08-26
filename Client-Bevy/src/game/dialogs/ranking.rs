@@ -13,9 +13,8 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::controls::{spawn_checkbox, CheckBox};
-use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{spawn_ui_button, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel, ImageButton};
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -124,7 +123,6 @@ fn spawn_ranking(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     mut libs: ResMut<GameLibraries>,
-    mut cache: ResMut<UiImageCache>,
     ranking: Res<RankingState>,
 ) {
     if !ui_font.0.is_strong() {
@@ -132,215 +130,176 @@ fn spawn_ranking(
     }
     let font = ui_font.0.clone();
 
-    // 面板背景 Title[728]（C# RankingDialog：Index=728, Library=Title；324x441）
-    let panel = if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 728) {
-        commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Ranking),
-                RankingWidget,
-                Sprite::from_image(h),
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(200.0, -150.0, 8.0),
-                Visibility::Hidden,
-            ))
-            .id()
-    } else {
-        // 兜底：纹理缺失时退回半透明深色面板
-        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-        commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Ranking),
-                RankingWidget,
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.12, 0.12, 0.16, 0.95),
-                    custom_size: Some(Vec2::new(320.0, 380.0)),
-                    ..default()
-                },
-                bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(200.0, -150.0, 8.0),
-                Visibility::Hidden,
-            ))
-            .id()
+    // bevy_ui 面板 Title[728]（324x441 @ 200,150）——bevy_ui 迁移样板
+    let Some(bg) = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 728) else {
+        return;
     };
-    // #89 可滚动排行列表：10 行 × 28px
-    let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (490.0, 248.0, 4.0, 280.0), 8.3);
-    commands.entity(track).insert((DialogRoot(DialogKind::Ranking), RankingWidget, Visibility::Visible));
-    commands.entity(thumb).insert((
-        DialogRoot(DialogKind::Ranking),
-        RankingWidget,
-        Visibility::Visible,
-    ));
-    commands.entity(panel).insert(ScrollList {
-        rect_rel: (10.0, 98.0, 280.0, 280.0),
-        row_h: 28.0,
-        visible: 10,
-        total: 0,
-        offset: 0,
-        step: 3,
-        track_rel: (290.0, 98.0, 4.0, 280.0),
-        thumb: Some(thumb),
-        z: 9.0,
+    let panel = crate::ui::theme::spawn_panel(&mut commands, bg, 200.0, 150.0, 324.0, 441.0, 40);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Ranking), RankingWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭 X（C# relative (289,3) → 面板内 (296,4)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            crate::ui::theme::spawn_icon_button(p, n, h, pr, 296.0, 4.0, 20.0, 20.0, 10)
+                .insert(RankingClose);
+        }
+        // 标题
+        crate::ui::theme::spawn_label(
+            p,
+            &font,
+            "排行榜",
+            130.0,
+            0.0,
+            16.0,
+            Color::srgb(1.0, 1.0, 0.3),
+            9,
+        );
+        // 页签（C# RankingDialog：All/War/Wiz/Tao/Sin/Arch）
+        let tabs: [(u8, &str); 6] = [
+            (0, "全部"),
+            (1, "战士"),
+            (2, "法师"),
+            (3, "道士"),
+            (4, "刺客"),
+            (5, "弓手"),
+        ];
+        for (i, (t, label)) in tabs.iter().enumerate() {
+            crate::ui::theme::spawn_label(
+                p,
+                &font,
+                label,
+                10.0 + i as f32 * 46.0,
+                18.0,
+                12.0,
+                Color::srgb(0.8, 0.9, 1.0),
+                9,
+            )
+            .insert((RankingTab(*t), Button));
+        }
+        // 上一页 / 下一页
+        crate::ui::theme::spawn_label(
+            p,
+            &font,
+            "上一页",
+            10.0,
+            410.0,
+            12.0,
+            Color::srgb(0.8, 0.9, 1.0),
+            9,
+        )
+        .insert((RankingPrev, Button));
+        crate::ui::theme::spawn_label(
+            p,
+            &font,
+            "下一页",
+            80.0,
+            410.0,
+            12.0,
+            Color::srgb(0.8, 0.9, 1.0),
+            9,
+        )
+        .insert((RankingNext, Button));
+        // 仅在线（Prguse 2086 未勾 / 2087 勾选）
+        if let (Some(u), Some(t)) = (
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2086),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2087),
+        ) {
+            crate::ui::theme::spawn_icon_button(p, u.clone(), t.clone(), u, 190.0, 410.0, 16.0, 14.0, 9)
+                .insert(RankingOnlineOnly);
+        }
+        crate::ui::theme::spawn_label(
+            p,
+            &font,
+            "仅在线",
+            210.0,
+            410.0,
+            12.0,
+            Color::srgb(0.8, 0.9, 1.0),
+            9,
+        );
+        // 10 行（bevy_ui 文本；行点击查看暂缓，后续做成可点击行）
+        for i in 0..10usize {
+            crate::ui::theme::spawn_label(
+                p,
+                &font,
+                "",
+                10.0,
+                98.0 + i as f32 * 28.0,
+                13.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(RankingLine(i));
+        }
+        // 我的排名
+        crate::ui::theme::spawn_label(
+            p,
+            &font,
+            "我的排名：--",
+            10.0,
+            388.0,
+            12.0,
+            Color::srgb(1.0, 0.9, 0.3),
+            9,
+        )
+        .insert(RankingMyRank);
     });
-
-    // 关闭按钮（右上角 X，Prguse2 360/361/362；与 ranking_ui_system 底部关闭命中区同坐标）
-    if let Some(e) = spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse2,
-        360,
-        361,
-        362,
-        496.0,
-        154.0,
-        8.3,
-        20.0,
-        20.0,
-    ) {
-        commands.entity(e).insert((RankingClose, DialogRoot(DialogKind::Ranking), RankingWidget));
-    }
-
-    // 标题（原 y=158 与下方页签 y=168 重叠；上移到面板标题栏顶部，对齐 C# 无独立标题、页签居中的布局）
-    let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 150.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
-    commands.entity(t).insert((DialogRoot(DialogKind::Ranking), RankingWidget));
-
-    // 页签（C# RankingDialog：All/War/Wiz/Tao/Sin/Arch）
-    let tabs: [(u8, &str); 6] = [
-        (0, "全部"),
-        (1, "战士"),
-        (2, "法师"),
-        (3, "道士"),
-        (4, "刺客"),
-        (5, "弓手"),
-    ];
-    for (i, (t, label)) in tabs.iter().enumerate() {
-        let e = spawn_ui_text(
-            &mut commands, &font, label,
-            210.0 + i as f32 * 46.0, 168.0,
-            12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
-        );
-        commands.entity(e).insert((
-            RankingTab(*t),
-            UiButton {
-                rect: (210.0 + i as f32 * 46.0, 168.0, 44.0, 18.0),
-                clicked: false,
-            },
-            DialogRoot(DialogKind::Ranking),
-            RankingWidget,
-        ));
-    }
-    // 翻页（C# PrevButton/NextButton；两种组件类型不同，分别生成）
-    let prev = spawn_ui_text(
-        &mut commands, &font, "上一页",
-        210.0, 560.0,
-        12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
-    );
-    commands.entity(prev).insert((
-        RankingPrev,
-        UiButton {
-            rect: (210.0, 560.0, 66.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Ranking),
-        RankingWidget,
-    ));
-    let next = spawn_ui_text(
-        &mut commands, &font, "下一页",
-        280.0, 560.0,
-        12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
-    );
-    commands.entity(next).insert((
-        RankingNext,
-        UiButton {
-            rect: (280.0, 560.0, 66.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Ranking),
-        RankingWidget,
-    ));
-
-    // 仅在线（C# OnlineOnlyButton：Prguse 2086 未勾 / 2087 勾选）
-    if let Some(e) = spawn_checkbox(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse,
-        [2086, 2086, 2086],
-        [2087, 2087, 2087],
-        390.0, 560.0, 8.2, 16.0, 14.0,
-        ranking.online_only,
-    ) {
-        commands.entity(e).insert((
-            RankingOnlineOnly,
-            DialogRoot(DialogKind::Ranking),
-            RankingWidget,
-        ));
-    }
-    let e = spawn_ui_text(
-        &mut commands, &font, "仅在线",
-        410.0, 560.0,
-        12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
-    );
-    commands.entity(e).insert((
-        DialogRoot(DialogKind::Ranking),
-        RankingWidget,
-    ));
-
-    // 10 行
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            210.0, 248.0 + i as f32 * 28.0,
-            13.0, Color::WHITE, 8.2,
-        );
-        commands.entity(e).insert((
-            RankingLine(i),
-            DialogRoot(DialogKind::Ranking),
-            RankingWidget,
-        ));
-    }
-    // 我的排名（C# MyRank；点击滚动到我的行）
-    let t = spawn_ui_text(
-        &mut commands, &font, "我的排名：--",
-        210.0, 538.0,
-        12.0, Color::srgb(1.0, 0.9, 0.3), 8.2,
-    );
-    commands.entity(t).insert((
-        RankingMyRank,
-        DialogRoot(DialogKind::Ranking),
-        RankingWidget,
-    ));
 }
 
 fn ranking_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut ranking: ResMut<RankingState>,
     net: Res<NetConnection>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    tabs: Query<(&UiButton, &RankingTab)>,
-    prev: Query<&UiButton, (With<RankingPrev>, Without<RankingTab>)>,
-    next: Query<&UiButton, (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>)>,
-    online_boxes: Query<&CheckBox, With<RankingOnlineOnly>>,
     local_player: Query<&PlayerName, With<LocalPlayer>>,
-    // #1329：B0001 修复（#1323 合入后启动 panic）——my_rank 与 lines 的 &mut Text2d 需 Without 隔离
-    mut my_rank_text: Query<&mut Text2d, (With<RankingMyRank>, Without<RankingLine>)>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
-    mut lines: Query<(&mut Text2d, &RankingLine), Without<RankingMyRank>>,
-    mut scroll: Query<&mut ScrollList, With<RankingWidget>>,
+    close: Query<(Entity, &Interaction), (With<RankingClose>, Without<RankingTab>)>,
+    tabs: Query<(Entity, &Interaction, &RankingTab)>,
+    prev: Query<(Entity, &Interaction), (With<RankingPrev>, Without<RankingTab>, Without<RankingNext>)>,
+    next: Query<
+        (Entity, &Interaction),
+        (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>),
+    >,
+    mut online: Query<
+        (Entity, &Interaction, &ImageButton, &mut ImageNode),
+        (With<RankingOnlineOnly>, Without<RankingTab>),
+    >,
+    mut my_rank_text: Query<&mut Text, (With<RankingMyRank>, Without<RankingLine>)>,
+    mut lines: Query<(&mut Text, &RankingLine), Without<RankingMyRank>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
+    mut offset: Local<usize>,
 ) {
+    // Interaction 边沿检测：仅当从非 Pressed → Pressed 那帧触发一次（bevy_ui 无 just_pressed）
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
         *requested = false;
+        *offset = 0;
         return;
     }
-    // 打开瞬间请求排行榜（原版 C# RankingDialog.Show → GetRanking）
+
+    // 关闭（点 X → 关闭排行榜）
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
+            mgr.close(DialogKind::Ranking);
+        }
+    }
+    // 打开瞬间请求排行榜（C# RankingDialog.Show → GetRanking）
     if !*requested {
         *requested = true;
         net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
@@ -351,57 +310,52 @@ fn ranking_ui_system(
     }
     let filtered = filter_rank_tab(&ranking.entries, ranking.tab);
     let max_offset = filtered.len().saturating_sub(10);
-    // 页签切换（C# SelectRank：本地按 class 过滤 + 重新请求）
-    for (btn, t) in &tabs {
-        if btn.clicked && ranking.tab != t.0 {
+    // 页签切换
+    for (e, inter, t) in &tabs {
+        if edge(e, inter, &mut prev_inter) && ranking.tab != t.0 {
             ranking.tab = t.0;
-            if let Ok(mut sl) = scroll.single_mut() {
-                sl.offset = 0;
-            }
+            *offset = 0;
             net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
                 rank_index: t.0,
                 online_only: ranking.online_only,
             });
-            tracing::info!("🏅 排行榜页签 {}", if t.0 == 0 { "全部" } else { rank_class_name(t.0 - 1) });
+            tracing::info!(
+                "🏅 排行榜页签 {}",
+                if t.0 == 0 { "全部" } else { rank_class_name(t.0 - 1) }
+            );
         }
     }
-    // 仅在线（C# OnlineOnlyButton → 重置 + 重新请求）
-    if let Ok(cb) = online_boxes.single() {
-        if cb.checked != ranking.online_only {
-            ranking.online_only = cb.checked;
-            if let Ok(mut sl) = scroll.single_mut() {
-                sl.offset = 0;
-            }
+    // 上一页 / 下一页
+    for (e, inter) in &prev {
+        if edge(e, inter, &mut prev_inter) {
+            *offset = offset.saturating_sub(10);
+        }
+    }
+    for (e, inter) in &next {
+        if edge(e, inter, &mut prev_inter) {
+            *offset = (*offset + 10).min(max_offset);
+        }
+    }
+    *offset = (*offset).min(max_offset);
+    // 仅在线（切换 + 帧同步）
+    for (e, inter, ib, mut node) in &mut online {
+        if edge(e, inter, &mut prev_inter) {
+            ranking.online_only = !ranking.online_only;
+            *offset = 0;
             net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
                 rank_index: ranking.tab,
                 online_only: ranking.online_only,
             });
             tracing::info!("🏅 排行榜仅在线 {}", ranking.online_only);
         }
-    }
-    // 翻页（C# PrevButton/NextButton）
-    for btn in &prev {
-        if btn.clicked {
-            if let Ok(mut sl) = scroll.single_mut() {
-                sl.offset = sl.offset.saturating_sub(10);
-            }
+        let want = if ranking.online_only { &ib.pressed } else { &ib.normal };
+        if node.image != *want {
+            node.image = want.clone();
         }
     }
-    for btn in &next {
-        if btn.clicked {
-            if let Ok(mut sl) = scroll.single_mut() {
-                sl.offset = (sl.offset + 10).min(max_offset);
-            }
-        }
-    }
-    {
-        if let Ok(mut sl) = scroll.single_mut() {
-            sl.offset = sl.offset.min(max_offset);
-            sl.set_total(filtered.len());
-        }
-    }
+    // 行文本
     for (mut text, line) in &mut lines {
-        let idx = scroll.single().map(|s| s.offset + line.0).unwrap_or(line.0);
+        let idx = *offset + line.0;
         text.0 = match filtered.get(idx) {
             Some(e) => format!(
                 "#{} {} ({} Lv.{})",
@@ -413,7 +367,7 @@ fn ranking_ui_system(
             None => String::new(),
         };
     }
-    // 我的排名（C# MyRank：0=未上榜；点击滚动到自己的行）
+    // 我的排名
     let self_name = local_player.single().map(|n| n.0.clone()).unwrap_or_default();
     for mut text in &mut my_rank_text {
         text.0 = if ranking.my_rank > 0 {
@@ -422,55 +376,8 @@ fn ranking_ui_system(
             "我的排名：未上榜".to_string()
         };
     }
-    if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
-            if let Some(cursor) = window.cursor_position() {
-                if cursor.x >= 210.0 && cursor.x <= 420.0 && cursor.y >= 538.0 && cursor.y <= 558.0 {
-                    if let Some(idx) = filtered.iter().position(|e| e.player_name == self_name) {
-                        if let Ok(mut sl) = scroll.single_mut() {
-                            sl.offset = idx.min(max_offset);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // 行点击查看（C# RankingRow.Click → Inspect{Ranking=true}）
-    if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
-            if let Some(cursor) = window.cursor_position() {
-                for i in 0..10usize {
-                    let y = 248.0 + i as f32 * 28.0;
-                    if cursor.x >= 210.0 && cursor.x <= 500.0 && cursor.y >= y && cursor.y <= y + 26.0 {
-                        if let Some(e) = filtered.get(i) {
-                            if !mgr.is_open(DialogKind::Inspect) {
-                                mgr.open(DialogKind::Inspect);
-                            }
-                            net.send_packet(&mir2_shared::packets::client::chat::Inspect {
-                                object_id: e.player_id,
-                                ranking: true,
-                                name: e.player_name.clone(),
-                            });
-                            tracing::info!("🔍 查看排行榜玩家 {} (id={})", e.player_name, e.player_id);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    // 点击右上角关闭
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    if mouse.just_pressed(MouseButton::Left) {
-        let x = 200.0 + 320.0 - 24.0;
-        let y = 150.0 + 4.0;
-        if cursor.x >= x && cursor.x <= x + 20.0 && cursor.y >= y && cursor.y <= y + 20.0 {
-            mgr.close(DialogKind::Ranking);
-        }
-    }
+    let _ = self_name; // 行点击查看（Inspect）暂缓迁移
 }
-
 
 /// 消费服务端排行榜事件（网络层只广播 ServerEvent）
 fn ranking_server_events(

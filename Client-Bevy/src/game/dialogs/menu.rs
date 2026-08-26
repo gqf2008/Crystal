@@ -12,9 +12,9 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_image,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -90,9 +90,7 @@ impl Plugin for MenuDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_menu_dialog);
         app.add_systems(
             Update,
-            (menu_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            (menu_ui_system,).run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -107,7 +105,6 @@ fn spawn_menu_dialog(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -118,65 +115,65 @@ fn spawn_menu_dialog(
     let font = ui_font.0.clone();
 
     // 背景 Title[567]（C# Location=(ScreenWidth-Width, MainDialog.Y-Height+15) → (988,349)）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 567) {
-        let e = spawn_ui_sprite(&mut commands, h, MENU_X, MENU_Y, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Menu),
-            MenuWidget,
-            Visibility::Hidden,
-        ));
-    }
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 567) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, MENU_X, MENU_Y, MENU_W, MENU_H, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Menu), MenuWidget));
 
-    // 按钮
-    for (action, lib, n, h, p, y) in MENU_BUTTONS {
-        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            *lib, *n, *h, *p,
-            MENU_X + MENU_BTN_DX, MENU_Y + y, 7.0, 38.0, 19.0,
-        ) {
-            commands.entity(e).insert((
-                MenuBtn(*action),
-                DialogRoot(DialogKind::Menu),
-                MenuWidget,
-            ));
+    commands.entity(panel).with_children(|p| {
+        // 菜单按钮（相对面板 (3, y)）
+        for (action, lib, n, h, pr, y) in MENU_BUTTONS {
+            if let (Some(nh), Some(hh), Some(ph)) = (
+                load_lib_image(&mut libs, &mut images, *lib, *n),
+                load_lib_image(&mut libs, &mut images, *lib, *h),
+                load_lib_image(&mut libs, &mut images, *lib, *pr),
+            ) {
+                spawn_icon_button(p, nh, hh, ph, MENU_BTN_DX, *y, 38.0, 19.0, 10)
+                    .insert(MenuBtn(*action));
+            }
         }
-    }
-    // 退出确认（C# MirMessageBox）
+    });
+
+    // 退出确认（C# MirMessageBox）：独立根节点（不随菜单面板裁切），半透明底
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    commands.spawn((
-        UiEntity,
-        DialogRoot(DialogKind::Menu),
-        MenuExitConfirm,
-        Sprite {
-            image: white.clone(),
-            color: Color::srgba(0.1, 0.1, 0.14, 0.96),
-            custom_size: Some(Vec2::new(260.0, 120.0)),
-            ..default()
-        },
-        bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(382.0, -324.0, 9.0),
-        Visibility::Hidden,
-    ));
-    let t = spawn_ui_text(&mut commands, &font, "确定要退出游戏吗？", 400.0, 336.0, 14.0, Color::WHITE, 9.2);
-    commands.entity(t).insert((MenuExitConfirm, DialogRoot(DialogKind::Menu)));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        410.0, 380.0, 9.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MenuExitYes, DialogRoot(DialogKind::Menu), MenuExitConfirm));
-    }
-    let t = spawn_ui_text(&mut commands, &font, "确定", 432.0, 384.0, 12.0, Color::WHITE, 9.4);
-    commands.entity(t).insert((MenuExitConfirm, DialogRoot(DialogKind::Menu)));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        500.0, 380.0, 9.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MenuExitNo, DialogRoot(DialogKind::Menu), MenuExitConfirm));
-    }
-    let t = spawn_ui_text(&mut commands, &font, "取消", 530.0, 384.0, 12.0, Color::WHITE, 9.4);
-    commands.entity(t).insert((MenuExitConfirm, DialogRoot(DialogKind::Menu)));
+    let confirm = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(382.0),
+                top: Val::Px(324.0),
+                width: Val::Px(260.0),
+                height: Val::Px(120.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.14, 0.96)),
+            GlobalZIndex(45),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(confirm).insert((DialogRoot(DialogKind::Menu), MenuExitConfirm));
+    commands.entity(confirm).with_children(|p| {
+        spawn_label(p, &font, "确定要退出游戏吗？", 18.0, 12.0, 14.0, Color::WHITE, 9);
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 28.0, 56.0, 76.0, 25.0, 10)
+                .insert(MenuExitYes);
+        }
+        spawn_label(p, &font, "确定", 50.0, 60.0, 12.0, Color::WHITE, 11);
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 118.0, 56.0, 76.0, 25.0, 10)
+                .insert(MenuExitNo);
+        }
+        spawn_label(p, &font, "取消", 148.0, 60.0, 12.0, Color::WHITE, 11);
+    });
 }
 
 /// #1330：菜单按钮 → 对应面板显隐切换（C# MenuDialog Click：已开则 Hide，未开则 Show）
@@ -193,19 +190,28 @@ fn menu_open_toggle(mgr: &mut DialogManager, kind: DialogKind, name: &str) {
 fn menu_ui_system(
     mut mgr: ResMut<DialogManager>,
     net: Res<crate::network::NetConnection>,
-    mut widgets: Query<&mut Visibility, With<MenuWidget>>,
-    buttons: Query<(&UiButton, &MenuBtn)>,
+    mut widgets: Query<&mut Visibility, (With<MenuWidget>, Without<MenuExitConfirm>)>,
+    buttons: Query<(Entity, &Interaction, &MenuBtn), Without<MenuExitConfirm>>,
     mut confirm: Local<bool>,
     mut confirm_widgets: Query<&mut Visibility, (With<MenuExitConfirm>, Without<MenuWidget>)>,
-    yes: Query<&UiButton, With<MenuExitYes>>,
-    no: Query<&UiButton, With<MenuExitNo>>,
+    yes: Query<(Entity, &Interaction), (With<MenuExitYes>, Without<MenuExitNo>)>,
+    no: Query<(Entity, &Interaction), (With<MenuExitNo>, Without<MenuExitYes>)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     let open = mgr.is_open(DialogKind::Menu);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
-        // 退出确认框（MenuExitConfirm 标签+按钮）不在 widgets 里，关闭时必须隐藏
         for mut vis in &mut confirm_widgets {
             *vis = Visibility::Hidden;
         }
@@ -213,49 +219,49 @@ fn menu_ui_system(
         return;
     }
     for mut vis in &mut confirm_widgets {
-        *vis = if open && *confirm { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if *confirm { Visibility::Visible } else { Visibility::Hidden };
     }
-    for btn in &yes {
-        if btn.clicked {
+    for (e, inter) in &yes {
+        if edge(e, inter, &mut prev_inter) {
             tracing::info!("🎮 退出游戏");
             std::process::exit(0);
         }
     }
-    for btn in &no {
-        if btn.clicked {
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
             *confirm = false;
         }
     }
-    for (btn, action) in &buttons {
-        if btn.clicked {
-            match action.0 {
-                MenuAction::Exit => {
-                    tracing::info!("🎮 退出确认");
-                    *confirm = true;
-                }
-                MenuAction::Logout => {
-                    // #182 下线：C.LogOut → S.LogOutSuccess → 返回选角
-                    net.send_packet(&mir2_shared::packets::client::character::LogOut);
-                    mgr.close(DialogKind::Menu);
-                    tracing::info!("🎮 发送下线请求");
-                }
-                MenuAction::Mount => {
-                    tracing::info!("🐴 打开坐骑面板");
-                    mgr.open(DialogKind::Mount);
-                    mgr.close(DialogKind::Menu);
-                }
-                // #1330：对齐 C# MenuDialog Click → Show/Hide 对应面板
-                MenuAction::Help => menu_open_toggle(&mut mgr, DialogKind::Help, "帮助"),
-                MenuAction::Keyboard => menu_open_toggle(&mut mgr, DialogKind::KeyboardLayout, "键盘设置"),
-                MenuAction::Ranking => menu_open_toggle(&mut mgr, DialogKind::Ranking, "排行榜"),
-                MenuAction::Creature => menu_open_toggle(&mut mgr, DialogKind::Creature, "宠物"),
-                MenuAction::Fishing => menu_open_toggle(&mut mgr, DialogKind::Fishing, "钓鱼"),
-                MenuAction::Friends => menu_open_toggle(&mut mgr, DialogKind::Friend, "好友"),
-                MenuAction::Mentor => menu_open_toggle(&mut mgr, DialogKind::Mentor, "师徒"),
-                MenuAction::Relationship => menu_open_toggle(&mut mgr, DialogKind::Relationship, "夫妻"),
-                MenuAction::Group => menu_open_toggle(&mut mgr, DialogKind::Group, "队伍"),
-                MenuAction::Guild => menu_open_toggle(&mut mgr, DialogKind::Guild, "行会"),
+    for (e, inter, action) in &buttons {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        match action.0 {
+            MenuAction::Exit => {
+                tracing::info!("🎮 退出确认");
+                *confirm = true;
             }
+            MenuAction::Logout => {
+                net.send_packet(&mir2_shared::packets::client::character::LogOut);
+                mgr.close(DialogKind::Menu);
+                tracing::info!("🎮 发送下线请求");
+            }
+            MenuAction::Mount => {
+                tracing::info!("🐴 打开坐骑面板");
+                mgr.open(DialogKind::Mount);
+                mgr.close(DialogKind::Menu);
+            }
+            MenuAction::Help => menu_open_toggle(&mut mgr, DialogKind::Help, "帮助"),
+            MenuAction::Keyboard => menu_open_toggle(&mut mgr, DialogKind::KeyboardLayout, "键盘设置"),
+            MenuAction::Ranking => menu_open_toggle(&mut mgr, DialogKind::Ranking, "排行榜"),
+            MenuAction::Creature => menu_open_toggle(&mut mgr, DialogKind::Creature, "宠物"),
+            MenuAction::Fishing => menu_open_toggle(&mut mgr, DialogKind::Fishing, "钓鱼"),
+            MenuAction::Friends => menu_open_toggle(&mut mgr, DialogKind::Friend, "好友"),
+            MenuAction::Mentor => menu_open_toggle(&mut mgr, DialogKind::Mentor, "师徒"),
+            MenuAction::Relationship => menu_open_toggle(&mut mgr, DialogKind::Relationship, "夫妻"),
+            MenuAction::Group => menu_open_toggle(&mut mgr, DialogKind::Group, "队伍"),
+            MenuAction::Guild => menu_open_toggle(&mut mgr, DialogKind::Guild, "行会"),
         }
     }
 }
+

@@ -6,9 +6,9 @@ description = "Legend of Mir 2 (传奇2) 游戏客户端 — Bevy 移植版（�
 
 [dependencies]
 # Bevy 游戏引擎 0.19（ECS/渲染大幅升级）
-bevy = { version = "0.19", features = ["wav"] }
+bevy = { version = "0.19.1", features = ["wav"] }
 # B0001 调试：显示冲突系统/组件名
-bevy_ecs = { version = "0.19", features = ["debug"] }
+bevy_ecs = { version = "0.19.1", features = ["debug"] }
 # 排版库（bevy_text 同版传递依赖）：直接访问 fontique Collection 注册系统宋体并设
 # Han 字形回退（复刻 C# GDI 字体链接 Arial→宋体；见 ui/sprite_ui.rs setup_han_fallback_system）。
 # default-features=false：只要核心 Collection API——默认特性 system 会在 Linux 拉

@@ -14,8 +14,10 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, ui_button_system, ui_image, UiButton, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    ImageButton,
 };
 
 /// 设置状态（对应 C# Settings，纯本地）
@@ -290,7 +292,7 @@ impl Plugin for OptionPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_option);
         app.add_systems(
             Update,
-            (option_ui_system, ui_button_system, option_view_system)
+            (option_ui_system, option_view_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -303,122 +305,18 @@ fn cleanup_option(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>
     }
 }
 
-/// 生成一个开/关按钮
-/// sel_idx = 设置 ON 时的 [normal, hover, pressed]
-/// unsel_idx = 设置 OFF 时的 [normal, hover, pressed]
-#[allow(clippy::too_many_arguments)]
-fn spawn_toggle_button(
-    commands: &mut Commands,
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-    cache: &mut UiImageCache,
-    lib: LibraryName,
-    sel_idx: [usize; 3],
-    unsel_idx: [usize; 3],
-    x: f32,
-    y: f32,
-    kind: OptionToggleKind,
-    is_on: bool,
-) -> Option<Entity> {
-    let mut sel = [None, None, None];
-    let mut unsel = [None, None, None];
-    for (i, idx) in sel_idx.iter().enumerate() {
-        sel[i] = ui_image(libs, images, cache, lib, *idx);
-    }
-    for (i, idx) in unsel_idx.iter().enumerate() {
-        unsel[i] = ui_image(libs, images, cache, lib, *idx);
-    }
-    if sel.iter().any(|h| h.is_none()) || unsel.iter().any(|h| h.is_none()) {
-        return None;
-    }
-    let sel = [
-        sel[0].clone().unwrap(),
-        sel[1].clone().unwrap(),
-        sel[2].clone().unwrap(),
-    ];
-    let unsel = [
-        unsel[0].clone().unwrap(),
-        unsel[1].clone().unwrap(),
-        unsel[2].clone().unwrap(),
-    ];
-    let normal = if is_on { sel[0].clone() } else { unsel[0].clone() };
-    let e = spawn_ui_sprite(commands, normal.clone(), x, y, 7.0, 1.0);
-    commands.entity(e).insert((
-        UiButton {
-            rect: (x, y, 36.0, 17.0),
-            clicked: false,
-        },
-        crate::ui::sprite_ui::ButtonFrames {
-            normal,
-            hover: if is_on { sel[1].clone() } else { unsel[1].clone() },
-            pressed: if is_on { sel[2].clone() } else { unsel[2].clone() },
-        },
-        OptionToggleBtn {
-            kind,
-            is_on,
-            frames_on: sel,
-            frames_off: unsel,
-        },
-        OptionWidget,
-        DialogRoot(DialogKind::Settings),
-    ));
-    Some(e)
-}
-
-/// 生成音量滑条（填充 + 滑块 + 点击区域）
-fn spawn_volume_bar(
-    commands: &mut Commands,
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-    cache: &mut UiImageCache,
-    bar_x: f32,
-    bar_y: f32,
-    knob_y: f32,
-    is_music: bool,
-) {
-    let Some(bar_info) = libs.0.get_image(LibraryName::Prguse2, 468) else {
-        return;
-    };
-    let bar_w = bar_info.width.max(0) as f32;
-    let bar_h = bar_info.height.max(0) as f32;
-    let Some(bar_tex) = ui_image(libs, images, cache, LibraryName::Prguse2, 468) else {
-        return;
-    };
-    let Some(knob_tex) = ui_image(libs, images, cache, LibraryName::Prguse, 20) else {
-        return;
-    };
-    // 填充条（部分裁剪，模拟 C# Draw(section)）
-    let fill = spawn_ui_sprite(commands, bar_tex, bar_x, bar_y, 7.0, 1.0);
-    commands.entity(fill).insert((
-        Sprite {
-            rect: Some(Rect::new(0.0, 0.0, 0.0, bar_h)),
-            custom_size: Some(Vec2::new(0.0, bar_h)),
-            ..default()
-        },
-        OptionVolumeFill(is_music),
-        OptionBar {
-            is_music,
-            rect: (bar_x, bar_y, bar_w, bar_h),
-        },
-        OptionWidget,
-        DialogRoot(DialogKind::Settings),
-    ));
-    // 滑块（C#：VolumeBar at (159+fill, 218/244)）
-    let knob = spawn_ui_sprite(commands, knob_tex, bar_x, knob_y, 8.0, 1.0);
-    commands.entity(knob).insert((
-        OptionVolumeKnob(is_music),
-        OptionWidget,
-        DialogRoot(DialogKind::Settings),
-    ));
-}
-
 fn spawn_option(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
 
     // 面板 Title[411]（259x354），居中
     let (pw, ph) = match libs.0.get_image(LibraryName::Title, 411) {
@@ -428,61 +326,103 @@ fn spawn_option(
     let px = (1024.0 - pw) / 2.0;
     let py = (768.0 - ph) / 2.0;
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 411) {
-        let e = spawn_ui_sprite(&mut commands, h, px, py, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Settings),
-            OptionWidget,
-            Visibility::Hidden,
-        ));
-    }
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 411) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, px, py, pw, ph, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Settings), OptionWidget));
 
-    // 关闭按钮（C#：Prguse2[360/361/362] at (Width-26, 5)，纹理 24x21）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        px + pw - 26.0, py + 5.0, 7.0, 24.0, 21.0,
-    ) {
-        commands.entity(e).insert((
-            OptionClose,
-            DialogRoot(DialogKind::Settings),
-            OptionWidget,
-        ));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 关闭按钮（Prguse2[360/361/362] @(pw-26,5)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, pw - 26.0, 5.0, 24.0, 21.0, 10).insert(OptionClose);
+        }
+        // 8 组开/关按钮（On at (159,y)，Off at (201,y)，36x17）
+        let rows: [(OptionToggleKind, LibraryName, f32, [usize; 3], [usize; 3]); 8] = [
+            (OptionToggleKind::SkillMode, LibraryName::Prguse2, 68.0, [452, 450, 451], [453, 455, 454]),
+            (OptionToggleKind::SkillBar, LibraryName::Prguse2, 93.0, [458, 456, 457], [459, 461, 460]),
+            (OptionToggleKind::Effect, LibraryName::Prguse2, 118.0, [458, 456, 457], [459, 461, 460]),
+            (OptionToggleKind::DropView, LibraryName::Prguse2, 143.0, [458, 456, 457], [459, 461, 460]),
+            (OptionToggleKind::NameView, LibraryName::Prguse2, 168.0, [458, 456, 457], [459, 461, 460]),
+            (OptionToggleKind::HpView, LibraryName::Prguse2, 193.0, [464, 462, 463], [465, 467, 466]),
+            (OptionToggleKind::Observe, LibraryName::Prguse2, 271.0, [458, 456, 457], [459, 461, 460]),
+            (OptionToggleKind::NewMove, LibraryName::Title, 296.0, [853, 851, 853], [848, 850, 850]),
+        ];
+        for (kind, lib, y, on_btn, off_btn) in rows {
+            let (on, off) = load_frames(&mut libs, &mut images, lib, on_btn, off_btn);
+            if let (Some(on), Some(off)) = (on, off) {
+                spawn_icon_button(p, on[0].clone(), on[1].clone(), on[2].clone(), 159.0, y, 36.0, 17.0, 10)
+                    .insert(OptionToggleBtn { kind, is_on: true, frames_on: on.clone(), frames_off: off.clone() });
+                spawn_icon_button(p, off[0].clone(), off[1].clone(), off[2].clone(), 201.0, y, 36.0, 17.0, 10)
+                    .insert(OptionToggleBtn { kind, is_on: false, frames_on: on, frames_off: off });
+            }
+        }
+        // 音量滑条（Sound @(159,225)，Music @(159,251)；滑块 y=218/244）
+        spawn_volume_bar(p, &mut libs, &mut images, px, py, 159.0, 225.0, 218.0, false);
+        spawn_volume_bar(p, &mut libs, &mut images, px, py, 159.0, 251.0, 244.0, true);
+    });
+}
 
-    // 8 组开/关按钮（C# 布局：On at (159,y)，Off at (201,y)，36x17）
-    // 每行：[ON 态 normal, OFF 态 normal, pressed] × 开按钮 / 关按钮
-    // 索引来自 C# BeforeDraw 的状态切换逻辑
-    let rows: [(OptionToggleKind, LibraryName, f32, [usize; 3], [usize; 3]); 8] = [
-        (OptionToggleKind::SkillMode, LibraryName::Prguse2, 68.0, [452, 450, 451], [453, 455, 454]),
-        (OptionToggleKind::SkillBar, LibraryName::Prguse2, 93.0, [458, 456, 457], [459, 461, 460]),
-        (OptionToggleKind::Effect, LibraryName::Prguse2, 118.0, [458, 456, 457], [459, 461, 460]),
-        (OptionToggleKind::DropView, LibraryName::Prguse2, 143.0, [458, 456, 457], [459, 461, 460]),
-        (OptionToggleKind::NameView, LibraryName::Prguse2, 168.0, [458, 456, 457], [459, 461, 460]),
-        (OptionToggleKind::HpView, LibraryName::Prguse2, 193.0, [464, 462, 463], [465, 467, 466]),
-        (OptionToggleKind::Observe, LibraryName::Prguse2, 271.0, [458, 456, 457], [459, 461, 460]),
-        (OptionToggleKind::NewMove, LibraryName::Title, 296.0, [853, 851, 853], [848, 850, 850]),
-    ];
-    for (kind, lib, y, on_btn, off_btn) in rows {
-        spawn_toggle_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            lib, on_btn, on_btn, px + 159.0, py + y, kind, true,
-        );
-        spawn_toggle_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            lib, off_btn, off_btn, px + 201.0, py + y, kind, false,
-        );
+/// 加载开关按钮两态帧 [normal,hover,pressed]
+fn load_frames(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    lib: LibraryName,
+    on_idx: [usize; 3],
+    off_idx: [usize; 3],
+) -> (Option<[Handle<Image>; 3]>, Option<[Handle<Image>; 3]>) {
+    let mut on = [None, None, None];
+    let mut off = [None, None, None];
+    for i in 0..3 {
+        on[i] = load_lib_image(libs, images, lib, on_idx[i]);
+        off[i] = load_lib_image(libs, images, lib, off_idx[i]);
     }
+    let on = if on.iter().all(|h| h.is_some()) {
+        Some([on[0].clone().unwrap(), on[1].clone().unwrap(), on[2].clone().unwrap()])
+    } else {
+        None
+    };
+    let off = if off.iter().all(|h| h.is_some()) {
+        Some([off[0].clone().unwrap(), off[1].clone().unwrap(), off[2].clone().unwrap()])
+    } else {
+        None
+    };
+    (on, off)
+}
 
-    // 音量滑条（C#：SoundBar at (159,225)/(159,251)，滑块 at (155,218)/(155,244)）
-    spawn_volume_bar(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        px + 159.0, py + 225.0, py + 218.0, false,
-    );
-    spawn_volume_bar(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        px + 159.0, py + 251.0, py + 244.0, true,
-    );
+/// 音量滑条（bevy_ui）：bar 容器 + fill ImageNode + knob ImageNode
+fn spawn_volume_bar(
+    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    px: f32,
+    py: f32,
+    bar_x: f32,
+    bar_y: f32,
+    knob_y: f32,
+    is_music: bool,
+) {
+    let Some(bar_tex) = load_lib_image(libs, images, LibraryName::Prguse2, 468) else {
+        return;
+    };
+    let Some(knob_tex) = load_lib_image(libs, images, LibraryName::Prguse, 20) else {
+        return;
+    };
+    spawn_container(p, bar_x, bar_y, 76.0, 19.0, 10)
+        .insert(OptionBar {
+            is_music,
+            rect: (px + bar_x, py + bar_y, 76.0, 19.0),
+        })
+        .with_children(|bc| {
+            spawn_image(bc, bar_tex, 0.0, 0.0, 0.0, 19.0, 11)
+                .insert(OptionVolumeFill(is_music));
+        });
+    spawn_container(p, bar_x, knob_y, 8.0, 22.0, 10)
+        .insert((ImageNode::new(knob_tex), OptionVolumeKnob(is_music)));
 }
 
 fn state_value(state: &OptionState, kind: OptionToggleKind) -> bool {
@@ -503,15 +443,24 @@ fn state_value(state: &OptionState, kind: OptionToggleKind) -> bool {
 fn option_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<OptionState>,
-    close: Query<&UiButton, With<OptionClose>>,
-    mut toggles: Query<(&UiButton, &OptionToggleBtn, &mut crate::ui::sprite_ui::ButtonFrames)>,
-    mut widgets: Query<&mut Visibility, With<OptionWidget>>,
-    mut fills: Query<(&mut Sprite, &OptionVolumeFill)>,
-    mut knobs: Query<(&mut Transform, &OptionVolumeKnob)>,
+    close: Query<(Entity, &Interaction), With<OptionClose>>,
+    mut toggles: Query<(Entity, &mut ImageButton, &Interaction, &OptionToggleBtn), Without<OptionClose>>,
+    mut widgets: Query<&mut Visibility, (With<OptionWidget>, Without<OptionVolumeFill>, Without<OptionVolumeKnob>)>,
+    mut fills: Query<(&mut Node, &OptionVolumeFill)>,
+    mut knobs: Query<(&mut Node, &OptionVolumeKnob)>,
     bars: Query<&OptionBar>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Settings);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -519,17 +468,15 @@ fn option_ui_system(
     if !open {
         return;
     }
-
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Settings);
         }
     }
-
-    // 开关点击 + 状态帧刷新（等效 C# BeforeDraw 按状态换 Index）
+    // 开关点击 + 状态帧刷新
     let mut changed = false;
-    for (btn, tg, mut frames) in &mut toggles {
-        if btn.clicked {
+    for (e, mut ib, inter, tg) in &mut toggles {
+        if edge(e, inter, &mut prev_inter) {
             match tg.kind {
                 OptionToggleKind::SkillMode => state.skill_mode_ctrl = !tg.is_on,
                 OptionToggleKind::SkillBar => state.skill_bar = tg.is_on,
@@ -540,26 +487,21 @@ fn option_ui_system(
                 OptionToggleKind::Observe => state.allow_observe = tg.is_on,
                 OptionToggleKind::NewMove => state.new_move = tg.is_on,
             }
-            tracing::info!(
-                "⚙️ 设置切换: {:?} -> {}",
-                tg.kind,
-                state_value(&state, tg.kind)
-            );
+            tracing::info!("⚙️ 设置切换: {:?} -> {}", tg.kind, state_value(&state, tg.kind));
             changed = true;
         }
         let sel = state_value(&state, tg.kind);
         let f = if sel { &tg.frames_on } else { &tg.frames_off };
-        if frames.normal != f[0] {
-            frames.normal = f[0].clone();
+        if ib.normal != f[0] {
+            ib.normal = f[0].clone();
         }
-        if frames.hover != f[1] {
-            frames.hover = f[1].clone();
+        if ib.hover != f[1] {
+            ib.hover = f[1].clone();
         }
-        if frames.pressed != f[2] {
-            frames.pressed = f[2].clone();
+        if ib.pressed != f[2] {
+            ib.pressed = f[2].clone();
         }
     }
-
     // 音量滑条：点击设置音量
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
@@ -583,41 +525,30 @@ fn option_ui_system(
             changed = true;
         }
     }
-    // 设置变更即保存（C# Settings.Save）
     if changed {
         state.save();
     }
-
-    // 填充条 + 滑块位置（C#：fill=(Width-2)*percent，knob at (159+fill, 218/244)）
-    for (mut sprite, fill) in &mut fills {
+    // 填充条 + 滑块位置
+    for (mut node, fill) in &mut fills {
         let vol = if fill.0 {
             state.music_volume
         } else {
             state.sound_volume
         };
-        let (_, _, bw, bh) = bars
-            .iter()
-            .find(|b| b.is_music == fill.0)
-            .map(|b| b.rect)
-            .unwrap_or((0.0, 0.0, 100.0, 10.0));
-        let w = ((bw - 2.0) * vol).max(0.0);
-        sprite.rect = Some(Rect::new(0.0, 0.0, w, bh));
-        sprite.custom_size = Some(Vec2::new(w, bh));
+        let w = ((76.0 - 2.0) * vol).max(0.0);
+        node.width = Val::Px(w);
     }
-    for (mut tf, knob) in &mut knobs {
+    for (mut node, knob) in &mut knobs {
         let vol = if knob.0 {
             state.music_volume
         } else {
             state.sound_volume
         };
-        let Some(bar) = bars.iter().find(|b| b.is_music == knob.0) else {
-            continue;
-        };
-        let (bx, _, bw, _) = bar.rect;
-        let fill = (bw - 2.0) * vol;
-        tf.translation.x = bx + fill;
+        let fill = (76.0 - 2.0) * vol;
+        node.left = Val::Px(159.0 + fill);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

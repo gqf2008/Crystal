@@ -564,8 +564,8 @@ mod tests {
     fn skill_key_labels_match_csharp_defaults() {
         assert_eq!(skill_key_label(0, 0), "F1");
         assert_eq!(skill_key_label(0, 7), "F8");
-        assert_eq!(skill_key_label(1, 0), "Ctrl + F1");
-        assert_eq!(skill_key_label(1, 7), "Ctrl + F8");
+        assert_eq!(skill_key_label(1, 0), "C+F1");
+        assert_eq!(skill_key_label(1, 7), "C+F8");
     }
 
     /// C# MirControl.OnMouseMove（L901-913）：拖动位置钳制在父容器（全屏）内，栏不可拖出屏幕。
@@ -1130,7 +1130,8 @@ pub fn skill_key_label(bar_idx: usize, i: usize) -> String {
     if bar_idx == 0 {
         format!("F{}", i + 1)
     } else {
-        format!("Ctrl + F{}", i + 1)
+        // C# 两行 "CTRL\nF*"；单行化用 "C+F*" 才能放进 24px 格子（"Ctrl + F*" 会溢出相邻格）
+        format!("C+F{}", i + 1)
     }
 }
 
@@ -1253,7 +1254,7 @@ fn spawn_one_skill_bar(
                     bevy::sprite::Anchor::TOP_LEFT,
                     TextFont {
                         font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(11.0),
+                        font_size: FontSize::Px(8.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
