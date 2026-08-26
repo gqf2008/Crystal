@@ -225,3 +225,15 @@ pub fn spawn_image<'a>(
         ZIndex(z),
     ))
 }
+
+/// 子节点：绝对定位空白容器（供页面/槽位/行等承载子元素）
+pub fn spawn_container<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    z: i32,
+) -> EntityCommands<'a> {
+    parent.spawn((abs_node(x, y, Some(w), Some(h)), ZIndex(z)))
+}

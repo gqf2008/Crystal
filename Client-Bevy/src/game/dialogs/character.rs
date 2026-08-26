@@ -20,9 +20,10 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, spawn_ui_text_anchored, ui_button_system,
-    ui_image, UiButton, UiEntity, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
+    spawn_label_center, spawn_panel,
 };
 
 /// 角色状态（网络写入；当前服务器未下发属性，先默认值）
@@ -286,7 +287,7 @@ impl Plugin for CharacterDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_character_dialog);
         app.add_systems(
             Update,
-            (character_ui_system, char_equip_system, char_skill_system, char_equip_tooltip_system, ui_button_system)
+            (character_ui_system, char_equip_system, char_skill_system, char_equip_tooltip_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -303,7 +304,6 @@ fn spawn_character_dialog(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     hud: Res<HudState>,
@@ -314,311 +314,187 @@ fn spawn_character_dialog(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Title[504]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 504) {
-        let e = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Character),
-                CharDialogWidget,
-                Sprite::from_image(h),
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(DIALOG_X, -DIALOG_Y, 6.0),
-                Visibility::Hidden,
-            ))
-            .id();
-        let _ = e;
-    }
-
-    // 页面背景（4 页；显示当前页，其余隐藏）
-    let page_bgs: [(usize, LibraryName, usize); 4] = [
-        (0, LibraryName::Prguse, 340),
-        (1, LibraryName::Title, 506),
-        (2, LibraryName::Title, 507),
-        (3, LibraryName::Title, 508),
-    ];
-    for (idx, lib, tex) in page_bgs {
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, lib, tex) {
-            let e = spawn_ui_sprite(&mut commands, h, DIALOG_X + PAGE_X, DIALOG_Y + PAGE_Y, 6.2, 1.0);
-            commands.entity(e).insert((
-                DialogRoot(DialogKind::Character),
-                CharPageBg(idx),
-                Visibility::Hidden,
-            ));
-        }
-    }
-
-    // 标签页 Title[500-503]（64x20，y=70）
-    for (idx, x) in [(0usize, 8.0f32), (1, 70.0), (2, 132.0), (3, 194.0)] {
-        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            LibraryName::Title, 500 + idx, 500 + idx, 500 + idx,
-            DIALOG_X + x, DIALOG_Y + 70.0, 7.0, 64.0, 20.0,
-        ) {
-            commands.entity(e).insert((
-                CharTab(idx),
-                DialogRoot(DialogKind::Character),
-                CharDialogWidget,
-            ));
-        }
-    }
-
-    // 关闭按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        DIALOG_X + 241.0, DIALOG_Y + 3.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            CharClose,
-            DialogRoot(DialogKind::Character),
-            CharDialogWidget,
-        ));
-    }
-
-    // C# ClassImage = Prguse[100+职业] @ (15,33)（CharacterDialog.cs:218-225，Parent=this 常显不随页）
-    let class_idx = 100 + (hud.class as usize).min(4); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
-    if let Some(h) = ui_image(
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Prguse,
-        class_idx,
-    ) {
-        let e = spawn_ui_sprite(
-            &mut commands,
-            h,
-            DIALOG_X + CLASS_IMG_X,
-            DIALOG_Y + CLASS_IMG_Y,
-            6.3,
-            1.0,
-        );
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Character),
-            CharDialogWidget,
-            Visibility::Hidden,
-        ));
-    }
-
-    // 名字/行会（C# NameLabel (0,12) 264x20 / GuildLabel (0,33) 264x30，HCenter|VCenter 框内双向居中）
-    // → CENTER 锚定框心 (132, 12+10=22) / (132, 33+15=48)，内容变化自动重居中
-    let name = spawn_ui_text_anchored(
-        &mut commands,
-        &font,
-        "",
-        Anchor::CENTER,
-        DIALOG_X + NAME_CX,
-        DIALOG_Y + NAME_CY,
-        14.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(name).insert((
-        CharNameText,
-        DialogRoot(DialogKind::Character),
-        CharDialogWidget,
-    ));
-    let guild = spawn_ui_text_anchored(
-        &mut commands,
-        &font,
-        "",
-        Anchor::CENTER,
-        DIALOG_X + NAME_CX,
-        DIALOG_Y + GUILD_CY,
-        12.0,
-        Color::srgb(1.0, 0.85, 0.3),
-        8.0,
-    );
-    commands.entity(guild).insert((
-        CharGuildText,
-        DialogRoot(DialogKind::Character),
-        CharDialogWidget,
-    ));
-
-    // 装备槽（14 个，深色底；服务端 14 槽按 SERVER_SLOT_TO_POS 映射）
-    // C# 装备格 Parent=CharacterPage(8,90)：屏坐标=DIALOG+PAGE+页内偏移（slot_screen_origin），
-    // 且随 CharacterPage 仅角色页可见 → 挂 CharPageBg(0) 骑页门控（改用非常显的 CharDialogWidget）。
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    for pos in 0..EQUIP_SLOTS.len() {
-        let (sx, sy) = slot_screen_origin(pos).unwrap();
-        let slot_entity = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Character),
-                CharPageBg(0),
-                CharEquipSlot(pos),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.0, 0.0, 0.0, 0.25),
-                    custom_size: Some(Vec2::new(SLOT_W, SLOT_H)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(sx, -sy, 6.3),
-                Visibility::Hidden,
-            ))
-            .id();
-        // 服务端槽位对应此位置（无对应则 -1）
-        let server_idx = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos);
-        if let Some(si) = server_idx {
-            commands.entity(slot_entity).with_children(|p| {
-                p.spawn((
-                    CharEquipIcon(si),
-                    Sprite {
-                        image: white.clone(),
-                        custom_size: Some(Vec2::new(SLOT_W - 4.0, SLOT_H - 4.0)),
-                        ..default()
-                    },
-                    Anchor::TOP_LEFT,
-                    Transform::from_xyz(2.0, -2.0, 6.4),
-                    Visibility::Hidden,
-                ));
-            });
-        }
-    }
 
-    // 状态数值标签（Status 页：HP/MP/AC/MAC/DC/MC/SC/CritR/CritD/AtkSpd/Acc/Agil/Luck）
-    let stat_ys: [f32; 13] = [
-        20.0, 38.0, 56.0, 74.0, 92.0, 110.0, 128.0, 146.0, 164.0, 182.0, 200.0, 218.0, 236.0,
-    ];
-    for (i, y) in stat_ys.iter().enumerate() {
-        let e = spawn_ui_text(
-            &mut commands, &font, "0",
-            DIALOG_X + PAGE_X + 126.0, DIALOG_Y + PAGE_Y + y - 2.0,
-            11.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            CharStatText(i),
-            DialogRoot(DialogKind::Character),
-            CharPageBg(1), // C# Parent=StatusPage(Title[506]=页1)，仅状态页可见
-        ));
-    }
-    // State 页数值标签（#210：Exp%/负重/躲避/恢复/神圣/冻结/中毒攻击，12 项）
-    for (i, y) in stat_ys.iter().take(12).enumerate() {
-        let e = spawn_ui_text(
-            &mut commands, &font, "0",
-            DIALOG_X + PAGE_X + 126.0, DIALOG_Y + PAGE_Y + y - 2.0,
-            11.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            CharState2Text(i),
-            CharPageBg(2),
-            DialogRoot(DialogKind::Character),
-        ));
-    }
-    // 技能页（页 3）：7 行技能按钮（C# MagicButton (8, 8+i*33)，231x33）
-    // 行内子控件坐标参考 C# MagicButton：图标 (36,0)、LevelImage Title[516] (73,7)、
-    // ExpImage Title[517] (73,19)、KeyLabel (2,2)、LevelLabel (88,2)、NameLabel (109,2)、ExpLabel (109,15)
-    let transparent = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    for i in 0..SKILL_ROW_COUNT {
-        let rx = DIALOG_X + PAGE_X + 8.0;
-        let ry = DIALOG_Y + PAGE_Y + 8.0 + i as f32 * 33.0;
-        let row = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Character),
-                CharSkillRow(i),
-                UiButton {
-                    rect: (rx, ry, 231.0, 33.0),
-                    clicked: false,
-                },
-                Sprite {
-                    image: transparent.clone(),
-                    color: Color::srgba(0.0, 0.0, 0.0, 0.0),
-                    custom_size: Some(Vec2::new(231.0, 33.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(rx, -ry, 6.5),
-                Visibility::Hidden,
-            ))
-            .id();
-        commands.entity(row).with_children(|p| {
-            // 技能图标（MagIcon2[icon*2]，原版 SkillButton (36,0)）
-            p.spawn((
-                CharSkillIcon(i),
-                CharSkillRowChild(i),
-                Sprite {
-                    image: transparent.clone(),
-                    custom_size: Some(Vec2::new(36.0, 36.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(36.0, 0.0, 6.6),
-                Visibility::Hidden,
-            ));
-            // 等级/经验背景条（Title[516] / Title[517]）
-            for (tex, oy) in [(516usize, 7.0f32), (517, 19.0)] {
-                if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, tex) {
-                    p.spawn((
-                        CharSkillRowChild(i),
-                        Sprite::from_image(h),
-                        Anchor::TOP_LEFT,
-                        Transform::from_xyz(73.0, -oy, 6.5),
-                        Visibility::Hidden,
-                    ));
-                }
-            }
-            // Key/Level/Name/Exp 文本
-            for (kind, ox, oy, size) in [
-                (SkillTextKind::Key, 2.0f32, 2.0f32, 10.0f32),
-                (SkillTextKind::Level, 88.0, 2.0, 11.0),
-                (SkillTextKind::Name, 109.0, 2.0, 11.0),
-                (SkillTextKind::Exp, 109.0, 15.0, 11.0),
-            ] {
-                p.spawn((
-                    CharSkillText { row: i, kind },
-                    CharSkillRowChild(i),
-                    Text2d::new(""),
-                    Anchor::TOP_LEFT,
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(size),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    Transform::from_xyz(ox, -oy, 6.7),
-                    Visibility::Hidden,
-                ));
-            }
-        });
-    }
-    // Next/Back（Prguse[396/397] (140,250) / [398/399] (90,250)，页内）
-    for (is_next, idx, x) in [
-        (true, 396usize, 140.0f32),
-        (false, 398usize, 90.0f32),
-    ] {
-        if let Some(e) = spawn_ui_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            LibraryName::Prguse, idx, idx, idx + 1,
-            DIALOG_X + PAGE_X + x, DIALOG_Y + PAGE_Y + 250.0, 7.0, 40.0, 22.0,
-        ) {
-            let mut ec = commands.entity(e);
-            ec.insert((
-                DialogRoot(DialogKind::Character),
-                CharDialogWidget,
-            ));
-            if is_next {
-                ec.insert(CharSkillNext);
-            } else {
-                ec.insert(CharSkillBack);
+    // bevy_ui 面板 Title[504]（264x380 @ 760,0）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 504) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 264.0, 380.0, 30);
+    commands.entity(panel).insert((DialogRoot(DialogKind::Character), CharDialogWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 标签页 Title[500-503]（64x20，y=70）
+        for (idx, x) in [(0usize, 8.0f32), (1, 70.0), (2, 132.0), (3, 194.0)] {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 500 + idx) {
+                spawn_icon_button(p, h.clone(), h.clone(), h, x, 70.0, 64.0, 20.0, 10)
+                    .insert(CharTab(idx));
             }
         }
-    }
+        // 关闭（Prguse2 360/361/362 @(241,3)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(CharClose);
+        }
+        // 职业图（Prguse[100+职业] @(15,33)）
+        let class_idx = 100 + (hud.class as usize).min(4);
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, class_idx) {
+            spawn_image(p, h, CLASS_IMG_X, CLASS_IMG_Y, 30.0, 30.0, 9);
+        }
+        // 名字/行会（框内居中）
+        spawn_label_center(p, &font, "", NAME_CX, 2.0, 200.0, 14.0, Color::WHITE, 9)
+            .insert(CharNameText);
+        spawn_label_center(p, &font, "", NAME_CX, 28.0, 200.0, 12.0, Color::srgb(1.0, 0.85, 0.3), 9)
+            .insert(CharGuildText);
+
+        // 4 页容器（页区 (8,90)，页背景 248x284）
+        let page_bgs: [(usize, LibraryName, usize); 4] = [
+            (0, LibraryName::Prguse, 340),
+            (1, LibraryName::Title, 506),
+            (2, LibraryName::Title, 507),
+            (3, LibraryName::Title, 508),
+        ];
+        for (idx, lib, tex) in page_bgs {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, lib, tex) {
+                spawn_image(p, h, PAGE_X, PAGE_Y, 248.0, 284.0, 8)
+                    .insert(CharPageBg(idx))
+                    .with_children(|pg| {
+                        match idx {
+                            0 => {
+                                // 14 装备槽
+                                for pos in 0..EQUIP_SLOTS.len() {
+                                    let (ox, oy) = EQUIP_SLOTS[pos];
+                                    spawn_container(pg, ox, oy, SLOT_W, SLOT_H, 9)
+                                        .insert((
+                                            Button,
+                                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                                            CharEquipSlot(pos),
+                                        ))
+                                        .with_children(|sc| {
+                                            if let Some(si) =
+                                                SERVER_SLOT_TO_POS.iter().position(|pp| *pp == pos)
+                                            {
+                                                spawn_container(sc, 2.0, 2.0, SLOT_W - 4.0, SLOT_H - 4.0, 10)
+                                                    .insert((
+                                                        ImageNode::new(white.clone()),
+                                                        CharEquipIcon(si),
+                                                        Visibility::Hidden,
+                                                    ));
+                                            }
+                                        });
+                                }
+                            }
+                            1 => {
+                                // 状态页数值（x=126，C# StatusPage）
+                                let stat_ys: [f32; 13] = [
+                                    20.0, 38.0, 56.0, 74.0, 92.0, 110.0, 128.0, 146.0, 164.0,
+                                    182.0, 200.0, 218.0, 236.0,
+                                ];
+                                for (i, y) in stat_ys.iter().enumerate() {
+                                    spawn_label(pg, &font, "0", 126.0, y - 2.0, 11.0, Color::WHITE, 9)
+                                        .insert(CharStatText(i));
+                                }
+                            }
+                            2 => {
+                                // State 页数值
+                                let stat_ys: [f32; 13] = [
+                                    20.0, 38.0, 56.0, 74.0, 92.0, 110.0, 128.0, 146.0, 164.0,
+                                    182.0, 200.0, 218.0, 236.0,
+                                ];
+                                for (i, y) in stat_ys.iter().take(12).enumerate() {
+                                    spawn_label(pg, &font, "0", 126.0, y - 2.0, 11.0, Color::WHITE, 9)
+                                        .insert(CharState2Text(i));
+                                }
+                            }
+                            3 => {
+                                // 技能页：7 行技能按钮（C# MagicButton (8,8+i*33) 231x33）
+                                for i in 0..SKILL_ROW_COUNT {
+                                    spawn_container(pg, 8.0, 8.0 + i as f32 * 33.0, 231.0, 33.0, 9)
+                                        .insert((Button, CharSkillRow(i)))
+                                        .with_children(|rc| {
+                                            spawn_container(rc, 36.0, 0.0, 36.0, 36.0, 10)
+                                                .insert((
+                                                    ImageNode::new(white.clone()),
+                                                    CharSkillIcon(i),
+                                                    CharSkillRowChild(i),
+                                                    Visibility::Hidden,
+                                                ));
+                                            for (tex, oy) in [(516usize, 7.0f32), (517, 19.0)] {
+                                                if let Some(h) = load_lib_image(
+                                                    &mut libs,
+                                                    &mut images,
+                                                    LibraryName::Title,
+                                                    tex,
+                                                ) {
+                                                    spawn_container(rc, 73.0, oy, 24.0, 9.0, 9)
+                                                        .insert((
+                                                            ImageNode::new(h),
+                                                            CharSkillRowChild(i),
+                                                            Visibility::Hidden,
+                                                        ));
+                                                }
+                                            }
+                                            for (kind, ox, oy, size) in [
+                                                (
+                                                    SkillTextKind::Key,
+                                                    2.0f32,
+                                                    2.0f32,
+                                                    10.0f32,
+                                                ),
+                                                (SkillTextKind::Level, 88.0, 2.0, 11.0),
+                                                (SkillTextKind::Name, 109.0, 2.0, 11.0),
+                                                (SkillTextKind::Exp, 109.0, 15.0, 11.0),
+                                            ] {
+                                                spawn_label(rc, &font, "", ox, oy, size, Color::WHITE, 11)
+                                                    .insert((
+                                                        CharSkillText { row: i, kind },
+                                                        CharSkillRowChild(i),
+                                                        Visibility::Hidden,
+                                                    ));
+                                            }
+                                        });
+                                }
+                                // Next/Back（Prguse[396/397] @(140,250) / [398/399] @(90,250)）
+                                for (is_next, idx, x) in [
+                                    (true, 396usize, 140.0f32),
+                                    (false, 398usize, 90.0f32),
+                                ] {
+                                    if let (Some(n), Some(h), Some(pr)) = (
+                                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
+                                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
+                                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 1),
+                                    ) {
+                                        let mut b = spawn_icon_button(pg, n, h, pr, x, 250.0, 40.0, 22.0, 10);
+                                        if is_next {
+                                            b.insert(CharSkillNext);
+                                        } else {
+                                            b.insert(CharSkillBack);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    });
+            }
+        }
+    });
 }
 
-/// 显示/隐藏 + 页切换 + 关闭 + 状态更新
 fn character_ui_system(
     mut mgr: ResMut<DialogManager>,
     state: Res<CharacterState>,
     assign_key: Res<AssignKeyState>,
     mut page: ResMut<CharPage>,
     mut widgets: Query<&mut Visibility, (With<CharDialogWidget>, Without<CharPageBg>)>,
-    tabs: Query<(&UiButton, &CharTab)>,
-    close: Query<&UiButton, (With<CharClose>, Without<CharTab>)>,
+    tabs: Query<(Entity, &Interaction, &CharTab)>,
+    close: Query<(Entity, &Interaction), (With<CharClose>, Without<CharTab>)>,
     mut page_bgs: Query<(&mut Visibility, &CharPageBg), Without<CharDialogWidget>>,
     mut name_texts: Query<
-        &mut Text2d,
+        &mut Text,
         (
             With<CharNameText>,
             Without<CharGuildText>,
@@ -627,7 +503,7 @@ fn character_ui_system(
         ),
     >,
     mut guild_texts: Query<
-        &mut Text2d,
+        &mut Text,
         (
             With<CharGuildText>,
             Without<CharNameText>,
@@ -636,7 +512,7 @@ fn character_ui_system(
         ),
     >,
     mut stat_texts: Query<
-        (&mut Text2d, &CharStatText),
+        (&mut Text, &CharStatText),
         (
             Without<CharNameText>,
             Without<CharGuildText>,
@@ -644,7 +520,7 @@ fn character_ui_system(
         ),
     >,
     mut state2_texts: Query<
-        (&mut Text2d, &CharState2Text),
+        (&mut Text, &CharState2Text),
         (
             Without<CharDialogWidget>,
             Without<CharNameText>,
@@ -652,12 +528,21 @@ fn character_ui_system(
             Without<CharStatText>,
         ),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     let open = mgr.is_open(DialogKind::Character);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
-    // 页面背景：仅打开时显示当前页
     for (mut vis, bg) in &mut page_bgs {
         *vis = if open && bg.0 == page.0 {
             Visibility::Visible
@@ -668,22 +553,18 @@ fn character_ui_system(
     if !open {
         return;
     }
-
     if !assign_key.visible {
-        // 标签页切换
-        for (btn, tab) in &tabs {
-            if btn.clicked {
+        for (e, inter, tab) in &tabs {
+            if edge(e, inter, &mut prev_inter) {
                 page.0 = tab.0;
             }
         }
-        // 关闭
-        for btn in &close {
-            if btn.clicked {
+        for (e, inter) in &close {
+            if edge(e, inter, &mut prev_inter) {
                 mgr.close(DialogKind::Character);
             }
         }
     }
-
     // 文本
     if let Ok(mut t) = name_texts.single_mut() {
         t.0 = state.name.clone();
@@ -694,7 +575,6 @@ fn character_ui_system(
     for (mut t, idx) in &mut stat_texts {
         t.0 = stat_label_text(idx.0, &state);
     }
-    // State 页（#210）
     for (mut t, idx) in &mut state2_texts {
         t.0 = match idx.0 {
             0 => format!(
@@ -727,9 +607,8 @@ fn char_equip_system(
     hud: Res<HudState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut icons: Query<
-        (&mut Sprite, &mut Visibility, &CharEquipIcon),
+        (&mut ImageNode, &mut Visibility, &CharEquipIcon),
         (Without<CharDialogWidget>, Without<CharEquipSlot>),
     >,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -752,7 +631,6 @@ fn char_equip_system(
                         && cursor.y >= sy
                         && cursor.y <= sy + SLOT_H
                     {
-                        // 位置 → 服务端槽位（SERVER_SLOT_TO_POS 反查）
                         if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
                             if let Some(item) = hud
                                 .equipment
@@ -777,23 +655,23 @@ fn char_equip_system(
             }
         }
     }
-    for (mut sprite, mut vis, icon) in &mut icons {
+    // 装备图标（ImageNode）
+    for (mut node, mut vis, icon) in &mut icons {
         let item = hud.equipment.get(icon.0).and_then(|s| s.as_ref());
         match item {
             Some(item) => {
-                let handle = ui_image(
+                let handle = load_lib_image(
                     &mut libs,
                     &mut images,
-                    &mut cache,
                     LibraryName::Items,
                     item.image as usize,
                 );
                 match handle {
-                    Some(h) if sprite.image != h => sprite.image = h,
+                    Some(h) if node.image != h => node.image = h,
                     None => *vis = Visibility::Hidden,
                     _ => {}
                 }
-                if sprite.image.is_strong() {
+                if node.image.is_strong() {
                     *vis = Visibility::Visible;
                 }
             }
@@ -813,31 +691,37 @@ fn char_skill_system(
     mut assign_key: ResMut<AssignKeyState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut rows: Query<
         (
+            Entity,
             &mut Visibility,
-            &UiButton,
+            &Interaction,
             Option<&CharSkillRow>,
             Option<&CharSkillNext>,
             Option<&CharSkillBack>,
         ),
+        (Without<CharSkillRowChild>, Without<CharSkillText>, Without<CharSkillIcon>),
     >,
-    mut children: Query<(&mut Visibility, &CharSkillRowChild), Without<UiButton>>,
-    mut icons: Query<(&mut Sprite, &CharSkillIcon), Without<CharSkillText>>,
-    mut texts: Query<(&mut Text2d, &CharSkillText), Without<CharSkillIcon>>,
-    windows: Query<&Window>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    mut children: Query<(&mut Visibility, &CharSkillRowChild), Without<Interaction>>,
+    mut icons: Query<(&mut ImageNode, &CharSkillIcon), Without<CharSkillText>>,
+    mut texts: Query<(&mut Text, &CharSkillText), Without<CharSkillIcon>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
     if !mgr.is_open(crate::game::dialogs::DialogKind::Character) {
         return;
     }
-
     let open = mgr.is_open(DialogKind::Character) && page.0 == 3;
-    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
-    let mouse_down = mouse.pressed(MouseButton::Left);
 
-    for (mut vis, btn, row, next, back) in &mut rows {
+    for (e, mut vis, inter, row, next, back) in &mut rows {
         let (show, magic) = if let Some(row) = row {
             let magic = magics.magics.get(start.0 + row.0);
             (open && magic.is_some(), magic)
@@ -849,7 +733,7 @@ fn char_skill_system(
             continue;
         }
         if let Some(row) = row {
-            if btn.clicked {
+            if edge(e, inter, &mut prev_inter) {
                 if let Some(m) = magic {
                     assign_key.open(m.spell, m.key);
                     tracing::info!(
@@ -860,34 +744,27 @@ fn char_skill_system(
             }
             // 图标帧：按下 = icon*2+1，否则 icon*2（原版 MagIcon2 Index/PressedIndex）
             if let Some(m) = magic {
-                let over = cursor
-                    .map(|c| {
-                        let (x, y, w, h) = btn.rect;
-                        c.x >= x && c.x <= x + w && c.y >= y && c.y <= y + h
-                    })
-                    .unwrap_or(false);
-                let frame = m.icon as usize * 2 + if mouse_down && over { 1 } else { 0 };
+                let frame = m.icon as usize * 2 + if *inter == Interaction::Pressed { 1 } else { 0 };
                 if let Some(h) =
-                    ui_image(&mut libs, &mut images, &mut cache, LibraryName::MagIcon2, frame)
+                    load_lib_image(&mut libs, &mut images, LibraryName::MagIcon2, frame)
                 {
-                    // #1378：冷却暗化（对齐 C# MagicButton.CoolDown，按剩余比例变暗）
                     let frac = cd.fraction(m.spell);
-                    for (mut sprite, ic) in &mut icons {
+                    for (mut node, ic) in &mut icons {
                         if ic.0 == row.0 {
-                            if sprite.image != h {
-                                sprite.image = h.clone();
+                            if node.image != h {
+                                node.image = h.clone();
                             }
                             if frac > 0.0 {
                                 let k = 1.0 - 0.7 * frac;
-                                sprite.color = Color::srgba(k, k, k, 1.0);
+                                node.color = Color::srgba(k, k, k, 1.0);
                             } else {
-                                sprite.color = Color::WHITE;
+                                node.color = Color::WHITE;
                             }
                         }
                     }
                 }
             }
-        } else if btn.clicked {
+        } else if edge(e, inter, &mut prev_inter) {
             if next.is_some() && start.0 + SKILL_ROW_COUNT < magics.magics.len() {
                 start.0 += SKILL_ROW_COUNT;
             } else if back.is_some() && start.0 >= SKILL_ROW_COUNT {
@@ -896,7 +773,7 @@ fn char_skill_system(
         }
     }
 
-    // 子控件可见性：行有技能时显示（行/翻页按钮的可见性在 rows 查询中处理）
+    // 子控件可见性：行有技能时显示
     for (mut vis, child) in &mut children {
         let show = open && magics.magics.get(start.0 + child.0).is_some();
         *vis = if show { Visibility::Visible } else { Visibility::Hidden };
@@ -992,7 +869,6 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(GameLibraries(Libraries::new("Data")));
         world.insert_resource(Assets::<Image>::default());
-        world.insert_resource(UiImageCache::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(UiFont::default());
         world.insert_resource(HudState::default());
@@ -1000,33 +876,33 @@ mod tests {
             .run_system_once(spawn_character_dialog)
             .expect("spawn_character_dialog 应成功");
 
-        // 状态标签：必须挂 CharPageBg(1)=StatusPage，且不得挂全页常显 CharDialogWidget
-        let mut stat_q = world.query::<(
-            &CharStatText,
-            Option<&CharPageBg>,
-            Option<&CharDialogWidget>,
-        )>();
+        // bevy_ui 结构：数值标签是页容器（挂 CharPageBg(idx)）的子节点。
+        // 状态标签 → 父容器 CharPageBg(1)=StatusPage；State 标签 → 父容器 CharPageBg(2)=StatePage。
+        fn parent_page_bg(world: &World, e: Entity) -> Option<usize> {
+            let parent = world.get::<ChildOf>(e)?.0;
+            world.get::<CharPageBg>(parent).map(|b| b.0)
+        }
+
+        let mut stat_q = world.query::<(Entity, &CharStatText)>();
         let mut stat_n = 0;
-        for (_s, bg, widget) in stat_q.iter(&world) {
+        for (e, _s) in stat_q.iter(&world) {
             stat_n += 1;
-            assert!(widget.is_none(), "状态标签不应挂全页常显 CharDialogWidget");
             assert_eq!(
-                bg.map(|b| b.0),
+                parent_page_bg(&world, e),
                 Some(1),
-                "状态标签应挂 CharPageBg(1)=StatusPage"
+                "状态标签父容器应挂 CharPageBg(1)=StatusPage"
             );
         }
         assert_eq!(stat_n, 13, "C# StatusPage 13 个状态数值标签");
 
-        // State 标签：挂 CharPageBg(2)=StatePage
-        let mut state_q = world.query::<(&CharState2Text, Option<&CharPageBg>)>();
+        let mut state_q = world.query::<(Entity, &CharState2Text)>();
         let mut state_n = 0;
-        for (_s, bg) in state_q.iter(&world) {
+        for (e, _s) in state_q.iter(&world) {
             state_n += 1;
             assert_eq!(
-                bg.map(|b| b.0),
+                parent_page_bg(&world, e),
                 Some(2),
-                "State 标签应挂 CharPageBg(2)=StatePage"
+                "State 标签父容器应挂 CharPageBg(2)=StatePage"
             );
         }
         assert_eq!(state_n, 12, "C# StatePage 12 个 State 数值标签");
