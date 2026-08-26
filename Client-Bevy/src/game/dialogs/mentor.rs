@@ -193,20 +193,22 @@ fn spawn_mentor(
             });
     });
 
-    // 邀请提示（MirMessageBox @(284,289) 独立根节点）
+    // 邀请提示（C# MirMessageBox：Prguse[360] 原生 456x190 居中 @(284,289)，
+    // Label(35,35)、Yes Title[206/207/208] (260,157)、No Title[210/211/212] (360,157)。
+    // 批 14 修正：旧实现面板 260x120 + 按钮 (240/340,150) 被 Overflow::clip 裁掉不可见）
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
-        let inv = spawn_panel(&mut commands, h, bx, by, 260.0, 120.0, 45);
+        let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
         commands.entity(inv).insert(MentorInviteWidget);
         commands.entity(inv).with_children(|ip| {
-            spawn_label(ip, &font, "", 35.0, 40.0, 12.0, Color::WHITE, 9)
+            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
                 .insert(MentorInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
             ) {
-                spawn_icon_button(ip, n, h, pr, 240.0, 150.0, 76.0, 25.0, 10)
+                spawn_icon_button(ip, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10)
                     .insert(MentorInviteYes);
             }
             if let (Some(n), Some(h), Some(pr)) = (
@@ -214,7 +216,7 @@ fn spawn_mentor(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
-                spawn_icon_button(ip, n, h, pr, 340.0, 150.0, 76.0, 25.0, 10)
+                spawn_icon_button(ip, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10)
                     .insert(MentorInviteNo);
             }
         });

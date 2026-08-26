@@ -2,9 +2,10 @@
 #![allow(clippy::type_complexity)]
 // 数量输入框（M9 第 2 批，通用组件）
 // 布局参考：macroquad amount_box.rs / C# MirAmountBox
-//   - 背景 Prguse[238]；OK Title[200-202] (23,76)；Cancel Title[203-205] (110,76)
-//   - 关闭 Prguse2[360-362] (180,3)；标题 (19,8)；数量输入区
+//   - 背景 Prguse[238]（原生 204x109，居中 @(410,329)）；OK Title[200-202] (23,76)；
+//     Cancel Title[203-205] (110,76)；关闭 Prguse2[360-362] (180,3)；标题 (19,8)；数量输入区
 // 使用：AmountBoxState.ask(title, max) → 用户输入 → AmountBoxResult 事件
+// bevy_ui 迁移（批 14）：全节点化，模态面板 GlobalZIndex(60)（盖过邀请弹窗 45）
 // ============================================================================
 
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -14,8 +15,9 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::PinyinIme;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 /// 数量输入结果事件（OK 时携带数量）
@@ -60,9 +62,7 @@ impl Plugin for AmountBoxPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_amount_box);
         app.add_systems(
             Update,
-            (amount_box_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            amount_box_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -90,7 +90,6 @@ fn spawn_amount_box(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -100,45 +99,44 @@ fn spawn_amount_box(
     }
     let font = ui_font.0.clone();
 
-    // 居中弹窗
-    let x = (1024.0 - 210.0) / 2.0;
-    let y = (768.0 - 110.0) / 2.0;
+    // 居中弹窗（C# MirAmountBox：Prguse[238] 原生 204x109，Screen 居中）
+    let (x, y) = ((1024.0 - 204.0) / 2.0, (768.0 - 109.0) / 2.0);
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 238) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, x, y, 204.0, 109.0, 60);
+    commands.entity(panel).insert(AmountBoxWidget);
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 238) {
-        let e = spawn_ui_sprite(&mut commands, h, x, y, 9.0, 1.0);
-        commands.entity(e).insert((AmountBoxWidget, Visibility::Hidden));
-    }
-
-    // 标题
-    let t = spawn_ui_text(&mut commands, &font, "", x + 19.0, y + 8.0, 12.0, Color::WHITE, 9.2);
-    commands.entity(t).insert((AmountTitleText, AmountBoxWidget));
-
-    // 数量值
-    let v = spawn_ui_text(&mut commands, &font, "", x + 60.0, y + 40.0, 14.0, Color::WHITE, 9.2);
-    commands.entity(v).insert((AmountValueText, AmountBoxWidget));
-
-    // OK / Cancel / Close
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 200, 201, 202,
-        x + 23.0, y + 76.0, 9.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((AmountOk, AmountBoxWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 203, 204, 205,
-        x + 110.0, y + 76.0, 9.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((AmountCancel, AmountBoxWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        x + 180.0, y + 3.0, 9.3, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((AmountClose, AmountBoxWidget));
-    }
+    commands.entity(panel).with_children(|p| {
+        // 标题（C# (19,8)）
+        spawn_label(p, &font, "", 19.0, 8.0, 12.0, Color::WHITE, 9).insert(AmountTitleText);
+        // 数量值（C# (60,40)）
+        spawn_label(p, &font, "", 60.0, 40.0, 14.0, Color::WHITE, 9).insert(AmountValueText);
+        // OK Title[200/201/202]（C# (23,76)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 200),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 201),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 202),
+        ) {
+            spawn_icon_button(p, n, h, pr, 23.0, 76.0, 76.0, 25.0, 10).insert(AmountOk);
+        }
+        // Cancel Title[203/204/205]（C# (110,76)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 203),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 204),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 205),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 76.0, 76.0, 25.0, 10).insert(AmountCancel);
+        }
+        // 关闭 Prguse2[360/361/362]（C# (180,3)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 180.0, 3.0, 20.0, 20.0, 10).insert(AmountClose);
+        }
+    });
 }
 
 /// 确认值：解析失败/空以 MaxAmount 兜底，钳 [1, max]（C# Amount=最后有效值
@@ -161,13 +159,22 @@ pub(crate) fn amount_box_system(
     mut result: MessageWriter<AmountBoxResult>,
     mut keys: MessageReader<KeyboardInput>,
     mut ime: ResMut<PinyinIme>,
-    ok: Query<&UiButton, (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>)>,
-    cancel: Query<&UiButton, (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
-    close: Query<&UiButton, (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
+    ok: Query<(Entity, &Interaction), (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>)>,
+    cancel: Query<(Entity, &Interaction), (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
+    close: Query<(Entity, &Interaction), (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
     mut widgets: Query<&mut Visibility, With<AmountBoxWidget>>,
-    mut titles: Query<&mut Text2d, (With<AmountTitleText>, Without<AmountValueText>)>,
-    mut values: Query<&mut Text2d, (With<AmountValueText>, Without<AmountTitleText>)>,
+    mut titles: Query<&mut Text, (With<AmountTitleText>, Without<AmountValueText>)>,
+    mut values: Query<&mut Text, (With<AmountValueText>, Without<AmountTitleText>)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     for mut vis in widgets.iter_mut() {
         *vis = if state.visible {
             Visibility::Visible
@@ -234,8 +241,8 @@ pub(crate) fn amount_box_system(
         }
     }
 
-    for btn in &ok {
-        if btn.clicked {
+    for (e, inter) in &ok {
+        if edge(e, inter, &mut prev_inter) {
             // C# Enter 即 OKButton.InvokeMouseClick（:204-209/:277-278）——
             // 两路径同一解析/钳制（审查 MAJOR：旧 OK 路径未同步，语义分裂）
             let amount = confirm_amount(&state);
@@ -243,14 +250,14 @@ pub(crate) fn amount_box_system(
             result.write(AmountBoxResult(amount));
         }
     }
-    for btn in &cancel {
-        if btn.clicked {
+    for (e, inter) in &cancel {
+        if edge(e, inter, &mut prev_inter) {
             state.visible = false;
             result.write(AmountBoxResult(None));
         }
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             state.visible = false;
             result.write(AmountBoxResult(None));
         }

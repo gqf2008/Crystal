@@ -5,6 +5,9 @@
 //   C: MarriageRequest[target dotnet] / MarriageReply[bool] / ChangeMarriage(空)
 //      DivorceRequest[partner dotnet] / DivorceReply[bool]
 //   S: MarriageRequest[lover dotnet] / LoverUpdate[Name dotnet][Date i64][MapName dotnet][MarriedDays i16] / DivorceRequest[lover dotnet]
+// bevy_ui 迁移（批 14）：面板 Prguse[170] @(280,80) 244x207，全节点化；
+//   邀请弹窗 = C# MirMessageBox（Prguse[360] 原生 456x190 居中 @(284,289)，
+//   Label(35,35)、Yes Title[206/207/208] (260,157)、No Title[210/211/212] (360,157)）
 // ============================================================================
 
 use bevy::prelude::*;
@@ -14,8 +17,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 /// 婚姻状态
@@ -83,7 +87,6 @@ app.add_systems(OnEnter(AppState::Game), spawn_relationship);
             (
                 relationship_ui_system,
                 marriage_invite_system,
-                ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -101,7 +104,6 @@ fn spawn_relationship(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -111,119 +113,103 @@ fn spawn_relationship(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Relationship),
-            RelationshipWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            RelationshipClose,
-            DialogRoot(DialogKind::Relationship),
-            RelationshipWidget,
-        ));
-    }
-    for i in 0..4usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            RelationshipLine(i),
-            DialogRoot(DialogKind::Relationship),
-            RelationshipWidget,
-        ));
-    }
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let box_e = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Relationship),
-            RelationshipWidget,
-            RelationshipTargetField,
-            crate::game::dialogs::text_input::TextInputField(13),
-            crate::game::dialogs::text_input::TextInputRect(298.0, 215.0, 160.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(160.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(298.0, -215.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(box_e).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(13),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
+    // 面板 Prguse[170]（244x207 @ 280,80）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 244.0, 207.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Relationship), RelationshipWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(RelationshipClose);
+        }
+        // 信息行 4 @(18,40+22i)
+        for i in 0..4usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(RelationshipLine(i));
+        }
+        // 目标名输入框（TextInput id 13）@(18,135)，命中矩形 = 屏幕坐标 (298,215,160,20)
+        spawn_container(p, 18.0, 135.0, 160.0, 20.0, 10)
+            .insert((
+                RelationshipTargetField,
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                crate::game::dialogs::text_input::TextInputField(13),
+                crate::game::dialogs::text_input::TextInputRect(298.0, 215.0, 160.0, 20.0),
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(11),
+                    crate::game::dialogs::text_input::TextInputDisplay(13),
+                ));
+            });
+        // 求婚 Title[206/207/208] @(20,170)、离婚 Title[210/211/212] @(110,170)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 170.0, 76.0, 25.0, 10)
+                .insert(RelationshipPropose);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 170.0, 76.0, 25.0, 10)
+                .insert(RelationshipDivorce);
+        }
     });
-    // 求婚 / 离婚
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 250.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            RelationshipPropose,
-            DialogRoot(DialogKind::Relationship),
-            RelationshipWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 250.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            RelationshipDivorce,
-            DialogRoot(DialogKind::Relationship),
-            RelationshipWidget,
-        ));
-    }
-    // 邀请弹窗
+
+    // 婚姻邀请弹窗（C# MirMessageBox：Prguse[360] 原生 456x190 居中 @(284,289)）
     let (bx, by) = (284.0, 289.0);
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
-        commands
-            .entity(e)
-            .insert((MarriageInviteWidget, Visibility::Hidden));
-    }
-    let t = spawn_ui_text(
-        &mut commands, &font, "", bx + 35.0, by + 40.0, 12.0, Color::WHITE, 9.6,
-    );
-    commands.entity(t).insert((MarriageInviteText, MarriageInviteWidget));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        bx + 240.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarriageInviteYes, MarriageInviteWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        bx + 340.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((MarriageInviteNo, MarriageInviteWidget));
+    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
+        commands.entity(inv).insert(MarriageInviteWidget);
+        commands.entity(inv).with_children(|ip| {
+            // Label（C# (35,35)，390x110）
+            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
+                .insert(MarriageInviteText);
+            // Yes Title[206/207/208]（C# (260,157)）
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(ip, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10)
+                    .insert(MarriageInviteYes);
+            }
+            // No Title[210/211/212]（C# (360,157)）
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(ip, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10)
+                    .insert(MarriageInviteNo);
+            }
+        });
     }
 }
 
@@ -234,12 +220,21 @@ fn relationship_ui_system(
     mut state: ResMut<RelationshipState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    close: Query<&UiButton, With<RelationshipClose>>,
-    propose_btn: Query<&UiButton, With<RelationshipPropose>>,
-    divorce_btn: Query<&UiButton, With<RelationshipDivorce>>,
+    close: Query<(Entity, &Interaction), With<RelationshipClose>>,
+    propose_btn: Query<(Entity, &Interaction), With<RelationshipPropose>>,
+    divorce_btn: Query<(Entity, &Interaction), With<RelationshipDivorce>>,
     mut widgets: Query<&mut Visibility, With<RelationshipWidget>>,
-    mut lines: Query<(&mut Text2d, &RelationshipLine)>,
+    mut lines: Query<(&mut Text, &RelationshipLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Relationship);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -247,8 +242,8 @@ fn relationship_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Relationship);
         }
     }
@@ -273,8 +268,8 @@ fn relationship_ui_system(
             _ => String::new(),
         };
     }
-    for btn in &propose_btn {
-        if btn.clicked {
+    for (e, inter) in &propose_btn {
+        if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(13).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() && !state.married {
@@ -288,8 +283,8 @@ fn relationship_ui_system(
             }
         }
     }
-    for btn in &divorce_btn {
-        if btn.clicked && state.married {
+    for (e, inter) in &divorce_btn {
+        if edge(e, inter, &mut prev_inter) && state.married {
             // 服务端离婚流程：发起离婚请求 → 对方确认
             net.send_packet(&crate::network::DivorceRequestWire {
                 partner_name: String::new(),
@@ -304,11 +299,20 @@ fn relationship_ui_system(
 fn marriage_invite_system(
     mut state: ResMut<RelationshipState>,
     net: Res<NetConnection>,
-    yes: Query<&UiButton, With<MarriageInviteYes>>,
-    no: Query<&UiButton, With<MarriageInviteNo>>,
+    yes: Query<(Entity, &Interaction), With<MarriageInviteYes>>,
+    no: Query<(Entity, &Interaction), With<MarriageInviteNo>>,
     mut widgets: Query<&mut Visibility, With<MarriageInviteWidget>>,
-    mut texts: Query<(&mut Text2d, &MarriageInviteText)>,
+    mut texts: Query<(&mut Text, &MarriageInviteText)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let has_invite = state.invite.is_some();
     for mut vis in widgets.iter_mut() {
         *vis = if has_invite {
@@ -327,13 +331,13 @@ fn marriage_invite_system(
         return;
     }
     let mut accept: Option<bool> = None;
-    for btn in &yes {
-        if btn.clicked {
+    for (e, inter) in &yes {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(true);
         }
     }
-    for btn in &no {
-        if btn.clicked {
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(false);
         }
     }
