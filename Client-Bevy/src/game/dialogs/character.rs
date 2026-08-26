@@ -240,7 +240,7 @@ fn stat_label_text(idx: usize, state: &CharacterState) -> String {
 fn char_equip_tooltip_system(
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
-    inv: Res<HudState>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
 ) {
@@ -250,11 +250,15 @@ fn char_equip_tooltip_system(
     }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+    let equipment = loadout_q
+        .single()
+        .map(|l| l.slots.as_slice())
+        .unwrap_or(&[]);
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
     for server_slot in 0..14usize {
         if let Some((sx, sy, w, h)) = equip_slot_screen_rect(server_slot) {
             if cursor.x >= sx && cursor.x <= sx + w && cursor.y >= sy && cursor.y <= sy + h {
-                hit = inv.equipment.get(server_slot).and_then(|s| s.as_ref()).cloned();
+                hit = equipment.get(server_slot).and_then(|s| s.as_ref()).cloned();
                 break;
             }
         }
@@ -721,10 +725,10 @@ fn character_ui_system(
     }
 }
 
-/// 装备图标（从 HudState.equipment 渲染 Items 库图标）+ 右键卸下装备
+/// 装备图标（从 `Loadout` 组件渲染 Items 库图标，#2633 批次4 步6）+ 右键卸下装备
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn char_equip_system(
-    hud: Res<HudState>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -739,6 +743,10 @@ fn char_equip_system(
     page: Res<CharPage>,
 ) {
     // 右键卸下装备（原版 C# MirItemCell 右键 → UseItem → Equipment → RemoveItem）
+    let equipment = loadout_q
+        .single()
+        .map(|l| l.slots.as_slice())
+        .unwrap_or(&[]);
     if mouse.just_pressed(MouseButton::Right) && mgr.is_open(DialogKind::Character) && page.0 == 0
     {
         if let Ok(window) = windows.single() {
@@ -754,8 +762,7 @@ fn char_equip_system(
                     {
                         // 位置 → 服务端槽位（SERVER_SLOT_TO_POS 反查）
                         if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
-                            if let Some(item) = hud
-                                .equipment
+                            if let Some(item) = equipment
                                 .get(server_idx)
                                 .and_then(|s| s.as_ref())
                             {
@@ -778,7 +785,7 @@ fn char_equip_system(
         }
     }
     for (mut sprite, mut vis, icon) in &mut icons {
-        let item = hud.equipment.get(icon.0).and_then(|s| s.as_ref());
+        let item = equipment.get(icon.0).and_then(|s| s.as_ref());
         match item {
             Some(item) => {
                 let handle = ui_image(

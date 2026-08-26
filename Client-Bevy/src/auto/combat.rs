@@ -414,20 +414,19 @@ pub(crate) fn auto_equip_system(
     mut fired: Local<bool>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
-    hud: Res<client_bevy::game::hud::HudState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<(&client_bevy::game::player_state::Inventory, &client_bevy::game::player_state::Loadout), With<client_bevy::actor::LocalPlayer>>,
 ) {
     if *fired {
         return;
     }
     *timer += time.delta_secs();
-    let Ok(inv) = inv_q.single() else { return };
+    let Ok((inv, loadout)) = inv_q.single() else { return };
     if *timer < 6.0 || inv.items.iter().flatten().count() == 0 {
         return;
     }
     *fired = true;
     if let Some(item) = inv.items.iter().flatten().find(|i| i.is_equipment()) {
-        if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
+        if let Some(to) = item.equip_slot_occupied(|s| loadout.slots.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 grid: mir2_shared::enums::MirGridType::Inventory,
                 unique_id: item.unique_id,

@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, MonsterAppearance, NetObjectId};
+use crate::actor::{ActorAnim, LocalPlayer, MonsterAppearance, NetObjectId};
 use crate::game::hud::HudState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
@@ -187,6 +187,7 @@ fn attack_mode_system(
 fn apply_combat_events(
     mut commands: Commands,
     hud: Res<HudState>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<LocalPlayer>>,
     mut probe: ResMut<RealHitProbe>,
     ui_font: Res<UiFont>,
     sound_bank: Res<crate::game::sound::SoundBank>,
@@ -204,10 +205,16 @@ fn apply_combat_events(
         match ev {
             CombatEvent::Struck { object_id, attacker_id, direction } => {
                 // #1568：C# MonsterObject.PlayStruckSound——本地玩家攻击时按自己武器播受击音
+                // （武器 shape 读 `Loadout` 组件，#2633 批次4 步6）
+                let weapon_shape = loadout_q
+                    .single()
+                    .ok()
+                    .and_then(|l| l.slots.get(0))
+                    .and_then(|s| s.as_ref())
+                    .map(|i| i.shape)
+                    .unwrap_or(-1);
                 let struck_sound = if hud.player_object_id == Some(*attacker_id) {
-                    crate::game::sound::monster_struck_sound(
-                        hud.equipment.get(0).and_then(|s| s.as_ref()).map(|i| i.shape).unwrap_or(-1),
-                    )
+                    crate::game::sound::monster_struck_sound(weapon_shape)
                 } else {
                     Some(10060) // 默认 StruckShort（非本地玩家攻击者武器未知）
                 };

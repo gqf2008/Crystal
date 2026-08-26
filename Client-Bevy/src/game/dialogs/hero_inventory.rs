@@ -21,7 +21,7 @@ use crate::game::dialogs::inventory::{
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
-use crate::game::player_state::Inventory;
+use crate::game::player_state::{Inventory, Loadout};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -603,7 +603,7 @@ fn hero_inv_click_system(
         Res<InvUiState>,
         Res<crate::game::dialogs::inventory::InventoryOrigin>,
     ),
-    player_q: Query<&Inventory, With<LocalPlayer>>,
+    player_q: Query<(&Inventory, &Loadout), With<LocalPlayer>>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_hero_click: Local<Option<(usize, f64)>>,
@@ -630,7 +630,7 @@ fn hero_inv_click_system(
         cursor.x,
         cursor.y,
         inv_res.0.page,
-        player_q.single().map(|inv| inv.items.len()).unwrap_or(0),
+        player_q.single().map(|(inv, _)| inv.items.len()).unwrap_or(0),
         (inv_res.1.0, inv_res.1.1),
     )
     .is_some()
@@ -682,7 +682,12 @@ fn hero_inv_click_system(
                     check_fishing: false,
                     allow_consumable: true,
                 };
-                if use_item_core(item, &net, &hud, false, ctx, now, &mut feedback, &mut confirm)
+                // 槽物品前置恒看主角色装备（C# CanUseItem User 侧）→ 主角色 Loadout slots（步6）
+                let player_equipment = player_q
+                    .single()
+                    .map(|(_, l)| l.slots.as_slice())
+                    .unwrap_or(&[]);
+                if use_item_core(item, &net, &hud, false, &player_equipment, ctx, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
                     // #2611：腰带格（0/1）使用时武装补货（C# :574 Item.Count==1

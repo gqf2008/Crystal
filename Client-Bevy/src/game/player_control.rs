@@ -13,7 +13,7 @@ use bevy::window::{CursorIcon, SystemCursorIcon};
 
 use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
-use crate::game::player_state::{Inventory, StatusFlags};
+use crate::game::player_state::{Inventory, Loadout, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
@@ -585,6 +585,7 @@ fn auto_attack_system(
     players: Query<(Entity, &Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
     hud: Res<HudState>,
+    loadout_q: Query<&Loadout, With<LocalPlayer>>,
     character_state: Res<crate::game::dialogs::character::CharacterState>,
     magics: Res<crate::game::skills::MagicsState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
@@ -602,10 +603,14 @@ fn auto_attack_system(
     let Ok((pe, player_tf, lm_opt)) = players.single() else { return };
 
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
-    let attack_kind = player_attack_kind(
-        hud.class,
-        hud.equipment.get(0).and_then(|s| s.as_ref()).is_some(),
-    );
+    // （武器槽读 `Loadout` 组件，#2633 批次4 步6）
+    let weapon_equipped = loadout_q
+        .single()
+        .ok()
+        .and_then(|l| l.slots.get(0))
+        .and_then(|s| s.as_ref())
+        .is_some();
+    let attack_kind = player_attack_kind(hud.class, weapon_equipped);
     let is_archer = attack_kind == PlayerAttackKind::Ranged;
     let max_range = if is_archer { 9 } else { 1 };
     // #1602：C# AttackTime = User.AttackSpeed（弓手远程 +200ms）——按攻速/等级动态计算
@@ -741,9 +746,9 @@ fn hold_move_system(
     >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
     hud: Res<HudState>,
-    // #2633 批次4：in_trap_rock/sprint/sneaking 读 StatusFlags（步4）、背包负重读 Inventory（步5）；
-    // riding/equipment 仍读 hud（批6）
-    flags: Query<(&StatusFlags, &Inventory), With<LocalPlayer>>,
+    // #2633 批次4：in_trap_rock/sprint/sneaking 读 StatusFlags（步4）、背包负重读 Inventory（步5）、
+    // 装备负重读 Loadout（步6）；riding 仍读 hud（步7）
+    flags: Query<(&StatusFlags, &Inventory, &Loadout), With<LocalPlayer>>,
     dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
@@ -840,12 +845,21 @@ fn hold_move_system(
             }
 
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
-            // #2633 步4/步5：in_trap_rock/sprint/sneaking 读 StatusFlags、背包负重读 Inventory；
-            // 实体缺失视同无旗标/空负重（同原 hud 默认 false/0）
-            let (in_trap, sprint, sneaking, bag_weight, bag_max) = flags
+            // #2633 步4/步5/步6：in_trap_rock/sprint/sneaking 读 StatusFlags、背包负重读 Inventory、
+            // 装备负重读 Loadout；实体缺失视同无旗标/空负重（同原 hud 默认 false/0）
+            let (in_trap, sprint, sneaking, bag_weight, bag_max, wear_weight) = flags
                 .single()
-                .map(|(f, inv)| (f.in_trap_rock, f.sprint, f.sneaking, inv.weight, inv.max_weight))
-                .unwrap_or((false, false, false, 0, 0));
+                .map(|(f, inv, lo)| {
+                    (
+                        f.in_trap_rock,
+                        f.sprint,
+                        f.sneaking,
+                        inv.weight,
+                        inv.max_weight,
+                        lo.slots.iter().flatten().map(|i| i.weight as u32).sum::<u32>(),
+                    )
+                })
+                .unwrap_or((false, false, false, 0, 0, 0));
 
             // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
             // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。

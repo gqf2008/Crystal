@@ -15,7 +15,7 @@ use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
-use crate::game::player_state::{Gold, Inventory, StatusFlags};
+use crate::game::player_state::{Gold, Inventory, Loadout, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::sound::{SoundBank, SoundCache, play_sound_cached};
 use crate::map_renderer::GameLibraries;
@@ -1567,11 +1567,13 @@ fn slot_item_target(item: &InvItem) -> Option<(i32, MirGridType)> {
 }
 
 /// #1544：槽物品前置检查（C# CanUseItem：坐骑配件需坐骑；钓具需鱼竿 shape 49/50）
-fn slot_item_ready(hud: &HudState, grid_to: MirGridType) -> bool {
+/// equipment 恒为**主角色**装备槽（C# 语义：坐骑/钓具槽物品看 User 装备，英雄格同；
+/// #2633 批次4 步6：调用方传 `Loadout` 组件 slots，不再读 hud.equipment）。
+fn slot_item_ready(equipment: &[Option<InvItem>], grid_to: MirGridType) -> bool {
     match grid_to {
-        MirGridType::Mount => hud.equipment.get(10).and_then(|s| s.as_ref()).is_some(),
+        MirGridType::Mount => equipment.get(10).and_then(|s| s.as_ref()).is_some(),
         MirGridType::Fishing => matches!(
-            hud.equipment
+            equipment
                 .get(0)
                 .and_then(|s| s.as_ref())
                 .map(|w| w.shape),
@@ -1609,14 +1611,15 @@ pub(crate) struct UseItemCtx<'a> {
 }
 
 impl<'a> UseItemCtx<'a> {
-    /// 主背包（hud）
-    pub fn player(hud: &'a HudState) -> Self {
+    /// 主背包（装备槽传 `Loadout` 组件 slots——步6；gender/class/level 步7 前仍由调用方
+    /// 从 hud 取、步7 改 ActorAppearance/Progression，签名不再变）。
+    pub fn player(equipment: &'a [Option<InvItem>], gender: u8, class: u8, level: u16) -> Self {
         Self {
             grid: MirGridType::Inventory,
-            equipment: &hud.equipment,
-            gender: hud.gender,
-            class: hud.class,
-            level: hud.level,
+            equipment,
+            gender,
+            class,
+            level,
             check_fishing: true,
             allow_consumable: true,
         }
@@ -1627,11 +1630,13 @@ impl<'a> UseItemCtx<'a> {
 
 /// #1546：守卫链纯逻辑（不发包，便于单测）
 /// 返回 Some(true)=可继续（已通过守卫）；Some(false)=槽物品无坐骑/鱼竿；None=被拦截
+/// equipment 恒为主角色 `Loadout` slots（槽物品前置看 User 装备，步6）；hud 仅余 riding（步7 迁）。
 #[allow(clippy::too_many_arguments)]
 fn use_item_guard(
     item: &InvItem,
     hud: &HudState,
     fishing: bool,
+    equipment: &[Option<InvItem>],
     ctx: UseItemCtx,
     now: f64,
     feedback: &mut ItemUseFeedback,
@@ -1671,7 +1676,7 @@ fn use_item_guard(
     }
     // 6. 槽物品前置（坐骑/鱼竿）
     if let Some((_, grid_to)) = slot_item_target(item) {
-        return Some(slot_item_ready(hud, grid_to));
+        return Some(slot_item_ready(equipment, grid_to));
     }
     Some(true)
 }
@@ -1690,13 +1695,14 @@ pub(crate) fn use_item_core(
     net: &NetConnection,
     hud: &HudState,
     fishing: bool,
+    equipment: &[Option<InvItem>],
     ctx: UseItemCtx,
     now: f64,
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
 ) -> UseOutcome {
     // 守卫链（节流/钓鱼/骑乘/SoulBound/CanUseItem/槽物品前置）
-    match use_item_guard(item, hud, fishing, ctx, now, feedback) {
+    match use_item_guard(item, hud, fishing, equipment, ctx, now, feedback) {
         None => return UseOutcome::Blocked,
         Some(false) => {
             // 按物品目标（坐骑/钓具）提示，而非来源格
@@ -1790,6 +1796,7 @@ fn use_or_equip(
     net: &NetConnection,
     hud: &HudState,
     fishing: bool,
+    equipment: &[Option<InvItem>],
     now: f64,
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
@@ -1799,7 +1806,8 @@ fn use_or_equip(
         net,
         hud,
         fishing,
-        UseItemCtx::player(hud),
+        equipment,
+        UseItemCtx::player(equipment, hud.gender, hud.class, hud.level),
         now,
         feedback,
         confirm,
@@ -2088,7 +2096,7 @@ fn cursor_over_dialog<'a>(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inv_item_action_system(
     hud: Res<HudState>,
-    player_q: Query<(&Inventory, &StatusFlags), With<LocalPlayer>>,
+    player_q: Query<(&Inventory, &StatusFlags, &Loadout), With<LocalPlayer>>,
     inv_ui: Res<InvUiState>,
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
@@ -2168,7 +2176,7 @@ fn inv_item_action_system(
     }
 
     // 光标下的背包格（按当前页与格数，#276；原点取 InventoryOrigin——推位/拖动后仍准确）
-    let Ok((inv, flags)) = player_q.single() else { return };
+    let Ok((inv, flags, loadout)) = player_q.single() else { return };
     let page = inv_ui.page;
     let size = inv.items.len().min(MAX_INV_SLOTS);
     let (ox, oy) = (misc.2.0, misc.2.1);
@@ -2306,7 +2314,7 @@ fn inv_item_action_system(
     // 双击：使用/装备
     if let Some(i) = dbl {
         if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
-            if use_or_equip(item, &net, &hud, flags.fishing, now, &mut feedback, &mut confirm)
+            if use_or_equip(item, &net, &hud, flags.fishing, &loadout.slots, now, &mut feedback, &mut confirm)
                 == UseOutcome::Sent
             {
                 if let Some(sid) = item_use_sound_id(item) {
@@ -2325,7 +2333,7 @@ fn inv_item_action_system(
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
             if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
-                if use_or_equip(item, &net, &hud, flags.fishing, now, &mut feedback, &mut confirm)
+                if use_or_equip(item, &net, &hud, flags.fishing, &loadout.slots, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
                     if let Some(sid) = item_use_sound_id(item) {
@@ -2841,20 +2849,20 @@ mod tests {
 
     #[test]
     fn slot_item_ready_requires_mount_or_rod() {
-        let mut hud = HudState::default();
-        assert!(!slot_item_ready(&hud, MirGridType::Mount));
-        assert!(!slot_item_ready(&hud, MirGridType::Fishing));
-        let mut m = item_with_type(ItemType::Mount);
-        hud.equipment[10] = Some(m);
-        assert!(slot_item_ready(&hud, MirGridType::Mount));
+        let mut equipment = vec![None; 14];
+        assert!(!slot_item_ready(&equipment, MirGridType::Mount));
+        assert!(!slot_item_ready(&equipment, MirGridType::Fishing));
+        let m = item_with_type(ItemType::Mount);
+        equipment[10] = Some(m);
+        assert!(slot_item_ready(&equipment, MirGridType::Mount));
         let mut rod = item_with_type(ItemType::Weapon);
         rod.shape = 49;
-        hud.equipment[0] = Some(rod);
-        assert!(slot_item_ready(&hud, MirGridType::Fishing));
+        equipment[0] = Some(rod);
+        assert!(slot_item_ready(&equipment, MirGridType::Fishing));
         let mut sword = item_with_type(ItemType::Weapon);
         sword.shape = 0;
-        hud.equipment[0] = Some(sword);
-        assert!(!slot_item_ready(&hud, MirGridType::Fishing));
+        equipment[0] = Some(sword);
+        assert!(!slot_item_ready(&equipment, MirGridType::Fishing));
     }
     #[test]
     fn pick_auto_hp_potion_prefers_hp_shape() {
@@ -2940,10 +2948,10 @@ mod tests {
             check_fishing: false,
             allow_consumable: true,
         };
-        assert!(use_item_guard(&potion, &hud, hud.fishing, ctx_hero, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&potion, &hud, hud.fishing, &hud.equipment, ctx_hero, 0.0, &mut fb).is_some());
         // 主背包 check_fishing=true → 钓鱼拦截
-        let ctx_player = UseItemCtx::player(&hud);
-        assert!(use_item_guard(&potion, &hud, hud.fishing, ctx_player, 0.0, &mut fb).is_none());
+        let ctx_player = UseItemCtx::player(&hud.equipment, hud.gender, hud.class, hud.level);
+        assert!(use_item_guard(&potion, &hud, hud.fishing, &hud.equipment, ctx_player, 0.0, &mut fb).is_none());
     }
 
     #[test]
@@ -2962,10 +2970,10 @@ mod tests {
         };
         // 守卫本身通过（消耗品拦截在 use_item_core 第 8 步）
         let potion = item_with_type(ItemType::Potion);
-        assert!(use_item_guard(&potion, &hud, hud.fishing, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&potion, &hud, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb).is_some());
         // 装备放行
         let sword = item_with_type(ItemType::Weapon);
-        assert!(use_item_guard(&sword, &hud, hud.fishing, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&sword, &hud, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb).is_some());
     }
 
     #[test]
@@ -2988,12 +2996,12 @@ mod tests {
         };
         let potion = item_with_type(ItemType::Potion);
         assert_eq!(
-            use_item_core(&potion, &net, &hud, hud.fishing, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(&potion, &net, &hud, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb, &mut confirm),
             UseOutcome::Blocked
         );
         let sword = item_with_type(ItemType::Weapon);
         assert_eq!(
-            use_item_core(&sword, &net, &hud, hud.fishing, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(&sword, &net, &hud, hud.fishing, &hud.equipment, ctx_storage, 0.0, &mut fb, &mut confirm),
             UseOutcome::Sent
         );
     }
@@ -3019,7 +3027,7 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, &hud, hud.fishing, ctx_empty, 0.0, &mut fb, &mut confirm),
+            use_item_core(&bracelet, &net, &hud, hud.fishing, &hud.equipment, ctx_empty, 0.0, &mut fb, &mut confirm),
             UseOutcome::Sent
         );
         // 左右手镯都占用 → 不装备（C# BraceletR/L 都占用 → 不装备）
@@ -3040,7 +3048,7 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, &hud, hud.fishing, ctx_full, 0.0, &mut fb, &mut confirm),
+            use_item_core(&bracelet, &net, &hud, hud.fishing, &hud.equipment, ctx_full, 0.0, &mut fb, &mut confirm),
             UseOutcome::Blocked
         );
     }

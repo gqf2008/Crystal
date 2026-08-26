@@ -21,7 +21,7 @@ use crate::game::dialogs::inventory::{
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
-use crate::game::player_state::{Inventory, StatusFlags};
+use crate::game::player_state::{Inventory, Loadout, StatusFlags};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -661,7 +661,7 @@ fn storage_action_system(
     mut state: ResMut<StorageState>,
     mut inv_click: ResMut<InvClickState>,
     hud: Res<HudState>,
-    player_q: Query<(&Inventory, &StatusFlags), With<LocalPlayer>>,
+    player_q: Query<(&Inventory, &StatusFlags, &Loadout), With<LocalPlayer>>,
     inv_ui: Res<InvUiState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -686,7 +686,7 @@ fn storage_action_system(
         cursor.x,
         cursor.y,
         inv_ui.page,
-        player.map(|(inv, _)| inv.items.len()).unwrap_or(0),
+        player.map(|(inv, _, _)| inv.items.len()).unwrap_or(0),
         (inv_origin.0, inv_origin.1),
     );
 
@@ -713,7 +713,7 @@ fn storage_action_system(
         {
             let ctx = UseItemCtx {
                 grid: mir2_shared::enums::MirGridType::Storage,
-                equipment: &hud.equipment,
+                equipment: player.map(|(_, _, l)| l.slots.as_slice()).unwrap_or(&[]),
                 gender: hud.gender,
                 class: hud.class,
                 level: hud.level,
@@ -724,7 +724,8 @@ fn storage_action_system(
                 item,
                 &net,
                 &hud,
-                player.map(|(_, f)| f.fishing).unwrap_or(false),
+                player.map(|(_, f, _)| f.fishing).unwrap_or(false),
+                player.map(|(_, _, l)| l.slots.as_slice()).unwrap_or(&[]),
                 ctx,
                 now,
                 &mut feedback,
