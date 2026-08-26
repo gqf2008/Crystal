@@ -13,13 +13,15 @@
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::hero::{HeroState, STAT_HP, STAT_MP, next_autopot};
 use crate::game::dialogs::inventory::{
-    InvClickState, InvDropConfirm, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
+    InvClickState, InvDropConfirm, InvUiState, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
     item_use_sound_id, use_item_core,
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
+use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -596,7 +598,12 @@ fn hero_inv_click_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     time: Res<Time>,
-    inv_origin: Res<crate::game::dialogs::inventory::InventoryOrigin>,
+    // 元组折叠（系统参数上限 16）：背包页 UI 态 / 主背包命中原点
+    inv_res: (
+        Res<InvUiState>,
+        Res<crate::game::dialogs::inventory::InventoryOrigin>,
+    ),
+    player_q: Query<&Inventory, With<LocalPlayer>>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_hero_click: Local<Option<(usize, f64)>>,
@@ -622,9 +629,9 @@ fn hero_inv_click_system(
     if inv_slot_at(
         cursor.x,
         cursor.y,
-        hud.inventory.page,
-        hud.inventory.items.len(),
-        (inv_origin.0, inv_origin.1),
+        inv_res.0.page,
+        player_q.single().map(|inv| inv.items.len()).unwrap_or(0),
+        (inv_res.1.0, inv_res.1.1),
     )
     .is_some()
     {
@@ -675,7 +682,7 @@ fn hero_inv_click_system(
                     check_fishing: false,
                     allow_consumable: true,
                 };
-                if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
+                if use_item_core(item, &net, &hud, false, ctx, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
                     // #2611：腰带格（0/1）使用时武装补货（C# :574 Item.Count==1

@@ -21,10 +21,12 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::inventory::{InvItem, InvSlot, InventoryShiftRight};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
+use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -694,6 +696,7 @@ fn trade_ui_system(
 fn trade_action_system(
     mut trade: ResMut<TradeState>,
     hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -784,6 +787,7 @@ fn trade_action_system(
     // 点击背包物品 → 存入（C# DepositTradeItem：点击空槽/找空槽，MirItemCell.cs:1553-1565；
     // 按背包格实体实际 Transform 命中——背包可能已被推到右侧或拖动过）
     if !trade.my_locked {
+        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
         for (tf, InvSlot(idx), vis) in &inv_cells {
             if *vis != Visibility::Visible {
                 continue;
@@ -791,7 +795,7 @@ fn trade_action_system(
             let x = tf.translation.x;
             let y = -tf.translation.y;
             if cursor.x >= x && cursor.x <= x + CELL_W && cursor.y >= y && cursor.y <= y + CELL_H {
-                if let Some(item) = hud.inventory.items.get(*idx).and_then(|s| s.as_ref()) {
+                if let Some(item) = items.get(*idx).and_then(|s| s.as_ref()) {
                     if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
                         net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {
                             from: *idx as i32,
@@ -852,9 +856,10 @@ fn trade_invite_system(
 fn trade_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut trade: ResMut<TradeState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
+    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
     for ev in events.read() {
         match ev {
             ServerEvent::TradeGold { amount } => {
@@ -925,7 +930,7 @@ fn trade_server_events(
                 if *success {
                     if let Some((from2, to2)) = trade.pending_deposit.take() {
                         let from = (*from).max(from2 as i32) as usize;
-                        if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
+                        if let Some(item) = items.get(from).and_then(|s| s.as_ref()) {
                             if let Some(slot) = trade.my_items.get_mut(to2.max(*to as usize)) {
                                 *slot = Some(TradeItem::from(item));
                             }

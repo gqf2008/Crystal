@@ -162,11 +162,22 @@ pub struct HudData {
 
 /// #1392：HUD 负重/空格标签（C# WeightLabel=剩余负重，SpaceLabel=背包空格数）
 fn hud_space_weight_system(
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut wt: Query<&mut Text2d, (With<HudWeightText>, Without<HudSpaceText>)>,
     mut sp: Query<&mut Text2d, (With<HudSpaceText>, Without<HudWeightText>)>,
 ) {
-    let rem = hud.inventory.max_weight.saturating_sub(hud.inventory.weight);
+    // #2633 批次4 步5：负重/空格读 Inventory 组件；实体缺失视同空背包（同原 hud 默认 0）
+    let (max_weight, weight, space) = inv_q
+        .single()
+        .map(|inv| {
+            (
+                inv.max_weight,
+                inv.weight,
+                inv.items.iter().filter(|s| s.is_none()).count(),
+            )
+        })
+        .unwrap_or((0, 0, 0));
+    let rem = max_weight.saturating_sub(weight);
     // C# WeightLabel = (BagWeight - CurrentBagWeight).ToString()：仅剩余负重（不带 /max）
     let w = format!("{}", rem);
     for mut t in &mut wt {
@@ -174,7 +185,7 @@ fn hud_space_weight_system(
             t.0 = w.clone();
         }
     }
-    let space = hud.inventory.items.iter().filter(|s| s.is_none()).count().to_string();
+    let space = space.to_string();
     for mut t in &mut sp {
         if t.0 != space {
             t.0 = space.clone();

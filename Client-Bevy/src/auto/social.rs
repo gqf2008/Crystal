@@ -223,7 +223,7 @@ pub(crate) fn auto_trade_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut trade: ResMut<client_bevy::game::dialogs::trade::TradeState>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -260,7 +260,12 @@ pub(crate) fn auto_trade_test(
                 return;
             }
             // 放入背包第一个物品
-            if let Some((from, _)) = hud.inventory.items.iter().enumerate().find(|(_, s)| s.is_some()) {
+            let first = inv_q
+                .single()
+                .ok()
+                .and_then(|inv| inv.items.iter().enumerate().find(|(_, s)| s.is_some()))
+                .map(|(i, _)| i);
+            if let Some(from) = first {
                 if trade.pending_deposit.is_none() && trade.my_items[0].is_none() {
                     trade.pending_deposit = Some((from, 0));
                     net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {

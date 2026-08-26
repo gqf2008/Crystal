@@ -14,6 +14,7 @@ use bevy::prelude::*;
 
 use std::fs;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::inventory::{
     item_use_sound_id, try_use_belt_item, use_item_core, InvDropConfirm, ItemUseFeedback,
@@ -21,6 +22,7 @@ use crate::game::dialogs::inventory::{
 };
 use crate::game::dialogs::potion_belt::PotionBeltState;
 use crate::game::hud::HudState;
+use crate::game::player_state::StatusFlags;
 use crate::game::dialogs::settings_file;
 use crate::network::NetConnection;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -811,6 +813,7 @@ fn secondary_hotkey_system(
     gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
     hud: Res<HudState>,
+    flags_q: Query<&StatusFlags, With<LocalPlayer>>,
     time: Res<Time>,
     mut feedback: ResMut<ItemUseFeedback>,
     belt: Res<PotionBeltState>,
@@ -846,6 +849,7 @@ fn secondary_hotkey_system(
     }
     // 腰带 1-8（C# Belt1..8：D1..D8 / NumPad1..8）：
     // 1-6 = 主药水腰带（#1544）；7/8 = 英雄腰带（#2602，C# GameScene.cs:759-766）
+    let fishing = flags_q.single().map(|f| f.fishing).unwrap_or(false);
     let digits = [
         KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4,
         KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8,
@@ -863,7 +867,7 @@ fn secondary_hotkey_system(
         if i < 6 {
             // 主腰带：C# BeltDialog.Grid[i].UseItem
             if let Some(uid) = belt.slots.get(i).and_then(|u| u.as_ref()).copied() {
-                try_use_belt_item(uid, &net, &hud, now, &mut feedback);
+                try_use_belt_item(uid, &net, fishing, now, &mut feedback);
             }
         } else {
             // 英雄腰带格 0/1（= 英雄背包前 2 格；UseItem 按 uid 全背包查）
@@ -885,7 +889,7 @@ fn secondary_hotkey_system(
                 check_fishing: false,
                 allow_consumable: true,
             };
-            if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm)
+            if use_item_core(item, &net, &hud, fishing, ctx, now, &mut feedback, &mut confirm)
                 == UseOutcome::Sent
             {
                 // #2611：腰带用尽补货武装（C# :574 Item.Count == 1 才发——

@@ -164,7 +164,7 @@ fn refine_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<RefineState>,
     net: Res<NetConnection>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
     close: Query<&UiButton, With<RefineClose>>,
     deposit_btn: Query<&UiButton, With<RefineDeposit>>,
@@ -203,14 +203,15 @@ fn refine_ui_system(
         };
     }
     // 存入：选中背包物品 → DepositRefineItem[uid]
+    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
     for btn in &deposit_btn {
         if btn.clicked {
             let idx = inv_click
                 .selected
-                .filter(|i| hud.inventory.items.get(*i).and_then(|s| s.as_ref()).is_some())
-                .or_else(|| hud.inventory.items.iter().position(|s| s.is_some()));
+                .filter(|i| items.get(*i).and_then(|s| s.as_ref()).is_some())
+                .or_else(|| items.iter().position(|s| s.is_some()));
             if let Some(i) = idx {
-                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if let Some(item) = items.get(i).and_then(|s| s.as_ref()) {
                     net.send_packet(&crate::network::RefineDepositWire {
                         from: i as i32,
                         to: 0,
@@ -230,7 +231,7 @@ fn refine_ui_system(
         if btn.clicked {
             if let Some(uid) = state.deposited_uid {
                 // C# RetrieveRefineItem：[from 精炼栏格][to 背包格]；Rust 单槽 from=0，to 需为空格
-                match hud.inventory.items.iter().position(|s| s.is_none()) {
+                match items.iter().position(|s| s.is_none()) {
                     Some(grid) => {
                         net.send_packet(&crate::network::RefineRetrieveWire {
                             from: 0,

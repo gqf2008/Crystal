@@ -847,6 +847,58 @@ mod tests {
         assert!(hud.inventory.items.iter().flatten().any(|it| it.unique_id == 7));
     }
 
+    /// §9：gold 唯一源是 Gold 组件——UserInformation 不再写 hud.inventory.gold（双源已消）。
+    #[test]
+    fn gold_single_source_inventory_gold_not_written() {
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        app.world_mut().write_message(user_info(10, 100, 50));
+        app.update();
+
+        let g: Gold = get(&mut app);
+        assert_eq!(g.0, 4242, "Gold 组件为金币唯一源");
+        let hud = app.world().resource::<HudState>();
+        assert_eq!(hud.gold, 4242, "hud.gold 仍双写（步9 删）");
+        assert_eq!(
+            hud.inventory.gold, 0,
+            "hud.inventory.gold 不再写入（§9 双源已消，背包金币文本读 Gold 组件）"
+        );
+    }
+
+    /// 背包 CRUD（移动/删除）：组件与 hud 双写逐步一致（unique_id 序列比对）。
+    #[test]
+    fn inventory_move_delete_mirror_to_component() {
+        fn ids(items: &[Option<InvItem>]) -> Vec<Option<u64>> {
+            items.iter().map(|s| s.as_ref().map(|i| i.unique_id)).collect()
+        }
+        let mut app = test_app();
+        spawn_local(&mut app);
+        enter_game(&mut app);
+
+        app.world_mut().write_message(user_info(10, 100, 50));
+        app.update();
+
+        // 移动 0 <-> 1（user_info 背包 [uid1, uid2, None, None]）
+        app.world_mut()
+            .write_message(ServerEvent::InventoryMoved { from: 0, to: 1 });
+        app.update();
+        let hud_ids = ids(&app.world().resource::<HudState>().inventory.items);
+        let inv: Inventory = get(&mut app);
+        assert_eq!(hud_ids, ids(&inv.items), "移动后 hud 与 Inventory 组件一致");
+
+        // 删除当前 0 格物品（uid=2，移动后位于 0）
+        let uid = inv.items[0].as_ref().unwrap().unique_id;
+        app.world_mut()
+            .write_message(ServerEvent::ItemDeleted { unique_id: uid });
+        app.update();
+        let hud_ids = ids(&app.world().resource::<HudState>().inventory.items);
+        let inv: Inventory = get(&mut app);
+        assert_eq!(hud_ids, ids(&inv.items), "删除后 hud 与 Inventory 组件一致");
+        assert!(!inv.items.iter().flatten().any(|it| it.unique_id == uid));
+    }
+
     /// ItemUsed：腰带补货须读「扣减前」背包（belt_restock 先于 inventory 扣减，§12 R6）
     #[test]
     fn belt_restock_reads_pre_deduct_inventory() {

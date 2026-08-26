@@ -128,7 +128,7 @@ pub(crate) fn auto_drop_pick_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     ground: Query<&client_bevy::actor::NetObjectId, With<client_bevy::actor::GroundItem>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -181,7 +181,7 @@ pub(crate) fn auto_drop_pick_test(
             if *t < 1.0 {
                 return;
             }
-            *before = hud.inventory.items.iter().flatten().count();
+            *before = inv_q.single().map(|inv| inv.items.iter().flatten().count()).unwrap_or(0);
             net.send_packet(&mir2_shared::packets::client::item::PickUp {});
             tracing::info!("[DROPTEST] 发送 PickUp（拾取前背包 {} 件）", *before);
             *stage = 2;
@@ -191,7 +191,7 @@ pub(crate) fn auto_drop_pick_test(
             if *t < 3.0 {
                 return;
             }
-            let now = hud.inventory.items.iter().flatten().count();
+            let now = inv_q.single().map(|inv| inv.items.iter().flatten().count()).unwrap_or(0);
             if now > *before {
                 tracing::info!("[DROPTEST] ✅ 拾取成功：背包 {} -> {} 件", *before, now);
             } else {
@@ -415,16 +415,18 @@ pub(crate) fn auto_equip_system(
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
     hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
 ) {
     if *fired {
         return;
     }
     *timer += time.delta_secs();
-    if *timer < 6.0 || hud.inventory.items.iter().flatten().count() == 0 {
+    let Ok(inv) = inv_q.single() else { return };
+    if *timer < 6.0 || inv.items.iter().flatten().count() == 0 {
         return;
     }
     *fired = true;
-    if let Some(item) = hud.inventory.items.iter().flatten().find(|i| i.is_equipment()) {
+    if let Some(item) = inv.items.iter().flatten().find(|i| i.is_equipment()) {
         if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 grid: mir2_shared::enums::MirGridType::Inventory,
@@ -442,7 +444,7 @@ pub(crate) fn auto_life_system(
     mut phase: Local<u8>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
-    hud: Res<client_bevy::game::hud::HudState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
 ) {
     *timer += time.delta_secs();
     let t = *timer;
@@ -466,7 +468,12 @@ pub(crate) fn auto_life_system(
         }
         2 if t >= 12.0 => {
             *phase = 3;
-            if let Some(potion) = hud.inventory.items.iter().flatten().find(|i| i.item_index == 1) {
+            let potion = inv_q
+                .single()
+                .ok()
+                .and_then(|inv| inv.items.iter().flatten().find(|i| i.item_index == 1))
+                .cloned();
+            if let Some(potion) = potion {
                 net.send_packet(&mir2_shared::packets::client::item::UseItem {
                     unique_id: potion.unique_id,
                 });

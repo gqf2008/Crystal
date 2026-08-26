@@ -9,9 +9,11 @@
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
+use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -316,6 +318,7 @@ fn fishing_ui_system(
 fn fishing_gear_system(
     mgr: Res<DialogManager>,
     hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut inv_click: ResMut<InvClickState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -341,6 +344,7 @@ fn fishing_gear_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
+    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
     for (slot, (rx, ry)) in GEAR_POS.iter().enumerate() {
         let x = 280.0 + rx;
         let y = 80.0 + ry;
@@ -350,7 +354,7 @@ fn fishing_gear_system(
         let Some(rod) = rod else { return };
         // 已占用 → 卸下回背包（C# RemoveSlotItem Grid=Fishing）
         if let Some(gear) = rod.slots.get(slot).and_then(|s| s.as_ref()) {
-            let Some(to) = free_inventory_index(&hud.inventory.items) else {
+            let Some(to) = free_inventory_index(items) else {
                 tracing::warn!("🎣 背包已满，无法卸下钓具");
                 return;
             };
@@ -368,7 +372,7 @@ fn fishing_gear_system(
         // #2631：选中态归 inventory 所有，经接口访问。严格对齐旧码：仅当物品确实存在
         // 才发送并清除选中；陈旧选中（物品已被移除）保留选中态，不用 take_selected。
         if let Some(sel) = inv_click.selected() {
-            if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
+            if let Some(item) = items.get(sel).and_then(|s| s.as_ref()) {
                 net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
                     grid: mir2_shared::enums::MirGridType::Inventory,
                     unique_id: item.unique_id,

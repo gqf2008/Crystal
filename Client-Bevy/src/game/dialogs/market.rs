@@ -13,8 +13,10 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
+use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -469,7 +471,7 @@ fn market_action_system(
     mut market: ResMut<MarketState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
     buy_btn: Query<&UiButton, With<MarketBuyBtn>>,
     consign_btn: Query<&UiButton, With<MarketConsignBtn>>,
@@ -507,6 +509,7 @@ fn market_action_system(
         }
     }
     // 寄售（选中背包物品 + 价格）
+    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
     for btn in &consign_btn {
         if btn.clicked {
             let price = input
@@ -519,10 +522,10 @@ fn market_action_system(
                 .unwrap_or(0);
             let idx = inv_click
                 .selected
-                .filter(|i| hud.inventory.items.get(*i).and_then(|s| s.as_ref()).is_some())
-                .or_else(|| hud.inventory.items.iter().position(|s| s.is_some()));
+                .filter(|i| items.get(*i).and_then(|s| s.as_ref()).is_some())
+                .or_else(|| items.iter().position(|s| s.is_some()));
             if let Some(i) = idx {
-                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if let Some(item) = items.get(i).and_then(|s| s.as_ref()) {
                     if price == 0 {
                         market.message = "价格无效".to_string();
                         continue;
@@ -582,8 +585,11 @@ fn market_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut market: ResMut<MarketState>,
     mut hud: ResMut<HudState>,
+    mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
+    // 双写过渡：寄售移除背包格后镜像到 Inventory 组件（R1 步9 删 hud 侧）
+    let mut inv_dirty = false;
     for ev in events.read() {
         match ev {
             ServerEvent::MarketPages { pages } => {
@@ -626,6 +632,7 @@ fn market_server_events(
                         .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*uid))
                     {
                         hud.inventory.items[idx] = None;
+                        inv_dirty = true;
                         tracing::info!("🏪 寄售成功，背包移除 uid={}", uid);
                     }
                     market.consign_ok = Some(*uid);
@@ -647,5 +654,107 @@ fn market_server_events(
             }
             _ => {}
         }
+    }
+    // 双写镜像：寄售移除背包格同步到 Inventory 组件（实体未生成则跳过，R1）
+    if inv_dirty {
+        if let Ok(mut inv) = inv_q.single_mut() {
+            inv.items = hud.inventory.items.clone();
+            inv.weight = hud.inventory.weight;
+            inv.max_weight = hud.inventory.max_weight;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::dialogs::inventory::InvItem;
+    use crate::network::server_event::ServerEvent;
+
+    fn mk_item(uid: u64) -> InvItem {
+        InvItem {
+            unique_id: uid,
+            ..Default::default()
+        }
+    }
+
+    /// 寄售成功移除背包格后镜像到 Inventory 组件（#2633 批次4 步5 写者覆盖，R1）。
+    #[test]
+    fn market_consign_removes_item_and_mirrors_component() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<MarketState>();
+        app.init_resource::<HudState>();
+        app.add_systems(Update, market_server_events);
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![Some(mk_item(11)), Some(mk_item(22)), None],
+                ..Default::default()
+            },
+        ));
+        {
+            let mut hud = app.world_mut().resource_mut::<HudState>();
+            hud.inventory.items = vec![Some(mk_item(11)), Some(mk_item(22)), None];
+        }
+        app.update(); // 初始化消息缓冲/系统状态
+
+        // 寄售 uid=22（idx=1）成功 → hud 与 Inventory 组件同格都清空
+        app.world_mut()
+            .write_message(ServerEvent::MarketConsign { uid: 22, success: true });
+        app.update();
+        let hud = app.world().resource::<HudState>();
+        assert!(hud.inventory.items[1].is_none(), "hud 背包格 1 应被寄售移除");
+        assert!(
+            hud.inventory.items[0].is_some(),
+            "hud 背包格 0 应保持（只移除寄售格）"
+        );
+        let inv = app
+            .world_mut()
+            .query_filtered::<&Inventory, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .cloned()
+            .expect("LocalPlayer 应有 Inventory");
+        assert!(inv.items[1].is_none(), "Inventory 组件格 1 应镜像移除");
+        assert!(inv.items[0].is_some(), "Inventory 组件格 0 应保持");
+    }
+
+    /// 寄售失败不移除背包格，Inventory 组件保持不动。
+    #[test]
+    fn market_consign_fail_keeps_inventory() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<MarketState>();
+        app.init_resource::<HudState>();
+        app.add_systems(Update, market_server_events);
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![Some(mk_item(11)), None],
+                ..Default::default()
+            },
+        ));
+        {
+            let mut hud = app.world_mut().resource_mut::<HudState>();
+            hud.inventory.items = vec![Some(mk_item(11)), None];
+        }
+        app.update();
+
+        app.world_mut()
+            .write_message(ServerEvent::MarketConsign { uid: 11, success: false });
+        app.update();
+        let hud = app.world().resource::<HudState>();
+        assert!(hud.inventory.items[0].is_some(), "寄售失败 hud 背包应保持");
+        let inv = app
+            .world_mut()
+            .query_filtered::<&Inventory, With<LocalPlayer>>()
+            .iter(app.world())
+            .next()
+            .cloned()
+            .expect("LocalPlayer 应有 Inventory");
+        assert!(inv.items[0].is_some(), "寄售失败 Inventory 组件应保持");
     }
 }

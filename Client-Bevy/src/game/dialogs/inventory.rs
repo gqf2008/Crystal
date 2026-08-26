@@ -15,6 +15,7 @@ use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
+use crate::game::player_state::{Gold, Inventory, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::sound::{SoundBank, SoundCache, play_sound_cached};
 use crate::map_renderer::GameLibraries;
@@ -200,6 +201,14 @@ impl InventoryState {
     }
 }
 
+/// 背包翻页 UI 态（#2633 批次4：page 从背包数据剥离为单一 UI 资源，背包/英雄背包/仓库
+/// 三处共读避免翻页不同步 R8；Inventory 玩家组件本就不含 page，设计 §6/§8）。
+#[derive(Resource, Default)]
+pub struct InvUiState {
+    /// 当前背包页（0=道具 1=道具2 2=任务；#276 双页扩容）
+    pub page: usize,
+}
+
 /// 背包窗口原点：C# InventoryDialog 构造器**未设 Location**（InventoryDialog.cs:25-31）
 /// → MirControl 默认 (0,0)（左上角，_location 字段零值，MirControl.cs:300）。
 /// 旧值 (182,217) 误把 WeightBar 的**局部**坐标当对话框原点（InventoryDialog.cs:37）。
@@ -254,12 +263,18 @@ pub struct InvWeightBar;
 /// 负重条填充（C# WeightBar_BeforeDraw :396-426）：percent = weight/max_weight
 /// clamp [0,1]，宽度 = (84-3)*percent；色调近似三段（白≤50%/黄≤75%/红>75%，
 /// 原 UI_32bit[471/470] 素材本机数据缺失——#2611 偏差）
-fn inv_weight_bar_system(hud: Res<HudState>, mut bars: Query<&mut Sprite, With<InvWeightBar>>) {
-    let max = hud.inventory.max_weight;
+fn inv_weight_bar_system(
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
+    mut bars: Query<&mut Sprite, With<InvWeightBar>>,
+) {
+    let (max, weight) = inv_q
+        .single()
+        .map(|inv| (inv.max_weight, inv.weight))
+        .unwrap_or((0, 0));
     let percent = if max == 0 {
         0.0
     } else {
-        (hud.inventory.weight as f32 / max as f32).clamp(0.0, 1.0)
+        (weight as f32 / max as f32).clamp(0.0, 1.0)
     };
     let tint = if percent <= 0.50 {
         Color::srgb(1.0, 1.0, 1.0)
@@ -285,6 +300,7 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvPendingAmount>();
         app.init_resource::<ItemUseFeedback>();
         app.init_resource::<InventoryOrigin>();
+        app.init_resource::<InvUiState>();
         // #2631：背包自我右移让位（交易开窗解耦；背包实体/Origin 归本模块所有）
         app.add_message::<InventoryShiftRight>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
@@ -324,8 +340,10 @@ impl Plugin for InventoryDialogPlugin {
 fn quest_inventory_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut hud: ResMut<HudState>,
+    mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
+    let mut dirty = false;
     for ev in events.read() {
         match ev {
             ServerEvent::QuestItemGained { item } => {
@@ -340,6 +358,7 @@ fn quest_inventory_events(
                     hud.inventory.quest_inventory.push(Some(item.clone()));
                 }
                 hud.inventory.quest_inventory.truncate(QUEST_GRID_SIZE);
+                dirty = true;
             }
             ServerEvent::QuestItemDeleted { unique_id, count } => {
                 for slot in hud.inventory.quest_inventory.iter_mut() {
@@ -354,8 +373,15 @@ fn quest_inventory_events(
                         }
                     }
                 }
+                dirty = true;
             }
             _ => {}
+        }
+    }
+    // 双写过渡：任务背包镜像到玩家组件（实体未生成则跳过，R1；hud 侧步9 删）。
+    if dirty {
+        if let Ok(mut inv) = inv_q.single_mut() {
+            inv.quest_inventory = hud.inventory.quest_inventory.clone();
         }
     }
 }
@@ -439,14 +465,14 @@ pub(crate) fn inventory_events(
                 inventory,
                 equipment,
                 quest_inventory,
-                gold,
                 bag_weight,
                 ..
             } => {
                 // 背包/装备部分（玩家属性部分归 player_vitals_events）
                 hud.inventory.items = inventory.clone();
                 hud.inventory.quest_inventory = quest_inventory.clone();
-                hud.inventory.gold = *gold;
+                // #2633 批次4 §9：gold 唯一源是 Gold 组件（vitals 路径同事件写入，
+                // player_state.rs apply_user_info_vitals）；不再写 hud.inventory.gold。
                 hud.equipment = equipment.clone();
                 // #1544：RefreshStats 重量（C# User.RefreshStats；max_weight=服务端 bag_weight）
                 hud.inventory.max_weight = (*bag_weight).max(0) as u32;
@@ -954,7 +980,8 @@ pub struct InvConfirmNo;
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inventory_ui_system(
     mut mgr: ResMut<DialogManager>,
-    mut hud: ResMut<HudState>,
+    player_q: Query<(&Inventory, &Gold), With<LocalPlayer>>,
+    mut inv_ui: ResMut<InvUiState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -991,16 +1018,17 @@ fn inventory_ui_system(
         ),
     >,
 ) {
-    let inv = &hud.inventory;
+    let player = player_q.single().ok();
+    let inv = player.map(|(inv, _)| inv);
     let open = mgr.is_open(DialogKind::Inventory);
-    let size = inv.items.len().min(MAX_INV_SLOTS);
+    let size = inv.map(|inv| inv.items.len()).unwrap_or(0).min(MAX_INV_SLOTS);
     // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页=0..40（QuestGrid）
     for (mut vis, slot) in &mut all_vis {
         let visible = if !open {
             false
         } else {
             match slot {
-                Some(s) => match inv.page {
+                Some(s) => match inv_ui.page {
                     0 => s.0 < size.min(GRID_COLS * GRID_ROWS),
                     1 => s.0 >= GRID_COLS * GRID_ROWS && s.0 < size,
                     // #1342：任务页签显示 QuestGrid 40 格（C# QuestInventory 8x5）
@@ -1026,10 +1054,10 @@ fn inventory_ui_system(
 
     // 物品数据 → 通用 ItemCell（图标/数量/耐久条由 item_cell_system 渲染，#90 续）
     for (slot, mut data) in &mut cells_data {
-        let item = if inv.page == 2 {
-            inv.quest_inventory.get(slot.0).and_then(|s| s.as_ref())
+        let item = if inv_ui.page == 2 {
+            inv.and_then(|i| i.quest_inventory.get(slot.0).and_then(|s| s.as_ref()))
         } else {
-            inv.items.get(slot.0).and_then(|s| s.as_ref())
+            inv.and_then(|i| i.items.get(slot.0).and_then(|s| s.as_ref()))
         };
         match item {
             Some(item) => {
@@ -1064,7 +1092,7 @@ fn inventory_ui_system(
         if btn.clicked {
             match tab {
                 Some(t) => {
-                    hud.inventory.page = t.0;
+                    inv_ui.page = t.0;
                     tracing::debug!("背包页 -> {}", t.0);
                 }
                 None => mgr.close(DialogKind::Inventory),
@@ -1074,9 +1102,10 @@ fn inventory_ui_system(
     for (mut t, mut vis, gold, weight) in &mut money {
         *vis = Visibility::Visible;
         if gold.is_some() {
-            t.0 = format!("{}", hud.inventory.gold);
+            t.0 = format!("{}", player.map(|(_, g)| g.0).unwrap_or(0));
         } else if weight.is_some() {
-            t.0 = format!("{}/{}", hud.inventory.weight, hud.inventory.max_weight);
+            let (w, mw) = inv.map(|i| (i.weight, i.max_weight)).unwrap_or((0, 0));
+            t.0 = format!("{}/{}", w, mw);
         }
     }
 }
@@ -1084,7 +1113,8 @@ fn inventory_ui_system(
 /// 悬停提示系统（#93/#106 通用 Tooltip）：物品格上显示 名称 + 类型/数量/耐久
 /// 命中用 InventoryOrigin（#2560：背包推位/拖动后 tooltip 跟随）
 fn inv_tooltip_system(
-    inv: Res<crate::game::hud::HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
+    inv_ui: Res<InvUiState>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     origin: Res<InventoryOrigin>,
     windows: Query<&Window>,
@@ -1095,8 +1125,9 @@ fn inv_tooltip_system(
         return;
     };
 
-    let page = inv.inventory.page;
-    let size = inv.inventory.items.len().min(MAX_INV_SLOTS);
+    let inv = inv_q.single().ok();
+    let page = inv_ui.page;
+    let size = inv.map(|i| i.items.len()).unwrap_or(0).min(MAX_INV_SLOTS);
     let mut hit: Option<InvItem> = None;
     for slot in &slots {
         let i = slot.0;
@@ -1116,13 +1147,9 @@ fn inv_tooltip_system(
         let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
             hit = if page == 2 {
-                inv.inventory
-                    .quest_inventory
-                    .get(i)
-                    .and_then(|s| s.as_ref())
-                    .cloned()
+                inv.and_then(|i2| i2.quest_inventory.get(i).and_then(|s| s.as_ref()).cloned())
             } else {
-                inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned()
+                inv.and_then(|i2| i2.items.get(i).and_then(|s| s.as_ref()).cloned())
             };
             break;
         }
@@ -1289,15 +1316,16 @@ pub fn item_type_name(t: u8) -> &'static str {
 #[allow(clippy::too_many_arguments)]
 fn inv_grid_sync_system(
     mut commands: Commands,
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     origin: Res<InventoryOrigin>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     slots: Query<(Entity, &InvSlot)>,
 ) {
-    let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
-    if hud.inventory.items.is_empty() && slots.is_empty() {
+    let inv = inv_q.single().ok();
+    let size = inv.map(|i| i.items.len()).unwrap_or(0).min(MAX_INV_SLOTS);
+    if inv.map(|i| i.items.is_empty()).unwrap_or(true) && slots.is_empty() {
         return; // 进图 UserInformation 到达前：无格子可同步
     }
     // 缩容：移除超出 size 的格子
@@ -1453,14 +1481,14 @@ pub struct ItemUseFeedback {
 pub(crate) fn try_use_belt_item(
     uid: u64,
     net: &NetConnection,
-    hud: &HudState,
+    fishing: bool,
     now: f64,
     feedback: &mut ItemUseFeedback,
 ) -> bool {
     if now < feedback.last_use {
         return false;
     }
-    if hud.fishing {
+    if fishing {
         return false;
     }
     feedback.last_use = now + 0.3;
@@ -1603,6 +1631,7 @@ impl<'a> UseItemCtx<'a> {
 fn use_item_guard(
     item: &InvItem,
     hud: &HudState,
+    fishing: bool,
     ctx: UseItemCtx,
     now: f64,
     feedback: &mut ItemUseFeedback,
@@ -1612,7 +1641,7 @@ fn use_item_guard(
         return None;
     }
     // 2. 钓鱼（英雄格跳过：C# !HeroGridType && User.Fishing）
-    if ctx.check_fishing && hud.fishing {
+    if ctx.check_fishing && fishing {
         feedback.messages.push("钓鱼中无法使用物品".to_string());
         return None;
     }
@@ -1660,13 +1689,14 @@ pub(crate) fn use_item_core(
     item: &InvItem,
     net: &NetConnection,
     hud: &HudState,
+    fishing: bool,
     ctx: UseItemCtx,
     now: f64,
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
 ) -> UseOutcome {
     // 守卫链（节流/钓鱼/骑乘/SoulBound/CanUseItem/槽物品前置）
-    match use_item_guard(item, hud, ctx, now, feedback) {
+    match use_item_guard(item, hud, fishing, ctx, now, feedback) {
         None => return UseOutcome::Blocked,
         Some(false) => {
             // 按物品目标（坐骑/钓具）提示，而非来源格
@@ -1759,6 +1789,7 @@ fn use_or_equip(
     item: &InvItem,
     net: &NetConnection,
     hud: &HudState,
+    fishing: bool,
     now: f64,
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
@@ -1767,6 +1798,7 @@ fn use_or_equip(
         item,
         net,
         hud,
+        fishing,
         UseItemCtx::player(hud),
         now,
         feedback,
@@ -1776,7 +1808,7 @@ fn use_or_equip(
 /// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
 #[allow(clippy::too_many_arguments)]
 fn inv_add_del_buttons_system(
-    mut hud: ResMut<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut click: ResMut<InvClickState>,
     mut confirm: ResMut<InvDropConfirm>,
     mgr: Res<DialogManager>,
@@ -1788,7 +1820,7 @@ fn inv_add_del_buttons_system(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
 ) {
-    let len = hud.inventory.items.len();
+    let len = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
     // C# AddButton.Visible = openLevel < 10（上限 86 格）；
     // 必须先判断背包对话框是否打开，否则关闭后按钮残留成屏幕上的孤按钮
     let can_expand = mgr.is_open(DialogKind::Inventory) && len < MAX_INV_EXPAND;
@@ -1981,7 +2013,8 @@ fn inv_confirm_system(
 /// Ctrl+右键：打开镶嵌面板（C# MirItemCell.OpenItem）——独立系统避免主系统参数超限（Bevy 16 上限）
 #[allow(clippy::too_many_arguments)]
 fn inv_socket_open_system(
-    hud: Res<HudState>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
+    inv_ui: Res<InvUiState>,
     mut mgr: ResMut<DialogManager>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1996,8 +2029,9 @@ fn inv_socket_open_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    let page = hud.inventory.page;
-    let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
+    let Ok(inv) = inv_q.single() else { return };
+    let page = inv_ui.page;
+    let size = inv.items.len().min(MAX_INV_SLOTS);
     let range: std::ops::Range<usize> = match page {
         0 => 0..size.min(GRID_COLS * GRID_ROWS),
         1 => (GRID_COLS * GRID_ROWS)..size,
@@ -2010,7 +2044,7 @@ fn inv_socket_open_system(
         let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
-            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+            if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                 if !item.slots.is_empty() {
                     socket.item = Some(item.clone());
                     mgr.open(DialogKind::Socket);
@@ -2054,6 +2088,8 @@ fn cursor_over_dialog<'a>(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inv_item_action_system(
     hud: Res<HudState>,
+    player_q: Query<(&Inventory, &StatusFlags), With<LocalPlayer>>,
+    inv_ui: Res<InvUiState>,
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -2091,7 +2127,7 @@ fn inv_item_action_system(
     };
 
     // #1342：任务物品格只读（C# MirGridType.QuestInventory 不可移动/使用）
-    if hud.inventory.page == 2 {
+    if inv_ui.page == 2 {
         return;
     }
 
@@ -2132,8 +2168,9 @@ fn inv_item_action_system(
     }
 
     // 光标下的背包格（按当前页与格数，#276；原点取 InventoryOrigin——推位/拖动后仍准确）
-    let page = hud.inventory.page;
-    let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
+    let Ok((inv, flags)) = player_q.single() else { return };
+    let page = inv_ui.page;
+    let size = inv.items.len().min(MAX_INV_SLOTS);
     let (ox, oy) = (misc.2.0, misc.2.1);
     let slot_at = |cx: f32, cy: f32| -> Option<usize> {
         let range: std::ops::Range<usize> = match page {
@@ -2164,7 +2201,7 @@ fn inv_item_action_system(
     // #1346：删除模式左键点物品 → 数量框/确认 → C.DeleteItem（C# PromptDelete）
     if click.delete_mode && mouse.just_pressed(MouseButton::Left) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
-            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+            if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                 if item.count > 1 {
                     pending.delete_uid = Some(item.unique_id);
                     amount.ask(format!("删除 {} 数量", item.name), item.count as u32);
@@ -2217,20 +2254,19 @@ fn inv_item_action_system(
                     Some(from) => {
                         // #1604：拖到同类堆叠格 → C.MergeItem（C# MirItemCell.cs:815/906/980）；
                         // ServerRust move_item 目标格有物品会失败，merge_item 只由 MergeItem 触发
-                        let same_stack = hud
-                            .inventory
+                        let same_stack = inv
                             .items
                             .get(i)
                             .and_then(|s| s.as_ref())
-                            .zip(hud.inventory.items.get(from).and_then(|s| s.as_ref()))
+                            .zip(inv.items.get(from).and_then(|s| s.as_ref()))
                             .map(|(t, f)| {
                                 t.item_index == f.item_index && t.unique_id != f.unique_id
                             })
                             .unwrap_or(false);
                         if same_stack {
                             if let (Some(from_item), Some(to_item)) = (
-                                hud.inventory.items.get(from).and_then(|s| s.as_ref()),
-                                hud.inventory.items.get(i).and_then(|s| s.as_ref()),
+                                inv.items.get(from).and_then(|s| s.as_ref()),
+                                inv.items.get(i).and_then(|s| s.as_ref()),
                             ) {
                                 net.send_packet(&mir2_shared::packets::client::item::MergeItem {
                                     grid_from: MirGridType::Inventory,
@@ -2259,13 +2295,7 @@ fn inv_item_action_system(
                     }
                     None => {
                         // 只有物品格可选中（空格不选中）
-                        if hud
-                            .inventory
-                            .items
-                            .get(i)
-                            .and_then(|s| s.as_ref())
-                            .is_some()
-                        {
+                        if inv.items.get(i).and_then(|s| s.as_ref()).is_some() {
                             click.selected = Some(i);
                         }
                     }
@@ -2275,8 +2305,9 @@ fn inv_item_action_system(
     }
     // 双击：使用/装备
     if let Some(i) = dbl {
-        if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-            if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm) == UseOutcome::Sent
+        if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
+            if use_or_equip(item, &net, &hud, flags.fishing, now, &mut feedback, &mut confirm)
+                == UseOutcome::Sent
             {
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);
@@ -2293,8 +2324,8 @@ fn inv_item_action_system(
     // 右键：使用/装备
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
-            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-                if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm)
+            if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
+                if use_or_equip(item, &net, &hud, flags.fishing, now, &mut feedback, &mut confirm)
                     == UseOutcome::Sent
                 {
                     if let Some(sid) = item_use_sound_id(item) {
@@ -2308,7 +2339,7 @@ fn inv_item_action_system(
     if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::AltLeft) {
         if npc_goods.visible {
             if let Some(i) = slot_at(cursor.x, cursor.y) {
-                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                     net.send_packet(&mir2_shared::packets::client::npc::SellItem {
                         unique_id: item.unique_id,
                         count: 1,
@@ -2323,9 +2354,9 @@ fn inv_item_action_system(
     // Shift+左键：拆分堆叠
     if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::ShiftLeft) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
-            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+            if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                 if item.count > 1 {
-                    if !hud.inventory.items.iter().any(|s| s.is_none()) {
+                    if !inv.items.iter().any(|s| s.is_none()) {
                         tracing::warn!("背包已满，无法拆分");
                         return;
                     }
@@ -2366,7 +2397,7 @@ fn inv_item_action_system(
         if over_btn {
             return;
         }
-        let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) else {
+        let Some(item) = inv.items.get(sel).and_then(|s| s.as_ref()) else {
             click.selected = None;
             return;
         };
@@ -2431,9 +2462,14 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
 
         let mut world = World::new();
-        let mut hud = HudState::default();
-        hud.inventory.items = vec![None, None]; // 2 格（既有 0，扩容补 1）
-        world.insert_resource(hud);
+        // 2 格背包（既有 0，扩容补 1）：#2633 批次4 后 inv_grid_sync 读 Inventory 组件
+        world.spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![None, None],
+                ..Default::default()
+            },
+        ));
         // 背包被推位到 (393,50)
         world.insert_resource(InventoryOrigin(393.0, 50.0));
         world.insert_resource(Assets::<Image>::default());
@@ -2460,6 +2496,42 @@ mod tests {
             .map(|(_, tf)| (tf.translation.x, tf.translation.y))
             .expect("扩容应补出格 1");
         assert_eq!(cell1, (sx, sy), "新格应在推位原点基准处（列 1）");
+    }
+
+    /// R8：背包页签写入单一 InvUiState 资源（背包/英雄背包/仓库共读同一资源，翻页天然同步）。
+    /// 点击任务页签（InvTab(2)）→ 共享 InvUiState.page 变 2，而非旧 hud.inventory.page。
+    #[test]
+    fn inventory_page_lives_in_shared_inv_ui_state() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open.push(DialogKind::Inventory);
+        world.insert_resource(mgr);
+        world.insert_resource(InvUiState::default());
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(UiImageCache::default());
+        // 任务页签按钮（已点击；带 Visibility 走 all_vis 分支，无 InvSlot → 恒可见）
+        world.spawn((
+            DialogWidget,
+            Visibility::Visible,
+            UiButton {
+                rect: (146.0, 7.0, 72.0, 23.0),
+                clicked: true,
+            },
+            InvTab(2),
+        ));
+
+        world
+            .run_system_once(inventory_ui_system)
+            .expect("inventory_ui_system 应运行");
+
+        assert_eq!(
+            world.resource::<InvUiState>().page,
+            2,
+            "页签点击应写入共享 InvUiState（R8 单一翻页源）"
+        );
     }
 
     /// #2631：InventoryShiftRight → 背包自我右移让位（替代旧 trade.rs push_inventory_right）。
@@ -2868,10 +2940,10 @@ mod tests {
             check_fishing: false,
             allow_consumable: true,
         };
-        assert!(use_item_guard(&potion, &hud, ctx_hero, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&potion, &hud, hud.fishing, ctx_hero, 0.0, &mut fb).is_some());
         // 主背包 check_fishing=true → 钓鱼拦截
         let ctx_player = UseItemCtx::player(&hud);
-        assert!(use_item_guard(&potion, &hud, ctx_player, 0.0, &mut fb).is_none());
+        assert!(use_item_guard(&potion, &hud, hud.fishing, ctx_player, 0.0, &mut fb).is_none());
     }
 
     #[test]
@@ -2890,10 +2962,10 @@ mod tests {
         };
         // 守卫本身通过（消耗品拦截在 use_item_core 第 8 步）
         let potion = item_with_type(ItemType::Potion);
-        assert!(use_item_guard(&potion, &hud, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&potion, &hud, hud.fishing, ctx_storage, 0.0, &mut fb).is_some());
         // 装备放行
         let sword = item_with_type(ItemType::Weapon);
-        assert!(use_item_guard(&sword, &hud, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(&sword, &hud, hud.fishing, ctx_storage, 0.0, &mut fb).is_some());
     }
 
     #[test]
@@ -2916,12 +2988,12 @@ mod tests {
         };
         let potion = item_with_type(ItemType::Potion);
         assert_eq!(
-            use_item_core(&potion, &net, &hud, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(&potion, &net, &hud, hud.fishing, ctx_storage, 0.0, &mut fb, &mut confirm),
             UseOutcome::Blocked
         );
         let sword = item_with_type(ItemType::Weapon);
         assert_eq!(
-            use_item_core(&sword, &net, &hud, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(&sword, &net, &hud, hud.fishing, ctx_storage, 0.0, &mut fb, &mut confirm),
             UseOutcome::Sent
         );
     }
@@ -2947,7 +3019,7 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, &hud, ctx_empty, 0.0, &mut fb, &mut confirm),
+            use_item_core(&bracelet, &net, &hud, hud.fishing, ctx_empty, 0.0, &mut fb, &mut confirm),
             UseOutcome::Sent
         );
         // 左右手镯都占用 → 不装备（C# BraceletR/L 都占用 → 不装备）
@@ -2968,7 +3040,7 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, &hud, ctx_full, 0.0, &mut fb, &mut confirm),
+            use_item_core(&bracelet, &net, &hud, hud.fishing, ctx_full, 0.0, &mut fb, &mut confirm),
             UseOutcome::Blocked
         );
     }

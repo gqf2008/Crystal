@@ -212,7 +212,7 @@ fn mail_compose_request_system(
 #[allow(clippy::too_many_arguments)]
 fn mail_compose_system(
     mut mail: ResMut<MailState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     mut libs: ResMut<GameLibraries>,
@@ -253,12 +253,12 @@ fn mail_compose_system(
     }
 
     if open {
+        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
         // 附件槽图标（按 unique_id 在背包中查找）
         for (mut data, slot) in &mut attach_cells {
             let uid = mail.attach.get(slot.0).and_then(|s| *s);
             data.icon = uid.and_then(|uid| {
-                hud.inventory
-                    .items
+                items
                     .iter()
                     .flatten()
                     .find(|it| it.unique_id == uid)
@@ -277,7 +277,7 @@ fn mail_compose_system(
         // 背包选择格（最多 20 个，跳过已附加；记录对应背包槽位）
         let attached: Vec<u64> = mail.attach.iter().flatten().copied().collect();
         let mut pick_slots: Vec<Option<usize>> = Vec::new();
-        for (slot_idx, item) in hud.inventory.items.iter().enumerate() {
+        for (slot_idx, item) in items.iter().enumerate() {
             if pick_slots.len() >= 20 {
                 break;
             }
@@ -294,7 +294,7 @@ fn mail_compose_system(
         for (mut data, pick) in &mut pick_cells {
             match pick_slots.get(pick.0).and_then(|s| *s) {
                 Some(slot_idx) => {
-                    match hud.inventory.items.get(slot_idx).and_then(|s| s.as_ref()) {
+                    match items.get(slot_idx).and_then(|s| s.as_ref()) {
                         Some(it) => {
                             let icon = ui_image(
                                 &mut libs,
@@ -366,7 +366,7 @@ fn mail_compose_system(
                         && cursor.y <= y + 40.0
                     {
                         if let Some(it) =
-                            hud.inventory.items.get(*slot_idx).and_then(|s| s.as_ref())
+                            items.get(*slot_idx).and_then(|s| s.as_ref())
                         {
                             // #2538：未贴票仅第 1 格可用（C# UpdateParcel Cells[1..] Enabled=false）
                             let slots = stamp_slots(mail.stamped);
@@ -426,7 +426,7 @@ fn mail_compose_system(
 /// #2538：邮票交互（C# StampParcel/UpdateParcel）+ 贴票覆层/邮资显示
 fn mail_stamp_system(
     mut mail: ResMut<MailState>,
-    hud: Res<crate::game::hud::HudState>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     net: Res<NetConnection>,
     stamp_btn: Query<&UiButton, With<MailStampBtn>>,
     mut stamp_on: Query<&mut Visibility, With<MailStampOn>>,
@@ -446,7 +446,11 @@ fn mail_stamp_system(
         if btn.clicked && mail.compose {
             if !mail.stamped {
                 // C# StampParcel：背包须有邮票（Nothing/Shape==1）
-                if hud.inventory.items.iter().flatten().any(is_stamp_item) {
+                let has_stamp = inv_q
+                    .single()
+                    .map(|inv| inv.items.iter().flatten().any(is_stamp_item))
+                    .unwrap_or(false);
+                if has_stamp {
                     mail.stamped = true;
                 } else {
                     tracing::info!("✉️ 背包无邮票，无法贴票");

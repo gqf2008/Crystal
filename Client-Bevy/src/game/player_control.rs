@@ -13,7 +13,7 @@ use bevy::window::{CursorIcon, SystemCursorIcon};
 
 use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
-use crate::game::player_state::StatusFlags;
+use crate::game::player_state::{Inventory, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
@@ -741,8 +741,9 @@ fn hold_move_system(
     >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
     hud: Res<HudState>,
-    // #2633 批次4 步4：in_trap_rock/sprint/sneaking 读改 StatusFlags；riding/inventory/equipment 仍读 hud（批5/6）
-    flags: Query<&StatusFlags, With<LocalPlayer>>,
+    // #2633 批次4：in_trap_rock/sprint/sneaking 读 StatusFlags（步4）、背包负重读 Inventory（步5）；
+    // riding/equipment 仍读 hud（批6）
+    flags: Query<(&StatusFlags, &Inventory), With<LocalPlayer>>,
     dialog: Res<crate::game::dialogs::DialogManager>,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
@@ -839,11 +840,12 @@ fn hold_move_system(
             }
 
             // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
-            // #2633 步4：in_trap_rock/sprint/sneaking 读改 StatusFlags；实体缺失视同无旗标（同原 hud 默认 false）
-            let (in_trap, sprint, sneaking) = flags
+            // #2633 步4/步5：in_trap_rock/sprint/sneaking 读 StatusFlags、背包负重读 Inventory；
+            // 实体缺失视同无旗标/空负重（同原 hud 默认 false/0）
+            let (in_trap, sprint, sneaking, bag_weight, bag_max) = flags
                 .single()
-                .map(|f| (f.in_trap_rock, f.sprint, f.sneaking))
-                .unwrap_or((false, false, false));
+                .map(|(f, inv)| (f.in_trap_rock, f.sprint, f.sneaking, inv.weight, inv.max_weight))
+                .unwrap_or((false, false, false, 0, 0));
 
             // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
             // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
@@ -890,14 +892,14 @@ fn hold_move_system(
                 // C# CanRun：负重不超限 && CanWalk(dir) && EmptyCell(2 格)；
                 // 骑乘或冲刺（且非潜行）→ 3 格（C# GameScene.cs:12143-12147）
                 // 潜行且非冲刺 → 不可跑（C# CheckInput 11528：!Sneaking || (Sneaking && Sprint)）
-                let bag_ok = hud.inventory.weight <= hud.inventory.max_weight;
+                let bag_ok = bag_weight <= bag_max;
                 let wear_ok = hud
                     .equipment
                     .iter()
                     .flatten()
                     .map(|i| i.weight as u32)
                     .sum::<u32>()
-                    <= hud.inventory.max_weight;
+                    <= bag_max;
                 let can_run_base = !in_trap && bag_ok && wear_ok && !(sneaking && !sprint);
                 let run_dist = if hud.riding || (sprint && !sneaking) { 3 } else { 2 };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {

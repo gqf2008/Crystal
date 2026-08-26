@@ -12,8 +12,10 @@
 
 use bevy::prelude::*;
 
+use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem, ItemUseFeedback, try_use_belt_item};
 use crate::game::hud::HudState;
+use crate::game::player_state::{Inventory, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -341,7 +343,7 @@ fn potion_belt_ui_system(
     mut belt: ResMut<PotionBeltState>,
     mut visible: ResMut<PotionBeltVisible>,
     mut vertical: ResMut<PotionBeltVertical>,
-    hud: Res<HudState>,
+    player_q: Query<(&Inventory, &StatusFlags), With<LocalPlayer>>,
     net: Res<NetConnection>,
     mut feedback: ResMut<ItemUseFeedback>,
     // #2631：选中态归 inventory 所有，本系统只读（指派腰带给当前背包选中格）
@@ -501,12 +503,20 @@ fn potion_belt_ui_system(
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
+    let player = player_q.single().ok();
     if let Some(uid) = belt.slots[i] {
-        if try_use_belt_item(uid, &net, &hud, now, &mut feedback) {
+        if try_use_belt_item(
+            uid,
+            &net,
+            player.map(|(_, f)| f.fishing).unwrap_or(false),
+            now,
+            &mut feedback,
+        ) {
             tracing::info!("🧪 使用腰带物品 uid={}", uid);
         }
     } else if let Some(sel) = click.selected() {
-        if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
+        if let Some(item) = player.and_then(|(inv, _)| inv.items.get(sel).and_then(|s| s.as_ref()))
+        {
             belt.slots[i] = Some(item.unique_id);
             tracing::info!(
                 "🧪 指派腰带 {}: {} (uid={})",
