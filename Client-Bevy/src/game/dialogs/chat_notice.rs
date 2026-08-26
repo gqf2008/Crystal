@@ -10,10 +10,8 @@ use bevy::prelude::*;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_image, UiFont, UiImageCache,
-};
-use crate::ui::controls::{strip_color_tags, ScrollingLabel};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_label, spawn_panel};
 
 /// 屏幕通知状态（网络 ChatNotice 写入）
 #[derive(Resource, Default)]
@@ -54,7 +52,6 @@ fn spawn_chat_notice(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -64,26 +61,33 @@ fn spawn_chat_notice(
     }
     let font = ui_font.0.clone();
 
-    // 背景（屏幕顶部中央）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1361) {
-        let e = spawn_ui_sprite(&mut commands, h, 330.0, 80.0, 9.0, 1.0);
-        commands.entity(e).insert((ChatNoticeWidget, Visibility::Hidden));
-    }
-    let t = spawn_ui_text(&mut commands, &font, "", 350.0, 90.0, 14.0, Color::srgb(1.0, 0.9, 0.4), 9.2);
-    commands.entity(t).insert((
-        ChatNoticeText,
-        ChatNoticeWidget,
-        // #90 ScrollingLabel：剥离 {text/color} 标签，支持多行
-        ScrollingLabel { visible_lines: 4, text: String::new() },
-    ));
+    // 背景 Prguse[1361]（660x25 @ 330,80，屏幕顶部中央）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1361) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 330.0, 80.0, 660.0, 25.0, 50);
+    commands.entity(panel).insert(ChatNoticeWidget);
+    commands.entity(panel).with_children(|p| {
+        spawn_label(
+            p,
+            &font,
+            "",
+            20.0,
+            4.0,
+            14.0,
+            Color::srgb(1.0, 0.9, 0.4),
+            9,
+        )
+        .insert(ChatNoticeText);
+    });
 }
 
 /// 显示/计时消失
 fn chat_notice_system(
     mut state: ResMut<ChatNoticeState>,
     time: Res<Time>,
-    mut widgets: Query<&mut Visibility, With<ChatNoticeWidget>>,
-    mut texts: Query<&mut Text2d, With<ChatNoticeText>>,
+    mut widgets: Query<&mut Visibility, (With<ChatNoticeWidget>, Without<ChatNoticeText>)>,
+    mut texts: Query<&mut Text, With<ChatNoticeText>>,
 ) {
     if state.visible {
         state.remaining -= time.delta_secs();
@@ -99,11 +103,11 @@ fn chat_notice_system(
         };
     }
     if let Ok(mut t) = texts.single_mut() {
-        // #90：标签剥离 + 多行
+        // 剥离 {text/color} 标签 + 多行
         let stripped: Vec<String> = state
             .text
             .split('\n')
-            .map(strip_color_tags)
+            .map(crate::ui::controls::strip_color_tags)
             .collect();
         let joined = stripped.join("\n");
         if t.0 != joined {
@@ -111,3 +115,4 @@ fn chat_notice_system(
         }
     }
 }
+
