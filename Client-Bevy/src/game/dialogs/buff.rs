@@ -14,9 +14,8 @@ use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
-};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
 
 /// Buff 条目
 #[derive(Debug, Clone, Copy, Default)]
@@ -124,9 +123,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_buff);
         app.add_systems(OnExit(AppState::Game), cleanup_buff);
         app.add_systems(
             Update,
-            (buff_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            buff_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -141,7 +138,6 @@ fn spawn_buff(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -151,108 +147,104 @@ fn spawn_buff(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Buff),
-            BuffWidget,
-            BuffPanel,
-            Visibility::Hidden,
-        ));
-    }
-    // 展开/收起按钮（C# _expandCollapseButton：Prguse2 7/8/9，16x15）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 7, 8, 9,
-        280.0 + 300.0 - 20.0, 83.0, 7.0, 16.0, 15.0,
-    ) {
-        commands.entity(e).insert((
-            BuffExpand,
-            DialogRoot(DialogKind::Buff),
-            BuffWidget,
-        ));
-    }
-    // 收起时的数量标签（C# _buffCountLabel：黄色粗体）
-    let e = spawn_ui_text(
-        &mut commands, &font, "",
-        280.0 + 22.0, 97.0,
-        12.0, Color::srgb(1.0, 1.0, 0.0), 8.0,
-    );
-    commands.entity(e).insert((
-        BuffCount,
-        DialogRoot(DialogKind::Buff),
-        BuffWidget,
-    ));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            BuffClose,
-            DialogRoot(DialogKind::Buff),
-            BuffWidget,
-        ));
-    }
-    // 8 行 buff + 2 状态行
-    for i in 0..10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            BuffLine(i),
-            DialogRoot(DialogKind::Buff),
-            BuffWidget,
-        ));
-    }
+    // 面板 Prguse[170] @ (280,80)。展开 320x262（10 行文本 + 关闭按钮都在面板内，
+    // 修复旧 sprite 布局状态行悬空面板外）；收起 44x34（C# Size(44,34) 语义）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Buff), BuffWidget, BuffPanel));
+
+    commands.entity(panel).with_children(|p| {
+        // 展开/收起按钮（C# _expandCollapseButton：Prguse2 7/8/9，16x15）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 7),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 8),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 9),
+        ) {
+            spawn_icon_button(p, n, h, pr, 302.0, 3.0, 16.0, 15.0, 10).insert(BuffExpand);
+        }
+        // 收起时的数量标签（C# _buffCountLabel：黄色粗体）
+        spawn_label(p, &font, "", 160.0, 11.0, 12.0, Color::srgb(1.0, 1.0, 0.0), 10)
+            .insert(BuffCount);
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(BuffClose);
+        }
+        // 8 行 buff + 2 状态行
+        for i in 0..10usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(BuffLine(i));
+        }
+    });
 }
 
 /// 显隐 + 渲染 + 展开/收起 + 关闭
 fn buff_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<BuffState>,
-    mut expand: Query<(&UiButton, &mut Transform), With<BuffExpand>>,
-    mut close: Query<(&UiButton, &mut Visibility), With<BuffClose>>,
-    mut panel: Query<&mut Sprite, (With<BuffPanel>, Without<BuffExpand>, Without<BuffClose>, Without<BuffCount>)>,
+    mut expand: Query<
+        (Entity, &Interaction, &mut Node),
+        (With<BuffExpand>, Without<BuffPanel>, Without<BuffCount>, Without<BuffClose>),
+    >,
+    mut close: Query<
+        (Entity, &Interaction, &mut Visibility),
+        (With<BuffClose>, Without<BuffLine>, Without<BuffCount>, Without<BuffExpand>, Without<BuffPanel>),
+    >,
+    mut panel: Query<&mut Node, (With<BuffPanel>, Without<BuffExpand>, Without<BuffClose>, Without<BuffCount>)>,
     // #1290：Bevy B0001——多个 &mut Query 需完整 Without 隔离（#1237 合并后启动 panic）
     mut count_text: Query<
-        (&mut Text2d, &mut Transform, &mut Visibility),
-        (With<BuffCount>, Without<BuffLine>, Without<BuffExpand>, Without<BuffClose>, Without<BuffWidget>),
+        (&mut Text, &mut Node, &mut Visibility),
+        (With<BuffCount>, Without<BuffLine>, Without<BuffExpand>, Without<BuffClose>, Without<BuffPanel>),
     >,
-    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>, Without<BuffCount>, Without<BuffClose>)>,
+    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>, Without<BuffCount>, Without<BuffClose>, Without<BuffExpand>, Without<BuffPanel>)>,
     mut lines: Query<
-        (&mut Text2d, &mut Visibility, &BuffLine),
-        (Without<BuffCount>, Without<BuffClose>, Without<BuffWidget>),
+        (&mut Text, &mut Visibility, &BuffLine),
+        (Without<BuffCount>, Without<BuffClose>, Without<BuffExpand>, Without<BuffPanel>),
     >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Buff);
-    // 面板尺寸：展开 300x200，收起 44x34（C# Size(44,34)）
-    let (pw, ph) = if state.expanded { (300.0f32, 200.0f32) } else { (44.0, 34.0) };
-    for mut sp in &mut panel {
-        sp.custom_size = Some(Vec2::new(pw, ph));
+    // 面板尺寸：展开 320x262，收起 44x34（C# Size(44,34)）
+    let (pw, ph) = if state.expanded { (320.0f32, 262.0f32) } else { (44.0, 34.0) };
+    for mut node in &mut panel {
+        node.width = Val::Px(pw);
+        node.height = Val::Px(ph);
     }
     // 展开按钮：收起时移到小窗右上角
-    for (btn, mut tf) in &mut expand {
-        tf.translation.x = 280.0 + pw - 18.0;
-        tf.translation.y = -83.0;
-        if btn.clicked {
+    for (e, inter, mut node) in &mut expand {
+        node.left = Val::Px(pw - 18.0);
+        node.top = Val::Px(3.0);
+        if edge(e, inter, &mut prev_inter) {
             state.expanded = !state.expanded;
             state.save_expanded();
             tracing::info!("🩹 Buff 窗口{}", if state.expanded { "展开" } else { "收起" });
         }
     }
     // 数量标签（收起时显示）
-    for (mut text, mut tf, mut vis) in &mut count_text {
+    for (mut text, mut node, mut vis) in &mut count_text {
         *vis = if open && !state.expanded {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
         text.0 = format!("{}", state.buffs.len());
-        tf.translation.x = 280.0 + pw / 2.0;
-        tf.translation.y = -(80.0 + ph / 2.0);
+        node.left = Val::Px(pw / 2.0 - 6.0);
+        node.top = Val::Px(ph / 2.0 - 6.0);
     }
     // 面板/按钮显隐
     for mut vis in &mut widgets {
@@ -260,14 +252,17 @@ fn buff_ui_system(
     }
     if !open {
         // 关闭按钮（BuffClose）只在 open 分支管理显隐，关闭时必须隐藏
-        for (_, mut vis) in &mut close {
+        for (_, _, mut vis) in &mut close {
             *vis = Visibility::Hidden;
         }
         return;
     }
-    // 关闭按钮仅展开时显示
-    for (_, mut vis) in &mut close {
+    // 关闭按钮：仅展开时显示；点击关闭（旧 sprite 版只显示不响应，迁移补上）
+    for (e, inter, mut vis) in &mut close {
         *vis = if state.expanded { Visibility::Visible } else { Visibility::Hidden };
+        if edge(e, inter, &mut prev_inter) {
+            mgr.close(DialogKind::Buff);
+        }
     }
     // 列表行仅展开时显示 + 渲染
     for (mut text, mut vis, line) in &mut lines {
@@ -287,7 +282,6 @@ fn buff_ui_system(
         };
     }
 }
-
 
 /// 消费服务端状态事件（网络层只广播 ServerEvent）
 /// #2633 批次4 步9：sprint/sneaking 直写 `StatusFlags` 组件（hud.* 双写已删）；

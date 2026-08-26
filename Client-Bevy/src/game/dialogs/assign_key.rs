@@ -17,9 +17,8 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    ui_button_system, ui_image, ButtonFrames, UiButton, UiEntity, UiFont, UiImageCache,
-};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, ImageButton};
 
 /// 面板状态（C# AssignKeyPanel：Magic/Key；Save 时发包并本地更新）
 #[derive(Resource, Default)]
@@ -84,9 +83,7 @@ impl Plugin for AssignKeyPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_assign_key_panel);
         app.add_systems(
             Update,
-            (assign_key_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            assign_key_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -109,7 +106,6 @@ fn spawn_assign_key_panel(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -119,174 +115,87 @@ fn spawn_assign_key_panel(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[710]，屏幕居中（原版 Location = Center）
-    let Some(bg) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 710) else {
+    // 背景 Prguse[710]（380x144），屏幕居中（原版 Location = Center）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 710) else {
         return;
     };
-    let size = images
-        .get(&bg)
-        .map(|i| i.size())
-        .unwrap_or(UVec2::new(350, 150));
-    let (w, h) = (size.x as f32, size.y as f32);
+    let (w, h) = (380.0, 144.0);
     let (px, py) = ((1024.0 - w) / 2.0, (768.0 - h) / 2.0);
-    let panel = commands
-        .spawn((
-            UiEntity,
-            AssignKeyWidget,
-            Sprite::from_image(bg),
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(px, -py, 7.5),
-            Visibility::Hidden,
-        ))
-        .id();
+    let panel = spawn_panel(&mut commands, bg, px, py, w, h, 60);
+    commands.entity(panel).insert(AssignKeyWidget);
+
     commands.entity(panel).with_children(|p| {
-        // 魔法图标 MagIcon2[icon*2] (16,16)
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::MagIcon2, 0) {
-            p.spawn((
-                AssignKeyWidget,
-                AssignKeyIcon,
-                Sprite::from_image(h),
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(16.0, -16.0, 7.6),
-                Visibility::Hidden,
-            ));
+        // 魔法图标 MagIcon2[icon*2] (16,16)，尺寸 36x34
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::MagIcon2, 0) {
+            spawn_image(p, h, 16.0, 16.0, 36.0, 34.0, 9).insert(AssignKeyIcon);
         }
         // 标题（C# TitleLabel (49,17)）
-        p.spawn((
-            AssignKeyWidget,
-            AssignKeyTitle,
-            Text2d::new(""),
-            Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(49.0, -17.0, 7.6),
-            Visibility::Hidden,
-        ));
+        spawn_label(p, &font, "", 49.0, 17.0, 12.0, Color::WHITE, 9).insert(AssignKeyTitle);
         // None 按钮 Title[287-289] (284,64)
-        if let (Some(n), Some(hov), Some(pre)) = (
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 287),
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 288),
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 289),
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 287),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 288),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 289),
         ) {
-            let sz = images
-                .get(&n)
-                .map(|i| i.size())
-                .unwrap_or(UVec2::new(40, 20));
-            p.spawn((
-                AssignKeyWidget,
-                AssignKeyNone,
-                UiButton {
-                    rect: (px + 284.0, py + 64.0, sz.x as f32, sz.y as f32),
-                    clicked: false,
-                },
-                ButtonFrames {
-                    normal: n.clone(),
-                    hover: hov,
-                    pressed: pre,
-                },
-                Sprite::from_image(n.clone()),
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(284.0, -64.0, 7.6),
-                Visibility::Hidden,
-            ));
+            spawn_icon_button(p, n, h, pr, 284.0, 64.0, 76.0, 25.0, 10).insert(AssignKeyNone);
         }
         // Save 按钮 Title[156-158] (284,101)
-        if let (Some(n), Some(hov), Some(pre)) = (
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 156),
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 157),
-            ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 158),
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 156),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 157),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 158),
         ) {
-            let sz = images
-                .get(&n)
-                .map(|i| i.size())
-                .unwrap_or(UVec2::new(40, 20));
-            p.spawn((
-                AssignKeyWidget,
-                AssignKeySave,
-                UiButton {
-                    rect: (px + 284.0, py + 101.0, sz.x as f32, sz.y as f32),
-                    clicked: false,
-                },
-                ButtonFrames {
-                    normal: n.clone(),
-                    hover: hov,
-                    pressed: pre,
-                },
-                Sprite::from_image(n.clone()),
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(284.0, -101.0, 7.6),
-                Visibility::Hidden,
-            ));
+            spawn_icon_button(p, n, h, pr, 284.0, 101.0, 60.0, 25.0, 10).insert(AssignKeySave);
         }
-        // 16 个 F 键按钮（Prguse 1656/1657/1658）
+        // 16 个 F 键按钮（Prguse 1656/1657/1658，32x32）
         if let (Some(n), Some(hov), Some(pre)) = (
-            ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                1656,
-            ),
-            ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                1657,
-            ),
-            ui_image(
-                &mut libs,
-                &mut images,
-                &mut cache,
-                LibraryName::Prguse,
-                1658,
-            ),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1656),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1657),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1658),
         ) {
-            let sz = images
-                .get(&n)
-                .map(|i| i.size())
-                .unwrap_or(UVec2::new(32, 32));
             for i in 0..16usize {
                 let rx = 17.0 + 32.0 * (i % 8) as f32 + 5.0 * ((i % 8) / 4) as f32;
                 let ry = 58.0 + 37.0 * (i / 8) as f32;
+                // F 键用自定义 AssignKeyFrames（选中态固定 pressed 帧），
+                // 不挂 ImageButton（避免与 image_button_system 抢帧）
                 p.spawn((
-                    AssignKeyWidget,
+                    Button,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(rx),
+                        top: Val::Px(ry),
+                        width: Val::Px(32.0),
+                        height: Val::Px(32.0),
+                        ..default()
+                    },
+                    ImageNode::new(n.clone()),
                     AssignKeyFKey(i),
                     AssignKeyFrames {
                         normal: n.clone(),
                         hover: hov.clone(),
                         pressed: pre.clone(),
                     },
-                    UiButton {
-                        rect: (px + rx, py + ry, sz.x as f32, sz.y as f32),
-                        clicked: false,
-                    },
-                    Sprite::from_image(n.clone()),
-                    Anchor::TOP_LEFT,
-                    Transform::from_xyz(rx, -ry, 7.6),
-                    Visibility::Hidden,
+                    ZIndex(10),
                 ))
-                .with_children(|c| {
-                    // 键名文本：F1..F8 / "Ctrl↵F1" 双行（#2584）
-                    let label = assign_key_label(i as u8 + 1);
-                    c.spawn((
-                        AssignKeyWidget,
-                        Text2d::new(label),
-                        Anchor::TOP_LEFT,
-                        TextFont {
-                            font: FontSource::Handle(font.clone()),
-                            font_size: FontSize::Px(9.0),
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        Transform::from_xyz(4.0, -10.0, 7.7),
-                        Visibility::Hidden,
-                    ));
-                });
+                    .with_children(|c| {
+                        // 键名文本：F1..F8 / "Ctrl\nF1" 双行（#2584）
+                        c.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(4.0),
+                                top: Val::Px(11.0),
+                                ..default()
+                            },
+                            Text::new(assign_key_label(i as u8 + 1)),
+                            TextFont {
+                                font: FontSource::Handle(font.clone()),
+                                font_size: FontSize::Px(9.0),
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                            ZIndex(11),
+                        ));
+                    });
             }
         }
     });
@@ -299,21 +208,27 @@ fn assign_key_system(
     net: Res<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut all_vis: Query<&mut Visibility, With<AssignKeyWidget>>,
     mut icon: Query<
-        (&mut Sprite, &AssignKeyIcon),
+        (&mut ImageNode, &AssignKeyIcon),
         (Without<AssignKeyTitle>, Without<AssignKeyFKey>),
     >,
-    mut title: Query<(&mut Text2d, &AssignKeyTitle), Without<AssignKeyIcon>>,
+    mut title: Query<(&mut Text, &AssignKeyTitle), Without<AssignKeyIcon>>,
     mut actions: Query<
-        (&UiButton, Option<&AssignKeyNone>, Option<&AssignKeySave>),
+        (Entity, &Interaction, Option<&AssignKeyNone>, Option<&AssignKeySave>),
         Without<AssignKeyFKey>,
     >,
-    mut fkeys: Query<(&UiButton, &AssignKeyFKey, &mut Sprite, &AssignKeyFrames)>,
-    windows: Query<&Window>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    mut fkeys: Query<(Entity, &Interaction, &AssignKeyFKey, &mut ImageNode, &AssignKeyFrames)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     for mut vis in &mut all_vis {
         *vis = if state.visible {
             Visibility::Visible
@@ -327,16 +242,15 @@ fn assign_key_system(
 
     // 图标 + 标题（C# MagicImage / TitleLabel）
     if let Some(m) = state.spell.and_then(|s| magics.by_spell(s)) {
-        if let Some(h) = ui_image(
+        if let Some(h) = load_lib_image(
             &mut libs,
             &mut images,
-            &mut cache,
             LibraryName::MagIcon2,
             m.icon as usize * 2,
         ) {
-            for (mut sprite, _) in &mut icon {
-                if sprite.image != h {
-                    sprite.image = h.clone();
+            for (mut node, _) in &mut icon {
+                if node.image != h {
+                    node.image = h.clone();
                 }
             }
         }
@@ -346,8 +260,8 @@ fn assign_key_system(
     }
 
     // None / Save（C# NoneButton.Click / SaveButton.Click）
-    for (btn, none, save) in &mut actions {
-        if !btn.clicked {
+    for (e, inter, none, save) in &mut actions {
+        if !edge(e, inter, &mut prev_inter) {
             continue;
         }
         if none.is_some() {
@@ -373,28 +287,20 @@ fn assign_key_system(
     }
 
     // F 键：点击选择；选中态固定 pressed 帧（C# AssignKeyPanel_BeforeDraw）
-    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
-    let mouse_down = mouse.pressed(MouseButton::Left);
-    for (btn, fkey, mut sprite, frames) in &mut fkeys {
-        if btn.clicked {
+    for (e, inter, fkey, mut node, frames) in &mut fkeys {
+        if edge(e, inter, &mut prev_inter) {
             state.key = (fkey.0 + 1) as u8;
         }
         let selected = state.key as usize == fkey.0 + 1;
-        let over = cursor
-            .map(|c| {
-                let (x, y, w, h) = btn.rect;
-                c.x >= x && c.x <= x + w && c.y >= y && c.y <= y + h
-            })
-            .unwrap_or(false);
-        let frame = if selected || (mouse_down && over) {
+        let frame = if selected || *inter == Interaction::Pressed {
             &frames.pressed
-        } else if over {
+        } else if *inter == Interaction::Hovered {
             &frames.hover
         } else {
             &frames.normal
         };
-        if sprite.image != *frame {
-            sprite.image = frame.clone();
+        if node.image != *frame {
+            node.image = frame.clone();
         }
     }
 }
