@@ -1,24 +1,42 @@
 // ============================================================================
-// 行会对话框（M27）
+// 行会对话框（M27 → 批 47 bevy_ui 迁移）
 // 布局参考：C# GuildDialog.cs / macroquad guild_dialog.rs
-//   - 背景 Prguse[180]，标题 Title[15]，位置 (280,80)
+//   - 背景 Prguse[180]（实测 590x432），标题 Title[15]，位置 (280,80)
 //   - 行会名/会长/金币、成员列表（职务+在线）、公告、创建输入框
 // 网络：GuildStatus（1 字节 in_guild / 完整信息，同 opcode 双格式）、GuildNoticeChange、GuildMemberChange
+// 迁移说明：
+//   - 原版 C# GuildDialog 是分页窗口（Member/Buff/Rank/Storage 各一页，590x432）。
+//     本移植为单窗垂直堆叠：根容器 590x740 @ (280,80)，背景图以自然尺寸作子图，
+//     下方 432..740 为深色延伸区容纳职务/仓库/金币区块（原 sprite 版这些区块
+//     溢出面板裸奔，正是"UI 堆屏幕"病灶之一）。
+//   - 邀请提示 = 独立覆盖层 Prguse[360]（456x190）@ (284,289)。
 // ============================================================================
 
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::text_input::{
+    TextInputDisplay, TextInputField, TextInputRect, TextInputState,
+};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{
+    load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel, spawn_scroll_bar_ui, UiDropDown, UiScrollList,
 };
-use crate::ui::controls::{spawn_dropdown, DropDown};
-use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
+
+/// 根容器尺寸（容纳堆叠的成员/职务/仓库/金币区块；背景图保持自然尺寸）
+pub const GUILD_X: f32 = 280.0;
+pub const GUILD_Y: f32 = 80.0;
+pub const GUILD_W: f32 = 590.0;
+pub const GUILD_H: f32 = 740.0;
+/// 背景图 Prguse[180] 自然尺寸
+pub const BG_W: f32 = 590.0;
+pub const BG_H: f32 = 432.0;
 
 /// 行会成员
 #[derive(Debug, Clone, Default)]
@@ -121,8 +139,6 @@ pub fn buff_page_count(catalog_len: usize) -> usize {
 #[derive(Component)]
 pub struct GuildWidget;
 
-#[derive(Component)]
-pub struct GuildClose;
 
 /// 创建行会输入框（TextInputState id 0）
 #[derive(Component)]
@@ -135,8 +151,6 @@ pub struct GuildCreateBtn;
 #[derive(Component)]
 pub struct GuildInviteField;
 
-#[derive(Component)]
-pub struct GuildInviteBtn;
 
 /// #1362：职务改名下拉（C# RanksSelectBox）
 #[derive(Component)]
@@ -161,6 +175,14 @@ pub struct GuildRankPermText;
 #[derive(Component)]
 pub struct GuildPromoteBtn;
 
+/// 公告输入框（TextInput id 2）
+#[derive(Component)]
+pub struct GuildNoticeField;
+
+/// 仓库金币输入框（TextInput id 3）
+#[derive(Component)]
+pub struct GuildGoldField;
+
 /// #1348：显示离线成员切换（C# MembersShowOfflineButton）
 #[derive(Component)]
 pub struct GuildShowOfflineBtn;
@@ -176,26 +198,8 @@ pub struct GuildBuffUp;
 #[derive(Component)]
 pub struct GuildBuffDown;
 
-/// 踢出选中成员
-#[derive(Component)]
-pub struct GuildKickBtn;
 
-/// 公告输入框（TextInput id 2）
-#[derive(Component)]
-pub struct GuildNoticeField;
 
-#[derive(Component)]
-pub struct GuildNoticeBtn;
-
-/// 仓库金币输入框（TextInput id 3）
-#[derive(Component)]
-pub struct GuildGoldField;
-
-#[derive(Component)]
-pub struct GuildGoldDeposit;
-
-#[derive(Component)]
-pub struct GuildGoldWithdraw;
 
 #[derive(Component)]
 pub struct GuildItemDeposit;
@@ -225,6 +229,23 @@ pub struct GuildInviteNo;
 #[derive(Component)]
 pub struct GuildLine(usize);
 
+/// 行会窗口主按钮（单查询分发，避免多 With<marker> 查询超 SystemParam 上限）
+#[derive(Component, Clone, Copy)]
+pub enum GuildBtnKind {
+    Close,
+    Invite,
+    Kick,
+    Notice,
+    GoldDeposit,
+    GoldWithdraw,
+}
+#[derive(Component)]
+pub struct GuildBtn(pub GuildBtnKind);
+
+/// #1348：显示离线按钮文本子节点
+#[derive(Component)]
+pub struct GuildShowOfflineText;
+
 pub struct GuildPlugin;
 
 impl Plugin for GuildPlugin {
@@ -243,7 +264,6 @@ impl Plugin for GuildPlugin {
                 guild_show_offline_system,
                 guild_rank_rename_system,
                 guild_rank_manage_system,
-                ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -261,7 +281,6 @@ fn spawn_guild(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -271,22 +290,26 @@ fn spawn_guild(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[180]（C# GuildDialog：Index=180, Library=Prguse, Location=Center；590x432）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 180) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        // #89 可滚动成员列表：10 行 × 20px
-        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (498.0, 140.0, 4.0, 200.0), 6.3);
-        commands.entity(track).insert((DialogRoot(DialogKind::Guild), GuildWidget, Visibility::Visible));
-        commands.entity(thumb).insert((
+    // 根容器（bevy_ui Node + Overflow::clip）：590x740 @ (280,80)
+    // 背景 Prguse[180]（实测 590x432）以自然尺寸作子图，下方 432..740 为深色延伸区，
+    // 容纳移植版堆叠的职务/仓库/金币区块（原 sprite 版这些区块溢出面板裸奔）。
+    let root = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(GUILD_X),
+                top: Val::Px(GUILD_Y),
+                width: Val::Px(GUILD_W),
+                height: Val::Px(GUILD_H),
+                overflow: Overflow::clip(),
+                ..default()
+            },
             DialogRoot(DialogKind::Guild),
             GuildWidget,
-            Visibility::Visible,
-        ));
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
+            GlobalZIndex(30),
             Visibility::Hidden,
-            ScrollList {
+            // #89 可滚动成员列表：10 行 × 20px（滚动条/滚轮区域相对根容器）
+            UiScrollList {
                 rect_rel: (18.0, 60.0, 200.0, 200.0),
                 row_h: 20.0,
                 visible: 10,
@@ -294,522 +317,396 @@ fn spawn_guild(
                 offset: 0,
                 step: 3,
                 track_rel: (218.0, 60.0, 4.0, 200.0),
-                thumb: Some(thumb),
-                z: 8.0,
+                thumb: None,
+                z: 8,
             },
-        ));
-    }
-    // 标题 Title[15]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 15) {
-        let e = spawn_ui_sprite(&mut commands, h, 298.0, 88.0, 6.2, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            Visibility::Hidden,
-        ));
-    }
-    // 关闭
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 340.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            GuildClose,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    // 行会名/会长文本（GuildLine 0 占位显示头部）
-    let head = spawn_ui_text(
-        &mut commands, &font, "",
-        298.0, 120.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8.0,
-    );
-    commands.entity(head).insert((
-        GuildLine(0),
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
-    // 成员列表（10 行，1..=10）
-    for i in 1..=10usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 140.0 + (i - 1) as f32 * 20.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            GuildLine(i),
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    // #1348：显示离线成员切换（C# MembersShowOfflineButton/Status @(230,310)，纯本地过滤）
-    let show_offline_btn = spawn_ui_text(
-        &mut commands, &font, "显示离线",
-        545.0, 390.0, 12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(show_offline_btn).insert((
-        GuildShowOfflineBtn,
-        UiButton {
-            rect: (545.0, 390.0, 70.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
-
-    // #2537：Buff 页开关（C# BuffButton）+ 翻页（C# UpButton/DownButton，列区右侧）
-    let buff_toggle = spawn_ui_text(
-        &mut commands,
-        &font,
-        "技能",
-        470.0,
-        390.0,
-        12.0,
-        Color::WHITE,
-        8.0,
-    );
-    commands.entity(buff_toggle).insert((
-        GuildBuffToggleBtn,
-        UiButton {
-            rect: (470.0, 390.0, 60.0, 20.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
-    let buff_up = spawn_ui_text(
-        &mut commands,
-        &font,
-        "▲",
-        505.0,
-        140.0,
-        11.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands.entity(buff_up).insert((
-        GuildBuffUp,
-        UiButton {
-            rect: (505.0, 140.0, 16.0, 14.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
-    let buff_down = spawn_ui_text(
-        &mut commands,
-        &font,
-        "▼",
-        505.0,
-        324.0,
-        11.0,
-        Color::WHITE,
-        8.1,
-    );
-    commands.entity(buff_down).insert((
-        GuildBuffDown,
-        UiButton {
-            rect: (505.0, 324.0, 16.0, 14.0),
-            clicked: false,
-        },
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
-
-    // #1362：职务改名（C# RanksSelectBox + RanksName + RanksSaveName @(298,420)）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let rank_dd = spawn_dropdown(
-        &mut commands, &mut images, &font,
-        vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
-        Some(0),
-        298.0, 420.0, 64.0, 18.0,
-        3, 8.0,
-    );
-    commands.entity(rank_dd).insert((GuildRankDrop, DialogRoot(DialogKind::Guild), GuildWidget));
-    let rank_input = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            GuildRankRenameField,
-            crate::game::dialogs::text_input::TextInputField(4),
-            crate::game::dialogs::text_input::TextInputRect(370.0, 420.0, 120.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(120.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(370.0, -420.0, 8.1),
-            Visibility::Hidden,
         ))
         .id();
-    commands.entity(rank_input).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(4),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    let rank_save = spawn_ui_text(
-        &mut commands, &font, "改名",
-        500.0, 420.0, 12.0, Color::WHITE, 8.0,
-    );
-    commands.entity(rank_save).insert((
-        GuildRankSaveBtn,
-        UiButton { rect: (500.0, 420.0, 40.0, 20.0), clicked: false },
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
 
-    // #1395 子批2：加职务（TextInput id 7 @(340,448)）+ 按钮
-    let add_label = spawn_ui_text(&mut commands, &font, "加职务", 298.0, 448.0, 11.0, Color::WHITE, 8.0);
-    commands.entity(add_label).insert((DialogRoot(DialogKind::Guild), GuildWidget));
-    let add_input = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            GuildAddRankField,
-            crate::game::dialogs::text_input::TextInputField(7),
-            crate::game::dialogs::text_input::TextInputRect(340.0, 448.0, 100.0, 20.0),
-            Sprite { image: white.clone(), color: Color::srgba(0.2, 0.2, 0.25, 0.9), custom_size: Some(Vec2::new(100.0, 20.0)), ..default() },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(340.0, -448.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(add_input).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(7),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont { font: FontSource::Handle(font.clone()), font_size: FontSize::Px(12.0), ..default() },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    let add_btn = spawn_ui_text(&mut commands, &font, "添加", 450.0, 448.0, 11.0, Color::WHITE, 8.0);
-    commands.entity(add_btn).insert((GuildAddRankBtn, UiButton { rect: (450.0, 448.0, 36.0, 18.0), clicked: false }, DialogRoot(DialogKind::Guild), GuildWidget));
-    // #1395 子批2：权限位（C# RanksOptionsButtons[8]：改/招/踢/存/取/盟/告/益）
-    let perm_label = spawn_ui_text(&mut commands, &font, "权限", 298.0, 472.0, 11.0, Color::WHITE, 8.0);
-    commands.entity(perm_label).insert((DialogRoot(DialogKind::Guild), GuildWidget));
-    for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"].iter().enumerate() {
-        let e = spawn_ui_text(&mut commands, &font, label, 330.0 + i as f32 * 30.0, 472.0, 11.0, Color::WHITE, 8.0);
-        commands.entity(e).insert((GuildRankPermBtn(i as u8), UiButton { rect: (330.0 + i as f32 * 30.0, 472.0, 24.0, 16.0), clicked: false }, DialogRoot(DialogKind::Guild), GuildWidget));
-    }
-    let perm_text = spawn_ui_text(&mut commands, &font, "权限:00000000", 298.0, 492.0, 10.0, Color::srgb(0.8, 0.9, 0.6), 8.0);
-    commands.entity(perm_text).insert((GuildRankPermText, DialogRoot(DialogKind::Guild), GuildWidget));
-    let promote_btn = spawn_ui_text(&mut commands, &font, "调职到下拉职务", 440.0, 492.0, 11.0, Color::WHITE, 8.0);
-    commands.entity(promote_btn).insert((GuildPromoteBtn, UiButton { rect: (440.0, 492.0, 100.0, 18.0), clicked: false }, DialogRoot(DialogKind::Guild), GuildWidget));
+    commands.entity(root).with_children(|p| {
+        // 背景图（自然尺寸）+ 下方深色延伸区
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 180) {
+            spawn_image(p, h, 0.0, 0.0, BG_W, BG_H, 0);
+        }
+        spawn_container(p, 0.0, BG_H, GUILD_W, GUILD_H - BG_H, 0)
+            .insert(BackgroundColor(crate::ui::theme::colors::PANEL_BG));
+        // 标题 Title[15] @(18,8)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 15) {
+            spawn_image(p, h, 18.0, 8.0, 103.0, 17.0, 1);
+        }
+        // 关闭 Prguse2[360-362] @(340,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 340.0, 3.0, 20.0, 20.0, 9)
+                .insert(GuildBtn(GuildBtnKind::Close));
+        }
+        // 滚动条（轨道 + 滑块）
+        spawn_scroll_bar_ui(p, (218.0, 60.0, 4.0, 200.0), 8);
+        // 行会名/会长文本（GuildLine 0 占位显示头部）@(18,40)
+        spawn_label(p, &font, "", 18.0, 40.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
+            .insert(GuildLine(0));
+        // 成员列表（10 行，1..=10）@(18,60+20i)
+        for i in 1..=10usize {
+            spawn_label(p, &font, "", 18.0, 60.0 + (i - 1) as f32 * 20.0, 12.0, Color::WHITE, 8)
+                .insert(GuildLine(i));
+        }
+        // #1348：显示离线成员切换（C# MembersShowOfflineButton）@(265,310) 70x20
+        spawn_container(p, 265.0, 310.0, 70.0, 20.0, 8)
+            .insert((Button, GuildShowOfflineBtn))
+            .with_children(|b| {
+                spawn_label(b, &font, "显示离线", 0.0, 0.0, 12.0, Color::WHITE, 1)
+                    .insert(GuildShowOfflineText);
+            });
+        // #2537：Buff 页开关（C# BuffButton）+ 翻页（C# UpButton/DownButton）
+        spawn_container(p, 190.0, 310.0, 60.0, 20.0, 8)
+            .insert((Button, GuildBuffToggleBtn))
+            .with_children(|b| {
+                spawn_label(b, &font, "技能", 0.0, 0.0, 12.0, Color::WHITE, 1);
+            });
+        spawn_container(p, 225.0, 60.0, 16.0, 14.0, 8)
+            .insert((Button, GuildBuffUp))
+            .with_children(|b| {
+                spawn_label(b, &font, "▲", 0.0, 0.0, 11.0, Color::WHITE, 1);
+            });
+        spawn_container(p, 225.0, 244.0, 16.0, 14.0, 8)
+            .insert((Button, GuildBuffDown))
+            .with_children(|b| {
+                spawn_label(b, &font, "▼", 0.0, 0.0, 11.0, Color::WHITE, 1);
+            });
 
-    // 创建行会：输入框 + 按钮（原版 C# GuildDialog 创建流程）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let name_box = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            GuildNameField,
-            crate::game::dialogs::text_input::TextInputField(0),
-            crate::game::dialogs::text_input::TextInputRect(340.0, 330.0, 200.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(200.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(340.0, -330.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(name_box).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(0),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 360.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildCreateBtn,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    // 邀请玩家：输入框（TextInput id 1）+ 邀请按钮
-    let inv_box = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            GuildInviteField,
-            crate::game::dialogs::text_input::TextInputField(1),
-            crate::game::dialogs::text_input::TextInputRect(340.0, 390.0, 200.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(200.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(340.0, -390.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(inv_box).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(1),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 420.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildInviteBtn,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 420.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildKickBtn,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    // 公告输入框（TextInput id 2）+ 设置按钮（C# GuildDialog 公告编辑）
-    let notice_box = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            GuildNoticeField,
-            crate::game::dialogs::text_input::TextInputField(2),
-            crate::game::dialogs::text_input::TextInputRect(340.0, 460.0, 200.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(200.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(340.0, -460.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(notice_box).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(2),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 490.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildNoticeBtn,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    // 仓库金币：输入框（TextInput id 3）+ 存入/取出（C# GuildDialog 仓库语义）
-    let gold_box = commands
-        .spawn((
-            crate::ui::sprite_ui::UiEntity,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-            GuildGoldField,
-            crate::game::dialogs::text_input::TextInputField(3),
-            crate::game::dialogs::text_input::TextInputRect(340.0, 530.0, 200.0, 20.0),
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
-                custom_size: Some(Vec2::new(200.0, 20.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(340.0, -530.0, 8.1),
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(gold_box).with_children(|p| {
-        p.spawn((
-            crate::game::dialogs::text_input::TextInputDisplay(3),
-            Text2d::new(String::new()),
-            bevy::sprite::Anchor::TOP_LEFT,
-            TextFont {
-                font: FontSource::Handle(font.clone()),
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Transform::from_xyz(4.0, -2.0, 8.2),
-        ));
-    });
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 560.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildGoldDeposit,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 560.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildGoldWithdraw,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
+        // #1362：职务改名（C# RanksSelectBox + RanksName + RanksSaveName @(18,340)）
+        spawn_dropdown_ui(
+            p,
+            &font,
+            vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
+            Some(0),
+            (GUILD_X, GUILD_Y),
+            18.0,
+            340.0,
+            64.0,
+            18.0,
+            3,
+            8,
+        )
+        .insert(GuildRankDrop);
+        spawn_container(p, 90.0, 340.0, 120.0, 20.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildRankRenameField,
+                TextInputField(4),
+                TextInputRect(370.0, 420.0, 120.0, 20.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(9),
+                    TextInputDisplay(4),
+                ));
+            });
+        spawn_container(p, 220.0, 340.0, 40.0, 20.0, 8)
+            .insert((Button, GuildRankSaveBtn))
+            .with_children(|b| {
+                spawn_label(b, &font, "改名", 0.0, 0.0, 12.0, Color::WHITE, 1);
+            });
 
-    // 仓库物品（M32）：8 行列表 + 页签 + 存入/取出/翻页
-    // 原版 C# GuildDialog.StorageGrid 8x14（这里分页显示 8 格/页）
-    for i in 0..8usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 595.0 + i as f32 * 18.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            GuildLine(11 + i),
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    let page = spawn_ui_text(
-        &mut commands, &font, "",
-        298.0, 745.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8.0,
-    );
-    commands.entity(page).insert((
-        GuildLine(19),
-        DialogRoot(DialogKind::Guild),
-        GuildWidget,
-    ));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 770.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildItemDeposit,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        390.0, 770.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            GuildItemWithdraw,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    // 翻页（原版 C# Prguse2 197/198/199 上、207/208/209 下）
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 197, 198, 199,
-        300.0, 802.0, 8.3, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            GuildStorageUp,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 207, 208, 209,
-        320.0, 802.0, 8.3, 16.0, 14.0,
-    ) {
-        commands.entity(e).insert((
-            GuildStorageDown,
-            DialogRoot(DialogKind::Guild),
-            GuildWidget,
-        ));
-    }
+        // #1395 子批2：加职务（TextInput id 7 @(60,368)）+ 按钮
+        spawn_label(p, &font, "加职务", 18.0, 368.0, 11.0, Color::WHITE, 8);
+        spawn_container(p, 60.0, 368.0, 100.0, 20.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildAddRankField,
+                TextInputField(7),
+                TextInputRect(340.0, 448.0, 100.0, 20.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(9),
+                    TextInputDisplay(7),
+                ));
+            });
+        spawn_container(p, 170.0, 368.0, 36.0, 18.0, 8)
+            .insert((Button, GuildAddRankBtn))
+            .with_children(|b| {
+                spawn_label(b, &font, "添加", 0.0, 0.0, 11.0, Color::WHITE, 1);
+            });
+        // #1395 子批2：权限位（C# RanksOptionsButtons[8]：改/招/踢/存/取/盟/告/益）
+        spawn_label(p, &font, "权限", 18.0, 392.0, 11.0, Color::WHITE, 8);
+        for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"].iter().enumerate() {
+            spawn_container(p, 50.0 + i as f32 * 30.0, 392.0, 24.0, 16.0, 8)
+                .insert((Button, GuildRankPermBtn(i as u8)))
+                .with_children(|b| {
+                    spawn_label(b, &font, label, 0.0, 0.0, 11.0, Color::WHITE, 1);
+                });
+        }
+        spawn_label(p, &font, "权限:00000000", 18.0, 412.0, 10.0, Color::srgb(0.8, 0.9, 0.6), 8)
+            .insert(GuildRankPermText);
+        spawn_container(p, 160.0, 412.0, 100.0, 18.0, 8)
+            .insert((Button, GuildPromoteBtn))
+            .with_children(|b| {
+                spawn_label(b, &font, "调职到下拉职务", 0.0, 0.0, 11.0, Color::WHITE, 1);
+            });
 
-    // 邀请提示（MirMessageBox）
+        // 创建行会：输入框（TextInput id 0）+ 创建按钮（原版 C# GuildDialog 创建流程）
+        spawn_container(p, 60.0, 250.0, 200.0, 20.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildNameField,
+                TextInputField(0),
+                TextInputRect(340.0, 330.0, 200.0, 20.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                    ZIndex(9),
+                    TextInputDisplay(0),
+                ));
+            });
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 280.0, 76.0, 25.0, 9).insert(GuildCreateBtn);
+        }
+        // 邀请玩家：输入框（TextInput id 1）+ 邀请按钮
+        spawn_container(p, 60.0, 310.0, 200.0, 20.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildInviteField,
+                TextInputField(1),
+                TextInputRect(340.0, 390.0, 200.0, 20.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                    ZIndex(9),
+                    TextInputDisplay(1),
+                ));
+            });
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 340.0, 76.0, 25.0, 9)
+                .insert(GuildBtn(GuildBtnKind::Invite));
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 340.0, 76.0, 25.0, 9)
+                .insert(GuildBtn(GuildBtnKind::Kick));
+        }
+        // 公告输入框（TextInput id 2）+ 设置按钮
+        spawn_container(p, 60.0, 380.0, 200.0, 20.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildNoticeField,
+                TextInputField(2),
+                TextInputRect(340.0, 460.0, 200.0, 20.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                    ZIndex(9),
+                    TextInputDisplay(2),
+                ));
+            });
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 410.0, 76.0, 25.0, 9)
+                .insert(GuildBtn(GuildBtnKind::Notice));
+        }
+        // 仓库金币：输入框（TextInput id 3）+ 存入/取出
+        spawn_container(p, 60.0, 450.0, 200.0, 20.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildGoldField,
+                TextInputField(3),
+                TextInputRect(340.0, 530.0, 200.0, 20.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                    ZIndex(9),
+                    TextInputDisplay(3),
+                ));
+            });
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 480.0, 76.0, 25.0, 9)
+                .insert(GuildBtn(GuildBtnKind::GoldDeposit));
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 480.0, 76.0, 25.0, 9)
+                .insert(GuildBtn(GuildBtnKind::GoldWithdraw));
+        }
+
+        // 仓库物品（M32）：8 行列表 + 页签 + 存入/取出/翻页 @(18,515+18i)
+        for i in 0..8usize {
+            spawn_label(p, &font, "", 18.0, 515.0 + i as f32 * 18.0, 12.0, Color::WHITE, 8)
+                .insert(GuildLine(11 + i));
+        }
+        spawn_label(p, &font, "", 18.0, 665.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
+            .insert(GuildLine(19));
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 690.0, 76.0, 25.0, 9).insert(GuildItemDeposit);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+        ) {
+            spawn_icon_button(p, n, h, pr, 110.0, 690.0, 76.0, 25.0, 9).insert(GuildItemWithdraw);
+        }
+        // 翻页（原版 C# Prguse2 197/198/199 上、207/208/209 下）@(20/40,722)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 722.0, 16.0, 14.0, 9).insert(GuildStorageUp);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(p, n, h, pr, 40.0, 722.0, 16.0, 14.0, 9).insert(GuildStorageDown);
+        }
+    });
+
+    // 邀请提示（MirMessageBox，独立覆盖层 Prguse[360] 456x190 @ (284,289)）
     let (bx, by) = (284.0, 289.0);
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
+    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let popup = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
         commands
-            .entity(e)
-            .insert((GuildInviteWidget, Visibility::Hidden));
-    }
-    let t = spawn_ui_text(
-        &mut commands, &font, "", bx + 35.0, by + 40.0, 12.0, Color::WHITE, 9.6,
-    );
-    commands.entity(t).insert((GuildInviteText, GuildInviteWidget));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        bx + 240.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((GuildInviteYes, GuildInviteWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        bx + 340.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((GuildInviteNo, GuildInviteWidget));
+            .entity(popup)
+            .insert((
+                DialogRoot(DialogKind::Guild),
+                // 独立弹窗不随 Guild 开关门控；挂 DialogRoot 仅为 OnExit 时随行会窗口一起清理
+                // （否则重进 Game 会重复生成弹窗）
+                AlwaysVisible,
+                GuildInviteWidget,
+                Visibility::Hidden,
+            ));
+        commands.entity(popup).with_children(|p| {
+            spawn_label(p, &font, "", 35.0, 40.0, 12.0, Color::WHITE, 9).insert(GuildInviteText);
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(p, n, h, pr, 240.0, 150.0, 76.0, 25.0, 10)
+                    .insert(GuildInviteYes);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(p, n, h, pr, 340.0, 150.0, 76.0, 25.0, 10)
+                    .insert(GuildInviteNo);
+            }
+        });
     }
 }
 
@@ -819,38 +716,43 @@ fn guild_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut guild: ResMut<GuildState>,
     net: Res<NetConnection>,
-    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    mut create_btns: Query<(&UiButton, &mut Visibility), With<GuildCreateBtn>>,
-    invite_btn: Query<&UiButton, With<GuildInviteBtn>>,
-    kick_btn: Query<&UiButton, With<GuildKickBtn>>,
-    notice_btn: Query<&UiButton, With<GuildNoticeBtn>>,
-    gold_deposit: Query<&UiButton, With<GuildGoldDeposit>>,
-    gold_withdraw: Query<&UiButton, With<GuildGoldWithdraw>>,
-    close: Query<&UiButton, With<GuildClose>>,
+    mut input: ResMut<TextInputState>,
+    mut create_btns: Query<(Entity, &Interaction, &mut Visibility), With<GuildCreateBtn>>,
+    btns: Query<(Entity, &Interaction, &GuildBtn)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut widgets: Query<
-        (
-            &mut Visibility,
-            Option<&GuildLine>,
-            Option<&GuildNameField>,
-            Option<&mut ScrollList>,
-        ),
-        (With<GuildWidget>, Without<GuildCreateBtn>),
-    >,
-    mut lines: Query<(&mut Text2d, &mut TextColor, &GuildLine)>,
+    mut widgets: Query<(&mut Visibility, Option<&mut UiScrollList>), (With<GuildWidget>, Without<GuildCreateBtn>)>,
+    mut lines: Query<(&mut Text, &mut TextColor, &GuildLine)>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Guild);
-    for (mut vis, _line, _field, sl) in &mut widgets {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+    for (mut vis, sl) in &mut widgets {
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if let Some(mut sl) = sl {
             // #89 成员列表行数（滚动夹紧）
-            sl.set_total(if guild.in_guild { guild.visible_member_indices().len() } else { 0 });
+            sl.set_total(if guild.in_guild {
+                guild.visible_member_indices().len()
+            } else {
+                0
+            });
         }
     }
-    // 创建行会按钮：仅对话框打开且未入会时显示（此前完全没管理显隐，一直残留屏幕）
-    for (_, mut vis) in &mut create_btns {
+    // 创建行会按钮：仅对话框打开且未入会时显示（此前完全没管理显隐，一直残留屏幕）；
+    // 点击动作在下方"创建按钮 → GuildNameReturn"统一处理
+    for (_, _, mut vis) in &mut create_btns {
         *vis = if open && !guild.in_guild {
             Visibility::Visible
         } else {
@@ -872,15 +774,111 @@ fn guild_ui_system(
         });
         tracing::info!("🏰 请求行会信息 + 行会技能列表");
     }
-    for btn in &close {
-        if btn.clicked {
-            mgr.close(DialogKind::Guild);
+    // 关闭（bevy_ui Interaction 边沿）
+    for (e, inter, k) in &btns {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        match k.0 {
+            GuildBtnKind::Close => {
+                mgr.close(DialogKind::Guild);
+            }
+            GuildBtnKind::Invite => {
+                // 邀请按钮 → EditGuildMember{0=add member}（C# GuildDialog 邀请）
+                let name = input.texts.get(1).cloned().unwrap_or_default();
+                let name = name.trim().to_string();
+                if !name.is_empty() && guild.in_guild {
+                    net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                        change_type: 0,
+                        rank_index: 0,
+                        name: name.clone(),
+                        rank_name: String::new(),
+                    });
+                    tracing::info!("🏰 邀请玩家加入行会: {}", name);
+                    input.texts[1].clear();
+                    input.active = None;
+                }
+            }
+            GuildBtnKind::Kick => {
+                // 踢出按钮 → EditGuildMember{1=delete member}（对选中的成员）
+                if let Some(idx) = guild.selected_member {
+                    let visible = guild.visible_member_indices();
+                    if let Some(&mi) = visible.get(idx) {
+                        if let Some(m) = guild.members.get(mi) {
+                            net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                                change_type: 1,
+                                rank_index: 0,
+                                name: m.name.clone(),
+                                rank_name: String::new(),
+                            });
+                            tracing::info!("🏰 踢出行会成员: {}", m.name);
+                            guild.selected_member = None;
+                        }
+                    }
+                }
+            }
+            GuildBtnKind::Notice => {
+                // 公告按钮 → EditGuildNotice（C# GuildDialog 公告编辑）
+                let notice = input.texts.get(2).cloned().unwrap_or_default();
+                let notice = notice.trim().to_string();
+                if !notice.is_empty() && guild.in_guild {
+                    net.send_packet(&mir2_shared::packets::client::guild::EditGuildNotice {
+                        notice_lines: vec![notice.clone()],
+                    });
+                    tracing::info!("🏰 更新行会公告: {}", notice);
+                    input.texts[2].clear();
+                    input.active = None;
+                }
+            }
+            GuildBtnKind::GoldDeposit => {
+                // 仓库金币：存入（C# GuildDialog 仓库语义：GuildStorageGoldChange）
+                if guild.in_guild {
+                    let amount = input
+                        .texts
+                        .get(3)
+                        .cloned()
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(0);
+                    if amount > 0 {
+                        net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                            change_type: 0,
+                            amount,
+                        });
+                        tracing::info!("🏰 存入行会仓库 {} 金币", amount);
+                        input.texts[3].clear();
+                        input.active = None;
+                    }
+                }
+            }
+            GuildBtnKind::GoldWithdraw => {
+                if guild.in_guild {
+                    let amount = input
+                        .texts
+                        .get(3)
+                        .cloned()
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(0);
+                    if amount > 0 {
+                        net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                            change_type: 1,
+                            amount,
+                        });
+                        tracing::info!("🏰 取出行会仓库 {} 金币", amount);
+                        input.texts[3].clear();
+                        input.active = None;
+                    }
+                }
+            }
         }
     }
     // 渲染（#89 成员列表支持滚轮滚动）
     let scroll_offset = widgets
         .iter()
-        .find_map(|(_, _, _, sl)| sl.map(|s| s.offset))
+        .find_map(|(_, sl)| sl.map(|s| s.offset))
         .unwrap_or(0);
     // #1348：可见成员下标（过滤离线）
     let visible = guild.visible_member_indices();
@@ -897,12 +895,7 @@ fn guild_ui_system(
                 } else if guild.in_guild {
                     let notice = guild.notice.first().cloned().unwrap_or_default();
                     if notice.is_empty() {
-                        format!(
-                            "{}（{}）金币:{}",
-                            guild.name,
-                            guild.leader,
-                            guild.gold
-                        )
+                        format!("{}（{}）金币:{}", guild.name, guild.leader, guild.gold)
                     } else {
                         format!(
                             "{}（{}）金币:{} 公告:{}",
@@ -938,24 +931,24 @@ fn guild_ui_system(
                     let idx = scroll_offset + i - 1;
                     // #1348：按 show_offline 过滤后的可见成员映射
                     match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
-                    Some(m) => {
-                    // #1395：按 rank_index 显示职务名（C# 按职务分组）
-                    let rank = guild
-                        .rank_defs
-                        .get(m.rank_index as usize)
-                        .map(|(n, _)| n.clone())
-                        .unwrap_or_else(|| "成员".to_string());
-                    format!(
-                        "{}{} ({})",
-                        m.name,
-                        if m.online { "" } else { "（离线）" },
-                        rank
-                    )
+                        Some(m) => {
+                            // #1395：按 rank_index 显示职务名（C# 按职务分组）
+                            let rank = guild
+                                .rank_defs
+                                .get(m.rank_index as usize)
+                                .map(|(n, _)| n.clone())
+                                .unwrap_or_else(|| "成员".to_string());
+                            format!(
+                                "{}{} ({})",
+                                m.name,
+                                if m.online { "" } else { "（离线）" },
+                                rank
+                            )
+                        }
+                        None => String::new(),
+                    }
                 }
-                    None => String::new(),
-                }
-                }
-            },
+            }
             i if (11..=18).contains(&i) => {
                 let slot = guild.storage_page * 8 + (i - 11);
                 match guild.storage_items.get(slot).and_then(|s| s.as_ref()) {
@@ -996,8 +989,8 @@ fn guild_ui_system(
         }
     }
     // 创建按钮 → GuildNameReturn（原版 C#：输入行会名 → 创建）
-    for (btn, _) in &create_btns {
-        if btn.clicked {
+    for (e, inter, _) in &create_btns {
+        if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(0).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() {
@@ -1010,88 +1003,6 @@ fn guild_ui_system(
             }
         }
     }
-    // 邀请按钮 → EditGuildMember{0=add member}（C# GuildDialog 邀请）
-    for btn in &invite_btn {
-        if btn.clicked {
-            let name = input.texts.get(1).cloned().unwrap_or_default();
-            let name = name.trim().to_string();
-            if !name.is_empty() && guild.in_guild {
-                net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
-                    change_type: 0,
-                    rank_index: 0,
-                    name: name.clone(),
-                    rank_name: String::new(),
-                });
-                tracing::info!("🏰 邀请玩家加入行会: {}", name);
-                input.texts[1].clear();
-                input.active = None;
-            }
-        }
-    }
-    // 踢出按钮 → EditGuildMember{1=delete member}（对选中的成员）
-    for btn in &kick_btn {
-        if btn.clicked {
-            if let Some(idx) = guild.selected_member {
-                let visible = guild.visible_member_indices();
-                if let Some(&mi) = visible.get(idx) {
-                    if let Some(m) = guild.members.get(mi) {
-                        net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
-                            change_type: 1,
-                            rank_index: 0,
-                            name: m.name.clone(),
-                            rank_name: String::new(),
-                        });
-                        tracing::info!("🏰 踢出行会成员: {}", m.name);
-                        guild.selected_member = None;
-                    }
-                }
-            }
-        }
-    }
-    // 公告按钮 → EditGuildNotice（C# GuildDialog 公告编辑）
-    for btn in &notice_btn {
-        if btn.clicked {
-            let notice = input.texts.get(2).cloned().unwrap_or_default();
-            let notice = notice.trim().to_string();
-            if !notice.is_empty() && guild.in_guild {
-                net.send_packet(&mir2_shared::packets::client::guild::EditGuildNotice {
-                    notice_lines: vec![notice.clone()],
-                });
-                tracing::info!("🏰 更新行会公告: {}", notice);
-                input.texts[2].clear();
-                input.active = None;
-            }
-        }
-    }
-    // 仓库金币：存入/取出（C# GuildDialog 仓库语义：GuildStorageGoldChange）
-    for btn in &gold_deposit {
-        if btn.clicked && guild.in_guild {
-            let amount = input.texts.get(3).cloned().unwrap_or_default().trim().parse::<u32>().unwrap_or(0);
-            if amount > 0 {
-                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
-                    change_type: 0,
-                    amount,
-                });
-                tracing::info!("🏰 存入行会仓库 {} 金币", amount);
-                input.texts[3].clear();
-                input.active = None;
-            }
-        }
-    }
-    for btn in &gold_withdraw {
-        if btn.clicked && guild.in_guild {
-            let amount = input.texts.get(3).cloned().unwrap_or_default().trim().parse::<u32>().unwrap_or(0);
-            if amount > 0 {
-                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
-                    change_type: 1,
-                    amount,
-                });
-                tracing::info!("🏰 取出行会仓库 {} 金币", amount);
-                input.texts[3].clear();
-                input.active = None;
-            }
-        }
-    }
     // 点击成员行选中（踢出目标）；Buff 页模式下由 guild_buff_system 处理点击
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
@@ -1100,7 +1011,11 @@ fn guild_ui_system(
                     let visible = guild.visible_member_indices();
                     for i in 1..=10usize {
                         let y = 140.0 + (i - 1) as f32 * 20.0;
-                        if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                        if cursor.x >= 298.0
+                            && cursor.x <= 600.0
+                            && cursor.y >= y
+                            && cursor.y <= y + 18.0
+                        {
                             let idx = scroll_offset + i - 1;
                             if let Some(&mi) = visible.get(idx) {
                                 guild.selected_member = Some(idx);
@@ -1113,7 +1028,11 @@ fn guild_ui_system(
                 // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
                 for i in 11..=18usize {
                     let y = 595.0 + (i - 11) as f32 * 18.0;
-                    if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 16.0 {
+                    if cursor.x >= 298.0
+                        && cursor.x <= 600.0
+                        && cursor.y >= y
+                        && cursor.y <= y + 16.0
+                    {
                         let slot = guild.storage_page * 8 + (i - 11);
                         if slot < guild.storage_items.len() {
                             guild.selected_storage = Some(slot);
@@ -1134,13 +1053,22 @@ fn guild_buff_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    buff_toggle_btn: Query<&UiButton, With<GuildBuffToggleBtn>>,
-    buff_up_btn: Query<&UiButton, With<GuildBuffUp>>,
-    buff_down_btn: Query<&UiButton, With<GuildBuffDown>>,
+    buff_toggle_btn: Query<(Entity, &Interaction), With<GuildBuffToggleBtn>>,
+    buff_up_btn: Query<(Entity, &Interaction), With<GuildBuffUp>>,
+    buff_down_btn: Query<(Entity, &Interaction), With<GuildBuffDown>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     // Buff 页开关（C# BuffButton 切换 BuffPage）
-    for btn in &buff_toggle_btn {
-        if btn.clicked {
+    for (e, inter) in &buff_toggle_btn {
+        if edge(e, inter, &mut prev_inter) {
             guild.show_buff_page = !guild.show_buff_page;
             tracing::info!(
                 "🏴 行会技能页: {}",
@@ -1148,20 +1076,22 @@ fn guild_buff_system(
             );
         }
     }
-    for btn in &buff_up_btn {
-        if btn.clicked {
+    for (e, inter) in &buff_up_btn {
+        if edge(e, inter, &mut prev_inter) {
             guild.buff_start = guild.buff_start.saturating_sub(8);
         }
     }
-    for btn in &buff_down_btn {
-        if btn.clicked && guild.buff_start + 8 < guild.buff_catalog.len() {
+    for (e, inter) in &buff_down_btn {
+        if edge(e, inter, &mut prev_inter) && guild.buff_start + 8 < guild.buff_catalog.len() {
             guild.buff_start += 8;
         }
     }
     if !guild.show_buff_page || !mouse.just_pressed(MouseButton::Left) {
         return;
     }
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = windows.single() else {
+        return;
+    };
     let Some(cursor) = window.cursor_position() else {
         return;
     };
@@ -1193,10 +1123,19 @@ fn guild_buff_system(
 fn guild_rank_rename_system(
     guild: Res<GuildState>,
     net: Res<NetConnection>,
-    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    mut rank_dd: Query<(&mut DropDown, &GuildRankDrop)>,
-    save_btn: Query<&UiButton, With<GuildRankSaveBtn>>,
+    mut input: ResMut<TextInputState>,
+    mut rank_dd: Query<(&mut UiDropDown, &GuildRankDrop)>,
+    save_btn: Query<(Entity, &Interaction), With<GuildRankSaveBtn>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     // #1395：下拉同步服务端职务定义（顺序即索引）
     let defs = guild.rank_defs.clone();
     let idx = if let Ok((mut dd, _)) = rank_dd.single_mut() {
@@ -1208,8 +1147,8 @@ fn guild_rank_rename_system(
     } else {
         0
     };
-    for btn in &save_btn {
-        if btn.clicked && guild.in_guild {
+    for (e, inter) in &save_btn {
+        if edge(e, inter, &mut prev_inter) && guild.in_guild {
             let name = input.texts.get(4).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() {
@@ -1233,14 +1172,26 @@ fn guild_rank_rename_system(
 fn guild_rank_manage_system(
     guild: Res<GuildState>,
     net: Res<NetConnection>,
-    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    mut rank_dd: Query<(&mut DropDown, &GuildRankDrop)>,
-    add_btn: Query<&UiButton, With<GuildAddRankBtn>>,
-    promote_btn: Query<&UiButton, With<GuildPromoteBtn>>,
-    perm_btns: Query<(&UiButton, &GuildRankPermBtn)>,
-    mut perm_text: Query<&mut Text2d, With<GuildRankPermText>>,
+    mut input: ResMut<TextInputState>,
+    mut rank_dd: Query<(&mut UiDropDown, &GuildRankDrop)>,
+    add_btn: Query<(Entity, &Interaction), With<GuildAddRankBtn>>,
+    promote_btn: Query<(Entity, &Interaction), With<GuildPromoteBtn>>,
+    perm_btns: Query<(Entity, &Interaction, &GuildRankPermBtn)>,
+    mut perm_text: Query<&mut Text, With<GuildRankPermText>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
-    let idx = rank_dd.single_mut().map(|(dd, _)| dd.selected.unwrap_or(0)).unwrap_or(0);
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    let idx = rank_dd
+        .single_mut()
+        .map(|(dd, _)| dd.selected.unwrap_or(0))
+        .unwrap_or(0);
     let options = guild.rank_defs.get(idx).map(|(_, o)| *o).unwrap_or(0);
     for mut t in &mut perm_text {
         let s = format!("权限:{:08b}", options);
@@ -1251,8 +1202,8 @@ fn guild_rank_manage_system(
     if !guild.in_guild {
         return;
     }
-    for btn in &add_btn {
-        if btn.clicked {
+    for (e, inter) in &add_btn {
+        if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(7).cloned().unwrap_or_default();
             let name = name.trim().to_string();
             if !name.is_empty() {
@@ -1270,8 +1221,8 @@ fn guild_rank_manage_system(
             }
         }
     }
-    for (btn, p) in &perm_btns {
-        if btn.clicked {
+    for (e, inter, p) in &perm_btns {
+        if edge(e, inter, &mut prev_inter) {
             let bit = p.0;
             let on = options & (1 << bit) == 0;
             net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
@@ -1283,8 +1234,8 @@ fn guild_rank_manage_system(
             tracing::info!("🏰 职务 #{} 权限位 {} -> {}", idx, bit, on);
         }
     }
-    for btn in &promote_btn {
-        if btn.clicked {
+    for (e, inter) in &promote_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(si) = guild.selected_member {
                 if let Some(m) = guild.members.get(si) {
                     net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
@@ -1303,16 +1254,32 @@ fn guild_rank_manage_system(
 /// #1348：显示离线成员切换（C# MembersShowOfflineButton/Status，纯本地过滤）
 fn guild_show_offline_system(
     mut guild: ResMut<GuildState>,
-    mut btn: Query<(&UiButton, &mut Text2d), With<GuildShowOfflineBtn>>,
+    btn: Query<(Entity, &Interaction), With<GuildShowOfflineBtn>>,
+    mut texts: Query<&mut Text, With<GuildShowOfflineText>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
-    for (b, mut text) in btn.iter_mut() {
-        text.0 = if guild.show_offline { "✓显示离线".to_string() } else { "显示离线".to_string() };
-        if b.clicked {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    for (e, inter) in &btn {
+        if edge(e, inter, &mut prev_inter) {
             guild.show_offline = !guild.show_offline;
             if !guild.show_offline {
                 guild.selected_member = None;
             }
         }
+    }
+    for mut t in &mut texts {
+        t.0 = if guild.show_offline {
+            "✓显示离线".to_string()
+        } else {
+            "显示离线".to_string()
+        };
     }
 }
 
@@ -1321,17 +1288,26 @@ fn guild_show_offline_system(
 /// S.GuildStorageList 推送（C# GuildStorageItemChange type=3 请求）
 #[allow(clippy::too_many_arguments)]
 fn guild_storage_system(
-    mut mgr: ResMut<DialogManager>,
+    mgr: ResMut<DialogManager>,
     mut guild: ResMut<GuildState>,
     net: Res<NetConnection>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
-    deposit_btn: Query<&UiButton, With<GuildItemDeposit>>,
-    withdraw_btn: Query<&UiButton, With<GuildItemWithdraw>>,
-    up_btn: Query<&UiButton, With<GuildStorageUp>>,
-    down_btn: Query<&UiButton, With<GuildStorageDown>>,
+    deposit_btn: Query<(Entity, &Interaction), With<GuildItemDeposit>>,
+    withdraw_btn: Query<(Entity, &Interaction), With<GuildItemWithdraw>>,
+    up_btn: Query<(Entity, &Interaction), With<GuildStorageUp>>,
+    down_btn: Query<(Entity, &Interaction), With<GuildStorageDown>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let open = mgr.is_open(DialogKind::Guild);
     if !open {
         *requested = false;
@@ -1348,18 +1324,18 @@ fn guild_storage_system(
         });
         tracing::info!("🏰 请求仓库物品列表");
     }
-    for btn in &up_btn {
-        if btn.clicked {
+    for (e, inter) in &up_btn {
+        if edge(e, inter, &mut prev_inter) {
             guild.storage_page = guild.storage_page.saturating_sub(1);
         }
     }
-    for btn in &down_btn {
-        if btn.clicked && guild.storage_page + 1 < 13 {
+    for (e, inter) in &down_btn {
+        if edge(e, inter, &mut prev_inter) && guild.storage_page + 1 < 13 {
             guild.storage_page += 1;
         }
     }
-    for btn in &deposit_btn {
-        if btn.clicked && guild.in_guild {
+    for (e, inter) in &deposit_btn {
+        if edge(e, inter, &mut prev_inter) && guild.in_guild {
             // 选中背包物品 → 存入（原版 C#：选中物品 → GuildStorageItemChange type=0）
             let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
             let idx = inv_click
@@ -1386,8 +1362,8 @@ fn guild_storage_system(
             }
         }
     }
-    for btn in &withdraw_btn {
-        if btn.clicked && guild.in_guild {
+    for (e, inter) in &withdraw_btn {
+        if edge(e, inter, &mut prev_inter) && guild.in_guild {
             if let Some(slot) = guild.selected_storage {
                 if slot < guild.storage_items.len() && guild.storage_items[slot].is_some() {
                     net.send_packet(&crate::network::GuildStorageItemChangeWire {
@@ -1409,14 +1385,20 @@ fn guild_storage_system(
 fn guild_invite_system(
     mut guild: ResMut<GuildState>,
     net: Res<NetConnection>,
-    yes: Query<&UiButton, With<GuildInviteYes>>,
-    no: Query<&UiButton, With<GuildInviteNo>>,
-    mut widgets: Query<
-        &mut Visibility,
-        (With<GuildInviteWidget>, Without<GuildWidget>),
-    >,
-    mut texts: Query<(&mut Text2d, &GuildInviteText)>,
+    yes: Query<(Entity, &Interaction), With<GuildInviteYes>>,
+    no: Query<(Entity, &Interaction), With<GuildInviteNo>>,
+    mut widgets: Query<&mut Visibility, With<GuildInviteWidget>>,
+    mut texts: Query<&mut Text, With<GuildInviteText>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     let has_invite = guild.invite.is_some();
     for mut vis in &mut widgets {
         *vis = if has_invite {
@@ -1425,7 +1407,7 @@ fn guild_invite_system(
             Visibility::Hidden
         };
     }
-    for (mut text, _) in &mut texts {
+    for mut text in &mut texts {
         text.0 = match guild.invite.as_ref() {
             Some(name) => format!("{} 邀请你加入行会", name),
             None => String::new(),
@@ -1435,13 +1417,13 @@ fn guild_invite_system(
         return;
     }
     let mut accept: Option<bool> = None;
-    for btn in &yes {
-        if btn.clicked {
+    for (e, inter) in &yes {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(true);
         }
     }
-    for btn in &no {
-        if btn.clicked {
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
             accept = Some(false);
         }
     }
