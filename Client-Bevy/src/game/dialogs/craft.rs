@@ -18,9 +18,8 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
-};
+use crate::ui::sprite_ui::UiFont;
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
 
 /// #2536：当前选中的合成配方（产物；recipe_id 由服务端随合成商品 unique_id 下发）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,9 +77,7 @@ impl Plugin for CraftPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_craft);
         app.add_systems(
             Update,
-            (craft_ui_system, ui_button_system)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            craft_ui_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -95,7 +92,6 @@ fn spawn_craft(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -105,50 +101,39 @@ fn spawn_craft(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Craft),
-            CraftWidget,
-            Visibility::Hidden,
-        ));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
-    ) {
-        commands.entity(e).insert((
-            CraftClose,
-            DialogRoot(DialogKind::Craft),
-            CraftWidget,
-        ));
-    }
-    // 选中配方 + 结果消息 + 提示 + 已学会数
-    for i in 0..4usize {
-        let e = spawn_ui_text(
-            &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 22.0,
-            12.0, Color::WHITE, 8.0,
-        );
-        commands.entity(e).insert((
-            CraftLine(i),
-            DialogRoot(DialogKind::Craft),
-            CraftWidget,
-        ));
-    }
-    // 合成按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        360.0, 240.0, 8.3, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((
-            CraftBtn,
-            DialogRoot(DialogKind::Craft),
-            CraftWidget,
-        ));
-    }
+    // 面板 Prguse[170] @ (280,80)。加宽到 320x207：关闭按钮(300,3)+合成按钮都在面板内
+    // （批 20 同款：244 宽会裁掉关闭按钮）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+        return;
+    };
+    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 207.0, 30);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Craft), CraftWidget));
+
+    commands.entity(panel).with_children(|p| {
+        // 关闭 Prguse2[360/361/362] @(300,3)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(CraftClose);
+        }
+        // 选中配方 + 结果消息 + 提示 + 已学会数 @(18,40+22i)
+        for i in 0..4usize {
+            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+                .insert(CraftLine(i));
+        }
+        // 合成按钮 Title[206/207/208] @(80,160)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(p, n, h, pr, 80.0, 160.0, 76.0, 25.0, 10).insert(CraftBtn);
+        }
+    });
 }
 
 /// 显隐 + 渲染 + 选择联动 + 合成
@@ -157,11 +142,20 @@ fn craft_ui_system(
     mut state: ResMut<CraftState>,
     mut npc_goods: ResMut<NpcGoodsState>,
     net: Res<NetConnection>,
-    close: Query<&UiButton, With<CraftClose>>,
-    craft_btn: Query<&UiButton, With<CraftBtn>>,
+    close: Query<(Entity, &Interaction), With<CraftClose>>,
+    craft_btn: Query<(Entity, &Interaction), With<CraftBtn>>,
     mut widgets: Query<&mut Visibility, With<CraftWidget>>,
-    mut lines: Query<(&mut Text2d, &CraftLine)>,
+    mut lines: Query<(&mut Text, &CraftLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
     // #2536：商品行点击选中的配方（C# NPCDialogs.cs:1090 ResetCells/RefreshCraftCells/Show）
     if let Some((recipe_id, name)) = npc_goods.craft_pick.take() {
         state.selected = Some(SelectedRecipe { recipe_id, name });
@@ -178,8 +172,8 @@ fn craft_ui_system(
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Craft);
         }
     }
@@ -193,8 +187,8 @@ fn craft_ui_system(
         };
     }
     // 合成
-    for btn in &craft_btn {
-        if btn.clicked {
+    for (e, inter) in &craft_btn {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(r) = state.selected.clone() {
                 // #2573：C# C.CraftItem wire（UniqueID/Count/Slots；暂无材料槽选择 UI，
                 // 槽位空 → 服务端按 DB 配方自动扣材）
