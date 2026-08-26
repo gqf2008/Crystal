@@ -303,7 +303,7 @@ impl Plugin for InventoryDialogPlugin {
 
 /// #1342：GainedQuestItem/DeleteQuestItem 增量更新任务格（C# QuestInventory）
 /// #2633 批次4 步9：直接写 `Inventory` 组件（HudState 双写已删）；实体未生成跳过（R1）。
-fn quest_inventory_events(
+pub(crate) fn quest_inventory_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {

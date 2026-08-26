@@ -478,23 +478,29 @@ pub(crate) fn despawn_removed_objects(
     }
 }
 
-/// 等待地图加载完成后生成演示角色（只跑一次）
+/// 演示角色生成一次标记。
+/// 评审 MINOR：用 Resource 而非 `Local<bool>`——OnExit(Game) 清掉演示玩家后重进 Game
+/// 须重新生成（Local 无法跨状态复位，见 ActorPlugin OnExit 重置）。
+#[derive(Resource, Default)]
+pub(crate) struct DemoActorsSpawned(pub bool);
+
+/// 等待地图加载完成后生成演示角色（每个 Game 会话只跑一次）
 pub(crate) fn spawn_demo_actors_when_ready(
     mut commands: Commands,
     data: Res<GameData>,
-    mut done: Local<bool>,
+    mut done: ResMut<DemoActorsSpawned>,
 ) {
     // 演示角色只在 --demo 模式下生成（默认走网络 mock 对象）
     if !std::env::args().any(|a| a == "--demo") {
         return;
     }
-    if *done {
+    if done.0 {
         return;
     }
     let Some(map) = data.map.as_ref() else {
         return;
     };
-    *done = true;
+    done.0 = true;
 
     let cx = (map.width as f32 * TILE_WIDTH) / 2.0;
     let cy = (map.height as f32 * TILE_HEIGHT) / 2.0;

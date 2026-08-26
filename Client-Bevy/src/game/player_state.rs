@@ -451,14 +451,25 @@ impl Plugin for PlayerStatePlugin {
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
         app.init_resource::<PendingPlayerEvents>();
         // R1/M1 reconcile：须在事件写系统之前运行——缓冲事件先回放，本帧新到事件后写（新值胜）。
+        // 排序边覆盖全部与回放冲突的写者（评审 MAJOR-1：缺 status 边时调度器把 status
+        // 处理器排在回放前，旧缓冲覆盖本帧新值，与 M1 目标缺陷同类）：
+        // player_status_events/belt_restock_events/quest_inventory_events/buff_server_events
+        // 均写回放所触组件（StatusFlags/Inventory），同帧须"回放旧→写新"。
         app.add_systems(
             Update,
             apply_pending_events
                 .before(player_vitals_events)
+                .before(player_status_events)
                 .before(crate::game::dialogs::inventory::inventory_events)
+                .before(crate::game::dialogs::potion_belt::belt_restock_events)
+                .before(crate::game::dialogs::inventory::quest_inventory_events)
+                .before(crate::game::dialogs::buff::buff_server_events)
                 .in_set(GameSet::PlayerState)
                 .run_if(in_state(AppState::Game)),
         );
+        // 登出/ReturnToLogin 离开 Game：清空登录缓冲——防跨会话残留把上个角色
+        // 的事件回放到下个角色（评审 MINOR；despawn 清实体在 actor/mod.rs，此处只管资源）。
+        app.add_systems(OnExit(AppState::Game), clear_pending_player_events_on_exit);
         app.add_systems(
             Update,
             (player_vitals_events, player_status_events)
@@ -473,7 +484,7 @@ impl Plugin for PlayerStatePlugin {
 /// #2633 批次4 步8/9：CharacterState 双源已删、HudState 双写已删——唯一数据源是玩家实体组件。
 #[allow(clippy::too_many_arguments)]
 fn player_vitals_events(
-    mut warned_multi: Local<bool>,
+    mut warned: Local<bool>,
     mut events: MessageReader<ServerEvent>,
     mut pending: ResMut<PendingPlayerEvents>,
     mut q: Query<
@@ -490,15 +501,15 @@ fn player_vitals_events(
         // R1/M1：实体未生成——本窗口全部可处理事件按到达顺序缓冲，待 apply_pending_events 回放
         //（修复评审 M1：此前只缓冲 UserInformation、其余被丢弃）。正常窗口仅登录数帧。
         // 另：若实际是"多个 LocalPlayer 实体"（异常，理论已由登出清理修复消除），给一次告警便于定位。
-        if !*warned_multi
+        if !*warned
             && matches!(q.single_mut(), Err(bevy_ecs::query::QuerySingleError::MultipleEntities(_)))
         {
-            *warned_multi = true;
+            *warned = true;
             tracing::warn!("⚠️ 多个 LocalPlayer 实体（登出未清理？CRITICAL-1）——本帧跳过组件写，事件按序缓冲");
         }
         for ev in events.read() {
             if is_vitals_event(ev) {
-                pending.0.push(ev.clone());
+                push_pending(&mut pending.0, ev.clone(), &mut warned);
             }
         }
         return;
@@ -576,6 +587,7 @@ fn is_status_event(ev: &ServerEvent) -> bool {
 /// （设计 §10 `player_status_events`；sprint/sneaking 由 buff.rs 写；
 /// MountUpdated 的 MountState 由 object_state/spawn 维护——步9 起本系统不再为该事件写任何值。）
 fn player_status_events(
+    mut warned: Local<bool>,
     mut events: MessageReader<ServerEvent>,
     mut pending: ResMut<PendingPlayerEvents>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
@@ -585,7 +597,7 @@ fn player_status_events(
     let Ok(mut f) = flags_q.single_mut() else {
         for ev in events.read() {
             if is_status_event(ev) {
-                pending.0.push(ev.clone());
+                push_pending(&mut pending.0, ev.clone(), &mut warned);
             }
         }
         return;
@@ -632,6 +644,29 @@ fn apply_pending_events(
     }
 }
 
+/// 缓冲上限：防"Game 态持续但 LocalPlayer 实体长期不生成"（服务端异常/多实体
+/// 告警路径）下 Vec 无界增长（评审 MINOR）。正常登录窗口仅数帧、远达不到。
+const MAX_PENDING_EVENTS: usize = 256;
+
+/// 入队辅助（vitals/status 两系统共用）：超限丢弃并只告警一次（`warned` 为各自系统
+/// Local<bool>，同时承载多实体告警的一次性语义）。
+fn push_pending(pending: &mut Vec<ServerEvent>, ev: ServerEvent, warned: &mut bool) {
+    if pending.len() >= MAX_PENDING_EVENTS {
+        if !*warned {
+            *warned = true;
+            tracing::warn!("⚠️ 登录缓冲超 {MAX_PENDING_EVENTS} 条，丢弃后续状态事件（实体长期未生成？）");
+        }
+        return;
+    }
+    pending.push(ev);
+}
+
+/// OnExit(Game)：清空登录缓冲（评审 MINOR）——登出恰好落在实体缺失窗口时，
+/// 残留事件跨会话存续会被下个角色登录时回放（上个角色的死亡/毒/增量金额）。
+fn clear_pending_player_events_on_exit(mut pending: ResMut<PendingPlayerEvents>) {
+    pending.0.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,14 +686,20 @@ mod tests {
         app.init_resource::<PotionBeltState>();
         app.init_resource::<PendingPlayerEvents>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
-        // CRITICAL-1：登出回登录界面须清 LocalPlayer 实体（防"换角色重登出现双实体"，见 actor/mod.rs）
+        // CRITICAL-1：登出回登录界面须清 LocalPlayer 实体（防"换角色重登出现双实体"）。
+        // ⚠️ 同步注：生产注册在 actor/mod.rs ActorPlugin——本行仅测试装配，勿只改一边
+        //（否则 local_player_despawned_on_exit_game 全绿但生产失效，评审 MINOR-3）；
+        // 登出清缓冲（clear_pending_player_events_on_exit）生产注册在 PlayerStatePlugin。
         app.add_systems(OnExit(AppState::Game), crate::actor::despawn_local_player);
+        app.add_systems(OnExit(AppState::Game), clear_pending_player_events_on_exit);
         app.add_systems(
             Update,
             (
                 apply_pending_events
                     .before(player_vitals_events)
-                    .before(crate::game::dialogs::inventory::inventory_events),
+                    .before(player_status_events)
+                    .before(crate::game::dialogs::inventory::inventory_events)
+                    .before(crate::game::dialogs::potion_belt::belt_restock_events),
                 player_vitals_events,
                 player_status_events,
                 crate::game::dialogs::potion_belt::belt_restock_events
@@ -968,6 +1009,60 @@ mod tests {
             .clone();
         assert_eq!(pn, "先改名后", "PlayerNameUpdated 应随缓冲回放");
         assert!(app.world().resource::<PendingPlayerEvents>().0.is_empty());
+    }
+
+    /// MAJOR-1（评审，2 名复核员独立探针实证）：缺失窗口缓冲旧 status 值，生成帧
+    /// 同帧新到新值——回放必须先于 status 处理器（新值胜）。修复前此测试失败：
+    /// apply_pending_events 无 .before(player_status_events) 边，调度器把 status
+    /// 处理器排在回放前，旧缓冲覆盖本帧新值（与 M1 目标缺陷同类的"旧值胜"）。
+    #[test]
+    fn status_pending_replayed_before_new_events() {
+        let mut app = test_app();
+        enter_game(&mut app);
+
+        // 缺失窗口（实体未生成）：缓冲旧值
+        app.world_mut()
+            .write_message(ServerEvent::LocalPoisonChanged { paralysis: true });
+        app.world_mut().write_message(ServerEvent::PlayerDied);
+        app.update();
+        assert_eq!(app.world().resource::<PendingPlayerEvents>().0.len(), 2);
+
+        // 生成帧：同帧新到新值
+        spawn_local(&mut app);
+        app.world_mut()
+            .write_message(ServerEvent::LocalPoisonChanged { paralysis: false });
+        app.world_mut().write_message(ServerEvent::PlayerRevived);
+        app.update();
+
+        let f: StatusFlags = get(&mut app);
+        assert!(
+            !f.paralysis,
+            "生成帧新值应覆盖缓冲旧值（LocalPoisonChanged false 胜）"
+        );
+        assert!(!f.dead, "生成帧 PlayerRevived 应覆盖缓冲 PlayerDied（新值胜）");
+    }
+
+    /// 评审 MINOR：登出（OnExit Game）清空登录缓冲——防跨会话残留把上个角色的事件
+    /// 回放到下个角色（登出恰好落在实体缺失窗口时）。
+    #[test]
+    fn pending_cleared_on_exit_game() {
+        let mut app = test_app();
+        enter_game(&mut app);
+        // 实体缺失窗口：缓冲一条
+        app.world_mut()
+            .write_message(ServerEvent::HealthChanged { hp: 42, mp: 24 });
+        app.update();
+        assert_eq!(app.world().resource::<PendingPlayerEvents>().0.len(), 1);
+
+        // 离开 Game → OnExit 清空
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
+        app.update();
+        assert!(
+            app.world().resource::<PendingPlayerEvents>().0.is_empty(),
+            "登出应清空登录缓冲"
+        );
     }
 
     /// 步7/9：PlayerNameUpdated / UserInformation 写 `PlayerName` 组件

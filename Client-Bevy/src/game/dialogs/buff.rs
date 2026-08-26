@@ -292,7 +292,7 @@ fn buff_ui_system(
 /// 消费服务端状态事件（网络层只广播 ServerEvent）
 /// #2633 批次4 步9：sprint/sneaking 直写 `StatusFlags` 组件（hud.* 双写已删）；
 /// 组件写 `single_mut()` 失败（实体未生成）跳过不 panic（R1 同理）。
-fn buff_server_events(
+pub(crate) fn buff_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut buff: ResMut<BuffState>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
