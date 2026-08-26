@@ -659,7 +659,7 @@ fn storage_ui_system(
 fn storage_action_system(
     mut state: ResMut<StorageState>,
     mut inv_click: ResMut<InvClickState>,
-    // #2633 批次4 步7：gender/class/level/riding 改读组件（hud 双写保留，步9 删）
+    // #2633 批次4 步7：gender/class/level/riding 改读组件（HudState 已于步9 删除）
     player_q: Query<
         (
             &Inventory,

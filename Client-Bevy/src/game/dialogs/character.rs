@@ -239,7 +239,7 @@ fn spawn_character_dialog(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
-    // #2633 批次4 步7：class 读 `ActorAppearance`（hud.class 双写保留，步9 删）
+    // #2633 批次4 步7：class 读 `ActorAppearance`（HudState 已于步9 删除）
     appearance_q: Query<&crate::actor::ActorAppearance, With<crate::actor::LocalPlayer>>,
 ) {
     libs.0.ensure_initialized();

@@ -347,7 +347,7 @@ fn advance_local_move(
     time: Res<Time>,
     net: Res<NetConnection>,
     game_data: Res<GameData>,
-    // #2633 批次4 步7：步声骑乘参数改读 `MountState`（hud.riding 双写保留，步9 删）；
+    // #2633 批次4 步7：步声骑乘参数改读 `MountState`（HudState 已于步9 删除）；
     // 实体缺失视同未骑乘（原 hud.riding=false 默认）
     mount_q: Query<&MountState, With<LocalPlayer>>,
     sound_bank: Res<SoundBank>,

@@ -267,7 +267,7 @@ fn mentor_ui_system(
     mut state: ResMut<MentorState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    // #2633 批次4 步7：name→`PlayerName`、level→`Progression`（hud 双写保留，步9 删）；
+    // #2633 批次4 步7：name→`PlayerName`、level→`Progression`（HudState 已于步9 删除）；
     // 实体缺失按 HudState 默认（level=1/name=""）
     player_q: Query<
         (

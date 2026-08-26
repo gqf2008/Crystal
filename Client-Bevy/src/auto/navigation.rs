@@ -201,7 +201,7 @@ pub(crate) fn real_verify_system(
     mut control: ResMut<client_bevy::game::player_control::ControlState>,
     game_data: Res<client_bevy::map_renderer::GameData>,
     mut chat: ResMut<client_bevy::game::chat::ChatState>,
-    // #2633 批次4 步7：聊天前缀读 `PlayerName`（hud.name 双写保留，步9 删）
+    // #2633 批次4 步7：聊天前缀读 `PlayerName`（HudState 已于步9 删除）
     name_q: Query<&client_bevy::actor::PlayerName, With<client_bevy::actor::LocalPlayer>>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
     probe: Res<client_bevy::game::combat::RealHitProbe>,

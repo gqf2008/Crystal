@@ -728,7 +728,7 @@ pub(crate) fn chat_input_system(
     mut chat: ResMut<ChatState>,
     net: Res<NetConnection>,
     net_mode: Res<crate::network::NetMode>,
-    // #2633 批次4 步7：本地回显名字改读 `PlayerName`（hud.name 双写保留，步9 删）
+    // #2633 批次4 步7：本地回显名字改读 `PlayerName`（HudState 已于步9 删除）
     name_q: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
     filter: Res<ChatFilter>,
 ) {

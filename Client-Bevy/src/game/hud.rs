@@ -962,7 +962,7 @@ fn attack_mode_text_system(
 }
 
 /// #2633 批次4 步3/步7：hp/max_hp/mp/max_mp→`Vitals`、exp/max_exp/level→`Progression`、
-/// gold→`Gold`、name→复用 `PlayerName`（步7 迁；hud.name 仍双写，步9 删）。
+/// gold→`Gold`、name→复用 `PlayerName`（步7 迁；HudState 已于步9 删除）。
 /// R3：保留 `Changed<HudData>` 跳帧门控——仍「值变才写 HudData」（`if *data != new`），
 /// 不改成每帧无条件写；R4：一律读组件当前值，不加 `Changed<组件>` 过滤。
 /// 实体缺失跳过（登录前无 LocalPlayer，HudData 保持默认，与组件默认值一致）。
@@ -989,7 +989,7 @@ fn sync_hud_data(
 }
 
 /// #2633 批次4 步3/步7：血/蓝/经验/等级/金币/名字改读 `Vitals`/`Progression`/`Gold`/
-/// `PlayerName` 组件（步7 迁 name；hud.name 双写保留，步9 删）。门控不变：仍靠 `Changed<HudData>`
+/// `PlayerName` 组件（步7 迁 name；HudState 已于步9 删除）。门控不变：仍靠 `Changed<HudData>`
 /// 跳帧（#70），R4 读当前值不加组件 Changed 过滤。实体缺失跳过（HudData 默认帧不更新）。
 fn hud_update_system(
     opt: Res<crate::game::dialogs::option::OptionState>,

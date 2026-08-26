@@ -160,7 +160,7 @@ pub struct Inventory {
 
 impl Inventory {
     /// 按服务端 ResizeInventory 调整格数（C# Array.Resize：截断/补空，上限 MAX_INV_SLOTS）。
-    /// 逻辑同 `InventoryState::resize`；本批写路径用全量镜像（见 inventory_events），
+    /// 逻辑源自原 `InventoryState::resize`（已删）；本批写路径用全量镜像（见 inventory_events），
     /// 该方法供后续「直接操作组件」的读者迁移批次使用。
     pub fn resize(&mut self, size: usize) {
         let size = size.min(crate::game::dialogs::inventory::MAX_INV_SLOTS);
@@ -172,7 +172,7 @@ impl Inventory {
     }
 
     /// #1544：RefreshStats 重量（C# User.RefreshStats 从物品重量重算）。
-    /// 逻辑同 `InventoryState::refresh_weight`；用途同 `resize`。
+    /// 逻辑源自原 `InventoryState::refresh_weight`（已删）；用途同 `resize`。
     pub fn refresh_weight(&mut self) {
         self.weight = self
             .items
@@ -234,7 +234,7 @@ pub struct PendingUserInfo(pub Option<ServerEvent>);
 // ServerEvent 写系统（#2633 批次4 步2：拆 hud_server_events，设计 §10）
 //
 // 双写过渡（设计 §11 批1）：每个系统把值同时写进玩家组件与原 `HudState`
-// （CharacterState 双写已在步8 删除；hud.* 保留至步9）。
+// （CharacterState 已于步8 删除；HudState 已于步9 删除）。
 // 组件写用 `Query<&mut X, With<LocalPlayer>>` + `single_mut()`；实体未生成时
 // （UserInformation 可能先于 ObjectPlayer 到达，设计 §12 R1）跳过组件写、仅写
 // HudState 兜底，UserInformation 另由 PendingUserInfo 缓冲待实体生成后应用。
@@ -244,7 +244,7 @@ pub struct PendingUserInfo(pub Option<ServerEvent>);
 ///
 /// `player_vitals_events` 与 `apply_pending_user_info` 共用此一份字段映射，避免双份漂移
 /// （#2633 R1）。非 UserInformation 事件为 no-op。只写组件，不写 HudState
-/// （hud 侧由调用方按双写过渡单独处理，步9 删）。
+/// （HudState 已于步9 删除）。
 pub(crate) fn apply_user_info_stats(
     ev: &ServerEvent,
     vitals: &mut Vitals,

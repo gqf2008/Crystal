@@ -511,7 +511,7 @@ fn quest_log_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<QuestLogState>,
     catalog: Res<QuestCatalog>,
-    // #2633 批次4 步7：level→`Progression`、class→`ActorAppearance`（hud 双写保留，步9 删）；
+    // #2633 批次4 步7：level→`Progression`、class→`ActorAppearance`（HudState 已于步9 删除）；
     // 实体缺失按 HudState 默认（level=1/class=0）
     player_q: Query<
         (

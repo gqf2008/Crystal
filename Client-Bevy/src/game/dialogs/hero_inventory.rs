@@ -601,7 +601,7 @@ fn hero_inv_click_system(
         Res<InvUiState>,
         Res<crate::game::dialogs::inventory::InventoryOrigin>,
     ),
-    // #2633 批次4 步7：riding 读 `MountState`（hud.riding 双写保留，步9 删）；
+    // #2633 批次4 步7：riding 读 `MountState`（HudState 已于步9 删除）；
     // 英雄性别/职业/等级走 HeroState（不属本地玩家组件）
     player_q: Query<(&Inventory, &Loadout, Option<&MountState>), With<LocalPlayer>>,
     mut feedback: ResMut<ItemUseFeedback>,

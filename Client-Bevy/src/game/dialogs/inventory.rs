@@ -163,42 +163,8 @@ pub const MAX_INV_SLOTS: usize = 80;
 /// 背包扩容上限（C# CharacterInfo.ResizeInventory 上限 86，AddButton 满格隐藏）
 pub const MAX_INV_EXPAND: usize = 86;
 
-/// 背包数据（网络 UserInformation.inventory 写入）
-#[derive(Resource, Default)]
-pub struct InventoryState {
-    /// 动态格数背包（默认 40，ResizeInventory 扩容/缩容，#276）
-    pub items: Vec<Option<InvItem>>,
-    pub gold: u32,
-    pub weight: u32,
-    pub max_weight: u32,
-    /// 任务物品格（C# QuestInventory 40 格；UserInformation.quest_inventory 写入）
-    pub quest_inventory: Vec<Option<InvItem>>,
-    /// 当前背包页（0=道具 1=道具2 2=任务；#276 双页扩容）
-    pub page: usize,
-}
-
-impl InventoryState {
-    /// 按服务端 ResizeInventory 调整格数（C# Array.Resize：截断/补空，上限 MAX_INV_SLOTS）
-    pub fn resize(&mut self, size: usize) {
-        let size = size.min(MAX_INV_SLOTS);
-        if size < self.items.len() {
-            self.items.truncate(size);
-        } else {
-            self.items.resize(size, None);
-        }
-    }
-
-    /// #1544：RefreshStats 重量（C# User.RefreshStats 从物品重量重算；max_weight 由服务端 bag_weight 提供）
-    pub fn refresh_weight(&mut self) {
-        let w: u32 = self
-            .items
-            .iter()
-            .flatten()
-            .map(|it| it.weight as u32 * it.count as u32)
-            .sum();
-        self.weight = w;
-    }
-}
+// #2633 批次4 收尾：`InventoryState`（原 `HudState.inventory` 字段类型）已随 HudState 一起删除——
+// 背包数据归 `crate::game::player_state::Inventory` 组件（resize/refresh_weight 逻辑已移植过去）。
 
 /// 背包翻页 UI 态（#2633 批次4：page 从背包数据剥离为单一 UI 资源，背包/英雄背包/仓库
 /// 三处共读避免翻页不同步 R8；Inventory 玩家组件本就不含 page，设计 §6/§8）。
@@ -773,7 +739,7 @@ fn spawn_inventory_dialog(
             .insert((InvDelBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
     }
 
-    // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 InventoryState.items.len()
+    // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 Inventory 组件 items.len()
     // 动态生成/移除（进图 UserInformation 到达前 items 为空，避免先建后删抖动）
 }
 
@@ -1260,7 +1226,7 @@ pub fn item_type_name(t: u8) -> &'static str {
     }
 }
 
-/// 背包动态格子同步（#276）：按 InventoryState.items.len() 生成/移除 InvSlot 格子。
+/// 背包动态格子同步（#276）：按 Inventory 组件 items.len() 生成/移除 InvSlot 格子。
 /// 对齐 C# InventoryDialog.Grid（8x10，位置 y%5 复用）；缩容时移除多余格子。
 /// 扩容补格按 InventoryOrigin 生成（#2560：背包不在 (0,0) 时新格与已平移格对齐）。
 #[allow(clippy::too_many_arguments)]
@@ -1581,7 +1547,7 @@ impl<'a> UseItemCtx<'a> {
 /// #1546：守卫链纯逻辑（不发包，便于单测）
 /// 返回 Some(true)=可继续（已通过守卫）；Some(false)=槽物品无坐骑/鱼竿；None=被拦截
 /// equipment 恒为主角色 `Loadout` slots（槽物品前置看 User 装备，步6）；
-/// #2633 批次4 步7：riding 改由调用方读 `MountState` 传入（hud.riding 双写保留，步9 删）。
+/// #2633 批次4 步7：riding 改由调用方读 `MountState` 传入（HudState 已于步9 删除）。
 #[allow(clippy::too_many_arguments)]
 fn use_item_guard(
     item: &InvItem,
@@ -1742,7 +1708,7 @@ pub(crate) fn use_item_core(
 
 /// 主背包快捷使用（#1544 包装，调用点保持兼容）
 /// #2633 批次4 步7：gender/class/level/riding 由调用方读组件传入
-///（`ActorAppearance`/`Progression`/`MountState`；hud 双写保留，步9 删）
+///（`ActorAppearance`/`Progression`/`MountState`；HudState 已于步9 删除）
 #[allow(clippy::too_many_arguments)]
 fn use_or_equip(
     item: &InvItem,
@@ -2051,7 +2017,7 @@ fn cursor_over_dialog<'a>(
 ///   - 选中物品 + 点场景地面 → 丢弃（单件 YesNo 确认 / 多件数量框 → DropItem）
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inv_item_action_system(
-    // #2633 批次4 步7：gender/class/level/riding 读组件（hud 双写保留，步9 删）
+    // #2633 批次4 步7：gender/class/level/riding 读组件（HudState 已于步9 删除）
     player_q: Query<
         (
             &Inventory,
@@ -2890,7 +2856,7 @@ mod tests {
 
     #[test]
     fn refresh_weight_sums_items() {
-        let mut inv = InventoryState::default();
+        let mut inv = crate::game::player_state::Inventory::default();
         let mut a = item_with_type(ItemType::Potion);
         a.weight = 1;
         a.count = 2;

@@ -185,7 +185,7 @@ fn attack_mode_system(
 /// 应用受击/死亡事件 + 生成伤害飘字
 fn apply_combat_events(
     mut commands: Commands,
-    // #2633 批次4 步7：本地判定改读 `NetObjectId`/`ActorAppearance`（hud 双写保留，步9 删）；
+    // #2633 批次4 步7：本地判定改读 `NetObjectId`/`ActorAppearance`（HudState 已于步9 删除）；
     // 实体缺失 = 非本地/未生成（同原 local_id=None、gender=0 默认）
     local_q: Query<(&NetObjectId, &crate::actor::ActorAppearance), With<LocalPlayer>>,
     loadout_q: Query<&crate::game::player_state::Loadout, With<LocalPlayer>>,

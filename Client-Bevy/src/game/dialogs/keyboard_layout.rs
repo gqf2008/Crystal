@@ -811,7 +811,7 @@ fn secondary_hotkey_system(
     kb: Res<KeyboardState>,
     gate: Res<crate::game::input_gate::TextInputGate>,
     net: Res<NetConnection>,
-    // #2633 批次4 步7：riding 读 `MountState`（hud.riding 双写保留，步9 删）
+    // #2633 批次4 步7：riding 读 `MountState`（HudState 已于步9 删除）
     flags_q: Query<(&StatusFlags, &Loadout, Option<&crate::actor::MountState>), With<LocalPlayer>>,
     time: Res<Time>,
     mut feedback: ResMut<ItemUseFeedback>,

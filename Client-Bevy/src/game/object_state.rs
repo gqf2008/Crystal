@@ -51,7 +51,7 @@ impl Plugin for ObjectStatePlugin {
 fn apply_object_state_events(
     mut commands: Commands,
     mut events: MessageReader<ServerEvent>,
-    // #2633 批次4 步7：本地判定改读 `NetObjectId`（hud.player_object_id 双写保留，步9 删）；
+    // #2633 批次4 步7：本地判定改读 `NetObjectId`（HudState 已于步9 删除）；
     // 实体缺失视同非本地（原 hud.player_object_id=None 默认）
     local_q: Query<&NetObjectId, With<LocalPlayer>>,
     mut vis: Query<(&NetObjectId, &mut Visibility)>,
