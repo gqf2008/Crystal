@@ -968,6 +968,20 @@ fn storage_grid_sync_system(
 
 #[cfg(test)]
 mod tests {
+    /// 仓库格命中：初始原点等价于原固定坐标，拖动后跟随面板
+    #[test]
+    fn slot_at_origin_and_drag() {
+        // 初始 (0,0)：首格 (9,60)，格 36x32
+        assert_eq!(storage_slot_at(10.0, 61.0, 80, 0.0, 0.0), Some(0));
+        assert_eq!(storage_slot_at(8.0, 61.0, 80, 0.0, 0.0), None);
+        // 拖动到 (393,50)：首格绝对坐标 (402,110)
+        assert_eq!(storage_slot_at(403.0, 111.0, 80, 393.0, 50.0), Some(0));
+        assert_eq!(storage_slot_at(401.0, 111.0, 80, 393.0, 50.0), None);
+        // 初始位不再命中（面板已移走）
+        assert_eq!(storage_slot_at(10.0, 61.0, 80, 393.0, 50.0), None);
+    }
+
+
     use super::*;
 
     /// C# StorageDialog `Location = new Point(0, 0)`（NPCDialogs.cs:2807）→ 左上角原点。

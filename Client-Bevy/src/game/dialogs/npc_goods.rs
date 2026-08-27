@@ -204,6 +204,11 @@ fn spawn_npc_goods(
 
 /// 显示/隐藏 + 商品列表渲染 + 选中/购买/关闭
 #[allow(clippy::type_complexity)]
+/// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..8）
+fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (ox + 12.0, oy + 16.0 + i as f32 * 22.0, 480.0, 18.0)
+}
+
 fn npc_goods_ui_system(
     mut state: ResMut<NpcGoodsState>,
     mut amount: ResMut<AmountBoxState>,
@@ -331,8 +336,8 @@ fn npc_goods_ui_system(
         .map(|n| crate::ui::theme::node_origin(n, (0.0, 224.0)))
         .unwrap_or((0.0, 224.0));
     for i in 0..8usize {
-        let y = oy + 16.0 + i as f32 * 22.0;
-        if cursor.x >= ox + 12.0 && cursor.x <= ox + 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+        let (rx, ry, rw, rh) = npc_goods_row_rect(i, ox, oy);
+        if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
             hovered = state.goods.get(off + i);
             break;
         }
@@ -359,8 +364,8 @@ fn npc_goods_ui_system(
     let Some(cursor) = window.cursor_position() else { return };
     if mouse.just_pressed(MouseButton::Left) {
         for i in 0..8usize {
-            let y = oy + 16.0 + i as f32 * 22.0;
-            if cursor.x >= ox + 12.0 && cursor.x <= ox + 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+            let (rx, ry, rw, rh) = npc_goods_row_rect(i, ox, oy);
+            if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
                 let idx = off + i;
                 if idx < state.goods.len() {
                     state.selected = Some(idx);
@@ -477,6 +482,19 @@ fn npc_goods_server_events(
 }
 #[cfg(test)]
 mod tests {
+    /// 商品行命中：初始原点等价于原固定坐标，拖动后跟随面板
+    #[test]
+    fn row_rect_origin_and_drag() {
+        // 初始 (0,224)：首行 y=240（=224+16），x 起 12（=0+12）
+        let (rx, ry, rw, rh) = npc_goods_row_rect(0, 0.0, 224.0);
+        assert_eq!((rx, ry, rw, rh), (12.0, 240.0, 480.0, 18.0));
+        assert_eq!(npc_goods_row_rect(7, 0.0, 224.0).1, 240.0 + 7.0 * 22.0);
+        // 拖动到 (50,250)：跟随
+        let (rx2, ry2, _, _) = npc_goods_row_rect(0, 50.0, 250.0);
+        assert_eq!((rx2, ry2), (62.0, 266.0));
+    }
+
+
     use super::*;
 
     #[test]

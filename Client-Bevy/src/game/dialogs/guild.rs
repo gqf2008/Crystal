@@ -1015,11 +1015,11 @@ fn guild_ui_system(
                 if !guild.show_buff_page {
                     let visible = guild.visible_member_indices();
                     for i in 1..=10usize {
-                        let y = oy + 60.0 + (i - 1) as f32 * 20.0;
-                        if cursor.x >= ox + 18.0
-                            && cursor.x <= ox + 320.0
-                            && cursor.y >= y
-                            && cursor.y <= y + 18.0
+                        let (rx, ry, rw, rh) = guild_member_row_rect(i, ox, oy);
+                        if cursor.x >= rx
+                            && cursor.x <= rx + rw
+                            && cursor.y >= ry
+                            && cursor.y <= ry + rh
                         {
                             let idx = scroll_offset + i - 1;
                             if let Some(&mi) = visible.get(idx) {
@@ -1032,11 +1032,11 @@ fn guild_ui_system(
                 }
                 // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
                 for i in 11..=18usize {
-                    let y = oy + 515.0 + (i - 11) as f32 * 18.0;
-                    if cursor.x >= ox + 18.0
-                        && cursor.x <= ox + 320.0
-                        && cursor.y >= y
-                        && cursor.y <= y + 16.0
+                    let (rx, ry, rw, rh) = guild_storage_row_rect(i, ox, oy);
+                    if cursor.x >= rx
+                        && cursor.x <= rx + rw
+                        && cursor.y >= ry
+                        && cursor.y <= ry + rh
                     {
                         let slot = guild.storage_page * 8 + (i - 11);
                         if slot < guild.storage_items.len() {
@@ -1049,6 +1049,21 @@ fn guild_ui_system(
             }
         }
     }
+}
+
+/// 成员行命中矩形（面板原点 ox/oy + 相对坐标；i 1..=10）
+fn guild_member_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 320.0, 18.0)
+}
+
+/// 仓库格命中矩形（i 11..=18）
+fn guild_storage_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (ox + 18.0, oy + 515.0 + (i - 11) as f32 * 18.0, 320.0, 16.0)
+}
+
+/// Buff 行命中矩形（i 1..=8）
+fn guild_buff_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 218.0, 18.0)
 }
 
 /// #2537 Buff 页交互（独立系统：guild_ui_system 已满 16 参 Bevy SystemParam 上限）
@@ -1107,8 +1122,8 @@ fn guild_buff_system(
         .map(|n| crate::ui::theme::node_origin(n, (GUILD_X, GUILD_Y)))
         .unwrap_or((GUILD_X, GUILD_Y));
     for i in 1..=8usize {
-        let y = oy + 60.0 + (i - 1) as f32 * 20.0;
-        if cursor.x >= ox + 18.0 && cursor.x <= ox + 218.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+        let (rx, ry, rw, rh) = guild_buff_row_rect(i, ox, oy);
+        if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
             if let Some(info) = guild.buff_catalog.get(guild.buff_start + i - 1) {
                 net.send_packet(&mir2_shared::packets::client::guild::GuildBuffUpdate {
                     action: 2,
@@ -1621,6 +1636,37 @@ fn guild_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// 成员行命中：初始原点等价于原固定坐标，拖动后跟随面板
+    #[test]
+    fn member_row_rect_origin_and_drag() {
+        // 初始 (GUILD_X=280, GUILD_Y=80)：首行 y=140（=80+60），x 起 298（=280+18）
+        let (rx, ry, rw, rh) = guild_member_row_rect(1, GUILD_X, GUILD_Y);
+        assert_eq!((rx, ry, rw, rh), (298.0, 140.0, 320.0, 18.0));
+        assert_eq!(guild_member_row_rect(10, GUILD_X, GUILD_Y).1, 140.0 + 9.0 * 20.0);
+        // 拖动到 (330,100)：同一相对位置命中跟随（原始坐标 + delta(50,20)）
+        let (rx2, ry2, _, _) = guild_member_row_rect(1, 330.0, 100.0);
+        assert_eq!((rx2, ry2), (348.0, 160.0));
+    }
+
+    /// 仓库格命中：初始等价 + 拖动跟随
+    #[test]
+    fn storage_row_rect_origin_and_drag() {
+        let (rx, ry, _, _) = guild_storage_row_rect(11, GUILD_X, GUILD_Y);
+        assert_eq!((rx, ry), (298.0, 595.0), "初始 11 格 y=595");
+        let (rx2, ry2, _, _) = guild_storage_row_rect(11, 330.0, 100.0);
+        assert_eq!((rx2, ry2), (348.0, 615.0), "拖动后跟随");
+    }
+
+    /// Buff 行命中：初始等价 + 拖动跟随
+    #[test]
+    fn buff_row_rect_origin_and_drag() {
+        let (rx, ry, rw, _) = guild_buff_row_rect(1, GUILD_X, GUILD_Y);
+        assert_eq!((rx, ry, rw), (298.0, 140.0, 218.0));
+        let (rx2, ry2, _, _) = guild_buff_row_rect(1, 330.0, 100.0);
+        assert_eq!((rx2, ry2), (348.0, 160.0));
+    }
+
+
     use super::*;
 
     fn buff_info(id: i32, name: &str) -> mir2_shared::data::client_data::GuildBuffInfo {
