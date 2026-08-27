@@ -206,7 +206,8 @@ fn spawn_npc_goods(
 #[allow(clippy::type_complexity)]
 /// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..8）
 fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 12.0, oy + 16.0 + i as f32 * 22.0, 480.0, 18.0)
+    // 宽度=右界−左界（480−12）：旧实现误把绝对右界当宽度，命中带右扩 12px
+    (ox + 12.0, oy + 16.0 + i as f32 * 22.0, 468.0, 18.0)
 }
 
 fn npc_goods_ui_system(
@@ -487,7 +488,7 @@ mod tests {
     fn row_rect_origin_and_drag() {
         // 初始 (0,224)：首行 y=240（=224+16），x 起 12（=0+12）
         let (rx, ry, rw, rh) = npc_goods_row_rect(0, 0.0, 224.0);
-        assert_eq!((rx, ry, rw, rh), (12.0, 240.0, 480.0, 18.0));
+        assert_eq!((rx, ry, rw, rh), (12.0, 240.0, 468.0, 18.0));
         assert_eq!(npc_goods_row_rect(7, 0.0, 224.0).1, 240.0 + 7.0 * 22.0);
         // 拖动到 (50,250)：跟随
         let (rx2, ry2, _, _) = npc_goods_row_rect(0, 50.0, 250.0);

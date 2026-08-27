@@ -399,7 +399,8 @@ fn reward_item_display(catalog: &QuestCatalog, r: &QuestItemReward) -> String {
 #[allow(clippy::too_many_arguments)]
 /// 任务行命中矩形（面板原点 ox/oy + 相对坐标；i 0..8）
 fn quest_log_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 18.0, oy + 40.0 + i as f32 * 20.0, 300.0, 18.0)
+    // 宽度=右界−左界（500−218）：旧实现误把绝对右界当宽度，命中带右扩 18px
+    (ox + 18.0, oy + 40.0 + i as f32 * 20.0, 282.0, 18.0)
 }
 
 fn quest_log_ui_system(
@@ -892,7 +893,7 @@ mod tests {
     fn row_rect_origin_and_drag() {
         // 初始 (200,60)：首行 y=100（=60+40），x 起 218（=200+18）
         let (rx, ry, rw, rh) = quest_log_row_rect(0, 200.0, 60.0);
-        assert_eq!((rx, ry, rw, rh), (218.0, 100.0, 300.0, 18.0));
+        assert_eq!((rx, ry, rw, rh), (218.0, 100.0, 282.0, 18.0));
         assert_eq!(quest_log_row_rect(7, 200.0, 60.0).1, 100.0 + 7.0 * 20.0);
         // 拖动到 (250,100)：跟随
         let (rx2, ry2, _, _) = quest_log_row_rect(0, 250.0, 100.0);

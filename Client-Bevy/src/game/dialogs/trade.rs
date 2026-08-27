@@ -23,7 +23,9 @@ use bevy::sprite::Anchor;
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::inventory::{InvItem, InvSlot, InventoryShiftRight};
+use crate::game::dialogs::inventory::{
+    InvItem, InventoryOrigin, InventoryShiftRight, inv_slot_at,
+};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::{Gold, Inventory};
 use crate::map_renderer::GameLibraries;
@@ -487,10 +489,10 @@ fn trade_action_system(
     windows: Query<&Window>,
     close: Query<(Entity, &Interaction), With<TradeClose>>,
     confirm: Query<(Entity, &Interaction), With<TradeConfirmBtn>>,
-    // 我方槽/金币标签：bevy_ui 节点用布局坐标命中（trade_slot_pos + 面板原点）
+    // 我方交易面板原点（拖后跟随；GuestTrade 也挂 TradeWidget，按 kind 取我方）
+    panels: Query<(&Node, &DialogRoot), With<TradeWidget>>,
     gold_hit: Query<(), With<TradeGoldHit>>,
-    // 背包格仍为 sprite（inventory 未迁移）：Transform 命中
-    inv_cells: Query<(&Transform, &InvSlot, &Visibility)>,
+    inv_origin: Res<InventoryOrigin>,
     mut amount: ResMut<AmountBoxState>,
     mut result: MessageReader<AmountBoxResult>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -540,12 +542,18 @@ fn trade_action_system(
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
+    // 我方面板原点（拖后命中跟随；GuestTrade 同挂 TradeWidget，按 DialogKind 过滤）
+    let (tx, ty) = panels
+        .iter()
+        .find(|(_, r)| r.0 == DialogKind::Trade)
+        .map(|(n, _)| crate::ui::theme::node_origin(n, (TRADE_X, TRADE_Y)))
+        .unwrap_or((TRADE_X, TRADE_Y));
 
-    // 我方交易槽点击 → 取回（C# RetrieveTradeItem；bevy_ui 布局坐标命中）
+    // 我方交易槽点击 → 取回（C# RetrieveTradeItem；bevy_ui 布局坐标 + 面板原点）
     for i in 0..TRADE_SLOTS {
         let (sx, sy) = trade_slot_pos(i);
-        let x = TRADE_X + sx;
-        let y = TRADE_Y + sy;
+        let x = tx + sx;
+        let y = ty + sy;
         if cursor.x >= x && cursor.x <= x + CELL_W && cursor.y >= y && cursor.y <= y + CELL_H {
             if !trade.my_locked
                 && trade
@@ -567,8 +575,8 @@ fn trade_action_system(
     }
     // 金币标签点击 → 数量框（C# GoldLabel.Click → MirAmountBox(…, GameScene.Gold)）
     if !gold_hit.is_empty() {
-        let cx = TRADE_X + GOLD_X + GOLD_W / 2.0;
-        let cy = TRADE_Y + GOLD_Y + GOLD_H / 2.0;
+        let cx = tx + GOLD_X + GOLD_W / 2.0;
+        let cy = ty + GOLD_Y + GOLD_H / 2.0;
         if (cursor.x - cx).abs() <= GOLD_W / 2.0 && (cursor.y - cy).abs() <= GOLD_H / 2.0 {
             if !trade.my_locked {
                 amount.ask("输入交易金币", gold_q.single().map(|g| g.0).unwrap_or(0));
@@ -577,34 +585,35 @@ fn trade_action_system(
         }
     }
     // 点击背包物品 → 存入（C# DepositTradeItem：点击空槽/找空槽，MirItemCell.cs:1553-1565；
-    // 按背包格实体实际 Transform 命中——背包可能已被推到右侧或拖动过）
+    // 复用 inv_slot_at + InventoryOrigin 命中——背包可能已被推到右侧或拖动过，
+    // 旧 Transform 残留命中在 bevy_ui 迁移后已失效）
     if !trade.my_locked {
         let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
-        for (tf, InvSlot(idx), vis) in &inv_cells {
-            if *vis != Visibility::Visible {
-                continue;
-            }
-            let x = tf.translation.x;
-            let y = -tf.translation.y;
-            if cursor.x >= x && cursor.x <= x + CELL_W && cursor.y >= y && cursor.y <= y + CELL_H {
-                if let Some(item) = items.get(*idx).and_then(|s| s.as_ref()) {
-                    if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
-                        net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {
-                            from: *idx as i32,
-                            to: to as i32,
-                        });
-                        trade.pending_deposit = Some((*idx, to));
-                        tracing::info!(
-                            "📦 放入交易: {} (uid={}) 背包{} -> 槽{}",
-                            item.name,
-                            item.unique_id,
-                            idx,
-                            to
-                        );
-                    }
+        let hit = inv_slot_at(
+            cursor.x,
+            cursor.y,
+            0,
+            items.len(),
+            (inv_origin.0, inv_origin.1),
+        );
+        if let Some(idx) = hit {
+            if let Some(item) = items.get(idx).and_then(|s| s.as_ref()) {
+                if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
+                    net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {
+                        from: idx as i32,
+                        to: to as i32,
+                    });
+                    trade.pending_deposit = Some((idx, to));
+                    tracing::info!(
+                        "📦 放入交易: {} (uid={}) 背包{} -> 槽{}",
+                        item.name,
+                        item.unique_id,
+                        idx,
+                        to
+                    );
                 }
-                return;
             }
+            return;
         }
     }
 }

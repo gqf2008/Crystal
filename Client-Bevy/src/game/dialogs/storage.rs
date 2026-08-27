@@ -354,6 +354,9 @@ fn storage_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
+    // 评审 P1：走 UiImageCache 缓存句柄——原 load_lib_image 每帧每格新建 Image
+    // 资产（#112 的“无变化不写”因 Handle 恒不等而失效 → GPU 纹理每帧重传）
+    mut image_cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     mut all_vis: Query<(&mut Visibility, Option<&StorageSlot>), With<StorageWidget>>,
     mut cells: Query<(&mut UiItemCellData, &UiItemCell), With<StorageSlot>>,
     buttons: Query<(Entity, &Interaction, Option<&StorageClose>), With<StorageWidget>>,
@@ -381,9 +384,10 @@ fn storage_ui_system(
     for (mut data, cell) in &mut cells {
         let item = state.items.get(cell.slot).and_then(|s| s.as_ref());
         let icon = item.and_then(|it| {
-            load_lib_image(
+            crate::ui::sprite_ui::ui_image(
                 &mut libs,
                 &mut images,
+                &mut image_cache,
                 LibraryName::Items,
                 it.image as usize,
             )
@@ -595,8 +599,9 @@ fn storage_server_events(
     mut storage: ResMut<StorageState>,
     mut mgr: ResMut<DialogManager>,
     mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
-    // bevy_ui 迁移：背包面板根 Node.left = 屏幕 x，子节点随根整体平移
-    mut inv_entities: Query<(&mut Node, &DialogRoot)>,
+    // 只推背包面板根（同 inventory_shift_right_system：子实体随根平移，
+    // 根+格双重 +dx 会把背包推出屏幕——评审 P0）
+    mut inv_entities: Query<(&mut Node, &DialogRoot), With<crate::game::dialogs::inventory::InventoryPanel>>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;

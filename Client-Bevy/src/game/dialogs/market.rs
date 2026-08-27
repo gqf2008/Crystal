@@ -270,7 +270,8 @@ fn spawn_market_input(
 #[allow(clippy::too_many_arguments)]
 /// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..10）
 fn market_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 15.0, oy + 40.0 + i as f32 * 18.0, 340.0, 16.0)
+    // 宽度=右界−左界（620−295）：旧实现误把绝对右界当宽度，命中带右扩 15px
+    (ox + 15.0, oy + 40.0 + i as f32 * 18.0, 325.0, 16.0)
 }
 
 fn market_ui_system(
@@ -640,7 +641,7 @@ mod tests {
     fn row_rect_origin_and_drag() {
         // 初始 (280,80)：首行 y=120（=80+40），x 起 295（=280+15）
         let (rx, ry, rw, rh) = market_row_rect(0, 280.0, 80.0);
-        assert_eq!((rx, ry, rw, rh), (295.0, 120.0, 340.0, 16.0));
+        assert_eq!((rx, ry, rw, rh), (295.0, 120.0, 325.0, 16.0));
         assert_eq!(market_row_rect(9, 280.0, 80.0).1, 120.0 + 9.0 * 18.0);
         // 拖动到 (330,100)：同一相对位置命中跟随（+delta 50,20）
         let (rx2, ry2, _, _) = market_row_rect(0, 330.0, 100.0);

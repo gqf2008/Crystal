@@ -702,6 +702,8 @@ impl Plugin for DialogsPlugin {
         app.init_resource::<DialogManager>();
         app.init_resource::<DialogDrag>();
         app.init_resource::<DialogZ>();
+        // storage/inventory cells 循环的图像缓存（评审 P1；login/select 已有，幂等兜底）
+        app.init_resource::<crate::ui::sprite_ui::UiImageCache>();
         app.add_plugins(hero_equipment::HeroEquipmentPlugin);
         app.add_plugins(hero_skills::HeroSkillPlugin);
         // 先置顶再开始拖动：点击重叠窗口时，先让被点窗口到最前，再由 drag 选中它。

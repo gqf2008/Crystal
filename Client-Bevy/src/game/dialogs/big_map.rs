@@ -19,6 +19,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::network::NetConnection;
+use crate::ui::outlined_text::spawn_outlined_label;
 use crate::resources::libraries::LibraryName;
 use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
@@ -161,6 +162,8 @@ app.add_systems(OnEnter(AppState::Game), spawn_big_map);
                 big_map_world_system,
                 big_map_viewport_system,
                 big_map_member_system,
+                // 描边副本同步须排在 Text 写方之后（批48 P1：C# MirLabel 默认描边）
+                crate::ui::outlined_text::sync_outline_ui_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -205,7 +208,8 @@ fn spawn_big_map(
 
     commands.entity(panel).with_children(|p| {
         // 标题（C# TitleLabel (19,6) 699x20）
-        spawn_label(p, &font, "", 19.0, 6.0, 14.0, Color::WHITE, 4).insert(BigMapTitleText);
+        spawn_outlined_label(p, font.clone(), "", 19.0, 6.0, 14.0, Color::WHITE, 4)
+            .insert(BigMapTitleText);
         // 关闭 (W-25,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
@@ -344,7 +348,7 @@ fn spawn_big_map(
             }
         }
         // 悬停标题（C# WorldMapImage.TitleLabel：黑底白字，顶部居中）
-        spawn_label(p, &font, "", 10.0, 8.0, 12.0, Color::WHITE, 9)
+        spawn_outlined_label(p, font.clone(), "", 10.0, 8.0, 12.0, Color::WHITE, 9)
             .insert((BigMapWorldTitle, BigMapWorldRoot, Visibility::Hidden));
         // 世界地图图标池（MapLinkIcon 帧带 offset，C# UseOffSet=true）
         let wm_white = images.add(crate::map_renderer::make_image(
@@ -364,11 +368,11 @@ fn spawn_big_map(
         }
         // NPC 列表行（x=590, y=50+i*21，右侧）
         for i in 0..MAX_ROWS {
-            spawn_label(p, &font, "", 590.0, 50.0 + i as f32 * 21.0, 12.0, Color::WHITE, 4)
+            spawn_outlined_label(p, font.clone(), "", 590.0, 50.0 + i as f32 * 21.0, 12.0, Color::WHITE, 4)
                 .insert(BigMapRow(i));
         }
         // 坐标标签 (519,435)
-        spawn_label(p, &font, "", 519.0, 435.0, 12.0, Color::WHITE, 4)
+        spawn_outlined_label(p, font.clone(), "", 519.0, 435.0, 12.0, Color::WHITE, 4)
             .insert(BigMapCoordText);
     });
 }
@@ -390,7 +394,15 @@ fn big_map_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
-    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>)>,
+    // B0001：只读 panel_origin(R Node) × 本系统 Node 写方需互斥（面板根不带其标记，不错杀）
+    panel_origin: Query<
+        &Node,
+        (
+            With<BigMapWidget>,
+            With<DialogRoot>,
+            Without<BigMapPosBar>,
+        ),
+    >,
 ) {
     fn edge(
         e: Entity,
@@ -589,7 +601,15 @@ fn big_map_world_system(
     mut prev_open: Local<bool>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     windows: Query<&Window>,
-    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>)>,
+    // B0001：只读 panel_origin(R Node) × world_icons(W Node) 需互斥（面板根不带图标标记）
+    panel_origin: Query<
+        &Node,
+        (
+            With<BigMapWidget>,
+            With<DialogRoot>,
+            Without<BigMapWorldIcon>,
+        ),
+    >,
 ) {
     fn edge(
         e: Entity,
@@ -771,13 +791,47 @@ fn big_map_viewport_system(
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut terrain: Query<(&mut Node, &mut ImageNode), With<BigMapTerrain>>,
-    mut player_dot: Query<&mut Node, With<BigMapPlayerDot>>,
-    mut npc_dots: Query<(&mut Node, &mut BackgroundColor, &BigMapDot)>,
+    // B0001 互斥：terrain/player_dot/npc_dots 三查询同写 Node——批48迁移遗漏
+    // 互斥矩阵 → 调度器初始化即 panic（b0001_smoke 实证）。每个写方必须显式
+    // `With<自身标记>`：仅 read fetch（&BigMapDot 等）不足以构成互斥对——实测
+    // 两查询各自只挂对方 Without 而自身无显式 With 时判定仍死锁（tests 实验证）。
+    mut terrain: Query<
+        (&mut Node, &mut ImageNode),
+        (
+            With<BigMapTerrain>,
+            Without<BigMapPlayerDot>,
+            Without<BigMapDot>,
+        ),
+    >,
+    mut player_dot: Query<
+        &mut Node,
+        (
+            With<BigMapPlayerDot>,
+            Without<BigMapTerrain>,
+        ),
+    >,
+    mut npc_dots: Query<
+        (&mut Node, &mut BackgroundColor, &BigMapDot),
+        (
+            With<BigMapDot>,
+            Without<BigMapPlayerDot>,
+            Without<BigMapTerrain>,
+        ),
+    >,
     players: Query<&Transform, (With<crate::actor::LocalPlayer>, Without<BigMapWidget>)>,
     windows: Query<&Window>,
     mut texts: Query<(&mut Text, Option<&BigMapTitleText>, Option<&BigMapCoordText>)>,
-    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>)>,
+    // B0001：只读 panel_origin(R Node) × terrain/dots(W Node) 需互斥（面板根不带其标记）
+    panel_origin: Query<
+        &Node,
+        (
+            With<BigMapWidget>,
+            With<DialogRoot>,
+            Without<BigMapTerrain>,
+            Without<BigMapPlayerDot>,
+            Without<BigMapDot>,
+        ),
+    >,
 ) {
     let open = mgr.is_open(DialogKind::BigMap);
     if !open {
