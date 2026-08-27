@@ -1053,17 +1053,18 @@ fn guild_ui_system(
 
 /// 成员行命中矩形（面板原点 ox/oy + 相对坐标；i 1..=10）
 fn guild_member_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 320.0, 18.0)
+    // 宽度=右界−左界（600−298）：旧实现误把绝对右界当宽度，命中带右扩 18px
+    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 302.0, 18.0)
 }
 
 /// 仓库格命中矩形（i 11..=18）
 fn guild_storage_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 18.0, oy + 515.0 + (i - 11) as f32 * 18.0, 320.0, 16.0)
+    (ox + 18.0, oy + 515.0 + (i - 11) as f32 * 18.0, 302.0, 16.0)
 }
 
 /// Buff 行命中矩形（i 1..=8）
 fn guild_buff_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 218.0, 18.0)
+    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 200.0, 18.0)
 }
 
 /// #2537 Buff 页交互（独立系统：guild_ui_system 已满 16 参 Bevy SystemParam 上限）
@@ -1641,7 +1642,7 @@ mod tests {
     fn member_row_rect_origin_and_drag() {
         // 初始 (GUILD_X=280, GUILD_Y=80)：首行 y=140（=80+60），x 起 298（=280+18）
         let (rx, ry, rw, rh) = guild_member_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw, rh), (298.0, 140.0, 320.0, 18.0));
+        assert_eq!((rx, ry, rw, rh), (298.0, 140.0, 302.0, 18.0));
         assert_eq!(guild_member_row_rect(10, GUILD_X, GUILD_Y).1, 140.0 + 9.0 * 20.0);
         // 拖动到 (330,100)：同一相对位置命中跟随（原始坐标 + delta(50,20)）
         let (rx2, ry2, _, _) = guild_member_row_rect(1, 330.0, 100.0);
@@ -1661,7 +1662,7 @@ mod tests {
     #[test]
     fn buff_row_rect_origin_and_drag() {
         let (rx, ry, rw, _) = guild_buff_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw), (298.0, 140.0, 218.0));
+        assert_eq!((rx, ry, rw), (298.0, 140.0, 200.0));
         let (rx2, ry2, _, _) = guild_buff_row_rect(1, 330.0, 100.0);
         assert_eq!((rx2, ry2), (348.0, 160.0));
     }

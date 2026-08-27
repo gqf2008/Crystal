@@ -23,6 +23,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::outlined_text::spawn_outlined_label;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_label,
@@ -108,13 +109,20 @@ impl Plugin for NpcDialogPlugin {
             npc_dialog_server_events.run_if(in_state(AppState::Game)),
         );
         app.init_resource::<NpcInputState>();
+        // 描边文本（批46 P1：C# MirLabel 默认 OutLine=true）：sync 必须排在全部
+        // Text 写方之后（同帧晚写副本陈旧——变更检测按 tick 严格比较）
         app.add_systems(
             Update,
-            npc_input_overlay
+            (
+                npc_dialog_server_events,
+                npc_input_overlay,
+                npc_ui_system,
+                crate::ui::outlined_text::sync_outline_ui_system,
+            )
+                .chain()
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
-        app.add_systems(Update, npc_ui_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -201,9 +209,9 @@ fn spawn_npc_dialog(
         }
         // 8 行文本（bevy_ui Text，CJK 主字体）
         for i in 0..8usize {
-            spawn_label(
+            spawn_outlined_label(
                 p,
-                &cjk,
+                cjk.clone(),
                 "",
                 8.0,
                 34.0 + i as f32 * 18.0,
@@ -431,8 +439,8 @@ fn npc_ui_system(
             let mut child = None;
             commands.entity(panel).with_children(|p| {
                 child = Some(
-                    spawn_label(p, &cjk, &seg_text, lx + x_off, ly, font_px, seg_col, 9)
-                        .insert(NpcDialogWidget)
+                    spawn_outlined_label(p, cjk.clone(), &seg_text, lx + x_off, ly, font_px, seg_col, 9)
+                        .insert((NpcDialogWidget, FontHinting::Enabled))
                         .id(),
                 );
             });
@@ -731,9 +739,9 @@ fn spawn_npc_input_overlay(
 
     commands.entity(root).with_children(|p| {
         // 提示（C# CaptionLabel @(25,25) 语义）
-        spawn_label(
+        spawn_outlined_label(
             p,
-            &font,
+            font.clone(),
             &format!("请输入（{}）:", page_name),
             20.0,
             20.0,

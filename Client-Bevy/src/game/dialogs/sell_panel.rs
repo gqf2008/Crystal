@@ -195,6 +195,8 @@ fn sell_panel_action_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    // 面板原点（拖后跟随；挂在 Npc kind 组随 NPC 对话框联合拖动/置顶）
+    panel_origin: Query<&Node, With<SellPanelWidget>>,
     confirm_btns: Query<(Entity, &Interaction), With<SellPanelConfirm>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -215,9 +217,14 @@ fn sell_panel_action_system(
     };
 
     // 点拖放区（C# NPCDropPanel_Click 区域 (20,55,75,75) 相对面板）：放入选中物品
+    // （面板原点动态取——面板挂 Npc kind 可被联合拖动，固定 DIALOG_X/Y 会成死区）
     if mouse.just_pressed(MouseButton::Left) {
-        let dx = DIALOG_X + 20.0;
-        let dy = DIALOG_Y + 55.0;
+        let (ox, oy) = panel_origin
+            .single()
+            .map(|n| crate::ui::theme::node_origin(n, (DIALOG_X, DIALOG_Y)))
+            .unwrap_or((DIALOG_X, DIALOG_Y));
+        let dx = ox + 20.0;
+        let dy = oy + 55.0;
         if cursor.x >= dx && cursor.x <= dx + 75.0 && cursor.y >= dy && cursor.y <= dy + 75.0 {
             // #2631：选中态归 inventory 所有，经接口访问。严格对齐旧码：仅当物品确实存在
             // 才放入并清除选中；陈旧选中（物品已被移除）保留选中态，不用 take_selected。

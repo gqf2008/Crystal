@@ -173,12 +173,15 @@ pub struct OptionToggleBtn {
     pub frames_off: [Handle<Image>; 3],
 }
 
-/// 音量滑条（rect 为点击区域，x/y/w/h 屏幕坐标）
+/// 音量滑条（rect 为面板内相对点击区域 x/y/w/h；命中时加面板原点——面板可拖）
 #[derive(Component)]
 pub struct OptionBar {
     pub is_music: bool,
     pub rect: (f32, f32, f32, f32),
 }
+
+/// 面板初始原点兜底（Title[411] 259x354 居中：与 setup 的 fallback 尺寸一致）
+const OPTION_ORIGIN: (f32, f32) = ((1024.0 - 259.0) / 2.0, (768.0 - 354.0) / 2.0);
 
 /// 音量填充条（Prguse2[468] 部分裁剪）
 #[derive(Component)]
@@ -362,8 +365,8 @@ fn spawn_option(
             }
         }
         // 音量滑条（Sound @(159,225)，Music @(159,251)；滑块 y=218/244）
-        spawn_volume_bar(p, &mut libs, &mut images, px, py, 159.0, 225.0, 218.0, false);
-        spawn_volume_bar(p, &mut libs, &mut images, px, py, 159.0, 251.0, 244.0, true);
+        spawn_volume_bar(p, &mut libs, &mut images, 159.0, 225.0, 218.0, false);
+        spawn_volume_bar(p, &mut libs, &mut images, 159.0, 251.0, 244.0, true);
     });
 }
 
@@ -399,8 +402,6 @@ fn spawn_volume_bar(
     p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
     libs: &mut GameLibraries,
     images: &mut Assets<Image>,
-    px: f32,
-    py: f32,
     bar_x: f32,
     bar_y: f32,
     knob_y: f32,
@@ -415,7 +416,7 @@ fn spawn_volume_bar(
     spawn_container(p, bar_x, bar_y, 76.0, 19.0, 10)
         .insert(OptionBar {
             is_music,
-            rect: (px + bar_x, py + bar_y, 76.0, 19.0),
+            rect: (bar_x, bar_y, 76.0, 19.0),
         })
         .with_children(|bc| {
             spawn_image(bc, bar_tex, 0.0, 0.0, 0.0, 19.0, 11)
@@ -446,10 +447,12 @@ fn option_ui_system(
     close: Query<(Entity, &Interaction), With<OptionClose>>,
     mut toggles: Query<(Entity, &mut ImageButton, &Interaction, &OptionToggleBtn), Without<OptionClose>>,
     mut widgets: Query<&mut Visibility, (With<OptionWidget>, Without<OptionVolumeFill>, Without<OptionVolumeKnob>)>,
-    // B0001 互斥：fills/knobs 同写 Node——对称补 Without（Fill/Knob 实体互斥）
-    mut fills: Query<(&mut Node, &OptionVolumeFill), Without<OptionVolumeKnob>>,
-    mut knobs: Query<(&mut Node, &OptionVolumeKnob), Without<OptionVolumeFill>>,
+    // B0001 互斥：fills/knobs 同写 Node——对称补 Without（Fill/Knob 实体互斥；
+    // 再与下方只读 panel(Node) 互斥，写×读同样计入冲突）
+    mut fills: Query<(&mut Node, &OptionVolumeFill), (Without<OptionVolumeKnob>, Without<OptionWidget>)>,
+    mut knobs: Query<(&mut Node, &OptionVolumeKnob), (Without<OptionVolumeFill>, Without<OptionWidget>)>,
     bars: Query<&OptionBar>,
+    panel: Query<&Node, With<OptionWidget>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -503,16 +506,22 @@ fn option_ui_system(
             ib.pressed = f[2].clone();
         }
     }
-    // 音量滑条：点击设置音量
+    // 音量滑条：点击设置音量（rect 为面板内相对坐标，命中前取面板原点——
+    // 设置面板可拖动，生成期绝对坐标在拖后即成死区）
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+    let (ox, oy) = panel
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, OPTION_ORIGIN))
+        .unwrap_or(OPTION_ORIGIN);
     for bar in &bars {
-        let (bx, by, bw, bh) = bar.rect;
+        let (rx, ry, rw, rh) = bar.rect;
+        let (bx, by) = (ox + rx, oy + ry);
         if mouse.just_pressed(MouseButton::Left)
-            && cursor.x >= bx && cursor.x <= bx + bw
-            && cursor.y >= by && cursor.y <= by + bh
+            && cursor.x >= bx && cursor.x <= bx + rw
+            && cursor.y >= by && cursor.y <= by + rh
         {
-            let vol = ((cursor.x - bx) / bw).clamp(0.0, 1.0);
+            let vol = ((cursor.x - bx) / rw).clamp(0.0, 1.0);
             if bar.is_music {
                 state.music_volume = vol;
             } else {

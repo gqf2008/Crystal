@@ -519,7 +519,16 @@ fn keyboard_layout_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
-    panel_origin: Query<&Node, With<KeyboardWidget>>,
+    // B0001：只读 panel_origin(R Node) × pos_bar/rows(W Node) 需互斥——
+    // panel_origin 匹配的面板根不带 Row/PositionBar 标记，不错杀
+    panel_origin: Query<
+        &Node,
+        (
+            With<KeyboardWidget>,
+            Without<KeyboardRow>,
+            Without<KeyboardPositionBar>,
+        ),
+    >,
 ) {
     fn edge(
         e: Entity,

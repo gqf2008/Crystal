@@ -612,7 +612,10 @@ fn spawn_inventory_dialog(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, hover),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, hover),
             ) {
-                spawn_icon_button(p, n, h, pr, x, 7.0, 72.0, 23.0, 8).insert(InvTab(idx));
+                // DialogWidget：inventory_ui_system 的 buttons/money/all_vis 查询域
+                // 门槛（批49 迁移遗漏 → 页签/关闭/金币负重全部失效）
+                spawn_icon_button(p, n, h, pr, x, 7.0, 72.0, 23.0, 8)
+                    .insert((InvTab(idx), DialogWidget));
             }
         }
         // 关闭按钮（Prguse2 360/361/362）@(289,3)
@@ -621,13 +624,14 @@ fn spawn_inventory_dialog(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 20.0, 20.0, 8).insert(InvCloseBtn);
+            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 20.0, 20.0, 8)
+                .insert((InvCloseBtn, DialogWidget));
         }
         // 金币/负重文本
         spawn_label(p, &font, "0", GOLD_TEXT_X, GOLD_TEXT_Y, 12.0, Color::WHITE, 8)
-            .insert(InvGoldText);
+            .insert((InvGoldText, DialogWidget));
         spawn_label(p, &font, "0/0", WEIGHT_TEXT_X, WEIGHT_TEXT_Y, 12.0, Color::WHITE, 8)
-            .insert(InvWeightText);
+            .insert((InvWeightText, DialogWidget));
         // 负重条（C# WeightBar：Prguse[24] 实测 84x6 @(182,217)，按填充度裁宽）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 24) {
             spawn_image(p, h, 182.0, 217.0, 84.0, 6.0, 7).insert(InvWeightBar);
@@ -814,6 +818,8 @@ fn inventory_ui_system(
     mut inv_ui: ResMut<InvUiState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
+    // 评审 P1：走 UiImageCache 缓存句柄（同 storage_ui_system，防每帧资产 churn）
+    mut image_cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     // 背景/标签/关闭/格子 统一显隐（格子带 InvSlot）
     mut all_vis: Query<
         (&mut Visibility, Option<&InvSlot>),
@@ -903,9 +909,10 @@ fn inventory_ui_system(
         };
         match item {
             Some(item) => {
-                let handle = load_lib_image(
+                let handle = crate::ui::sprite_ui::ui_image(
                     &mut libs,
                     &mut images,
+                    &mut image_cache,
                     crate::resources::libraries::LibraryName::Items,
                     item.image as usize,
                 );
@@ -1224,7 +1231,11 @@ fn inv_grid_sync_system(
 fn inventory_shift_right_system(
     mut events: MessageReader<InventoryShiftRight>,
     mut libs: ResMut<GameLibraries>,
-    mut inv_entities: Query<(&mut Node, &DialogRoot)>,
+    // 只平移背包**面板根**：批49 迁移把旧平铺 Sprite 版的逐实体推位直接搬来，
+    // 但 bevy_ui 格子已是面板子实体（相对坐标 left）且仍带 DialogRoot(Inventory)
+    // ——旧查询会把根+每格各 +dx 双重平移，背包飞出屏幕（评审 P0）。
+    // With<InventoryPanel> 锁定唯一面板根；InventoryOrigin=target 即真值。
+    mut inv_entities: Query<(&mut Node, &DialogRoot), With<InventoryPanel>>,
     mut inv_origin: ResMut<InventoryOrigin>,
 ) {
     let mut shift = false;
@@ -2391,6 +2402,7 @@ mod tests {
         world.insert_resource(InvUiState::default());
         world.insert_resource(GameLibraries::default());
         world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
         // 任务页签按钮（Pressed 边沿触发；带 Visibility 走 all_vis 分支，无 InvSlot → 恒可见）
         world.spawn((DialogWidget, Button, Interaction::Pressed, InvTab(2)));
 
@@ -2406,8 +2418,9 @@ mod tests {
     }
 
     /// #2631：InventoryShiftRight → 背包自我右移让位（替代旧 trade.rs push_inventory_right）。
-    /// bevy_ui 迁移：平移面板根 Node.left 并覆写 InventoryOrigin；子节点随根整体移动，
-    /// 按钮命中区不再需要单独同步（bevy_ui Interaction 按布局命中）。
+    /// bevy_ui 迁移：平移**面板根** Node.left 并覆写 InventoryOrigin；格子（面板
+    /// 子实体、相对坐标）随根整体移动。曾因旧查询根+格双重 +dx 把背包推出屏幕
+    /// （评审 P0），本测试按真实父子结构构造，断言只动根、子格相对位不变。
     #[test]
     fn inventory_shift_right_repositions_entities_and_origin() {
         use bevy::ecs::message::Messages;
@@ -2418,25 +2431,32 @@ mod tests {
         // 未初始化的 GameLibraries → inventory_real_size 走缺省 (316,236)，无磁盘 IO
         world.insert_resource(GameLibraries::default());
         world.insert_resource(InventoryOrigin::default());
-        // 背包两枚实体（初始位 (0,0) 基准：背景 (0,0)、首格 (9,37)）——bevy_ui Node
-        world.spawn((
-            DialogRoot(DialogKind::Inventory),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-        ));
-        world.spawn((
-            DialogRoot(DialogKind::Inventory),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(9.0),
-                top: Val::Px(37.0),
-                ..default()
-            },
-        ));
+        // 真实树形：面板根 (0,0) 携 InventoryPanel；首格是**子实体** (9,37) 相对位
+        let panel = world
+            .spawn((
+                DialogRoot(DialogKind::Inventory),
+                InventoryPanel,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    ..default()
+                },
+            ))
+            .id();
+        let cell = world
+            .spawn((
+                DialogRoot(DialogKind::Inventory),
+                InvSlot(0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(9.0),
+                    top: Val::Px(37.0),
+                    ..default()
+                },
+            ))
+            .id();
+        world.entity_mut(panel).add_child(cell);
         // 非背包实体（交易窗）不应被平移
         world.spawn((
             DialogRoot(DialogKind::Trade),
@@ -2455,26 +2475,28 @@ mod tests {
             .run_system_once(inventory_shift_right_system)
             .expect("shift right 应成功");
 
-        // target_x = 1024 - 316 = 708
-        let mut q = world.query_filtered::<(&Node, &DialogRoot), ()>();
-        let inv_min_x = q
-            .iter(&world)
-            .filter(|(_, r)| r.0 == DialogKind::Inventory)
-            .map(|(n, _)| match n.left {
-                Val::Px(v) => v,
-                _ => f32::MAX,
-            })
-            .fold(f32::MAX, f32::min);
-        assert_eq!(inv_min_x, 708.0, "背包左缘应右移到 target_x");
-        let trade_x = q
+        // target_x = 1024 - 316 = 708：只有面板根被平移；子格相对位保持不变；
+        // 交易窗不动（三者皆防回潮——尤其"子格被二次 +dx"的原始回归形态）
+        let panel_x = match world.get::<Node>(panel).unwrap().left {
+            Val::Px(v) => v,
+            _ => f32::MAX,
+        };
+        assert_eq!(panel_x, 708.0, "面板根应右移到 target_x");
+        let cell_x = match world.get::<Node>(cell).unwrap().left {
+            Val::Px(v) => v,
+            _ => f32::MAX,
+        };
+        assert_eq!(cell_x, 9.0, "子格相对位不得被平移（随根整体移动）");
+        let trade_x = world
+            .query::<(&Node, &DialogRoot)>()
             .iter(&world)
             .find(|(_, r)| r.0 == DialogKind::Trade)
-            .map(|(n, _)| match n.left {
-                Val::Px(v) => v,
-                _ => -999.0,
-            })
+            .map(|(n, _)| n.left)
             .expect("交易实体存在");
-        assert_eq!(trade_x, 298.0, "非背包实体不应移动");
+        match trade_x {
+            Val::Px(v) => assert_eq!(v, 298.0, "非背包实体不应移动"),
+            _ => panic!("交易实体存在"),
+        }
         // InventoryOrigin 覆写
         let origin = world.resource::<InventoryOrigin>();
         assert_eq!((origin.0, origin.1), (708.0, 0.0));

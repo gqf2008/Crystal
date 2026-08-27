@@ -82,3 +82,8 @@ jobs:
       - name: test (lib)
         working-directory: Client-Bevy
         run: cargo test --lib
+      # 集成测试防线：b0001_smoke 逐插件注册守 B0001 启动即崩（cargo test --lib 拦不住），
+      # ui_alignment 守 C#→Bevy 布局对齐——曾因此类回归静默合并（批46-49/drag PR）
+      - name: test (integration)
+        working-directory: Client-Bevy
+        run: cargo test --test b0001_smoke --test ui_alignment
