@@ -21,7 +21,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
     spawn_label_center, spawn_panel,
@@ -259,6 +259,7 @@ fn spawn_character_dialog(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
     appearance_q: Query<&crate::actor::ActorAppearance, With<LocalPlayer>>,
 ) {
@@ -267,6 +268,7 @@ fn spawn_character_dialog(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
 
@@ -303,9 +305,9 @@ fn spawn_character_dialog(
             spawn_image(p, h, CLASS_IMG_X, CLASS_IMG_Y, 30.0, 30.0, 9);
         }
         // 名字/行会（框内居中）
-        spawn_label_center(p, &font, "", NAME_CX, 2.0, 200.0, 14.0, Color::WHITE, 9)
+        spawn_label_center(p, &cjk, "", NAME_CX, 2.0, 200.0, 14.0, Color::WHITE, 9)
             .insert(CharNameText);
-        spawn_label_center(p, &font, "", NAME_CX, 28.0, 200.0, 12.0, Color::srgb(1.0, 0.85, 0.3), 9)
+        spawn_label_center(p, &cjk, "", NAME_CX, 28.0, 200.0, 12.0, Color::srgb(1.0, 0.85, 0.3), 9)
             .insert(CharGuildText);
 
         // 4 页容器（页区 (8,90)，页背景 248x284）
@@ -406,7 +408,7 @@ fn spawn_character_dialog(
                                                 (SkillTextKind::Name, 109.0, 2.0, 11.0),
                                                 (SkillTextKind::Exp, 109.0, 15.0, 11.0),
                                             ] {
-                                                spawn_label(rc, &font, "", ox, oy, size, Color::WHITE, 11)
+                                                spawn_label(rc, &cjk, "", ox, oy, size, Color::WHITE, 11)
                                                     .insert((
                                                         CharSkillText { row: i, kind },
                                                         CharSkillRowChild(i),
@@ -856,6 +858,7 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
         world
             .run_system_once(spawn_character_dialog)
             .expect("spawn_character_dialog 应成功");
@@ -934,6 +937,7 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
         world
             .run_system_once(spawn_character_dialog)
             .expect("spawn_character_dialog 应成功");

@@ -27,7 +27,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiButton;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiEntity, UiFont, UiImageCache,
+    shared_cjk_font, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiCjkFont,
+    UiEntity, UiFont, UiImageCache,
 };
 
 /// #2633 批次4 步9：死亡弹窗 UI 态（原 `HudState.death_popup_dismissed`，设计 §1/§8 纯 UI 残余）。
@@ -424,6 +425,7 @@ fn spawn_hud(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
@@ -437,6 +439,7 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 分辨率索引：窗口 1024 宽 → 1（与 macroquad 一致：800→0，1024→1，其他→2）
     let resolution_index = 1usize;
@@ -777,9 +780,9 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     // 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 Visible=Settings.ModeView）。
     let mode_vis = mode_visibility(opt.mode_view);
     let big = mmap.big;
-    spawn_mode_label(&mut commands, &font, "技能:Ctrl", big, S_MODE_DY, Color::srgb(0.196, 0.804, 0.196), mode_vis, SModeText);
-    spawn_mode_label(&mut commands, &font, "模式:和平", big, A_MODE_DY, Color::srgb(1.0, 1.0, 0.0), mode_vis, AttackModeText);
-    spawn_mode_label(&mut commands, &font, "宠物:跟随", big, P_MODE_DY, Color::srgb(1.0, 0.647, 0.0), mode_vis, PModeText);
+    spawn_mode_label(&mut commands, &cjk, "技能:Ctrl", big, S_MODE_DY, Color::srgb(0.196, 0.804, 0.196), mode_vis, SModeText);
+    spawn_mode_label(&mut commands, &cjk, "模式:和平", big, A_MODE_DY, Color::srgb(1.0, 1.0, 0.0), mode_vis, AttackModeText);
+    spawn_mode_label(&mut commands, &cjk, "宠物:跟随", big, P_MODE_DY, Color::srgb(1.0, 0.647, 0.0), mode_vis, PModeText);
     // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
     let wt = spawn_ui_text(&mut commands, &font, "0/0", main_x + bg_w - 105.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
     commands.entity(wt).insert(HudWeightText);
@@ -1254,6 +1257,7 @@ mod tests {
             world.insert_resource(UiImageCache::default());
             world.insert_resource(Assets::<Font>::default());
             world.insert_resource(UiFont::default());
+            world.insert_resource(UiCjkFont::default());
             let mut opt = OptionState::default();
             opt.hp_view = hp_view;
             world.insert_resource(opt);
@@ -1312,6 +1316,7 @@ mod tests {
             world.insert_resource(UiImageCache::default());
             world.insert_resource(Assets::<Font>::default());
             world.insert_resource(UiFont::default());
+            world.insert_resource(UiCjkFont::default());
             let mut opt = OptionState::default();
             opt.mode_view = mode_view;
             world.insert_resource(opt);
