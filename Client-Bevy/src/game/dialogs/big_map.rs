@@ -23,7 +23,7 @@ use crate::ui::outlined_text::spawn_outlined_label;
 use crate::resources::libraries::LibraryName;
 use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -182,13 +182,16 @@ fn spawn_big_map(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
+    // 标题/行文本可能含中文（#2599：动态文本 CJK 需主字体自带，不能依赖回退）
     let font = ui_font.0.clone();
+    let cjk = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
 
     let (pw, ph) = match libs.0.get_image(LibraryName::Title, 820) {
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
@@ -208,7 +211,7 @@ fn spawn_big_map(
 
     commands.entity(panel).with_children(|p| {
         // 标题（C# TitleLabel (19,6) 699x20）
-        spawn_outlined_label(p, font.clone(), "", 19.0, 6.0, 14.0, Color::WHITE, 4)
+        spawn_outlined_label(p, cjk.clone(), "", 19.0, 6.0, 14.0, Color::WHITE, 4)
             .insert(BigMapTitleText);
         // 关闭 (W-25,3)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -348,7 +351,7 @@ fn spawn_big_map(
             }
         }
         // 悬停标题（C# WorldMapImage.TitleLabel：黑底白字，顶部居中）
-        spawn_outlined_label(p, font.clone(), "", 10.0, 8.0, 12.0, Color::WHITE, 9)
+        spawn_outlined_label(p, cjk.clone(), "", 10.0, 8.0, 12.0, Color::WHITE, 9)
             .insert((BigMapWorldTitle, BigMapWorldRoot, Visibility::Hidden));
         // 世界地图图标池（MapLinkIcon 帧带 offset，C# UseOffSet=true）
         let wm_white = images.add(crate::map_renderer::make_image(
@@ -368,11 +371,11 @@ fn spawn_big_map(
         }
         // NPC 列表行（x=590, y=50+i*21，右侧）
         for i in 0..MAX_ROWS {
-            spawn_outlined_label(p, font.clone(), "", 590.0, 50.0 + i as f32 * 21.0, 12.0, Color::WHITE, 4)
+            spawn_outlined_label(p, cjk.clone(), "", 590.0, 50.0 + i as f32 * 21.0, 12.0, Color::WHITE, 4)
                 .insert(BigMapRow(i));
         }
         // 坐标标签 (519,435)
-        spawn_outlined_label(p, font.clone(), "", 519.0, 435.0, 12.0, Color::WHITE, 4)
+        spawn_outlined_label(p, cjk.clone(), "", 519.0, 435.0, 12.0, Color::WHITE, 4)
             .insert(BigMapCoordText);
     });
 }

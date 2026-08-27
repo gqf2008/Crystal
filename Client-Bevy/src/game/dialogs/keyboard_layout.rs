@@ -28,7 +28,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -413,6 +413,7 @@ fn spawn_keyboard_layout(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -420,6 +421,7 @@ fn spawn_keyboard_layout(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Title[119]（512x430），居中
     let (pw, ph) = match libs.0.get_image(LibraryName::Title, 119) {
@@ -439,7 +441,7 @@ fn spawn_keyboard_layout(
 
     commands.entity(panel).with_children(|p| {
         // 标题“键位设置”（C# PageLabel (135,34)）
-        spawn_label(p, &font, "键位设置", 135.0, 34.0, 15.0, Color::WHITE, 9);
+        spawn_label(p, &cjk, "键位设置", 135.0, 34.0, 15.0, Color::WHITE, 9);
         // 关闭按钮 (489,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
@@ -494,10 +496,10 @@ fn spawn_keyboard_layout(
                     KeyboardEnforceFrames { off, on },
                 ));
         }
-        spawn_label(p, &font, "严格规则", 125.0, 405.0, 12.0, Color::WHITE, 9);
+        spawn_label(p, &cjk, "严格规则", 125.0, 405.0, 12.0, Color::WHITE, 9);
         // 行区文字实体（16 个槽，位置每帧按 build_rows 更新）
         for i in 0..16usize {
-            spawn_label(p, &font, "", 20.0, 90.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 20.0, 90.0, 12.0, Color::WHITE, 9)
                 .insert(KeyboardRow(i, 90.0));
         }
     });

@@ -15,7 +15,7 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::PinyinIme;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_label, spawn_panel,
 };
@@ -91,6 +91,7 @@ fn spawn_amount_box(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -98,6 +99,7 @@ fn spawn_amount_box(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 居中弹窗（C# MirAmountBox：Prguse[238] 原生 204x109，Screen 居中）
     let (x, y) = ((1024.0 - 204.0) / 2.0, (768.0 - 109.0) / 2.0);
@@ -109,9 +111,9 @@ fn spawn_amount_box(
 
     commands.entity(panel).with_children(|p| {
         // 标题（C# (19,8)）
-        spawn_label(p, &font, "", 19.0, 8.0, 12.0, Color::WHITE, 9).insert(AmountTitleText);
+        spawn_label(p, &cjk, "", 19.0, 8.0, 12.0, Color::WHITE, 9).insert(AmountTitleText);
         // 数量值（C# (60,40)）
-        spawn_label(p, &font, "", 60.0, 40.0, 14.0, Color::WHITE, 9).insert(AmountValueText);
+        spawn_label(p, &cjk, "", 60.0, 40.0, 14.0, Color::WHITE, 9).insert(AmountValueText);
         // OK Title[200/201/202]（C# (23,76)）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 200),

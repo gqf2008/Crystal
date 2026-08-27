@@ -14,7 +14,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel,
     spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
@@ -142,6 +142,7 @@ fn spawn_npc_goods(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -149,6 +150,7 @@ fn spawn_npc_goods(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[1000]（C# NPCGoodsDialog Index=1000，244x334 @ (0,224)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1000) else {
@@ -196,7 +198,7 @@ fn spawn_npc_goods(
             let y = 16.0 + i as f32 * 22.0;
             spawn_item_cell_ui(p, &mut images, &font, 10.0, y, 32.0, 20.0, 9, i)
                 .insert(NpcGoodsCell(i));
-            spawn_label(p, &font, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9)
                 .insert(NpcGoodsLine(i));
         }
     });

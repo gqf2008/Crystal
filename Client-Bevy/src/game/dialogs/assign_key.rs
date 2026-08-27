@@ -17,7 +17,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, ImageButton};
 
 /// 面板状态（C# AssignKeyPanel：Magic/Key；Save 时发包并本地更新）
@@ -107,6 +107,7 @@ fn spawn_assign_key_panel(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -114,6 +115,7 @@ fn spawn_assign_key_panel(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[710]（380x144），屏幕居中（原版 Location = Center）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 710) else {
@@ -130,7 +132,7 @@ fn spawn_assign_key_panel(
             spawn_image(p, h, 16.0, 16.0, 36.0, 34.0, 9).insert(AssignKeyIcon);
         }
         // 标题（C# TitleLabel (49,17)）
-        spawn_label(p, &font, "", 49.0, 17.0, 12.0, Color::WHITE, 9).insert(AssignKeyTitle);
+        spawn_label(p, &cjk, "", 49.0, 17.0, 12.0, Color::WHITE, 9).insert(AssignKeyTitle);
         // None 按钮 Title[287-289] (284,64)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 287),

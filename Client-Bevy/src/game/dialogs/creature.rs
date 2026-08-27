@@ -14,7 +14,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
@@ -151,6 +151,7 @@ fn spawn_creature(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -158,6 +159,7 @@ fn spawn_creature(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170] @ (280,80)。加宽加高到 320x320：操作按钮/选项面板/输入框
     // 全在面板内（旧 sprite 布局底部元素 rel y=225-270 悬空 207 高面板外）
@@ -180,7 +182,7 @@ fn spawn_creature(
         }
         // 8 行宠物 + 2 状态行 @(18,40+22i)
         for i in 0..10usize {
-            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
                 .insert(CreatureLine(i));
         }
         // 刷新按钮 @(200,265)
@@ -251,7 +253,7 @@ fn spawn_creature(
                 Visibility::Hidden,
             ))
             .with_children(|c| { spawn_label(c, &font, "取消", 0.0, 5.0, 12.0, Color::WHITE, 11); });
-        spawn_label(p, &font, "品质:全部", 20.0, 280.0, 12.0, Color::WHITE, 11)
+        spawn_label(p, &cjk, "品质:全部", 20.0, 280.0, 12.0, Color::WHITE, 11)
             .insert((CreatureOptionsWidget, CreatureGradeText, Visibility::Hidden));
         for (x, marker, text) in [(100.0, "prev", "◀"), (130.0, "next", "▶")] {
             let mut cmds = spawn_container(p, x, 280.0, 20.0, 20.0, 10);

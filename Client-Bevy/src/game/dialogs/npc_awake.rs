@@ -16,7 +16,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
     spawn_label, spawn_panel, UiDropDown,
@@ -139,6 +139,7 @@ fn spawn_npc_awake(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -146,6 +147,7 @@ fn spawn_npc_awake(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Title[710]（360x420）C# Location (0,0)
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 710) else {
@@ -221,19 +223,19 @@ fn spawn_npc_awake(
                 });
         }
         // #1356：操作按钮文字（升级按钮下方）
-        spawn_label(p, &font, "觉醒", 118.0, 396.0, 12.0, Color::WHITE, 10)
+        spawn_label(p, &cjk, "觉醒", 118.0, 396.0, 12.0, Color::WHITE, 10)
             .insert(NpcAwakeActionLabel);
         // 主物品格（C# (202,91)）：图标 + 名字（白图占位，render 系统换物品图）
         let empty = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
         spawn_image(p, empty, 202.0, 91.0, 36.0, 28.0, 9).insert(NpcAwakeMainIcon);
-        spawn_label(p, &font, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
+        spawn_label(p, &cjk, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
         // 材料需求标签（C# (67,317)/(192,317)）
         for x in [67.0, 192.0] {
-            spawn_label(p, &font, "", x, 317.0, 11.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", x, 317.0, 11.0, Color::WHITE, 9)
                 .insert(NpcAwakeMaterialText);
         }
         // 结果标签（C# GoldLabel (112,354)）
-        spawn_label(p, &font, "", 112.0, 354.0, 11.0, Color::srgb(1.0, 0.9, 0.1), 9)
+        spawn_label(p, &cjk, "", 112.0, 354.0, 11.0, Color::srgb(1.0, 0.9, 0.1), 9)
             .insert(NpcAwakeResultText);
     });
 }

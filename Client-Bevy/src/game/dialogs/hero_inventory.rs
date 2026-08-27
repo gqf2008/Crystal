@@ -25,7 +25,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label, spawn_panel,
     UiItemCellData, UiItemCellIcon,
@@ -123,6 +123,7 @@ fn spawn_hero_inventory(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -130,6 +131,7 @@ fn spawn_hero_inventory(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[1422]（C# HeroInventoryDialog Index=1422，324x266 @ (0,0)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1422) else {
@@ -199,9 +201,9 @@ fn spawn_hero_inventory(
                 .insert((HeroInvMpBtn, Visibility::Hidden));
         }
         // 百分比标签（按钮下方）
-        spawn_label(p, &font, "", 58.0, bh - 33.0, 12.0, Color::WHITE, 10)
+        spawn_label(p, &cjk, "", 58.0, bh - 33.0, 12.0, Color::WHITE, 10)
             .insert((HeroInvHpLabel, Visibility::Hidden));
-        spawn_label(p, &font, "", 206.0, bh - 33.0, 12.0, Color::WHITE, 10)
+        spawn_label(p, &cjk, "", 206.0, bh - 33.0, 12.0, Color::WHITE, 10)
             .insert((HeroInvMpLabel, Visibility::Hidden));
         // HP/MP 物品格（C# HPItem at (122, h-55) / MPItem at (166, h-55)）
         spawn_item_cell_ui(p, &mut images, &font, 122.0, bh - 55.0, 34.0, 30.0, 9, 40)

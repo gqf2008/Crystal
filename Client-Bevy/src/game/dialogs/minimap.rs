@@ -18,7 +18,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -159,6 +159,7 @@ fn spawn_minimap(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
 if !crate::ui::sprite_ui::ui_enabled("map") {
@@ -170,6 +171,7 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[2090]（大模式默认 128x154 @ (898,0)；ui_system 随模式换图+改尺寸）
     let Some(big) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, BG_BIG) else {
@@ -207,9 +209,9 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
                 .insert((MiniMapMemberDot(i), Visibility::Hidden));
         }
         // 地图名（C# MapNameLabel (2,2) 120x18）
-        spawn_label(p, &font, "", 12.0, 2.0, 12.0, Color::WHITE, 3).insert(MiniMapNameText);
+        spawn_label(p, &cjk, "", 12.0, 2.0, 12.0, Color::WHITE, 3).insert(MiniMapNameText);
         // 坐标（C# LocationLabel (46, Height-23)）
-        spawn_label(p, &font, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3)
+        spawn_label(p, &cjk, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3)
             .insert(MiniMapPosText);
         // 大小切换按钮（C# ToggleButton Prguse[2102/2103/2104] (109,3)）
         spawn_minimap_button(p, &mut libs, &mut images, 2102, 2103, 2104, 109.0, 3.0, 4)

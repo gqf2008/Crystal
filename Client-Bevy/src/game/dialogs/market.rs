@@ -20,7 +20,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
     spawn_scroll_bar_ui, UiScrollList,
@@ -129,6 +129,7 @@ fn spawn_market(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -136,6 +137,7 @@ fn spawn_market(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170] @ (280,80)。加宽加高到 320x400：8 按钮 + 2 输入框 + 滚动条
     // 全在面板内（旧 sprite 布局底部按钮 rel y=265-385 悬空 207 高面板外）
@@ -173,12 +175,12 @@ fn spawn_market(
         }
         // 商品列表 10 行 @(15,40+18i)
         for i in 0..10usize {
-            spawn_label(p, &font, "", 15.0, 40.0 + i as f32 * 18.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 15.0, 40.0 + i as f32 * 18.0, 12.0, Color::WHITE, 9)
                 .insert(MarketLine(i));
         }
         // 页签 + 消息行 @(15,225+18i)
         for i in 10..=11usize {
-            spawn_label(p, &font, "", 15.0, 225.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+            spawn_label(p, &cjk, "", 15.0, 225.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
                 .insert(MarketLine(i));
         }
         // 按钮行 1：刷新/搜索/购买 @(20/110/200,265)；行 2：寄售/取回/立即售出 @(20/110/200,300)

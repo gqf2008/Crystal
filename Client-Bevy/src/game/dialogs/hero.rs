@@ -14,7 +14,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
@@ -243,6 +243,7 @@ fn spawn_hero(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -250,6 +251,7 @@ fn spawn_hero(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170] @ (280,80)。加宽加高到 320x310：切换/创建/行为/自动药/
     // 导航按钮全在面板内（旧 sprite 布局底部按钮 rel y=250-298 悬空 207 高面板外）
@@ -272,7 +274,7 @@ fn spawn_hero(
         }
         // 列表行（0..5，#1135 末行显示英雄实时状态）@(18,40+22i)
         for i in 0..6usize {
-            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
                 .insert(HeroLine(i));
         }
         // 切换主角色 / 英雄 1 @(20/130,150) 90x25
@@ -293,8 +295,8 @@ fn spawn_hero(
             spawn_icon_button(p, n, h, pr, 130.0, 150.0, 90.0, 25.0, 10).insert(HeroSwitch1);
         }
         // 创建英雄说明 + 行为标签 + 行为按钮（C# HeroBehaviourPanel：Prguse 1840..1843，16x17）
-        spawn_label(p, &font, "创建英雄", 34.0, 186.0, 12.0, Color::WHITE, 10);
-        spawn_label(p, &font, "行为:", 130.0, 186.0, 12.0, Color::WHITE, 10);
+        spawn_label(p, &cjk, "创建英雄", 34.0, 186.0, 12.0, Color::WHITE, 10);
+        spawn_label(p, &cjk, "行为:", 130.0, 186.0, 12.0, Color::WHITE, 10);
         for i in 0..4usize {
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1840 + i) {
                 crate::ui::theme::spawn_image(p, h.clone(), 160.0 + i as f32 * 18.0, 182.0, 16.0, 17.0, 10)
@@ -316,7 +318,7 @@ fn spawn_hero(
                 spawn_label(c, &font, "英雄已阵亡·点击复活", 0.0, 4.0, 12.0, Color::srgb(1.0, 0.4, 0.4), 11);
             });
         // 自动药阈值（C# HeroInventoryDialog HPButton/MPButton，Title 560/563）
-        spawn_label(p, &font, "自动药:", 20.0, 220.0, 12.0, Color::WHITE, 10);
+        spawn_label(p, &cjk, "自动药:", 20.0, 220.0, 12.0, Color::WHITE, 10);
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 560),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 561),
@@ -331,7 +333,7 @@ fn spawn_hero(
         ) {
             spawn_icon_button(p, n, h, pr, 150.0, 216.0, 60.0, 25.0, 10).insert(HeroAutoMpCycle);
         }
-        spawn_label(p, &font, "", 84.0, 220.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 10)
+        spawn_label(p, &cjk, "", 84.0, 220.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 10)
             .insert(HeroAutoPotLabel);
         // 英雄背包/装备/技能 文本按钮（打开对应对话框）
         for (x, y, marker, text) in [
@@ -375,7 +377,7 @@ fn spawn_hero(
             Visibility::Hidden,
         ))
         .with_children(|p| {
-            spawn_label(p, &font, "名字:", 10.0, 16.0, 12.0, Color::WHITE, 10);
+            spawn_label(p, &cjk, "名字:", 10.0, 16.0, 12.0, Color::WHITE, 10);
             // 名字输入框（TextInput 0）@(50,12)，命中矩形 (330,308,260,20)
             spawn_container(p, 50.0, 12.0, 260.0, 20.0, 10)
                 .insert((
@@ -411,7 +413,7 @@ fn spawn_hero(
                 spawn_icon_button(p, n, h, pr, 20.0, 44.0, 130.0, 22.0, 10)
                     .insert(HeroClassCycle);
             }
-            spawn_label(p, &font, "职业: 战士", 28.0, 48.0, 12.0, Color::WHITE, 11)
+            spawn_label(p, &cjk, "职业: 战士", 28.0, 48.0, 12.0, Color::WHITE, 11)
                 .insert(HeroClassLabel);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
@@ -421,7 +423,7 @@ fn spawn_hero(
                 spawn_icon_button(p, n, h, pr, 170.0, 44.0, 100.0, 22.0, 10)
                     .insert(HeroGenderCycle);
             }
-            spawn_label(p, &font, "性别: 男", 178.0, 48.0, 12.0, Color::WHITE, 11)
+            spawn_label(p, &cjk, "性别: 男", 178.0, 48.0, 12.0, Color::WHITE, 11)
                 .insert(HeroGenderLabel);
             // 确定 / 取消 / 结果提示
             if let (Some(n), Some(h), Some(pr)) = (
@@ -431,7 +433,7 @@ fn spawn_hero(
             ) {
                 spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 20.0, 80.0, 70.0, 23.0, 10)
                     .insert(HeroCreateOk);
-                spawn_label(p, &font, "确定", 35.0, 84.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "确定", 35.0, 84.0, 12.0, Color::WHITE, 11);
             }
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
@@ -440,9 +442,9 @@ fn spawn_hero(
             ) {
                 spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 80.0, 70.0, 23.0, 10)
                     .insert(HeroCreateCancel);
-                spawn_label(p, &font, "取消", 125.0, 84.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "取消", 125.0, 84.0, 12.0, Color::WHITE, 11);
             }
-            spawn_label(p, &font, "", 20.0, 114.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 11)
+            spawn_label(p, &cjk, "", 20.0, 114.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 11)
                 .insert(HeroCreateMsg);
         });
 }
