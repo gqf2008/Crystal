@@ -48,10 +48,11 @@ fn hero_cell_pos(i: usize) -> (f32, f32) {
     (14.0 + x * 37.0, 23.0 + y * 33.0)
 }
 
-/// 光标坐标 → 英雄背包格（0..39）
-fn hero_slot_at(cx: f32, cy: f32) -> Option<usize> {
+/// 光标坐标 → 英雄背包格（0..39）。ox/oy = 面板当前原点（拖动/推位后跟随）
+fn hero_slot_at(cx: f32, cy: f32, ox: f32, oy: f32) -> Option<usize> {
     for i in 0..(GRID_COLS * GRID_ROWS) {
-        let (sx, sy) = hero_cell_pos(i);
+        let (rx, ry) = hero_cell_pos(i);
+        let (sx, sy) = (ox + rx, oy + ry);
         if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
             return Some(i);
         }
@@ -437,10 +438,11 @@ fn hero_inv_click_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     time: Res<Time>,
-    // 元组折叠（系统参数上限 16）：背包页 UI 态 / 主背包命中原点
+    // 元组折叠（系统参数上限 16）：背包页 UI 态 / 主背包命中原点 / 英雄背包面板原点
     inv_res: (
         Res<InvUiState>,
         Res<crate::game::dialogs::inventory::InventoryOrigin>,
+        Query<&Node, With<HeroInvWidget>>,
     ),
     // #2633 批次4 步7：riding 读 `MountState`（HudState 已于步9 删除）；
     // 英雄性别/职业/等级走 HeroState（不属本地玩家组件）
@@ -481,7 +483,23 @@ fn hero_inv_click_system(
     // #2602 命中目标 → 英雄背包原始槽位：8x5 网格格 = 2+idx（C# ItemSlot = 2+idx，
     // HeroDialogs.cs:53，前 2 槽是腰带不进网格）；英雄腰带格 = 0/1（HeroBeltDialog，
     // 独立渲染/命中，横纵布局随其 Flip）
-    let slot = if let Some(i) = hero_slot_at(cursor.x, cursor.y).filter(|_| grid_open) {
+    let (hx, hy) = inv_res
+        .2
+        .single()
+        .map(|n| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((DIALOG_X, DIALOG_Y));
+    let slot = if let Some(i) = hero_slot_at(cursor.x, cursor.y, hx, hy).filter(|_| grid_open) {
         Some(2 + i)
     } else if belt_visible.0 {
         (0..crate::game::dialogs::hero_belt::BELT_SLOTS).find(|&j| {
@@ -573,16 +591,18 @@ mod tests {
     #[test]
     fn hero_slot_hit_math() {
         // C# HeroInventoryDialog 布局：(14+x*37, 23+y*33)，格 36x32
-        assert_eq!(hero_slot_at(14.0, 23.0), Some(0));
+        assert_eq!(hero_slot_at(14.0, 23.0, 0.0, 0.0), Some(0));
         assert_eq!(
-            hero_slot_at(14.0 + 3.0 * 37.0 + 2.0, 23.0 + 4.0 * 33.0 + 2.0),
+            hero_slot_at(14.0 + 3.0 * 37.0 + 2.0, 23.0 + 4.0 * 33.0 + 2.0, 0.0, 0.0),
             Some(4 * 8 + 3)
         );
         assert_eq!(
-            hero_slot_at(14.0 + 7.0 * 37.0 + 30.0, 23.0 + 4.0 * 33.0 + 28.0),
+            hero_slot_at(14.0 + 7.0 * 37.0 + 30.0, 23.0 + 4.0 * 33.0 + 28.0, 0.0, 0.0),
             Some(39)
         );
-        assert_eq!(hero_slot_at(0.0, 0.0), None);
-        assert_eq!(hero_slot_at(14.0 + 8.0 * 37.0, 23.0), None);
+        assert_eq!(hero_slot_at(0.0, 0.0, 0.0, 0.0), None);
+        assert_eq!(hero_slot_at(14.0 + 8.0 * 37.0, 23.0, 0.0, 0.0), None);
+        // 拖动到 (400,200) 后命中跟随
+        assert_eq!(hero_slot_at(400.0 + 14.0, 200.0 + 23.0, 400.0, 200.0), Some(0));
     }
 }

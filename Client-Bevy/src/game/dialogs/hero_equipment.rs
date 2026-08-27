@@ -128,6 +128,7 @@ fn hero_equip_ui_system(
     mut widgets: Query<&mut Visibility, With<HeroEquipWidget>>,
     mut cells: Query<(&HeroEquipSlot, &mut UiItemCellData), Without<crate::ui::theme::UiItemCellIcon>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<HeroEquipWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -189,10 +190,25 @@ fn hero_equip_ui_system(
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((DIALOG_X, DIALOG_Y));
     for (slot, _) in &cells {
         let (rx, ry) = EQUIP_SLOTS[slot.0];
-        let sx = DIALOG_X + PAGE_X + rx;
-        let sy = DIALOG_Y + PAGE_Y + ry;
+        let sx = ox + PAGE_X + rx;
+        let sy = oy + PAGE_Y + ry;
         if cursor.x >= sx && cursor.x <= sx + SLOT_W && cursor.y >= sy && cursor.y <= sy + SLOT_H {
             let server_idx = SERVER_SLOT_TO_POS.iter().position(|p| *p == slot.0);
             if let Some(item) = server_idx
