@@ -12,7 +12,7 @@ use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{UiEntity, UiFont};
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiEntity, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_scroll_bar_ui,
     UiScrollList,
@@ -732,6 +732,7 @@ mod tests {
         app.init_resource::<Assets<Image>>()
             .init_resource::<Assets<Font>>()
             .init_resource::<UiFont>()
+            .init_resource::<UiCjkFont>()
             .insert_resource(GameLibraries(crate::resources::libraries::Libraries::new(
                 "Data",
             )))
@@ -846,6 +847,7 @@ fn spawn_skills_window(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -853,6 +855,7 @@ fn spawn_skills_window(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板背景 Title[508]（C# CharacterDialog 技能页背景；248x284 @ (360,180)）
     let panel = if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 508) {
@@ -900,7 +903,7 @@ fn spawn_skills_window(
         // 滚动条（面板子节点）
         spawn_scroll_bar_ui(p, (288.0, 36.0, 4.0, 200.0), 9);
         // 标题
-        spawn_label(p, &font, "技能", 12.0, 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 9);
+        spawn_label(p, &cjk, "技能", 12.0, 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 9);
         // 关闭
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
@@ -911,7 +914,7 @@ fn spawn_skills_window(
         }
         // 列表（10 行 × 20px）@(12,36+20i)
         for i in 0..10usize {
-            spawn_label(p, &font, "", 12.0, 36.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 12.0, 36.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
                 .insert(SkillsLine(i));
         }
     });
