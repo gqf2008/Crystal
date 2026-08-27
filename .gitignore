@@ -374,3 +374,6 @@ FodyWeavers.xsd
 
 # 开发调试产物（截图/辅助脚本）
 /tools/
+
+# 客户端运行时本地设置（游戏自写自读，不入库）
+/Mir2Config.ini
