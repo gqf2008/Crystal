@@ -268,6 +268,11 @@ fn spawn_market_input(
 
 /// 显隐 + 渲染 + 按钮
 #[allow(clippy::too_many_arguments)]
+/// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..10）
+fn market_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (ox + 15.0, oy + 40.0 + i as f32 * 18.0, 340.0, 16.0)
+}
+
 fn market_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut market: ResMut<MarketState>,
@@ -374,8 +379,8 @@ fn market_ui_system(
                     .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
                     .unwrap_or((280.0, 80.0));
                 for i in 0..10usize {
-                    let y = oy + 40.0 + i as f32 * 18.0;
-                    if cursor.x >= ox + 15.0 && cursor.x <= ox + 340.0 && cursor.y >= y && cursor.y <= y + 16.0 {
+                    let (rx, ry, rw, rh) = market_row_rect(i, ox, oy);
+                    if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
                         let idx = market.page * 10 + i;
                         if idx < market.listings.len() {
                             market.selected = Some(idx);
@@ -630,6 +635,19 @@ fn market_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// 商品行命中：初始原点等价于原固定坐标，拖动后跟随面板
+    #[test]
+    fn row_rect_origin_and_drag() {
+        // 初始 (280,80)：首行 y=120（=80+40），x 起 295（=280+15）
+        let (rx, ry, rw, rh) = market_row_rect(0, 280.0, 80.0);
+        assert_eq!((rx, ry, rw, rh), (295.0, 120.0, 340.0, 16.0));
+        assert_eq!(market_row_rect(9, 280.0, 80.0).1, 120.0 + 9.0 * 18.0);
+        // 拖动到 (330,100)：同一相对位置命中跟随（+delta 50,20）
+        let (rx2, ry2, _, _) = market_row_rect(0, 330.0, 100.0);
+        assert_eq!((rx2, ry2), (345.0, 140.0));
+    }
+
+
     use super::*;
     use crate::game::dialogs::inventory::InvItem;
     use crate::network::server_event::ServerEvent;

@@ -397,6 +397,11 @@ fn reward_item_display(catalog: &QuestCatalog, r: &QuestItemReward) -> String {
 
 /// 显隐 + 渲染 + 选择 + 接受/完成/放弃（#2535）
 #[allow(clippy::too_many_arguments)]
+/// 任务行命中矩形（面板原点 ox/oy + 相对坐标；i 0..8）
+fn quest_log_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (ox + 18.0, oy + 40.0 + i as f32 * 20.0, 300.0, 18.0)
+}
+
 fn quest_log_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<QuestLogState>,
@@ -649,11 +654,11 @@ fn quest_log_ui_system(
                     .map(|n| crate::ui::theme::node_origin(n, (200.0, 60.0)))
                     .unwrap_or((200.0, 60.0));
                 for i in 0..8usize {
-                    let y = oy + 40.0 + i as f32 * 20.0;
-                    if cursor.x >= ox + 18.0
-                        && cursor.x <= ox + 300.0
-                        && cursor.y >= y
-                        && cursor.y <= y + 18.0
+                    let (rx, ry, rw, rh) = quest_log_row_rect(i, ox, oy);
+                    if cursor.x >= rx
+                        && cursor.x <= rx + rw
+                        && cursor.y >= ry
+                        && cursor.y <= ry + rh
                     {
                         match diary.get(i) {
                             Some(DiaryRow::Header(gi)) => {
@@ -882,6 +887,19 @@ fn quest_log_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// 任务行命中：初始原点等价于原固定坐标，拖动后跟随面板
+    #[test]
+    fn row_rect_origin_and_drag() {
+        // 初始 (200,60)：首行 y=100（=60+40），x 起 218（=200+18）
+        let (rx, ry, rw, rh) = quest_log_row_rect(0, 200.0, 60.0);
+        assert_eq!((rx, ry, rw, rh), (218.0, 100.0, 300.0, 18.0));
+        assert_eq!(quest_log_row_rect(7, 200.0, 60.0).1, 100.0 + 7.0 * 20.0);
+        // 拖动到 (250,100)：跟随
+        let (rx2, ry2, _, _) = quest_log_row_rect(0, 250.0, 100.0);
+        assert_eq!((rx2, ry2), (268.0, 140.0));
+    }
+
+
     use super::*;
     use mir2_shared::enums::{QuestType, RequiredClass};
 
