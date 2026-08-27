@@ -14,7 +14,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
 
 /// 精炼状态
@@ -76,6 +76,7 @@ fn spawn_refine(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -83,6 +84,7 @@ fn spawn_refine(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170] @ (280,80)。加宽到 320x207：3 列按钮 + 关闭按钮都在面板内
     // （旧 sprite 布局"开始精炼"按钮右缘超出 244 面板宽，悬空面板外）
@@ -105,7 +107,7 @@ fn spawn_refine(
         }
         // 状态行 4 @(18,40+22i)
         for i in 0..4usize {
-            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
                 .insert(RefineLine(i));
         }
         // 按钮：存入/取回/开始精炼 @(20/110/200,135)；查看/取消 @(20/110,170)

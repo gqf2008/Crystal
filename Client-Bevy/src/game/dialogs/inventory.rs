@@ -23,7 +23,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use mir2_shared::enums::MirGridType;
 
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label, spawn_panel,
     UiItemCellData,
@@ -576,6 +576,7 @@ fn spawn_inventory_dialog(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
     mut origin: ResMut<InventoryOrigin>,
 ) {
@@ -584,6 +585,7 @@ fn spawn_inventory_dialog(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     // 场景重入重置原点（实体按常量重生成；资源若残留上局的推位/拖动偏移会脱节）
     *origin = InventoryOrigin(DIALOG_X, DIALOG_Y);
 
@@ -628,9 +630,9 @@ fn spawn_inventory_dialog(
                 .insert((InvCloseBtn, DialogWidget));
         }
         // 金币/负重文本
-        spawn_label(p, &font, "0", GOLD_TEXT_X, GOLD_TEXT_Y, 12.0, Color::WHITE, 8)
+        spawn_label(p, &cjk, "0", GOLD_TEXT_X, GOLD_TEXT_Y, 12.0, Color::WHITE, 8)
             .insert((InvGoldText, DialogWidget));
-        spawn_label(p, &font, "0/0", WEIGHT_TEXT_X, WEIGHT_TEXT_Y, 12.0, Color::WHITE, 8)
+        spawn_label(p, &cjk, "0/0", WEIGHT_TEXT_X, WEIGHT_TEXT_Y, 12.0, Color::WHITE, 8)
             .insert((InvWeightText, DialogWidget));
         // 负重条（C# WeightBar：Prguse[24] 实测 84x6 @(182,217)，按填充度裁宽）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 24) {
@@ -1733,6 +1735,7 @@ fn spawn_inv_confirm(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -1740,6 +1743,7 @@ fn spawn_inv_confirm(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     // MirMessageBox 居中（原版 456x190 → (1024-456)/2=284, (768-190)/2=289）
     let (bx, by) = (284.0, 289.0);
     let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) else {
@@ -1748,7 +1752,7 @@ fn spawn_inv_confirm(
     let panel = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
     commands.entity(panel).insert((InvConfirmWidget, Visibility::Hidden));
     commands.entity(panel).with_children(|p| {
-        spawn_label(p, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
+        spawn_label(p, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
             .insert((InvConfirmWidget, InvConfirmText));
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),

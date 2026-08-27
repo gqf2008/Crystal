@@ -19,7 +19,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -119,6 +119,7 @@ fn spawn_game_shop(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -126,6 +127,7 @@ fn spawn_game_shop(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Title[749]（C# GameshopDialog Index=749，696x476 居中 @(164,146)；
     // 旧 Bevy 用 Title[411] 259 宽占位，分类/搜索悬空面板外）
@@ -153,7 +155,7 @@ fn spawn_game_shop(
         }
         // 分类页签（C# Filters 区 @(11,102)，每页 10 行）
         for i in 0..10usize {
-            spawn_label(p, &font, "", 11.0, 105.0 + i as f32 * 20.0, 12.0, Color::srgb(0.9, 0.9, 0.9), 9)
+            spawn_label(p, &cjk, "", 11.0, 105.0 + i as f32 * 20.0, 12.0, Color::srgb(0.9, 0.9, 0.9), 9)
                 .insert(GameShopCat(i));
         }
         // 分类翻页（C# Up/Down @(120,103)/(120,421)；本实现行区 105..285）
@@ -173,12 +175,12 @@ fn spawn_game_shop(
         }
         // 商品列表 10 行 @(135,90+20i)
         for i in 0..10usize {
-            spawn_label(p, &font, "", 135.0, 90.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 135.0, 90.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
                 .insert(GameShopLine(i));
         }
         // 状态行（金币/消息）@(135,270)/(135,288)
         for i in 10..=11usize {
-            spawn_label(p, &font, "", 135.0, 270.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+            spawn_label(p, &cjk, "", 135.0, 270.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
                 .insert(GameShopLine(i));
         }
         // 购买按钮 @(160,305)
@@ -190,7 +192,7 @@ fn spawn_game_shop(
             spawn_icon_button(p, n, h, pr, 160.0, 305.0, 76.0, 25.0, 10).insert(GameShopBuy);
         }
         // 搜索（C# Search @(540,69) 140x16；TextInput 31）
-        spawn_label(p, &font, "搜索", 500.0, 67.0, 12.0, Color::WHITE, 9);
+        spawn_label(p, &cjk, "搜索", 500.0, 67.0, 12.0, Color::WHITE, 9);
         spawn_container(p, 540.0, 69.0, 140.0, 16.0, 10)
             .insert((
                 BackgroundColor(Color::srgba(0.05, 0.05, 0.08, 0.95)),

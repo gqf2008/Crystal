@@ -15,7 +15,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui, spawn_label,
     spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
@@ -549,6 +549,7 @@ fn spawn_mail(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -556,6 +557,7 @@ fn spawn_mail(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 邮件列表视图：根容器（透明，承载顶栏/标题/按钮/行/详情/滚动条；内容到 rel y=260）
     let list = commands
@@ -616,17 +618,17 @@ fn spawn_mail(
                 .insert(MailWrite);
             spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 240.0, 226.0, 60.0, 23.0, 10)
                 .insert(MailDelete);
-            spawn_label(p, &font, "删除", 254.0, 230.0, 12.0, Color::WHITE, 11);
+            spawn_label(p, &cjk, "删除", 254.0, 230.0, 12.0, Color::WHITE, 11);
             spawn_icon_button(p, n, h, pr, 170.0, 226.0, 60.0, 23.0, 10).insert(MailCollect);
-            spawn_label(p, &font, "收取", 184.0, 230.0, 12.0, Color::WHITE, 11);
+            spawn_label(p, &cjk, "收取", 184.0, 230.0, 12.0, Color::WHITE, 11);
         }
         // 邮件列表（8 行）@(18,60+22i)
         for i in 0..8usize {
-            spawn_label(p, &font, "", 18.0, 60.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 60.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
                 .insert(MailLine(i));
         }
         // 内容区（正文/金币）@(18,260)
-        spawn_label(p, &font, "", 18.0, 260.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 9)
+        spawn_label(p, &cjk, "", 18.0, 260.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 9)
             .insert(MailDetailText);
     });
 
@@ -658,7 +660,7 @@ fn spawn_mail(
             (3, "金币:", 110.0),
         ];
         for (id, label, y) in fields {
-            spawn_label(p, &font, label, 10.0, y, 12.0, Color::WHITE, 10);
+            spawn_label(p, &cjk, label, 10.0, y, 12.0, Color::WHITE, 10);
             spawn_container(p, 70.0, y, 270.0, 20.0, 10)
                 .insert((
                     BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
@@ -686,7 +688,7 @@ fn spawn_mail(
                 });
         }
         // 附件 5 格（C# MailComposeParcelDialog）@(10+46i,146)
-        spawn_label(p, &font, "附件:", 10.0, 138.0, 12.0, Color::WHITE, 10);
+        spawn_label(p, &cjk, "附件:", 10.0, 138.0, 12.0, Color::WHITE, 10);
         for i in 0..5usize {
             spawn_item_cell_ui(p, &mut images, &font, 10.0 + i as f32 * 46.0, 146.0, 40.0, 40.0, 10, i)
                 .insert(MailAttachSlot(i));
@@ -699,10 +701,10 @@ fn spawn_mail(
                 .insert((MailStampOn, Visibility::Hidden));
         }
         // 邮资标签 + 值
-        spawn_label(p, &font, "邮票:", 232.0, 152.0, 11.0, Color::WHITE, 10);
-        spawn_label(p, &font, "", 300.0, 152.0, 11.0, Color::WHITE, 10).insert(MailCostLabel);
+        spawn_label(p, &cjk, "邮票:", 232.0, 152.0, 11.0, Color::WHITE, 10);
+        spawn_label(p, &cjk, "", 300.0, 152.0, 11.0, Color::WHITE, 10).insert(MailCostLabel);
         // 背包选择 20 格 @(10+col*46, 202+row*46)
-        spawn_label(p, &font, "背包选择:", 10.0, 194.0, 12.0, Color::WHITE, 10);
+        spawn_label(p, &cjk, "背包选择:", 10.0, 194.0, 12.0, Color::WHITE, 10);
         for i in 0..20usize {
             let col = (i % 5) as f32;
             let row = (i / 5) as f32;

@@ -22,7 +22,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_label_center, spawn_panel,
     ImageButton,
@@ -210,6 +210,7 @@ fn spawn_help(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -217,6 +218,7 @@ fn spawn_help(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     let (ox, oy) = ORIGIN;
 
     // bevy_ui 面板 Prguse[920]（536x509 @ ox,oy）
@@ -279,9 +281,9 @@ fn spawn_help(
         // 快捷键页行（黄键名/白说明）
         for i in 0..SHORTCUT_ROWS {
             let y = 142.0 + i as f32 * 20.0;
-            spawn_label(p, &font, "", 30.0, y, 9.0, Color::srgb(1.0, 1.0, 0.0), 9)
+            spawn_label(p, &cjk, "", 30.0, y, 9.0, Color::srgb(1.0, 1.0, 0.0), 9)
                 .insert(HelpShortcutKey(i));
-            spawn_label(p, &font, "", 131.0, y, 9.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 131.0, y, 9.0, Color::WHITE, 9)
                 .insert(HelpShortcutInfo(i));
         }
     });

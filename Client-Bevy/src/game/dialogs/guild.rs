@@ -23,7 +23,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
     spawn_label, spawn_panel, spawn_scroll_bar_ui, UiDropDown, UiScrollList,
@@ -282,6 +282,7 @@ fn spawn_guild(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -289,6 +290,7 @@ fn spawn_guild(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 根容器（bevy_ui Node + Overflow::clip）：590x740 @ (280,80)
     // 背景 Prguse[180]（实测 590x432）以自然尺寸作子图，下方 432..740 为深色延伸区，
@@ -346,11 +348,11 @@ fn spawn_guild(
         // 滚动条（轨道 + 滑块）
         spawn_scroll_bar_ui(p, (218.0, 60.0, 4.0, 200.0), 8);
         // 行会名/会长文本（GuildLine 0 占位显示头部）@(18,40)
-        spawn_label(p, &font, "", 18.0, 40.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
+        spawn_label(p, &cjk, "", 18.0, 40.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
             .insert(GuildLine(0));
         // 成员列表（10 行，1..=10）@(18,60+20i)
         for i in 1..=10usize {
-            spawn_label(p, &font, "", 18.0, 60.0 + (i - 1) as f32 * 20.0, 12.0, Color::WHITE, 8)
+            spawn_label(p, &cjk, "", 18.0, 60.0 + (i - 1) as f32 * 20.0, 12.0, Color::WHITE, 8)
                 .insert(GuildLine(i));
         }
         // #1348：显示离线成员切换（C# MembersShowOfflineButton）@(265,310) 70x20
@@ -426,7 +428,7 @@ fn spawn_guild(
             });
 
         // #1395 子批2：加职务（TextInput id 7 @(60,368)）+ 按钮
-        spawn_label(p, &font, "加职务", 18.0, 368.0, 11.0, Color::WHITE, 8);
+        spawn_label(p, &cjk, "加职务", 18.0, 368.0, 11.0, Color::WHITE, 8);
         spawn_container(p, 60.0, 368.0, 100.0, 20.0, 8)
             .insert((
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
@@ -460,7 +462,7 @@ fn spawn_guild(
                 spawn_label(b, &font, "添加", 0.0, 0.0, 11.0, Color::WHITE, 1);
             });
         // #1395 子批2：权限位（C# RanksOptionsButtons[8]：改/招/踢/存/取/盟/告/益）
-        spawn_label(p, &font, "权限", 18.0, 392.0, 11.0, Color::WHITE, 8);
+        spawn_label(p, &cjk, "权限", 18.0, 392.0, 11.0, Color::WHITE, 8);
         for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"].iter().enumerate() {
             spawn_container(p, 50.0 + i as f32 * 30.0, 392.0, 24.0, 16.0, 8)
                 .insert((Button, GuildRankPermBtn(i as u8)))
@@ -468,7 +470,7 @@ fn spawn_guild(
                     spawn_label(b, &font, label, 0.0, 0.0, 11.0, Color::WHITE, 1);
                 });
         }
-        spawn_label(p, &font, "权限:00000000", 18.0, 412.0, 10.0, Color::srgb(0.8, 0.9, 0.6), 8)
+        spawn_label(p, &cjk, "权限:00000000", 18.0, 412.0, 10.0, Color::srgb(0.8, 0.9, 0.6), 8)
             .insert(GuildRankPermText);
         spawn_container(p, 160.0, 412.0, 100.0, 18.0, 8)
             .insert((Button, GuildPromoteBtn))
@@ -638,10 +640,10 @@ fn spawn_guild(
 
         // 仓库物品（M32）：8 行列表 + 页签 + 存入/取出/翻页 @(18,515+18i)
         for i in 0..8usize {
-            spawn_label(p, &font, "", 18.0, 515.0 + i as f32 * 18.0, 12.0, Color::WHITE, 8)
+            spawn_label(p, &cjk, "", 18.0, 515.0 + i as f32 * 18.0, 12.0, Color::WHITE, 8)
                 .insert(GuildLine(11 + i));
         }
-        spawn_label(p, &font, "", 18.0, 665.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
+        spawn_label(p, &cjk, "", 18.0, 665.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
             .insert(GuildLine(19));
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
@@ -689,7 +691,7 @@ fn spawn_guild(
                 Visibility::Hidden,
             ));
         commands.entity(popup).with_children(|p| {
-            spawn_label(p, &font, "", 35.0, 40.0, 12.0, Color::WHITE, 9).insert(GuildInviteText);
+            spawn_label(p, &cjk, "", 35.0, 40.0, 12.0, Color::WHITE, 9).insert(GuildInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),

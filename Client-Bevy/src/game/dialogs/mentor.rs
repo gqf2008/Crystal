@@ -17,7 +17,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -108,6 +108,7 @@ fn spawn_mentor(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -115,6 +116,7 @@ fn spawn_mentor(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170]（C# MentorDialog.Index=170，320x262 @ 280,80）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
@@ -138,7 +140,7 @@ fn spawn_mentor(
         }
         // 信息行（0 标题 / 1 师父 / 2 徒弟 / 3 拜师经验 / 4 允许拜师状态）@(10,45+26i)
         for i in 0..5usize {
-            spawn_label(p, &font, "", 10.0, 45.0 + i as f32 * 26.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 10.0, 45.0 + i as f32 * 26.0, 12.0, Color::WHITE, 9)
                 .insert(MentorLine(i));
         }
         // 允许拜师（Prguse[114/115/116] @(20,195)）、添加（Title[213/214/215] @(90,195)）、

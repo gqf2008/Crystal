@@ -14,7 +14,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
@@ -74,6 +74,7 @@ fn spawn_mount(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -81,6 +82,7 @@ fn spawn_mount(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
 
     // 面板（默认 5 孔 167；ui_system 按孔数换 Prguse[160/167]）
@@ -93,9 +95,9 @@ fn spawn_mount(
 
     commands.entity(panel).with_children(|p| {
         // 名称/忠诚度
-        spawn_label(p, &font, "", 30.0, 40.0, 15.0, Color::WHITE, 9)
+        spawn_label(p, &cjk, "", 30.0, 40.0, 15.0, Color::WHITE, 9)
             .insert(MountNameText);
-        spawn_label(p, &font, "", 30.0, 60.0, 12.0, Color::WHITE, 9)
+        spawn_label(p, &cjk, "", 30.0, 60.0, 12.0, Color::WHITE, 9)
             .insert(MountLoyaltyText);
         // 骑乘按钮 Prguse[155/156/157] @(262,70)
         if let (Some(n), Some(h), Some(pr)) = (

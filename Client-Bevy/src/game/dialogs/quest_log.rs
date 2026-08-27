@@ -19,7 +19,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -303,6 +303,7 @@ fn spawn_quest_log(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -310,6 +311,7 @@ fn spawn_quest_log(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[961]（C# QuestDiaryDialog，316x466 @ (200,60)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 961) else {
@@ -346,15 +348,15 @@ fn spawn_quest_log(
             spawn_icon_button(p, n, h, pr, 200.0, 436.0, 76.0, 25.0, 10).insert(QuestLogClose);
         }
         // 已接计数标签 @(18,20)
-        spawn_label(p, &font, "", 18.0, 20.0, 12.0, Color::WHITE, 9).insert(QuestLogLine(14));
+        spawn_label(p, &cjk, "", 18.0, 20.0, 12.0, Color::WHITE, 9).insert(QuestLogLine(14));
         // 任务行 8 + 详情 6 @(18,40+20i)
         for i in 0..14usize {
-            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
                 .insert(QuestLogLine(i));
         }
         // 每行追踪按钮（Text 节点本身作为 Button，C# QuestRow Track）
         for i in 0..8usize {
-            spawn_label(p, &font, "追踪", 250.0, 40.0 + i as f32 * 20.0, 11.0, Color::srgb(0.6, 0.9, 1.0), 10)
+            spawn_label(p, &cjk, "追踪", 250.0, 40.0 + i as f32 * 20.0, 11.0, Color::srgb(0.6, 0.9, 1.0), 10)
                 .insert((Button, QuestLogTrack(i)));
         }
         // 放弃 @(200,285)

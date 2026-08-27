@@ -14,7 +14,7 @@ use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
 
 /// Buff 条目
@@ -139,6 +139,7 @@ fn spawn_buff(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -146,6 +147,7 @@ fn spawn_buff(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170] @ (280,80)。展开 320x262（10 行文本 + 关闭按钮都在面板内，
     // 修复旧 sprite 布局状态行悬空面板外）；收起 44x34（C# Size(44,34) 语义）
@@ -167,7 +169,7 @@ fn spawn_buff(
             spawn_icon_button(p, n, h, pr, 302.0, 3.0, 16.0, 15.0, 10).insert(BuffExpand);
         }
         // 收起时的数量标签（C# _buffCountLabel：黄色粗体）
-        spawn_label(p, &font, "", 160.0, 11.0, 12.0, Color::srgb(1.0, 1.0, 0.0), 10)
+        spawn_label(p, &cjk, "", 160.0, 11.0, 12.0, Color::srgb(1.0, 1.0, 0.0), 10)
             .insert(BuffCount);
         // 关闭 Prguse2[360/361/362] @(300,3)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -179,7 +181,7 @@ fn spawn_buff(
         }
         // 8 行 buff + 2 状态行
         for i in 0..10usize {
-            spawn_label(p, &font, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
                 .insert(BuffLine(i));
         }
     });

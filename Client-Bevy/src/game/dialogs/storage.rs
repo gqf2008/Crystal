@@ -25,7 +25,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui_root, spawn_label,
     spawn_panel, UiItemCell, UiItemCellData, UiItemCellIcon,
@@ -152,6 +152,7 @@ fn spawn_storage_dialog(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -159,6 +160,7 @@ fn spawn_storage_dialog(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[586]（C# StorageDialog.Index=586，实测 388x346 @ (0,0)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 586) else {
@@ -179,7 +181,7 @@ fn spawn_storage_dialog(
             spawn_icon_button(p, n, h, pr, 363.0, 3.0, 20.0, 20.0, 10).insert(StorageClose);
         }
         // 标题文字
-        spawn_label(p, &font, "仓库", 18.0, 8.0, 12.0, Color::WHITE, 9);
+        spawn_label(p, &cjk, "仓库", 18.0, 8.0, 12.0, Color::WHITE, 9);
         // 仓库密码按钮 + 标签 @(18,330)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
@@ -188,7 +190,7 @@ fn spawn_storage_dialog(
         ) {
             spawn_icon_button(p, n, h, pr, 18.0, 330.0, 76.0, 23.0, 10).insert(StoragePwdBtn);
         }
-        spawn_label(p, &font, "仓库密码", 34.0, 334.0, 12.0, Color::WHITE, 11);
+        spawn_label(p, &cjk, "仓库密码", 34.0, 334.0, 12.0, Color::WHITE, 11);
     });
 
     // 密码面板（根节点覆盖层 300x150 @ (18,360)，GlobalZIndex 45）
@@ -210,7 +212,7 @@ fn spawn_storage_dialog(
         ))
         .with_children(|p| {
             for (id, label, y) in [(0usize, "当前密码:", 370.0f32), (1, "新密码:", 400.0)] {
-                spawn_label(p, &font, label, 28.0, y - 360.0, 12.0, Color::WHITE, 10);
+                spawn_label(p, &cjk, label, 28.0, y - 360.0, 12.0, Color::WHITE, 10);
                 spawn_container(p, 100.0, y - 360.0, 200.0, 20.0, 10)
                     .insert((
                         BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
@@ -239,7 +241,7 @@ fn spawn_storage_dialog(
                         ));
                     });
             }
-            spawn_label(p, &font, "", 28.0, 70.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 11)
+            spawn_label(p, &cjk, "", 28.0, 70.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 11)
                 .insert(StoragePwdMsg);
             // 设置 / 移除 / 关闭
             if let (Some(n), Some(h), Some(pr)) = (
@@ -249,9 +251,9 @@ fn spawn_storage_dialog(
             ) {
                 spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 28.0, 95.0, 70.0, 23.0, 10)
                     .insert(StoragePwdSet);
-                spawn_label(p, &font, "设置", 43.0, 99.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "设置", 43.0, 99.0, 12.0, Color::WHITE, 11);
                 spawn_icon_button(p, n, h, pr, 108.0, 95.0, 70.0, 23.0, 10).insert(StoragePwdRemove);
-                spawn_label(p, &font, "移除", 123.0, 99.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "移除", 123.0, 99.0, 12.0, Color::WHITE, 11);
             }
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
@@ -259,7 +261,7 @@ fn spawn_storage_dialog(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
                 spawn_icon_button(p, n, h, pr, 188.0, 95.0, 70.0, 23.0, 10).insert(StoragePwdClose);
-                spawn_label(p, &font, "关闭", 203.0, 99.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "关闭", 203.0, 99.0, 12.0, Color::WHITE, 11);
             }
         });
 
@@ -281,7 +283,7 @@ fn spawn_storage_dialog(
             Visibility::Hidden,
         ))
         .with_children(|p| {
-            spawn_label(p, &font, "请输入仓库密码", 28.0, 10.0, 12.0, Color::WHITE, 10);
+            spawn_label(p, &cjk, "请输入仓库密码", 28.0, 10.0, 12.0, Color::WHITE, 10);
             spawn_container(p, 100.0, 15.0, 200.0, 20.0, 10)
                 .insert((
                     BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
@@ -308,7 +310,7 @@ fn spawn_storage_dialog(
                         crate::game::dialogs::text_input::TextInputDisplay(2),
                     ));
                 });
-            spawn_label(p, &font, "", 28.0, 45.0, 12.0, Color::srgb(1.0, 0.6, 0.4), 11)
+            spawn_label(p, &cjk, "", 28.0, 45.0, 12.0, Color::srgb(1.0, 0.6, 0.4), 11)
                 .insert(StorageUnlockMsg);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
@@ -317,7 +319,7 @@ fn spawn_storage_dialog(
             ) {
                 spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 100.0, 75.0, 70.0, 23.0, 10)
                     .insert(StorageUnlockOk);
-                spawn_label(p, &font, "确定", 115.0, 79.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "确定", 115.0, 79.0, 12.0, Color::WHITE, 11);
             }
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
@@ -325,7 +327,7 @@ fn spawn_storage_dialog(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
                 spawn_icon_button(p, n, h, pr, 188.0, 75.0, 70.0, 23.0, 10).insert(StorageUnlockCancel);
-                spawn_label(p, &font, "取消", 203.0, 79.0, 12.0, Color::WHITE, 11);
+                spawn_label(p, &cjk, "取消", 203.0, 79.0, 12.0, Color::WHITE, 11);
             }
         });
 

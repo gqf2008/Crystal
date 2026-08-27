@@ -16,7 +16,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
@@ -112,6 +112,7 @@ fn spawn_item_rental(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -119,6 +120,7 @@ fn spawn_item_rental(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[170] @ (280,80)。加宽加高到 320x320：8 按钮 3 列 + 3 输入框
     // + 关闭按钮全在面板内（旧 sprite 布局底部按钮 rel y=290 悬空 207 高面板外）
@@ -141,7 +143,7 @@ fn spawn_item_rental(
         }
         // 状态行 6 行 @(18,38+20i)
         for i in 0..6usize {
-            spawn_label(p, &font, "", 18.0, 38.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 38.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
                 .insert(ItemRentalLine(i));
         }
         // 目标名（8）/费用（9）/期限（10）输入框 @(18,160)/(18,192)/(150,192)

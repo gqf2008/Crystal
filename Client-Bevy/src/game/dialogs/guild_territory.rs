@@ -17,7 +17,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
@@ -97,6 +97,7 @@ fn spawn_guild_territory(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
@@ -104,6 +105,7 @@ fn spawn_guild_territory(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Prguse[680]（C# GuildTerritoryDialog Index=680，568x241 @ (280,80)）。
     // 加高到 340：旧 sprite 布局宣战输入/按钮在 rel y=308-333 悬空 241 高面板外
@@ -131,12 +133,12 @@ fn spawn_guild_territory(
         }
         // 领地列表 7 行 @(18,45+22i)
         for i in 0..7usize {
-            spawn_label(p, &font, "", 18.0, 45.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 18.0, 45.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
                 .insert(GuildTerritoryLine(i));
         }
         // 状态/页签/宣战结果行 @(18,205+18i)
         for i in 7..=9usize {
-            spawn_label(p, &font, "", 18.0, 205.0 + (i - 7) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+            spawn_label(p, &cjk, "", 18.0, 205.0 + (i - 7) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
                 .insert(GuildTerritoryLine(i));
         }
         // 上一页/下一页（C# Prguse2 240/241/242, 243/244/245）@(20/60,270)
