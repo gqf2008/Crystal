@@ -370,6 +370,9 @@ FodyWeavers.xsd
 /Server.MirForms/Envir
 /ServerRust/Daneo1989
 /SharedRust/target
+/ServerRust/target
+# 根目录误跑 cargo 产生的构建产物（workspace 外直接构建落在这里）
+/target/
 /ServerRust/tests
 
 # 开发调试产物（截图/辅助脚本）
