@@ -224,6 +224,7 @@ fn mail_compose_system(
     mut attach_cells: Query<(&mut UiItemCellData, &MailAttachSlot), Without<MailInvPick>>,
     mut pick_cells: Query<(&mut UiItemCellData, &MailInvPick), Without<MailAttachSlot>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<MailComposeWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -333,10 +334,14 @@ fn mail_compose_system(
             let Some(cursor) = window.cursor_position() else {
                 return;
             };
+            let (ox, oy) = panel_origin
+                .single()
+                .map(|n| crate::ui::theme::node_origin(n, (290.0, 80.0)))
+                .unwrap_or((290.0, 80.0));
             let mut attach_changed = false;
             for i in 0..5usize {
-                let x = 300.0 + i as f32 * 46.0;
-                let y = 226.0;
+                let x = ox + 10.0 + i as f32 * 46.0;
+                let y = oy + 146.0;
                 if cursor.x >= x && cursor.x <= x + 40.0 && cursor.y >= y && cursor.y <= y + 40.0 {
                     if mail.attach.get(i).is_some_and(|s| s.is_some()) {
                         mail.attach[i] = None;
@@ -362,8 +367,8 @@ fn mail_compose_system(
                 if let Some(slot_idx) = slot_idx {
                     let col = (cell_idx % 5) as f32;
                     let row = (cell_idx / 5) as f32;
-                    let x = 300.0 + col * 46.0;
-                    let y = 282.0 + row * 46.0;
+                    let x = ox + 10.0 + col * 46.0;
+                    let y = oy + 202.0 + row * 46.0;
                     if cursor.x >= x
                         && cursor.x <= x + 40.0
                         && cursor.y >= y
@@ -743,6 +748,7 @@ fn mail_ui_system(
     mut detail_texts: Query<(&mut Text, &MailDetailText), Without<MailLine>>,
     mut scroll: Query<&mut UiScrollList, With<MailWidget>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<MailWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -851,9 +857,13 @@ fn mail_ui_system(
             return;
         };
         let off = scroll.single().map(|s| s.offset).unwrap_or(0);
+        let (ox, oy) = panel_origin
+            .single()
+            .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
+            .unwrap_or((280.0, 80.0));
         for i in 0..8usize {
-            let y = 140.0 + i as f32 * 22.0;
-            if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+            let y = oy + 60.0 + i as f32 * 22.0;
+            if cursor.x >= ox + 18.0 && cursor.x <= ox + 320.0 && cursor.y >= y && cursor.y <= y + 20.0 {
                 if let Some(m) = mail.mails.get(off + i) {
                     let mail_id = m.mail_id;
                     let subject = m.subject.clone();

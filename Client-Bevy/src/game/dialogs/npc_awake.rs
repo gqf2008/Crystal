@@ -263,7 +263,10 @@ fn npc_awake_ui_system(
     mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
     mut mat_vis: Query<&mut Visibility, (With<NpcAwakeMaterialText>, Without<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
     mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    ui: (
+        Query<&Window>,
+        Query<&Node, With<NpcAwakeWidget>>,
+    ),
     mut last_uid: Local<Option<u64>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -361,13 +364,18 @@ fn npc_awake_ui_system(
     }
 
     // 主物品格点击：循环选择背包武器（C# 从背包拖入）
-    if let Ok(window) = windows.single() {
+    if let Ok(window) = ui.0.single() {
         if let Some(cursor) = window.cursor_position() {
+            let (ox, oy) = ui
+                .1
+                .single()
+                .map(|n| crate::ui::theme::node_origin(n, (0.0, 0.0)))
+                .unwrap_or((0.0, 0.0));
             if mouse.just_pressed(MouseButton::Left)
-                && cursor.x >= 202.0
-                && cursor.x <= 238.0
-                && cursor.y >= 91.0
-                && cursor.y <= 119.0
+                && cursor.x >= ox + 202.0
+                && cursor.x <= ox + 238.0
+                && cursor.y >= oy + 91.0
+                && cursor.y <= oy + 119.0
             {
                 // #1356：觉醒模式循环武器；分解/降级/重置循环全部物品
                 let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);

@@ -210,7 +210,10 @@ fn npc_goods_ui_system(
     mut result: MessageReader<AmountBoxResult>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    ui: (
+        Query<&Window>,
+        Query<&Node, With<NpcGoodsWidget>>,
+    ),
     close: Query<(Entity, &Interaction), (With<NpcGoodsClose>, Without<NpcGoodsBuy>)>,
     mut buy: Query<(Entity, &Interaction, &mut Visibility), (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
     mut widgets: Query<&mut Visibility, (With<NpcGoodsWidget>, Without<NpcGoodsBuy>)>,
@@ -319,12 +322,17 @@ fn npc_goods_ui_system(
     }
 
     // 悬停商品行 → 通用 Tooltip（#110）
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = ui.0.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
     let mut hovered: Option<&GoodsEntry> = None;
+    let (ox, oy) = ui
+        .1
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, (0.0, 224.0)))
+        .unwrap_or((0.0, 224.0));
     for i in 0..8usize {
-        let y = 240.0 + i as f32 * 22.0;
-        if cursor.x >= 12.0 && cursor.x <= 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+        let y = oy + 16.0 + i as f32 * 22.0;
+        if cursor.x >= ox + 12.0 && cursor.x <= ox + 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
             hovered = state.goods.get(off + i);
             break;
         }
@@ -347,12 +355,12 @@ fn npc_goods_ui_system(
     }
 
     // 点击行选中
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = ui.0.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
     if mouse.just_pressed(MouseButton::Left) {
         for i in 0..8usize {
-            let y = 240.0 + i as f32 * 22.0;
-            if cursor.x >= 12.0 && cursor.x <= 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+            let y = oy + 16.0 + i as f32 * 22.0;
+            if cursor.x >= ox + 12.0 && cursor.x <= ox + 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
                 let idx = off + i;
                 if idx < state.goods.len() {
                     state.selected = Some(idx);

@@ -416,7 +416,10 @@ fn quest_log_ui_system(
     net: Res<NetConnection>,
     close: Query<(Entity, &Interaction, Option<&QuestLogClose>, Option<&QuestLogAbandon>)>,
     mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    ui: (
+        Query<&Window>,
+        Query<&Node, With<QuestLogWidget>>,
+    ),
     // #1290：Bevy B0001——多个 &mut Text/Visibility Query 需用 Without 隔离
     mut widgets: Query<
         &mut Visibility,
@@ -638,12 +641,17 @@ fn quest_log_ui_system(
     }
     // #2535 子批2：行点击——组头展开/收起（C# ChangeExpand）、任务选中（DeselectQuests 单选）
     if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
+        if let Ok(window) = ui.0.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = ui
+                    .1
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (200.0, 60.0)))
+                    .unwrap_or((200.0, 60.0));
                 for i in 0..8usize {
-                    let y = 100.0 + i as f32 * 20.0;
-                    if cursor.x >= 218.0
-                        && cursor.x <= 500.0
+                    let y = oy + 40.0 + i as f32 * 20.0;
+                    if cursor.x >= ox + 18.0
+                        && cursor.x <= ox + 300.0
                         && cursor.y >= y
                         && cursor.y <= y + 18.0
                     {
@@ -682,14 +690,14 @@ fn quest_log_ui_system(
                 // #2535 可选奖励点击分段选择（行 12，横向等分；x 上限避开放弃按钮）
                 if let Some(info) = sel_info {
                     if !info.rewards_select_item.is_empty() {
-                        let y = 100.0 + 12.0 * 20.0;
-                        if cursor.x >= 218.0
-                            && cursor.x <= 398.0
+                        let y = oy + 40.0 + 12.0 * 20.0;
+                        if cursor.x >= ox + 18.0
+                            && cursor.x <= ox + 198.0
                             && cursor.y >= y
                             && cursor.y <= y + 18.0
                         {
                             let n = info.rewards_select_item.len() as f32;
-                            let k = (((cursor.x - 218.0) / ((398.0 - 218.0) / n)) as usize)
+                            let k = (((cursor.x - (ox + 18.0)) / (180.0 / n)) as usize)
                                 .min(info.rewards_select_item.len() - 1);
                             state.selected_reward = Some(k);
                         }

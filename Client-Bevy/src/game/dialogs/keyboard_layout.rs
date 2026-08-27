@@ -519,6 +519,7 @@ fn keyboard_layout_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<KeyboardWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -582,11 +583,15 @@ fn keyboard_layout_ui_system(
             if let Some(cursor) = window.cursor_position() {
                 if mouse.just_pressed(MouseButton::Left) {
                     let base = 90.0;
+                    let (ox, oy) = panel_origin
+                        .single()
+                        .map(|n| crate::ui::theme::node_origin(n, ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0)))
+                        .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
                     for spec in build_rows(&state) {
                         if let RowSpec::Bind { y, index, .. } = spec {
-                            let ry = (768.0 - PANEL_H) / 2.0 + base + y;
-                            if cursor.x >= (1024.0 - PANEL_W) / 2.0 + 20.0
-                                && cursor.x <= (1024.0 - PANEL_W) / 2.0 + 480.0
+                            let ry = oy + base + y;
+                            if cursor.x >= ox + 20.0
+                                && cursor.x <= ox + 480.0
                                 && cursor.y >= ry
                                 && cursor.y <= ry + 15.0
                             {

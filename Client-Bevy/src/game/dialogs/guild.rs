@@ -725,6 +725,7 @@ fn guild_ui_system(
     mut lines: Query<(&mut Text, &mut TextColor, &GuildLine)>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
+    panel_origin: Query<&Node, With<GuildWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -1007,12 +1008,16 @@ fn guild_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (GUILD_X, GUILD_Y)))
+                    .unwrap_or((GUILD_X, GUILD_Y));
                 if !guild.show_buff_page {
                     let visible = guild.visible_member_indices();
                     for i in 1..=10usize {
-                        let y = 140.0 + (i - 1) as f32 * 20.0;
-                        if cursor.x >= 298.0
-                            && cursor.x <= 600.0
+                        let y = oy + 60.0 + (i - 1) as f32 * 20.0;
+                        if cursor.x >= ox + 18.0
+                            && cursor.x <= ox + 320.0
                             && cursor.y >= y
                             && cursor.y <= y + 18.0
                         {
@@ -1027,9 +1032,9 @@ fn guild_ui_system(
                 }
                 // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
                 for i in 11..=18usize {
-                    let y = 595.0 + (i - 11) as f32 * 18.0;
-                    if cursor.x >= 298.0
-                        && cursor.x <= 600.0
+                    let y = oy + 515.0 + (i - 11) as f32 * 18.0;
+                    if cursor.x >= ox + 18.0
+                        && cursor.x <= ox + 320.0
                         && cursor.y >= y
                         && cursor.y <= y + 16.0
                     {
@@ -1057,6 +1062,7 @@ fn guild_buff_system(
     buff_up_btn: Query<(Entity, &Interaction), With<GuildBuffUp>>,
     buff_down_btn: Query<(Entity, &Interaction), With<GuildBuffDown>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<GuildWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -1096,9 +1102,13 @@ fn guild_buff_system(
         return;
     };
     // 行点击 → C.GuildBuffUpdate；服务端 toggle 语义（未激活→激活收费校验，已激活→停用），结果走系统消息
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, (GUILD_X, GUILD_Y)))
+        .unwrap_or((GUILD_X, GUILD_Y));
     for i in 1..=8usize {
-        let y = 140.0 + (i - 1) as f32 * 20.0;
-        if cursor.x >= 298.0 && cursor.x <= 498.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+        let y = oy + 60.0 + (i - 1) as f32 * 20.0;
+        if cursor.x >= ox + 18.0 && cursor.x <= ox + 218.0 && cursor.y >= y && cursor.y <= y + 18.0 {
             if let Some(info) = guild.buff_catalog.get(guild.buff_start + i - 1) {
                 net.send_packet(&mir2_shared::packets::client::guild::GuildBuffUpdate {
                     action: 2,
