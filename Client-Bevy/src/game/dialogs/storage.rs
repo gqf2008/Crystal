@@ -332,13 +332,14 @@ fn spawn_storage_dialog(
     // 格子底板不在此预生成：#281 由 storage_grid_sync_system 动态生成
 }
 
-/// 光标坐标 → 仓库格（按实际格数，#281）
-fn storage_slot_at(cx: f32, cy: f32, size: usize) -> Option<usize> {
+/// 光标坐标 → 仓库格（按实际格数，#281）。
+/// ox/oy = 面板当前原点（拖动/推位后跟随，避免命中失准）
+fn storage_slot_at(cx: f32, cy: f32, size: usize, ox: f32, oy: f32) -> Option<usize> {
     for i in 0..size.min(COLS * ROWS) {
         let x = i % COLS;
         let y = i / COLS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 60.0 + y as f32 * (CELL_H + 1.0);
+        let sx = ox + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = oy + 60.0 + y as f32 * (CELL_H + 1.0);
         if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
             return Some(i);
         }
@@ -444,6 +445,7 @@ fn storage_action_system(
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     mut last_storage_click: Local<Option<(usize, f64)>>,
+    panel_origin: Query<&Node, With<StorageWidget>>,
 ) {
     if !state.visible || !mouse.just_pressed(MouseButton::Left) {
         return;
@@ -453,8 +455,23 @@ fn storage_action_system(
         return;
     };
 
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((DIALOG_X, DIALOG_Y));
     let player = player_q.single().ok();
-    let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len());
+    let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len(), ox, oy);
     let inv_slot = inv_slot_at(
         cursor.x,
         cursor.y,
@@ -702,6 +719,7 @@ fn storage_tooltip_system(
     state: Res<StorageState>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
+    panel_origin: Query<&Node, With<StorageWidget>>,
 ) {
     if !state.visible {
         tooltip.update(3, false, String::new(), Vec::new(), 0.0, 0.0);
@@ -711,8 +729,23 @@ fn storage_tooltip_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((DIALOG_X, DIALOG_Y));
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
-    if let Some(i) = storage_slot_at(cursor.x, cursor.y, state.items.len()) {
+    if let Some(i) = storage_slot_at(cursor.x, cursor.y, state.items.len(), ox, oy) {
         hit = state.items.get(i).and_then(|s| s.as_ref()).cloned();
     }
     let Some(item) = hit else {
@@ -862,11 +895,28 @@ fn storage_grid_sync_system(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     slots: Query<(Entity, &StorageSlot)>,
+    panel_origin: Query<&Node, With<StorageWidget>>,
 ) {
     let size = state.items.len().min(COLS * ROWS);
     if state.items.is_empty() && slots.is_empty() {
         return; // 进图 UserStorage 到达前：无格子可同步
     }
+    // 面板当前原点（拖动/推位后新格与已平移格对齐；DIALOG 常量仅为初始值）
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((DIALOG_X, DIALOG_Y));
     // 缩容：移除超出 size 的格子
     for (e, s) in &slots {
         if s.0 >= size {
@@ -895,8 +945,8 @@ fn storage_grid_sync_system(
         }
         let x = i % COLS;
         let y = i / COLS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 60.0 + y as f32 * (CELL_H + 1.0);
+        let sx = ox + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = oy + 60.0 + y as f32 * (CELL_H + 1.0);
         let cell = spawn_item_cell_ui_root(
             &mut commands,
             &mut images,

@@ -132,16 +132,20 @@ pub struct CharSkillBack;
 
 /// 装备格屏坐标原点（对话框(760,0) + CharacterPage(8,90) + 页内偏移）。
 /// 生成/右键/tooltip 三处统一用此换算——#2503 修的偏移 bug 即生成与右键漏加页偏移所致。
-fn slot_screen_origin(pos: usize) -> Option<(f32, f32)> {
+fn slot_screen_origin(pos: usize, ox: f32, oy: f32) -> Option<(f32, f32)> {
     EQUIP_SLOTS
         .get(pos)
-        .map(|(ox, oy)| (DIALOG_X + PAGE_X + ox, DIALOG_Y + PAGE_Y + oy))
+        .map(|(px, py)| (ox + PAGE_X + px, oy + PAGE_Y + py))
 }
 
 /// 装备格屏幕矩形（server_slot 0..13 → 绝对屏幕坐标 + C# MirItemCell 36x32 尺寸）
-fn equip_slot_screen_rect(server_slot: usize) -> Option<(f32, f32, f32, f32)> {
+fn equip_slot_screen_rect(
+    server_slot: usize,
+    ox: f32,
+    oy: f32,
+) -> Option<(f32, f32, f32, f32)> {
     let pos_idx = *SERVER_SLOT_TO_POS.get(server_slot)?;
-    let (x, y) = slot_screen_origin(pos_idx)?;
+    let (x, y) = slot_screen_origin(pos_idx, ox, oy)?;
     Some((x, y, SLOT_W, SLOT_H))
 }
 
@@ -174,6 +178,7 @@ fn char_equip_tooltip_system(
     loadout_q: Query<&Loadout, With<LocalPlayer>>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
+    panel_origin: Query<&Node, With<CharDialogWidget>>,
 ) {
     if !mgr.is_open(DialogKind::Character) || page.0 != 0 {
         tooltip.update(5, false, String::new(), Vec::new(), 0.0, 0.0);
@@ -186,9 +191,24 @@ fn char_equip_tooltip_system(
         .single()
         .map(|l| l.slots.as_slice())
         .unwrap_or(&[]);
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((DIALOG_X, DIALOG_Y));
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
     for server_slot in 0..14usize {
-        if let Some((sx, sy, w, h)) = equip_slot_screen_rect(server_slot) {
+        if let Some((sx, sy, w, h)) = equip_slot_screen_rect(server_slot, ox, oy) {
             if cursor.x >= sx && cursor.x <= sx + w && cursor.y >= sy && cursor.y <= sy + h {
                 hit = equipment.get(server_slot).and_then(|s| s.as_ref()).cloned();
                 break;
@@ -557,6 +577,7 @@ fn char_equip_system(
     net: Res<NetConnection>,
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
+    panel_origin: Query<&Node, With<CharDialogWidget>>,
 ) {
     // 右键卸下装备（原版 C# MirItemCell 右键 → UseItem → Equipment → RemoveItem）
     // #2633 批次4 步6：读 Loadout 组件（实体缺失默认空，同旧 HudState.equipment 默认 [None;14]）
@@ -568,8 +589,23 @@ fn char_equip_system(
     {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| {
+                        (
+                            match n.left {
+                                Val::Px(v) => v,
+                                _ => DIALOG_X,
+                            },
+                            match n.top {
+                                Val::Px(v) => v,
+                                _ => DIALOG_Y,
+                            },
+                        )
+                    })
+                    .unwrap_or((DIALOG_X, DIALOG_Y));
                 for pos in 0..EQUIP_SLOTS.len() {
-                    let Some((sx, sy)) = slot_screen_origin(pos) else {
+                    let Some((sx, sy)) = slot_screen_origin(pos, ox, oy) else {
                         continue;
                     };
                     if cursor.x >= sx
@@ -774,12 +810,16 @@ mod tests {
     #[test]
     fn equip_slot_screen_rect_weapon() {
         // 武器 server_slot=0 → EQUIP_SLOTS[0]=(123,7) + PAGE(8,90) + DIALOG(760,0)；格尺寸 C# 36x32
-        let r = equip_slot_screen_rect(0).unwrap();
+        let r = equip_slot_screen_rect(0, DIALOG_X, DIALOG_Y).unwrap();
         assert_eq!(
             r,
             (1024.0 - 264.0 + 8.0 + 123.0, 0.0 + 90.0 + 7.0, 36.0, 32.0)
         );
-        assert_eq!(equip_slot_screen_rect(14), None);
+        // 拖动到 (400,200) 后装备命中跟随
+        let r2 = equip_slot_screen_rect(0, 400.0, 200.0).unwrap();
+        assert_eq!(r2.0, 400.0 + 8.0 + 123.0);
+        assert_eq!(r2.1, 200.0 + 90.0 + 7.0);
+        assert_eq!(equip_slot_screen_rect(14, DIALOG_X, DIALOG_Y), None);
     }
 
     #[test]

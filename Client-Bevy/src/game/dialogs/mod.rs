@@ -59,12 +59,10 @@ pub mod timer;
 pub mod trade;
 
 use bevy::prelude::*;
-use bevy::sprite::Anchor;
 
 use crate::game::dialogs::text_input::TextInputRect;
 use crate::scenes::AppState;
-use crate::ui::controls::DropDown;
-use crate::ui::sprite_ui::{UiButton, UiEntity};
+use crate::ui::theme::UiDropDown;
 
 /// 对话框类型
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -158,10 +156,8 @@ impl DialogManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::asset::Assets;
-    use bevy::image::Image;
-    use bevy::sprite::{Anchor, Sprite};
-    use bevy::transform::components::Transform;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::window::{PrimaryWindow, Window};
 
     #[test]
     fn test_blocks_world_click() {
@@ -179,30 +175,222 @@ mod tests {
         assert!(m.blocks_world_click(), "大地图打开屏蔽");
     }
 
+    /// node_rect：根面板 Node Px 字段 → 屏幕矩形
     #[test]
-    fn ui_sprite_rect_top_left_anchor() {
-        let mut assets = Assets::<Image>::default();
-        let sprite = Sprite::sized(Vec2::new(100.0, 50.0));
-        let tf = Transform::from_xyz(200.0, -150.0, 5.0);
-        let (x0, y0, x1, y1) = ui_sprite_rect(&tf, Some(&sprite), Some(&Anchor::TOP_LEFT), &assets);
-        assert_eq!((x0, y0, x1, y1), (200.0, 150.0, 300.0, 200.0));
+    fn node_rect_reads_px() {
+        let node = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(280.0),
+            top: Val::Px(80.0),
+            width: Val::Px(316.0),
+            height: Val::Px(236.0),
+            ..default()
+        };
+        assert_eq!(node_rect(&node), (280.0, 80.0, 316.0, 236.0));
+        // 非 Px 字段防御回退 0
+        let auto = Node::default();
+        assert_eq!(node_rect(&auto), (0.0, 0.0, 0.0, 0.0));
     }
 
+    /// is_descendant_of：沿 ChildOf 逐级向上找根面板
     #[test]
-    fn ui_sprite_rect_center_anchor_shifts_half_size() {
-        let mut assets = Assets::<Image>::default();
-        let sprite = Sprite::sized(Vec2::new(100.0, 50.0));
-        let tf = Transform::from_xyz(200.0, -150.0, 5.0);
-        let (x0, y0, x1, y1) = ui_sprite_rect(&tf, Some(&sprite), Some(&Anchor::CENTER), &assets);
-        assert_eq!((x0, y0, x1, y1), (150.0, 125.0, 250.0, 175.0));
+    fn descendant_walks_up_childof() {
+        let mut world = World::new();
+        let root = world.spawn_empty().id();
+        let mid = world.spawn_empty().id();
+        let leaf = world.spawn_empty().id();
+        world.entity_mut(mid).insert(ChildOf(root));
+        world.entity_mut(leaf).insert(ChildOf(mid));
+        let parents = world.query::<&ChildOf>();
+
+        // 无关实体提前生成（避免闭包捕获 &world 期间可变借用冲突）
+        let other = world.spawn_empty().id();
+        let mut parents = world.query::<&ChildOf>();
+        let mut parent_of = |x: Entity| parents.get(&world, x).ok().map(|c| c.parent());
+        assert!(is_descendant_of(leaf, root, &mut parent_of));
+        assert!(is_descendant_of(mid, root, &mut parent_of));
+        assert!(!is_descendant_of(root, root, &mut parent_of));
+        assert!(!is_descendant_of(other, root, &mut parent_of));
     }
 
+    /// bevy_ui 拖拽：点中根面板（非按钮）→ 拖动 Node.left/top；第二帧移动鼠标 →
+    /// 面板平移 + InventoryOrigin 同步；子输入框命中区（绝对坐标）同步
     #[test]
-    fn ui_sprite_rect_without_sprite_falls_back_to_point() {
-        let mut assets = Assets::<Image>::default();
-        let tf = Transform::from_xyz(200.0, -150.0, 5.0);
-        let rect = ui_sprite_rect(&tf, None, None, &assets);
-        assert_eq!(rect, (200.0, 150.0, 200.0, 150.0));
+    fn drag_moves_panel_node_and_syncs_abs_rects() {
+        let mut world = World::new();
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(50.0, 50.0)));
+        world.spawn((window, PrimaryWindow));
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left); // just_pressed + pressed
+        world.insert_resource(mouse);
+        world.insert_resource(DialogDrag::default());
+        world.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
+
+        // 背包根面板 @ (0,0) 316x236（inventory 拖拽同步 InventoryOrigin）
+        let panel = world
+            .spawn((
+                DialogRoot(DialogKind::Inventory),
+                Visibility::Visible,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(316.0),
+                    height: Val::Px(236.0),
+                    ..default()
+                },
+                GlobalZIndex(30),
+            ))
+            .id();
+        // 输入框（面板子节点，TextInputRect 绝对屏幕坐标）
+        world.entity_mut(panel).with_children(|p| {
+            p.spawn((
+                TextInputRect(50.0, 60.0, 130.0, 10.0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(50.0),
+                    top: Val::Px(60.0),
+                    ..default()
+                },
+            ));
+        });
+        // 无关对话框（不应被移动）
+        world.spawn((
+            DialogRoot(DialogKind::Trade),
+            Visibility::Visible,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(298.0),
+                top: Val::Px(418.0),
+                width: Val::Px(300.0),
+                height: Val::Px(200.0),
+                ..default()
+            },
+            GlobalZIndex(30),
+        ));
+
+        // 第一帧：点中背包 → 开始拖动
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        {
+            let drag = world.resource::<DialogDrag>();
+            assert_eq!(drag.dragging, Some(DialogKind::Inventory), "应开始拖动背包");
+        }
+
+        // 第二帧：鼠标移到 (100,80)，保持按住 → 面板平移 (50,30)，TextInputRect 与 Origin 同步
+        let mut win_q = world.query::<&mut Window>();
+        for mut win in win_q.iter_mut(&mut world) {
+            win.set_cursor_position(Some(Vec2::new(100.0, 80.0)));
+        }
+        drop(win_q);
+        world
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear_just_pressed(MouseButton::Left); // 保持 pressed，消费 just_pressed
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+
+        let mut q = world.query::<(&DialogRoot, &Node)>();
+        let inv_node = q
+            .iter(&world)
+            .find(|(r, _)| r.0 == DialogKind::Inventory)
+            .map(|(_, n)| {
+                (
+                    match n.left {
+                        Val::Px(v) => v,
+                        _ => -1.0,
+                    },
+                    match n.top {
+                        Val::Px(v) => v,
+                        _ => -1.0,
+                    },
+                )
+            })
+            .expect("背包面板存在");
+        assert_eq!(inv_node, (50.0, 30.0), "背包根面板应平移 delta=(50,30)");
+        let trade_node = q
+            .iter(&world)
+            .find(|(r, _)| r.0 == DialogKind::Trade)
+            .map(|(_, n)| match n.left {
+                Val::Px(v) => v,
+                _ => -1.0,
+            })
+            .expect("交易面板存在");
+        assert_eq!(trade_node, 298.0, "无关对话框不应移动");
+        // 输入框命中矩形（绝对坐标）跟随平移
+        let tr = world
+            .query_filtered::<&TextInputRect, ()>()
+            .iter(&world)
+            .next()
+            .cloned()
+            .expect("输入框存在");
+        assert_eq!((tr.0, tr.1), (100.0, 90.0), "TextInputRect 应同步平移");
+        // InventoryOrigin 同步
+        let origin = world.resource::<crate::game::dialogs::inventory::InventoryOrigin>();
+        assert_eq!((origin.0, origin.1), (50.0, 30.0));
+
+        // 松开鼠标 → 结束拖动
+        world
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        assert_eq!(world.resource::<DialogDrag>().dragging, None);
+    }
+
+    /// bevy_ui 置顶：新打开对话框 → GlobalZIndex 抬到现有最大值之上（保留内部层级）
+    #[test]
+    fn front_bumps_new_open_to_top() {
+        let mut world = World::new();
+        world.insert_resource(DialogZ::default());
+        world.insert_resource(ButtonInput::<MouseButton>::default());
+        let mut mgr = DialogManager::default();
+        mgr.open.push(DialogKind::Character);
+        mgr.open.push(DialogKind::Mail);
+        world.insert_resource(mgr);
+        // 角色面板 gz=30；邮件主面板 gz=30、写邮件覆盖层 gz=40（内部层级）
+        world.spawn((
+            DialogRoot(DialogKind::Character),
+            Visibility::Visible,
+            Node::default(),
+            GlobalZIndex(30),
+        ));
+        world.spawn((
+            DialogRoot(DialogKind::Mail),
+            Visibility::Visible,
+            Node::default(),
+            GlobalZIndex(30),
+        ));
+        world.spawn((
+            DialogRoot(DialogKind::Mail),
+            Visibility::Visible,
+            Node::default(),
+            GlobalZIndex(40),
+        ));
+
+        world
+            .run_system_once(dialog_front_system)
+            .expect("front 系统应运行");
+
+        let mut q = world.query::<(&DialogRoot, &GlobalZIndex)>();
+        let mail_gz: Vec<i32> = q
+            .iter(&world)
+            .filter(|(r, _)| r.0 == DialogKind::Mail)
+            .map(|(_, g)| g.0)
+            .collect();
+        let char_gz = q
+            .iter(&world)
+            .find(|(r, _)| r.0 == DialogKind::Character)
+            .map(|(_, g)| g.0)
+            .expect("角色面板存在");
+        // Mail 新打开 → 整体抬到 50（最高 40 + 10），内部层级差 10 保留
+        let mut sorted = mail_gz.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![40, 50], "Mail 两面板抬到 40/50，内部层级保留");
+        assert_eq!(char_gz, 30, "Character 未置顶保持原值");
     }
 }
 
@@ -210,122 +398,119 @@ mod tests {
 #[derive(Component)]
 pub struct DialogRoot(pub DialogKind);
 
-/// 弹窗拖动状态（#34：原版弹窗可拖动）
+/// 弹窗拖动状态（#34：原版弹窗可拖动；bevy_ui 版按根面板 Node 增量位移）
 #[derive(Resource, Default)]
 pub struct DialogDrag {
     /// 正在拖动的对话框类型
     pub dragging: Option<DialogKind>,
     /// 拖动开始时的鼠标位置（逻辑坐标）
     pub start_cursor: Vec2,
-    /// 拖动开始时各实体的原始 Transform（用于增量位移）
-    pub origins: std::collections::HashMap<Entity, Vec3>,
-    /// 拖动开始时按钮命中矩形的原始位置（拖动后同步，否则按钮/关闭点击失效）
-    pub btn_origins: std::collections::HashMap<Entity, (f32, f32)>,
-    /// 拖动开始时文本输入框命中矩形的原始位置
+    /// 拖动开始时各根面板 Node.left/top 的原始位置（bevy_ui 版）
+    pub panel_origins: std::collections::HashMap<Entity, (f32, f32)>,
+    /// 拖动开始时文本输入框命中矩形的原始位置（绝对屏幕坐标，跟随平移）
     pub text_origins: std::collections::HashMap<Entity, (f32, f32)>,
-    /// 拖动开始时下拉框命中矩形的原始位置（box_rect + popup_pos）
+    /// 拖动开始时下拉框命中矩形的原始位置（box_rect + popup_pos，绝对坐标）
     pub dd_origins: std::collections::HashMap<Entity, ((f32, f32), (f32, f32))>,
     /// 拖动开始时的背包命中原点（仅拖 Inventory 时 Some）
     pub inv_origin_start: Option<(f32, f32)>,
 }
 
-/// 对话框置顶层级（front 系统维护单调递增的 z 顶值）
+/// 对话框置顶层级（front 系统维护单调递增的 GlobalZIndex 顶值）
 #[derive(Resource, Default)]
 pub struct DialogZ {
-    pub top: f32,
+    pub top: i32,
 }
 
-/// 计算 UI 实体在屏幕坐标下的包围盒（屏幕 y 向下）。
-/// 没有 Sprite 的实体退化为其 Transform 点，保持原行为。
-fn ui_sprite_rect(
-    tf: &Transform,
-    sprite: Option<&Sprite>,
-    anchor: Option<&Anchor>,
-    image_assets: &Assets<Image>,
-) -> (f32, f32, f32, f32) {
-    let Some(sprite) = sprite else {
-        let (x, y) = (tf.translation.x, -tf.translation.y);
-        return (x, y, x, y);
+/// 根面板 Node 矩形（屏幕坐标：根面板是 UI 根的子节点，left/top 即绝对坐标）。
+/// bevy_ui 对话框根面板均显式设置 Px 尺寸；非 Px 回退 0（防御）。
+fn node_rect(node: &Node) -> (f32, f32, f32, f32) {
+    let x = match node.left {
+        Val::Px(v) => v,
+        _ => 0.0,
     };
-    let size = sprite
-        .custom_size
-        .or_else(|| {
-            image_assets.get(&sprite.image).map(|img| {
-                let s = img.size();
-                Vec2::new(s.x as f32, s.y as f32)
-            })
-        })
-        .unwrap_or(Vec2::ZERO);
-    let anchor_vec = anchor
-        .map(|a| a.as_vec())
-        .unwrap_or(Anchor::TOP_LEFT.as_vec());
-    // Bevy Sprite 中心 = -anchor * size；左上角 = 中心 + (-0.5, 0.5) * size
-    let local_top_left = (-anchor_vec + Vec2::new(-0.5, 0.5)) * size;
-    let tl = tf.translation.truncate() + local_top_left;
-    (tl.x, -tl.y, tl.x + size.x, -tl.y + size.y)
+    let y = match node.top {
+        Val::Px(v) => v,
+        _ => 0.0,
+    };
+    let w = match node.width {
+        Val::Px(v) => v,
+        _ => 0.0,
+    };
+    let h = match node.height {
+        Val::Px(v) => v,
+        _ => 0.0,
+    };
+    (x, y, w, h)
 }
 
-/// 通用弹窗拖动系统：
-/// - 按 DialogKind 聚合实体，用实体位置估算窗口包围盒，按住任意位置（非按钮）可拖
-/// - 拖动时对所有该对话框实体整体平移（保持相对布局）
+/// 判断实体是否挂在给定根面板之下（沿 ChildOf 逐级向上；用于拖动时同步
+/// 子节点上携带的绝对坐标组件：TextInputRect / UiDropDown）。
+/// `parent_of` 返回实体的父实体（无父返回 None）。
+fn is_descendant_of(
+    e: Entity,
+    root: Entity,
+    parent_of: &mut impl FnMut(Entity) -> Option<Entity>,
+) -> bool {
+    let mut cur = e;
+    while let Some(p) = parent_of(cur) {
+        if p == root {
+            return true;
+        }
+        cur = p;
+    }
+    false
+}
+
+/// 通用弹窗拖动系统（bevy_ui 版）：
+/// - 按 DialogKind 聚合**根面板**（有 GlobalZIndex 的 DialogRoot 节点 = 根；子格等无
+///   GlobalZIndex 不参与），用根面板矩形估算窗口包围盒，按住任意位置（非按钮）可拖
+/// - 拖动时对根面板 Node.left/top 整体平移（子节点随根），并同步子节点上携带的
+///   绝对坐标组件：TextInputRect / UiDropDown / InventoryOrigin
 pub fn dialog_drag_system(
     mut drag: ResMut<DialogDrag>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
-    image_assets: Res<Assets<Image>>,
-    mut dialogs: Query<(
-        Entity,
-        &DialogRoot,
-        &Visibility,
-        &mut Transform,
-        Option<&Sprite>,
-        Option<&Anchor>,
-    )>,
-    mut ui_buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
-    mut text_rects: Query<(Entity, &mut TextInputRect, Option<&DialogRoot>)>,
-    mut drop_downs: Query<(Entity, &mut DropDown, Option<&DialogRoot>)>,
+    buttons: Query<&Interaction, With<Button>>,
+    mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &mut Node, &GlobalZIndex)>,
+    mut text_rects: Query<(Entity, &mut TextInputRect)>,
+    mut drop_downs: Query<(Entity, &mut UiDropDown)>,
+    parents: Query<&ChildOf>,
     // 背包拖动时同步 InventoryOrigin（inv_slot_at/仓库/交易命中依赖它）
     mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
 ) {
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = windows.single() else {
+        return;
+    };
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    let Ok((ui_camera, cam_tf)) = ui_cameras.single() else {
-        return;
-    };
-    let Ok(world) = ui_camera.viewport_to_world_2d(cam_tf, cursor) else {
-        return;
-    };
-    let cursor = Vec2::new(world.x, -world.y);
 
-    let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, f32)> =
+    // 聚合每个 kind 的根面板包围盒（bevy_ui 面板根 = 有 GlobalZIndex 的 DialogRoot）
+    let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, i32)> =
         std::collections::HashMap::new();
-    for (_, root, vis, tf, sprite, anchor) in dialogs.iter() {
+    for (_, root, vis, node, gz) in dialogs.iter() {
         if *vis != Visibility::Visible {
             continue;
         }
-        let (x0, y0, x1, y1) = ui_sprite_rect(tf, sprite, anchor, &image_assets);
-        let b = boxes
-            .entry(root.0)
-            .or_insert((x0, y0, x1, y1, tf.translation.z));
-        b.0 = b.0.min(x0);
-        b.1 = b.1.min(y0);
-        b.2 = b.2.max(x1);
-        b.3 = b.3.max(y1);
-        b.4 = b.4.max(tf.translation.z);
+        let (x, y, w, h) = node_rect(node);
+        let b = boxes.entry(root.0).or_insert((x, y, x + w, y + h, gz.0));
+        b.0 = b.0.min(x);
+        b.1 = b.1.min(y);
+        b.2 = b.2.max(x + w);
+        b.3 = b.3.max(y + h);
+        b.4 = b.4.max(gz.0);
     }
 
     if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
-        let on_button = ui_buttons.iter().any(|(_, b, _)| {
-            let (x, y, w, h) = b.rect;
-            cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
-        });
+        // 按钮上不触发（bevy_ui Interaction 由 ui_focus_system 按命中计算）
+        let on_button = buttons.iter().any(|i| *i != Interaction::None);
         if !on_button {
-            let mut top: Option<(DialogKind, f32)> = None;
+            let mut top: Option<(DialogKind, i32)> = None;
             for (kind, (minx, miny, maxx, maxy, maxz)) in &boxes {
-                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy
+                if cursor.x >= *minx
+                    && cursor.x <= *maxx
+                    && cursor.y >= *miny
+                    && cursor.y <= *maxy
                 {
                     if top.map(|(_, z)| *maxz > z).unwrap_or(true) {
                         top = Some((*kind, *maxz));
@@ -333,36 +518,36 @@ pub fn dialog_drag_system(
                 }
             }
             if let Some((kind, _)) = top {
-                let origins = dialogs
+                let roots: Vec<Entity> = dialogs
                     .iter()
-                    .filter(|(_, r, v, _, _, _)| *v == Visibility::Visible && r.0 == kind)
-                    .map(|(e, _, _, tf, _, _)| (e, tf.translation))
-                    .collect::<std::collections::HashMap<_, _>>();
+                    .filter(|(_, r, v, _, _)| *v == Visibility::Visible && r.0 == kind)
+                    .map(|(e, _, _, _, _)| e)
+                    .collect();
                 drag.dragging = Some(kind);
                 drag.start_cursor = cursor;
-                drag.origins = origins;
+                drag.panel_origins = dialogs
+                    .iter()
+                    .filter(|(_, r, v, _, _)| *v == Visibility::Visible && r.0 == kind)
+                    .map(|(e, _, _, node, _)| {
+                        let (x, y, _, _) = node_rect(node);
+                        (e, (x, y))
+                    })
+                    .collect();
                 drag.inv_origin_start =
                     (kind == DialogKind::Inventory).then(|| (inv_origin.0, inv_origin.1));
-                drag.btn_origins = ui_buttons
-                    .iter()
-                    .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
-                    .map(|(e, btn, _)| (e, (btn.rect.0, btn.rect.1)))
-                    .collect();
+                // 输入框/下拉框命中矩形（绝对屏幕坐标）跟随：只收集挂在被拖 kind 根面板下的
                 drag.text_origins = text_rects
                     .iter()
-                    .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
-                    .map(|(e, tr, _)| (e, (tr.0, tr.1)))
+                    .filter(|(e, _)| roots.iter().any(|r| is_descendant_of(*e, *r, &mut |x| parents.get(x).ok().map(|c| c.parent()))))
+                    .map(|(e, tr)| (e, (tr.0, tr.1)))
                     .collect();
                 drag.dd_origins = drop_downs
                     .iter()
-                    .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
-                    .map(|(e, dd, _)| {
+                    .filter(|(e, _)| roots.iter().any(|r| is_descendant_of(*e, *r, &mut |x| parents.get(x).ok().map(|c| c.parent()))))
+                    .map(|(e, dd)| {
                         (
                             e,
-                            (
-                                (dd.box_rect.0, dd.box_rect.1),
-                                (dd.popup_pos.0, dd.popup_pos.1),
-                            ),
+                            ((dd.box_rect.0, dd.box_rect.1), (dd.popup_pos.0, dd.popup_pos.1)),
                         )
                     })
                     .collect();
@@ -374,26 +559,22 @@ pub fn dialog_drag_system(
     if let Some(kind) = drag.dragging {
         if mouse.pressed(MouseButton::Left) {
             let delta = cursor - drag.start_cursor;
-            for (e, _, vis, mut tf, _, _) in dialogs.iter_mut() {
-                if *vis == Visibility::Visible {
-                    if let Some(orig) = drag.origins.get(&e) {
-                        tf.translation = *orig + Vec3::new(delta.x, -delta.y, 0.0);
+            for (e, root, vis, mut node, _) in dialogs.iter_mut() {
+                if *vis == Visibility::Visible && root.0 == kind {
+                    if let Some((ox, oy)) = drag.panel_origins.get(&e) {
+                        node.left = Val::Px(ox + delta.x);
+                        node.top = Val::Px(oy + delta.y);
                     }
                 }
             }
-            for (e, mut btn, _) in ui_buttons.iter_mut() {
-                if let Some(o) = drag.btn_origins.get(&e) {
-                    btn.rect.0 = o.0 + delta.x;
-                    btn.rect.1 = o.1 + delta.y;
-                }
-            }
-            for (e, mut tr, _) in text_rects.iter_mut() {
+            // 输入框命中区 / 下拉框命中区（屏幕坐标）随面板平移
+            for (e, mut tr) in text_rects.iter_mut() {
                 if let Some(o) = drag.text_origins.get(&e) {
                     tr.0 = o.0 + delta.x;
                     tr.1 = o.1 + delta.y;
                 }
             }
-            for (e, mut dd, _) in drop_downs.iter_mut() {
+            for (e, mut dd) in drop_downs.iter_mut() {
                 if let Some(o) = drag.dd_origins.get(&e) {
                     dd.box_rect.0 = o.0.0 + delta.x;
                     dd.box_rect.1 = o.0.1 + delta.y;
@@ -408,8 +589,7 @@ pub fn dialog_drag_system(
             }
         } else {
             drag.dragging = None;
-            drag.origins.clear();
-            drag.btn_origins.clear();
+            drag.panel_origins.clear();
             drag.text_origins.clear();
             drag.dd_origins.clear();
             drag.inv_origin_start = None;
@@ -417,28 +597,19 @@ pub fn dialog_drag_system(
     }
 }
 
-/// 置顶系统：
+/// 置顶系统（bevy_ui 版）：
 /// - 新打开的对话框 → 置顶（对齐 C# Show → BringToFront）
-/// - 点击可见对话框 → 置顶（对齐 C# 点击窗口置前）
+/// - 点击可见对话框根面板 → 置顶（对齐 C# 点击窗口置前）
 pub fn dialog_front_system(
     mut z: ResMut<DialogZ>,
     mgr: Res<DialogManager>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
-    image_assets: Res<Assets<Image>>,
-    mut dialogs: Query<(
-        Entity,
-        &DialogRoot,
-        &Visibility,
-        &mut Transform,
-        Option<&Sprite>,
-        Option<&Anchor>,
-    )>,
+    mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &Node, &mut GlobalZIndex)>,
     mut prev_open: Local<Vec<DialogKind>>,
 ) {
-    if z.top < 30.0 {
-        z.top = 30.0;
+    if z.top < 30 {
+        z.top = 30;
     }
 
     if let Some(kind) = mgr.open.last().copied().filter(|k| !prev_open.contains(k)) {
@@ -447,35 +618,27 @@ pub fn dialog_front_system(
     *prev_open = mgr.open.clone();
 
     if mouse.just_pressed(MouseButton::Left) {
-        let Ok(window) = windows.single() else { return };
+        let Ok(window) = windows.single() else {
+            return;
+        };
         let Some(cursor) = window.cursor_position() else {
             return;
         };
-        let Ok((cam, gtf)) = ui_cameras.single() else {
-            return;
-        };
-        let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else {
-            return;
-        };
-        let cursor = Vec2::new(world.x, -world.y);
-
-        let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, f32)> =
+        let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, i32)> =
             std::collections::HashMap::new();
-        for (_, root, vis, tf, sprite, anchor) in dialogs.iter() {
+        for (_, root, vis, node, gz) in dialogs.iter() {
             if *vis != Visibility::Visible {
                 continue;
             }
-            let (x0, y0, x1, y1) = ui_sprite_rect(tf, sprite, anchor, &image_assets);
-            let b = boxes
-                .entry(root.0)
-                .or_insert((x0, y0, x1, y1, tf.translation.z));
-            b.0 = b.0.min(x0);
-            b.1 = b.1.min(y0);
-            b.2 = b.2.max(x1);
-            b.3 = b.3.max(y1);
-            b.4 = b.4.max(tf.translation.z);
+            let (x, y, w, h) = node_rect(node);
+            let b = boxes.entry(root.0).or_insert((x, y, x + w, y + h, gz.0));
+            b.0 = b.0.min(x);
+            b.1 = b.1.min(y);
+            b.2 = b.2.max(x + w);
+            b.3 = b.3.max(y + h);
+            b.4 = b.4.max(gz.0);
         }
-        let mut best: Option<(DialogKind, f32)> = None;
+        let mut best: Option<(DialogKind, i32)> = None;
         for (kind, (minx, miny, maxx, maxy, maxz)) in &boxes {
             if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy {
                 if best.map(|(_, bz)| *maxz > bz).unwrap_or(true) {
@@ -489,35 +652,30 @@ pub fn dialog_front_system(
     }
 }
 
-/// 把指定对话框整体平移到置顶 z（保留内部相对层级，隐藏子页也一起平移）
+/// 把指定对话框整体平移到置顶 z（保留内部相对层级：整体平移使最高者 = z.top，
+/// 覆盖层如 MailCompose/StorageUnlock 保持高于其父面板）
 fn bump_dialog_z(
     kind: DialogKind,
     z: &mut DialogZ,
-    dialogs: &mut Query<(
-        Entity,
-        &DialogRoot,
-        &Visibility,
-        &mut Transform,
-        Option<&Sprite>,
-        Option<&Anchor>,
-    )>,
+    dialogs: &mut Query<(Entity, &DialogRoot, &Visibility, &Node, &mut GlobalZIndex)>,
 ) {
-    let mut min_z = f32::MAX;
+    let mut max_gz = i32::MIN;
     let mut any = false;
-    for (_, r, _, tf, _, _) in dialogs.iter() {
+    for (_, r, _, _, gz) in dialogs.iter() {
         if r.0 == kind {
-            min_z = min_z.min(tf.translation.z);
+            max_gz = max_gz.max(gz.0);
             any = true;
         }
     }
     if !any {
         return;
     }
-    let top = z.top;
-    z.top += 10.0;
-    for (_, r, _, mut tf, _, _) in dialogs.iter_mut() {
+    let top = z.top.max(max_gz + 10);
+    z.top = top + 10;
+    let delta = top - max_gz;
+    for (_, r, _, _, mut gz) in dialogs.iter_mut() {
         if r.0 == kind {
-            tf.translation.z = tf.translation.z - min_z + top;
+            gz.0 += delta;
         }
     }
     tracing::info!("📌 置顶对话框 {:?}（z={}）", kind, top);
