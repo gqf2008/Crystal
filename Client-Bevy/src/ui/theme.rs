@@ -115,6 +115,21 @@ fn abs_node(x: f32, y: f32, w: Option<f32>, h: Option<f32>) -> Node {
     }
 }
 
+/// 面板根 Node 当前屏幕原点（left/top Px）。对话框拖动/推位后，内部固定坐标命中
+/// 用「当前原点 + 相对坐标」跟随，避免停留在初始位置（bevy_ui 拖拽联动）。
+pub fn node_origin(node: &Node, default: (f32, f32)) -> (f32, f32) {
+    (
+        match node.left {
+            Val::Px(v) => v,
+            _ => default.0,
+        },
+        match node.top {
+            Val::Px(v) => v,
+            _ => default.1,
+        },
+    )
+}
+
 /// 生成 .Lib 背景面板（bevy_ui Node + ImageNode）。返回根面板实体（DialogRoot 由调用方挂）。
 pub fn spawn_panel(
     commands: &mut Commands,
@@ -789,6 +804,20 @@ pub fn item_cell_ui_system(
 mod tests {
     use super::*;
     use bevy::ecs::world::CommandQueue;
+
+    /// 面板根 Node 当前原点：拖动/推位后命中跟随用
+    #[test]
+    fn node_origin_reads_px_with_default_fallback() {
+        let node = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(393.0),
+            top: Val::Px(50.0),
+            ..default()
+        };
+        assert_eq!(node_origin(&node, (0.0, 0.0)), (393.0, 50.0));
+        // 非 Px 字段回退默认（如 Auto 布局节点）
+        assert_eq!(node_origin(&Node::default(), (280.0, 80.0)), (280.0, 80.0));
+    }
 
     /// 耐久条宽度：满耐久=整格，随比例缩短，最小 1px（C# MirItemCell DrawDurability）
     #[test]

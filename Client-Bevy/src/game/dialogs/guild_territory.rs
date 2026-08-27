@@ -215,6 +215,7 @@ fn guild_territory_ui_system(
     mut lines: Query<(&mut Text, &GuildTerritoryLine)>,
     mut requested: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<GuildTerritoryWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -281,9 +282,13 @@ fn guild_territory_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
+                    .unwrap_or((280.0, 80.0));
                 for i in 0..7usize {
-                    let y = 125.0 + i as f32 * 22.0;
-                    if cursor.x >= 298.0 && cursor.x <= 640.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                    let y = oy + 45.0 + i as f32 * 22.0;
+                    if cursor.x >= ox + 18.0 && cursor.x <= ox + 360.0 && cursor.y >= y && cursor.y <= y + 20.0 {
                         let idx = state.page * 7 + i;
                         if idx < state.rows.len() {
                             state.selected = Some(idx);

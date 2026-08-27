@@ -390,6 +390,7 @@ fn big_map_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>)>,
 ) {
     fn edge(
         e: Entity,
@@ -492,12 +493,19 @@ fn big_map_ui_system(
     if let Ok(window) = windows.single() {
         if let Some(cursor) = window.cursor_position() {
             if mouse.just_pressed(MouseButton::Left) {
-                let px = (1024.0 - PANEL_W) / 2.0;
-                let py = (768.0 - PANEL_H) / 2.0;
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| {
+                        crate::ui::theme::node_origin(
+                            n,
+                            ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0),
+                        )
+                    })
+                    .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
                 for i in 0..MAX_ROWS {
-                    let ry = py + 50.0 + i as f32 * 21.0;
-                    if cursor.x >= px + 590.0
-                        && cursor.x <= px + 590.0 + 150.0
+                    let ry = oy + 50.0 + i as f32 * 21.0;
+                    if cursor.x >= ox + 590.0
+                        && cursor.x <= ox + 590.0 + 150.0
                         && cursor.y >= ry
                         && cursor.y <= ry + 18.0
                     {
@@ -581,6 +589,7 @@ fn big_map_world_system(
     mut prev_open: Local<bool>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     windows: Query<&Window>,
+    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>)>,
 ) {
     fn edge(
         e: Entity,
@@ -628,9 +637,16 @@ fn big_map_world_system(
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
         None => (PANEL_W, PANEL_H),
     };
-    let px = (1024.0 - pw) / 2.0;
-    let py = (768.0 - ph) / 2.0;
-    let (wm_x, wm_y) = (px + 10.0, py);
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            crate::ui::theme::node_origin(
+                n,
+                ((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0),
+            )
+        })
+        .unwrap_or(((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0));
+    let (wm_x, wm_y) = (ox + 10.0, oy);
 
     let mut hover_title = String::new();
     let mut clicked_icon: Option<usize> = None;
@@ -761,6 +777,7 @@ fn big_map_viewport_system(
     players: Query<&Transform, (With<crate::actor::LocalPlayer>, Without<BigMapWidget>)>,
     windows: Query<&Window>,
     mut texts: Query<(&mut Text, Option<&BigMapTitleText>, Option<&BigMapCoordText>)>,
+    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>)>,
 ) {
     let open = mgr.is_open(DialogKind::BigMap);
     if !open {
@@ -795,17 +812,24 @@ fn big_map_viewport_system(
     if tw <= 0.0 || mw <= 0.0 {
         return;
     }
-    let px = (1024.0 - PANEL_W) / 2.0;
-    let py = (768.0 - PANEL_H) / 2.0;
-    let vx = px + VIEW_X + (VIEW_W - tw) / 2.0;
-    let vy = py + VIEW_Y + (VIEW_H - th) / 2.0;
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| {
+            crate::ui::theme::node_origin(
+                n,
+                ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0),
+            )
+        })
+        .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
+    let vx = ox + VIEW_X + (VIEW_W - tw) / 2.0;
+    let vy = oy + VIEW_Y + (VIEW_H - th) / 2.0;
 
     // 玩家点
     if let Ok(player_tf) = players.single() {
         let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
         if let Ok(mut node) = player_dot.single_mut() {
-            node.left = Val::Px(vx + (tx as f32 / mw) * tw - px);
-            node.top = Val::Px(vy + (ty as f32 / mh) * th - py);
+            node.left = Val::Px(vx + (tx as f32 / mw) * tw - ox);
+            node.top = Val::Px(vy + (ty as f32 / mh) * th - oy);
         }
     }
     // NPC 点（选中黄、其余绿）
@@ -813,8 +837,8 @@ fn big_map_viewport_system(
         if let Some(npc) = state.npcs.get(d.0) {
             let sx = vx + (npc.x as f32 / mw) * tw;
             let sy = vy + (npc.y as f32 / mh) * th;
-            node.left = Val::Px(sx - px - 1.5);
-            node.top = Val::Px(sy - py - 1.5);
+            node.left = Val::Px(sx - ox - 1.5);
+            node.top = Val::Px(sy - oy - 1.5);
             let selected = state.selected == Some(d.0);
             color.0 = if selected {
                 Color::srgb(1.0, 0.9, 0.1)

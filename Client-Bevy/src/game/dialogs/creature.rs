@@ -337,6 +337,7 @@ fn creature_ui_system(
     mut lines: Query<(&mut Text, &CreatureLine)>,
     mut requested: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<CreatureWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -369,9 +370,13 @@ fn creature_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
+                    .unwrap_or((280.0, 80.0));
                 for i in 0..8usize {
-                    let y = 120.0 + i as f32 * 22.0;
-                    if cursor.x >= 298.0 && cursor.x <= 540.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                    let y = oy + 40.0 + i as f32 * 22.0;
+                    if cursor.x >= ox + 18.0 && cursor.x <= ox + 260.0 && cursor.y >= y && cursor.y <= y + 20.0 {
                         if i < state.creatures.len() {
                             state.selected = i;
                             state.message = format!("选中宠物 {}", state.creatures[i].name);
@@ -650,6 +655,7 @@ fn creature_options_system(
     save_btn: Query<(Entity, &Interaction), With<CreatureOptionsSave>>,
     cancel_btn: Query<(Entity, &Interaction), With<CreatureOptionsCancel>>,
     grade_btns: Query<(Entity, &Interaction, Has<CreatureGradePrev>, Has<CreatureGradeNext>)>,
+    panel_origin: Query<&Node, With<CreatureWidget>>,
     mut lines: Query<
         (&mut Text, Option<&CreatureOptionsLine>, Has<CreatureGradeText>),
         Or<(With<CreatureOptionsLine>, With<CreatureGradeText>)>,
@@ -720,9 +726,13 @@ fn creature_options_system(
     if state.options_open && mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
+                    .unwrap_or((280.0, 80.0));
                 for i in 0..9usize {
-                    let y = 120.0 + i as f32 * 22.0;
-                    if cursor.x >= 300.0 && cursor.x <= 500.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                    let y = oy + 40.0 + i as f32 * 22.0;
+                    if cursor.x >= ox + 20.0 && cursor.x <= ox + 220.0 && cursor.y >= y && cursor.y <= y + 20.0 {
                         creature_filter_toggle(&mut state.options, i);
                         break;
                     }

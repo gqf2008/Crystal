@@ -238,6 +238,7 @@ fn game_shop_ui_system(
     cat_down: Query<(Entity, &Interaction), With<GameShopCatDown>>,
     mut requested: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    panel_origin: Query<&Node, With<GameShopWidget>>,
 ) {
     fn edge(
         e: Entity,
@@ -330,9 +331,13 @@ fn game_shop_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (164.0, 146.0)))
+                    .unwrap_or((164.0, 146.0));
                 for i in 0..10usize {
-                    let y = 236.0 + i as f32 * 20.0;
-                    if cursor.x >= 299.0 && cursor.x <= 704.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                    let y = oy + 90.0 + i as f32 * 20.0;
+                    if cursor.x >= ox + 135.0 && cursor.x <= ox + 540.0 && cursor.y >= y && cursor.y <= y + 18.0 {
                         if let Some(&idx) = filtered.get(i) {
                             shop.selected = Some(idx);
                             let it = &shop.items[idx];
@@ -353,9 +358,13 @@ fn game_shop_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = panel_origin
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (164.0, 146.0)))
+                    .unwrap_or((164.0, 146.0));
                 for i in 0..10usize {
-                    let y = 251.0 + i as f32 * 20.0;
-                    if cursor.x >= 175.0 && cursor.x <= 284.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                    let y = oy + 105.0 + i as f32 * 20.0;
+                    if cursor.x >= ox + 11.0 && cursor.x <= ox + 120.0 && cursor.y >= y && cursor.y <= y + 18.0 {
                         let idx = shop.category_page * 10 + i;
                         if let Some(c) = shop.categories.get(idx).cloned() {
                             shop.category = c;

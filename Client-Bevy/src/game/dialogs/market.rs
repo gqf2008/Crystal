@@ -279,7 +279,10 @@ fn market_ui_system(
     prev_btn: Query<(Entity, &Interaction), With<MarketPrevBtn>>,
     next_btn: Query<(Entity, &Interaction), With<MarketNextBtn>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    ui: (
+        Query<&Window>,
+        Query<&Node, With<MarketWidget>>,
+    ),
     mut widgets: Query<&mut Visibility, With<MarketWidget>>,
     mut lines: Query<(&mut Text, &MarketLine)>,
     mut scroll: Query<&mut UiScrollList, With<MarketWidget>>,
@@ -363,11 +366,16 @@ fn market_ui_system(
     }
     // 行点击选中
     if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
+        if let Ok(window) = ui.0.single() {
             if let Some(cursor) = window.cursor_position() {
+                let (ox, oy) = ui
+                    .1
+                    .single()
+                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
+                    .unwrap_or((280.0, 80.0));
                 for i in 0..10usize {
-                    let y = 120.0 + i as f32 * 18.0;
-                    if cursor.x >= 295.0 && cursor.x <= 620.0 && cursor.y >= y && cursor.y <= y + 16.0 {
+                    let y = oy + 40.0 + i as f32 * 18.0;
+                    if cursor.x >= ox + 15.0 && cursor.x <= ox + 340.0 && cursor.y >= y && cursor.y <= y + 16.0 {
                         let idx = market.page * 10 + i;
                         if idx < market.listings.len() {
                             market.selected = Some(idx);
