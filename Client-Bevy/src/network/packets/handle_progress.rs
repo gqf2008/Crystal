@@ -246,7 +246,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // #268：杂项协议（租赁/基础属性/觉醒拆卸/行会Buff/珍珠/NPC输入）
         x if x == ServerPacketIds::GetRentedItems as i16 => {
             if let Ok(p) = rental_system::GetRentedItems::read_body(&mut cur) {
-                tracing::info!("📦 租赁物品列表: {} 件", p.items.len());
+                server_events.write(ServerEvent::RentedItems { items: p.items });
+                tracing::info!("📦 租赁物品列表已下发");
             }
         }
         x if x == ServerPacketIds::BaseStatsInfo as i16 => {
