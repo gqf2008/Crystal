@@ -120,6 +120,12 @@ pub struct CreatureRefresh;
 #[derive(Component)]
 pub struct CreatureLine(usize);
 
+#[derive(Component)]
+struct CreatureSummary;
+
+#[derive(Component)]
+struct CreatureMessage;
+
 pub struct CreaturePlugin;
 
 impl Plugin for CreaturePlugin {
@@ -146,6 +152,50 @@ fn cleanup_creature(mut commands: Commands, roots: Query<Entity, With<DialogRoot
     }
 }
 
+const CREATURE_W: f32 = 452.0;
+const CREATURE_H: f32 = 376.0;
+const CREATURE_SLOT_X0: f32 = 44.0;
+const CREATURE_SLOT_Y0: f32 = 259.0;
+const CREATURE_SLOT_DX: f32 = 81.0;
+const CREATURE_SLOT_DY: f32 = 40.0;
+const CREATURE_SLOT_W: f32 = 76.0;
+const CREATURE_SLOT_H: f32 = 32.0;
+
+fn creature_slot_rect(index: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    let col = (index % 5) as f32;
+    let row = (index / 5) as f32;
+    (
+        ox + CREATURE_SLOT_X0 + col * CREATURE_SLOT_DX,
+        oy + CREATURE_SLOT_Y0 + row * CREATURE_SLOT_DY,
+        CREATURE_SLOT_W,
+        CREATURE_SLOT_H,
+    )
+}
+
+/// C# `IntelligentCreatureDialogs.cs` 操作按钮：(marker, x, y, Title 首帧索引, 宽, 高)。
+/// 尺寸取自 `Title.Lib`（Index/HoverIndex/PressedIndex 连续 3 帧）。
+/// Summon/Dismiss 与 Automatic/SemiAuto 在 C# 中同坐标互斥显示。
+const CREATURE_OP_BUTTONS: [(&str, f32, f32, usize, f32, f32); 7] = [
+    ("rename", 344.0, 50.0, 570, 92.0, 25.0),
+    ("dismiss", 113.0, 217.0, 580, 80.0, 25.0),
+    ("summon", 113.0, 217.0, 576, 80.0, 25.0),
+    ("release", 255.0, 217.0, 583, 80.0, 25.0),
+    ("opts", 375.0, 160.0, 573, 60.0, 25.0),
+    ("auto", 375.0, 187.0, 610, 60.0, 25.0),
+    ("semi", 375.0, 187.0, 613, 60.0, 25.0),
+];
+
+/// C# `RefreshMode()`：Automatic 模式显示「自动」按钮，其余（含非 0 值）显示
+/// 「半自动」；未选中宠物时两个都不显示（C# error 分支置 Enabled=false，
+/// Bevy 用 Hidden 表达不可用）。
+fn creature_mode_buttons_visible(has_selection: bool, pickup_mode: u8) -> (bool, bool) {
+    if !has_selection {
+        (false, false)
+    } else {
+        (pickup_mode == 0, pickup_mode != 0)
+    }
+}
+
 fn spawn_creature(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
@@ -161,13 +211,12 @@ fn spawn_creature(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[170] @ (280,80)。加宽加高到 320x320：操作按钮/选项面板/输入框
-    // 全在面板内（旧 sprite 布局底部元素 rel y=225-270 悬空 207 高面板外）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+    // 面板 C# Title[468]（原生 452x376；此前用 Prguse[170] 244x207 拉伸到面板尺寸会变形）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 468) else {
         return;
     };
-    let (px, py) = crate::game::dialogs::center_origin(452.0, 376.0);
-    let panel = spawn_panel(&mut commands, bg, px, py, 452.0, 376.0, 30);
+    let (px, py) = crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H);
+    let panel = spawn_panel(&mut commands, bg, px, py, CREATURE_W, CREATURE_H, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Creature), CreatureWidget));
@@ -181,46 +230,56 @@ fn spawn_creature(
         ) {
             spawn_icon_button(p, n, h, pr, 427.0, 3.0, 20.0, 20.0, 10).insert(CreatureClose);
         }
-        // 8 行宠物 + 2 状态行 @(18,40+22i)
+        // C# 顶部信息行：摘要 + 操作反馈。
+        spawn_label(p, &cjk, "", 19.0, 161.0, 12.0, Color::WHITE, 9).insert(CreatureSummary);
+        spawn_label(p, &cjk, "", 19.0, 176.0, 12.0, Color::WHITE, 9).insert(CreatureMessage);
+        // C# CreatureButton 5x2 网格：x=44+81*col，y=259/299。
         for i in 0..10usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+            let (sx, sy, _, _) = creature_slot_rect(i, 0.0, 0.0);
+            spawn_label(p, &cjk, "", sx + 4.0, sy + 10.0, 12.0, Color::WHITE, 9)
                 .insert(CreatureLine(i));
         }
-        // 刷新按钮 @(200,265)
+        // Bevy 扩展：刷新按钮（C# 无此控件）放在右侧操作列，不覆盖 5x2 宠物槽。
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
         ) {
-            spawn_icon_button(p, n, h, pr, 200.0, 265.0, 76.0, 25.0, 10).insert(CreatureRefresh);
+            spawn_icon_button(p, n, h, pr, 375.0, 217.0, 76.0, 25.0, 10).insert(CreatureRefresh);
         }
-        // 操作文本按钮（改名/解散/召唤/释放/自动/半自动/选项）
-        for (x, y, marker, text) in [
-            (18.0, 225.0, "rename", "改名"),
-            (80.0, 225.0, "dismiss", "解散"),
-            (80.0, 225.0, "summon", "召唤"),
-            (140.0, 225.0, "release", "释放"),
-            (18.0, 250.0, "auto", "自动"),
-            (80.0, 250.0, "semi", "半自动"),
-            (140.0, 250.0, "opts", "选项"),
-        ] {
-            let mut cmds = spawn_container(p, x, y, 44.0, 22.0, 10);
-            cmds.insert((
-                Button,
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-            ));
-            match marker {
-                "rename" => cmds.insert(CreatureRenameBtn),
-                "dismiss" => cmds.insert(CreatureDismissBtn),
-                "summon" => cmds.insert((CreatureSummonBtn, Visibility::Hidden)),
-                "release" => cmds.insert(CreatureReleaseBtn),
-                "auto" => cmds.insert(CreatureAutoBtn),
-                "semi" => cmds.insert(CreatureSemiBtn),
-                _ => cmds.insert(CreatureOptionsBtn),
+        // C# 操作按钮：使用 Title 精灵（含中文贴图）与 C# 原生坐标/尺寸。
+        for (marker, x, y, index, w, h) in CREATURE_OP_BUTTONS {
+            let (Some(n), Some(hv), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, index),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, index + 1),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, index + 2),
+            ) else {
+                continue;
             };
-            cmds.with_children(|c| {
-                spawn_label(c, &font, text, 0.0, 5.0, 12.0, Color::WHITE, 11);
-            });
+            let mut cmds = spawn_icon_button(p, n, hv, pr, x, y, w, h, 10);
+            match marker {
+                "rename" => {
+                    cmds.insert(CreatureRenameBtn);
+                }
+                "dismiss" => {
+                    cmds.insert(CreatureDismissBtn);
+                }
+                "summon" => {
+                    cmds.insert((CreatureSummonBtn, Visibility::Hidden));
+                }
+                "release" => {
+                    cmds.insert(CreatureReleaseBtn);
+                }
+                "auto" => {
+                    cmds.insert((CreatureAutoBtn, Visibility::Hidden));
+                }
+                "semi" => {
+                    cmds.insert((CreatureSemiBtn, Visibility::Hidden));
+                }
+                _ => {
+                    cmds.insert(CreatureOptionsBtn);
+                }
+            }
         }
         // 选项面板覆盖层（C# IntelligentCreatureOptionsDialog：9 个过滤项 + 保存/取消 + 品质）
         for i in 0..9usize {
@@ -288,11 +347,11 @@ fn spawn_creature_input(
     ok_label: &str,
     ok_comp: impl Component,
 ) {
-    spawn_container(parent, 18.0, 270.0, 120.0, 20.0, 10)
+    spawn_container(parent, 130.0, 140.0, 180.0, 20.0, 10)
         .insert((
             input_comp,
             crate::game::dialogs::text_input::TextInputField(id),
-            crate::game::dialogs::text_input::TextInputRect(298.0, 350.0, 120.0, 20.0),
+            crate::game::dialogs::text_input::TextInputRect(416.0, 336.0, 180.0, 20.0),
             BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
             Visibility::Hidden,
         ))
@@ -315,7 +374,7 @@ fn spawn_creature_input(
                 crate::game::dialogs::text_input::TextInputDisplay(id),
             ));
         });
-    spawn_container(parent, 145.0, 270.0, 60.0, 20.0, 10)
+    spawn_container(parent, 315.0, 140.0, 70.0, 20.0, 10)
         .insert((
             Button,
             ok_comp,
@@ -337,7 +396,26 @@ fn creature_ui_system(
     close: Query<(Entity, &Interaction), With<CreatureClose>>,
     refresh_btn: Query<(Entity, &Interaction), With<CreatureRefresh>>,
     mut widgets: Query<&mut Visibility, With<CreatureWidget>>,
-    mut lines: Query<(&mut Text, &CreatureLine)>,
+    mut lines: Query<
+        (&mut Text, &CreatureLine),
+        (Without<CreatureSummary>, Without<CreatureMessage>),
+    >,
+    mut summary: Query<
+        &mut Text,
+        (
+            With<CreatureSummary>,
+            Without<CreatureLine>,
+            Without<CreatureMessage>,
+        ),
+    >,
+    mut messages: Query<
+        &mut Text,
+        (
+            With<CreatureMessage>,
+            Without<CreatureLine>,
+            Without<CreatureSummary>,
+        ),
+    >,
     mut requested: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<CreatureWidget>>,
@@ -378,13 +456,13 @@ fn creature_ui_system(
                     .map(|n| {
                         crate::ui::theme::node_origin(
                             n,
-                            crate::game::dialogs::center_origin(452.0, 376.0),
+                            crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
                         )
                     })
-                    .unwrap_or(crate::game::dialogs::center_origin(452.0, 376.0));
-                for i in 0..8usize {
-                    let y = oy + 40.0 + i as f32 * 22.0;
-                    if cursor.x >= ox + 18.0 && cursor.x <= ox + 260.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                    .unwrap_or(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H));
+                for i in 0..10usize {
+                    let (x, y, w, h) = creature_slot_rect(i, ox, oy);
+                    if cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h {
                         if i < state.creatures.len() {
                             state.selected = i;
                             state.message = format!("选中宠物 {}", state.creatures[i].name);
@@ -396,22 +474,22 @@ fn creature_ui_system(
         }
     }
     for (mut text, line) in &mut lines {
-        text.0 = match line.0 {
-            i if i < 8 => match state.creatures.get(i) {
-                Some(c) => format!(
-                    "{} {}（类型 {}）模式:{} 饥饿:{}",
-                    if state.selected == i { ">" } else { " " },
-                    if c.name.is_empty() { format!("#{}", c.creature_type) } else { c.name.clone() },
-                    c.creature_type,
-                    if c.pickup_mode == 0 { "自动" } else { "半自动" },
-                    c.hunger
-                ),
-                None => String::new(),
-            },
-            8 => format!("宠物: {} 个", state.creatures.len()),
-            9 => state.message.clone(),
-            _ => String::new(),
+        text.0 = match state.creatures.get(line.0) {
+            Some(c) => format!(
+                "{} {} 模式:{} 饥饿:{}",
+                if state.selected == line.0 { ">" } else { " " },
+                if c.name.is_empty() { format!("#{}", c.creature_type) } else { c.name.clone() },
+                if c.pickup_mode == 0 { "自动" } else { "半自动" },
+                c.hunger
+            ),
+            None => String::new(),
         };
+    }
+    if let Ok(mut text) = summary.single_mut() {
+        text.0 = format!("宠物: {} 个", state.creatures.len());
+    }
+    if let Ok(mut text) = messages.single_mut() {
+        text.0 = state.message.clone();
     }
     for (e, inter) in &refresh_btn {
         if edge(e, inter, &mut prev_inter) {
@@ -448,6 +526,8 @@ fn creature_action_system(
             &mut Visibility,
             Has<CreatureDismissBtn>,
             Has<CreatureSummonBtn>,
+            Has<CreatureAutoBtn>,
+            Has<CreatureSemiBtn>,
         )>,
         Query<(
             &mut Visibility,
@@ -475,11 +555,18 @@ fn creature_action_system(
     let sel_name = selected.as_ref().map(|c| c.name.clone()).unwrap_or_default();
 
     // 解散仅对激活宠物显示；召唤对未激活的选中宠物显示（C# Summon/Dismiss 同位置切换）
-    for (mut vis, is_dismiss, is_summon) in &mut vis.p0() {
+    let (auto_visible, semi_visible) = creature_mode_buttons_visible(selected.is_some(), pet_mode);
+    for (mut vis, is_dismiss, is_summon, is_auto, is_semi) in &mut vis.p0() {
         if is_dismiss {
             *vis = if is_active { Visibility::Visible } else { Visibility::Hidden };
         } else if is_summon {
             *vis = if selected.is_some() && !is_active { Visibility::Visible } else { Visibility::Hidden };
+        } else if is_auto {
+            // C# RefreshMode：Automatic 模式只显示「自动」按钮
+            *vis = if auto_visible { Visibility::Visible } else { Visibility::Hidden };
+        } else if is_semi {
+            // 非 Automatic（含其它非 0 值）只显示「半自动」按钮，两者不叠加
+            *vis = if semi_visible { Visibility::Visible } else { Visibility::Hidden };
         }
     }
     for (mut vis, is_ri, is_reli, is_rok, is_relok) in &mut vis.p1() {
@@ -739,10 +826,10 @@ fn creature_options_system(
                     .map(|n| {
                         crate::ui::theme::node_origin(
                             n,
-                            crate::game::dialogs::center_origin(452.0, 376.0),
+                            crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
                         )
                     })
-                    .unwrap_or(crate::game::dialogs::center_origin(452.0, 376.0));
+                    .unwrap_or(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H));
                 for i in 0..9usize {
                     let y = oy + 40.0 + i as f32 * 22.0;
                     if cursor.x >= ox + 20.0 && cursor.x <= ox + 220.0 && cursor.y >= y && cursor.y <= y + 20.0 {
@@ -894,6 +981,63 @@ mod tests {
     }
     #[test]
     fn creature_origin_is_csharp_center() {
-        assert_eq!(crate::game::dialogs::center_origin(452.0, 376.0), (286.0, 196.0));
+        assert_eq!(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H), (286.0, 196.0));
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn creature_slots_match_csharp_grid() {
+        assert_eq!(creature_slot_rect(0, 0.0, 0.0), (44.0, 259.0, 76.0, 32.0));
+        assert_eq!(creature_slot_rect(4, 0.0, 0.0), (368.0, 259.0, 76.0, 32.0));
+        assert_eq!(creature_slot_rect(5, 0.0, 0.0), (44.0, 299.0, 76.0, 32.0));
+        assert_eq!(creature_slot_rect(9, 0.0, 0.0), (368.0, 299.0, 76.0, 32.0));
+    }
+
+    #[test]
+    fn creature_slots_offset_with_panel_origin() {
+        // C# Center 原点 (286,196) + 槽位 5（第二行首列）
+        assert_eq!(
+            creature_slot_rect(5, 286.0, 196.0),
+            (330.0, 495.0, 76.0, 32.0)
+        );
+    }
+
+    /// C# 锚点（IntelligentCreatureDialogs.cs）：按钮坐标与 Title 精灵尺寸。
+    #[test]
+    fn creature_op_buttons_match_csharp_anchors() {
+        let spec = |m: &str| {
+            CREATURE_OP_BUTTONS
+                .iter()
+                .find(|b| b.0 == m)
+                .map(|b| (b.1, b.2, b.3, b.4, b.5))
+                .expect("marker 必须存在")
+        };
+        assert_eq!(spec("rename"), (344.0, 50.0, 570, 92.0, 25.0));
+        assert_eq!(spec("dismiss"), (113.0, 217.0, 580, 80.0, 25.0));
+        assert_eq!(spec("summon"), (113.0, 217.0, 576, 80.0, 25.0));
+        assert_eq!(spec("release"), (255.0, 217.0, 583, 80.0, 25.0));
+        assert_eq!(spec("opts"), (375.0, 160.0, 573, 60.0, 25.0));
+        assert_eq!(spec("auto"), (375.0, 187.0, 610, 60.0, 25.0));
+        assert_eq!(spec("semi"), (375.0, 187.0, 613, 60.0, 25.0));
+        // Summon/Dismiss、Auto/SemiAuto 在 C# 中共用同一坐标，靠显隐互斥
+        assert_eq!(spec("dismiss").0, spec("summon").0);
+        assert_eq!(spec("auto").0, spec("semi").0);
+        assert_eq!(spec("dismiss").1, spec("summon").1);
+        assert_eq!(spec("auto").1, spec("semi").1);
+    }
+
+    /// 自动/半自动按钮必须互斥，且未选中宠物时两者都隐藏。
+    #[test]
+    fn creature_mode_buttons_are_mutually_exclusive() {
+        assert_eq!(creature_mode_buttons_visible(false, 0), (false, false));
+        assert_eq!(creature_mode_buttons_visible(false, 1), (false, false));
+        assert_eq!(creature_mode_buttons_visible(true, 0), (true, false));
+        assert_eq!(creature_mode_buttons_visible(true, 1), (false, true));
+        // C# 非 Automatic 一律按 SemiAuto 显示
+        assert_eq!(creature_mode_buttons_visible(true, 7), (false, true));
     }
 }
