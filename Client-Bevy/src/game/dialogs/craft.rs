@@ -37,6 +37,19 @@ pub struct CraftState {
     pub last_result: Option<(u32, u16, bool)>,
     /// #262 已学会配方（S.NewRecipeInfo）
     pub learned: Vec<i32>,
+    /// #2720 配方详情（S.NewRecipeInfo 整份 ClientRecipeInfo，按 recipe_id 索引）：
+    /// 产物/工具/材料/金币/成功率，合成材料槽与自动填充依赖。
+    pub recipes: std::collections::HashMap<i32, mir2_shared::data::client_data::ClientRecipeInfo>,
+}
+
+/// 当前选中配方的详情（C# `CraftDialog.Recipe` 等价物）
+pub fn selected_recipe_info<'a>(
+    state: &'a CraftState,
+) -> Option<&'a mir2_shared::data::client_data::ClientRecipeInfo> {
+    state
+        .selected
+        .as_ref()
+        .and_then(|r| state.recipes.get(&(r.recipe_id as i32)))
 }
 
 /// 配方行文案（C# CraftDialog RecipeLabel）
@@ -246,7 +259,17 @@ fn craft_ui_system(
         text.0 = match line.0 {
             0 => recipe_label(&state.selected),
             1 => state.message.clone(),
-            2 => "材料槽待移植：当前服务端按配方自动扣材".to_string(),
+            2 => match selected_recipe_info(&state) {
+                // C# GoldLabel：金币需求 + 成功率
+                Some(info) => format!(
+                    "金币: {} 成功率: {}% 工具: {} 材料: {}",
+                    info.gold,
+                    info.chance,
+                    info.tools.len(),
+                    info.ingredients.len()
+                ),
+                None => "材料槽待移植：当前服务端按配方自动扣材".to_string(),
+            },
             3 => format!("已学会配方: {} 种", state.learned.len()),
             _ => String::new(),
         };
@@ -255,8 +278,15 @@ fn craft_ui_system(
     // （S.NewRecipeInfo 目前只下发 recipe_id），协议扩展前仅提示。
     for (e, inter) in &autofill_btn {
         if edge(e, inter, &mut prev_inter) {
-            state.message = "自动填充待配方材料协议扩展".to_string();
-            tracing::info!("🔧 自动填充：等待 NewRecipeInfo 全量配方数据");
+            state.message = match selected_recipe_info(&state) {
+                Some(info) => format!(
+                    "自动填充：需 {} 个工具 / {} 种材料（摆槽 UI 待移植）",
+                    info.tools.len(),
+                    info.ingredients.len()
+                ),
+                None => "请先选择合成产物".to_string(),
+            };
+            tracing::info!("🔧 自动填充：配方数据已就绪，摆槽 UI 待移植");
         }
     }
     // 合成
@@ -287,11 +317,12 @@ fn craft_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::RecipeLearned { recipe_id } = ev {
-            // #262：学会配方
+        if let ServerEvent::RecipeLearned { recipe_id, info } = ev {
+            // #262：学会配方；#2720：同时缓存整份配方（材料槽/自动填充数据源）
             if !craft.learned.contains(recipe_id) {
                 craft.learned.push(*recipe_id);
             }
+            craft.recipes.insert(*recipe_id, info.clone());
             craft.message = format!("学会配方 #{}", recipe_id);
         }
         if let ServerEvent::CraftResult { recipe_id, count, success } = ev {
@@ -359,5 +390,41 @@ mod tests {
         assert!(inside(CRAFT_AUTOFILL_POS, 48.0, 25.0));
         assert!(inside(CRAFT_CONFIRM_POS, 80.0, 25.0));
         assert!(CRAFT_AUTOFILL_POS.0 + 48.0 <= CRAFT_CONFIRM_POS.0);
+    }
+
+    /// #2720：选中配方 → 详情查找（材料槽/自动填充的数据源）
+    #[test]
+    fn selected_recipe_info_lookup() {
+        use mir2_shared::data::client_data::ClientRecipeInfo;
+        use mir2_shared::data::item::UserItem;
+
+        let mut state = CraftState::default();
+        assert!(selected_recipe_info(&state).is_none());
+
+        state.recipes.insert(
+            5,
+            ClientRecipeInfo {
+                gold: 250,
+                chance: 80,
+                item: UserItem::new(9005),
+                tools: vec![UserItem::new(1001)],
+                ingredients: vec![UserItem::new(2001), UserItem::new(2002)],
+            },
+        );
+        state.selected = Some(SelectedRecipe {
+            recipe_id: 5,
+            name: "测试产物".to_string(),
+        });
+        let info = selected_recipe_info(&state).expect("配方详情必须可查");
+        assert_eq!(info.gold, 250);
+        assert_eq!(info.tools.len(), 1);
+        assert_eq!(info.ingredients.len(), 2);
+
+        // 未下发的配方 id → 无详情（不会 panic）
+        state.selected = Some(SelectedRecipe {
+            recipe_id: 99,
+            name: "未下发".to_string(),
+        });
+        assert!(selected_recipe_info(&state).is_none());
     }
 }

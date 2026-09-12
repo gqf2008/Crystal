@@ -192,8 +192,11 @@ pub enum ServerEvent {
     },
     /// #260 ShareQuest：共享任务
     QuestShared { quest_id: i32 },
-    /// #262 NewRecipeInfo：学会配方
-    RecipeLearned { recipe_id: i32 },
+    /// #262/#2720 NewRecipeInfo：学会配方（C# S.NewRecipeInfo 整份 ClientRecipeInfo）
+    RecipeLearned {
+        recipe_id: i32,
+        info: mir2_shared::data::client_data::ClientRecipeInfo,
+    },
     /// #262 PauseBuff：Buff 暂停
     BuffPaused { buff_type: u8, object_id: u32, paused: bool },
     /// #264 ObjectName：对象改名

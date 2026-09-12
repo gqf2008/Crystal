@@ -11284,6 +11284,48 @@ async fn broadcast_group_locations(world: &mut WorldActor) {
 // 游戏进入序列
 // ============================================================
 
+/// C# `RecipeInfo.CreateClientRecipeInfo()`（Server/MirDatabase/RecipeInfo.cs:225）：
+/// 把 DB 配方转成客户端展示用的 `ClientRecipeInfo`（产物 / 工具 / 材料 / 金币 / 成功率）。
+/// 工具与材料按 item_index + count 构造影子 UserItem（info 从 item_infos 取，用于耐久等）。
+fn build_client_recipe_info(
+    recipe: &db::RecipeInfo,
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> mir2_shared::data::client_data::ClientRecipeInfo {
+    use mir2_shared::data::item::UserItem;
+
+    fn requirement(
+        item_index: i32,
+        count: u16,
+        infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+    ) -> UserItem {
+        // 只带 item_index/count/dura：`info` 不上线（客户端按 item_index 查本地 ItemInfo）
+        let mut item = UserItem::new(item_index);
+        item.count = count.max(1);
+        if let Some(info) = infos.get(&item_index) {
+            let dura = info.durability.max(0) as u16;
+            item.current_dura = dura;
+            item.max_dura = dura;
+        }
+        item
+    }
+
+    mir2_shared::data::client_data::ClientRecipeInfo {
+        gold: recipe.gold_cost,
+        chance: recipe.chance,
+        item: requirement(recipe.product_item_index, recipe.product_count, item_infos),
+        tools: recipe
+            .tools
+            .iter()
+            .map(|idx| requirement(*idx, 1, item_infos))
+            .collect(),
+        ingredients: recipe
+            .ingredients
+            .iter()
+            .map(|ing| requirement(ing.item_index, ing.count, item_infos))
+            .collect(),
+    }
+}
+
 /// C# CheckQuestInfo：DB QuestInfo → 客户端 ClientQuestInfo（登录下发 NewQuestInfo 的任务定义）
 fn build_client_quest_info(q: &db::QuestInfo) -> mir2_shared::data::client_data::ClientQuestInfo {
     use mir2_shared::enums::{QuestType, RequiredClass};
@@ -11435,10 +11477,12 @@ async fn send_game_entry_sequence(
         }
     }
 
-    // C# StartGame GetRecipeInfo（:1186）：登录下发配方 ID 列表
+    // C# StartGame GetRecipeInfo（:1186）+ CheckRecipeInfo：登录下发整份配方
+    // （产物/工具/材料/金币/成功率，客户端合成窗材料槽与自动填充依赖）
     for recipe in recipe_infos {
         let packet = mir2_shared::packets::server::ui_events::NewRecipeInfo {
             recipe_id: recipe.recipe_id,
+            info: build_client_recipe_info(recipe, item_infos),
         };
         let mut body = Vec::new();
         if mir2_shared::packets::base::serialize_packet(
@@ -13213,6 +13257,63 @@ fn replace_pos_marker(message: &str, x: i32, y: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #2720：DB 配方 → 客户端 `ClientRecipeInfo`（产物/工具/材料/金币/成功率）
+    #[test]
+    fn test_build_client_recipe_info() {
+        use std::collections::HashMap;
+
+        fn db_item_info(index: i32, durability: i32) -> crate::db::ItemInfo {
+            crate::db::ItemInfo {
+                index,
+                durability,
+                ..Default::default()
+            }
+        }
+
+        let recipe = crate::db::RecipeInfo {
+            recipe_id: 7,
+            product_item_index: 9005,
+            product_count: 2,
+            gold_cost: 250,
+            chance: 80,
+            ingredients: vec![
+                crate::db::RecipeIngredient {
+                    item_index: 2001,
+                    count: 3,
+                },
+                crate::db::RecipeIngredient {
+                    item_index: 2002,
+                    count: 1,
+                },
+            ],
+            tools: vec![1001],
+            required_level: None,
+            required_gender: None,
+            required_quests: Vec::new(),
+            required_flags: Vec::new(),
+            required_classes: Vec::new(),
+        };
+
+        let mut item_infos = HashMap::new();
+        item_infos.insert(1001, db_item_info(1001, 1000));
+        item_infos.insert(2001, db_item_info(2001, 0));
+
+        let info = super::build_client_recipe_info(&recipe, &item_infos);
+        assert_eq!(info.gold, 250);
+        assert_eq!(info.chance, 80);
+        assert_eq!(info.item.item_index, 9005);
+        assert_eq!(info.item.count, 2);
+        assert_eq!(info.tools.len(), 1);
+        assert_eq!(info.tools[0].item_index, 1001);
+        assert_eq!(info.tools[0].current_dura, 1000);
+        assert_eq!(info.ingredients.len(), 2);
+        assert_eq!(info.ingredients[0].item_index, 2001);
+        assert_eq!(info.ingredients[0].count, 3);
+        // 未登记的 item_info → 耐久 0（不 panic）
+        assert_eq!(info.ingredients[1].item_index, 2002);
+        assert_eq!(info.ingredients[1].current_dura, 0);
+    }
+
     /// #2348：C# Envir.LoadLineMessages 解析（跳过 ;/空行）
     #[test]
     fn test_parse_line_messages() {

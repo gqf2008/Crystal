@@ -341,6 +341,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             if let Ok(p) = ui_events::NewRecipeInfo::read_body(&mut cur) {
                 server_events.write(ServerEvent::RecipeLearned {
                     recipe_id: p.recipe_id,
+                    info: p.info,
                 });
                 tracing::info!("📖 学会配方 #{}", p.recipe_id);
             }

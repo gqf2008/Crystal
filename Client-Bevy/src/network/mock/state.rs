@@ -132,6 +132,32 @@ pub(crate) fn socketed_sword_item() -> mir2_shared::data::item::UserItem {
     }
 }
 
+/// #2720：mock 配方（1 产物 + 1 工具 + 2 材料），与 C# `ClientRecipeInfo` 同构
+pub(crate) fn mock_recipe_info() -> mir2_shared::data::client_data::ClientRecipeInfo {
+    use mir2_shared::data::item::UserItem;
+
+    let mut product = potion_item(9005);
+    product.count = 1;
+
+    let mut tool = potion_item(5); // 木剑当工具
+    tool.current_dura = 1000;
+    tool.max_dura = 1000;
+    tool.count = 1;
+
+    let mut ingredient_a = potion_item(1);
+    ingredient_a.count = 3;
+    let mut ingredient_b = potion_item(2);
+    ingredient_b.count = 2;
+
+    mir2_shared::data::client_data::ClientRecipeInfo {
+        gold: 100,
+        chance: 80,
+        item: product,
+        tools: vec![tool],
+        ingredients: vec![ingredient_a, ingredient_b],
+    }
+}
+
 pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     mir2_shared::data::item::UserItem {
         unique_id: 9000 + index as u64,

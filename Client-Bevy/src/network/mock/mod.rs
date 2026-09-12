@@ -1973,7 +1973,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         // #262：配方 / Buff 暂停 / 杂项
                                         send(
                                             &to_client,
-                                            &server::ui_events::NewRecipeInfo { recipe_id: 1 },
+                                            &server::ui_events::NewRecipeInfo {
+                                                recipe_id: 1,
+                                                info: mock_recipe_info(),
+                                            },
                                         );
                                         send(
                                             &to_client,
