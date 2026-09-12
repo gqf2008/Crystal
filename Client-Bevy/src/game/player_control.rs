@@ -23,6 +23,7 @@ use crate::game::pathfinding;
 use crate::map_renderer::{GameData, GameLibraries, TILE_WIDTH};
 use crate::network::NetConnection;
 use crate::scenes::AppState;
+use crate::game::dialogs::assign_key::AssignKeyState;
 use crate::ui::sprite_ui::UiButton;
 
 #[derive(Resource)]
@@ -205,19 +206,30 @@ struct UiLockState<'w> {
     click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
     amount: Res<'w, crate::game::dialogs::amount_box::AmountBoxState>,
     confirm: Res<'w, crate::game::dialogs::inventory::InvDropConfirm>,
+    assign_key: Res<'w, AssignKeyState>,
     dialog: Res<'w, crate::game::dialogs::DialogManager>,
     skill_bar: Res<'w, crate::game::skills::SkillBarState>,
     skill_bar_opt: Res<'w, crate::game::dialogs::option::OptionState>,
 }
 
+/// 选中物品/数量框/丢弃确认/快捷键分配均为模态交互；右击和按住移动也必须让路。
+fn modal_ui_locked(selected: bool, amount: bool, confirm: bool, assign_key: bool) -> bool {
+    selected || amount || confirm || assign_key
+}
+
 impl UiLockState<'_> {
     fn locked(&self) -> bool {
-        self.click.selected.is_some() || self.amount.visible || self.confirm.visible
+        modal_ui_locked(
+            self.click.selected.is_some(),
+            self.amount.visible,
+            self.confirm.visible,
+            self.assign_key.visible,
+        )
     }
 
-    /// #1830：窗口类对话框打开（小地图除外）
+    /// 任意 UI 模态层或窗口类对话框打开（小地图除外）。
     fn blocks_world_click(&self) -> bool {
-        self.dialog.blocks_world_click()
+        self.locked() || self.dialog.blocks_world_click()
     }
 
     /// 技能栏可见且光标落在栏体上（C# 对话框 Hidden 时不吃事件）
@@ -276,9 +288,7 @@ fn right_click_move_system(
         ),
     >,
     buttons: Query<(&UiButton, &InheritedVisibility)>,
-    dialog: Res<crate::game::dialogs::DialogManager>,
-    skill_bar: Res<crate::game::skills::SkillBarState>,
-    skill_bar_opt: Res<crate::game::dialogs::option::OptionState>,
+    ui: UiLockState,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };
@@ -297,8 +307,8 @@ fn right_click_move_system(
         || over_ui
         || over_main_dialog(cursor_logical)
         || over_chat_panel(cursor_logical)
-        || (skill_bar_opt.skill_bar && over_skill_bar(cursor_logical, &skill_bar))
-        || dialog.blocks_world_click()
+        || ui.over_visible_skill_bar(cursor_logical)
+        || ui.blocks_world_click()
     {
         return;
     }
@@ -781,11 +791,11 @@ fn hold_move_system(
     // #2633 批次4：in_trap_rock/sprint/sneaking 读 StatusFlags（步4）、背包负重读 Inventory（步5）、
     // 装备负重读 Loadout（步6）、riding 读 MountState（步7，骑乘=组件存在，缺席 0.2s 窗口可接受）
     flags: Query<(&StatusFlags, &Inventory, &Loadout, Option<&MountState>), With<LocalPlayer>>,
-    dialog: Res<crate::game::dialogs::DialogManager>,
+    ui: UiLockState,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
     // #1830：窗口类对话框打开时不按住移动（小地图除外）
-    if dialog.blocks_world_click() {
+    if ui.blocks_world_click() {
         return;
     }
     let Some(map) = &game_data.map else { return };
@@ -1558,6 +1568,15 @@ mod tests {
         let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer
             && w_loadout.slots.get(0).and_then(|s| s.as_ref()).is_some();
         assert!(!is_archer);
+    }
+
+    #[test]
+    fn modal_ui_lock_truth_table() {
+        assert!(!modal_ui_locked(false, false, false, false));
+        assert!(modal_ui_locked(true, false, false, false));
+        assert!(modal_ui_locked(false, true, false, false));
+        assert!(modal_ui_locked(false, false, true, false));
+        assert!(modal_ui_locked(false, false, false, true));
     }
 
     #[test]
