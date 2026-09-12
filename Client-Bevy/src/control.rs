@@ -381,6 +381,8 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "market" => D::Market,
         "storage" => D::Storage,
         "skills" => D::Skills,
+        // #2720：C# `ItemRentalDialog`（浏览已租出物品）
+        "item_rental_browse" => D::ItemRentalBrowse,
         _ => return None,
     })
 }
@@ -434,6 +436,7 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::BigMap
         | D::ChatNotice
         | D::Market
+        | D::ItemRentalBrowse
         | D::Storage
         | D::Skills => true,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
@@ -719,6 +722,7 @@ mod tests {
             "market",
             "storage",
             "skills",
+            "item_rental_browse",
         ];
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
@@ -731,11 +735,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 46);
+        assert_eq!(all.len(), 47);
         assert_eq!(
             uniq.len(),
-            44,
-            "46 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 44 个不同变体"
+            45,
+            "47 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 45 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(

@@ -30,6 +30,8 @@ pub mod hero_skills;
 pub mod inspect;
 pub mod inventory;
 pub mod item_rental;
+/// #2720：C# `ItemRentalDialog`（浏览已租出物品；与出租流程 `item_rental` 分开）
+pub mod item_rental_browse;
 pub mod keyboard_layout;
 pub mod mail;
 pub mod market;
@@ -113,6 +115,8 @@ pub enum DialogKind {
     Market,
     Storage,
     Skills,
+    /// #2720：C# `ItemRentalDialog`（浏览已租出物品列表；与出租流程 `ItemRental` 分开）
+    ItemRentalBrowse,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -960,6 +964,7 @@ impl Plugin for DialogsPlugin {
                 storage::StoragePlugin,
                 sell_panel::SellPanelPlugin,
             ),
+            item_rental_browse::ItemRentalBrowsePlugin,
         ));
     }
 }

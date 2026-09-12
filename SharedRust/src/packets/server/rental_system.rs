@@ -13,14 +13,19 @@ pub struct GetRentedItems {
     pub items: Vec<RentalItemInfo>, // 租赁物品列表
 }
 
+/// 单条已租出物品信息，字段与 C# `ItemRentalInformation`（Shared/Data/ItemData.cs:1090）
+/// 一一对应：ItemId / ItemName / RentingPlayerName / ItemReturnDate。
+/// 客户端没有本地物品库，故物品名由服务端随包下发（C# 亦是字符串）。
 #[derive(Debug, Clone)]
 pub struct RentalItemInfo {
-    pub item: UserItem,     // 物品
-    pub rental_fee: u32,    // 租金
-    pub rental_period: i32, // 租赁期限(小时)
-    pub expiry_date: i64,   // 到期日期
-    /// 承租人姓名（C# ItemRentalInformation.RentingPlayerName；物主视角列表）
+    /// C# `ItemId`
+    pub item_id: u64,
+    /// C# `ItemName`
+    pub item_name: String,
+    /// C# `RentingPlayerName`
     pub renting_player_name: String,
+    /// C# `ItemReturnDate.ToBinary()`（Rust 端口用 Unix 秒墙钟）
+    pub return_date: i64,
 }
 
 impl Packet for GetRentedItems {
@@ -32,11 +37,10 @@ impl Packet for GetRentedItems {
         writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
 
         for info in &self.items {
-            info.item.write_to(writer)?;
-            writer.write_u32::<LittleEndian>(info.rental_fee)?;
-            writer.write_i32::<LittleEndian>(info.rental_period)?;
-            writer.write_i64::<LittleEndian>(info.expiry_date)?;
+            writer.write_u64::<LittleEndian>(info.item_id)?;
+            write_dotnet_string(writer, &info.item_name)?;
             write_dotnet_string(writer, &info.renting_player_name)?;
+            writer.write_i64::<LittleEndian>(info.return_date)?;
         }
 
         Ok(())
@@ -47,18 +51,16 @@ impl Packet for GetRentedItems {
         let mut items = Vec::with_capacity(count as usize);
 
         for _ in 0..count {
-            let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
-            let rental_fee = reader.read_u32::<LittleEndian>()?;
-            let rental_period = reader.read_i32::<LittleEndian>()?;
-            let expiry_date = reader.read_i64::<LittleEndian>()?;
+            let item_id = reader.read_u64::<LittleEndian>()?;
+            let item_name = read_dotnet_string(reader)?;
             let renting_player_name = read_dotnet_string(reader)?;
+            let return_date = reader.read_i64::<LittleEndian>()?;
 
             items.push(RentalItemInfo {
-                item,
-                rental_fee,
-                rental_period,
-                expiry_date,
+                item_id,
+                item_name,
                 renting_player_name,
+                return_date,
             });
         }
 
@@ -356,16 +358,16 @@ mod tests {
     use super::*;
     use crate::packets::base::Packet;
 
-    /// #2214：GetRentedItems 物主视角线格式 roundtrip（含 renting_player_name）
+    /// #2214/#2720：GetRentedItems 物主视角线格式 roundtrip
+    /// （C# `ItemRentalInformation` 形状：ItemId/ItemName/RentingPlayerName/ItemReturnDate）
     #[test]
     fn get_rented_items_roundtrip() -> SharedResult<()> {
         let pkt = GetRentedItems {
             items: vec![RentalItemInfo {
-                item: UserItem::new(1001),
-                rental_fee: 5000,
-                rental_period: 7,
-                expiry_date: 1_700_000_000_000,
+                item_id: 88_888,
+                item_name: "屠龙".to_string(),
                 renting_player_name: "Renter".to_string(),
+                return_date: 1_700_000_000,
             }],
         };
         let mut buf = Vec::new();
@@ -373,9 +375,10 @@ mod tests {
         let mut cur = std::io::Cursor::new(&buf);
         let back = GetRentedItems::read_body(&mut cur)?;
         assert_eq!(back.items.len(), 1);
-        assert_eq!(back.items[0].item.item_index, 1001);
-        assert_eq!(back.items[0].rental_fee, 5000);
+        assert_eq!(back.items[0].item_id, 88_888);
+        assert_eq!(back.items[0].item_name, "屠龙");
         assert_eq!(back.items[0].renting_player_name, "Renter");
+        assert_eq!(back.items[0].return_date, 1_700_000_000);
         Ok(())
     }
 }

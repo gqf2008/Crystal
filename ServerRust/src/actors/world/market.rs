@@ -2258,12 +2258,19 @@ impl Message<GetRentedItemsRequest> for WorldActor {
                 rentals
                     .iter()
                     .map(
-                        |r| mir2_shared::packets::server::rental_system::RentalItemInfo {
-                            item: r.item.clone(),
-                            rental_fee: r.rental_fee,
-                            rental_period: 0,
-                            expiry_date: r.expiry_timestamp,
-                            renting_player_name: r.renter_name.clone(),
+                        |r| {
+                            // C# `ItemRentalInformation`：ItemId/ItemName/RentingPlayerName/ItemReturnDate
+                            let item_name = self
+                                .item_infos
+                                .get(&r.item.item_index)
+                                .map(|i| i.name.clone())
+                                .unwrap_or_else(|| format!("#{}", r.item.item_index));
+                            mir2_shared::packets::server::rental_system::RentalItemInfo {
+                                item_id: r.item.unique_id,
+                                item_name,
+                                renting_player_name: r.renter_name.clone(),
+                                return_date: r.expiry_timestamp,
+                            }
                         },
                     )
                     .collect()

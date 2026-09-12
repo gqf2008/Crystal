@@ -1,5 +1,6 @@
 // 租赁系统相关数据包
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
@@ -14,10 +15,11 @@ pub struct GetRentedItems {
 
 #[derive(Debug, Clone)]
 pub struct RentalItemInfo {
-    pub item: UserItem,             // 物品
-    pub rental_fee: u32,            // 租金
-    pub rental_period: i32,         // 租赁期限(小时)
-    pub expiry_date: i64,           // 到期日期
+    // C# `ItemRentalInformation`（Shared/Data/ItemData.cs:1090）同形
+    pub item_id: u64,               // ItemId
+    pub item_name: String,          // ItemName（客户端无本地物品库，服务端随包下发）
+    pub renting_player_name: String,// RentingPlayerName
+    pub return_date: i64,           // ItemReturnDate（Unix 秒）
 }
 
 impl Packet for GetRentedItems {
@@ -29,10 +31,10 @@ impl Packet for GetRentedItems {
         writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
         
         for info in &self.items {
-            info.item.write_to(writer)?;
-            writer.write_u32::<LittleEndian>(info.rental_fee)?;
-            writer.write_i32::<LittleEndian>(info.rental_period)?;
-            writer.write_i64::<LittleEndian>(info.expiry_date)?;
+            writer.write_u64::<LittleEndian>(info.item_id)?;
+            write_dotnet_string(writer, &info.item_name)?;
+            write_dotnet_string(writer, &info.renting_player_name)?;
+            writer.write_i64::<LittleEndian>(info.return_date)?;
         }
         
         Ok(())
@@ -43,16 +45,16 @@ impl Packet for GetRentedItems {
         let mut items = Vec::with_capacity(count as usize);
         
         for _ in 0..count {
-            let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
-            let rental_fee = reader.read_u32::<LittleEndian>()?;
-            let rental_period = reader.read_i32::<LittleEndian>()?;
-            let expiry_date = reader.read_i64::<LittleEndian>()?;
-            
+            let item_id = reader.read_u64::<LittleEndian>()?;
+            let item_name = read_dotnet_string(reader)?;
+            let renting_player_name = read_dotnet_string(reader)?;
+            let return_date = reader.read_i64::<LittleEndian>()?;
+
             items.push(RentalItemInfo {
-                item,
-                rental_fee,
-                rental_period,
-                expiry_date,
+                item_id,
+                item_name,
+                renting_player_name,
+                return_date,
             });
         }
         

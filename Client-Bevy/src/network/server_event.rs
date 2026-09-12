@@ -212,6 +212,10 @@ pub enum ServerEvent {
     RefineStarted { unique_id: u64 },
     /// #2720 精炼取消/重置（C# GameScene.RefineCancel → `RefineDialog.RefineReset()`）
     RefineCancelled { unlock: bool },
+    /// #2720 已租出物品列表（C# `S.GetRentedItems` → `ItemRentalDialog.ReceiveRentedItems`）
+    RentedItems {
+        items: Vec<mir2_shared::packets::server::rental_system::RentalItemInfo>,
+    },
     /// #262 PauseBuff：Buff 暂停
     BuffPaused { buff_type: u8, object_id: u32, paused: bool },
     /// #264 ObjectName：对象改名
