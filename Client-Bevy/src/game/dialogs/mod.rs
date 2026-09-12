@@ -147,9 +147,12 @@ impl DialogManager {
         self.open.retain(|k| *k != kind);
     }
 
-    /// #1830：是否有窗口类对话框打开（小地图为无阻塞覆盖层，不屏蔽世界点击）
+    /// #1830/#2588：是否有窗口类对话框打开。
+    /// Minimap 与 Timer 是 C# NotControl 覆盖层，不屏蔽世界点击。
     pub fn blocks_world_click(&self) -> bool {
-        self.open.iter().any(|k| !matches!(k, DialogKind::Minimap))
+        self.open
+            .iter()
+            .any(|k| !matches!(k, DialogKind::Minimap | DialogKind::Timer))
     }
 }
 
@@ -165,6 +168,9 @@ mod tests {
         assert!(!m.blocks_world_click(), "空状态不屏蔽");
         m.open.push(DialogKind::Minimap);
         assert!(!m.blocks_world_click(), "小地图不屏蔽");
+        m.open.clear();
+        m.open.push(DialogKind::Timer);
+        assert!(!m.blocks_world_click(), "计时器 NotControl 不屏蔽");
         m.open.push(DialogKind::Inventory);
         assert!(m.blocks_world_click(), "背包打开屏蔽");
         m.open.clear();
