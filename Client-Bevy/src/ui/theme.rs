@@ -130,6 +130,32 @@ pub fn node_origin(node: &Node, default: (f32, f32)) -> (f32, f32) {
     )
 }
 
+/// UI 根面板的 `Visibility` → `Display` 桥接状态。
+///
+/// 根面板被业务系统设为 `Visibility::Hidden` 后，仍可能有显式
+/// `Visibility::Visible` 的后代继续渲染；`Display::None` 才会真正隐藏整棵子树。
+/// 这里记录关闭前的布局模式，根重新可见时恢复。
+#[derive(Component, Default)]
+pub(crate) struct UiRootDisplay {
+    restore: Option<Display>,
+}
+
+/// 通用 UI 根显隐兜底：隐藏根切换为不渲染子树，重新可见时恢复原布局模式。
+pub(crate) fn enforce_ui_root_display(
+    mut roots: Query<(&Visibility, &mut Node, &mut UiRootDisplay)>,
+) {
+    for (vis, mut node, mut display) in &mut roots {
+        if *vis == Visibility::Hidden {
+            if display.restore.is_none() && node.display != Display::None {
+                display.restore = Some(node.display);
+            }
+            node.display = Display::None;
+        } else if let Some(restore) = display.restore.take() {
+            node.display = restore;
+        }
+    }
+}
+
 /// 生成 .Lib 背景面板（bevy_ui Node + ImageNode）。返回根面板实体（DialogRoot 由调用方挂）。
 pub fn spawn_panel(
     commands: &mut Commands,
@@ -150,6 +176,7 @@ pub fn spawn_panel(
             ImageNode::new(image),
             GlobalZIndex(z),
             Visibility::Hidden,
+            UiRootDisplay::default(),
         ))
         .id()
 }
@@ -817,6 +844,18 @@ mod tests {
         assert_eq!(node_origin(&node, (0.0, 0.0)), (393.0, 50.0));
         // 非 Px 字段回退默认（如 Auto 布局节点）
         assert_eq!(node_origin(&Node::default(), (280.0, 80.0)), (280.0, 80.0));
+    }
+
+    /// `spawn_panel` 必须自动挂 `UiRootDisplay`，否则非 DialogRoot 面板
+    /// （如 AssignKeyPanel）关闭时仍可能漏出显式 Visible 子控件。
+    #[test]
+    fn spawn_panel_marks_ui_root_display() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let panel = spawn_panel(&mut commands, Handle::default(), 0.0, 0.0, 10.0, 10.0, 1);
+        queue.apply(&mut world);
+        assert!(world.get::<UiRootDisplay>(panel).is_some());
     }
 
     /// 耐久条宽度：满耐久=整格，随比例缩短，最小 1px（C# MirItemCell DrawDurability）
