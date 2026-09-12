@@ -64,6 +64,36 @@ pub struct MarketWidget;
 #[derive(Component)]
 pub struct MarketClose;
 
+/// 页签按钮（C# `TrustMerchantDialog`：Market/Consignment/Auction/GameShop）
+#[derive(Component)]
+pub struct MarketTabBtn(pub &'static str);
+
+/// C# `TrustMerchantDialog`（`TrustMerchantDialog.cs:86-500`）面板与控件锚点
+const TM_PANEL_W: f32 = 492.0;
+const TM_PANEL_H: f32 = 478.0;
+/// C# 未设 `Location`（MirControl 默认 (0,0)）
+const TM_POS: (f32, f32) = (0.0, 0.0);
+const TM_CLOSE: (f32, f32) = (465.0, 3.0);
+/// (marker, x, y, normal/hover 帧, pressed 帧)
+const TM_TABS: [(&str, f32, f32, usize, usize); 4] = [
+    ("market", 9.0, 35.0, 789, 788),
+    ("consign", 104.0, 35.0, 791, 790),
+    ("auction", 199.0, 35.0, 817, 816),
+    ("game_shop", 389.0, 35.0, 819, 818),
+];
+/// C# 列表区（左侧 x≤120 为筛选树，行高 18）
+const TM_LIST_X: f32 = 130.0;
+const TM_LIST_Y: f32 = 60.0;
+/// C# 底部操作栏：搜索框 (11,452) 110x18、Find (124,448)、Refresh (320,448)、Buy (380,448)
+const TM_SEARCH_POS: (f32, f32) = (11.0, 452.0);
+const TM_FIND_POS: (f32, f32) = (124.0, 448.0);
+const TM_REFRESH_POS: (f32, f32) = (320.0, 448.0);
+const TM_BUY_POS: (f32, f32) = (380.0, 448.0);
+/// C# 翻页：Back (251,419)、Next (320,419)、PageLabel (260,419) 70x18
+const TM_BACK_POS: (f32, f32) = (251.0, 419.0);
+const TM_NEXT_POS: (f32, f32) = (320.0, 419.0);
+const TM_PAGE_POS: (f32, f32) = (260.0, 419.0);
+
 #[derive(Component)]
 pub struct MarketRefreshBtn;
 
@@ -115,6 +145,12 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
+        app.add_systems(
+            Update,
+            market_tab_system
+                .chain()
+                .run_if(in_state(AppState::Game)),
+        );
     }
 }
 
@@ -139,24 +175,31 @@ fn spawn_market(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[170] @ (280,80)。加宽加高到 320x400：8 按钮 + 2 输入框 + 滚动条
-    // 全在面板内（旧 sprite 布局底部按钮 rel y=265-385 悬空 207 高面板外）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+    // 面板 C# `TrustMerchantDialog`：Title[786] 原生 492x478（C# 未设 Location → (0,0)）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 786) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 400.0, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        TM_POS.0,
+        TM_POS.1,
+        TM_PANEL_W,
+        TM_PANEL_H,
+        30,
+    );
     commands.entity(panel).insert((
         DialogRoot(DialogKind::Market),
         MarketWidget,
         // #89 市场列表滚轮翻页：1 格 = 1 页（10 行）
         UiScrollList {
-            rect_rel: (15.0, 40.0, 200.0, 180.0),
+            rect_rel: (TM_LIST_X, TM_LIST_Y, 300.0, 180.0),
             row_h: 18.0,
             visible: 10,
             total: 0,
             offset: 0,
             step: 10,
-            track_rel: (215.0, 40.0, 4.0, 180.0),
+            track_rel: (435.0, TM_LIST_Y, 4.0, 180.0),
             thumb: None,
             z: 9,
         },
@@ -164,66 +207,104 @@ fn spawn_market(
 
     commands.entity(panel).with_children(|p| {
         // 滚动条（面板子节点）
-        spawn_scroll_bar_ui(p, (215.0, 40.0, 4.0, 180.0), 9);
-        // 关闭 Prguse2[360/361/362] @(300,3)
+        spawn_scroll_bar_ui(p, (435.0, TM_LIST_Y, 4.0, 180.0), 9);
+        // 关闭 C# CloseButton Prguse2[360/361/362] @(465,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(MarketClose);
+            spawn_icon_button(p, n, h, pr, TM_CLOSE.0, TM_CLOSE.1, 24.0, 21.0, 10)
+                .insert(MarketClose);
         }
-        // 商品列表 10 行 @(15,40+18i)
+        // C# 四个页签（Title[789/788]、[791/790]、[817/816]、[819/818]）
+        for (name, x, y, normal, pressed) in TM_TABS {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, normal),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, normal),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, pressed),
+            ) {
+                spawn_icon_button(p, n, h, pr, x, y, 92.0, 21.0, 10).insert(MarketTabBtn(name));
+            }
+        }
+        // 商品列表 10 行 @(130,60+18i)（C# 列表区：左列 x≤120 为筛选树）
         for i in 0..10usize {
-            spawn_label(p, &cjk, "", 15.0, 40.0 + i as f32 * 18.0, 12.0, Color::WHITE, 9)
-                .insert(MarketLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                TM_LIST_X,
+                TM_LIST_Y + i as f32 * 18.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(MarketLine(i));
         }
-        // 页签 + 消息行 @(15,225+18i)
-        for i in 10..=11usize {
-            spawn_label(p, &cjk, "", 15.0, 225.0 + (i - 10) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
-                .insert(MarketLine(i));
-        }
-        // 按钮行 1：刷新/搜索/购买 @(20/110/200,265)；行 2：寄售/取回/立即售出 @(20/110/200,300)
+        // C# `PageLabel` @(260,419) 70x18：行 10 承载「第 x/y 页」
+        spawn_label(p, &cjk, "", TM_PAGE_POS.0, TM_PAGE_POS.1, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+            .insert(MarketLine(10));
+        // 消息行（Bevy 扩展，放在列表下方）
+        spawn_label(p, &cjk, "", TM_LIST_X, TM_LIST_Y + 190.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
+            .insert(MarketLine(11));
+        // C# 底部操作栏：Find Title[480..482] @(124,448)、Refresh Prguse[663..665] @(320,448)、
+        // Buy Title[703..705] @(380,448)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 480),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 481),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 482),
         ) {
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 20.0, 265.0, 76.0, 25.0, 10)
-                .insert(MarketRefreshBtn);
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 265.0, 76.0, 25.0, 10)
+            spawn_icon_button(p, n, h, pr, TM_FIND_POS.0, TM_FIND_POS.1, 48.0, 25.0, 10)
                 .insert(MarketSearchBtn);
-            spawn_icon_button(p, n, h, pr, 20.0, 300.0, 76.0, 25.0, 10).insert(MarketConsignBtn);
         }
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 663),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 664),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 665),
         ) {
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 200.0, 265.0, 76.0, 25.0, 10)
+            spawn_icon_button(p, n, h, pr, TM_REFRESH_POS.0, TM_REFRESH_POS.1, 28.0, 25.0, 10)
+                .insert(MarketRefreshBtn);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 703),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 704),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 705),
+        ) {
+            spawn_icon_button(p, n, h, pr, TM_BUY_POS.0, TM_BUY_POS.1, 84.0, 25.0, 10)
                 .insert(MarketBuyBtn);
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 300.0, 76.0, 25.0, 10)
-                .insert(MarketGetBackBtn);
-            spawn_icon_button(p, n, h, pr, 200.0, 300.0, 76.0, 25.0, 10).insert(MarketSellNowBtn);
         }
-        // 翻页 @(20/40,335)
+        // C# 翻页：Back Prguse2[240..242] @(251,419)、Next Prguse2[243..245] @(320,419)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 240),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 241),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 242),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 335.0, 16.0, 14.0, 10).insert(MarketPrevBtn);
+            spawn_icon_button(p, n, h, pr, TM_BACK_POS.0, TM_BACK_POS.1, 16.0, 16.0, 10)
+                .insert(MarketPrevBtn);
         }
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 243),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 244),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 245),
         ) {
-            spawn_icon_button(p, n, h, pr, 40.0, 335.0, 16.0, 14.0, 10).insert(MarketNextBtn);
+            spawn_icon_button(p, n, h, pr, TM_NEXT_POS.0, TM_NEXT_POS.1, 16.0, 16.0, 10)
+                .insert(MarketNextBtn);
         }
-        // 搜索/价格输入框（TextInput 5/6）@(20/180,365)
-        spawn_market_input(p, &mut images, &font, 5, 20.0, 365.0, 120.0, 300.0, 445.0);
-        spawn_market_input(p, &mut images, &font, 6, 180.0, 365.0, 120.0, 460.0, 445.0);
+        // C# 搜索框 @(11,452) 110x18（Bevy TextInput id 5；id 6 为寄售卖价扩展框）
+        spawn_market_input(p, &mut images, &font, 5, TM_SEARCH_POS.0, TM_SEARCH_POS.1, 110.0, 11.0, 452.0);
+        // Bevy 扩展：寄售/取回/立即出售（C# 在筛选树与外层按钮，筛选树未移植前放左列）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 920),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 921),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 921),
+        ) {
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 10.0, 100.0, 100.0, 22.0, 10)
+                .insert(MarketConsignBtn);
+            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 10.0, 126.0, 100.0, 22.0, 10)
+                .insert(MarketSellNowBtn);
+            spawn_icon_button(p, n, h, pr, 10.0, 152.0, 100.0, 22.0, 10).insert(MarketGetBackBtn);
+        }
+        spawn_market_input(p, &mut images, &font, 6, 10.0, 180.0, 100.0, 11.0, 180.0);
     });
 }
 
@@ -272,8 +353,8 @@ fn spawn_market_input(
 #[allow(clippy::too_many_arguments)]
 /// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..10）
 fn market_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    // 宽度=右界−左界（620−295）：旧实现误把绝对右界当宽度，命中带右扩 15px
-    (ox + 15.0, oy + 40.0 + i as f32 * 18.0, 325.0, 16.0)
+    // 列表区随 C# 布局右移（左列 x≤120 为筛选树）：行矩形与绘制同源
+    (ox + TM_LIST_X, oy + TM_LIST_Y + i as f32 * 18.0, 300.0, 16.0)
 }
 
 fn market_ui_system(
@@ -432,6 +513,43 @@ fn market_ui_system(
         if edge(e, inter, &mut prev_inter) && market.page + 1 < market.pages.max(1) {
             market.page += 1;
             net.send_packet(&crate::network::MarketPageWire { page: market.page as u32 });
+        }
+    }
+}
+
+/// C# 页签：Market 保持本窗；GameShop 开现有商城窗；寄售/拍卖页签待移植
+/// （独立系统避免 Bevy 16 参数上限）
+fn market_tab_system(
+    mut mgr: ResMut<DialogManager>,
+    mut market: ResMut<MarketState>,
+    tab_btns: Query<(Entity, &Interaction, &MarketTabBtn)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if !mgr.is_open(DialogKind::Market) {
+        return;
+    }
+    for (e, inter, tab) in &tab_btns {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        match tab.0 {
+            "market" => market.message = "当前：市场".to_string(),
+            // C# `GameShopButton.Click` → `TMerchantDialog(MarketPanelType.GameShop)`
+            "game_shop" => {
+                mgr.open(DialogKind::GameShop);
+                market.message = "打开游戏商城".to_string();
+            }
+            "consign" => market.message = "寄售页签待移植（可先用左列「寄售」）".to_string(),
+            "auction" => market.message = "拍卖页签待移植".to_string(),
+            _ => {}
         }
     }
 }
@@ -641,13 +759,40 @@ mod tests {
     /// 商品行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn row_rect_origin_and_drag() {
-        // 初始 (280,80)：首行 y=120（=80+40），x 起 295（=280+15）
-        let (rx, ry, rw, rh) = market_row_rect(0, 280.0, 80.0);
-        assert_eq!((rx, ry, rw, rh), (295.0, 120.0, 325.0, 16.0));
-        assert_eq!(market_row_rect(9, 280.0, 80.0).1, 120.0 + 9.0 * 18.0);
-        // 拖动到 (330,100)：同一相对位置命中跟随（+delta 50,20）
+        // C# 布局：面板 @(0,0)，列表区首行 (130,60)、行高 18、宽 300
+        let (rx, ry, rw, rh) = market_row_rect(0, TM_POS.0, TM_POS.1);
+        assert_eq!((rx, ry, rw, rh), (130.0, 60.0, 300.0, 16.0));
+        assert_eq!(market_row_rect(9, TM_POS.0, TM_POS.1).1, 60.0 + 9.0 * 18.0);
+        // 拖动到 (330,100)：同一相对位置命中跟随（+delta 330,100）
         let (rx2, ry2, _, _) = market_row_rect(0, 330.0, 100.0);
-        assert_eq!((rx2, ry2), (345.0, 140.0));
+        assert_eq!((rx2, ry2), (460.0, 160.0));
+    }
+
+    /// #2720：TrustMerchant 面板/页签/底部栏锚点对齐 C#（TrustMerchantDialog.cs:86-500）
+    #[test]
+    fn trust_merchant_layout_matches_csharp_anchors() {
+        assert_eq!((TM_PANEL_W, TM_PANEL_H), (492.0, 478.0)); // Title[786] 原生尺寸
+        assert_eq!(TM_POS, (0.0, 0.0)); // C# 未设 Location
+        assert_eq!(TM_CLOSE, (465.0, 3.0));
+        assert_eq!(TM_TABS[0], ("market", 9.0, 35.0, 789, 788));
+        assert_eq!(TM_TABS[1], ("consign", 104.0, 35.0, 791, 790));
+        assert_eq!(TM_TABS[2], ("auction", 199.0, 35.0, 817, 816));
+        assert_eq!(TM_TABS[3], ("game_shop", 389.0, 35.0, 819, 818));
+        assert_eq!(TM_SEARCH_POS, (11.0, 452.0));
+        assert_eq!(TM_FIND_POS, (124.0, 448.0));
+        assert_eq!(TM_REFRESH_POS, (320.0, 448.0));
+        assert_eq!(TM_BUY_POS, (380.0, 448.0));
+        assert_eq!(TM_BACK_POS, (251.0, 419.0));
+        assert_eq!(TM_NEXT_POS, (320.0, 419.0));
+        assert_eq!(TM_PAGE_POS, (260.0, 419.0));
+        // 控件必须落在 492x478 面板内
+        let inside = |(x, y): (f32, f32)| x >= 0.0 && y >= 0.0 && x <= TM_PANEL_W && y <= TM_PANEL_H;
+        for (_, x, y, _, _) in TM_TABS {
+            assert!(inside((x, y)));
+        }
+        assert!(inside(TM_CLOSE));
+        assert!(inside(TM_SEARCH_POS));
+        assert!(inside(TM_BUY_POS));
     }
 
 
