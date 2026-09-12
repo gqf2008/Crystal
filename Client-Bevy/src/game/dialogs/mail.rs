@@ -107,6 +107,9 @@ fn mail_row_y(index: usize) -> f32 {
 #[derive(Message, Debug)]
 pub struct ComposeMail {
     pub to: String,
+    /// C# `MailComposeLetterDialog.ComposeMail(recipient, message)` 的正文预填（输入框 id 2）；
+    /// `None` = 只预填收件人（C# FriendDialog EmailButton 语义）
+    pub message: Option<String>,
 }
 
 /// #2538：邮票判定（C# ItemType.Nothing && Shape==1；客户端 InvItem.item_type 为
@@ -221,6 +224,12 @@ fn mail_compose_request_system(
             input.texts.resize(4, String::new());
         }
         input.texts[0] = ev.to.clone();
+        if let Some(body) = ev.message.as_ref() {
+            if input.texts.len() < 3 {
+                input.texts.resize(4, String::new());
+            }
+            input.texts[2] = body.clone();
+        }
         input.active = None;
         tracing::info!("✉️ 给 {} 写邮件", ev.to);
     }
@@ -1114,6 +1123,7 @@ mod tests {
             .resource_mut::<Messages<ComposeMail>>()
             .write(ComposeMail {
                 to: "小明".to_string(),
+                message: None,
             });
 
         world

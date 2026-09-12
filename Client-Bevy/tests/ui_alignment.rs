@@ -898,6 +898,58 @@ fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
 }
 
+/// TrustMerchant 价格排序图标与 Mail 按钮：
+/// `PriceFilterIcon` = `Prguse2[925/926]` 12x11 @(371,65)（落在「价格」表头 295..383 内），
+/// `MailButton` = `Prguse[437..439]` 28x25 @(350,448)（仅市场页签，与仅寄售的 COLLECT 不同页签）。
+#[test]
+fn trust_merchant_price_filter_and_mail_aligned() {
+    use client_bevy::game::dialogs::market as mk;
+    let mut libs = Libs::new();
+
+    for idx in [mk::TM_PRICE_ICON_LOW, mk::TM_PRICE_ICON_HIGH] {
+        let (w, h) = libs.size(LibraryName::Prguse2, idx);
+        assert_eq!(
+            (w, h),
+            (mk::TM_PRICE_ICON_W, mk::TM_PRICE_ICON_H),
+            "[尺寸] Prguse2[{idx}] 应等于价格排序图标尺寸"
+        );
+    }
+    for idx in [437usize, 438, 439] {
+        let (w, h) = libs.size(LibraryName::Prguse, idx);
+        assert_eq!(
+            (w, h),
+            (mk::TM_MAIL_W, mk::TM_MAIL_H),
+            "[尺寸] Prguse[{idx}] 应等于 Mail 键尺寸"
+        );
+    }
+    // 图标锚点（C# `TitlePriceLabel.Location + Size` 推导）与表头命中区
+    assert_eq!(mk::TM_PRICE_HEADER_POS, (295.0, 60.0));
+    assert_eq!(mk::TM_PRICE_ICON_POS, (371.0, 65.0));
+    assert!(
+        mk::TM_PRICE_ICON_POS.0 + mk::TM_PRICE_ICON_W <= 383.0,
+        "图标越出「价格」表头"
+    );
+    // Mail 键位置与底栏「价格」列一致（C# 350,448）；与 COLLECT(300,448,仅寄售) 不同页签共存
+    assert_eq!(mk::TM_MAIL_POS, (350.0, 448.0));
+    assert_eq!(mk::TM_COLLECT_SOLD_POS.1, mk::TM_MAIL_POS.1, "同底栏行");
+    assert!(mk::TM_MAIL_POS.0 >= mk::TM_COLLECT_SOLD_POS.0);
+    assert_in_canvas(
+        "市场写信键",
+        mk::TM_MAIL_POS.0,
+        mk::TM_MAIL_POS.1,
+        mk::TM_MAIL_W,
+        mk::TM_MAIL_H,
+    );
+    // 三态循环与图标帧（C# `CyclePriceFilter` / `UpdatePriceFilterIcon`）
+    use client_bevy::game::dialogs::market::MarketPriceFilter as F;
+    assert_eq!(F::Normal.next().next(), F::High);
+    assert_eq!(F::High.next(), F::Normal);
+    assert_eq!(F::Low.icon_frame(), Some(mk::TM_PRICE_ICON_LOW));
+    assert_eq!(F::High.icon_frame(), Some(mk::TM_PRICE_ICON_HIGH));
+
+    println!("  ✓ 价格排序图标 Prguse2[925/926] @(371,65) 与 Mail 键 Prguse[437..439] @(350,448) 对齐 C#");
+}
+
 /// TrustMerchant 列表行（C# `AuctionRow`：行 (127, 82+i*33) 354x32 + 34x32 图标区 +
 /// 名称/价格/卖家/到期 4 标签 + 选中橙框；空数量用 `Prguse[540]` 占位）。
 #[test]

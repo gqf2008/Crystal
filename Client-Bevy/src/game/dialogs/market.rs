@@ -79,6 +79,8 @@ pub struct MarketState {
     pub filter_skip: usize,
     /// 寄售/拍卖目标物品（C# `SellItemSlot`；点 ItemCell 从背包选中物放入）
     pub consign_item: Option<InvItem>,
+    /// 价格排序三态（C# `TrustMerchantDialog.PriceFilter`）
+    pub price_filter: MarketPriceFilter,
 }
 
 impl Default for MarketState {
@@ -97,6 +99,7 @@ impl Default for MarketState {
             filter_sub_index: None,
             filter_skip: 0,
             consign_item: None,
+            price_filter: MarketPriceFilter::Normal,
         }
     }
 }
@@ -176,6 +179,8 @@ pub enum MarketForPanel {
     ConsignOnly,
     /// 仅拍卖：`SellNowButton`
     AuctionOnly,
+    /// 仅市场：`MailButton`（C# 其余三个页签都 `Visible = false`）
+    MarketOnly,
 }
 
 /// 列表表头标签（C# `TitleSalePriceLabel`/`TitleSellLabel`/`TitleItemLabel`/
@@ -264,6 +269,105 @@ pub const TM_MAX_STARTING_BID: u32 = 50_000;
 /// C# `Globals.ConsignmentLength`（天，到期列 = 寄售日期 + 7 天）
 pub const TM_CONSIGNMENT_LENGTH_DAYS: i64 = 7;
 
+// ===== 价格排序（C# `MarketPriceFilter` + `PriceFilterIcon`）与 Mail 按钮 =====
+
+/// C# `PriceFilterIcon` 位置 = `(TitlePriceLabel.X + W - 12, Y + (H - 14)/2 + 2)` = (371, 65)
+pub const TM_PRICE_ICON_POS: (f32, f32) = (371.0, 65.0);
+/// `Prguse2[925]`（低价）与 `[926]`（高价）实测 12x11
+pub const TM_PRICE_ICON_LOW: usize = 925;
+pub const TM_PRICE_ICON_HIGH: usize = 926;
+pub const TM_PRICE_ICON_W: f32 = 12.0;
+pub const TM_PRICE_ICON_H: f32 = 11.0;
+/// 价格表头点击层（C# `TitlePriceLabel.Click` 的 (295,60) 88x21 命中区）
+pub const TM_PRICE_HEADER_POS: (f32, f32) = (295.0, 60.0);
+pub const TM_PRICE_HEADER_W: f32 = 88.0;
+pub const TM_PRICE_HEADER_H: f32 = 21.0;
+/// C# `MailButton`：`Prguse[437..439]` 28x25 @(350,448)
+pub const TM_MAIL_POS: (f32, f32) = (350.0, 448.0);
+pub const TM_MAIL_W: f32 = 28.0;
+pub const TM_MAIL_H: f32 = 25.0;
+
+/// C# `MarketPriceFilter`（价格排序三态，Shared/Enums.cs:61）
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MarketPriceFilter {
+    #[default]
+    Normal,
+    Low,
+    High,
+}
+
+impl MarketPriceFilter {
+    /// C# `CyclePriceFilter()`：Normal → Low → High → Normal
+    pub fn next(self) -> Self {
+        match self {
+            Self::Normal => Self::Low,
+            Self::Low => Self::High,
+            Self::High => Self::Normal,
+        }
+    }
+
+    /// C# `UpdatePriceFilterIcon()`：Normal 隐藏，Low 用 `Prguse2[925]`，High 用 `[926]`
+    pub fn icon_frame(self) -> Option<usize> {
+        match self {
+            Self::Normal => None,
+            Self::Low => Some(TM_PRICE_ICON_LOW),
+            Self::High => Some(TM_PRICE_ICON_HIGH),
+        }
+    }
+}
+
+/// C# `GetOrderedListings()`：Normal 保持服务器顺序，Low/High 按价格升/降序（稳定排序，
+/// 同价保持服务器顺序；C# `OrderBy` 亦为稳定排序，`?? 0` 对应价格取 0）
+pub fn display_order(prices: &[u32], filter: MarketPriceFilter) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..prices.len()).collect();
+    match filter {
+        MarketPriceFilter::Normal => {}
+        MarketPriceFilter::Low => order.sort_by_key(|i| prices[*i]),
+        MarketPriceFilter::High => order.sort_by_key(|i| std::cmp::Reverse(prices[*i])),
+    }
+    order
+}
+
+/// C# `MailButton.Click` 正文（`ClientTextKeys.InterestedInPurchase` =
+/// 「我有意购买{0}，价格为{1}。」，价格不带千分位）
+pub fn market_mail_message(item_name: &str, price: u32) -> String {
+    format!("我有意购买{}，价格为{}。", item_name, price)
+}
+
+/// 价格排序触发区（C# `TitlePriceLabel.Click`）
+#[derive(Component)]
+pub struct MarketPriceFilterBtn;
+
+/// 价格排序图标（C# `PriceFilterIcon`）
+#[derive(Component)]
+pub struct MarketPriceFilterIcon;
+
+/// 写邮件按钮（C# `MailButton`）
+#[derive(Component)]
+pub struct MarketMailBtn;
+
+/// C# `TMerchantDialog(type)` 的页签控件显隐（:1117-1314）：
+/// 寄售/拍卖面板组、`CollectSoldButton`（仅寄售）、`SellNowButton`（仅拍卖）、`MailButton`（仅市场）
+pub fn panel_part_visible(kind: MarketForPanel, panel: MarketPanelType) -> bool {
+    match kind {
+        MarketForPanel::ConsignOrAuction => {
+            matches!(panel, MarketPanelType::Consign | MarketPanelType::Auction)
+        }
+        MarketForPanel::ConsignOnly => panel == MarketPanelType::Consign,
+        MarketForPanel::AuctionOnly => panel == MarketPanelType::Auction,
+        MarketForPanel::MarketOnly => panel == MarketPanelType::Market,
+    }
+}
+
+/// 当前页第 `slot` 行对应的 `listings` 下标（按价格排序重排后）。
+/// Bevy 服务端按页下发（`listings` = 当前页），故不复用 C# 的 `Page*10 + i` 全量索引。
+pub fn row_listing_index(market: &MarketState, slot: usize) -> Option<usize> {
+    let prices: Vec<u32> = market.listings.iter().map(|l| l.price).collect();
+    display_order(&prices, market.price_filter)
+        .get(slot)
+        .copied()
+}
+
 // ===== 列表行（C# `AuctionRow`，TrustMerchantDialog.cs:1440-1625）=====
 
 /// C# `Rows[i].Location = new Point(127, 82 + i * 33)`；`Size = (354, 32)`
@@ -320,6 +424,8 @@ pub enum MarketBottomBtn {
     CollectSold,
     /// 选中行卖家为 `Bid Met` 才可用（C# `SellNowButton`）
     SellNow,
+    /// 选中行才可用（C# `MailButton.Enabled`）
+    Mail,
 }
 
 /// 行内绝对定位节点（`border` = 四周 1px 描边，用于选中框）
@@ -524,6 +630,8 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
                 market_consign_system,
                 market_row_system,
                 market_consign_cell_system,
+                market_price_filter_system,
+                market_mail_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -694,6 +802,67 @@ fn spawn_market(
         // 表头标签（C# 5 个 Title*Label，居中；文案随页签变化）
         for (kind, x, y, w) in TM_HEADERS {
             spawn_label_center(p, &cjk, "", x + w / 2.0, y, w, 12.0, Color::WHITE, 9).insert(kind);
+        }
+        // #2720：价格排序（C# `TitlePriceLabel.Click` 命中区 + `PriceFilterIcon` Prguse2[925/926]）
+        spawn_container(
+            p,
+            TM_PRICE_HEADER_POS.0,
+            TM_PRICE_HEADER_POS.1,
+            TM_PRICE_HEADER_W,
+            TM_PRICE_HEADER_H,
+            10,
+        )
+        .insert((Button, BackgroundColor(Color::NONE), MarketPriceFilterBtn));
+        {
+            let low = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse2,
+                TM_PRICE_ICON_LOW,
+            );
+            let high = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse2,
+                TM_PRICE_ICON_HIGH,
+            );
+            if let (Some(low), Some(high)) = (low, high) {
+                spawn_icon_button(
+                    p,
+                    low.clone(),
+                    low,
+                    high,
+                    TM_PRICE_ICON_POS.0,
+                    TM_PRICE_ICON_POS.1,
+                    TM_PRICE_ICON_W,
+                    TM_PRICE_ICON_H,
+                    11,
+                )
+                .insert((MarketPriceFilterIcon, Visibility::Hidden));
+            }
+        }
+        // #2720：写邮件（C# `MailButton` Prguse[437..439] @(350,448)，仅市场页签）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 437),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 438),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 439),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                TM_MAIL_POS.0,
+                TM_MAIL_POS.1,
+                TM_MAIL_W,
+                TM_MAIL_H,
+                10,
+            )
+            .insert((
+                MarketMailBtn,
+                MarketBottomBtn::Mail,
+                MarketForPanel::MarketOnly,
+            ));
         }
         // C# 翻页：Back Prguse2[240..242] @(251,419)、Next Prguse2[243..245] @(320,419)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -997,8 +1166,8 @@ fn market_ui_system(
                 for i in 0..10usize {
                     let (rx, ry, rw, rh) = market_row_rect(i, ox, oy);
                     if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
-                        let idx = market.page * 10 + i;
-                        if idx < market.listings.len() {
+                        // 按价格排序映射到 `listings` 下标（Bevy 服务端按页下发，见 `row_listing_index`）
+                        if let Some(idx) = row_listing_index(&market, i) {
                             market.selected = Some(idx);
                             let it = &market.listings[idx];
                             tracing::info!(
@@ -1131,12 +1300,7 @@ fn market_tab_system(
     // 这两个页签；CollectSold 只寄售、SellNow 只拍卖）
     for (for_panel, mut vis) in &mut panel_parts {
         let show = match for_panel {
-            MarketForPanel::ConsignOrAuction => matches!(
-                market.panel,
-                MarketPanelType::Consign | MarketPanelType::Auction
-            ),
-            MarketForPanel::ConsignOnly => market.panel == MarketPanelType::Consign,
-            MarketForPanel::AuctionOnly => market.panel == MarketPanelType::Auction,
+            kind => panel_part_visible(*kind, market.panel),
         };
         *vis = if show {
             Visibility::Visible
@@ -1419,11 +1583,10 @@ fn market_row_system(
         market.panel,
         MarketPanelType::Consign | MarketPanelType::Auction
     );
-    let base = market.page * 10;
     let selected = market.selected;
     // 行显隐（C# `Rows[i].Clear()`：无数据 → Visible=false）
     for (row, mut vis) in &mut rows {
-        let show = market.listings.get(base + row.0).is_some();
+        let show = row_listing_index(&market, row.0).is_some();
         *vis = if show {
             Visibility::Visible
         } else {
@@ -1432,7 +1595,8 @@ fn market_row_system(
     }
     // 图标（C# `IconImage`：count>0 用 `Items[Image]`，否则 `Prguse[540]`；按 IconArea 居中）
     for (icon, mut node_img, mut node) in &mut icons {
-        let Some(item) = market.listings.get(base + icon.0) else {
+        let Some(item) = row_listing_index(&market, icon.0).and_then(|i| market.listings.get(i))
+        else {
             continue;
         };
         let handle = if item.count > 0 {
@@ -1482,7 +1646,9 @@ fn market_row_system(
     }
     // 文本（C# `AuctionRow.Update` 的名称/价格/卖家/到期）
     for (label, mut text, mut color) in &mut labels {
-        let text_new = match market.listings.get(base + label.0) {
+        let text_new = match row_listing_index(&market, label.0)
+            .and_then(|i| market.listings.get(i))
+        {
             Some(item) => match label.1 {
                 MarketRowTextKind::Name => Some((item.name.clone(), row_name_color(item.grade))),
                 MarketRowTextKind::Price => Some((
@@ -1517,7 +1683,9 @@ fn market_row_system(
     }
     // 选中框（C# `Rows[i].Border = Rows[i] == Selected`）
     for (border, mut vis) in &mut borders {
-        let show = selected == Some(base + border.0) && market.listings.get(base + border.0).is_some();
+        let show = row_listing_index(&market, border.0)
+            .map(|i| selected == Some(i))
+            .unwrap_or(false);
         *vis = if show {
             Visibility::Visible
         } else {
@@ -1534,6 +1702,7 @@ fn market_row_system(
             MarketBottomBtn::Buy => has_sel,
             MarketBottomBtn::CollectSold => !has_sel,
             MarketBottomBtn::SellNow => bid_met,
+            MarketBottomBtn::Mail => has_sel,
         };
         let want = if enabled {
             Color::WHITE
@@ -1543,6 +1712,109 @@ fn market_row_system(
         if node.color != want {
             node.color = want;
         }
+    }
+}
+
+/// 寄售目标格渲染（C# `ItemCell`：显示已选物品图标/数量）
+#[allow(clippy::too_many_arguments)]
+fn market_price_filter_system(
+    mgr: Res<DialogManager>,
+    mut market: ResMut<MarketState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    header_btn: Query<(Entity, &Interaction), With<MarketPriceFilterBtn>>,
+    icon_btn: Query<(Entity, &Interaction), With<MarketPriceFilterIcon>>,
+    mut icon_img: Query<(&MarketPriceFilterIcon, &mut ImageNode, &mut Visibility)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if !mgr.is_open(DialogKind::Market) {
+        return;
+    }
+    // C#：`TitlePriceLabel.Click` 与 `PriceFilterIcon.Click` 都调 `CyclePriceFilter()`
+    let mut cycle = false;
+    for (e, inter) in &header_btn {
+        if edge(e, inter, &mut prev_inter) {
+            cycle = true;
+        }
+    }
+    for (e, inter) in &icon_btn {
+        if edge(e, inter, &mut prev_inter) {
+            cycle = true;
+        }
+    }
+    if cycle {
+        market.price_filter = market.price_filter.next();
+        market.message = match market.price_filter {
+            MarketPriceFilter::Normal => "价格排序：默认".to_string(),
+            MarketPriceFilter::Low => "价格排序：从低到高".to_string(),
+            MarketPriceFilter::High => "价格排序：从高到低".to_string(),
+        };
+    }
+    // C# `UpdatePriceFilterIcon()`：Normal 隐藏，其余显示对应帧
+    let want = market.price_filter.icon_frame().and_then(|idx| {
+        ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse2,
+            idx,
+        )
+    });
+    for (_icon, mut node, mut vis) in &mut icon_img {
+        match (market.price_filter, want.as_ref()) {
+            (MarketPriceFilter::Normal, _) | (_, None) => {
+                *vis = Visibility::Hidden;
+            }
+            (_, Some(handle)) => {
+                *vis = Visibility::Visible;
+                if node.image != *handle {
+                    node.image = handle.clone();
+                }
+            }
+        }
+    }
+}
+
+/// 写邮件（C# `MailButton.Click`：以选中行的卖家为收件人、按 `InterestedInPurchase` 预填正文）
+fn market_mail_system(
+    mgr: Res<DialogManager>,
+    market: Res<MarketState>,
+    mut compose: MessageWriter<crate::game::dialogs::mail::ComposeMail>,
+    mail_btn: Query<(Entity, &Interaction), With<MarketMailBtn>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if !mgr.is_open(DialogKind::Market) {
+        return;
+    }
+    for (e, inter) in &mail_btn {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        let Some(item) = market.selected.and_then(|i| market.listings.get(i)) else {
+            continue;
+        };
+        compose.write(crate::game::dialogs::mail::ComposeMail {
+            to: item.seller.clone(),
+            message: Some(market_mail_message(&item.name, item.price)),
+        });
+        tracing::info!("✉️ 市场写信给 {}", item.seller);
     }
 }
 
@@ -1772,6 +2044,91 @@ mod tests {
         assert!(inside(TM_CLOSE));
         assert!(inside(TM_SEARCH_POS));
         assert!(inside(TM_BUY_POS));
+    }
+
+    /// #2720：页签控件显隐映射（C# `TMerchantDialog(type)`：Mail 仅市场、
+    /// CollectSold 仅寄售、SellNow 仅拍卖、寄售面板组只在寄售/拍卖）
+    #[test]
+    fn market_panel_part_visibility_matches_csharp() {
+        use MarketForPanel::*;
+        use MarketPanelType::*;
+        for panel in [Market, Consign, Auction, GameShop] {
+            assert_eq!(
+                panel_part_visible(ConsignOrAuction, panel),
+                matches!(panel, Consign | Auction),
+                "寄售面板组 @ {panel:?}"
+            );
+            assert_eq!(
+                panel_part_visible(ConsignOnly, panel),
+                panel == Consign,
+                "COLLECT @ {panel:?}"
+            );
+            assert_eq!(
+                panel_part_visible(AuctionOnly, panel),
+                panel == Auction,
+                "SELLNOW @ {panel:?}"
+            );
+            assert_eq!(
+                panel_part_visible(MarketOnly, panel),
+                panel == Market,
+                "MAIL @ {panel:?}"
+            );
+        }
+    }
+
+    /// #2720：价格排序三态与图标（C# `CyclePriceFilter` / `UpdatePriceFilterIcon`）
+    #[test]
+    fn market_price_filter_cycles_and_icons() {
+        use MarketPriceFilter::*;
+        assert_eq!(Normal.next(), Low);
+        assert_eq!(Low.next(), High);
+        assert_eq!(High.next(), Normal); // 三态循环
+        assert_eq!(Normal.icon_frame(), None);
+        assert_eq!(Low.icon_frame(), Some(925)); // Prguse2[925]
+        assert_eq!(High.icon_frame(), Some(926));
+        assert_eq!(MarketPriceFilter::default(), Normal);
+        // 图标锚点 = TitlePriceLabel(295,60,88x21) → (295+88-12, 60+(21-14)/2+2) = (371,65)
+        assert_eq!(TM_PRICE_HEADER_POS, (295.0, 60.0));
+        assert_eq!((TM_PRICE_HEADER_W, TM_PRICE_HEADER_H), (88.0, 21.0));
+        assert_eq!(TM_PRICE_ICON_POS, (371.0, 65.0));
+        assert_eq!((TM_PRICE_ICON_W, TM_PRICE_ICON_H), (12.0, 11.0));
+    }
+
+    /// #2720：`GetOrderedListings()` 排序（Normal 原序 / Low 升序 / High 降序，稳定）
+    #[test]
+    fn market_display_order_sorts_by_price() {
+        use MarketPriceFilter::*;
+        let prices = [500u32, 100, 300, 100];
+        assert_eq!(display_order(&prices, Normal), vec![0, 1, 2, 3]);
+        assert_eq!(display_order(&prices, Low), vec![1, 3, 2, 0]); // 同价保持原序（稳定）
+        assert_eq!(display_order(&prices, High), vec![0, 2, 1, 3]);
+        assert!(display_order(&[], Low).is_empty());
+        // `row_listing_index`：Normal 直取，Low 取排序后的第 n 个
+        let mut market = MarketState::default();
+        market.listings = prices
+            .iter()
+            .map(|p| MarketItem {
+                price: *p,
+                ..Default::default()
+            })
+            .collect();
+        assert_eq!(row_listing_index(&market, 0), Some(0));
+        market.price_filter = Low;
+        assert_eq!(row_listing_index(&market, 0), Some(1));
+        assert_eq!(row_listing_index(&market, 3), Some(0));
+        assert_eq!(row_listing_index(&market, 4), None);
+    }
+
+    /// #2720：Mail 按钮锚点与正文（C# `MailButton` + `InterestedInPurchase`）
+    #[test]
+    fn market_mail_button_matches_csharp() {
+        assert_eq!(TM_MAIL_POS, (350.0, 448.0));
+        assert_eq!((TM_MAIL_W, TM_MAIL_H), (28.0, 25.0)); // Prguse[437..439]
+        assert_eq!(
+            market_mail_message("屠龙", 12345),
+            "我有意购买屠龙，价格为12345。"
+        );
+        assert_eq!(market_mail_message("#853", 0), "我有意购买#853，价格为0。");
     }
 
     /// #2720：列表行锚点对齐 C# `AuctionRow`（TrustMerchantDialog.cs:1440-1522）
