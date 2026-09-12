@@ -140,7 +140,7 @@ pub fn spawn_tooltip_panel(
 pub fn tooltip_hint_system(
     windows: Query<&Window>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
-    buttons: Query<(&UiButton, &TooltipHint)>,
+    buttons: Query<(&UiButton, &TooltipHint, &InheritedVisibility, &Transform)>,
     mut state: ResMut<TooltipState>,
 ) {
     let Ok(window) = windows.single() else { return };
@@ -150,16 +150,26 @@ pub fn tooltip_hint_system(
     let Ok((cam, gtf)) = ui_cameras.single() else { return };
     let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
     let cursor = Vec2::new(world.x, -world.y);
-    let mut hit = false;
-    for (btn, hint) in &buttons {
+    let mut topmost: Option<(&TooltipHint, f32)> = None;
+    for (btn, hint, inherited, transform) in &buttons {
+        if !inherited.get() {
+            continue;
+        }
         let (x, y, w, h) = btn.rect;
-        if cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h {
-            state.update(1, true, String::new(), vec![hint.0.clone()], cursor.x, cursor.y);
-            hit = true;
-            break;
+        if cursor.x >= x
+            && cursor.x <= x + w
+            && cursor.y >= y
+            && cursor.y <= y + h
+            && topmost
+                .map(|(_, z)| transform.translation.z > z)
+                .unwrap_or(true)
+        {
+            topmost = Some((hint, transform.translation.z));
         }
     }
-    if !hit {
+    if let Some((hint, _)) = topmost {
+        state.update(1, true, String::new(), vec![hint.0.clone()], cursor.x, cursor.y);
+    } else {
         state.update(1, false, String::new(), Vec::new(), 0.0, 0.0);
     }
 }

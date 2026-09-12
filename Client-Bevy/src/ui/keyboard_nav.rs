@@ -114,7 +114,12 @@ pub fn tab_focus_system(
     mut nav: ResMut<KeyboardNav>,
     mgr: Res<DialogManager>,
     mut images: ResMut<Assets<Image>>,
-    mut buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
+    mut buttons: Query<(
+        Entity,
+        &mut UiButton,
+        Option<&DialogRoot>,
+        &InheritedVisibility,
+    )>,
     mut highlight_q: Query<(&mut Transform, &mut Sprite), Without<UiButton>>,
 ) {
     if gate.0 {
@@ -132,8 +137,10 @@ pub fn tab_focus_system(
     let top = mgr.open.last().copied();
     let mut cands: Vec<(Entity, (f32, f32, f32, f32))> = buttons
         .iter()
-        .filter(|(_, _, root)| root.map(|r| Some(r.0) == top).unwrap_or(false))
-        .map(|(e, b, _)| (e, b.rect))
+        .filter(|(_, _, root, inherited)| {
+            inherited.get() && root.map(|r| Some(r.0) == top).unwrap_or(false)
+        })
+        .map(|(e, b, _, _)| (e, b.rect))
         .collect();
     cands.sort_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -161,7 +168,7 @@ pub fn tab_focus_system(
     }
     if nav.click_remaining > 0 {
         if let Some(f) = nav.focused {
-            if let Ok((_, mut b, _)) = buttons.get_mut(f) {
+            if let Ok((_, mut b, _, _)) = buttons.get_mut(f) {
                 b.clicked = true;
             }
         }
@@ -178,7 +185,7 @@ pub fn tab_focus_system(
         }
         return;
     };
-    let Ok((_, b, _)) = buttons.get(f) else {
+    let Ok((_, b, _, _)) = buttons.get(f) else {
         return;
     };
     let (x, y, w, h) = b.rect;
