@@ -201,6 +201,17 @@ pub enum ServerEvent {
     RefineDeposited { from: i32, to: i32, success: bool },
     /// #2720 精炼材料取回确认（C# S.RetrieveRefineItem：[from][to][success]）
     RefineRetrieved { from: i32, to: i32, success: bool },
+    /// #2720 精炼入口（C# GameScene.NPCRefine：`NPCDropDialog.PType=Refine` +
+    /// `RefineDialog.Show()`；`refining=true` 表示精炼进行中 → 收起入口）
+    NpcRefinePanel { rate: f32, refining: bool },
+    /// #2720 精炼结果查看入口（C# GameScene.NPCCheckRefine）
+    NpcCheckRefinePanel,
+    /// #2720 精炼收取（C# GameScene.NPCCollectRefine：收起对话框）
+    NpcCollectRefine,
+    /// #2720 精炼开始确认（C# GameScene.RefineItem → `RefineDialog.RefineReset()`）
+    RefineStarted { unique_id: u64 },
+    /// #2720 精炼取消/重置（C# GameScene.RefineCancel → `RefineDialog.RefineReset()`）
+    RefineCancelled { unlock: bool },
     /// #262 PauseBuff：Buff 暂停
     BuffPaused { buff_type: u8, object_id: u32, paused: bool },
     /// #264 ObjectName：对象改名

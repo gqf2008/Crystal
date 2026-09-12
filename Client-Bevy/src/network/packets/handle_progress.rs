@@ -770,16 +770,20 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("🔨 精炼材料存入 from={} to={} ok={}", p.from, p.to, p.success);
             }
         }
-        // #291：C# 服务端包面收尾（RefineCancel）
+        // #2720：精炼取消/重置（C# GameScene.RefineCancel → RefineDialog.RefineReset）
         x if x == ServerPacketIds::RefineCancel as i16 => {
-            if item_operations::RefineCancel::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 RefineCancel 解码");
+            if let Ok(p) = item_operations::RefineCancel::read_body(&mut cur) {
+                server_events.write(ServerEvent::RefineCancelled { unlock: p.unlock });
+                tracing::info!("🔨 精炼取消 unlock={}", p.unlock);
             }
         }
-        // #291：C# 服务端包面收尾（RefineItem）
+        // #2720：精炼开始确认（C# GameScene.RefineItem → RefineDialog.RefineReset）
         x if x == ServerPacketIds::RefineItem as i16 => {
-            if item_operations::RefineItem::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 RefineItem 解码");
+            if let Ok(p) = item_operations::RefineItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::RefineStarted {
+                    unique_id: p.unique_id,
+                });
+                tracing::info!("🔨 精炼开始 uid={}", p.unique_id);
             }
         }
         // #2720：精炼材料取回确认（C# S.RetrieveRefineItem：[from][to][success]）
@@ -835,22 +839,26 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("📦 WorldMapSetup 解码（{} 个世界地图点, cost={}）", n, p.teleport_cost);
             }
         }
-        // #291：C# 服务端包面收尾（NPCCheckRefine）
+        // #2720：精炼入口/查看/收取（C# GameScene.NPCRefine / NPCCheckRefine / NPCCollectRefine）
         x if x == ServerPacketIds::NPCCheckRefine as i16 => {
             if npc::NPCCheckRefine::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 NPCCheckRefine 解码");
+                server_events.write(ServerEvent::NpcCheckRefinePanel);
+                tracing::info!("🔨 NPC 精炼查看入口");
             }
         }
-        // #291：C# 服务端包面收尾（NPCCollectRefine）
         x if x == ServerPacketIds::NPCCollectRefine as i16 => {
             if npc::NPCCollectRefine::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 NPCCollectRefine 解码");
+                server_events.write(ServerEvent::NpcCollectRefine);
+                tracing::info!("🔨 NPC 精炼收取");
             }
         }
-        // #291：C# 服务端包面收尾（NPCRefine）
         x if x == ServerPacketIds::NPCRefine as i16 => {
-            if npc::NPCRefine::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 NPCRefine 解码");
+            if let Ok(p) = npc::NPCRefine::read_body(&mut cur) {
+                server_events.write(ServerEvent::NpcRefinePanel {
+                    rate: p.rate,
+                    refining: p.refining,
+                });
+                tracing::info!("🔨 NPC 精炼入口 rate={} refining={}", p.rate, p.refining);
             }
         }
         // #291：C# 服务端包面收尾（NPCRepair）
