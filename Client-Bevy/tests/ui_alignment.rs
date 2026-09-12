@@ -898,6 +898,90 @@ fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
 }
 
+/// TrustMerchant 寄售/拍卖页签面板（C# `TMerchantDialog(type)`：`Title[787]` 背景 +
+/// HelpLabel/ItemCell/PriceTextBox/SellItemButton/CollectSoldButton/SellNowButton + 5 个表头）。
+#[test]
+fn trust_merchant_consign_panel_aligned() {
+    use client_bevy::game::dialogs::market as mk;
+    let mut libs = Libs::new();
+
+    // 两个页签背景都是 492x478（C# `Index = 786` / `787`）
+    for idx in [786usize, 787] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!(
+            (w, h),
+            (mk::TM_PANEL_W, mk::TM_PANEL_H),
+            "[尺寸] Title[{idx}] 应为 492x478"
+        );
+    }
+    // `SellItemButton`/`SellNowButton` 共用 Title[700..702]（52x25）
+    for idx in [700usize, 701, 702] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!(
+            (w, h),
+            (mk::TM_SELL_BTN_W, mk::TM_SELL_BTN_H),
+            "[尺寸] Title[{idx}] 应等于寄售提交键尺寸"
+        );
+    }
+    // `CollectSoldButton` Title[680..682]（72x25）
+    for idx in [680usize, 681, 682] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!(
+            (w, h),
+            (mk::TM_COLLECT_BTN_W, mk::TM_COLLECT_BTN_H),
+            "[尺寸] Title[{idx}] 应等于领取已售键尺寸"
+        );
+    }
+    // Buy 两套精灵都是 84x25
+    for idx in [703usize, 704, 705, 706, 707, 708] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!((w, h), (84.0, 25.0), "[尺寸] Title[{idx}] 应为 84x25");
+    }
+
+    // 锚点与 C# 字面值一致 + 全部落在面板内
+    assert_eq!(mk::TM_HELP_POS, (8.0, 237.0));
+    assert_eq!(mk::TM_CONSIGN_CELL_POS, (47.0, 104.0));
+    assert_eq!(mk::TM_PRICE_POS, (15.0, 165.0));
+    assert_eq!(mk::TM_SELL_ITEM_POS, (39.0, 188.0));
+    assert_eq!(mk::TM_COLLECT_SOLD_POS, (300.0, 448.0));
+    assert_eq!(mk::TM_SELL_NOW_POS, (324.0, 448.0));
+    assert_in_canvas(
+        "寄售物品格",
+        mk::TM_CONSIGN_CELL_POS.0,
+        mk::TM_CONSIGN_CELL_POS.1,
+        mk::TM_CONSIGN_CELL_W,
+        mk::TM_CONSIGN_CELL_H,
+    );
+    assert_in_canvas(
+        "领取已售键",
+        mk::TM_COLLECT_SOLD_POS.0,
+        mk::TM_COLLECT_SOLD_POS.1,
+        mk::TM_COLLECT_BTN_W,
+        mk::TM_COLLECT_BTN_H,
+    );
+    // 寄售说明（115x205 @8,237）与表头（y=60/142）都不得越出 492x478 面板
+    let (pw, ph) = libs.size(LibraryName::Title, 787);
+    assert!(mk::TM_HELP_POS.0 + mk::TM_HELP_W <= pw);
+    assert!(mk::TM_HELP_POS.1 + mk::TM_HELP_H <= ph);
+    for (kind, x, y, w) in mk::TM_HEADERS {
+        assert!(x + w <= pw, "[包含] 表头 {kind:?} 越界");
+        assert!(y + 21.0 <= ph);
+    }
+    // 表头随页签换文案（寄售/拍卖）
+    use client_bevy::game::dialogs::market::MarketHeader as H;
+    use mir2_shared::enums::MarketPanelType;
+    assert_eq!(
+        mk::header_text(H::SalePrice, MarketPanelType::Consign),
+        "出售价格"
+    );
+    assert_eq!(
+        mk::header_text(H::SalePrice, MarketPanelType::Auction),
+        "起始出价"
+    );
+
+    println!("  ✓ 寄售/拍卖面板 Title[787] + 680..682/700..708 精灵与锚点对齐 C#");
+}
+
 /// TrustMerchant 左列筛选树（C# `TrustMerchantDialog.SetupFilters/DrawFilters`）：
 /// 主/子按钮 `Prguse2[920..923]`(100x22)、滚动条 `[197..199]`/`[207..209]`(12x12) 与
 /// 拖动手柄 `[205/206]`(12x18) 的精灵存在性、锚点（x=108）、以及不越出 `Title[786]` 面板。
