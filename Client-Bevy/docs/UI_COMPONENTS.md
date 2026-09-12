@@ -18,6 +18,7 @@
 - 批7 状态窗/Mail：NPC、Trade/GuestTrade、NpcGoods、Roll、Buff 同步 `DialogManager`，世界输入锁与通用显隐使用同一真值；Mail 列表恢复 C# 312x444 面板、Title[7]、10x33 行和底部操作按钮。
 - 批8 Center 布局：Friend/Fishing/Creature/Mentor/Relationship/Report/Guild 按窗口真实尺寸居中；Mentor/Relationship/Report 使用 C# 控件坐标，ChatNotice 使用 C# 顶部中心公式。
 - 批9 Creature 内部：背景改 C# `Title[468]`（原生 452x376，原先用 `Prguse[170]` 244x207 拉伸变形）；10 个宠物槽按 C# 5x2 网格（44+81*col, 259+40*row，命中测试同一常量）；改名/召唤/解散/释放/选项/自动/半自动改用 C# `Title` 精灵与原生坐标/尺寸；自动/半自动按 C# `RefreshMode()` 依 `petMode` 互斥显示（原先两个叠在同一坐标）。
+- 批10 Craft 外壳：面板改 C# `Prguse[1109]`（原生 337x215），位置按 C# `Show()` 相对背包窗 `(Inventory.X-12, Y+236)`；RecipeLabel(22,5)/PossibilityLabel(10,135)/GoldLabel(30,190) 与标题 `Title[18]`(28,8) 对齐；按钮改 C# `AutoFill Title[180..182]`(165,185)、`Craft Title[336..338]`(215,185)、Close `Prguse2[360..362]`(312,3) 原生 24x21（原先一个通用 `Title[206..208]` 合成按钮 + 文本行）。
 
 ## 1. 通用交互控件
 
@@ -134,15 +135,17 @@
 | 批7 状态窗/Mail | 状态驱动窗口同步 DialogManager；Mail 面板/10x33 行/按钮对齐 C# | #2714 |
 | 批8 Center 布局 | Friend/Fishing/Creature/Mentor/Relationship/Report/Guild 居中；Report/ChatNotice 坐标收口 | #2716 |
 | 批9 Creature 内部 | `Title[468]` 面板 + 5x2 宠物槽 + C# 操作按钮精灵/坐标 + 自动/半自动互斥 | #2718 |
+| 批10 Craft 外壳 | `Prguse[1109]` 面板 + C# 标签/按钮坐标（材料槽待配方协议扩展） | #2720 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：385 lib + 2 bin + 1 smoke + 17 alignment 通过（批9后基线）。
+- `cargo test`（Client-Bevy）：387 lib + 2 bin + 1 smoke + 17 alignment 通过（批10 Craft 外壳后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：665 lib + protocol integration 通过（批3后基线）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
 - 批9 实机复验（2026-09-13，`--skip-login` + Control API `dialog`/`screenshot`，mock 3 宠物）：Creature 面板为 `Title[468]` 452x376 居中；槽位标签 `>小猪` / `很长的宠物名`（超宽截断）/ `#4`（空名字回退）互不压叠、无越界裁切；右侧操作列 RENAME / DISMISS（激活宠物）/ RELEASE / OPTIONS / ENABLE（Automatic 互斥，无半自动叠加）/ 刷新 均在 C# 坐标；信息行 (19,161)/(19,176) 显示「宠物: 3 个 ｜ 小猪 自动 饥饿:55」与操作反馈。
+- 批10 实机复验（2026-09-13，Control API 打开 Craft 截图）：`Prguse[1109]` 面板（含 3 工具格 + 6 材料格轮廓）、RecipeLabel(22,5)、PossibilityLabel(10,135)、AUTO(165,185)/CRAFT(215,185) 精灵按钮、Close(312,3) 与 C# 坐标一致。
 
 ## 7. 已知有意偏差
 
@@ -151,3 +154,5 @@
 - Creature：C# 未选中宠物时模式按钮是 `Enabled = false`（`RefreshMode()` 早返回、保留原可见性）；Bevy 无禁用态，未选中时直接 `Visibility::Hidden`。
 - Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
+- Craft：材料槽（C# 3 工具格 + 6 材料格）与 `AutoFill` 需配方 Tools/Ingredients 数据，而 Rust 侧 `S.NewRecipeInfo` 目前只下发 `recipe_id`（C# 下发整份 `ClientRecipeInfo`）——UI 骨架已按 C# 落地，格子与自动填充待协议扩展后补齐（当前服务端按配方自动扣材）。
+- Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。

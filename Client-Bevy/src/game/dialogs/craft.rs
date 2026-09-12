@@ -12,6 +12,7 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::inventory::InventoryOrigin;
 use crate::game::dialogs::npc_goods::NpcGoodsState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -52,6 +53,25 @@ pub fn craft_should_close(npc_panel: mir2_shared::enums::PanelType, goods_visibl
     craft_open && npc_panel == mir2_shared::enums::PanelType::Craft && !goods_visible
 }
 
+/// C# `CraftDialog`（NPCDialogs.cs:2256）：面板 `Index = 1109; Library = Prguse`（原生 337x215）。
+const CRAFT_W: f32 = 337.0;
+const CRAFT_H: f32 = 215.0;
+/// C# `CraftDialog.Show()`（NPCDialogs.cs:2448）：
+/// `Location = (InventoryDialog.X - 12, InventoryDialog.Y + 236)`。
+const CRAFT_REL_X: f32 = -12.0;
+const CRAFT_REL_Y: f32 = 236.0;
+/// C# 控件锚点（NPCDialogs.cs:2280-2391）。
+const CRAFT_TITLE: (f32, f32) = (28.0, 8.0); // Title[18] 57x15
+const CRAFT_RECIPE_LABEL: (f32, f32) = (22.0, 5.0); // RecipeLabel
+const CRAFT_MESSAGE_LABEL: (f32, f32) = (10.0, 135.0); // PossibilityLabel
+const CRAFT_GOLD_LABEL: (f32, f32) = (30.0, 190.0); // GoldLabel
+const CRAFT_CLOSE_POS: (f32, f32) = (312.0, 3.0); // CloseButton（Prguse2[360..362] 24x21）
+const CRAFT_AUTOFILL_POS: (f32, f32) = (165.0, 185.0); // AutoFillButton（Title[180..182] 48x25）
+const CRAFT_CONFIRM_POS: (f32, f32) = (215.0, 185.0); // CraftButton（Title[336..338] 80x25）
+/// 精灵首帧索引（Index/HoverIndex/PressedIndex 连续 3 帧）。
+const CRAFT_AUTOFILL_INDEX: usize = 180;
+const CRAFT_CONFIRM_INDEX: usize = 336;
+
 #[derive(Component)]
 pub struct CraftWidget;
 
@@ -60,6 +80,10 @@ pub struct CraftClose;
 
 #[derive(Component)]
 pub struct CraftBtn;
+
+/// 自动填充（C# `AutoFillButton`：按配方工具/材料从背包自动摆放）
+#[derive(Component)]
+pub struct CraftAutoFill;
 
 #[derive(Component)]
 pub struct CraftLine(usize);
@@ -95,6 +119,7 @@ fn spawn_craft(
     mut fonts: ResMut<Assets<Font>>,
     mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
+    inv_origin: Res<InventoryOrigin>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -103,38 +128,63 @@ fn spawn_craft(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[170] @ (280,80)。批 20 同款统一 320x262：原生 244x207
-    // 会裁掉关闭按钮(300,3)，且高度与其他 Prguse[170] 面板（mentor/report/
-    // relationship/timer/buff/refine 均 320x262）保持观感一致（批次19-23 评审 F1）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+    // 面板 C# Prguse[1109]（原生 337x215）；位置按 C# Show() 相对背包窗计算
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1109) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        inv_origin.0 + CRAFT_REL_X,
+        inv_origin.1 + CRAFT_REL_Y,
+        CRAFT_W,
+        CRAFT_H,
+        30,
+    );
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Craft), CraftWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 关闭 Prguse2[360/361/362] @(300,3)
+        // 标题精灵 C# TitleLabel Title[18] @(28,8)
+        if let Some(title) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 18) {
+            crate::ui::theme::spawn_image(p, title, CRAFT_TITLE.0, CRAFT_TITLE.1, 57.0, 15.0, 9);
+        }
+        // 关闭 C# CloseButton Prguse2[360/361/362] @(312,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(CraftClose);
+            spawn_icon_button(p, n, h, pr, CRAFT_CLOSE_POS.0, CRAFT_CLOSE_POS.1, 24.0, 21.0, 10)
+                .insert(CraftClose);
         }
-        // 选中配方 + 结果消息 + 提示 + 已学会数 @(18,40+22i)
-        for i in 0..4usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
-                .insert(CraftLine(i));
-        }
-        // 合成按钮 Title[206/207/208] @(80,160)
+        // C# RecipeLabel(22,5) / PossibilityLabel(10,135) / GoldLabel(30,190)；
+        // CraftLine(3) 是 Bevy 扩展（已学会配方数），放在标题下方空位。
+        spawn_label(p, &cjk, "", CRAFT_RECIPE_LABEL.0, CRAFT_RECIPE_LABEL.1, 12.0, Color::WHITE, 9)
+            .insert(CraftLine(0));
+        spawn_label(p, &cjk, "", CRAFT_MESSAGE_LABEL.0, CRAFT_MESSAGE_LABEL.1, 12.0, Color::WHITE, 9)
+            .insert(CraftLine(1));
+        spawn_label(p, &cjk, "", CRAFT_GOLD_LABEL.0, CRAFT_GOLD_LABEL.1, 12.0, Color::WHITE, 9)
+            .insert(CraftLine(2));
+        spawn_label(p, &cjk, "", CRAFT_RECIPE_LABEL.0, CRAFT_RECIPE_LABEL.1 + 16.0, 12.0, Color::WHITE, 9)
+            .insert(CraftLine(3));
+        // 自动填充 C# AutoFillButton Title[180..182] @(165,185)、合成 C# CraftButton Title[336..338] @(215,185)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_AUTOFILL_INDEX),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_AUTOFILL_INDEX + 1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_AUTOFILL_INDEX + 2),
         ) {
-            spawn_icon_button(p, n, h, pr, 80.0, 160.0, 76.0, 25.0, 10).insert(CraftBtn);
+            spawn_icon_button(p, n, h, pr, CRAFT_AUTOFILL_POS.0, CRAFT_AUTOFILL_POS.1, 48.0, 25.0, 10)
+                .insert(CraftAutoFill);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX + 1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX + 2),
+        ) {
+            spawn_icon_button(p, n, h, pr, CRAFT_CONFIRM_POS.0, CRAFT_CONFIRM_POS.1, 80.0, 25.0, 10)
+                .insert(CraftBtn);
         }
     });
 }
@@ -145,11 +195,15 @@ fn craft_ui_system(
     mut state: ResMut<CraftState>,
     mut npc_goods: ResMut<NpcGoodsState>,
     net: Res<NetConnection>,
+    inv_origin: Res<InventoryOrigin>,
     close: Query<(Entity, &Interaction), With<CraftClose>>,
     craft_btn: Query<(Entity, &Interaction), With<CraftBtn>>,
+    autofill_btn: Query<(Entity, &Interaction), With<CraftAutoFill>>,
     mut widgets: Query<&mut Visibility, With<CraftWidget>>,
+    mut panel_node: Query<&mut Node, With<CraftWidget>>,
     mut lines: Query<(&mut Text, &CraftLine)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    mut was_open: Local<bool>,
 ) {
     fn edge(
         e: Entity,
@@ -172,6 +226,14 @@ fn craft_ui_system(
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
+    // C# Show()：每次打开按背包窗当前位置定位（InventoryDialog.X-12, Y+236）
+    if open && !*was_open {
+        for mut node in &mut panel_node {
+            node.left = Val::Px(inv_origin.0 + CRAFT_REL_X);
+            node.top = Val::Px(inv_origin.1 + CRAFT_REL_Y);
+        }
+    }
+    *was_open = open;
     if !open {
         return;
     }
@@ -184,10 +246,18 @@ fn craft_ui_system(
         text.0 = match line.0 {
             0 => recipe_label(&state.selected),
             1 => state.message.clone(),
-            2 => "点击左侧产物选中 → 点合成".to_string(),
+            2 => "材料槽待移植：当前服务端按配方自动扣材".to_string(),
             3 => format!("已学会配方: {} 种", state.learned.len()),
             _ => String::new(),
         };
+    }
+    // 自动填充（C# AutoFill）：需要配方 Tools/Ingredients 全量数据
+    // （S.NewRecipeInfo 目前只下发 recipe_id），协议扩展前仅提示。
+    for (e, inter) in &autofill_btn {
+        if edge(e, inter, &mut prev_inter) {
+            state.message = "自动填充待配方材料协议扩展".to_string();
+            tracing::info!("🔧 自动填充：等待 NewRecipeInfo 全量配方数据");
+        }
     }
     // 合成
     for (e, inter) in &craft_btn {
@@ -261,5 +331,33 @@ mod tests {
         assert!(!craft_should_close(PanelType::Craft, true, true));
         assert!(!craft_should_close(PanelType::Buy, false, true));
         assert!(!craft_should_close(PanelType::Craft, false, false));
+    }
+
+    /// #2720：Craft 面板与控件锚点对齐 C# `CraftDialog`（NPCDialogs.cs:2280-2391）。
+    #[test]
+    fn craft_layout_matches_csharp_anchors() {
+        assert_eq!((CRAFT_W, CRAFT_H), (337.0, 215.0)); // Prguse[1109] 原生尺寸
+        assert_eq!((CRAFT_REL_X, CRAFT_REL_Y), (-12.0, 236.0)); // Show() 相对背包
+        assert_eq!(CRAFT_TITLE, (28.0, 8.0));
+        assert_eq!(CRAFT_RECIPE_LABEL, (22.0, 5.0));
+        assert_eq!(CRAFT_MESSAGE_LABEL, (10.0, 135.0));
+        assert_eq!(CRAFT_GOLD_LABEL, (30.0, 190.0));
+        assert_eq!(CRAFT_CLOSE_POS, (312.0, 3.0));
+        assert_eq!(CRAFT_AUTOFILL_POS, (165.0, 185.0));
+        assert_eq!(CRAFT_CONFIRM_POS, (215.0, 185.0));
+        assert_eq!(CRAFT_AUTOFILL_INDEX, 180);
+        assert_eq!(CRAFT_CONFIRM_INDEX, 336);
+    }
+
+    /// 控件必须落在面板内且互不重叠（C# 面板 337x215）。
+    #[test]
+    fn craft_buttons_fit_panel() {
+        let inside = |(x, y): (f32, f32), w: f32, h: f32| {
+            x >= 0.0 && y >= 0.0 && x + w <= CRAFT_W && y + h <= CRAFT_H
+        };
+        assert!(inside(CRAFT_CLOSE_POS, 24.0, 21.0));
+        assert!(inside(CRAFT_AUTOFILL_POS, 48.0, 25.0));
+        assert!(inside(CRAFT_CONFIRM_POS, 80.0, 25.0));
+        assert!(CRAFT_AUTOFILL_POS.0 + 48.0 <= CRAFT_CONFIRM_POS.0);
     }
 }
