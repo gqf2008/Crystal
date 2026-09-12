@@ -205,7 +205,7 @@ fn buff_ui_system(
         (&mut Text, &mut Node, &mut Visibility),
         (With<BuffCount>, Without<BuffLine>, Without<BuffExpand>, Without<BuffClose>, Without<BuffPanel>),
     >,
-    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>, Without<BuffCount>, Without<BuffClose>, Without<BuffExpand>, Without<BuffPanel>)>,
+    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>, Without<BuffCount>, Without<BuffClose>, Without<BuffExpand>)>,
     mut lines: Query<
         (&mut Text, &mut Visibility, &BuffLine),
         (Without<BuffCount>, Without<BuffClose>, Without<BuffExpand>, Without<BuffPanel>),
@@ -291,6 +291,7 @@ fn buff_ui_system(
 pub(crate) fn buff_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut buff: ResMut<BuffState>,
+    mut mgr: Option<ResMut<DialogManager>>,
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
 ) {
     use crate::network::server_event::ServerEvent;
@@ -352,6 +353,11 @@ pub(crate) fn buff_server_events(
             }
             _ => {}
         }
+    }
+    // BuffDialog 在 C# 中随已有 Buff 常驻显示；有管理资源时同步同一真值，
+    // 无 DialogsPlugin 的独立测试仍可运行。
+    if let Some(mgr) = mgr.as_mut() {
+        crate::game::dialogs::sync_dialog_state(mgr, DialogKind::Buff, !buff.buffs.is_empty());
     }
 }
 

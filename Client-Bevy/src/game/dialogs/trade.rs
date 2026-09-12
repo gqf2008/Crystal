@@ -363,6 +363,7 @@ fn trade_reset(trade: &mut TradeState) {
 /// 显隐 + 槽位物品渲染 + 文本/锁定状态 + 邀请提示 + 开窗推背包
 #[allow(clippy::type_complexity)]
 fn trade_ui_system(
+    mut mgr: ResMut<DialogManager>,
     trade: Res<TradeState>,
     // #2633 批次4 步7：MyName 改读 `PlayerName`（HudState 已于步9 删除）
     name_q: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
@@ -385,6 +386,10 @@ fn trade_ui_system(
     mut shift_right: MessageWriter<InventoryShiftRight>,
     mut was_visible: Local<bool>,
 ) {
+    // Trade/GuestTrade 由服务端会话驱动；同步管理栈后，PostUpdate 的通用
+    // 显隐兜底和世界输入锁能识别同一个可见状态。
+    crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::Trade, trade.visible);
+    crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::GuestTrade, trade.visible);
     for mut vis in &mut widgets {
         *vis = if trade.visible {
             Visibility::Visible

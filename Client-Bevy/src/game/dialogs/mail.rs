@@ -84,6 +84,22 @@ pub fn stamp_slots(stamped: bool) -> usize {
     if stamped { 5 } else { 1 }
 }
 
+// C# MailListDialog（MailDialogs.cs:32-35）布局锚点。
+const MAIL_W: f32 = 312.0;
+const MAIL_H: f32 = 444.0;
+const MAIL_SCREEN_W: f32 = 1024.0;
+const MAIL_VISIBLE_ROWS: usize = 10;
+const MAIL_ROW_H: f32 = 33.0;
+const MAIL_BUTTON_Y: f32 = 414.0;
+
+fn mail_panel_origin(screen_w: f32) -> (f32, f32) {
+    (screen_w - MAIL_W - 150.0, 5.0)
+}
+
+fn mail_row_y(index: usize) -> f32 {
+    55.0 + index as f32 * MAIL_ROW_H
+}
+
 /// 请求写邮件（#2631 跨对话框解耦 Message）。
 /// friend 等外部对话框不再直写 [`MailState`]，改发本 Message；邮件对话框的
 /// [`mail_compose_request_system`] 消费并自行预填收件人 + 打开写邮件界面。
@@ -107,6 +123,10 @@ pub struct MailClose;
 
 #[derive(Component)]
 pub struct MailDelete;
+
+/// 阅读所选邮件（C# MailListDialog.ReadButton → C.ReadMail）
+#[derive(Component)]
+pub struct MailReadBtn;
 
 /// 收取附件按钮（C# MailReadParcelDialog.CollectButton → C.CollectParcel）
 #[derive(Component)]
@@ -559,77 +579,117 @@ fn spawn_mail(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 邮件列表视图：根容器（透明，承载顶栏/标题/按钮/行/详情/滚动条；内容到 rel y=260）
-    let list = commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(280.0),
-                top: Val::Px(80.0),
-                width: Val::Px(360.0),
-                height: Val::Px(300.0),
-                ..default()
-            },
-            DialogRoot(DialogKind::Mail),
-            MailWidget,
-            GlobalZIndex(30),
-            Visibility::Hidden,
-            // #89 可滚动邮件列表：8 行 × 22px
-            UiScrollList {
-                rect_rel: (18.0, 60.0, 300.0, 176.0),
-                row_h: 22.0,
-                visible: 8,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (330.0, 60.0, 4.0, 176.0),
-                thumb: None,
-                z: 9,
-            },
-        ))
-        .id();
+    // C# MailListDialog: Title[670] 312x444 @ (ScreenWidth-W-150, 5).
+    let (panel_x, panel_y) = mail_panel_origin(MAIL_SCREEN_W);
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 670) else {
+        return;
+    };
+    let list = spawn_panel(
+        &mut commands,
+        bg,
+        panel_x,
+        panel_y,
+        MAIL_W,
+        MAIL_H,
+        30,
+    );
+    commands.entity(list).insert((
+        DialogRoot(DialogKind::Mail),
+        MailWidget,
+        UiScrollList {
+            rect_rel: (10.0, mail_row_y(0), 290.0, MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32),
+            row_h: MAIL_ROW_H,
+            visible: MAIL_VISIBLE_ROWS,
+            total: 0,
+            offset: 0,
+            step: 3,
+            track_rel: (300.0, mail_row_y(0), 8.0, MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32),
+            thumb: None,
+            z: 9,
+        },
+    ));
 
     commands.entity(list).with_children(|p| {
-        // 滚动条（面板子节点）
-        spawn_scroll_bar_ui(p, (330.0, 60.0, 4.0, 176.0), 9);
-        // 顶栏 Prguse[956] @(0,0) 252x16
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 956) {
-            crate::ui::theme::spawn_image(p, h, 0.0, 0.0, 252.0, 16.0, 8);
+        spawn_scroll_bar_ui(
+            p,
+            (300.0, mail_row_y(0), 8.0, MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32),
+            9,
+        );
+        // C# TitleLabel = Title[7]，不是 NEW CHARACTER（Title[20]）。
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 7) {
+            let (w, h_px) = libs
+                .0
+                .get_image(LibraryName::Title, 7)
+                .map(|i| (i.width as f32, i.height as f32))
+                .unwrap_or((276.0, 25.0));
+            crate::ui::theme::spawn_image(p, h, 18.0, 9.0, w, h_px, 8);
         }
-        // 标题 Title[20] @(18,8)
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 20) {
-            crate::ui::theme::spawn_image(p, h, 18.0, 8.0, 187.0, 20.0, 8);
-        }
-        // 关闭 Prguse2[360-362] @(340,3)
+        // C# 三段表头 @ y=34。
+        spawn_label(p, &cjk, "类型", 8.0, 38.0, 12.0, Color::WHITE, 9);
+        spawn_label(p, &cjk, "发件人", 47.0, 38.0, 12.0, Color::WHITE, 9);
+        spawn_label(p, &cjk, "信息", 181.0, 38.0, 12.0, Color::WHITE, 9);
+        // C# CloseButton @ (W-24, 3)。
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 340.0, 3.0, 20.0, 20.0, 10).insert(MailClose);
+            spawn_icon_button(p, n, h, pr, MAIL_W - 24.0, 3.0, 20.0, 20.0, 10)
+                .insert(MailClose);
         }
-        // 写邮件 / 删除 / 收取
+        // C# 10 行 @ 55 + 33*i；行点击由 mail_ui_system 按同一常量命中。
+        for i in 0..MAIL_VISIBLE_ROWS {
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                10.0,
+                mail_row_y(i) + 9.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(MailLine(i));
+        }
+        // 阅读内容复用同一面板；有 detail 时隐藏行并显示正文。
+        spawn_label(p, &cjk, "", 10.0, 58.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 12)
+            .insert((MailDetailText, Visibility::Hidden));
+
+        // C# 列表操作按钮 y=414：写邮件 / 阅读 / 删除。
+        let actions = [
+            (75.0, 563, 564, 565),
+            (129.0, 572, 573, 574),
+            (156.0, 557, 558, 559),
+        ];
+        for (x, normal, hover, pressed) in actions {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, normal),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, hover),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, pressed),
+            ) {
+                let mut e = spawn_icon_button(p, n, h, pr, x, MAIL_BUTTON_Y, 24.0, 24.0, 10);
+                match normal {
+                    563 => {
+                        e.insert(MailWrite);
+                    }
+                    572 => {
+                        e.insert(MailReadBtn);
+                    }
+                    _ => {
+                        e.insert(MailDelete);
+                    }
+                }
+            }
+        }
+        // 附件领取按钮只在阅读详情且附件可领取时显示（C# MailReadParcelDialog）。
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 680),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 681),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 682),
         ) {
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 300.0, 200.0, 60.0, 23.0, 10)
-                .insert(MailWrite);
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 240.0, 226.0, 60.0, 23.0, 10)
-                .insert(MailDelete);
-            spawn_label(p, &cjk, "删除", 254.0, 230.0, 12.0, Color::WHITE, 11);
-            spawn_icon_button(p, n, h, pr, 170.0, 226.0, 60.0, 23.0, 10).insert(MailCollect);
-            spawn_label(p, &cjk, "收取", 184.0, 230.0, 12.0, Color::WHITE, 11);
+            spawn_icon_button(p, n, h, pr, 100.0, 390.0, 32.0, 24.0, 10)
+                .insert(MailCollect);
         }
-        // 邮件列表（8 行）@(18,60+22i)
-        for i in 0..8usize {
-            spawn_label(p, &cjk, "", 18.0, 60.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
-                .insert(MailLine(i));
-        }
-        // 内容区（正文/金币）@(18,260)
-        spawn_label(p, &cjk, "", 18.0, 260.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 9)
-            .insert(MailDetailText);
     });
 
     // ---- 写邮件界面（C# MailComposeParcelDialog 覆盖层 360x430 @ (290,80)）----
@@ -737,17 +797,29 @@ fn mail_ui_system(
     windows: Query<&Window>,
     close: Query<(Entity, &Interaction), With<MailClose>>,
     delete_btn: Query<(Entity, &Interaction), With<MailDelete>>,
-    mut collect_btn: Query<(Entity, &Interaction, &mut Visibility), With<MailCollect>>,
+    read_btn: Query<(Entity, &Interaction), With<MailReadBtn>>,
+    mut collect_btn: Query<
+        (Entity, &Interaction, &mut Visibility),
+        (With<MailCollect>, Without<MailLine>, Without<MailDetailText>),
+    >,
     mut widgets: Query<
         (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),
         (
             With<MailWidget>,
             Without<MailComposeWidget>,
             Without<MailCollect>,
+            Without<MailLine>,
+            Without<MailDetailText>,
         ),
     >,
-    mut lines: Query<(&mut Text, &mut TextColor, &MailLine), Without<MailDetailText>>,
-    mut detail_texts: Query<(&mut Text, &MailDetailText), Without<MailLine>>,
+    mut lines: Query<
+        (&mut Text, &mut TextColor, &mut Visibility, &MailLine),
+        (Without<MailDetailText>, Without<MailCollect>),
+    >,
+    mut detail_texts: Query<
+        (&mut Text, &mut Visibility, &MailDetailText),
+        (Without<MailLine>, Without<MailCollect>),
+    >,
     mut scroll: Query<&mut UiScrollList, With<MailWidget>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<MailWidget>>,
@@ -780,15 +852,27 @@ fn mail_ui_system(
     }
     for (e, inter) in &close {
         if edge(e, inter, &mut prev_inter) {
-            mgr.close(DialogKind::Mail);
+            if mail.detail.is_some() {
+                // 阅读态先返回列表，第二次关闭才关闭整个邮件窗。
+                mail.detail = None;
+                mail.selected = None;
+            } else {
+                mgr.close(DialogKind::Mail);
+            }
         }
     }
+    let showing_detail = mail.detail.is_some();
     // 列表（#89 支持滚轮滚动）
     let mut sl = scroll.single_mut();
     if let Ok(sl) = sl.as_mut() {
         sl.set_total(mail.mails.len());
         let off = sl.offset;
-        for (mut text, mut color, line) in &mut lines {
+        for (mut text, mut color, mut vis, line) in &mut lines {
+            *vis = if showing_detail {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            };
             let idx = off + line.0;
             text.0 = match mail.mails.get(idx) {
                 Some(m) => {
@@ -808,7 +892,12 @@ fn mail_ui_system(
         }
     }
     // 内容区
-    for (mut text, _) in &mut detail_texts {
+    for (mut text, mut vis, _) in &mut detail_texts {
+        *vis = if showing_detail {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         text.0 = match mail.detail.as_ref() {
             Some(d) => {
                 let mut s = format!("发件人: {}\n主题: {}\n\n{}", d.sender, d.subject, d.body);
@@ -837,7 +926,7 @@ fn mail_ui_system(
         .map(|d| d.collected && (!d.items.is_empty() || d.gold > 0))
         .unwrap_or(false);
     for (e, inter, mut vis) in &mut collect_btn {
-        *vis = if open && can_collect {
+        *vis = if open && showing_detail && can_collect {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -852,8 +941,22 @@ fn mail_ui_system(
         }
     }
 
+    // 阅读按钮与行点击共用同一 C.ReadMail 路径。
+    for (e, inter) in &read_btn {
+        if edge(e, inter, &mut prev_inter) && !showing_detail {
+            if let Some(idx) = mail.selected {
+                if let Some(m) = mail.mails.get(idx) {
+                    net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
+                        mail_id: m.mail_id,
+                    });
+                    tracing::info!("📧 读取邮件按钮: {} ({})", m.subject, m.mail_id);
+                }
+            }
+        }
+    }
+
     // 点击列表项 → ReadMail（#89：行号 = 滚动偏移 + 可视槽位）
-    if mouse.just_pressed(MouseButton::Left) {
+    if mouse.just_pressed(MouseButton::Left) && !showing_detail {
         let Ok(window) = windows.single() else { return };
         let Some(cursor) = window.cursor_position() else {
             return;
@@ -861,11 +964,15 @@ fn mail_ui_system(
         let off = scroll.single().map(|s| s.offset).unwrap_or(0);
         let (ox, oy) = panel_origin
             .single()
-            .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
-            .unwrap_or((280.0, 80.0));
-        for i in 0..8usize {
-            let y = oy + 60.0 + i as f32 * 22.0;
-            if cursor.x >= ox + 18.0 && cursor.x <= ox + 320.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+            .map(|n| crate::ui::theme::node_origin(n, mail_panel_origin(MAIL_SCREEN_W)))
+            .unwrap_or(mail_panel_origin(MAIL_SCREEN_W));
+        for i in 0..MAIL_VISIBLE_ROWS {
+            let y = oy + mail_row_y(i);
+            if cursor.x >= ox + 10.0
+                && cursor.x <= ox + MAIL_W - 12.0
+                && cursor.y >= y
+                && cursor.y <= y + MAIL_ROW_H
+            {
                 if let Some(m) = mail.mails.get(off + i) {
                     let mail_id = m.mail_id;
                     let subject = m.subject.clone();
@@ -961,6 +1068,15 @@ pub fn build_mail_items_idx(attach: &[Option<u64>]) -> [u64; 5] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mail_list_layout_matches_csharp_anchor() {
+        assert_eq!(mail_panel_origin(MAIL_SCREEN_W), (562.0, 5.0));
+        assert_eq!(mail_row_y(0), 55.0);
+        assert_eq!(mail_row_y(MAIL_VISIBLE_ROWS - 1), 352.0);
+        assert!(mail_row_y(MAIL_VISIBLE_ROWS - 1) + MAIL_ROW_H < MAIL_BUTTON_Y);
+        assert!(MAIL_BUTTON_Y + 24.0 <= MAIL_H);
+    }
 
     #[test]
     fn build_mail_items_idx_empty() {

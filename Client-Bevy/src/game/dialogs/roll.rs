@@ -130,6 +130,7 @@ fn spawn_roll(
 }
 
 fn roll_ui_system(
+    mut mgr: ResMut<DialogManager>,
     time: Res<Time>,
     mut state: ResMut<RollState>,
     net: ResMut<NetConnection>,
@@ -141,6 +142,7 @@ fn roll_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut logged: Local<bool>,
 ) {
+    crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::Roll, state.visible);
     if !state.visible {
         for mut vis in &mut widgets {
             *vis = Visibility::Hidden;

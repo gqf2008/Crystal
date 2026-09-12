@@ -9,7 +9,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::DialogRoot;
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -126,7 +126,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_npc_goods);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_goods);
         app.add_systems(
             Update,
-            npc_goods_ui_system.run_if(in_state(AppState::Game)),
+            (npc_goods_dialog_sync_system, npc_goods_ui_system).run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -210,6 +210,13 @@ fn spawn_npc_goods(
 fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     // 宽度=右界−左界（480−12）：旧实现误把绝对右界当宽度，命中带右扩 12px
     (ox + 12.0, oy + 16.0 + i as f32 * 22.0, 468.0, 18.0)
+}
+
+fn npc_goods_dialog_sync_system(
+    state: Res<NpcGoodsState>,
+    mut mgr: ResMut<DialogManager>,
+) {
+    crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::NpcGoods, state.visible);
 }
 
 fn npc_goods_ui_system(

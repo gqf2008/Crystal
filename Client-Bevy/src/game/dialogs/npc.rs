@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use crate::game::dialogs::text_input::{
     TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
 };
-use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -155,8 +155,6 @@ fn spawn_npc_dialog(
     commands.entity(panel).insert((
         DialogRoot(DialogKind::Npc),
         NpcDialogWidget,
-        // 服务器驱动显隐，不随 DialogManager.open 门控（见文件头迁移说明）
-        AlwaysVisible,
         // #118 长对话页滚轮滚动（C# NPC 对话框支持 MouseWheel）
         UiScrollList {
             rect_rel: (8.0, 34.0, 400.0, 144.0),
@@ -265,6 +263,9 @@ fn npc_ui_system(
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
+
+    // 状态驱动窗口同样进入 DialogManager，统一显隐兜底与世界输入锁。
+    crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::Npc, npc.visible);
 
     for mut vis in widgets.iter_mut() {
         *vis = if npc.visible {
