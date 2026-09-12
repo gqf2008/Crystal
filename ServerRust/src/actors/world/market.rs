@@ -1422,7 +1422,7 @@ impl Message<ItemRentalRequestMsg> for WorldActor {
             return;
         }
 
-        // Create rental session (initiator = renter, partner = owner)
+        // 租赁会话按 C# 角色建键：发起方 = 物主（自有物品窗），partner = 租客（自有费用窗）
         self.rental_sessions.insert(
             msg.session_id,
             RentalSession {
@@ -1436,10 +1436,22 @@ impl Message<ItemRentalRequestMsg> for WorldActor {
             },
         );
 
-        // Send rental request to target (owner)
+        // C# `PlayerObject.ItemRentalRequest`（Server/MirObjects/PlayerObject.cs:14072）：
+        // 两端各收一份 —— 发起方 `Renting=false`（Name = 对方租客名），
+        // 目标方 `Renting=true`（Name = 发起方即物主名）
+        self.send_rental_packet(
+            msg.session_id,
+            mir2_shared::packets::server::rental_system::ItemRentalRequest {
+                name: msg.target_name.clone(),
+                renting: false,
+            },
+        );
         self.send_rental_packet(
             target_session,
-            mir2_shared::packets::server::rental_system::ItemRentalRequest {},
+            mir2_shared::packets::server::rental_system::ItemRentalRequest {
+                name: state.name.clone(),
+                renting: true,
+            },
         );
         send_system_message(
             &self.gate_ref,
@@ -1546,16 +1558,10 @@ impl Message<DepositRentalItemRequest> for WorldActor {
             return;
         }
 
-        // Find the rental session where this player is the partner (owner)
-        let initiator = self
-            .rental_sessions
-            .iter()
-            .find(|(_, s)| s.partner_session == msg.session_id)
-            .map(|(k, _)| *k);
-
-        let initiator = match initiator {
-            Some(sid) => sid,
-            None => {
+        // C# `DepositRentalItem` 由物主发出（会话键即物主 sid）
+        let owner_sid = match self.rental_sessions.contains_key(&msg.session_id) {
+            true => msg.session_id,
+            false => {
                 send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
                 return;
             }
@@ -1579,7 +1585,7 @@ impl Message<DepositRentalItemRequest> for WorldActor {
             }
         };
 
-        if let Some(session) = self.rental_sessions.get_mut(&initiator) {
+        if let Some(session) = self.rental_sessions.get_mut(&owner_sid) {
             session.owner_item = Some(item.clone());
         }
 
@@ -1590,23 +1596,22 @@ impl Message<DepositRentalItemRequest> for WorldActor {
                 success: true,
             },
         );
-        // Also update the renter's dialog
-        self.send_rental_packet(
-            initiator,
-            mir2_shared::packets::server::rental_system::UpdateRentalItem {
-                item: item.clone(),
-                rental_fee: self
-                    .rental_sessions
-                    .get(&initiator)
-                    .map(|s| s.fee)
-                    .unwrap_or(0),
-                rental_period: self
-                    .rental_sessions
-                    .get(&initiator)
-                    .map(|s| s.period_hours as i32)
-                    .unwrap_or(0),
-            },
-        );
+        // C# `UpdateRentalItem()`：把存入物品同步给租客（对方物品窗）
+        if let Some(session) = self.rental_sessions.get(&owner_sid) {
+            let (renter, fee, period) = (
+                session.partner_session,
+                session.fee,
+                session.period_hours as i32,
+            );
+            self.send_rental_packet(
+                renter,
+                mir2_shared::packets::server::rental_system::UpdateRentalItem {
+                    item: Some(item.clone()),
+                    rental_fee: fee,
+                    rental_period: period,
+                },
+            );
+        }
         debug!(
             "DepositRentalItem: session={} from={} uid={}",
             msg.session_id, from, uid
@@ -1664,21 +1669,16 @@ impl Message<RetrieveRentalItemRequest> for WorldActor {
             return;
         }
 
-        let initiator = self
-            .rental_sessions
-            .iter()
-            .find(|(_, s)| s.partner_session == msg.session_id)
-            .map(|(k, _)| *k);
-
-        let initiator = match initiator {
-            Some(sid) => sid,
-            None => {
+        // C# `RetrieveRentalItem` 由物主发出（会话键即物主 sid）
+        let owner_sid = match self.rental_sessions.contains_key(&msg.session_id) {
+            true => msg.session_id,
+            false => {
                 send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
                 return;
             }
         };
 
-        let item = if let Some(session) = self.rental_sessions.get_mut(&initiator) {
+        let item = if let Some(session) = self.rental_sessions.get_mut(&owner_sid) {
             session.owner_item.take()
         } else {
             None
@@ -1708,15 +1708,21 @@ impl Message<RetrieveRentalItemRequest> for WorldActor {
                     success: added,
                 },
             );
-            // Update renter's dialog (clear item)
-            self.send_rental_packet(
-                initiator,
-                mir2_shared::packets::server::rental_system::UpdateRentalItem {
-                    item: mir2_shared::data::item::UserItem::default(),
-                    rental_fee: 0,
-                    rental_period: 0,
-                },
-            );
+            // 清空租客侧对方物品窗（C# `UpdateRentalItem` HasData=false）
+            if let Some(renter) = self
+                .rental_sessions
+                .get(&owner_sid)
+                .map(|s| s.partner_session)
+            {
+                self.send_rental_packet(
+                    renter,
+                    mir2_shared::packets::server::rental_system::UpdateRentalItem {
+                        item: None,
+                        rental_fee: 0,
+                        rental_period: 0,
+                    },
+                );
+            }
             debug!(
                 "RetrieveRentalItem: session={} to={} uid={}",
                 msg.session_id, to, item.unique_id
@@ -1805,13 +1811,14 @@ pub struct ItemRentalFeeMsg {
 impl Message<ItemRentalFeeMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalFeeMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        let initiator = self
+        // C# `SetItemRentalFee`：费用由租客设置，只回给物主（对方费用窗）
+        let owner_sid = self
             .rental_sessions
             .iter()
             .find(|(_, s)| s.partner_session == msg.session_id)
             .map(|(k, _)| *k);
 
-        let initiator = match initiator {
+        let owner_sid = match owner_sid {
             Some(sid) => sid,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
@@ -1819,20 +1826,18 @@ impl Message<ItemRentalFeeMsg> for WorldActor {
             }
         };
 
-        if let Some(session) = self.rental_sessions.get_mut(&initiator) {
+        if let Some(session) = self.rental_sessions.get_mut(&owner_sid) {
             session.fee = msg.amount;
         }
 
-        // Broadcast fee to both players
         self.send_rental_packet(
-            initiator,
+            owner_sid,
             mir2_shared::packets::server::rental_system::ItemRentalFee { fee: msg.amount },
         );
-        self.send_rental_packet(
-            msg.session_id,
-            mir2_shared::packets::server::rental_system::ItemRentalFee { fee: msg.amount },
+        debug!(
+            "ItemRentalFee: owner={} renter={} fee={}",
+            owner_sid, msg.session_id, msg.amount
         );
-        debug!("ItemRentalFee: initiator={} fee={}", initiator, msg.amount);
     }
 }
 
@@ -1844,39 +1849,34 @@ pub struct ItemRentalPeriodMsg {
 impl Message<ItemRentalPeriodMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalPeriodMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        let initiator = self
-            .rental_sessions
-            .iter()
-            .find(|(_, s)| s.partner_session == msg.session_id)
-            .map(|(k, _)| *k);
-
-        let initiator = match initiator {
-            Some(sid) => sid,
-            None => {
+        // C# `SetItemRentalPeriodLength`：期限由物主设置，只回给租客（对方物品窗）
+        let owner_sid = match self.rental_sessions.contains_key(&msg.session_id) {
+            true => msg.session_id,
+            false => {
                 send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
                 return;
             }
         };
 
-        if let Some(session) = self.rental_sessions.get_mut(&initiator) {
+        if let Some(session) = self.rental_sessions.get_mut(&owner_sid) {
             session.period_hours = msg.duration;
         }
 
-        self.send_rental_packet(
-            initiator,
-            mir2_shared::packets::server::rental_system::ItemRentalPeriod {
-                period: msg.duration as i32,
-            },
-        );
-        self.send_rental_packet(
-            msg.session_id,
-            mir2_shared::packets::server::rental_system::ItemRentalPeriod {
-                period: msg.duration as i32,
-            },
-        );
+        if let Some(renter) = self
+            .rental_sessions
+            .get(&owner_sid)
+            .map(|s| s.partner_session)
+        {
+            self.send_rental_packet(
+                renter,
+                mir2_shared::packets::server::rental_system::ItemRentalPeriod {
+                    period: msg.duration as i32,
+                },
+            );
+        }
         debug!(
-            "ItemRentalPeriod: initiator={} hours={}",
-            initiator, msg.duration
+            "ItemRentalPeriod: owner={} hours={}",
+            owner_sid, msg.duration
         );
     }
 }
@@ -1888,44 +1888,50 @@ pub struct ItemRentalLockFeeMsg {
 impl Message<ItemRentalLockFeeMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalLockFeeMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        // LockFee is sent by the renter (initiator)
-        let (partner, both_locked) = {
-            let session = match self.rental_sessions.get_mut(&msg.session_id) {
+        // C# `ItemRentalLockFee`：由租客锁定费用 → 本端回执 `GoldLocked`，
+        // 通知物主 `ItemRentalPartnerLock{GoldLocked}`，双方锁定后只通知物主可确认
+        let owner_sid = self
+            .rental_sessions
+            .iter()
+            .find(|(_, s)| s.partner_session == msg.session_id)
+            .map(|(k, _)| *k);
+        let owner_sid = match owner_sid {
+            Some(sid) => sid,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
+                return;
+            }
+        };
+
+        let (owner, both_locked) = {
+            let session = match self.rental_sessions.get_mut(&owner_sid) {
                 Some(s) => s,
-                None => {
-                    send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
-                    return;
-                }
+                None => return,
             };
             session.renter_locked = true;
-            (session.partner_session, session.owner_locked)
+            (owner_sid, session.owner_locked)
         };
 
         self.send_rental_packet(
             msg.session_id,
             mir2_shared::packets::server::rental_system::ItemRentalLock {
-                unique_id: 0,
-                locked: true,
+                success: true,
+                gold_locked: true,
+                item_locked: false,
             },
         );
         self.send_rental_packet(
-            partner,
+            owner,
             mir2_shared::packets::server::rental_system::ItemRentalPartnerLock {
-                unique_id: 0,
-                locked: true,
+                gold_locked: true,
+                item_locked: false,
             },
         );
 
-        // Check if both locked and can confirm
+        // C# 只在物主侧开放确认按钮
         if both_locked {
             self.send_rental_packet(
-                msg.session_id,
-                mir2_shared::packets::server::rental_system::CanConfirmItemRental {
-                    can_confirm: true,
-                },
-            );
-            self.send_rental_packet(
-                partner,
+                owner,
                 mir2_shared::packets::server::rental_system::CanConfirmItemRental {
                     can_confirm: true,
                 },
@@ -1942,61 +1948,43 @@ pub struct ItemRentalLockItemMsg {
 impl Message<ItemRentalLockItemMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalLockItemMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        // LockItem is sent by the owner (partner)
-        let initiator = self
-            .rental_sessions
-            .iter()
-            .find(|(_, s)| s.partner_session == msg.session_id)
-            .map(|(k, _)| *k);
-
-        let initiator = match initiator {
-            Some(sid) => sid,
-            None => {
+        // C# `ItemRentalLockItem`：由物主锁定物品（会话键即物主）
+        let owner_sid = match self.rental_sessions.contains_key(&msg.session_id) {
+            true => msg.session_id,
+            false => {
                 send_system_message(&self.gate_ref, msg.session_id, "没有活跃的租赁会话");
                 return;
             }
         };
 
-        let (partner, item_uid, both_locked) = {
-            let session = match self.rental_sessions.get_mut(&initiator) {
+        let (renter, both_locked) = {
+            let session = match self.rental_sessions.get_mut(&owner_sid) {
                 Some(s) => s,
                 None => return,
             };
             session.owner_locked = true;
-            (
-                session.partner_session,
-                session
-                    .owner_item
-                    .as_ref()
-                    .map(|i| i.unique_id)
-                    .unwrap_or(0),
-                session.renter_locked,
-            )
+            (session.partner_session, session.renter_locked)
         };
 
         self.send_rental_packet(
             msg.session_id,
             mir2_shared::packets::server::rental_system::ItemRentalLock {
-                unique_id: item_uid,
-                locked: true,
+                success: true,
+                gold_locked: false,
+                item_locked: true,
             },
         );
         self.send_rental_packet(
-            initiator,
+            renter,
             mir2_shared::packets::server::rental_system::ItemRentalPartnerLock {
-                unique_id: item_uid,
-                locked: true,
+                gold_locked: false,
+                item_locked: true,
             },
         );
+        // C# 只给物主发可确认（Confirm 按钮在物主自有物品窗）
         if both_locked {
             self.send_rental_packet(
-                initiator,
-                mir2_shared::packets::server::rental_system::CanConfirmItemRental {
-                    can_confirm: true,
-                },
-            );
-            self.send_rental_packet(
-                partner,
+                owner_sid,
                 mir2_shared::packets::server::rental_system::CanConfirmItemRental {
                     can_confirm: true,
                 },
@@ -2049,11 +2037,12 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         };
 
         let fee = session.fee as u64;
-        let renter_record = match self.players.get(&initiator) {
+        // 会话键 = 物主（存物/收租），partner = 租客（付费/收物）
+        let owner_record = match self.players.get(&initiator) {
             Some(r) => r.clone(),
             None => return,
         };
-        let owner_record = match self.players.get(&session.partner_session) {
+        let renter_record = match self.players.get(&session.partner_session) {
             Some(r) => r.clone(),
             None => return,
         };
@@ -2092,7 +2081,11 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
             .await
             .unwrap_or(false);
         if !has_gold {
-            send_system_message(&self.gate_ref, initiator, "金币不足，无法支付租金");
+            send_system_message(
+                &self.gate_ref,
+                session.partner_session,
+                "金币不足，无法支付租金",
+            );
             // Return item to owner
             let _ = owner_record
                 .actor_ref
@@ -2116,7 +2109,11 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
             .await
             .unwrap_or(false);
         if !deducted {
-            send_system_message(&self.gate_ref, initiator, "金币扣除失败，租赁取消");
+            send_system_message(
+                &self.gate_ref,
+                session.partner_session,
+                "金币扣除失败，租赁取消",
+            );
             let _ = owner_record
                 .actor_ref
                 .ask(AddItemToInventory { item })
@@ -2162,7 +2159,11 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
                 .actor_ref
                 .ask(AddItemToInventory { item })
                 .await;
-            send_system_message(&self.gate_ref, initiator, "背包已满，租赁失败");
+            send_system_message(
+                &self.gate_ref,
+                session.partner_session,
+                "背包已满，租赁失败",
+            );
             self.send_rental_packet(
                 initiator,
                 mir2_shared::packets::server::rental_system::ConfirmItemRental { success: false },
@@ -2176,12 +2177,12 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
 
         send_system_message(
             &self.gate_ref,
-            initiator,
+            session.partner_session,
             &format!("租赁成功！支付 {} 金币，获得物品 {}", fee, item.item_index),
         );
         send_system_message(
             &self.gate_ref,
-            session.partner_session,
+            initiator,
             &format!(
                 "租赁成功！获得 {} 金币，物品 {} 已出租",
                 fee, item.item_index

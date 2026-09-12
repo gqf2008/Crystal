@@ -638,16 +638,19 @@ pub(crate) fn auto_craft_test(
     }
 }
 
-/// --rental-test（租方）：发起租赁 → 等 UpdateRentalItem → 锁定费用 → 确认
+/// --rental-test（C# 物主侧，点 RENT 发起）：建会话 → 存物 → 设期限 → 锁物 → 确认
+/// 角色按 C# `S.ItemRentalRequest.Renting`（发起方 `renting=false` = 物主）
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_rental_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
+    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
+    use client_bevy::game::dialogs::item_rental::RentalRole;
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
@@ -661,29 +664,61 @@ pub(crate) fn auto_rental_test(
             net.send_packet(&client_bevy::network::RentalRequestWire {
                 target_name: "bevy2char".to_string(),
             });
-            tracing::info!("[RENTAL] 向 bevy2char 发起租赁");
+            tracing::info!("[RENTAL] 向 bevy2char 发起租赁（物主侧）");
             *stage = 1;
             *t = 0.0;
         }
         1 => {
             if *t >= 25.0 {
-                tracing::warn!("[RENTAL] ❌ 未收到租赁更新（has_item={}）", rental.has_item);
+                tracing::warn!("[RENTAL] ❌ 未收到租赁会话回执");
                 *stage = 9;
                 return;
             }
-            if rental.has_item {
-                tracing::info!(
-                    "[RENTAL] ✅ 收到租赁物品（费用={} 期限={}）",
-                    rental.fee,
-                    rental.period
-                );
-                net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockFee);
-                tracing::info!("[RENTAL] 锁定费用");
-                *stage = 2;
-                *t = 0.0;
+            if !rental.request_received || rental.role != RentalRole::Owner {
+                return;
+            }
+            tracing::info!("[RENTAL] ✅ 会话建立（对方={}）", rental.partner_name);
+            // C# `DepositRentalItem`：把背包第一格物品放进租赁格
+            let first = inv_q
+                .single()
+                .ok()
+                .and_then(|inv| inv.items.iter().position(|s| s.is_some()));
+            match first {
+                Some(from) => {
+                    net.send_packet(&mir2_shared::packets::client::item::DepositRentalItem {
+                        from: from as i32,
+                        to: 0,
+                    });
+                    tracing::info!("[RENTAL] 存入物品 槽位={}", from);
+                    *stage = 2;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[RENTAL] ❌ 背包为空");
+                    *stage = 9;
+                }
             }
         }
         2 => {
+            if *t < 4.0 {
+                return;
+            }
+            // C# `InputRentalPeroid`：期限 1..30
+            net.send_packet(&mir2_shared::packets::client::item::ItemRentalPeriod { days: 24 });
+            tracing::info!("[RENTAL] 设置期限 24 天");
+            *stage = 3;
+            *t = 0.0;
+        }
+        3 => {
+            if *t < 4.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockItem);
+            tracing::info!("[RENTAL] 锁定物品");
+            *stage = 4;
+            *t = 0.0;
+        }
+        4 => {
             if *t >= 15.0 {
                 tracing::warn!("[RENTAL] ❌ 未收到可确认");
                 *stage = 9;
@@ -692,11 +727,11 @@ pub(crate) fn auto_rental_test(
             if rental.can_confirm {
                 tracing::info!("[RENTAL] ✅ 双方已锁定，确认成交");
                 net.send_packet(&mir2_shared::packets::client::item::ConfirmItemRental);
-                *stage = 3;
+                *stage = 5;
                 *t = 0.0;
             }
         }
-        3 => {
+        5 => {
             if *t < 5.0 {
                 return;
             }
@@ -711,18 +746,18 @@ pub(crate) fn auto_rental_test(
     }
 }
 
-/// --rental-owner（物主）：等请求 → 存入物品 → 设费/期 → 锁定物品 → 等可确认
+/// --rental-renter（C# 租客侧，被请求的一方）：建会话 → 等对方存物 → 设费 → 锁费
 /// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn auto_rental_owner(
+pub(crate) fn auto_rental_renter(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
+    use client_bevy::game::dialogs::item_rental::RentalRole;
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
@@ -731,65 +766,42 @@ pub(crate) fn auto_rental_owner(
     match *stage {
         0 => {
             if *t >= 30.0 {
-                tracing::warn!("[RENTALOWNER] ❌ 未收到租赁请求");
+                tracing::warn!("[RENTALRENTER] ❌ 未收到租赁请求");
                 *stage = 9;
                 return;
             }
-            if rental.request_received {
-                tracing::info!("[RENTALOWNER] ✅ 收到租赁请求");
-                // 存入第一个背包物品
-                let first = inv_q
-                    .single()
-                    .ok()
-                    .and_then(|inv| {
-                        inv.items
-                            .iter()
-                            .enumerate()
-                            .find_map(|(i, s)| s.as_ref().map(|it| (i, it.unique_id)))
-                    });
-                match first {
-                    Some((_i, item_uid)) => {
-                        net.send_packet(&client_bevy::network::RentalDepositWire {
-                            unique_id: item_uid,
-                        });
-                        tracing::info!("[RENTALOWNER] 存入物品 uid={}", item_uid);
-                        *stage = 1;
-                        *t = 0.0;
-                    }
-                    None => {
-                        tracing::warn!("[RENTALOWNER] ❌ 背包为空");
-                        *stage = 9;
-                    }
-                }
+            if rental.request_received && rental.role == RentalRole::Renter {
+                tracing::info!("[RENTALRENTER] ✅ 收到租赁请求（物主={}）", rental.partner_name);
+                *stage = 1;
+                *t = 0.0;
             }
         }
         1 => {
-            if *t < 4.0 {
+            if *t >= 20.0 {
+                tracing::warn!("[RENTALRENTER] ❌ 未收到对方存入物品");
+                *stage = 9;
                 return;
             }
-            net.send_packet(&mir2_shared::packets::client::item::ItemRentalFee { amount: 100 });
-            net.send_packet(&mir2_shared::packets::client::item::ItemRentalPeriod { days: 24 });
-            tracing::info!("[RENTALOWNER] 设置费用 100 / 期限 24");
-            *stage = 2;
-            *t = 0.0;
+            // C# `UpdateRentalItem` → 对方物品窗出现物品后设费
+            if rental.partner_item.is_some() {
+                tracing::info!("[RENTALRENTER] ✅ 对方物品就位，设置费用 100");
+                net.send_packet(&mir2_shared::packets::client::item::ItemRentalFee { amount: 100 });
+                *stage = 2;
+                *t = 0.0;
+            }
         }
         2 => {
             if *t < 4.0 {
                 return;
             }
-            net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockItem);
-            tracing::info!("[RENTALOWNER] 锁定物品");
+            net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockFee);
+            tracing::info!("[RENTALRENTER] 锁定费用");
             *stage = 3;
             *t = 0.0;
         }
         3 => {
-            if *t >= 15.0 {
-                tracing::warn!("[RENTALOWNER] ❌ 未收到可确认");
-                *stage = 9;
-                return;
-            }
-            if rental.can_confirm {
-                tracing::info!("[RENTALOWNER] ✅ 双方已锁定，可确认");
+            if *t >= 20.0 {
+                tracing::info!("[RENTALRENTER] ✅ 费用已锁定（等待物主确认）");
                 *stage = 9;
             }
         }

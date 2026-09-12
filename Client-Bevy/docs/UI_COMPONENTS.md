@@ -26,6 +26,7 @@
 - 批10 ItemRent 浏览窗（`dialogs/item_rental_browse.rs`，新 `DialogKind::ItemRentalBrowse`）：C# `ItemRentalDialog` `Prguse3[1]`(400x174 居中)、标题 `Prguse3[0]`(22,8)、页签 `Prguse3[2]/[3]` (8,32)/(81,32)、`Prguse3[4..6]` RENT(295,144) 85x29、关闭(375,3)、3 行(0,78+i*21) 三列(5/137/264)；打开时按 C# 60s 节流发 `C.GetRentedItems`，`S.GetRentedItems` 线格式改成 C# `ItemRentalInformation`（ItemId/ItemName/RentingPlayerName/ItemReturnDate）→ 填行；RENT 按钮发 `C.ItemRentalRequest`。
 - 批10 TrustMerchant 外壳：面板改 C# `Title[786]`(492x478 @ C# 默认(0,0))；四页签 `Title[789/788]`(9,35)/`[791/790]`(104,35)/`[817/816]`(199,35)/`[819/818]`(389,35)；关闭 `Prguse2[360..362]`(465,3)；底部栏 SearchTextBox(11,452) 110x18、Find `Title[480..482]`(124,448)、Refresh `Prguse[663..665]`(320,448)、Buy `Title[703..705]`(380,448)、翻页 `Prguse2[240..242]`(251,419)/`[243..245]`(320,419)、PageLabel(260,419)；列表移至 C# 列表区 (130,60) 行高 18（左列 x≤120 留给筛选树）；GameShop 页签开现有商城窗，寄售卖价/立即售出/取回暂用 C# 筛选按钮精灵放左列。
 - 批10 ItemRent 出租流程（物主侧，`item_rental.rs` 重写）：C# 双窗同用 `Prguse[238]`(204x109)——费用窗 `(718,163)`（价格按钮 `Prguse[28]`(18,46) 32x17 → 数量框 → `ItemRentalFee`；锁定费用 `Prguse[250..252]`(22,76)）、物品窗 `(718,287)`（物品格(16,35)、锁定物品 `Prguse[250..252]`(18,76) 期限 1..30 校验、设置期限 `Prguse3[7..9]`(46,76) 84x28、确认 `Prguse3[10..12]`(130,76) 58x28 需 `can_confirm`）、两窗关闭 `Prguse2[360..362]`(180,3)、名称(30,8)/数值(60,42) 标签；发起租赁改由浏览窗 RENT（`C.ItemRentalRequest`）。
+- 批10 ItemRent 对方镜像窗（`item_rental.rs` 四窗化）：`S.ItemRentalRequest` 按 C# 扩成 `{Name, Renting}`（两端各收一份定角色），角色由 `Renting` 定（false=物主=点 RENT 发起方，true=租客=被请求方）；每端只显示「1 自有窗 + 1 对方窗」——物主：自有物品窗(287)+对方费用窗(`GuestItemRentDialog` 163)，租客：自有费用窗(163)+对方物品窗(`GuestItemRentingDialog` 287)，坐标互补不重叠；对方窗控件全部 `Enabled=false`（单帧、无关闭键、物品格只读）。`S.ItemRentalPartnerLock`/`S.ItemRentalLock` 改成 C# 判别位（`GoldLocked`/`ItemLocked`），锁定后对应窗锁形换 `Prguse[253]`。服务端角色按 C# 反转：会话键=物主（存物/设期/锁物/确认/收租），partner=租客（设费/锁费/收物）；`UpdateRentalItem` 改 C# `HasData`+`LoanItem`（None 清空对方物品格）且只发租客，`CanConfirm` 只发物主。
 
 ## 1. 通用交互控件
 
@@ -147,12 +148,13 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：399 lib + 2 bin + 1 smoke + 17 alignment 通过（批10 出租流程后基线）。
+- `cargo test`（Client-Bevy）：401 lib + 2 bin + 1 smoke + 18 alignment 通过（批10 对方镜像窗后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
-- ServerRust：665 lib + protocol integration 通过（批3后基线）。
+- ServerRust：666 lib + 6 integration 通过（批10 租赁角色对齐后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
 - 批9 实机复验（2026-09-13，`--skip-login` + Control API `dialog`/`screenshot`，mock 3 宠物）：Creature 面板为 `Title[468]` 452x376 居中；槽位标签 `>小猪` / `很长的宠物名`（超宽截断）/ `#4`（空名字回退）互不压叠、无越界裁切；右侧操作列 RENAME / DISMISS（激活宠物）/ RELEASE / OPTIONS / ENABLE（Automatic 互斥，无半自动叠加）/ 刷新 均在 C# 坐标；信息行 (19,161)/(19,176) 显示「宠物: 3 个 ｜ 小猪 自动 饥饿:55」与操作反馈。
 - 批10 实机复验（2026-09-13，Control API 打开 Craft 截图）：`Prguse[1109]` 面板（含 3 工具格 + 6 材料格轮廓）、RecipeLabel(22,5)、PossibilityLabel(10,135)、AUTO(165,185)/CRAFT(215,185) 精灵按钮、Close(312,3) 与 C# 坐标一致。
+- 批10 租赁四窗实机复验（2026-09-13，`--skip-login` + `--rental-test` + Control API 截图；mock 侧 `ItemRentalRequest` 分别回 `Renting=false/true` 各截一次）：物主侧 = 自有物品窗(718,287：名称/期限/SET PERIOD/RENT/锁形) + 对方费用窗(718,163：对方名「bevy2char」/费用/金币价格钮/锁形)；租客侧 = 自有费用窗 + 对方物品窗（对方名 + 期限 + 只读物品格 + 禁用 SET PERIOD/RENT）。`visible` RPC 每端恰好 2 个 `ItemRental` 根（四窗中只显 2），确认角色分流生效。
 
 ## 7. 已知有意偏差
 
@@ -165,6 +167,9 @@
 - Craft：C# 放入材料后会锁定对应背包格（`SelectedCell.Locked`）直到关窗；Bevy 目前只记录背包槽号，未在背包侧锁定（后续可加 `LockedSlots` 资源）。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
 - ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `T`）并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。
-- ItemRent：C# 出租侧还有对方镜像窗（`GuestItemRentingDialog`/`GuestItemRentDialog`，同 `Prguse[238]` 另一列位置）未移植；Bevy 仍用同一对窗表示双方，名称标签在 HUD 快照无名字时回退为「租赁」。
+- ItemRent：`Prguse[238]` 面板位图**自带**右上角关闭图样（C# 四窗都画得到），但只有自有窗挂了可点关闭键（`Prguse2[360..362]`）——C# `GuestItemRentDialog`/`GuestItemRentingDialog` 本身没有 `closeButton`，Bevy 同样只在自有窗挂 `ItemRentalClose`，对方窗的 X 是装饰。
+- ItemRent：`S.UpdateRentalItem` 除 C# 的 `HasData`+`LoanItem` 外仍带 `rental_fee`/`rental_period`（Rust 扩展，客户端只在 >0 时用作兜底刷新）；`S.CanConfirmItemRental`/`S.ConfirmItemRental` 在 C# 是空包，Rust 端口带 `can_confirm`/`success` 载荷（自洽偏离，双方均为 Rust 实现）。
+- ItemRent：C# 租客侧的合计费用在服务端 `SetItemRentalFee` 里即时扣金币（`S.LoseGold`）；Rust 服务端到 `ConfirmItemRental` 成交时才扣，客户端费用标签两侧都由本地/对包数值驱动，显示一致。
+- ItemRent：mock 单客户端下 `ItemRentalRequest` 固定回 `Renting=false`（物主侧），租客侧窗口与锁定帧的实机验证靠临时把 mock 回包改 `true` 截图（验证后已还原）。
 - TrustMerchant：C# 左列筛选树（`SetupFilters`，Prguse2[920/921] 100x22 按钮 + 99x18 标签，20px 步进）、寄售/拍卖页签面板、列表行（C# 为 item cell 行 + 选中高亮）、Mail 按钮（Prguse[437..439]）尚未移植；Bevy 现用文本行 + 左列扩展按钮近似。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。

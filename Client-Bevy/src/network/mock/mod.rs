@@ -1191,16 +1191,20 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("🧑‍🏫 [MOCK] 解除师徒回发 MentorUpdate");
                                     }
                                 }
-                                // #769：租赁（--rental-test，wire [target_name dotnet]）
+                                // #769/#2720：租赁（wire [target_name dotnet]）
+                                // 发起方 = C# 物主 → 回 `Renting=false`（自有物品窗 + 对方费用窗）
                                 x if x == ClientPacketIds::ItemRentalRequest as i16 => {
                                     let _target =
                                         mir2_shared::binary::read_dotnet_string(&mut cur)
                                             .unwrap_or_default();
                                     send(
                                         &to_client,
-                                        &MockUpdateRentalItem { fee: 100, period: 24 },
+                                        &MockItemRentalRequest {
+                                            name: _target,
+                                            renting: false,
+                                        },
                                     );
-                                    tracing::info!("📦 [MOCK] 租赁更新回发（has_item）");
+                                    tracing::info!("📦 [MOCK] 租赁会话建立（物主侧）");
                                 }
                                 x if x == ClientPacketIds::ItemRentalLockFee as i16 => {
                                     if let Ok(_p) =
@@ -1208,6 +1212,15 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     {
                                         send(&to_client, &MockRentalCanConfirm);
                                         tracing::info!("📦 [MOCK] 租赁可确认回发");
+                                    }
+                                }
+                                // #2720：物主锁物品后 mock 直接回可确认（模拟对方已锁费用）
+                                x if x == ClientPacketIds::ItemRentalLockItem as i16 => {
+                                    if let Ok(_p) =
+                                        client::item::ItemRentalLockItem::read_body(&mut cur)
+                                    {
+                                        send(&to_client, &MockRentalCanConfirm);
+                                        tracing::info!("📦 [MOCK] 租赁可确认回发（锁物品后）");
                                     }
                                 }
                                 x if x == ClientPacketIds::ConfirmItemRental as i16 => {

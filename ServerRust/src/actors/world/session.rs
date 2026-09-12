@@ -2401,36 +2401,39 @@ impl Message<PlayerLogOut> for WorldActor {
         self.transform_appearance.remove(&msg.session_id);
         self.gm_login_pending.remove(&msg.session_id);
 
-        // Clean up active rental sessions involving this player
+        // 租赁会话清理：会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
-            // This player was the renter (initiator) - return item to owner
+            // 断线方是物主：物品退回本人（record 仍是其玩家 actor）
             if let Some(item) = session.owner_item {
-                if let Some(owner_record) = self.players.get(&session.partner_session) {
-                    let _ = owner_record
-                        .actor_ref
-                        .ask(AddItemToInventory { item })
-                        .await;
-                    send_system_message(
-                        &self.gate_ref,
-                        session.partner_session,
-                        "租赁对方已下线，物品已退回",
-                    );
-                }
+                let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
             }
+            send_system_message(
+                &self.gate_ref,
+                session.partner_session,
+                "租赁对方已下线，租赁已取消",
+            );
         }
-        // Check if this player is the owner in someone else's rental session
-        let renter_session = self
+        // 断线方是租客：物品退回另一端的物主
+        let owner_session = self
             .rental_sessions
             .iter()
             .find(|(_, s)| s.partner_session == msg.session_id)
             .map(|(k, _)| *k);
-        if let Some(renter_sid) = renter_session {
-            if let Some(session) = self.rental_sessions.remove(&renter_sid) {
-                // Return item to this player (owner, who is logging out)
+        if let Some(owner_sid) = owner_session {
+            if let Some(session) = self.rental_sessions.remove(&owner_sid) {
                 if let Some(item) = session.owner_item {
-                    let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+                    if let Some(owner_record) = self.players.get(&owner_sid) {
+                        let _ = owner_record
+                            .actor_ref
+                            .ask(AddItemToInventory { item })
+                            .await;
+                        send_system_message(
+                            &self.gate_ref,
+                            owner_sid,
+                            "租赁对方已下线，物品已退回",
+                        );
+                    }
                 }
-                send_system_message(&self.gate_ref, renter_sid, "租赁对方已下线，租赁已取消");
             }
         }
 

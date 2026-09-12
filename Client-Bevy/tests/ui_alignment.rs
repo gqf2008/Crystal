@@ -897,3 +897,102 @@ fn hud_two_line_labels_aligned() {
 fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
 }
+
+/// 物品租赁四窗（C# `ItemRentDialog`/`ItemRentingDialog`/`GuestItemRentDialog`/
+/// `GuestItemRentingDialog`）：每端显示 1 自有窗 + 1 对方窗，四窗同源 `Prguse[238]`(204x109)，
+/// 自有/对方同坐标（费用窗 y=163、物品窗 y=287，互补不重叠）；引用的精灵索引全部存在。
+#[test]
+fn item_rental_guest_windows_aligned() {
+    use client_bevy::game::dialogs::item_rental as ir;
+    let mut libs = Libs::new();
+
+    // 面板 Prguse[238] 实测 204x109（C# 四窗同源）
+    let (pw, ph) = libs.size(LibraryName::Prguse, 238);
+    assert_eq!(
+        (pw, ph),
+        (204.0, 109.0),
+        "[尺寸] 租赁面板应为 Prguse[238] 204x109"
+    );
+
+    // C# `Location`：(1024-204-102, 109+54)=163 与 (…, 218+54+15)=287
+    let fee = ir::RentalWindow::OwnFee.pos();
+    let item = ir::RentalWindow::OwnItem.pos();
+    assert_eq!(
+        fee,
+        (718.0, 163.0),
+        "[坐标] 费用窗 = (ScreenWidth-W-W/2, H+H/2)"
+    );
+    assert_eq!(item, (718.0, 287.0), "[坐标] 物品窗 = (…, H*2+H/2+15)");
+    assert_eq!(
+        ir::RentalWindow::GuestFee.pos(),
+        fee,
+        "对方费用窗与自有费用窗同坐标"
+    );
+    assert_eq!(
+        ir::RentalWindow::GuestItem.pos(),
+        item,
+        "对方物品窗与自有物品窗同坐标"
+    );
+    assert_in_canvas("租赁费用窗", fee.0, fee.1, pw, ph);
+    assert_in_canvas("租赁物品窗", item.0, item.1, pw, ph);
+    assert!(
+        !overlap(fee.0, pw, item.0, pw) || (fee.1 - item.1).abs() >= ph,
+        "[重叠] 费用窗与物品窗不得重叠"
+    );
+
+    // C# `GameScene.ItemRentalRequest`：renting=false → 物主（物品窗+对方费用窗），true → 租客
+    for (role, own, guest, neg) in [
+        (
+            ir::RentalRole::Owner,
+            ir::RentalWindow::OwnItem,
+            ir::RentalWindow::GuestFee,
+            ir::RentalWindow::OwnFee,
+        ),
+        (
+            ir::RentalRole::Renter,
+            ir::RentalWindow::OwnFee,
+            ir::RentalWindow::GuestItem,
+            ir::RentalWindow::OwnItem,
+        ),
+    ] {
+        assert!(own.shown_for(role), "[分流] {role:?} 应显示自有窗 {own:?}");
+        assert!(
+            guest.shown_for(role),
+            "[分流] {role:?} 应显示对方窗 {guest:?}"
+        );
+        assert!(!neg.shown_for(role), "[分流] {role:?} 不应显示 {neg:?}");
+        let shown = [
+            ir::RentalWindow::OwnFee,
+            ir::RentalWindow::OwnItem,
+            ir::RentalWindow::GuestFee,
+            ir::RentalWindow::GuestItem,
+        ]
+        .into_iter()
+        .filter(|w| w.shown_for(role))
+        .count();
+        assert_eq!(shown, 2, "[分流] {role:?} 应恰好显示 2 个窗口");
+    }
+
+    // C# 引用到的精灵索引（关闭 / 价格 / 锁定 250..253 / 限期 / 确认）
+    for (lib, idx) in [
+        (LibraryName::Prguse2, 360usize),
+        (LibraryName::Prguse2, 361),
+        (LibraryName::Prguse2, 362),
+        (LibraryName::Prguse, 28),
+        (LibraryName::Prguse, 250),
+        (LibraryName::Prguse, 251),
+        (LibraryName::Prguse, 252),
+        (LibraryName::Prguse, 253),
+        (LibraryName::Prguse3, 7),
+        (LibraryName::Prguse3, 8),
+        (LibraryName::Prguse3, 9),
+        (LibraryName::Prguse3, 10),
+        (LibraryName::Prguse3, 11),
+        (LibraryName::Prguse3, 12),
+    ] {
+        let (w, h) = libs.size(lib, idx);
+        assert!(w > 0.0 && h > 0.0, "[精灵] {lib:?}[{idx}] 应存在且非空");
+    }
+
+    println!("  ✓ 租赁四窗 Prguse[238] 204x109 @163/287、自有/对方分流、锁定帧 250..253 齐全");
+}

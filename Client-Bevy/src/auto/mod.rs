@@ -198,13 +198,14 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--craft-test") {
         app.add_systems(Update, auto_craft_test);
     }
-    // --rental-test: 物品租赁链路（租方，配合 --rental-owner）
+    // --rental-test: 物品租赁链路（C# 物主侧，发起方；配合 --rental-renter）
     if std::env::args().any(|a| a == "--rental-test") {
         app.add_systems(Update, auto_rental_test);
     }
-    // --rental-owner: 物品租赁链路（物主，配合 --rental-test）
-    if std::env::args().any(|a| a == "--rental-owner") {
-        app.add_systems(Update, auto_rental_owner);
+    // --rental-renter: 物品租赁链路（C# 租客侧，被请求方；配合 --rental-test）
+    //（原 `--rental-owner` 是同一端的旧名，角色已按 C# 反转为租客）
+    if std::env::args().any(|a| a == "--rental-renter" || a == "--rental-owner") {
+        app.add_systems(Update, auto_rental_renter);
     }
     // --quest-test: 任务日志链路（接受任务 → ChangeQuest 显示 → 放弃）
     if std::env::args().any(|a| a == "--quest-test") {
