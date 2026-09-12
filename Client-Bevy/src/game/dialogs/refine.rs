@@ -27,16 +27,16 @@ use crate::ui::theme::{
 };
 
 /// C# `RefineDialog` 面板原生尺寸（Prguse[1002]）
-const REFINE_W: f32 = 164.0;
-const REFINE_H: f32 = 207.0;
+pub const REFINE_W: f32 = 164.0;
+pub const REFINE_H: f32 = 207.0;
 /// C# `Location = new Point(0, 225)`
 const REFINE_POS: (f32, f32) = (0.0, 225.0);
 /// C# `TitleLabel = Title[18]` @(28,8)（57x15）
 const REFINE_TITLE_POS: (f32, f32) = (28.0, 8.0);
 /// C# 4x4 材料格：`Size = (34,32)`、`Location = (x*34+12+x, y*32+37+y)`
 const REFINE_GRID_ORIGIN: (f32, f32) = (12.0, 37.0);
-const REFINE_CELL_W: f32 = 34.0;
-const REFINE_CELL_H: f32 = 32.0;
+pub const REFINE_CELL_W: f32 = 34.0;
+pub const REFINE_CELL_H: f32 = 32.0;
 const REFINE_GRID_COLS: usize = 4;
 /// 材料格数量（C# `Grid = new MirItemCell[4*4]`；服务端 `REFINE_MATERIAL_SLOTS` 同为 16）
 pub const REFINE_MATERIAL_SLOTS: usize = REFINE_GRID_COLS * REFINE_GRID_COLS;
@@ -47,7 +47,7 @@ fn refine_material_slot(cell: usize) -> i32 {
 }
 
 /// C# `Grid[i].Location`
-fn refine_cell_pos(cell: usize) -> (f32, f32) {
+pub fn refine_cell_pos(cell: usize) -> (f32, f32) {
     let x = (cell % REFINE_GRID_COLS) as f32;
     let y = (cell / REFINE_GRID_COLS) as f32;
     (
