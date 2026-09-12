@@ -197,6 +197,10 @@ pub enum ServerEvent {
         recipe_id: i32,
         info: mir2_shared::data::client_data::ClientRecipeInfo,
     },
+    /// #2720 精炼材料存入确认（C# S.DepositRefineItem：[from][to][success]）
+    RefineDeposited { from: i32, to: i32, success: bool },
+    /// #2720 精炼材料取回确认（C# S.RetrieveRefineItem：[from][to][success]）
+    RefineRetrieved { from: i32, to: i32, success: bool },
     /// #262 PauseBuff：Buff 暂停
     BuffPaused { buff_type: u8, object_id: u32, paused: bool },
     /// #264 ObjectName：对象改名

@@ -759,10 +759,15 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("📦 DefaultNPC 解码");
             }
         }
-        // #291：C# 服务端包面收尾（DepositRefineItem）
+        // #2720：精炼材料存入确认（C# S.DepositRefineItem：[from][to][success]）
         x if x == ServerPacketIds::DepositRefineItem as i16 => {
-            if item_operations::DepositRefineItem::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 DepositRefineItem 解码");
+            if let Ok(p) = item_operations::DepositRefineItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::RefineDeposited {
+                    from: p.from,
+                    to: p.to,
+                    success: p.success,
+                });
+                tracing::info!("🔨 精炼材料存入 from={} to={} ok={}", p.from, p.to, p.success);
             }
         }
         // #291：C# 服务端包面收尾（RefineCancel）
@@ -777,10 +782,15 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("📦 RefineItem 解码");
             }
         }
-        // #291：C# 服务端包面收尾（RetrieveRefineItem）
+        // #2720：精炼材料取回确认（C# S.RetrieveRefineItem：[from][to][success]）
         x if x == ServerPacketIds::RetrieveRefineItem as i16 => {
-            if item_operations::RetrieveRefineItem::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 RetrieveRefineItem 解码");
+            if let Ok(p) = item_operations::RetrieveRefineItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::RefineRetrieved {
+                    from: p.from,
+                    to: p.to,
+                    success: p.success,
+                });
+                tracing::info!("🔨 精炼材料取回 from={} to={} ok={}", p.from, p.to, p.success);
             }
         }
         // #291：C# 服务端包面收尾（HeroCreateRequest）
