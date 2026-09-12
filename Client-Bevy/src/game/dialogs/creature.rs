@@ -166,7 +166,8 @@ fn spawn_creature(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 320.0, 30);
+    let (px, py) = crate::game::dialogs::center_origin(452.0, 376.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 452.0, 376.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Creature), CreatureWidget));
@@ -178,7 +179,7 @@ fn spawn_creature(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(CreatureClose);
+            spawn_icon_button(p, n, h, pr, 427.0, 3.0, 20.0, 20.0, 10).insert(CreatureClose);
         }
         // 8 行宠物 + 2 状态行 @(18,40+22i)
         for i in 0..10usize {
@@ -374,8 +375,13 @@ fn creature_ui_system(
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) = panel_origin
                     .single()
-                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
-                    .unwrap_or((280.0, 80.0));
+                    .map(|n| {
+                        crate::ui::theme::node_origin(
+                            n,
+                            crate::game::dialogs::center_origin(452.0, 376.0),
+                        )
+                    })
+                    .unwrap_or(crate::game::dialogs::center_origin(452.0, 376.0));
                 for i in 0..8usize {
                     let y = oy + 40.0 + i as f32 * 22.0;
                     if cursor.x >= ox + 18.0 && cursor.x <= ox + 260.0 && cursor.y >= y && cursor.y <= y + 20.0 {
@@ -730,8 +736,13 @@ fn creature_options_system(
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) = panel_origin
                     .single()
-                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
-                    .unwrap_or((280.0, 80.0));
+                    .map(|n| {
+                        crate::ui::theme::node_origin(
+                            n,
+                            crate::game::dialogs::center_origin(452.0, 376.0),
+                        )
+                    })
+                    .unwrap_or(crate::game::dialogs::center_origin(452.0, 376.0));
                 for i in 0..9usize {
                     let y = oy + 40.0 + i as f32 * 22.0;
                     if cursor.x >= ox + 20.0 && cursor.x <= ox + 220.0 && cursor.y >= y && cursor.y <= y + 20.0 {
@@ -880,5 +891,9 @@ mod tests {
     fn grade_cycle_prev() {
         assert_eq!(creature_grade_cycle(0, -1), 5);
         assert_eq!(creature_grade_cycle(3, -1), 2);
+    }
+    #[test]
+    fn creature_origin_is_csharp_center() {
+        assert_eq!(crate::game::dialogs::center_origin(452.0, 376.0), (286.0, 196.0));
     }
 }

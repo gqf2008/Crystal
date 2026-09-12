@@ -107,11 +107,12 @@ fn spawn_fishing(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 背景 Prguse[1340]（C# FishingDialog.Index=1340，200x287 @ (280,80)）
+    // 背景 Prguse[1340] 原生 200x287，C# Location = Center。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1340) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 200.0, 287.0, 30);
+    let (px, py) = crate::game::dialogs::center_origin(200.0, 287.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 200.0, 287.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Fishing), FishingWidget));
@@ -344,6 +345,11 @@ fn fishing_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fishing_origin_is_csharp_center() {
+        assert_eq!(crate::game::dialogs::center_origin(200.0, 287.0), (412.0, 240.0));
+    }
 
     #[test]
     fn free_inventory_index_finds_first_empty() {

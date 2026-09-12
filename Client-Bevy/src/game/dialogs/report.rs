@@ -4,7 +4,7 @@
 // 网络（ServerRust gate 实际 wire）：
 //   C: ReportIssue[type u32][description dotnet]（与 SharedRust [message dotnet] 不一致，手动构造）
 // 结果通过系统聊天消息返回
-// bevy_ui 迁移（批 13）：面板 Prguse[170] @(280,80) 320x262，全节点化
+// bevy_ui：C# ReportDialog 360x244 @ Center；Prguse[1633] 缺失时深色兜底
 //   - 关闭 Prguse2[360/361/362] @(300,3)
 //   - 状态行 3 + 类型下拉（bevy_ui UiDropDown）+ 描述输入（TextInput 12）+ 提交 Title[206/207/208]
 // ============================================================================
@@ -78,57 +78,65 @@ fn spawn_report(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[170]（C# ReportDialog.Index=170，320x262 @ 280,80）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
-        return;
-    };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
+    // C# ReportDialog: Prguse[1633]，Location = Center。当前数据包缺少 1633 时使用
+    // 同尺寸深色兜底面板；控件仍按 C# 坐标保留，避免继续错用 Prguse[170]。
+    const REPORT_W: f32 = 360.0;
+    const REPORT_H: f32 = 244.0;
+    let (px, py) = crate::game::dialogs::center_origin(REPORT_W, REPORT_H);
+    let bg = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1633).unwrap_or_else(|| {
+        images.add(crate::map_renderer::make_image(
+            vec![22, 23, 30, 255],
+            1,
+            1,
+        ))
+    });
+    let panel = spawn_panel(&mut commands, bg, px, py, REPORT_W, REPORT_H, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Report), ReportWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 关闭 Prguse2[360/361/362] @(300,3)
+        // 标题/状态文本。
+        spawn_label(p, &cjk, "", 12.0, 8.0, 12.0, Color::WHITE, 9).insert(ReportLine(0));
+        spawn_label(p, &cjk, "", 12.0, 220.0, 11.0, Color::srgb(1.0, 0.8, 0.4), 9)
+            .insert(ReportLine(1));
+        // 关闭 Prguse2[360/361/362] @(336,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(ReportClose);
+            spawn_icon_button(p, n, h, pr, 336.0, 3.0, 20.0, 20.0, 10)
+                .insert(ReportClose);
         }
-        // 状态行 3（0 标题 / 1 说明 / 2 反馈）@(18,40+22i)
-        for i in 0..3usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
-                .insert(ReportLine(i));
-        }
-        // 类型下拉（C# ReportType DropDown）@(18,110)
+        // 类型下拉（C# ReportType @(12,35)，170x14）
         spawn_dropdown_ui(
             p,
             &font,
             vec!["请选择类型".to_string(), "提交BUG".to_string(), "举报玩家".to_string()],
             None,
-            (280.0, 80.0),
-            18.0,
-            110.0,
-            80.0,
-            20.0,
+            (px, py),
+            12.0,
+            35.0,
+            170.0,
+            14.0,
             3,
             9,
         )
         .insert(ReportTypeDrop);
-        // 描述输入框（TextInput id 12）@(18,142)，命中矩形 = 屏幕坐标 (298,222,200,20)
-        spawn_container(p, 18.0, 142.0, 200.0, 20.0, 10)
+        // 描述输入框（C# MessageArea @(12,57)，330x150）
+        spawn_container(p, 12.0, 57.0, 330.0, 150.0, 10)
             .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                BackgroundColor(Color::srgba(0.16, 0.17, 0.22, 0.96)),
                 crate::game::dialogs::text_input::TextInputField(12),
-                crate::game::dialogs::text_input::TextInputRect(298.0, 222.0, 200.0, 20.0),
+                crate::game::dialogs::text_input::TextInputRect(px + 12.0, py + 57.0, 330.0, 150.0),
             ))
             .with_children(|ic| {
                 ic.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
+                        left: Val::Px(6.0),
+                        top: Val::Px(5.0),
                         ..default()
                     },
                     Text::new(String::new()),
@@ -142,13 +150,14 @@ fn spawn_report(
                     crate::game::dialogs::text_input::TextInputDisplay(12),
                 ));
             });
-        // 提交按钮 Title[206/207/208] @(80,178)
+        // 提交按钮（C# SendButton Title[607/608/609] @(260,219)）
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 607),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 608),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 609),
         ) {
-            spawn_icon_button(p, n, h, pr, 80.0, 178.0, 76.0, 25.0, 11).insert(ReportSubmit);
+            spawn_icon_button(p, n, h, pr, 260.0, 219.0, 76.0, 25.0, 11)
+                .insert(ReportSubmit);
         }
     });
 }
@@ -190,8 +199,7 @@ fn report_ui_system(
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             0 => "举报（GM）".to_string(),
-            1 => "类型 + 描述".to_string(),
-            2 => state.message.clone(),
+            1 => state.message.clone(),
             _ => String::new(),
         };
     }
@@ -218,5 +226,13 @@ fn report_ui_system(
             input.texts[12].clear();
             input.active = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn report_layout_matches_csharp() {
+        assert_eq!(crate::game::dialogs::center_origin(360.0, 244.0), (332.0, 262.0));
     }
 }
