@@ -196,6 +196,53 @@ fn creature_mode_buttons_visible(has_selection: bool, pickup_mode: u8) -> (bool,
     }
 }
 
+/// 槽位文字宽度估算（对话框 12px 字体：CJK 按 12px、半角按 6px）。
+fn creature_text_width(text: &str) -> f32 {
+    text.chars()
+        .map(|ch| if (ch as u32) > 0x2E7F { 12.0 } else { 6.0 })
+        .sum()
+}
+
+/// C# `CreatureButton.NameLabel`（80x15 定宽居中，仅名字）等价物：Bevy 无宠物头像
+/// 资源，用名字占位；列距 81px、列宽 76px，标签自 `sx + 4` 起，故按 72px 截断，
+/// 避免相邻槽文字互相压叠、最右列越出面板被裁。
+fn creature_slot_label(creature: &CreatureEntry, selected: bool) -> String {
+    let name = if creature.name.is_empty() {
+        format!("#{}", creature.creature_type)
+    } else {
+        creature.name.clone()
+    };
+    let mut out = if selected { String::from(">") } else { String::new() };
+    for ch in name.chars() {
+        let mut candidate = out.clone();
+        candidate.push(ch);
+        if creature_text_width(&candidate) > CREATURE_SLOT_W - 4.0 {
+            break;
+        }
+        out = candidate;
+    }
+    out
+}
+
+/// C# `CreatureInfo`/`CreatureInfo1`（@19,161 / @19,176）承载选中宠物信息的等价物：
+/// Bevy 合并为一行「数量 + 选中宠物名/拾取模式/饥饿度」。
+fn creature_summary_text(count: usize, selected: Option<&CreatureEntry>) -> String {
+    let mut text = format!("宠物: {} 个", count);
+    if let Some(c) = selected {
+        text.push_str(&format!(
+            " ｜ {} {} 饥饿:{}",
+            if c.name.is_empty() {
+                format!("#{}", c.creature_type)
+            } else {
+                c.name.clone()
+            },
+            if c.pickup_mode == 0 { "自动" } else { "半自动" },
+            c.hunger
+        ));
+    }
+    text
+}
+
 fn spawn_creature(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
@@ -222,13 +269,13 @@ fn spawn_creature(
         .insert((DialogRoot(DialogKind::Creature), CreatureWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 关闭 Prguse2[360/361/362] @(300,3)
+        // 关闭 C# CloseButton：Prguse2[360/361/362] @(Size.Width-25, 3)，精灵 24x21
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 427.0, 3.0, 20.0, 20.0, 10).insert(CreatureClose);
+            spawn_icon_button(p, n, h, pr, 427.0, 3.0, 24.0, 21.0, 10).insert(CreatureClose);
         }
         // C# 顶部信息行：摘要 + 操作反馈。
         spawn_label(p, &cjk, "", 19.0, 161.0, 12.0, Color::WHITE, 9).insert(CreatureSummary);
@@ -473,20 +520,15 @@ fn creature_ui_system(
             }
         }
     }
+    let selected = state.creatures.get(state.selected).cloned();
     for (mut text, line) in &mut lines {
         text.0 = match state.creatures.get(line.0) {
-            Some(c) => format!(
-                "{} {} 模式:{} 饥饿:{}",
-                if state.selected == line.0 { ">" } else { " " },
-                if c.name.is_empty() { format!("#{}", c.creature_type) } else { c.name.clone() },
-                if c.pickup_mode == 0 { "自动" } else { "半自动" },
-                c.hunger
-            ),
+            Some(c) => creature_slot_label(c, state.selected == line.0),
             None => String::new(),
         };
     }
     if let Ok(mut text) = summary.single_mut() {
-        text.0 = format!("宠物: {} 个", state.creatures.len());
+        text.0 = creature_summary_text(state.creatures.len(), selected.as_ref());
     }
     if let Ok(mut text) = messages.single_mut() {
         text.0 = state.message.clone();
@@ -1039,5 +1081,36 @@ mod layout_tests {
         assert_eq!(creature_mode_buttons_visible(true, 1), (false, true));
         // C# 非 Automatic 一律按 SemiAuto 显示
         assert_eq!(creature_mode_buttons_visible(true, 7), (false, true));
+    }
+
+    /// 槽位标签必须放得进 76px 列（自 sx+4 起，72px 内），否则相邻槽互相压叠。
+    #[test]
+    fn creature_slot_label_fits_column() {
+        let mut creature = CreatureEntry::default();
+        creature.name = "很长的宠物名字七个字".to_string();
+        let label = creature_slot_label(&creature, true);
+        assert!(label.starts_with('>'), "选中前缀保留：{label}");
+        let width = creature_text_width(&label);
+        assert!(width <= CREATURE_SLOT_W - 4.0, "标签宽度 {width} 超出列宽");
+        // 自 sx+4 起不越过下一列起点 sx+CREATURE_SLOT_DX
+        assert!(4.0 + width <= CREATURE_SLOT_DX);
+
+        creature.name = "小狗".to_string();
+        assert_eq!(creature_slot_label(&creature, false), "小狗");
+
+        creature.name.clear();
+        creature.creature_type = 12;
+        assert_eq!(creature_slot_label(&creature, false), "#12");
+    }
+
+    /// 选中宠物的模式/饥饿度在信息行（C# CreatureInfo 位），不再塞进槽位。
+    #[test]
+    fn creature_summary_reports_selected_pet() {
+        assert_eq!(creature_summary_text(0, None), "宠物: 0 个");
+        let mut creature = CreatureEntry::default();
+        creature.name = "小狗".to_string();
+        creature.pickup_mode = 1;
+        creature.hunger = 42;
+        assert_eq!(creature_summary_text(1, Some(&creature)), "宠物: 1 个 ｜ 小狗 半自动 饥饿:42");
     }
 }

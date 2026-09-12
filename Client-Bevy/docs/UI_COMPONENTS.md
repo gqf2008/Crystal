@@ -138,7 +138,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：383 lib + 2 bin + 1 smoke + 17 alignment 通过（批9后基线）。
+- `cargo test`（Client-Bevy）：385 lib + 2 bin + 1 smoke + 17 alignment 通过（批9后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：665 lib + protocol integration 通过（批3后基线）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口；批9 复验 Creature 面板背景、内部网格与操作按钮（含自动/半自动互斥）。
@@ -146,3 +146,6 @@
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
+- Creature：C# `CreatureInfo`/`CreatureInfo1` 是选中宠物的能力文案（`CanPickupItems`/`CanProduceBlackStones`），`CreatureInfo2` @(19,191) 未实现；Bevy 用 (19,161) 一行承载「数量 + 选中宠物名/模式/饥饿度」，语义不同但坐标对齐。
+- Creature：C# 未选中宠物时模式按钮是 `Enabled = false`（`RefreshMode()` 早返回、保留原可见性）；Bevy 无禁用态，未选中时直接 `Visibility::Hidden`。
+- Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
