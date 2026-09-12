@@ -368,6 +368,132 @@ pub fn row_listing_index(market: &MarketState, slot: usize) -> Option<usize> {
         .copied()
 }
 
+// ===== 买/取回确认框（C# `MirMessageBox` YesNo，TrustMerchantDialog.cs:360-440）=====
+
+/// C# `MirMessageBox` YesNo：背景 `Prguse[360]` 456x190 居中 @(284,289)、
+/// 文本 (35,35) 390x110、Yes `Title[206..208]` @(260,157)、No `Title[210..212]` @(360,157)
+pub const TM_CONFIRM_POS: (f32, f32) = (284.0, 289.0);
+pub const TM_CONFIRM_W: f32 = 456.0;
+pub const TM_CONFIRM_H: f32 = 190.0;
+pub const TM_CONFIRM_TEXT_POS: (f32, f32) = (35.0, 35.0);
+pub const TM_CONFIRM_YES_POS: (f32, f32) = (260.0, 157.0);
+pub const TM_CONFIRM_NO_POS: (f32, f32) = (360.0, 157.0);
+pub const TM_CONFIRM_BTN_W: f32 = 76.0;
+pub const TM_CONFIRM_BTN_H: f32 = 25.0;
+
+/// 确认后要执行的动作
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MarketConfirmAction {
+    /// `C.MarketBuy{AuctionID, BidPrice}`（寄售/商城一口价 → bid 0）
+    Buy { auction_id: u64, bid_price: u32 },
+    /// `C.MarketGetBack{AuctionID}`（取回物品/领取金币）
+    GetBack { auction_id: u64 },
+}
+
+/// C# `BuyButton.Click` 的分支结果
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum MarketBuyOutcome {
+    /// 直接执行（C# 未弹确认框的分支）
+    Direct(MarketConfirmAction),
+    /// 弹 YesNo 确认（文案 + Yes 时执行的动作）
+    Confirm(String, MarketConfirmAction),
+}
+
+/// C# `ItemNotSoldGetBack` / `ItemNotSoldConfirmRetrieve`（同文案）
+pub fn market_retrieve_text(item_name: &str) -> String {
+    format!("{}尚未售出，确定要取回它吗？", item_name)
+}
+
+/// C# `ConfirmBuyItemWithPrice`：`{1:#,##0}` 千分位 + 货币名（金币/积分）
+pub fn market_buy_text(item_name: &str, price: u32, currency: &str) -> String {
+    format!(
+        "确定要以{} {}购买{}吗？",
+        group_thousands(price),
+        currency,
+        item_name
+    )
+}
+
+/// C# `ConfirmBidGoldForItem`：`你确定要为{物品}出价{额}金币吗？`（`{0:#,##0}` 千分位）
+pub fn market_bid_text(item_name: &str, bid: u32) -> String {
+    format!(
+        "你确定要为{}出价{}金币吗？",
+        item_name,
+        group_thousands(bid)
+    )
+}
+
+/// C# `BuyButton.Click` 分支（:360-440）：
+/// - UserMode（寄售/拍卖页签）：`For Sale` / `No Bid` 弹「尚未售出，确定要取回它吗？」，其余直接 `MarketGetBack`
+/// - 非 UserMode 寄售/商城：弹「确定要以 N 金币购买 X 吗？」；货币按页签取 金币/积分
+/// - 非 UserMode 拍卖：C# 先弹 `MirAmountBox` 出价框（Bevy 用价格输入框 id 6），再弹「你确定要为 X 出价 N 金币吗？」
+pub fn market_buy_outcome(
+    item: &MarketItem,
+    panel: MarketPanelType,
+    typed_bid: u32,
+) -> MarketBuyOutcome {
+    let user_mode = matches!(panel, MarketPanelType::Consign | MarketPanelType::Auction);
+    if user_mode {
+        let action = MarketConfirmAction::GetBack {
+            auction_id: item.auction_id,
+        };
+        let needs_confirm = (item.item_type == 0 && item.seller == "For Sale")
+            || (item.item_type == 1 && item.seller == "No Bid");
+        if needs_confirm {
+            MarketBuyOutcome::Confirm(market_retrieve_text(&item.name), action)
+        } else {
+            MarketBuyOutcome::Direct(action)
+        }
+    } else if item.item_type == 1 {
+        // 拍卖：出价 = 输入框（缺省当前价 + 1，C# `MirAmountBox` 默认 `Price + 1`）
+        let bid = if typed_bid > 0 {
+            typed_bid
+        } else {
+            item.current_bid.saturating_add(1)
+        };
+        MarketBuyOutcome::Confirm(
+            market_bid_text(&item.name, bid),
+            MarketConfirmAction::Buy {
+                auction_id: item.auction_id,
+                bid_price: bid,
+            },
+        )
+    } else {
+        let currency = if panel == MarketPanelType::GameShop {
+            "积分"
+        } else {
+            "金币"
+        };
+        MarketBuyOutcome::Confirm(
+            market_buy_text(&item.name, item.price, currency),
+            MarketConfirmAction::Buy {
+                auction_id: item.auction_id,
+                bid_price: 0,
+            },
+        )
+    }
+}
+
+/// 确认框状态（`visible` + 文案 + 待执行动作）
+#[derive(Resource, Default)]
+pub struct MarketConfirm {
+    pub visible: bool,
+    pub text: String,
+    pub action: Option<MarketConfirmAction>,
+}
+
+#[derive(Component)]
+pub struct MarketConfirmWidget;
+
+#[derive(Component)]
+pub struct MarketConfirmText;
+
+#[derive(Component)]
+pub struct MarketConfirmYes;
+
+#[derive(Component)]
+pub struct MarketConfirmNo;
+
 // ===== 列表行（C# `AuctionRow`，TrustMerchantDialog.cs:1440-1625）=====
 
 /// C# `Rows[i].Location = new Point(127, 82 + i * 33)`；`Size = (354, 32)`
@@ -601,6 +727,7 @@ pub struct MarketPlugin;
 impl Plugin for MarketPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MarketState>();
+        app.init_resource::<MarketConfirm>();
                 app.add_systems(
             Update,
             market_server_events.run_if(in_state(AppState::Game)),
@@ -632,6 +759,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
                 market_consign_cell_system,
                 market_price_filter_system,
                 market_mail_system,
+                market_confirm_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -1009,6 +1137,72 @@ fn spawn_market(
         buy_market,
         buy_user,
     });
+
+    // #2720：买/取回确认框（C# `MirMessageBox` YesNo）——独立根节点（不在 TM 面板裁剪内，
+    // C# 里也是全局模态框）
+    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let panel = spawn_panel(
+            &mut commands,
+            h,
+            TM_CONFIRM_POS.0,
+            TM_CONFIRM_POS.1,
+            TM_CONFIRM_W,
+            TM_CONFIRM_H,
+            45,
+        );
+        commands
+            .entity(panel)
+            .insert((MarketConfirmWidget, Visibility::Hidden));
+        commands.entity(panel).with_children(|p| {
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                TM_CONFIRM_TEXT_POS.0,
+                TM_CONFIRM_TEXT_POS.1,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert((MarketConfirmWidget, MarketConfirmText));
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(
+                    p,
+                    n,
+                    h,
+                    pr,
+                    TM_CONFIRM_YES_POS.0,
+                    TM_CONFIRM_YES_POS.1,
+                    TM_CONFIRM_BTN_W,
+                    TM_CONFIRM_BTN_H,
+                    10,
+                )
+                .insert(MarketConfirmYes);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(
+                    p,
+                    n,
+                    h,
+                    pr,
+                    TM_CONFIRM_NO_POS.0,
+                    TM_CONFIRM_NO_POS.1,
+                    TM_CONFIRM_BTN_W,
+                    TM_CONFIRM_BTN_H,
+                    10,
+                )
+                .insert(MarketConfirmNo);
+            }
+        });
+    }
 }
 
 /// 市场输入框（TextInputField(id) + 子 TextInputDisplay(id)）；面板子节点
@@ -1851,6 +2045,92 @@ fn market_consign_cell_system(
     }
 }
 
+/// 执行确认动作（发送对应 C# 客户端包）
+fn market_execute_confirm(
+    net: &NetConnection,
+    action: MarketConfirmAction,
+    market: &mut MarketState,
+) {
+    match action {
+        MarketConfirmAction::Buy {
+            auction_id,
+            bid_price,
+        } => {
+            net.send_packet(&mir2_shared::packets::client::market::MarketBuy {
+                auction_id,
+                bid_price,
+            });
+            market.message = format!("购买商品 {}（bid={}）", auction_id, bid_price);
+        }
+        MarketConfirmAction::GetBack { auction_id } => {
+            net.send_packet(&crate::network::MarketGetBackWire {
+                mode: 0,
+                auction_id,
+            });
+            market.message = format!("取回/领取记录 {}", auction_id);
+        }
+    }
+}
+
+/// 确认框：显隐 + 文案 + Yes/No（C# `MirMessageBox` YesNo）
+fn market_confirm_system(
+    mgr: Res<DialogManager>,
+    net: Res<NetConnection>,
+    mut confirm: ResMut<MarketConfirm>,
+    mut market: ResMut<MarketState>,
+    mut widgets: Query<&mut Visibility, With<MarketConfirmWidget>>,
+    mut texts: Query<&mut Text, With<MarketConfirmText>>,
+    yes: Query<(Entity, &Interaction), (With<MarketConfirmYes>, Without<MarketConfirmNo>)>,
+    no: Query<(Entity, &Interaction), (With<MarketConfirmNo>, Without<MarketConfirmYes>)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    // 市场窗关闭 → 确认框一并收起（C# 模态框随对话框关闭）
+    if !mgr.is_open(DialogKind::Market) {
+        confirm.visible = false;
+        confirm.action = None;
+    }
+    for mut vis in &mut widgets {
+        *vis = if confirm.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for mut t in &mut texts {
+        if t.0 != confirm.text {
+            t.0 = confirm.text.clone();
+        }
+    }
+    if !confirm.visible {
+        return;
+    }
+    for (e, inter) in &yes {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        if let Some(action) = confirm.action {
+            market_execute_confirm(&net, action, &mut market);
+        }
+        confirm.visible = false;
+        confirm.action = None;
+    }
+    for (e, inter) in &no {
+        if edge(e, inter, &mut prev_inter) {
+            confirm.visible = false;
+            confirm.action = None;
+            market.message = "已取消".to_string();
+        }
+    }
+}
+
 /// 市场动作：Buy 键（C# `BuyButton.Click` :360-440）——
 /// 寄售/拍卖页签（UserMode）走 `C.MarketGetBack{AuctionID}`；市场/商城走 `C.MarketBuy`
 /// （拍卖行带 `BidPrice`；C# 用 MirAmountBox，Bevy 复用价格框 id 6，缺省 `当前价+1`）
@@ -1859,6 +2139,7 @@ fn market_action_system(
     mut market: ResMut<MarketState>,
     net: Res<NetConnection>,
     input: Res<crate::game::dialogs::text_input::TextInputState>,
+    mut confirm: ResMut<MarketConfirm>,
     buy_btn: Query<(Entity, &Interaction), With<MarketBuyBtn>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -1881,45 +2162,26 @@ fn market_action_system(
             market.message = "请先点击选中一个商品".to_string();
             continue;
         };
-        let it = &market.listings[idx];
-        let id = it.auction_id;
-        let is_auction = it.item_type == 1;
-        let current_bid = it.current_bid;
-        // C# UserMode（寄售/拍卖页签）：Buy 键 = 取回物品 / 领取金币
-        if matches!(
-            market.panel,
-            MarketPanelType::Consign | MarketPanelType::Auction
-        ) {
-            net.send_packet(&crate::network::MarketGetBackWire {
-                mode: 0,
-                auction_id: id as u64,
-            });
-            market.message = format!("取回/领取记录 {}", id);
-            continue;
-        }
-        // C#：寄售一口价 BidPrice=0；拍卖出价默认当前价+1（可复用价格框 id 6 自定义）
-        let bid_price = if is_auction {
-            let typed = input
-                .texts
-                .get(6)
-                .cloned()
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(0);
-            if typed > 0 {
-                typed
-            } else {
-                current_bid.saturating_add(1)
+        let item = market.listings[idx].clone();
+        // C#：拍卖出价来自 `MirAmountBox`（Bevy 复用价格框 id 6，缺省 `当前价 + 1`）
+        let typed_bid = input
+            .texts
+            .get(6)
+            .cloned()
+            .unwrap_or_default()
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(0);
+        match market_buy_outcome(&item, market.panel, typed_bid) {
+            MarketBuyOutcome::Direct(action) => {
+                market_execute_confirm(&net, action, &mut market);
             }
-        } else {
-            0
-        };
-        net.send_packet(&mir2_shared::packets::client::market::MarketBuy {
-            auction_id: id,
-            bid_price,
-        });
-        tracing::info!("🏪 购买商品 {}（bid={}）", id, bid_price);
+            MarketBuyOutcome::Confirm(text, action) => {
+                confirm.visible = true;
+                confirm.text = text;
+                confirm.action = Some(action);
+            }
+        }
     }
 }
 
@@ -2074,6 +2336,103 @@ mod tests {
                 "MAIL @ {panel:?}"
             );
         }
+    }
+
+    /// #2720：确认框锚点（C# `MirMessageBox` YesNo：Prguse[360] 456x190 居中 + Yes/No Title[206..208]/[210..212]）
+    #[test]
+    fn market_confirm_box_matches_csharp() {
+        assert_eq!(TM_CONFIRM_POS, (284.0, 289.0)); // (1024-456)/2, (768-190)/2
+        assert_eq!((TM_CONFIRM_W, TM_CONFIRM_H), (456.0, 190.0));
+        assert_eq!(TM_CONFIRM_TEXT_POS, (35.0, 35.0)); // Label 390x110
+        assert_eq!(TM_CONFIRM_YES_POS, (260.0, 157.0));
+        assert_eq!(TM_CONFIRM_NO_POS, (360.0, 157.0));
+        assert_eq!((TM_CONFIRM_BTN_W, TM_CONFIRM_BTN_H), (76.0, 25.0));
+    }
+
+    /// #2720：买/取回确认分支（C# `BuyButton.Click` :360-440）
+    #[test]
+    fn market_buy_outcome_matches_csharp() {
+        use MarketPanelType::*;
+        let base = MarketItem {
+            auction_id: 7,
+            name: "屠龙".to_string(),
+            price: 12_345,
+            item_type: 0,
+            seller: "For Sale".to_string(),
+            ..Default::default()
+        };
+        // UserMode + 寄售 `For Sale` → 确认取回（文案 = ItemNotSoldGetBack）
+        assert_eq!(
+            market_buy_outcome(&base, Consign, 0),
+            MarketBuyOutcome::Confirm(
+                "屠龙尚未售出，确定要取回它吗？".to_string(),
+                MarketConfirmAction::GetBack { auction_id: 7 }
+            )
+        );
+        // UserMode + 非 For Sale（如 `Sold`）→ 直接取回
+        let sold = MarketItem {
+            seller: "Sold".to_string(),
+            ..base.clone()
+        };
+        assert_eq!(
+            market_buy_outcome(&sold, Consign, 0),
+            MarketBuyOutcome::Direct(MarketConfirmAction::GetBack { auction_id: 7 })
+        );
+        // UserMode + 拍卖 `No Bid` → 确认取回
+        let auc_nobid = MarketItem {
+            item_type: 1,
+            seller: "No Bid".to_string(),
+            current_bid: 100,
+            ..base.clone()
+        };
+        assert!(matches!(
+            market_buy_outcome(&auc_nobid, Auction, 0),
+            MarketBuyOutcome::Confirm(_, MarketConfirmAction::GetBack { auction_id: 7 })
+        ));
+        // 非 UserMode 寄售 → 确认购买（`ConfirmBuyItemWithPrice`：千分位 + 金币）
+        assert_eq!(
+            market_buy_outcome(&base, Market, 0),
+            MarketBuyOutcome::Confirm(
+                "确定要以12,345 金币购买屠龙吗？".to_string(),
+                MarketConfirmAction::Buy {
+                    auction_id: 7,
+                    bid_price: 0
+                }
+            )
+        );
+        // 非 UserMode 商城 → 货币为「积分」
+        match market_buy_outcome(&base, GameShop, 0) {
+            MarketBuyOutcome::Confirm(text, _) => {
+                assert_eq!(text, "确定要以12,345 积分购买屠龙吗？")
+            }
+            other => panic!("{other:?}"),
+        }
+        // 非 UserMode 拍卖 → 出价确认（缺省 `当前价 + 1`，显式输入优先）
+        let auc = MarketItem {
+            item_type: 1,
+            current_bid: 150,
+            ..base.clone()
+        };
+        assert_eq!(
+            market_buy_outcome(&auc, Market, 0),
+            MarketBuyOutcome::Confirm(
+                "你确定要为屠龙出价151金币吗？".to_string(),
+                MarketConfirmAction::Buy {
+                    auction_id: 7,
+                    bid_price: 151
+                }
+            )
+        );
+        assert_eq!(
+            market_buy_outcome(&auc, Market, 999),
+            MarketBuyOutcome::Confirm(
+                "你确定要为屠龙出价999金币吗？".to_string(),
+                MarketConfirmAction::Buy {
+                    auction_id: 7,
+                    bid_price: 999
+                }
+            )
+        );
     }
 
     /// #2720：价格排序三态与图标（C# `CyclePriceFilter` / `UpdatePriceFilterIcon`）
