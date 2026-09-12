@@ -275,7 +275,7 @@ fn right_click_move_system(
             Without<LocalPlayer>,
         ),
     >,
-    buttons: Query<&UiButton>,
+    buttons: Query<(&UiButton, &InheritedVisibility)>,
     dialog: Res<crate::game::dialogs::DialogManager>,
     skill_bar: Res<crate::game::skills::SkillBarState>,
     skill_bar_opt: Res<crate::game::dialogs::option::OptionState>,
@@ -284,7 +284,10 @@ fn right_click_move_system(
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Some(cursor_logical) = window.cursor_position() else { return };
     let Ok(cam_tf) = camera.single() else { return };
-    let over_ui = buttons.iter().any(|b| {
+    let over_ui = buttons.iter().any(|(b, inherited)| {
+        if !inherited.get() {
+            return false;
+        }
         let (x, y, w, h) = b.rect;
         cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
     });
@@ -356,14 +359,17 @@ fn left_click_interact_system(
     actors: Query<(&NetObjectId, &Transform, Has<Npc>), Without<LocalPlayer>>,
     remote_players: Query<&NetObjectId, (With<crate::actor::Player>, Without<LocalPlayer>)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
-    buttons: Query<&UiButton>,
+    buttons: Query<(&UiButton, &InheritedVisibility)>,
     ui: UiLockState,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Some(cursor_logical) = window.cursor_position() else { return };
     let Ok(cam_tf) = camera.single() else { return };
-    let over_ui = buttons.iter().any(|b| {
+    let over_ui = buttons.iter().any(|(b, inherited)| {
+        if !inherited.get() {
+            return false;
+        }
         let (x, y, w, h) = b.rect;
         cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
     });

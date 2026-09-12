@@ -434,6 +434,27 @@ pub struct UiButton {
     pub clicked: bool,
 }
 
+/// 精灵 UI 控件是否在当前层级中可见。隐藏控件不得命中、悬停或拦截世界点击。
+#[inline]
+pub fn inherited_visible(vis: &InheritedVisibility) -> bool {
+    vis.get()
+}
+
+#[inline]
+fn ui_button_clicked(
+    btn: &UiButton,
+    inherited: &InheritedVisibility,
+    cursor: Vec2,
+    just_pressed: bool,
+    focused: bool,
+) -> bool {
+    if !inherited_visible(inherited) || !just_pressed || !focused {
+        return false;
+    }
+    let (x, y, w, h) = btn.rect;
+    cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
+}
+
 /// 三态按钮帧（normal/hover/pressed），与原版 draw_button 一致
 #[derive(Component)]
 pub struct ButtonFrames {
@@ -479,7 +500,14 @@ pub fn spawn_ui_button(
 /// 按钮系统：鼠标左键按下时命中矩形 → clicked=true；
 /// 带 ButtonFrames 的按钮按 hover/pressed 状态切换帧
 pub fn ui_button_system(
-    mut buttons: Query<(&mut UiButton, Option<&mut ButtonFrames>, &mut Sprite)>,
+    mut buttons: Query<(
+        Entity,
+        &mut UiButton,
+        Option<&mut ButtonFrames>,
+        &mut Sprite,
+        &InheritedVisibility,
+        &Transform,
+    )>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
@@ -516,14 +544,37 @@ pub fn ui_button_system(
     *warmup += 1;
     let just = mouse.just_pressed(MouseButton::Left) && !focus_changed && !init_ignore;
     let down = mouse.pressed(MouseButton::Left) && !focus_changed;
-    for (mut btn, frames, mut sprite) in &mut buttons {
+
+    // 同一坐标可能有多层按钮；只有最上层接收点击/悬停，避免一个物理点击触发多层控件。
+    let mut topmost: Option<(Entity, f32)> = None;
+    for (e, btn, _, _, inherited, transform) in &buttons {
+        if !inherited_visible(inherited) {
+            continue;
+        }
         let (x, y, w, h) = btn.rect;
         let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;
-        btn.clicked = just && over && focused;
+        if over
+            && topmost
+                .map(|(_, z)| transform.translation.z > z)
+                .unwrap_or(true)
+        {
+            topmost = Some((e, transform.translation.z));
+        }
+    }
+
+    for (e, mut btn, frames, mut sprite, inherited, _) in &mut buttons {
+        if !inherited_visible(inherited) {
+            btn.clicked = false;
+            continue;
+        }
+        let (x, y, w, h) = btn.rect;
+        let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;
+        let is_topmost = topmost.map(|(top, _)| top == e).unwrap_or(false);
+        btn.clicked = ui_button_clicked(&btn, inherited, cursor, just, focused) && is_topmost;
         if let Some(frames) = frames {
-            let frame = if down && over {
+            let frame = if down && is_topmost {
                 &frames.pressed
-            } else if over {
+            } else if is_topmost {
                 &frames.hover
             } else {
                 &frames.normal
@@ -555,6 +606,8 @@ pub fn ui_button_sound_system(
     buttons: Query<(
         Entity,
         &UiButton,
+        &InheritedVisibility,
+        &Transform,
         Option<&ButtonSound>,
         Option<&ButtonHoverSound>,
     )>,
@@ -575,11 +628,29 @@ pub fn ui_button_sound_system(
     };
     let cursor = Vec2::new(world.x, -world.y);
 
-    let mut hovered_now = std::collections::HashSet::new();
-    for (e, btn, sound, hover_sound) in &buttons {
+    let mut topmost: Option<(Entity, f32)> = None;
+    for (e, btn, inherited, transform, _, _) in &buttons {
+        if !inherited_visible(inherited) {
+            continue;
+        }
         let (x, y, w, h) = btn.rect;
         let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;
-        if over {
+        if over
+            && topmost
+                .map(|(_, z)| transform.translation.z > z)
+                .unwrap_or(true)
+        {
+            topmost = Some((e, transform.translation.z));
+        }
+    }
+
+    let mut hovered_now = std::collections::HashSet::new();
+    for (e, btn, inherited, _, sound, hover_sound) in &buttons {
+        if !inherited_visible(inherited) {
+            continue;
+        }
+        let is_topmost = topmost.map(|(top, _)| top == e).unwrap_or(false);
+        if is_topmost {
             hovered_now.insert(e);
         }
         // 点击音效
@@ -594,7 +665,7 @@ pub fn ui_button_sound_system(
             );
         }
         // 悬停进入音效（可选）
-        if over && !hovered_prev.contains(&e) {
+        if is_topmost && !hovered_prev.contains(&e) {
             if let Some(hs) = hover_sound {
                 crate::game::sound::play_sound_cached(
                     &mut commands,
@@ -698,4 +769,32 @@ mod tests {
             "非 UI 子树子实体不应被挂 RenderLayers"
         );
     }
+    /// 隐藏按钮不得继续参与命中；可见按钮仍正常点击。
+    #[test]
+    fn hidden_ui_button_is_not_clickable() {
+        let hidden = UiButton {
+            rect: (0.0, 0.0, 20.0, 20.0),
+            clicked: false,
+        };
+        let visible = UiButton {
+            rect: (0.0, 0.0, 20.0, 20.0),
+            clicked: false,
+        };
+        let cursor = Vec2::new(5.0, 5.0);
+        assert!(!ui_button_clicked(
+            &hidden,
+            &InheritedVisibility::HIDDEN,
+            cursor,
+            true,
+            true
+        ));
+        assert!(ui_button_clicked(
+            &visible,
+            &InheritedVisibility::VISIBLE,
+            cursor,
+            true,
+            true
+        ));
+    }
+
 }
