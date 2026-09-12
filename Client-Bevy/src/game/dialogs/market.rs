@@ -16,7 +16,7 @@ use mir2_shared::enums::{ItemType, MarketPanelType};
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::market_filter::{
-    self, MarketFilterDownBtn, MarketFilterSprites, MarketFilterUpBtn,
+    self, MarketFilterSprites,
 };
 use crate::game::dialogs::inventory::{InvClickState, InvItem};
 use crate::game::dialogs::text_input::TextInputState;
@@ -40,6 +40,10 @@ pub struct MarketItem {
     pub unique_id: u64,
     pub name: String,
     pub item_index: i32,
+    /// 物品图标帧（C# `Listing.Item.Info.Image`；0 或 count==0 时用 `Prguse[540]` 占位）
+    pub image: u16,
+    /// 物品品质（C# `Item.Info.Grade` → `GradeNameColor`）
+    pub grade: u8,
     pub count: u16,
     pub seller: String,
     pub price: u32,
@@ -47,6 +51,8 @@ pub struct MarketItem {
     pub item_type: u8,
     /// 拍卖当前最高出价（寄售=0）
     pub current_bid: u32,
+    /// C# `ClientAuction.ConsignmentDate`（Unix 秒；到期列显示 + `ConsignmentLength` 天）
+    pub consignment_date: i64,
 }
 
 /// 市场状态
@@ -255,6 +261,158 @@ pub fn load_buy_frames(
 pub const TM_MIN_CONSIGN_PRICE: u32 = 5000;
 pub const TM_MAX_CONSIGN_PRICE: u32 = 50_000_000;
 pub const TM_MAX_STARTING_BID: u32 = 50_000;
+/// C# `Globals.ConsignmentLength`（天，到期列 = 寄售日期 + 7 天）
+pub const TM_CONSIGNMENT_LENGTH_DAYS: i64 = 7;
+
+// ===== 列表行（C# `AuctionRow`，TrustMerchantDialog.cs:1440-1625）=====
+
+/// C# `Rows[i].Location = new Point(127, 82 + i * 33)`；`Size = (354, 32)`
+pub const TM_ROW_X: f32 = 127.0;
+pub const TM_ROW_Y: f32 = 82.0;
+pub const TM_ROW_W: f32 = 354.0;
+pub const TM_ROW_H: f32 = 32.0;
+pub const TM_ROW_STEP: f32 = 33.0;
+/// `IconArea = (34, 32)`（图标按 `(Area - Icon.Size)/2` 居中）
+pub const TM_ROW_ICON_W: f32 = 34.0;
+pub const TM_ROW_ICON_H: f32 = 32.0;
+/// 行内标签（相对行原点）：`NameLabel`(38,8)/`PriceLabel`(170,8)/`SellerLabel`(256,0)/`ExpireLabel`(256,14)
+pub const TM_ROW_NAME_POS: (f32, f32) = (38.0, 8.0);
+pub const TM_ROW_PRICE_POS: (f32, f32) = (170.0, 8.0);
+pub const TM_ROW_SELLER_POS: (f32, f32) = (256.0, 0.0);
+pub const TM_ROW_EXPIRE_POS: (f32, f32) = (256.0, 14.0);
+/// 选中边框（C# `BorderColour = Color.FromArgb(255, 200, 100, 0)`，`BorderInfo` 外扩 1px）
+pub const TM_ROW_BORDER_COLOR: Color = Color::srgb_u8(200, 100, 0);
+pub const TM_ROW_BORDER_INSET: f32 = 1.0;
+/// 空/零数量物品的占位图标（C# `Prguse[540]`）
+pub const TM_ROW_PLACEHOLDER_FRAME: usize = 540;
+
+/// C# `AuctionRow` 行槽
+#[derive(Component)]
+pub struct MarketAuctionRow(pub usize);
+
+/// 行图标（C# `IconImage`）
+#[derive(Component)]
+pub struct MarketRowIcon(pub usize);
+
+/// 行文本种类（C# `NameLabel`/`PriceLabel`/`SellerLabel`/`ExpireLabel`）
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MarketRowTextKind {
+    Name,
+    Price,
+    Seller,
+    Expire,
+}
+
+/// 行文本（槽位 + 种类）
+#[derive(Component)]
+pub struct MarketRowText(pub usize, pub MarketRowTextKind);
+
+/// 行选中边框（C# `AuctionRow.Border`，`Rows[i].Border = Rows[i] == Selected`）
+#[derive(Component)]
+pub struct MarketRowBorder(pub usize);
+
+/// 底栏按钮（C# `UpdateInterface` 的三个启用态开关，:1005-1033）
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MarketBottomBtn {
+    /// 选中行才可用（C# `BuyButton.Enabled`）
+    Buy,
+    /// 未选中时才可用（C# `CollectSoldButton`）
+    CollectSold,
+    /// 选中行卖家为 `Bid Met` 才可用（C# `SellNowButton`）
+    SellNow,
+}
+
+/// 行内绝对定位节点（`border` = 四周 1px 描边，用于选中框）
+fn row_node(x: f32, y: f32, w: f32, h: f32, border: bool) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(x),
+        top: Val::Px(y),
+        width: Val::Px(w),
+        height: Val::Px(h),
+        border: if border {
+            UiRect::all(Val::Px(1.0))
+        } else {
+            UiRect::default()
+        },
+        ..default()
+    }
+}
+
+/// C# `{0:###,###,##0}` 千分位
+pub fn group_thousands(n: u32) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// C# `AuctionRow.Update`：`String.Format("{0:###,###,##0} {1}", Price, 拍卖 ? "出价" : "")`
+pub fn row_price_text(price: u32, item_type: u8) -> String {
+    let amount = group_thousands(price);
+    if item_type == 1 {
+        format!("{} 出价", amount)
+    } else {
+        amount
+    }
+}
+
+/// C# 价格颜色阈值（:1575-1584）：>10M 红 / >1M 橙 / >100k 草绿 / >10k 天蓝 / 其余白
+pub fn row_price_color(price: u32) -> Color {
+    if price > 10_000_000 {
+        Color::srgb(1.0, 0.0, 0.0)
+    } else if price > 1_000_000 {
+        Color::srgb(1.0, 0.549, 0.0)
+    } else if price > 100_000 {
+        Color::srgb(0.486, 0.988, 0.0)
+    } else if price > 10_000 {
+        Color::srgb(0.0, 0.749, 1.0)
+    } else {
+        Color::WHITE
+    }
+}
+
+/// C# `GradeNameColor`（GameScene.cs:6791-6808）+ 调用点「黄色→白色」：
+/// None/Common 白、Rare 天蓝、Legendary 深橙、Mythical 梅红、Heroic 红
+pub fn row_name_color(grade: u8) -> Color {
+    match grade {
+        5 => Color::srgb(0.0, 0.749, 1.0),     // Rare DeepSkyBlue
+        6 => Color::srgb(1.0, 0.549, 0.0),     // Legendary DarkOrange
+        7 => Color::srgb(0.867, 0.627, 0.867), // Mythical Plum
+        8 => Color::srgb(1.0, 0.0, 0.0),       // Heroic Red
+        _ => Color::WHITE,                     // None/Common（C# 黄 → 白）
+    }
+}
+
+/// C# 卖家列颜色（:1587-1607）：UserMode 下 `Sold` 金 / `Expired` 红 / `Bid Met` 草绿 / 其余白
+pub fn row_seller_color(seller: &str, user_mode: bool) -> Color {
+    if !user_mode {
+        return Color::WHITE;
+    }
+    match seller {
+        "Sold" => Color::srgb(1.0, 0.843, 0.0),
+        "Expired" => Color::srgb(1.0, 0.0, 0.0),
+        "Bid Met" => Color::srgb(0.486, 0.988, 0.0),
+        _ => Color::WHITE,
+    }
+}
+
+/// C# `AuctionRow.UpdateInterface`：`ConsignmentDate.AddDays(ConsignmentLength)` 的
+/// `{0:dd/MM/yy HH:mm:ss}` 文本（本地墙钟，与 C# `DateTime` 一致）
+pub fn row_expire_text(consignment_date: i64) -> String {
+    if consignment_date <= 0 {
+        return String::new();
+    }
+    let expire = consignment_date + TM_CONSIGNMENT_LENGTH_DAYS * 86_400;
+    chrono::DateTime::from_timestamp(expire, 0)
+        .map(|t| t.with_timezone(&chrono::Local).format("%d/%m/%y %H:%M:%S").to_string())
+        .unwrap_or_default()
+}
 
 /// 价格输入状态（C# `TextBox_TextChanged` 的 `PriceTextBox.BorderColour` 三态 + 上限钳制）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -364,6 +522,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
             (
                 market_panel_system,
                 market_consign_system,
+                market_row_system,
                 market_consign_cell_system,
             )
                 .chain()
@@ -455,19 +614,52 @@ fn spawn_market(
                 spawn_icon_button(p, n, h, pr, x, y, 92.0, 21.0, 10).insert(MarketTabBtn(name));
             }
         }
-        // 商品列表 10 行 @(130,60+18i)（C# 列表区：左列 x≤120 为筛选树）
+        // C# `AuctionRow` ×10（:1440-1522）：行 (127, 82+i*33) 354x32 = 34x32 图标区 +
+        // 名称/价格/卖家/到期 4 标签 + 选中橙框（外扩 1px）
         for i in 0..10usize {
-            spawn_label(
+            let mut row = spawn_container(
                 p,
-                &cjk,
-                "",
-                TM_LIST_X,
-                TM_LIST_Y + i as f32 * 18.0,
-                12.0,
-                Color::WHITE,
+                TM_ROW_X,
+                TM_ROW_Y + i as f32 * TM_ROW_STEP,
+                TM_ROW_W,
+                TM_ROW_H,
                 9,
-            )
-            .insert(MarketLine(i));
+            );
+            row.insert((MarketAuctionRow(i), Visibility::Visible));
+            let row_id = row.id();
+            p.commands().entity(row_id).with_children(|r| {
+                // 图标（C# `IconImage`）：尺寸/居中位置由 `market_row_system` 按图标实际尺寸写
+                r.spawn((
+                    MarketRowIcon(i),
+                    ImageNode::new(Handle::default()),
+                    row_node(0.0, 0.0, 1.0, 1.0, false),
+                    ZIndex(1),
+                ));
+                for (kind, (lx, ly)) in [
+                    (MarketRowTextKind::Name, TM_ROW_NAME_POS),
+                    (MarketRowTextKind::Price, TM_ROW_PRICE_POS),
+                    (MarketRowTextKind::Seller, TM_ROW_SELLER_POS),
+                    (MarketRowTextKind::Expire, TM_ROW_EXPIRE_POS),
+                ] {
+                    spawn_label(r, &cjk, "", lx, ly, 12.0, Color::WHITE, 2)
+                        .insert(MarketRowText(i, kind));
+                }
+                // 选中框（C# `BorderInfo` 外扩 1px；C# `SelectedImage`(Prguse[545]) 是死控件）
+                r.spawn((
+                    MarketRowBorder(i),
+                    row_node(
+                        -TM_ROW_BORDER_INSET,
+                        -TM_ROW_BORDER_INSET,
+                        TM_ROW_W + TM_ROW_BORDER_INSET * 2.0,
+                        TM_ROW_H + TM_ROW_BORDER_INSET * 2.0,
+                        true,
+                    ),
+                    BackgroundColor(Color::NONE),
+                    BorderColor::all(TM_ROW_BORDER_COLOR),
+                    ZIndex(3),
+                    Visibility::Hidden,
+                ));
+            });
         }
         // C# `PageLabel` @(260,419) 70x18：行 10 承载「第 x/y 页」
         spawn_label(p, &cjk, "", TM_PAGE_POS.0, TM_PAGE_POS.1, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
@@ -497,7 +689,7 @@ fn spawn_market(
         {
             let (n, h, pr) = buy_market.clone();
             spawn_icon_button(p, n, h, pr, TM_BUY_POS.0, TM_BUY_POS.1, 84.0, 25.0, 10)
-                .insert(MarketBuyBtn);
+                .insert((MarketBuyBtn, MarketBottomBtn::Buy));
         }
         // 表头标签（C# 5 个 Title*Label，居中；文案随页签变化）
         for (kind, x, y, w) in TM_HEADERS {
@@ -610,7 +802,11 @@ fn spawn_market(
                 TM_COLLECT_BTN_H,
                 10,
             )
-            .insert((MarketCollectSoldBtn, MarketForPanel::ConsignOnly));
+            .insert((
+                MarketCollectSoldBtn,
+                MarketBottomBtn::CollectSold,
+                MarketForPanel::ConsignOnly,
+            ));
         }
         {
             if let Some((n, h, pr)) = load_buy_frames(&mut libs, &mut images, (700, 701, 702)) {
@@ -625,13 +821,25 @@ fn spawn_market(
                     TM_SELL_BTN_H,
                     10,
                 )
-                .insert((MarketSellNowBtn, MarketForPanel::AuctionOnly));
+                .insert((
+                    MarketSellNowBtn,
+                    MarketBottomBtn::SellNow,
+                    MarketForPanel::AuctionOnly,
+                ));
             }
         }
     });
     if let Some(sp) = filter_sprites {
         commands.insert_resource(sp);
     }
+    // #2733：此前漏了这条插入 → `market_panel_system` 拿不到 `MarketPanelSprites`，
+    // 页签背景 786/787 与 Buy 精灵 703..708 的切换实为死代码（PR #2732 的漏项）
+    commands.insert_resource(MarketPanelSprites {
+        bg_market,
+        bg_consign,
+        buy_market,
+        buy_user,
+    });
 }
 
 /// 市场输入框（TextInputField(id) + 子 TextInputDisplay(id)）；面板子节点
@@ -681,8 +889,13 @@ fn spawn_market_input(
 #[allow(clippy::too_many_arguments)]
 /// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..10）
 fn market_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    // 列表区随 C# 布局右移（左列 x≤120 为筛选树）：行矩形与绘制同源
-    (ox + TM_LIST_X, oy + TM_LIST_Y + i as f32 * 18.0, 300.0, 16.0)
+    // C# `AuctionRow`：行 (127, 82+i*33) 354x32（行矩形与绘制同源）
+    (
+        ox + TM_ROW_X,
+        oy + TM_ROW_Y + i as f32 * TM_ROW_STEP,
+        TM_ROW_W,
+        TM_ROW_H,
+    )
 }
 
 fn market_ui_system(
@@ -767,28 +980,6 @@ fn market_ui_system(
     }
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
-            i if i < 10 => {
-                let idx = market.page * 10 + i;
-                match market.listings.get(idx) {
-                    Some(it) => {
-                        // C#：拍卖行显示当前最高出价（Price = CurrentBid）+ “出价”后缀
-                        let price_txt = if it.item_type == 1 {
-                            format!("{}出价", it.current_bid)
-                        } else {
-                            format!("{}金币", it.price)
-                        };
-                        format!(
-                            "{:03}: {} x{} {} {}",
-                            it.auction_id % 10000,
-                            it.name,
-                            it.count,
-                            it.seller,
-                            price_txt
-                        )
-                    }
-                    None => String::new(),
-                }
-            }
             10 => format!("第 {}/{} 页", market.page + 1, market.pages.max(1)),
             11 => market.message.clone(),
             _ => String::new(),
@@ -1208,6 +1399,154 @@ fn market_consign_system(
 }
 
 /// 寄售目标格渲染（C# `ItemCell`：显示已选物品图标/数量）
+#[allow(clippy::too_many_arguments)]
+fn market_row_system(
+    mgr: Res<DialogManager>,
+    market: Res<MarketState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut rows: Query<(&MarketAuctionRow, &mut Visibility), Without<MarketRowBorder>>,
+    mut icons: Query<(&MarketRowIcon, &mut ImageNode, &mut Node)>,
+    mut labels: Query<(&MarketRowText, &mut Text, &mut TextColor)>,
+    mut borders: Query<(&MarketRowBorder, &mut Visibility), Without<MarketAuctionRow>>,
+    mut bottom_btns: Query<(&MarketBottomBtn, &mut ImageNode), Without<MarketRowIcon>>,
+) {
+    if !mgr.is_open(DialogKind::Market) {
+        return;
+    }
+    let user_mode = matches!(
+        market.panel,
+        MarketPanelType::Consign | MarketPanelType::Auction
+    );
+    let base = market.page * 10;
+    let selected = market.selected;
+    // 行显隐（C# `Rows[i].Clear()`：无数据 → Visible=false）
+    for (row, mut vis) in &mut rows {
+        let show = market.listings.get(base + row.0).is_some();
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // 图标（C# `IconImage`：count>0 用 `Items[Image]`，否则 `Prguse[540]`；按 IconArea 居中）
+    for (icon, mut node_img, mut node) in &mut icons {
+        let Some(item) = market.listings.get(base + icon.0) else {
+            continue;
+        };
+        let handle = if item.count > 0 {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Items,
+                item.image as usize,
+            )
+        } else {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Prguse,
+                TM_ROW_PLACEHOLDER_FRAME,
+            )
+        };
+        let Some(handle) = handle else {
+            continue;
+        };
+        if node_img.image != handle {
+            node_img.image = handle.clone();
+        }
+        let (iw, ih) = images
+            .get(&handle)
+            .map(|i| {
+                let s = i.size();
+                (s.x.max(1) as f32, s.y.max(1) as f32)
+            })
+            .unwrap_or((1.0, 1.0));
+        let left = (TM_ROW_ICON_W - iw) / 2.0;
+        let top = (TM_ROW_ICON_H - ih) / 2.0;
+        if node.left != Val::Px(left) {
+            node.left = Val::Px(left);
+        }
+        if node.top != Val::Px(top) {
+            node.top = Val::Px(top);
+        }
+        if node.width != Val::Px(iw) {
+            node.width = Val::Px(iw);
+        }
+        if node.height != Val::Px(ih) {
+            node.height = Val::Px(ih);
+        }
+    }
+    // 文本（C# `AuctionRow.Update` 的名称/价格/卖家/到期）
+    for (label, mut text, mut color) in &mut labels {
+        let text_new = match market.listings.get(base + label.0) {
+            Some(item) => match label.1 {
+                MarketRowTextKind::Name => Some((item.name.clone(), row_name_color(item.grade))),
+                MarketRowTextKind::Price => Some((
+                    row_price_text(item.price, item.item_type),
+                    row_price_color(item.price),
+                )),
+                MarketRowTextKind::Seller => {
+                    Some((item.seller.clone(), row_seller_color(&item.seller, user_mode)))
+                }
+                MarketRowTextKind::Expire => Some((
+                    row_expire_text(item.consignment_date),
+                    Color::WHITE,
+                )),
+            },
+            None => None,
+        };
+        match text_new {
+            Some((s, c)) => {
+                if text.0 != s {
+                    text.0 = s;
+                }
+                if color.0 != c {
+                    color.0 = c;
+                }
+            }
+            None => {
+                if !text.0.is_empty() {
+                    text.0.clear();
+                }
+            }
+        }
+    }
+    // 选中框（C# `Rows[i].Border = Rows[i] == Selected`）
+    for (border, mut vis) in &mut borders {
+        let show = selected == Some(base + border.0) && market.listings.get(base + border.0).is_some();
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // C# `UpdateInterface`（:1005-1033）：选中 → Buy/Mail 可用、CollectSold 变灰；
+    // `SellNow` 仅当选中行卖家为 `Bid Met`（拍卖已有人出价）
+    let sel = selected.and_then(|i| market.listings.get(i));
+    let has_sel = sel.is_some();
+    let bid_met = sel.map(|i| i.seller == "Bid Met").unwrap_or(false);
+    for (kind, mut node) in &mut bottom_btns {
+        let enabled = match kind {
+            MarketBottomBtn::Buy => has_sel,
+            MarketBottomBtn::CollectSold => !has_sel,
+            MarketBottomBtn::SellNow => bid_met,
+        };
+        let want = if enabled {
+            Color::WHITE
+        } else {
+            Color::srgb(0.55, 0.55, 0.55)
+        };
+        if node.color != want {
+            node.color = want;
+        }
+    }
+}
+
+/// 寄售目标格渲染（C# `ItemCell`：显示已选物品图标/数量）
 fn market_consign_cell_system(
     market: Res<MarketState>,
     mut libs: ResMut<GameLibraries>,
@@ -1247,7 +1586,7 @@ fn market_action_system(
     mgr: Res<DialogManager>,
     mut market: ResMut<MarketState>,
     net: Res<NetConnection>,
-    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    input: Res<crate::game::dialogs::text_input::TextInputState>,
     buy_btn: Query<(Entity, &Interaction), With<MarketBuyBtn>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -1329,26 +1668,29 @@ fn market_server_events(
             ServerEvent::MarketListings { listings } => {
                 market.listings = listings
                     .iter()
-                    .map(|(auction_id, unique_id, item_index, count, info_name, seller, price, item_type, current_bid)| {
-                        let name = if !info_name.is_empty() {
-                            info_name.clone()
+                    .map(|e| {
+                        let name = if !e.item.name.is_empty() {
+                            e.item.name.clone()
                         } else {
                             market
                                 .item_names
-                                .get(item_index)
+                                .get(&e.item.item_index)
                                 .cloned()
-                                .unwrap_or_else(|| format!("#{}", item_index))
+                                .unwrap_or_else(|| format!("#{}", e.item.item_index))
                         };
                         MarketItem {
-                            auction_id: *auction_id,
-                            unique_id: *unique_id,
+                            auction_id: e.auction_id,
+                            unique_id: e.unique_id,
                             name,
-                            item_index: *item_index,
-                            count: *count,
-                            seller: seller.clone(),
-                            price: *price,
-                            item_type: *item_type,
-                            current_bid: *current_bid,
+                            item_index: e.item.item_index,
+                            image: e.item.image,
+                            grade: e.item.grade,
+                            count: e.item.count,
+                            seller: e.seller.clone(),
+                            price: e.price,
+                            item_type: e.item_type,
+                            current_bid: e.current_bid,
+                            consignment_date: e.consignment_date,
                         }
                     })
                     .collect();
@@ -1390,16 +1732,19 @@ fn market_server_events(
 
 #[cfg(test)]
 mod tests {
-    /// 商品行命中：初始原点等价于原固定坐标，拖动后跟随面板
+    /// 商品行命中：C# `AuctionRow` 行矩形，拖动后跟随面板原点
     #[test]
     fn row_rect_origin_and_drag() {
-        // C# 布局：面板 @(0,0)，列表区首行 (130,60)、行高 18、宽 300
+        // C# 布局：面板 @(0,0)，首行 (127,82)、行高 33、354x32
         let (rx, ry, rw, rh) = market_row_rect(0, TM_POS.0, TM_POS.1);
-        assert_eq!((rx, ry, rw, rh), (130.0, 60.0, 300.0, 16.0));
-        assert_eq!(market_row_rect(9, TM_POS.0, TM_POS.1).1, 60.0 + 9.0 * 18.0);
+        assert_eq!((rx, ry, rw, rh), (127.0, 82.0, 354.0, 32.0));
+        assert_eq!(
+            market_row_rect(9, TM_POS.0, TM_POS.1).1,
+            82.0 + 9.0 * 33.0
+        );
         // 拖动到 (330,100)：同一相对位置命中跟随（+delta 330,100）
         let (rx2, ry2, _, _) = market_row_rect(0, 330.0, 100.0);
-        assert_eq!((rx2, ry2), (460.0, 160.0));
+        assert_eq!((rx2, ry2), (457.0, 182.0));
     }
 
     /// #2720：TrustMerchant 面板/页签/底部栏锚点对齐 C#（TrustMerchantDialog.cs:86-500）
@@ -1427,6 +1772,80 @@ mod tests {
         assert!(inside(TM_CLOSE));
         assert!(inside(TM_SEARCH_POS));
         assert!(inside(TM_BUY_POS));
+    }
+
+    /// #2720：列表行锚点对齐 C# `AuctionRow`（TrustMerchantDialog.cs:1440-1522）
+    #[test]
+    fn trust_merchant_auction_row_matches_csharp() {
+        assert_eq!((TM_ROW_X, TM_ROW_Y), (127.0, 82.0)); // Location = (127, 82 + i*33)
+        assert_eq!((TM_ROW_W, TM_ROW_H), (354.0, 32.0)); // Size
+        assert_eq!(TM_ROW_STEP, 33.0);
+        assert_eq!((TM_ROW_ICON_W, TM_ROW_ICON_H), (34.0, 32.0)); // IconArea
+        assert_eq!(TM_ROW_NAME_POS, (38.0, 8.0));
+        assert_eq!(TM_ROW_PRICE_POS, (170.0, 8.0));
+        assert_eq!(TM_ROW_SELLER_POS, (256.0, 0.0));
+        assert_eq!(TM_ROW_EXPIRE_POS, (256.0, 14.0));
+        assert_eq!(TM_ROW_PLACEHOLDER_FRAME, 540); // C# 空数量占位 Prguse[540]
+        assert_eq!(TM_ROW_BORDER_COLOR, Color::srgb_u8(200, 100, 0)); // BorderColour
+        // 行内元素都在行框内（图标区 + 4 标签；标签用 C# 声明尺寸）
+        let inside = |(x, y): (f32, f32), w: f32, h: f32| {
+            x >= 0.0 && y >= 0.0 && x + w <= TM_ROW_W && y + h <= TM_ROW_H
+        };
+        assert!(inside(TM_ROW_NAME_POS, 140.0, 20.0));
+        assert!(inside(TM_ROW_PRICE_POS, 178.0, 20.0));
+        // 卖家/到期列 C# 声明宽度超过行宽（AutoSize 会按文本收缩），只断言锚点不溢出右侧面板
+        assert!(TM_ROW_X + TM_ROW_SELLER_POS.0 < TM_PANEL_W);
+        assert!(TM_ROW_Y + TM_ROW_EXPIRE_POS.1 < TM_PANEL_H);
+        // 行首 x 与「物品」表头对齐（C# 两者都是 127）；10 行不越出 492x478 面板
+        assert_eq!(TM_ROW_X, TM_HEADERS[2].1);
+        assert!(TM_ROW_Y + 9.0 * TM_ROW_STEP + TM_ROW_H <= TM_PANEL_H);
+        // 行矩形命中（拖动后跟随面板原点）
+        let (rx, ry, rw, rh) = market_row_rect(0, 0.0, 0.0);
+        assert_eq!((rx, ry, rw, rh), (127.0, 82.0, 354.0, 32.0));
+        assert_eq!(market_row_rect(9, 0.0, 0.0).1, 82.0 + 9.0 * 33.0);
+        assert_eq!(market_row_rect(0, 330.0, 100.0).0, 457.0);
+    }
+
+    /// #2720：行文本/颜色对齐 C# `AuctionRow.Update`（:1565-1607）
+    #[test]
+    fn market_row_texts_match_csharp() {
+        // 千分位 + 拍卖「出价」后缀
+        assert_eq!(group_thousands(0), "0");
+        assert_eq!(group_thousands(999), "999");
+        assert_eq!(group_thousands(1000), "1,000");
+        assert_eq!(group_thousands(1_234_567), "1,234,567");
+        assert_eq!(row_price_text(1000, 0), "1,000");
+        assert_eq!(row_price_text(1000, 1), "1,000 出价");
+        // 价格阈值（>10M 红 / >1M 橙 / >100k 草绿 / >10k 天蓝 / 其余白）
+        assert_eq!(row_price_color(10_000), Color::WHITE);
+        assert_eq!(row_price_color(10_001), Color::srgb(0.0, 0.749, 1.0));
+        assert_eq!(row_price_color(100_000), Color::srgb(0.0, 0.749, 1.0));
+        assert_eq!(row_price_color(100_001), Color::srgb(0.486, 0.988, 0.0));
+        assert_eq!(row_price_color(1_000_000), Color::srgb(0.486, 0.988, 0.0));
+        assert_eq!(row_price_color(1_000_001), Color::srgb(1.0, 0.549, 0.0));
+        assert_eq!(row_price_color(10_000_001), Color::srgb(1.0, 0.0, 0.0));
+        // 名称品质（None=3/Common=4 黄→白，Rare=5 天蓝，Heroic=8 红）
+        assert_eq!(row_name_color(3), Color::WHITE);
+        assert_eq!(row_name_color(4), Color::WHITE);
+        assert_eq!(row_name_color(5), Color::srgb(0.0, 0.749, 1.0));
+        assert_eq!(row_name_color(6), Color::srgb(1.0, 0.549, 0.0));
+        assert_eq!(row_name_color(7), Color::srgb(0.867, 0.627, 0.867));
+        assert_eq!(row_name_color(8), Color::srgb(1.0, 0.0, 0.0));
+        // 卖家列：非 UserMode 一律白；UserMode 状态串着色
+        assert_eq!(row_seller_color("张三", false), Color::WHITE);
+        assert_eq!(row_seller_color("Sold", true), Color::srgb(1.0, 0.843, 0.0));
+        assert_eq!(row_seller_color("Expired", true), Color::srgb(1.0, 0.0, 0.0));
+        assert_eq!(
+            row_seller_color("Bid Met", true),
+            Color::srgb(0.486, 0.988, 0.0)
+        );
+        assert_eq!(row_seller_color("No Bid", true), Color::WHITE);
+        assert_eq!(row_seller_color("For Sale", true), Color::WHITE);
+        // 到期文本：`dd/MM/yy HH:mm:ss`（17 字符、含 `/` 与 `:`）；无日期留空
+        let text = row_expire_text(1_700_000_000);
+        assert_eq!(text.len(), 17, "{text}");
+        assert!(text.contains('/') && text.contains(':'), "{text}");
+        assert_eq!(row_expire_text(0), "");
     }
 
     /// #2720：寄售/拍卖页签面板锚点对齐 C#

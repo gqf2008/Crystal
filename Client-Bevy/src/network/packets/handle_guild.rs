@@ -232,26 +232,21 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
-                let _date = match cur.read_i64::<LittleEndian>() {
+                let consignment_date = match cur.read_i64::<LittleEndian>() {
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
-                let info_name = item
-                    .info
-                    .as_ref()
-                    .map(|i| i.name.clone())
-                    .unwrap_or_default();
-                listings.push((
+                // #2720：整条按 C# `ClientAuction` 形状交给 UI（含图标 index/品质/寄售日期）
+                listings.push(crate::network::server_event::MarketPageEntry {
                     auction_id,
-                    item.unique_id,
-                    item.item_index,
-                    item.count,
-                    info_name,
+                    unique_id: item.unique_id,
+                    item: super::to_inv_item(&item),
                     seller,
                     price,
                     item_type,
                     current_bid,
-                ));
+                    consignment_date,
+                });
             }
             if ok {
                 let listing_count = listings.len();

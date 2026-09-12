@@ -374,7 +374,9 @@ impl Packet for MockNPCMarketPage {
             writer.write_u32::<LittleEndian>(*price)?;
             writer.write_u8(*item_type)?;
             writer.write_u32::<LittleEndian>(*current_bid)?;
-            writer.write_i64::<LittleEndian>(0)?; // date
+            // #2720：寄售日期（mock 用「当前时间 - 1 小时」，便于核对到期列文本；
+            // 真实服务端为 `AuctionListing.consignment_date`）
+            writer.write_i64::<LittleEndian>(chrono::Utc::now().timestamp() - 3600)?;
         }
         Ok(())
     }
