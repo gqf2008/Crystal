@@ -141,6 +141,7 @@ impl Message<MarketSearchRequest> for WorldActor {
             msg.session_id,
             MarketSearchCache {
                 results: results.clone(),
+                user_mode: msg.user_mode,
             },
         );
 
@@ -175,7 +176,15 @@ impl Message<MarketSearchRequest> for WorldActor {
                     |a| mir2_shared::packets::server::market_system::MarketListing {
                         auction_id: a.auction_id,
                         item: a.item.clone(),
-                        seller_name: a.seller_name.clone(),
+                        seller_name: market_seller_label(
+                            a.item_type,
+                            a.sold,
+                            a.expired,
+                            a.current_bid,
+                            a.price,
+                            &a.seller_name,
+                            msg.user_mode,
+                        ),
                         price: a.price,
                         item_type: a.item_type,
                         current_bid: a.current_bid as u32,
@@ -233,6 +242,8 @@ impl Message<MarketRefreshRequest> for WorldActor {
             msg.session_id,
             MarketSearchCache {
                 results: results.clone(),
+                // C# `MarketRefresh` 是全局刷新（非用户模式）
+                user_mode: false,
             },
         );
 
@@ -267,7 +278,16 @@ impl Message<MarketRefreshRequest> for WorldActor {
                     |a| mir2_shared::packets::server::market_system::MarketListing {
                         auction_id: a.auction_id,
                         item: a.item.clone(),
-                        seller_name: a.seller_name.clone(),
+                        // `MarketRefresh` 是全局刷新（非用户模式）→ 显示卖家名
+                        seller_name: market_seller_label(
+                            a.item_type,
+                            a.sold,
+                            a.expired,
+                            a.current_bid,
+                            a.price,
+                            &a.seller_name,
+                            false,
+                        ),
                         price: a.price,
                         item_type: a.item_type,
                         current_bid: a.current_bid as u32,
@@ -356,7 +376,16 @@ impl Message<MarketPageRequest> for WorldActor {
                 |a| mir2_shared::packets::server::market_system::MarketListing {
                     auction_id: a.auction_id,
                     item: a.item.clone(),
-                    seller_name: a.seller_name.clone(),
+                    // 翻页沿用本次搜索的 `Usermode`（C# `AuctionInfo.GetSellerLabel`）
+                    seller_name: market_seller_label(
+                        a.item_type,
+                        a.sold,
+                        a.expired,
+                        a.current_bid,
+                        a.price,
+                        &a.seller_name,
+                        cache.user_mode,
+                    ),
                     price: a.price,
                     item_type: a.item_type,
                     current_bid: a.current_bid as u32,
@@ -854,6 +883,50 @@ pub(crate) fn market_sell_now_settlement(auction: &AuctionListing) -> Result<u64
 pub(crate) const MIN_CONSIGN_PRICE: u32 = 5000;
 pub(crate) const MAX_CONSIGN_PRICE: u32 = 50_000_000;
 pub(crate) const MAX_STARTING_BID: u32 = 50_000;
+
+/// C# `AuctionInfo.GetSellerLabel(userMatch)`（Server/MirDatabase/AuctionInfo.cs:89-102）：
+/// UserMode（寄售/拍卖页签，只看自己的记录）时「卖家」列显示状态标记串，否则显示卖家名。
+/// 客户端 `AuctionRow` 依赖这些标记（`Sold` 金 / `Expired` 红 / `Bid Met` 草绿 + `Bid Met` 才可立即售出）。
+pub(crate) fn market_seller_label(
+    item_type: u8,
+    sold: bool,
+    expired: bool,
+    current_bid: u64,
+    price: u32,
+    seller_name: &str,
+    user_match: bool,
+) -> String {
+    // C# `MarketItemType`：0=Consign 1=Auction 2=GameShop
+    match item_type {
+        0 => {
+            if !user_match {
+                return seller_name.to_string();
+            }
+            if sold {
+                "Sold".to_string()
+            } else if expired {
+                "Expired".to_string()
+            } else {
+                "For Sale".to_string()
+            }
+        }
+        1 => {
+            if !user_match {
+                return seller_name.to_string();
+            }
+            if sold {
+                "Sold".to_string()
+            } else if expired {
+                "Expired".to_string()
+            } else if current_bid > price as u64 {
+                "Bid Met".to_string()
+            } else {
+                "No Bid".to_string()
+            }
+        }
+        _ => String::new(), // GameShop（C# 返回空串）
+    }
+}
 
 /// #2566：寄售/拍卖价格校验按模式区分（此前两模式统一 5000..50M，拍卖起始价错位）
 pub(crate) fn consign_price_validate(market_type: u8, price: u32) -> Result<(), &'static str> {
@@ -2294,6 +2367,35 @@ impl Message<GetRentedItemsRequest> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2720：C# `AuctionInfo.GetSellerLabel(userMatch)`（AuctionInfo.cs:89-102）逐分支对齐
+    #[test]
+    fn market_seller_label_matches_csharp() {
+        // (item_type, sold, expired, current_bid, price, user_match, want)
+        let cases = [
+            // 非 UserMode → 卖家名（寄售/拍卖都一样）
+            (0u8, false, false, 0u64, 100u32, false, "卖家"),
+            (1, false, false, 0, 100, false, "卖家"),
+            // 寄售（0）：Sold / Expired / For Sale
+            (0, true, false, 0, 100, true, "Sold"),
+            (0, false, true, 0, 100, true, "Expired"),
+            (0, false, false, 0, 100, true, "For Sale"),
+            // 拍卖（1）：Sold / Expired / Bid Met（当前出价 > 起始价）/ No Bid
+            (1, true, false, 999, 100, true, "Sold"),
+            (1, false, true, 999, 100, true, "Expired"),
+            (1, false, false, 101, 100, true, "Bid Met"),
+            (1, false, false, 100, 100, true, "No Bid"),
+            // GameShop（2）→ 空串（C# 同）
+            (2, false, false, 0, 100, true, ""),
+        ];
+        for (item_type, sold, expired, bid, price, user_match, want) in cases {
+            assert_eq!(
+                market_seller_label(item_type, sold, expired, bid, price, "卖家", user_match),
+                want,
+                "type={item_type} sold={sold} expired={expired} bid={bid} um={user_match}"
+            );
+        }
+    }
 
     /// #2208：C# ConfirmItemRental 绑定旗标 = DontDrop|DontStore|DontSell|DontTrade|UnableToRent|DontUpgrade|UnableToDisassemble = 0x305E
     #[test]

@@ -898,6 +898,58 @@ fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
 }
 
+/// TrustMerchant 列表行（C# `AuctionRow`：行 (127, 82+i*33) 354x32 + 34x32 图标区 +
+/// 名称/价格/卖家/到期 4 标签 + 选中橙框；空数量用 `Prguse[540]` 占位）。
+#[test]
+fn trust_merchant_rows_aligned() {
+    use bevy::prelude::Color;
+    use client_bevy::game::dialogs::market as mk;
+    let mut libs = Libs::new();
+
+    // 行/图标区/步进（C# `AuctionRow.Size`/`IconArea`/`Rows[i].Location`）
+    assert_eq!((mk::TM_ROW_X, mk::TM_ROW_Y), (127.0, 82.0));
+    assert_eq!((mk::TM_ROW_W, mk::TM_ROW_H), (354.0, 32.0));
+    assert_eq!(mk::TM_ROW_STEP, 33.0);
+    assert_eq!((mk::TM_ROW_ICON_W, mk::TM_ROW_ICON_H), (34.0, 32.0));
+    // 行内标签锚点（C# `NameLabel`(38,8)/`PriceLabel`(170,8)/`SellerLabel`(256,0)/`ExpireLabel`(256,14)）
+    assert_eq!(mk::TM_ROW_NAME_POS, (38.0, 8.0));
+    assert_eq!(mk::TM_ROW_PRICE_POS, (170.0, 8.0));
+    assert_eq!(mk::TM_ROW_SELLER_POS, (256.0, 0.0));
+    assert_eq!(mk::TM_ROW_EXPIRE_POS, (256.0, 14.0));
+    // 选中框颜色（C# `BorderColour = FromArgb(255,200,100,0)`）
+    assert_eq!(mk::TM_ROW_BORDER_COLOR, Color::srgb_u8(200, 100, 0));
+
+    // 空数量占位图标 `Prguse[540]` 存在（实测 24x16）
+    let (pw, ph) = libs.size(LibraryName::Prguse, mk::TM_ROW_PLACEHOLDER_FRAME);
+    assert!(pw > 0.0 && ph > 0.0, "[精灵] Prguse[540] 应存在");
+    assert_eq!((pw, ph), (24.0, 16.0), "[尺寸] Prguse[540] 应为 24x16");
+
+    // 10 行都落在 `Title[786]` 面板内，且行宽不越过面板右边界
+    let (pan_w, pan_h) = libs.size(LibraryName::Title, 786);
+    let last_y = mk::TM_ROW_Y + 9.0 * mk::TM_ROW_STEP;
+    assert!(mk::TM_ROW_X + mk::TM_ROW_W <= pan_w, "[包含] 行宽越界");
+    assert!(last_y + mk::TM_ROW_H <= pan_h, "[包含] 末行越界");
+    assert_in_canvas(
+        "市场列表末行",
+        mk::TM_ROW_X,
+        last_y,
+        mk::TM_ROW_W,
+        mk::TM_ROW_H,
+    );
+
+    // 行文本/颜色（C# `AuctionRow.Update`）
+    assert_eq!(mk::group_thousands(1_234_567), "1,234,567");
+    assert_eq!(mk::row_price_text(2500, 1), "2,500 出价");
+    assert_eq!(mk::row_price_color(10_000), Color::WHITE);
+    assert_eq!(
+        mk::row_seller_color("Sold", true),
+        Color::srgb(1.0, 0.843, 0.0)
+    );
+    assert_eq!(mk::row_name_color(4), Color::WHITE);
+
+    println!("  ✓ 市场行 (127,82+i*33) 354x32、图标区 34x32、Prguse[540] 占位与行内标签对齐 C#");
+}
+
 /// TrustMerchant 寄售/拍卖页签面板（C# `TMerchantDialog(type)`：`Title[787]` 背景 +
 /// HelpLabel/ItemCell/PriceTextBox/SellItemButton/CollectSoldButton/SellNowButton + 5 个表头）。
 #[test]

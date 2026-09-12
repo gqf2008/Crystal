@@ -1082,6 +1082,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                     }
                                 }
+                                // #2720：C# 规范 `C.MarketSearch`（打开市场/点筛选走的就是它）
+                                x if x == ClientPacketIds::MarketSearch as i16 => {
+                                    if let Ok(_p) = client::market::MarketSearch::read_body(&mut cur) {
+                                        send(&to_client, &MockNPCMarket);
+                                        send(
+                                            &to_client,
+                                            &MockNPCMarketPage {
+                                                listings: mock_market_listings.clone(),
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "🏪 [MOCK] 市场搜索回发（{} 件）",
+                                            mock_market_listings.len()
+                                        );
+                                    }
+                                }
                                 x if x == ClientPacketIds::ConsignItem as i16 => {
                                     use byteorder::{LittleEndian, ReadBytesExt};
                                     let uid = cur.read_u64::<LittleEndian>().unwrap_or(0);

@@ -357,8 +357,8 @@ pub enum ServerEvent {
     RentalCancelled,
     /// NPCMarket：市场页数
     MarketPages { pages: usize },
-    /// NPCMarketPage：市场列表（auction_id, unique_id, item_index, count, info_name, seller, price, item_type, current_bid）
-    MarketListings { listings: Vec<(u64, u64, i32, u16, String, String, u32, u8, u32)> },
+    /// NPCMarketPage：市场列表（C# `ClientAuction` 形状，见 `MarketPageEntry`）
+    MarketListings { listings: Vec<MarketPageEntry> },
     /// ConsignItem：寄售结果
     MarketConsign { uid: u64, success: bool },
     /// MarketSuccess：市场成功消息
@@ -552,6 +552,25 @@ pub enum ServerEvent {
         hp_item_index: i32,
         mp_item_index: i32,
     },
+}
+
+/// `S.NPCMarketPage` 单条（对齐 C# `ClientAuction`：物品 + 卖家/状态 + 价格/出价 + 寄售日期）。
+/// `seller` 在 UserMode（寄售/拍卖页签）下是状态标记串（`Sold`/`Expired`/`Bid Met`/`No Bid`/`For Sale`，
+/// C# `AuctionInfo.GetSellerLabel`），非 UserMode 下是卖家名。
+#[derive(Debug, Clone, Default)]
+pub struct MarketPageEntry {
+    pub auction_id: u64,
+    pub unique_id: u64,
+    /// 列表物品（图标 index / 品质 / 名称 / 数量；C# `Listing.Item`）
+    pub item: InvItem,
+    pub seller: String,
+    pub price: u32,
+    /// 0=寄售 1=拍卖（C# `MarketItemType`）
+    pub item_type: u8,
+    /// 拍卖当前最高出价（寄售=0）
+    pub current_bid: u32,
+    /// C# `ClientAuction.ConsignmentDate`（Unix 秒）
+    pub consignment_date: i64,
 }
 
 use crate::game::dialogs::npc_goods::GoodsEntry;

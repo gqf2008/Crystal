@@ -8846,6 +8846,8 @@ fn load_fishing_drops(
 #[derive(Debug, Clone)]
 pub(crate) struct MarketSearchCache {
     results: Vec<usize>, // indices into self.auctions
+    /// C# `MarketSearch.Usermode`（寄售/拍卖页签只看自己；翻页也要沿用同一状态标记）
+    user_mode: bool,
 }
 
 /// C# Functions.PointMove(location, direction, distance)：返回目标点（MirDirection 0..7）

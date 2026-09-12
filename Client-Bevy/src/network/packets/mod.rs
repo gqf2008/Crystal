@@ -72,7 +72,7 @@ pub(crate) fn handle_packet(    net: &mut NetConnection,
 }
 
 // ---- 辅助函数（原 handle_packet 同文件内）----
-fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
+pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
     InvItem {
         unique_id: item.unique_id,
         item_index: item.item_index,
