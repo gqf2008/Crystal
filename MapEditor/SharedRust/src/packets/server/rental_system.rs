@@ -63,21 +63,32 @@ impl Packet for GetRentedItems {
 }
 
 /// ItemRentalRequest - 物品租赁请求 (253)
+/// C# `S.ItemRentalRequest`（Shared/ServerPackets.cs:6382）同形：`Name` + `Renting`
+/// （两端各收一份：`renting=false` = 本端物主，`renting=true` = 本端租客）
 #[derive(Debug, Clone)]
 pub struct ItemRentalRequest {
-    // C# 原实现为空
+    // C# `Name`：对方名字
+    pub name: String,
+    // C# `Renting`：true = 本端是租客
+    pub renting: bool,
 }
 
 impl Packet for ItemRentalRequest {
     const OPCODE: i16 = ServerPacketIds::ItemRentalRequest as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        // C# original implementation is empty
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+
+        write_dotnet_string(writer, &self.name)?;
+        writer.write_u8(if self.renting { 1 } else { 0 })?;
+
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        Ok(Self {})
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let name = read_dotnet_string(reader)?;
+        let renting = reader.read_u8()? != 0;
+        Ok(Self { name, renting })
     }
 }
 
@@ -183,11 +194,14 @@ impl Packet for RetrieveRentalItem {
 }
 
 /// UpdateRentalItem - 更新租赁物品 (258)
+/// C# `S.UpdateRentalItem`（Shared/ServerPackets.cs:6492）同形：`HasData` + `LoanItem`
+/// （Rust 额外带 rental_fee/rental_period）
 #[derive(Debug, Clone)]
 pub struct UpdateRentalItem {
-    pub item: UserItem,             // 更新的物品
-    pub rental_fee: u32,            // 租金
-    pub rental_period: i32,         // 租赁期限
+    // C# LoanItem；None = HasData=false（清空物品格）
+    pub item: Option<UserItem>,
+    pub rental_fee: u32,    // 租金
+    pub rental_period: i32, // 租赁期限
 }
 
 impl Packet for UpdateRentalItem {
@@ -195,19 +209,27 @@ impl Packet for UpdateRentalItem {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        // Note: Rust always has item, C# can be null
-        // Writing as if always present
-        writer.write_u8(1)?; // HasData = true
-        self.item.write_to(writer)?;
+
+        match &self.item {
+            Some(item) => {
+                writer.write_u8(1)?; // HasData = true
+                item.write_to(writer)?;
+            }
+            None => writer.write_u8(0)?, // HasData = false
+        }
         writer.write_u32::<LittleEndian>(self.rental_fee)?;
         writer.write_i32::<LittleEndian>(self.rental_period)?;
-        
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
+        let has_data = reader.read_u8()? != 0;
+        let item = if has_data {
+            Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?)
+        } else {
+            None
+        };
         let rental_fee = reader.read_u32::<LittleEndian>()?;
         let rental_period = reader.read_i32::<LittleEndian>()?;
         Ok(Self {
@@ -246,10 +268,12 @@ impl Packet for CancelItemRental {
 }
 
 /// ItemRentalLock - 物品租赁锁定 (260)
+/// C# `S.ItemRentalLock`（Shared/ServerPackets.cs:6533）同形：Success/GoldLocked/ItemLocked
 #[derive(Debug, Clone)]
 pub struct ItemRentalLock {
-    pub unique_id: u64,             // 物品唯一ID
-    pub locked: bool,               // 是否锁定
+    pub success: bool,     // 是否锁定成功
+    pub gold_locked: bool, // C# GoldLocked：费用已锁定
+    pub item_locked: bool, // C# ItemLocked：物品已锁定
 }
 
 impl Packet for ItemRentalLock {
@@ -257,26 +281,32 @@ impl Packet for ItemRentalLock {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        // Note: C# has Success/GoldLocked/ItemLocked, Rust has unique_id/locked
-        writer.write_u64::<LittleEndian>(self.unique_id)?;
-        writer.write_u8(if self.locked { 1 } else { 0 })?;
-        
+
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        writer.write_u8(if self.gold_locked { 1 } else { 0 })?;
+        writer.write_u8(if self.item_locked { 1 } else { 0 })?;
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let unique_id = reader.read_u64::<LittleEndian>()?;
-        let locked = reader.read_u8()? != 0;
-        Ok(Self { unique_id, locked })
+        let success = reader.read_u8()? != 0;
+        let gold_locked = reader.read_u8()? != 0;
+        let item_locked = reader.read_u8()? != 0;
+        Ok(Self {
+            success,
+            gold_locked,
+            item_locked,
+        })
     }
 }
 
 /// ItemRentalPartnerLock - 物品租赁伙伴锁定 (261)
+/// C# `S.ItemRentalPartnerLock`（Shared/ServerPackets.cs:6558）同形：GoldLocked/ItemLocked
 #[derive(Debug, Clone)]
 pub struct ItemRentalPartnerLock {
-    pub unique_id: u64,             // 物品唯一ID
-    pub locked: bool,               // 是否锁定
+    pub gold_locked: bool, // 对方已锁定费用
+    pub item_locked: bool, // 对方已锁定物品
 }
 
 impl Packet for ItemRentalPartnerLock {
@@ -284,18 +314,20 @@ impl Packet for ItemRentalPartnerLock {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        // Note: C# has GoldLocked/ItemLocked, Rust has unique_id/locked
-        writer.write_u64::<LittleEndian>(self.unique_id)?;
-        writer.write_u8(if self.locked { 1 } else { 0 })?;
-        
+
+        writer.write_u8(if self.gold_locked { 1 } else { 0 })?;
+        writer.write_u8(if self.item_locked { 1 } else { 0 })?;
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let unique_id = reader.read_u64::<LittleEndian>()?;
-        let locked = reader.read_u8()? != 0;
-        Ok(Self { unique_id, locked })
+        let gold_locked = reader.read_u8()? != 0;
+        let item_locked = reader.read_u8()? != 0;
+        Ok(Self {
+            gold_locked,
+            item_locked,
+        })
     }
 }
 

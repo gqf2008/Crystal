@@ -39,18 +39,39 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         // ---- M42: 物品租赁 ----
         x if x == ServerPacketIds::ItemRentalRequest as i16 => {
-            server_events.write(ServerEvent::RentalRequestReceived);
-            tracing::info!("📦 收到租赁请求");
+            // #2720：C# `S.ItemRentalRequest{Name, Renting}` —— 两端各收一份定角色
+            match mir2_shared::packets::server::rental_system::ItemRentalRequest::read_body(
+                &mut std::io::Cursor::new(&payload[PacketHeader::HEADER_SIZE..]),
+            ) {
+                Ok(p) => {
+                    server_events.write(ServerEvent::RentalRequest {
+                        renting: p.renting,
+                        name: p.name.clone(),
+                    });
+                    tracing::info!("📦 租赁会话建立: renting={} 对方={}", p.renting, p.name);
+                }
+                Err(e) => tracing::warn!("📦 ItemRentalRequest 解析失败: {}", e),
+            }
         }
         x if x == ServerPacketIds::UpdateRentalItem as i16 => {
-            // [hasdata u8][fee u32][period i32]
-            let body = &payload[PacketHeader::HEADER_SIZE..];
-            if body.len() >= 9 {
-                let has_item = body[0] != 0;
-                let fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
-                let period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
-                server_events.write(ServerEvent::RentalItemUpdate { has_item, fee, period });
-                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", has_item, fee, period);
+            // #2720：C# `{HasData, LoanItem}` + Rust 扩展 [fee u32][period i32]
+            match mir2_shared::packets::server::rental_system::UpdateRentalItem::read_body(
+                &mut std::io::Cursor::new(&payload[PacketHeader::HEADER_SIZE..]),
+            ) {
+                Ok(p) => {
+                    server_events.write(ServerEvent::RentalItemUpdate {
+                        item: p.item.as_ref().map(to_inv_item),
+                        fee: p.rental_fee,
+                        period: p.rental_period,
+                    });
+                    tracing::info!(
+                        "📦 UpdateRentalItem: item={} fee={} period={}",
+                        p.item.is_some(),
+                        p.rental_fee,
+                        p.rental_period
+                    );
+                }
+                Err(e) => tracing::warn!("📦 UpdateRentalItem 解析失败: {}", e),
             }
         }
         x if x == ServerPacketIds::ItemRentalFee as i16 => {
@@ -86,12 +107,42 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             }
         }
         x if x == ServerPacketIds::ItemRentalLock as i16 => {
-            server_events.write(ServerEvent::RentalLocked);
-            tracing::info!("📦 租赁锁定（本侧）");
+            // #2720：C# `{Success, GoldLocked, ItemLocked}`
+            match mir2_shared::packets::server::rental_system::ItemRentalLock::read_body(
+                &mut std::io::Cursor::new(&payload[PacketHeader::HEADER_SIZE..]),
+            ) {
+                Ok(p) => {
+                    server_events.write(ServerEvent::RentalLocked {
+                        gold_locked: p.gold_locked,
+                        item_locked: p.item_locked,
+                    });
+                    tracing::info!(
+                        "📦 租赁锁定（本侧）: gold={} item={}",
+                        p.gold_locked,
+                        p.item_locked
+                    );
+                }
+                Err(e) => tracing::warn!("📦 ItemRentalLock 解析失败: {}", e),
+            }
         }
         x if x == ServerPacketIds::ItemRentalPartnerLock as i16 => {
-            server_events.write(ServerEvent::RentalPartnerLocked);
-            tracing::info!("📦 租赁锁定（对方）");
+            // #2720：C# `{GoldLocked, ItemLocked}`
+            match mir2_shared::packets::server::rental_system::ItemRentalPartnerLock::read_body(
+                &mut std::io::Cursor::new(&payload[PacketHeader::HEADER_SIZE..]),
+            ) {
+                Ok(p) => {
+                    server_events.write(ServerEvent::RentalPartnerLocked {
+                        gold_locked: p.gold_locked,
+                        item_locked: p.item_locked,
+                    });
+                    tracing::info!(
+                        "📦 租赁锁定（对方）: gold={} item={}",
+                        p.gold_locked,
+                        p.item_locked
+                    );
+                }
+                Err(e) => tracing::warn!("📦 ItemRentalPartnerLock 解析失败: {}", e),
+            }
         }
         x if x == ServerPacketIds::CanConfirmItemRental as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];

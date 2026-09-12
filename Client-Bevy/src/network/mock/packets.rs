@@ -499,24 +499,23 @@ impl Packet for MockMentorUpdate {
     }
 }
 
-/// #769：租赁更新（客户端格式 [hasdata u8][fee u32][period i32]）
-pub(crate) struct MockUpdateRentalItem {
-    pub(crate) fee: u32,
-    pub(crate) period: i32,
+/// #769/#2720：租赁请求回执（C# `S.ItemRentalRequest{Name, Renting}` 线格式）
+pub(crate) struct MockItemRentalRequest {
+    pub(crate) name: String,
+    pub(crate) renting: bool,
 }
 
-impl Packet for MockUpdateRentalItem {
-    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::UpdateRentalItem as i16;
+impl Packet for MockItemRentalRequest {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::ItemRentalRequest as i16;
 
     fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         unreachable!("mock 只发送不解析")
     }
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u8(1)?; // hasdata
-        writer.write_u32::<LittleEndian>(self.fee)?;
-        writer.write_i32::<LittleEndian>(self.period)?;
+        use byteorder::WriteBytesExt;
+        mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
+        writer.write_u8(if self.renting { 1 } else { 0 })?;
         Ok(())
     }
 }

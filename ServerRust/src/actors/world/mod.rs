@@ -2052,7 +2052,7 @@ pub struct WorldActor {
     pub(crate) next_auction_id: u64,
     /// 市场搜索缓存 (session_id -> search results indices)
     pub(crate) market_search_cache: HashMap<u64, MarketSearchCache>,
-    /// 物品租赁会话 (initiator_session_id -> RentalSession)
+    /// 物品租赁会话 (物主 sid -> RentalSession)；C# 里物主是点 RENT 发起的一方
     pub(crate) rental_sessions: HashMap<u64, RentalSession>,
     /// 已生效的租赁记录 (owner_name -> list of RentedItem；C# Info.RentedItems 归属物主)
     pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,

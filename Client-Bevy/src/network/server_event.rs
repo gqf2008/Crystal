@@ -321,22 +321,34 @@ pub enum ServerEvent {
     },
     /// DivorceRequest：离婚请求
     DivorceRequest,
-    /// ItemRentalRequest：收到租赁请求（物主）
-    RentalRequestReceived,
-    /// UpdateRentalItem：租赁物品更新
-    RentalItemUpdate { has_item: bool, fee: u32, period: i32 },
-    /// ItemRentalFee：费用更新
+    /// ItemRentalRequest：租赁会话建立（C# `S.ItemRentalRequest{Name, Renting}`）
+    /// `renting = false` → 本端物主（自有物品窗 + 对方费用窗）
+    /// `renting = true`  → 本端租客（自有费用窗 + 对方物品窗）；`name` = 对方名
+    RentalRequest { renting: bool, name: String },
+    /// UpdateRentalItem：租赁物品更新（C# `HasData` + `LoanItem` → 租客侧对方物品窗）
+    RentalItemUpdate {
+        item: Option<InvItem>,
+        fee: u32,
+        period: i32,
+    },
+    /// ItemRentalFee：对方（租客）设置的费用（物主侧对方费用窗）
     RentalFee { fee: u32 },
-    /// ItemRentalPeriod：期限更新
+    /// ItemRentalPeriod：对方（物主）设置的期限（租客侧对方物品窗）
     RentalPeriod { period: i32 },
     /// DepositRentalItem：存入租赁物品
     RentalDeposit { uid: u64, success: bool },
     /// RetrieveRentalItem：取回租赁物品
     RentalRetrieve { uid: u64, success: bool },
-    /// ItemRentalLock：本侧锁定
-    RentalLocked,
-    /// ItemRentalPartnerLock：对方锁定
-    RentalPartnerLocked,
+    /// ItemRentalLock：本侧锁定（C# `Success/GoldLocked/ItemLocked`）
+    RentalLocked {
+        gold_locked: bool,
+        item_locked: bool,
+    },
+    /// ItemRentalPartnerLock：对方锁定（C# `GoldLocked/ItemLocked`）
+    RentalPartnerLocked {
+        gold_locked: bool,
+        item_locked: bool,
+    },
     /// CanConfirmItemRental：可确认状态
     RentalCanConfirm { can_confirm: bool },
     /// ConfirmItemRental：确认结果
