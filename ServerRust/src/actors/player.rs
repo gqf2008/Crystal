@@ -6315,14 +6315,28 @@ pub struct SetSpellKey {
     pub old_key: u8,
 }
 
+/// C# MirConnection.MagicKey 路由：玩家键 1..16，英雄键 17..24。
+/// OldKey 同时判断，保证英雄“设为无快捷键(Key=0)”仍更新英雄技能表。
+fn magic_key_targets_hero(key: u8, old_key: u8) -> bool {
+    key > 16 || old_key > 16
+}
+
 impl Message<SetSpellKey> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SetSpellKey, _ctx: &mut Context<Self, Self::Reply>) {
         // 客户端协议编号 = C# 编号 + 3（与 combat.rs MagicRequest 的 spell_cs 转换一致）
         let spell_cs = msg.spell.saturating_sub(3);
+        // C# MirConnection.MagicKey：Key 或 OldKey >16 路由英雄技能，
+        // 否则更新玩家技能。OldKey 保留英雄路由，兼容“设为无快捷键(Key=0)”。
+        let hero_target = magic_key_targets_hero(msg.key, msg.old_key);
+        let magics = if hero_target {
+            &mut self.state.hero_magics
+        } else {
+            &mut self.state.magics
+        };
         let mut target_found = false;
-        for magic in &mut self.state.magics {
+        for magic in magics {
             if magic.spell == spell_cs {
                 magic.key = msg.key;
                 target_found = true;
@@ -6332,8 +6346,11 @@ impl Message<SetSpellKey> for PlayerActor {
         }
         if target_found {
             debug!(
-                "Player {} spell {} key -> {}",
-                self.state.name, spell_cs, msg.key
+                "{} {} spell {} key -> {}",
+                if hero_target { "Hero" } else { "Player" },
+                self.state.name,
+                spell_cs,
+                msg.key
             );
         }
     }
@@ -8904,4 +8921,18 @@ mod tests {
         assert_eq!(super::remove_one_awake_level(&mut b), 0);
         assert_eq!(b.awake_type, AwakeType::None);
     }
+    #[test]
+    fn magic_key_routes_by_csharp_key_domain() {
+        // MirConnection.MagicKey: Key/OldKey >16 => hero, else player.
+        for (key, old_key, hero) in [
+            (1u8, 0u8, false),
+            (0, 17, true),
+            (17, 17, true),
+            (24, 24, true),
+        ] {
+            assert_eq!(super::magic_key_targets_hero(key, old_key), hero);
+        }
+    }
+
+
 }

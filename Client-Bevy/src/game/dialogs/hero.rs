@@ -87,6 +87,21 @@ impl Default for HeroState {
 
 impl HeroState {
     /// #220：按 object_id 路由英雄技能升级（匹配才更新，返回是否命中）
+    /// 英雄技能快捷键分配（C# MagicButton.HeroMagic -> AssignKeyPanel KeyOffset=17）。
+    /// 返回目标技能旧 key，供 C.MagicKey.OldKey 路由到英雄。
+    pub fn assign_key(&mut self, spell: mir2_shared::enums::Spell, key: u8) -> Option<u8> {
+        let old = self.magics.iter().find(|m| m.spell == spell).map(|m| m.key);
+        for m in &mut self.magics {
+            if m.spell != spell && m.key == key {
+                m.key = 0;
+            }
+        }
+        if let Some(m) = self.magics.iter_mut().find(|m| m.spell == spell) {
+            m.key = key;
+        }
+        old
+    }
+
     pub fn apply_magic_leveled(
         &mut self,
         object_id: u32,
