@@ -528,8 +528,6 @@ pub fn ui_button_system(
         return;
     };
     let cursor = Vec2::new(world.x, -world.y);
-    let just = mouse.just_pressed(MouseButton::Left);
-    let down = mouse.pressed(MouseButton::Left);
     // #幽灵鼠标：窗口失焦/后台时 macOS 可能残留 ButtonInput<MouseButton> 为 just_pressed，
     // 重聚焦后把残留点击当作新点击（症状：进游戏后 HUD 按钮被“自动点击”，技能窗口自己开关）。
     // 加窗口聚焦门控，失焦时不响应任何按钮点击（对齐 #2618 键盘聚焦门控）。
@@ -567,8 +565,6 @@ pub fn ui_button_system(
             btn.clicked = false;
             continue;
         }
-        let (x, y, w, h) = btn.rect;
-        let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;
         let is_topmost = topmost.map(|(top, _)| top == e).unwrap_or(false);
         btn.clicked = ui_button_clicked(&btn, inherited, cursor, just, focused) && is_topmost;
         if let Some(frames) = frames {
