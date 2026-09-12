@@ -2,7 +2,9 @@
 // 纯数据结构，由 WorldActor 调用
 
 /// C# Info.Refine 材料槽数量（PlayerInfo.Refine；PlayerObject.cs:12535）
-pub const REFINE_MATERIAL_SLOTS: usize = 10;
+/// 精炼材料格数量：C# `CharacterInfo.Refine = new UserItem[16]`（4x4 网格，
+/// 对应客户端 `RefineDialog.Grid = new MirItemCell[4*4]`）。
+pub const REFINE_MATERIAL_SLOTS: usize = 16;
 // #2392：其余 Refine* 已收入 util::config::RefineConfig（C# Settings.Refine*），由 WorldActor.refine_cfg 传入
 
 /// 精炼状态
