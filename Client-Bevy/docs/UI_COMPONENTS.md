@@ -16,6 +16,7 @@
 - 批5 Quest/NPC/系统窗：已关闭的 #2535～#2538 均落地；Timer 按 `NotControl` 允许点击穿透。
 - 批6 Login/Select/NewCharacter：补齐登录页 `InputKeyDialog` 安全键盘。
 - 批7 状态窗/Mail：NPC、Trade/GuestTrade、NpcGoods、Roll、Buff 同步 `DialogManager`，世界输入锁与通用显隐使用同一真值；Mail 列表恢复 C# 312x444 面板、Title[7]、10x33 行和底部操作按钮。
+- 批8 Center 布局：Friend/Fishing/Creature/Mentor/Relationship/Report/Guild 按窗口真实尺寸居中；Mentor/Relationship/Report 使用 C# 控件坐标，ChatNotice 使用 C# 顶部中心公式。
 
 ## 1. 通用交互控件
 
@@ -70,29 +71,29 @@
 | Minimap | `dialogs/minimap.rs` | `BigMapDialog.cs` / MiniMap | 实现；批2 |
 | Npc | `dialogs/npc.rs` | `NPCDialogs.cs` | 实现；批5 |
 | Group | `dialogs/group.rs` | `GroupDialog.cs` | 实现；批4 |
-| Friend | `dialogs/friend.rs` | `FriendDialog.cs` | 实现；批4 |
+| Friend | `dialogs/friend.rs` | `FriendDialog.cs` | 实现；批4/批8（Center） |
 | Trade | `dialogs/trade.rs` | `TradeDialogs.cs` | 实现；批4 |
 | GuestTrade | `dialogs/trade.rs` | `TradeDialogs.cs` | 实现；批4 |
 | Inspect | `dialogs/inspect.rs` | `CharacterDialog.cs` Inspect | 实现；批3 |
 | NpcGoods | `dialogs/npc_goods.rs` | `NPCDialogs.cs` | 实现；批4 |
-| Guild | `dialogs/guild.rs` | `GuildDialog.cs` | 实现；批4 |
+| Guild | `dialogs/guild.rs` | `GuildDialog.cs` | 实现；批4/批8（Center） |
 | Mail | `dialogs/mail.rs` | `MailDialogs.cs` | 实现；批4/批7（列表布局） |
 | Ranking | `dialogs/ranking.rs` | `RankingDialog.cs` | 实现；批4 |
-| Mentor | `dialogs/mentor.rs` | `MentorDialog.cs` | 实现；批4 |
-| Relationship | `dialogs/relationship.rs` | `RelationshipDialog.cs` | 实现；批4 |
+| Mentor | `dialogs/mentor.rs` | `MentorDialog.cs` | 实现；批4/批8（Center） |
+| Relationship | `dialogs/relationship.rs` | `RelationshipDialog.cs` | 实现；批4/批8（Center/按钮） |
 | Mount | `dialogs/mount.rs` | `MountDialog.cs` | 实现；批3 |
-| Report | `dialogs/report.rs` | `ReportDialog.cs` | 实现；批5 |
+| Report | `dialogs/report.rs` | `ReportDialog.cs` | 实现；批5/批8（布局） |
 | Hero | `dialogs/hero.rs` | `HeroDialogs.cs` | 实现；批3 |
 | HeroInventory | `dialogs/hero_inventory.rs` | `HeroDialogs.cs` | 实现；批3 |
 | HeroEquipment | `dialogs/hero_equipment.rs` | `HeroDialogs.cs` | 实现；批3 |
 | HeroSkill | `dialogs/hero_skills.rs` | `HeroDialogs.cs` | 实现；批3 |
-| Creature | `dialogs/creature.rs` | `IntelligentCreatureDialogs.cs` | 实现；批3 |
+| Creature | `dialogs/creature.rs` | `IntelligentCreatureDialogs.cs` | 实现；批3/批8（Center） |
 | ItemRental | `dialogs/item_rental.rs` | `ItemRentalDialog.cs` 等 | 实现；批4 |
 | GuildTerritory | `dialogs/guild_territory.rs` | `GuildTerritoryDialog .cs` | 实现；批4 |
 | Help | `dialogs/help.rs` | `HelpDialog.cs` | 实现；批5 |
 | Notice | `dialogs/notice.rs` | `NoticeDialog.cs` | 实现；批5 |
 | Buff | `dialogs/buff.rs` | `BuffDialog.cs` | 实现；批2 |
-| Fishing | `dialogs/fishing.rs` | `FishingDialog.cs` | 实现；批5 |
+| Fishing | `dialogs/fishing.rs` | `FishingDialog.cs` | 实现；批5/批8（Center） |
 | Socket | `dialogs/socket.rs` | `SocketDialog.cs` | 实现；批3 |
 | Refine | `dialogs/refine.rs` | `NPCDialogs.cs` refine 流 | 实现；批3 |
 | Craft | `dialogs/craft.rs` | `NPCDialogs.cs` Craft | 实现；批3 |
@@ -102,7 +103,7 @@
 | Timer | `dialogs/timer.rs` | `TimerDialog.cs` | 实现；批5 |
 | KeyboardLayout | `dialogs/keyboard_layout.rs` | `KeyboardLayoutDialog.cs` | 实现；批5 |
 | BigMap | `dialogs/big_map.rs` | `BigMapDialog.cs` | 实现；批2 |
-| ChatNotice | `dialogs/chat_notice.rs` | `ChatNoticeDialog.cs` | 实现；批5 |
+| ChatNotice | `dialogs/chat_notice.rs` | `ChatNoticeDialog.cs` | 实现；批5/批8（位置） |
 | Market | `dialogs/market.rs` | `TrustMerchantDialog.cs` | 实现；批4 |
 | Storage | `dialogs/storage.rs` | `InventoryDialog.cs` Storage | 实现；批3 |
 | Skills | `game/skills.rs` / Character SkillPage | `MainDialogs.cs` MagicWindow | 实现；批2 |
@@ -130,10 +131,12 @@
 | 批5 任务/NPC/系统窗 | #2535～#2538 已落地；Timer `NotControl` 点击穿透修复 | #2710 |
 | 批6 登录/选角/建角 | 登录 ViewKey `InputKeyDialog` 安全键盘落地 | #2712 |
 | 批7 状态窗/Mail | 状态驱动窗口同步 DialogManager；Mail 面板/10x33 行/按钮对齐 C# | #2714 |
+| 批8 Center 布局 | Friend/Fishing/Creature/Mentor/Relationship/Report/Guild 居中；Report/ChatNotice 坐标收口 | #2716 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：370 lib + 2 bin + 1 smoke + 17 alignment 通过（批7后基线）。
+- `cargo test`（Client-Bevy）：379 lib + 2 bin + 1 smoke + 17 alignment 通过（批8后基线）。
+- Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：665 lib + protocol integration 通过（批3后基线）。
-- 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 另复验 Mail 完整面板和 `--buff-test` 状态下 Buff 根真实可见。
+- 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Friend/Fishing/Creature/Mentor/Relationship/Report/Guild 居中。

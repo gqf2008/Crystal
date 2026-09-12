@@ -118,11 +118,12 @@ fn spawn_mentor(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[170]（C# MentorDialog.Index=170，320x262 @ 280,80）
+    // 面板 Prguse[170] 原生 244x207，C# Location = Center。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
+    let (px, py) = crate::game::dialogs::center_origin(244.0, 207.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 244.0, 207.0, 30);
     commands.entity(panel).insert((DialogRoot(DialogKind::Mentor), MentorWidget));
 
     commands.entity(panel).with_children(|p| {
@@ -130,49 +131,51 @@ fn spawn_mentor(
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 51) {
             spawn_image(p, h, 18.0, 8.0, 103.0, 17.0, 9);
         }
-        // 关闭 Prguse2[360/361/362] @(300,3)
+        // 关闭 Prguse2[360/361/362] @(219,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(MentorClose);
+            spawn_icon_button(p, n, h, pr, 219.0, 3.0, 20.0, 20.0, 10).insert(MentorClose);
         }
-        // 信息行（0 标题 / 1 师父 / 2 徒弟 / 3 拜师经验 / 4 允许拜师状态）@(10,45+26i)
-        for i in 0..5usize {
-            spawn_label(p, &cjk, "", 10.0, 45.0 + i as f32 * 26.0, 12.0, Color::WHITE, 9)
-                .insert(MentorLine(i));
+        // 信息行（标题 + 师父 + 徒弟 + 经验/允许状态）@ C# 区块。
+        for (i, (x, y)) in [(10.0, 10.0), (15.0, 41.0), (15.0, 83.0), (15.0, 112.0), (15.0, 130.0)]
+            .into_iter()
+            .enumerate()
+        {
+            spawn_label(p, &cjk, "", x, y, 12.0, Color::WHITE, 9).insert(MentorLine(i));
         }
-        // 允许拜师（Prguse[114/115/116] @(20,195)）、添加（Title[213/214/215] @(90,195)）、
-        // 解除（Title[216/217/218] @(180,195)）
+        // 允许拜师（Prguse[114/115/116] @(30,178)）、添加（Title[213/214/215] @(60,178)）、
+        // 解除（Title[216/217/218] @(135,178)）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 114),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 115),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 195.0, 60.0, 25.0, 10).insert(MentorAllow);
+            spawn_icon_button(p, n, h, pr, 30.0, 178.0, 24.0, 22.0, 10).insert(MentorAllow);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 213),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 214),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 215),
         ) {
-            spawn_icon_button(p, n, h, pr, 90.0, 195.0, 76.0, 25.0, 10).insert(MentorAdd);
+            spawn_icon_button(p, n, h, pr, 60.0, 178.0, 24.0, 22.0, 10).insert(MentorAdd);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 216),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 217),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 218),
         ) {
-            spawn_icon_button(p, n, h, pr, 180.0, 195.0, 76.0, 25.0, 10).insert(MentorRemove);
+            spawn_icon_button(p, n, h, pr, 135.0, 178.0, 24.0, 22.0, 10).insert(MentorRemove);
         }
-        // 师父名字输入框（TextInput id 4）@(20,235)
-        spawn_container(p, 20.0, 235.0, 180.0, 20.0, 10)
+        // 师父名字输入框（TextInput id 4）@(15,160)
+        spawn_container(p, 15.0, 150.0, 180.0, 18.0, 10)
             .insert((
                 MentorNameField,
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                 crate::game::dialogs::text_input::TextInputField(4),
-                crate::game::dialogs::text_input::TextInputRect(300.0, 315.0, 180.0, 20.0),
+                crate::game::dialogs::text_input::TextInputRect(405.0, 430.0, 180.0, 18.0),
             ))
             .with_children(|ic| {
                 ic.spawn((
@@ -427,5 +430,13 @@ fn mentor_server_events(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mentor_origin_is_csharp_center() {
+        assert_eq!(crate::game::dialogs::center_origin(244.0, 207.0), (390.0, 280.0));
     }
 }

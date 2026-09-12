@@ -148,11 +148,12 @@ fn spawn_friend(
     let font = ui_font.0.clone();
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
 
-    // 面板 Title[199]（264x272 @ 300,100）
+    // 面板 Title[199] 原生 264x272，C# Location = Center。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 199) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 300.0, 100.0, 264.0, 272.0, 30);
+    let (px, py) = crate::game::dialogs::center_origin(264.0, 272.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 264.0, 272.0, 30);
     commands.entity(panel).insert((DialogRoot(DialogKind::Friend), FriendWidget));
 
     commands.entity(panel).with_children(|p| {
@@ -499,6 +500,11 @@ pub fn friend_whisper_command(name: &str, online: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn friend_origin_is_csharp_center() {
+        assert_eq!(crate::game::dialogs::center_origin(264.0, 272.0), (380.0, 248.0));
+    }
 
     #[test]
     fn whisper_command_online_offline() {

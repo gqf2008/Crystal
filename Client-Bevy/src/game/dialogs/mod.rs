@@ -136,6 +136,18 @@ pub fn sync_dialog_state(mgr: &mut DialogManager, kind: DialogKind, visible: boo
     }
 }
 
+/// 客户端逻辑分辨率（C# Settings.ScreenWidth/ScreenHeight）。
+pub const UI_SCREEN_W: f32 = 1024.0;
+pub const UI_SCREEN_H: f32 = 768.0;
+
+/// C# `MirControl.Center`：逐轴整数除法，等价于 f32 结果的 floor。
+pub fn center_origin(width: f32, height: f32) -> (f32, f32) {
+    (
+        ((UI_SCREEN_W - width) / 2.0).floor(),
+        ((UI_SCREEN_H - height) / 2.0).floor(),
+    )
+}
+
 impl DialogManager {
     pub fn is_open(&self, kind: DialogKind) -> bool {
         self.open.contains(&kind)
@@ -188,6 +200,16 @@ mod tests {
             sync_dialog_state(&mut m, kind, false);
             assert!(!m.is_open(kind), "{kind:?} hidden 应退出管理栈");
         }
+    }
+
+    #[test]
+    fn center_origin_matches_mir_control_integer_division() {
+        assert_eq!(center_origin(264.0, 272.0), (380.0, 248.0));
+        assert_eq!(center_origin(200.0, 287.0), (412.0, 240.0));
+        assert_eq!(center_origin(244.0, 207.0), (390.0, 280.0));
+        assert_eq!(center_origin(284.0, 194.0), (370.0, 287.0));
+        assert_eq!(center_origin(452.0, 376.0), (286.0, 196.0));
+        assert_eq!(center_origin(590.0, 740.0), (217.0, 14.0));
     }
 
     #[test]

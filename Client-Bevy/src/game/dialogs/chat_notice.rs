@@ -11,7 +11,16 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
-use crate::ui::theme::{load_lib_image, spawn_label, spawn_panel};
+use crate::ui::theme::{load_lib_image, spawn_panel};
+
+fn chat_notice_origin(width: f32, height: f32) -> (f32, f32) {
+    // C# ChatNoticeDialog：X = ScreenWidth/2 - W/2；
+    // Y = ScreenHeight/6 - H/2（逐项整数除法）。
+    (
+        (crate::game::dialogs::UI_SCREEN_W / 2.0 - (width / 2.0).floor()).floor(),
+        ((crate::game::dialogs::UI_SCREEN_H / 6.0).floor() - (height / 2.0).floor()).floor(),
+    )
+}
 
 /// 屏幕通知状态（网络 ChatNotice 写入）
 #[derive(Resource, Default)]
@@ -61,19 +70,21 @@ fn spawn_chat_notice(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[1361]（660x25 @ 330,80，屏幕顶部中央）
+    // 背景 Prguse[1361] 原生 660x25；位置按 C# ChatNoticeDialog 公式。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1361) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 330.0, 80.0, 660.0, 25.0, 50);
+    let (px, py) = chat_notice_origin(660.0, 25.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 660.0, 25.0, 50);
     commands.entity(panel).insert(ChatNoticeWidget);
     commands.entity(panel).with_children(|p| {
-        spawn_label(
+        crate::ui::theme::spawn_label_center(
             p,
             &font,
             "",
-            20.0,
+            330.0,
             4.0,
+            640.0,
             14.0,
             Color::srgb(1.0, 0.9, 0.4),
             9,
@@ -116,3 +127,10 @@ fn chat_notice_system(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn chat_notice_origin_matches_csharp() {
+        assert_eq!(super::chat_notice_origin(660.0, 25.0), (182.0, 116.0));
+    }
+}

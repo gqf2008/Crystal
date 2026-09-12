@@ -12,6 +12,8 @@
 
 use bevy::prelude::*;
 
+use crate::game::chat::ChatState;
+use crate::game::dialogs::mail::ComposeMail;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -46,10 +48,28 @@ pub struct RelationshipWidget;
 pub struct RelationshipClose;
 
 #[derive(Component)]
+pub struct RelationshipAllow;
+
+#[derive(Component)]
 pub struct RelationshipPropose;
 
 #[derive(Component)]
 pub struct RelationshipDivorce;
+
+#[derive(Component)]
+pub struct RelationshipMail;
+
+#[derive(Component)]
+pub struct RelationshipWhisper;
+
+#[derive(Clone, Copy)]
+enum RelationshipAction {
+    Allow,
+    Propose,
+    Divorce,
+    Mail,
+    Whisper,
+}
 
 #[derive(Component)]
 pub struct RelationshipLine(usize);
@@ -115,36 +135,38 @@ fn spawn_relationship(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[170]（320x262 @ 280,80）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
+    // C# RelationshipDialog: Prguse[583] 原生 284x194，Location = Center。
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 583) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
+    let (px, py) = crate::game::dialogs::center_origin(284.0, 194.0);
+    let panel = spawn_panel(&mut commands, bg, px, py, 284.0, 194.0, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Relationship), RelationshipWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 关闭 Prguse2[360/361/362] @(300,3)
+        // 关闭 Prguse2[360/361/362] @(260,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(RelationshipClose);
+            spawn_icon_button(p, n, h, pr, 260.0, 3.0, 20.0, 20.0, 10)
+                .insert(RelationshipClose);
         }
-        // 信息行 4 @(18,40+22i)
-        for i in 0..4usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
+        // C# 信息行 4 @(30,40/65/90/115)
+        for (i, y) in [40.0, 65.0, 90.0, 115.0].into_iter().enumerate() {
+            spawn_label(p, &cjk, "", 30.0, y, 12.0, Color::WHITE, 9)
                 .insert(RelationshipLine(i));
         }
-        // 目标名输入框（TextInput id 13）@(18,135)，命中矩形 = 屏幕坐标 (298,215,160,20)
-        spawn_container(p, 18.0, 135.0, 160.0, 20.0, 10)
+        // 目标名输入框（TextInput id 13）@(30,140)，保留简化版求婚目标输入。
+        spawn_container(p, 30.0, 140.0, 160.0, 20.0, 10)
             .insert((
                 RelationshipTargetField,
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                 crate::game::dialogs::text_input::TextInputField(13),
-                crate::game::dialogs::text_input::TextInputRect(298.0, 215.0, 160.0, 20.0),
+                crate::game::dialogs::text_input::TextInputRect(400.0, 427.0, 160.0, 20.0),
             ))
             .with_children(|ic| {
                 ic.spawn((
@@ -165,22 +187,39 @@ fn spawn_relationship(
                     crate::game::dialogs::text_input::TextInputDisplay(13),
                 ));
             });
-        // 求婚 Title[206/207/208] @(20,170)、离婚 Title[210/211/212] @(110,170)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 170.0, 76.0, 25.0, 10)
-                .insert(RelationshipPropose);
-        }
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-        ) {
-            spawn_icon_button(p, n, h, pr, 110.0, 170.0, 76.0, 25.0, 10)
-                .insert(RelationshipDivorce);
+        // C# 五个操作按钮：切换/求婚/离婚/邮件/私聊 @ x=50/85/120/155/190, y=164。
+        let buttons = [
+            (50.0, 610usize, 611usize, 612usize, RelationshipAction::Allow),
+            (85.0, 600, 601, 602, RelationshipAction::Propose),
+            (120.0, 616, 617, 618, RelationshipAction::Divorce),
+            (155.0, 437, 438, 439, RelationshipAction::Mail),
+            (190.0, 566, 567, 568, RelationshipAction::Whisper),
+        ];
+        for (x, normal, hover, pressed, action) in buttons {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, normal),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, hover),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, pressed),
+            ) {
+                let mut e = spawn_icon_button(p, n, h, pr, x, 164.0, 24.0, 22.0, 10);
+                match action {
+                    RelationshipAction::Allow => {
+                        e.insert(RelationshipAllow);
+                    }
+                    RelationshipAction::Propose => {
+                        e.insert(RelationshipPropose);
+                    }
+                    RelationshipAction::Divorce => {
+                        e.insert(RelationshipDivorce);
+                    }
+                    RelationshipAction::Mail => {
+                        e.insert(RelationshipMail);
+                    }
+                    RelationshipAction::Whisper => {
+                        e.insert(RelationshipWhisper);
+                    }
+                }
+            }
         }
     });
 
@@ -222,9 +261,14 @@ fn relationship_ui_system(
     mut state: ResMut<RelationshipState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    mut compose_mail: MessageWriter<ComposeMail>,
+    mut chat: ResMut<ChatState>,
     close: Query<(Entity, &Interaction), With<RelationshipClose>>,
+    allow_btn: Query<(Entity, &Interaction), With<RelationshipAllow>>,
     propose_btn: Query<(Entity, &Interaction), With<RelationshipPropose>>,
     divorce_btn: Query<(Entity, &Interaction), With<RelationshipDivorce>>,
+    mail_btn: Query<(Entity, &Interaction), With<RelationshipMail>>,
+    whisper_btn: Query<(Entity, &Interaction), With<RelationshipWhisper>>,
     mut widgets: Query<&mut Visibility, With<RelationshipWidget>>,
     mut lines: Query<(&mut Text, &RelationshipLine)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -270,6 +314,30 @@ fn relationship_ui_system(
             _ => String::new(),
         };
     }
+    for (e, inter) in &allow_btn {
+        if edge(e, inter, &mut prev_inter) {
+            net.send_packet(&mir2_shared::packets::client::misc::ChangeMarriage);
+            state.message = "已切换求婚/结婚模式".to_string();
+        }
+    }
+
+    for (e, inter) in &mail_btn {
+        if edge(e, inter, &mut prev_inter) && !state.lover_name.is_empty() {
+            compose_mail.write(ComposeMail {
+                to: state.lover_name.clone(),
+            });
+            state.message = format!("写信给 {}", state.lover_name);
+        }
+    }
+
+    for (e, inter) in &whisper_btn {
+        if edge(e, inter, &mut prev_inter) && !state.lover_name.is_empty() {
+            chat.input_active = true;
+            chat.input_text = format!("/w {} ", state.lover_name);
+            state.message = format!("私聊 {}", state.lover_name);
+        }
+    }
+
     for (e, inter) in &propose_btn {
         if edge(e, inter, &mut prev_inter) {
             let name = input.texts.get(13).cloned().unwrap_or_default();
@@ -382,5 +450,13 @@ fn relationship_server_events(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn relationship_layout_matches_csharp() {
+        assert_eq!(crate::game::dialogs::center_origin(284.0, 194.0), (370.0, 287.0));
     }
 }

@@ -30,8 +30,8 @@ use crate::ui::theme::{
 };
 
 /// 根容器尺寸（容纳堆叠的成员/职务/仓库/金币区块；背景图保持自然尺寸）
-pub const GUILD_X: f32 = 280.0;
-pub const GUILD_Y: f32 = 80.0;
+pub const GUILD_X: f32 = 217.0;
+pub const GUILD_Y: f32 = 14.0;
 pub const GUILD_W: f32 = 590.0;
 pub const GUILD_H: f32 = 740.0;
 /// 背景图 Prguse[180] 自然尺寸
@@ -292,7 +292,7 @@ fn spawn_guild(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 根容器（bevy_ui Node + Overflow::clip）：590x740 @ (280,80)
+    // 根容器（bevy_ui Node + Overflow::clip）：扩展版 590x740，按自身尺寸居中 @(217,14)
     // 背景 Prguse[180]（实测 590x432）以自然尺寸作子图，下方 432..740 为深色延伸区，
     // 容纳移植版堆叠的职务/仓库/金币区块（原 sprite 版这些区块溢出面板裸奔）。
     let root = commands
@@ -1642,10 +1642,10 @@ mod tests {
     /// 成员行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn member_row_rect_origin_and_drag() {
-        // 初始 (GUILD_X=280, GUILD_Y=80)：首行 y=140（=80+60），x 起 298（=280+18）
+        // 初始扩展根居中 (217,14)：首行 y=74，x 起 235（=217+18）
         let (rx, ry, rw, rh) = guild_member_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw, rh), (298.0, 140.0, 302.0, 18.0));
-        assert_eq!(guild_member_row_rect(10, GUILD_X, GUILD_Y).1, 140.0 + 9.0 * 20.0);
+        assert_eq!((rx, ry, rw, rh), (235.0, 74.0, 302.0, 18.0));
+        assert_eq!(guild_member_row_rect(10, GUILD_X, GUILD_Y).1, 74.0 + 9.0 * 20.0);
         // 拖动到 (330,100)：同一相对位置命中跟随（原始坐标 + delta(50,20)）
         let (rx2, ry2, _, _) = guild_member_row_rect(1, 330.0, 100.0);
         assert_eq!((rx2, ry2), (348.0, 160.0));
@@ -1655,7 +1655,7 @@ mod tests {
     #[test]
     fn storage_row_rect_origin_and_drag() {
         let (rx, ry, _, _) = guild_storage_row_rect(11, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry), (298.0, 595.0), "初始 11 格 y=595");
+        assert_eq!((rx, ry), (235.0, 529.0), "初始 11 格 y=529");
         let (rx2, ry2, _, _) = guild_storage_row_rect(11, 330.0, 100.0);
         assert_eq!((rx2, ry2), (348.0, 615.0), "拖动后跟随");
     }
@@ -1664,7 +1664,7 @@ mod tests {
     #[test]
     fn buff_row_rect_origin_and_drag() {
         let (rx, ry, rw, _) = guild_buff_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw), (298.0, 140.0, 200.0));
+        assert_eq!((rx, ry, rw), (235.0, 74.0, 200.0));
         let (rx2, ry2, _, _) = guild_buff_row_rect(1, 330.0, 100.0);
         assert_eq!((rx2, ry2), (348.0, 160.0));
     }
@@ -1734,5 +1734,9 @@ mod tests {
             guild.buff_start = max_start;
         }
         assert_eq!(guild.buff_start, 0);
+    }
+    #[test]
+    fn guild_origin_is_centered() {
+        assert_eq!(crate::game::dialogs::center_origin(GUILD_W, GUILD_H), (GUILD_X, GUILD_Y));
     }
 }
