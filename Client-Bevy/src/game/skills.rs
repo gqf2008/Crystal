@@ -207,6 +207,7 @@ pub struct SkillsLine(usize);
 /// 技能快捷栏根实体（整栏随拖动移动、随设置开关显隐；对齐 C# SkillBarDialog 整体 Show/Hide）。
 /// .0 = 栏号（C# BarIndex 0/1；C# 共两条栏，Settings.SkillBar=true 时全部显示）
 #[derive(Component)]
+#[require(crate::ui::theme::UiRootDisplay)]
 pub struct SkillBarRoot(pub usize);
 
 /// 技能快捷栏格子锚点（子实体挂图标/冷却/键名标签）。
