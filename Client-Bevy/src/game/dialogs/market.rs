@@ -1446,6 +1446,15 @@ mod tests {
         assert_eq!(TM_COLLECT_SOLD_POS, (300.0, 448.0));
         assert_eq!((TM_COLLECT_BTN_W, TM_COLLECT_BTN_H), (72.0, 25.0));
         assert_eq!(TM_SELL_NOW_POS, (324.0, 448.0));
+        // C# `Globals`：MinConsignment / MaxConsignment / MaxStartingBid（Shared/Globals.cs:44-48）
+        assert_eq!(
+            (
+                TM_MIN_CONSIGN_PRICE,
+                TM_MAX_CONSIGN_PRICE,
+                TM_MAX_STARTING_BID
+            ),
+            (5000, 50_000_000, 50_000)
+        );
         // Buy 两套精灵（市场 703..705 / 寄售·拍卖 706..708，同为 84x25）
         assert_eq!(TM_BUY_MARKET_FRAMES, (703, 704, 705));
         assert_eq!(TM_BUY_USER_FRAMES, (706, 707, 708));
