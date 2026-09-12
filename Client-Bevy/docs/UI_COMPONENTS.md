@@ -164,7 +164,7 @@
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
 - Craft：C# 放入材料后会锁定对应背包格（`SelectedCell.Locked`）直到关窗；Bevy 目前只记录背包槽号，未在背包侧锁定（后续可加 `LockedSlots` 资源）。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
-- ItemRent：C# 用 `KeybindOptions.Rental` 快捷键开关 `ItemRentalDialog`；Bevy 键位表暂无 Rental 项，当前经调试/控制入口打开（键位接入待 keybind 批次）。
+- ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `T`）并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。
 - ItemRent：C# 出租侧还有对方镜像窗（`GuestItemRentingDialog`/`GuestItemRentDialog`，同 `Prguse[238]` 另一列位置）未移植；Bevy 仍用同一对窗表示双方，名称标签在 HUD 快照无名字时回退为「租赁」。
 - TrustMerchant：C# 左列筛选树（`SetupFilters`，Prguse2[920/921] 100x22 按钮 + 99x18 标签，20px 步进）、寄售/拍卖页签面板、列表行（C# 为 item cell 行 + 选中高亮）、Mail 按钮（Prguse[437..439]）尚未移植；Bevy 现用文本行 + 左列扩展按钮近似。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
