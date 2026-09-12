@@ -197,8 +197,9 @@ pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
             },
             ..Default::default()
         }),
-        current_dura: 0,
-        max_dura: 0,
+        // 木剑（5）当合成工具用：C# 工具要求 CurrentDura >= 1000
+        current_dura: if index == 5 { 1000 } else { 0 },
+        max_dura: if index == 5 { 1000 } else { 0 },
         ..Default::default()
     }
 }
