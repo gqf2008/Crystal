@@ -955,6 +955,57 @@ fn craft_refine_sprites_aligned() {
     println!("  ✓ Craft Prguse[1109]/Title[180..182]/[336..338]/Prguse2[360..362] 与 Refine Prguse[1002]/[392] 资源索引对齐 C#");
 }
 
+/// TrustMerchant 买/取回确认框（C# `MirMessageBox` YesNo）：`Prguse[360]` 456x190 居中
+/// (284,289)、文本框 (35,35)、Yes `Title[206..208]`(260,157)、No `Title[210..212]`(360,157)，均 76x25。
+#[test]
+fn trust_merchant_confirm_box_aligned() {
+    use client_bevy::game::dialogs::market as mk;
+    let mut libs = Libs::new();
+    let (w, h) = libs.size(LibraryName::Prguse, 360);
+    assert_eq!(
+        (w, h),
+        (mk::TM_CONFIRM_W, mk::TM_CONFIRM_H),
+        "[尺寸] 确认框背景应 = Prguse[360]"
+    );
+    assert_centered(
+        "确认框",
+        mk::TM_CONFIRM_POS.0,
+        mk::TM_CONFIRM_POS.1,
+        LibraryName::Prguse,
+        360,
+        &mut libs,
+    );
+    for idx in [206usize, 207, 208, 210, 211, 212] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!(
+            (w, h),
+            (mk::TM_CONFIRM_BTN_W, mk::TM_CONFIRM_BTN_H),
+            "[尺寸] Title[{idx}] 应等于确认框 Yes/No 键尺寸"
+        );
+    }
+    // Yes/No 键都在 456x190 面板内
+    let inside = |(x, y): (f32, f32)| {
+        x + mk::TM_CONFIRM_BTN_W <= mk::TM_CONFIRM_W && y + mk::TM_CONFIRM_BTN_H <= mk::TM_CONFIRM_H
+    };
+    assert!(inside(mk::TM_CONFIRM_YES_POS));
+    assert!(inside(mk::TM_CONFIRM_NO_POS));
+    assert!(
+        mk::TM_CONFIRM_YES_POS.0 < mk::TM_CONFIRM_NO_POS.0,
+        "Yes 在 No 左侧"
+    );
+    // 文案（C# `ItemNotSoldGetBack` / `ConfirmBuyItemWithPrice`）
+    assert_eq!(
+        mk::market_retrieve_text("屠龙"),
+        "屠龙尚未售出，确定要取回它吗？"
+    );
+    assert_eq!(
+        mk::market_buy_text("屠龙", 12_345, "金币"),
+        "确定要以12,345 金币购买屠龙吗？"
+    );
+
+    println!("  ✓ 确认框 Prguse[360] 456x190 @(284,289) + Yes/No Title[206..212] 76x25 对齐 C# MirMessageBox");
+}
+
 /// TrustMerchant 价格排序图标与 Mail 按钮：
 /// `PriceFilterIcon` = `Prguse2[925/926]` 12x11 @(371,65)（落在「价格」表头 295..383 内），
 /// `MailButton` = `Prguse[437..439]` 28x25 @(350,448)（仅市场页签，与仅寄售的 COLLECT 不同页签）。
