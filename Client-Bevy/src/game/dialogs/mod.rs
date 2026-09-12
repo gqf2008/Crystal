@@ -126,6 +126,16 @@ pub struct DialogManager {
 #[derive(Component)]
 pub struct AlwaysVisible;
 
+/// 状态驱动窗口的统一桥接：服务端/脚本状态变化时同步管理栈，
+/// 让通用显隐兜底、世界输入锁与 z 序使用同一真值。
+pub fn sync_dialog_state(mgr: &mut DialogManager, kind: DialogKind, visible: bool) {
+    if visible {
+        mgr.open(kind);
+    } else {
+        mgr.close(kind);
+    }
+}
+
 impl DialogManager {
     pub fn is_open(&self, kind: DialogKind) -> bool {
         self.open.contains(&kind)
@@ -161,6 +171,24 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::{PrimaryWindow, Window};
+
+    #[test]
+    fn state_dialog_sync_truth_table() {
+        let mut m = DialogManager::default();
+        for kind in [
+            DialogKind::Npc,
+            DialogKind::Trade,
+            DialogKind::GuestTrade,
+            DialogKind::NpcGoods,
+            DialogKind::Buff,
+            DialogKind::Roll,
+        ] {
+            sync_dialog_state(&mut m, kind, true);
+            assert!(m.is_open(kind), "{kind:?} visible 应进入管理栈");
+            sync_dialog_state(&mut m, kind, false);
+            assert!(!m.is_open(kind), "{kind:?} hidden 应退出管理栈");
+        }
+    }
 
     #[test]
     fn test_blocks_world_click() {

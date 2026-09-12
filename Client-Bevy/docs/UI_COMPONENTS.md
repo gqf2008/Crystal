@@ -12,9 +12,10 @@
 - 批1 通用交互基建：隐藏 `UiButton` 不再点击/悬停/发声/tooltip/拦截世界点击；重叠按钮只触发最上层。
 - 批2 HUD/Chat/SkillBar/AssignKey：技能栏子树门控、模态 UI 世界输入锁。
 - 批3 Inventory/Character/Hero 系列：补齐英雄技能 Shift+F1..F8 快捷键分配（client+server）。
-- 批4 Social/Trade/Market/Mail：逐项对照后确认现有实现已覆盖，无新增缺陷。
+- 批4 Social/Trade/Market/Mail：交互覆盖已核对；Mail 列表面板缺口在批7运行时审计中定位并修复。
 - 批5 Quest/NPC/系统窗：已关闭的 #2535～#2538 均落地；Timer 按 `NotControl` 允许点击穿透。
 - 批6 Login/Select/NewCharacter：补齐登录页 `InputKeyDialog` 安全键盘。
+- 批7 状态窗/Mail：NPC、Trade/GuestTrade、NpcGoods、Roll、Buff 同步 `DialogManager`，世界输入锁与通用显隐使用同一真值；Mail 列表恢复 C# 312x444 面板、Title[7]、10x33 行和底部操作按钮。
 
 ## 1. 通用交互控件
 
@@ -75,7 +76,7 @@
 | Inspect | `dialogs/inspect.rs` | `CharacterDialog.cs` Inspect | 实现；批3 |
 | NpcGoods | `dialogs/npc_goods.rs` | `NPCDialogs.cs` | 实现；批4 |
 | Guild | `dialogs/guild.rs` | `GuildDialog.cs` | 实现；批4 |
-| Mail | `dialogs/mail.rs` | `MailDialogs.cs` | 实现；批4 |
+| Mail | `dialogs/mail.rs` | `MailDialogs.cs` | 实现；批4/批7（列表布局） |
 | Ranking | `dialogs/ranking.rs` | `RankingDialog.cs` | 实现；批4 |
 | Mentor | `dialogs/mentor.rs` | `MentorDialog.cs` | 实现；批4 |
 | Relationship | `dialogs/relationship.rs` | `RelationshipDialog.cs` | 实现；批4 |
@@ -128,10 +129,11 @@
 | 批4 社交/交易/市场/邮件 | 对照代码和已合并批次，现有实现覆盖；无新增改动 | 已核实 |
 | 批5 任务/NPC/系统窗 | #2535～#2538 已落地；Timer `NotControl` 点击穿透修复 | #2710 |
 | 批6 登录/选角/建角 | 登录 ViewKey `InputKeyDialog` 安全键盘落地 | #2712 |
+| 批7 状态窗/Mail | 状态驱动窗口同步 DialogManager；Mail 面板/10x33 行/按钮对齐 C# | #2714 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：367 lib + 2 bin + 1 smoke + 17 alignment 通过（批6后基线）。
+- `cargo test`（Client-Bevy）：370 lib + 2 bin + 1 smoke + 17 alignment 通过（批7后基线）。
 - ServerRust：665 lib + protocol integration 通过（批3后基线）。
-- 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源。
+- 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 另复验 Mail 完整面板和 `--buff-test` 状态下 Buff 根真实可见。
