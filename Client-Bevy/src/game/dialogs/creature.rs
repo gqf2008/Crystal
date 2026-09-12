@@ -286,14 +286,17 @@ fn spawn_creature(
             spawn_label(p, &cjk, "", sx + 4.0, sy + 10.0, 12.0, Color::WHITE, 9)
                 .insert(CreatureLine(i));
         }
-        // Bevy 扩展：刷新按钮（C# 无此控件）放在右侧操作列，不覆盖 5x2 宠物槽。
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 375.0, 217.0, 76.0, 25.0, 10).insert(CreatureRefresh);
-        }
+        // Bevy 扩展：刷新按钮（C# 无此控件）放右侧操作列，不覆盖 5x2 宠物槽。
+        // 用中文文本按钮而非通用 Title[206..208]（该精灵在原版是 MessageBox 的「YES」）。
+        spawn_container(p, 375.0, 217.0, 70.0, 22.0, 10)
+            .insert((
+                Button,
+                CreatureRefresh,
+                BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 0.85)),
+            ))
+            .with_children(|c| {
+                spawn_label(c, &cjk, "刷新", 4.0, 3.0, 12.0, Color::WHITE, 11);
+            });
         // C# 操作按钮：使用 Title 精灵（含中文贴图）与 C# 原生坐标/尺寸。
         for (marker, x, y, index, w, h) in CREATURE_OP_BUTTONS {
             let (Some(n), Some(hv), Some(pr)) = (
