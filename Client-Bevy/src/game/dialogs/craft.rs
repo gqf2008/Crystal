@@ -20,7 +20,10 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel, UiItemCellData,
+    UiItemCellIcon,
+};
 
 /// #2536：当前选中的合成配方（产物；recipe_id 由服务端随合成商品 unique_id 下发）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +43,8 @@ pub struct CraftState {
     /// #2720 配方详情（S.NewRecipeInfo 整份 ClientRecipeInfo，按 recipe_id 索引）：
     /// 产物/工具/材料/金币/成功率，合成材料槽与自动填充依赖。
     pub recipes: std::collections::HashMap<i32, mir2_shared::data::client_data::ClientRecipeInfo>,
+    /// #2720 已放入合成槽的物品（C# `CraftDialog.Selected`）
+    pub slots: [Option<CraftPlaced>; CRAFT_SLOT_COUNT],
 }
 
 /// 当前选中配方的详情（C# `CraftDialog.Recipe` 等价物）
@@ -84,6 +89,89 @@ const CRAFT_CONFIRM_POS: (f32, f32) = (215.0, 185.0); // CraftButton（Title[336
 /// 精灵首帧索引（Index/HoverIndex/PressedIndex 连续 3 帧）。
 const CRAFT_AUTOFILL_INDEX: usize = 180;
 const CRAFT_CONFIRM_INDEX: usize = 336;
+/// C# `_toolCount` / `_ingredientCount`（NPCDialogs.cs:2261-2263）
+const CRAFT_TOOL_COUNT: usize = 3;
+const CRAFT_ING_COUNT: usize = 6;
+const CRAFT_SLOT_COUNT: usize = CRAFT_TOOL_COUNT + CRAFT_ING_COUNT;
+/// C# 格子几何：工具 `((x*44)+108, 44)`、材料 `((x-3)*40+52, 86)`，35x32
+const CRAFT_TOOL_ORIGIN: (f32, f32) = (108.0, 44.0);
+const CRAFT_TOOL_STEP: f32 = 44.0;
+const CRAFT_ING_ORIGIN: (f32, f32) = (52.0, 86.0);
+const CRAFT_ING_STEP: f32 = 40.0;
+const CRAFT_CELL_W: f32 = 35.0;
+const CRAFT_CELL_H: f32 = 32.0;
+
+/// C# `Grid[idx].Location`（工具/材料两段）
+fn craft_slot_pos(index: usize) -> (f32, f32) {
+    if index < CRAFT_TOOL_COUNT {
+        (
+            CRAFT_TOOL_ORIGIN.0 + index as f32 * CRAFT_TOOL_STEP,
+            CRAFT_TOOL_ORIGIN.1,
+        )
+    } else {
+        let i = index - CRAFT_TOOL_COUNT;
+        (
+            CRAFT_ING_ORIGIN.0 + i as f32 * CRAFT_ING_STEP,
+            CRAFT_ING_ORIGIN.1,
+        )
+    }
+}
+
+/// 已放入合成槽的背包物品（C# `CraftDialog.Selected`：格子 → 背包槽 + 锁定）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CraftPlaced {
+    pub inv_slot: usize,
+    pub item_index: i32,
+    pub count: u16,
+}
+
+/// C# `Grid_Click` 校验：可放入当且仅当格子为空、物品索引与需求一致，
+/// 工具要求 `CurrentDura >= min_dura`、材料要求 `count >= 需求数量`。
+pub fn craft_slot_accepts(
+    requirement: &mir2_shared::data::client_data::RecipeRequirement,
+    filled: bool,
+    item_index: i32,
+    count: u16,
+    current_dura: u16,
+) -> bool {
+    if filled || item_index != requirement.item_index {
+        return false;
+    }
+    if requirement.min_dura > 0 {
+        current_dura >= requirement.min_dura
+    } else {
+        count >= requirement.count
+    }
+}
+
+/// C# `AutoFill()`：按配方顺序（先工具后材料）在背包里挑未占用且满足条件的物品，
+/// 返回与 `requirements` 等长的背包槽位（None = 没找到）。
+pub fn craft_autofill_slots(
+    requirements: &[mir2_shared::data::client_data::RecipeRequirement],
+    inventory: &[(i32, u16, u16)],
+    used: &[usize],
+) -> Vec<Option<usize>> {
+    let mut taken: Vec<usize> = used.to_vec();
+    requirements
+        .iter()
+        .map(|req| {
+            let found = inventory.iter().enumerate().position(|(i, (index, count, dura))| {
+                if taken.contains(&i) || *index != req.item_index {
+                    return false;
+                }
+                if req.min_dura > 0 {
+                    *dura >= req.min_dura
+                } else {
+                    *count >= req.count
+                }
+            });
+            if let Some(i) = found {
+                taken.push(i);
+            }
+            found
+        })
+        .collect()
+}
 
 #[derive(Component)]
 pub struct CraftWidget;
@@ -97,6 +185,10 @@ pub struct CraftBtn;
 /// 自动填充（C# `AutoFillButton`：按配方工具/材料从背包自动摆放）
 #[derive(Component)]
 pub struct CraftAutoFill;
+
+/// 合成槽格子（0..3 = 工具，3..9 = 材料；C# `CraftDialog.Grid`）
+#[derive(Component)]
+pub struct CraftCell(pub usize);
 
 #[derive(Component)]
 pub struct CraftLine(usize);
@@ -114,7 +206,9 @@ impl Plugin for CraftPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_craft);
         app.add_systems(
             Update,
-            craft_ui_system.run_if(in_state(AppState::Game)),
+            (craft_ui_system, craft_slots_system)
+                .chain()
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -199,6 +293,22 @@ fn spawn_craft(
             spawn_icon_button(p, n, h, pr, CRAFT_CONFIRM_POS.0, CRAFT_CONFIRM_POS.1, 80.0, 25.0, 10)
                 .insert(CraftBtn);
         }
+        // C# Grid：3 工具格 + 6 材料格（影子格由 ui_system 按配方刷新）
+        for i in 0..CRAFT_SLOT_COUNT {
+            let (cx, cy) = craft_slot_pos(i);
+            spawn_item_cell_ui(
+                p,
+                &mut images,
+                &font,
+                cx,
+                cy,
+                CRAFT_CELL_W,
+                CRAFT_CELL_H,
+                9,
+                i,
+            )
+            .insert((CraftCell(i), Button));
+        }
     });
 }
 
@@ -207,11 +317,8 @@ fn craft_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<CraftState>,
     mut npc_goods: ResMut<NpcGoodsState>,
-    net: Res<NetConnection>,
     inv_origin: Res<InventoryOrigin>,
     close: Query<(Entity, &Interaction), With<CraftClose>>,
-    craft_btn: Query<(Entity, &Interaction), With<CraftBtn>>,
-    autofill_btn: Query<(Entity, &Interaction), With<CraftAutoFill>>,
     mut widgets: Query<&mut Visibility, With<CraftWidget>>,
     mut panel_node: Query<&mut Node, With<CraftWidget>>,
     mut lines: Query<(&mut Text, &CraftLine)>,
@@ -253,6 +360,8 @@ fn craft_ui_system(
     for (e, inter) in &close {
         if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Craft);
+            // C# `Hide()` → ResetCells()
+            state.slots = Default::default();
         }
     }
     for (mut text, line) in &mut lines {
@@ -268,44 +377,193 @@ fn craft_ui_system(
                     info.tools.len(),
                     info.ingredients.len()
                 ),
-                None => "材料槽待移植：当前服务端按配方自动扣材".to_string(),
+                None => "未选择产物——先在左侧商品列表选合成产物".to_string(),
             },
             3 => format!("已学会配方: {} 种", state.learned.len()),
             _ => String::new(),
         };
     }
-    // 自动填充（C# AutoFill）：需要配方 Tools/Ingredients 全量数据
-    // （S.NewRecipeInfo 目前只下发 recipe_id），协议扩展前仅提示。
-    for (e, inter) in &autofill_btn {
-        if edge(e, inter, &mut prev_inter) {
-            state.message = match selected_recipe_info(&state) {
-                Some(info) => format!(
-                    "自动填充：需 {} 个工具 / {} 种材料（摆槽 UI 待移植）",
-                    info.tools.len(),
-                    info.ingredients.len()
-                ),
-                None => "请先选择合成产物".to_string(),
+}
+
+/// 材料槽：影子格渲染 + 点击放入 + 自动填充 + 带槽位合成
+/// （C# `CraftDialog` `Grid_Click` / `AutoFill` / `CraftItem`）
+#[allow(clippy::too_many_arguments)]
+fn craft_slots_system(
+    mgr: Res<DialogManager>,
+    mut state: ResMut<CraftState>,
+    net: Res<NetConnection>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut image_cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
+    mut inv_click: ResMut<crate::game::dialogs::inventory::InvClickState>,
+    autofill_btn: Query<(Entity, &Interaction), With<CraftAutoFill>>,
+    craft_btn: Query<(Entity, &Interaction), With<CraftBtn>>,
+    mut cells: Query<(&CraftCell, &mut UiItemCellData), Without<UiItemCellIcon>>,
+    cell_inter: Query<(Entity, &Interaction, &CraftCell)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    mut slot_recipe: Local<Option<i32>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if !mgr.is_open(DialogKind::Craft) {
+        return;
+    }
+    // 配方详情 + 背包快照；配方变化即清空材料槽（C# ResetCells）
+    let info = selected_recipe_info(&state).cloned();
+    let current_recipe = state.selected.as_ref().map(|r| r.recipe_id as i32);
+    if *slot_recipe != current_recipe {
+        *slot_recipe = current_recipe;
+        state.slots = Default::default();
+    }
+    let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> =
+        inv_q.single().map(|inv| inv.items.clone()).unwrap_or_default();
+    let requirement = |i: usize| -> Option<mir2_shared::data::client_data::RecipeRequirement> {
+        info.as_ref().and_then(|recipe| {
+            if i < CRAFT_TOOL_COUNT {
+                recipe.tools.get(i).cloned()
+            } else {
+                recipe.ingredients.get(i - CRAFT_TOOL_COUNT).cloned()
+            }
+        })
+    };
+    // 影子格渲染：已放入 → 该背包物品图标 + 数量；未放入 → 配方需求图标 + 数量
+    for (cell, mut data) in &mut cells {
+        let req = requirement(cell.0);
+        let placed = state.slots[cell.0].clone();
+        let (image_index, count) = match (&placed, req.as_ref()) {
+            (Some(p), _) => {
+                let image = inv_items
+                    .get(p.inv_slot)
+                    .and_then(|s| s.as_ref())
+                    .map(|it| it.image as usize)
+                    .or_else(|| req.as_ref().map(|r| r.image as usize));
+                (image, p.count)
+            }
+            (None, Some(r)) => (Some(r.image as usize), r.count),
+            (None, None) => (None, 0),
+        };
+        data.icon = match image_index {
+            Some(idx) if idx > 0 => crate::ui::sprite_ui::ui_image(
+                &mut libs,
+                &mut images,
+                &mut image_cache,
+                LibraryName::Items,
+                idx,
+            ),
+            _ => None,
+        };
+        data.count = (count > 1).then_some(count as u32);
+        data.dura_ratio = None;
+    }
+    // C# `Grid_Click`：背包选中物 → 点击影子格放入（索引/数量/工具耐久校验）
+    for (e, inter, cell) in &cell_inter {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        let Some(req) = requirement(cell.0) else {
+            state.message = "请先选择合成产物".to_string();
+            continue;
+        };
+        let filled = state.slots[cell.0].is_some();
+        let Some(inv_slot) = inv_click.selected else {
+            state.message = if filled {
+                format!("已放入 {}", req.name)
+            } else {
+                format!("需要 {} —— 先在背包选中再点此格", req.name)
             };
-            tracing::info!("🔧 自动填充：配方数据已就绪，摆槽 UI 待移植");
+            continue;
+        };
+        let Some(item) = inv_items.get(inv_slot).and_then(|s| s.as_ref()) else {
+            continue;
+        };
+        if craft_slot_accepts(&req, filled, item.item_index, item.count, item.current_dura) {
+            let name = item.name.clone();
+            state.slots[cell.0] = Some(CraftPlaced {
+                inv_slot,
+                item_index: item.item_index,
+                count: req.count,
+            });
+            inv_click.selected = None; // C#：放入后清空 SelectedCell 并锁定背包格
+            state.message = format!("放入 {}", name);
+        } else if filled {
+            state.message = "该槽已有物品".to_string();
+        } else {
+            state.message = format!("需要 {}（索引/数量/耐久不符）", req.name);
         }
     }
-    // 合成
-    for (e, inter) in &craft_btn {
-        if edge(e, inter, &mut prev_inter) {
-            if let Some(r) = state.selected.clone() {
-                // #2573：C# C.CraftItem wire（UniqueID/Count/Slots；暂无材料槽选择 UI，
-                // 槽位空 → 服务端按 DB 配方自动扣材）
-                net.send_packet(&crate::network::CraftItemWire {
-                    unique_id: r.recipe_id as u64,
-                    count: 1,
-                    slots: Vec::new(),
-                });
-                state.message = format!("合成 {} 中…", r.name);
-                tracing::info!("🔧 合成配方 {}（{}）", r.recipe_id, r.name);
-            } else {
-                state.message = "请先在左侧商品列表点击合成产物".to_string();
+    // 自动填充（C# AutoFill：ResetCells(false) → 按配方顺序从背包挑匹配物品）
+    for (e, inter) in &autofill_btn {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        match info.as_ref() {
+            None => state.message = "请先选择合成产物".to_string(),
+            Some(recipe) => {
+                state.slots = Default::default();
+                let mut requirements = recipe.tools.clone();
+                requirements.extend(recipe.ingredients.iter().cloned());
+                let inventory: Vec<(i32, u16, u16)> = inv_items
+                    .iter()
+                    .map(|slot| {
+                        slot.as_ref()
+                            .map(|it| (it.item_index, it.count, it.current_dura))
+                            .unwrap_or((i32::MIN, 0, 0))
+                    })
+                    .collect();
+                let found = craft_autofill_slots(&requirements, &inventory, &[]);
+                let mut placed = 0usize;
+                for (i, slot) in found.iter().enumerate() {
+                    if let Some(inv_slot) = slot {
+                        state.slots[i] = Some(CraftPlaced {
+                            inv_slot: *inv_slot,
+                            item_index: requirements[i].item_index,
+                            count: requirements[i].count,
+                        });
+                        placed += 1;
+                    }
+                }
+                state.message = format!("自动填充 {}/{} 槽", placed, requirements.len());
+                tracing::info!("🔧 自动填充 {}/{} 槽", placed, requirements.len());
             }
         }
+    }
+    // 合成（C# `CraftItem()`：材料槽全部就位才发包，带上选中的背包槽）
+    for (e, inter) in &craft_btn {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        let Some(r) = state.selected.clone() else {
+            state.message = "请先在左侧商品列表点击合成产物".to_string();
+            continue;
+        };
+        let need = info
+            .as_ref()
+            .map(|recipe| recipe.tools.len() + recipe.ingredients.len())
+            .unwrap_or(0);
+        let filled = state.slots.iter().filter(|s| s.is_some()).count();
+        if need == 0 || filled < need {
+            state.message = format!("材料槽未就位（{}/{}），可用「AUTO」自动填充", filled, need);
+            continue;
+        }
+        let slots: Vec<i32> = state
+            .slots
+            .iter()
+            .filter_map(|s| s.as_ref().map(|p| p.inv_slot as i32))
+            .collect();
+        net.send_packet(&crate::network::CraftItemWire {
+            unique_id: r.recipe_id as u64,
+            count: 1,
+            slots,
+        });
+        state.message = format!("合成 {} 中…", r.name);
+        tracing::info!("🔧 合成配方 {}（{}）", r.recipe_id, r.name);
     }
 }
 
@@ -346,6 +604,68 @@ mod tests {
             recipe_id: 7,
             name: "精铁剑".to_string(),
         })
+    }
+
+    fn req(
+        item_index: i32,
+        count: u16,
+        image: u16,
+        min_dura: u16,
+    ) -> mir2_shared::data::client_data::RecipeRequirement {
+        mir2_shared::data::client_data::RecipeRequirement {
+            item_index,
+            count,
+            image,
+            name: format!("#{}", item_index),
+            min_dura,
+        }
+    }
+
+    /// #2720：格子放置校验（C# `Grid_Click`：工具看 `CurrentDura >= 1000`，材料看数量）
+    #[test]
+    fn craft_slot_accepts_matches_csharp_rules() {
+        let tool = req(1001, 1, 33, 1000);
+        assert!(!craft_slot_accepts(&tool, false, 1001, 1, 999)); // 耐久不足
+        assert!(craft_slot_accepts(&tool, false, 1001, 1, 1000));
+        assert!(!craft_slot_accepts(&tool, true, 1001, 1, 5000)); // 槽已占用
+        assert!(!craft_slot_accepts(&tool, false, 1002, 1, 5000)); // 物品不符
+
+        let ingredient = req(2001, 3, 55, 0);
+        assert!(!craft_slot_accepts(&ingredient, false, 2001, 2, 0)); // 数量不足
+        assert!(craft_slot_accepts(&ingredient, false, 2001, 3, 0));
+    }
+
+    /// #2720：AutoFill 按配方顺序（工具→材料）挑未占用且满足条件的背包物品
+    #[test]
+    fn craft_autofill_picks_matching_items() {
+        let requirements = vec![req(1001, 1, 33, 1000), req(2001, 2, 55, 0), req(2002, 1, 56, 0)];
+        let inventory = vec![(1001, 1, 1200), (2001, 5, 0), (2002, 1, 0)];
+        assert_eq!(
+            craft_autofill_slots(&requirements, &inventory, &[]),
+            vec![Some(0), Some(1), Some(2)]
+        );
+
+        // 工具耐久不足 → 工具槽留空，材料照填
+        let dull_tool = vec![(1001, 1, 100), (2001, 5, 0), (2002, 1, 0)];
+        assert_eq!(
+            craft_autofill_slots(&requirements, &dull_tool, &[]),
+            vec![None, Some(1), Some(2)]
+        );
+
+        // 已占用的背包槽不重复使用
+        assert_eq!(
+            craft_autofill_slots(&requirements, &inventory, &[0]),
+            vec![None, Some(1), Some(2)]
+        );
+    }
+
+    /// #2720：格子坐标对齐 C# Grid（工具 (108+x*44,44)，材料 (52+(x-3)*40,86)）
+    #[test]
+    fn craft_slot_positions_match_csharp_grid() {
+        assert_eq!(craft_slot_pos(0), (108.0, 44.0));
+        assert_eq!(craft_slot_pos(2), (196.0, 44.0));
+        assert_eq!(craft_slot_pos(3), (52.0, 86.0));
+        assert_eq!(craft_slot_pos(8), (252.0, 86.0));
     }
 
     /// #2536：配方行文案（选中显示产物名，未选中给提示）
@@ -395,8 +715,15 @@ mod tests {
     /// #2720：选中配方 → 详情查找（材料槽/自动填充的数据源）
     #[test]
     fn selected_recipe_info_lookup() {
-        use mir2_shared::data::client_data::ClientRecipeInfo;
-        use mir2_shared::data::item::UserItem;
+        use mir2_shared::data::client_data::{ClientRecipeInfo, RecipeRequirement};
+
+        let req = |item_index: i32, count: u16, image: u16, min_dura: u16| RecipeRequirement {
+            item_index,
+            count,
+            image,
+            name: format!("#{}", item_index),
+            min_dura,
+        };
 
         let mut state = CraftState::default();
         assert!(selected_recipe_info(&state).is_none());
@@ -406,9 +733,9 @@ mod tests {
             ClientRecipeInfo {
                 gold: 250,
                 chance: 80,
-                item: UserItem::new(9005),
-                tools: vec![UserItem::new(1001)],
-                ingredients: vec![UserItem::new(2001), UserItem::new(2002)],
+                item: req(9005, 1, 120, 0),
+                tools: vec![req(1001, 1, 33, 1000)],
+                ingredients: vec![req(2001, 3, 55, 0), req(2002, 1, 56, 0)],
             },
         );
         state.selected = Some(SelectedRecipe {

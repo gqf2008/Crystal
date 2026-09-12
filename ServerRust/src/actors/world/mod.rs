@@ -11291,37 +11291,47 @@ fn build_client_recipe_info(
     recipe: &db::RecipeInfo,
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
 ) -> mir2_shared::data::client_data::ClientRecipeInfo {
-    use mir2_shared::data::item::UserItem;
+    use mir2_shared::data::client_data::RecipeRequirement;
 
     fn requirement(
         item_index: i32,
         count: u16,
+        min_dura: u16,
         infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
-    ) -> UserItem {
-        // 只带 item_index/count/dura：`info` 不上线（客户端按 item_index 查本地 ItemInfo）
-        let mut item = UserItem::new(item_index);
-        item.count = count.max(1);
-        if let Some(info) = infos.get(&item_index) {
-            let dura = info.durability.max(0) as u16;
-            item.current_dura = dura;
-            item.max_dura = dura;
+    ) -> RecipeRequirement {
+        // 客户端无本地物品库 → 图标(image)/名称随包下发
+        let (image, name) = match infos.get(&item_index) {
+            Some(info) => (info.image.max(0) as u16, info.name.clone()),
+            None => (0, format!("#{}", item_index)),
+        };
+        RecipeRequirement {
+            item_index,
+            count: count.max(1),
+            image,
+            name,
+            min_dura,
         }
-        item
     }
 
     mir2_shared::data::client_data::ClientRecipeInfo {
         gold: recipe.gold_cost,
         chance: recipe.chance,
-        item: requirement(recipe.product_item_index, recipe.product_count, item_infos),
+        item: requirement(
+            recipe.product_item_index,
+            recipe.product_count,
+            0,
+            item_infos,
+        ),
         tools: recipe
             .tools
             .iter()
-            .map(|idx| requirement(*idx, 1, item_infos))
+            // C# Grid_Click：工具要求背包物品 CurrentDura >= 1000
+            .map(|idx| requirement(*idx, 1, 1000, item_infos))
             .collect(),
         ingredients: recipe
             .ingredients
             .iter()
-            .map(|ing| requirement(ing.item_index, ing.count, item_infos))
+            .map(|ing| requirement(ing.item_index, ing.count, 0, item_infos))
             .collect(),
     }
 }
@@ -13305,13 +13315,14 @@ mod tests {
         assert_eq!(info.item.count, 2);
         assert_eq!(info.tools.len(), 1);
         assert_eq!(info.tools[0].item_index, 1001);
-        assert_eq!(info.tools[0].current_dura, 1000);
+        assert_eq!(info.tools[0].min_dura, 1000);
+        assert_eq!(info.tools[0].image, 0);
         assert_eq!(info.ingredients.len(), 2);
         assert_eq!(info.ingredients[0].item_index, 2001);
         assert_eq!(info.ingredients[0].count, 3);
-        // 未登记的 item_info → 耐久 0（不 panic）
         assert_eq!(info.ingredients[1].item_index, 2002);
-        assert_eq!(info.ingredients[1].current_dura, 0);
+        // 未登记的 item_info → 名称回退 #index（不 panic）
+        assert_eq!(info.ingredients[1].name, "#2002");
     }
 
     /// #2348：C# Envir.LoadLineMessages 解析（跳过 ;/空行）

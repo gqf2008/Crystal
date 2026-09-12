@@ -1387,29 +1387,27 @@ mod tests {
 
     #[test]
     fn roundtrip_new_recipe_info() -> SharedResult<()> {
-        // #2720：S.NewRecipeInfo 现携带整份 ClientRecipeInfo（产物/工具/材料/金币/成功率）
-        use crate::data::client_data::ClientRecipeInfo;
-        use crate::data::item::UserItem;
+        // #2720：S.NewRecipeInfo 携带整份 ClientRecipeInfo（产物/工具/材料 + 图标/名称）
+        use crate::data::client_data::{ClientRecipeInfo, RecipeRequirement};
 
-        let mut product = UserItem::new(9005);
-        product.count = 1;
-
-        let mut tool = UserItem::new(1001);
-        tool.count = 1;
-        tool.current_dura = 1000;
-        tool.max_dura = 1000;
-
-        let mut ingredient = UserItem::new(2001);
-        ingredient.count = 3;
+        let req = |item_index: i32, count: u16, image: u16, name: &str, min_dura: u16| {
+            RecipeRequirement {
+                item_index,
+                count,
+                image,
+                name: name.to_string(),
+                min_dura,
+            }
+        };
 
         roundtrip(&server::ui_events::NewRecipeInfo {
             recipe_id: 7,
             info: ClientRecipeInfo {
                 gold: 250,
                 chance: 80,
-                item: product,
-                tools: vec![tool],
-                ingredients: vec![ingredient],
+                item: req(9005, 1, 120, "精铁剑", 0),
+                tools: vec![req(1001, 1, 33, "铁锤", 1000)],
+                ingredients: vec![req(2001, 3, 55, "铁矿石", 0)],
             },
         })
     }

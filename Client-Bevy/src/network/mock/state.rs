@@ -134,27 +134,25 @@ pub(crate) fn socketed_sword_item() -> mir2_shared::data::item::UserItem {
 
 /// #2720：mock 配方（1 产物 + 1 工具 + 2 材料），与 C# `ClientRecipeInfo` 同构
 pub(crate) fn mock_recipe_info() -> mir2_shared::data::client_data::ClientRecipeInfo {
-    use mir2_shared::data::item::UserItem;
+    use mir2_shared::data::client_data::RecipeRequirement;
 
-    let mut product = potion_item(9005);
-    product.count = 1;
-
-    let mut tool = potion_item(5); // 木剑当工具
-    tool.current_dura = 1000;
-    tool.max_dura = 1000;
-    tool.count = 1;
-
-    let mut ingredient_a = potion_item(1);
-    ingredient_a.count = 3;
-    let mut ingredient_b = potion_item(2);
-    ingredient_b.count = 2;
+    let req = |item_index: i32, count: u16, image: u16, name: &str, min_dura: u16| {
+        RecipeRequirement {
+            item_index,
+            count,
+            image,
+            name: name.to_string(),
+            min_dura,
+        }
+    };
 
     mir2_shared::data::client_data::ClientRecipeInfo {
         gold: 100,
         chance: 80,
-        item: product,
-        tools: vec![tool],
-        ingredients: vec![ingredient_a, ingredient_b],
+        item: req(11, 1, 11, "精铁剑", 0),
+        // mock 背包里有 木剑(5, 满耐久)/金创药(1)/魔法药(2)，便于实机验证摆槽
+        tools: vec![req(5, 1, 5, "木剑", 1000)],
+        ingredients: vec![req(1, 1, 1, "金创药(小)", 0), req(2, 1, 2, "魔法药(小)", 0)],
     }
 }
 
