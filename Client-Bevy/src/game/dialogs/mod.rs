@@ -175,6 +175,64 @@ mod tests {
         assert!(m.blocks_world_click(), "大地图打开屏蔽");
     }
 
+    /// 回归：关闭根必须隐藏整棵 UI 子树。Bevy 的显式 Visible 子节点不会随父
+    /// Visibility::Hidden 隐藏，因此根必须切到 Display::None；重开时恢复布局模式。
+    #[test]
+    fn hidden_dialog_root_suppresses_explicit_visible_children() {
+        let mut world = World::new();
+        world.insert_resource(DialogManager::default());
+        let root = world
+            .spawn((
+                DialogRoot(DialogKind::Inventory),
+                Visibility::Visible,
+                Node {
+                    display: Display::Grid,
+                    ..default()
+                },
+            ))
+            .id();
+        let child = world.spawn((Visibility::Visible, Node::default())).id();
+        world.entity_mut(root).add_child(child);
+
+        world
+            .run_system_once(enforce_dialog_visibility)
+            .expect("对话框可见性系统应运行");
+        world
+            .run_system_once(crate::ui::theme::enforce_ui_root_display)
+            .expect("UI 根显隐系统应运行");
+        assert_eq!(
+            world.entity(root).get::<Node>().unwrap().display,
+            Display::None,
+            "关闭根必须隐藏整棵子树"
+        );
+        assert_eq!(
+            world.entity(root).get::<Visibility>(),
+            Some(&Visibility::Hidden),
+            "关闭根自身也应隐藏"
+        );
+        assert_eq!(
+            world.entity(child).get::<Visibility>(),
+            Some(&Visibility::Visible),
+            "复现前提：子节点显式 Visible，不会被父 Hidden 级联"
+        );
+
+        world
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Inventory);
+        world.entity_mut(root).insert(Visibility::Visible);
+        world
+            .run_system_once(enforce_dialog_visibility)
+            .expect("对话框可见性系统应可重复运行");
+        world
+            .run_system_once(crate::ui::theme::enforce_ui_root_display)
+            .expect("UI 根显隐系统应可重复运行");
+        assert_eq!(
+            world.entity(root).get::<Node>().unwrap().display,
+            Display::Grid,
+            "重新打开时恢复根原有 Display 模式"
+        );
+    }
+
     /// node_rect：根面板 Node Px 字段 → 屏幕矩形
     #[test]
     fn node_rect_reads_px() {
@@ -396,6 +454,7 @@ mod tests {
 
 /// 对话框根标记（OnExit(Game) 统一清理）
 #[derive(Component)]
+#[require(crate::ui::theme::UiRootDisplay)]
 pub struct DialogRoot(pub DialogKind);
 
 /// 弹窗拖动状态（#34：原版弹窗可拖动；bevy_ui 版按根面板 Node 增量位移）
@@ -683,15 +742,16 @@ fn bump_dialog_z(
 
 pub struct DialogsPlugin;
 
-/// 通用对话框可见性兜底（#幽灵/泄漏）：PostUpdate 强制所有挂 `DialogRoot(kind)` 且
-/// kind 不在 `DialogManager.open` 的实体隐藏。根治"未 open 却 Visible"的控件泄漏——
-/// 各对话框 ui_system 若漏了部分子控件门控，会被这里兜底。跳过 `AlwaysVisible`。
+/// 通用对话框可见性兜底（#幽灵/泄漏）：PostUpdate 把不在 `DialogManager.open`
+/// 的 `DialogRoot(kind)` 根设为 `Visibility::Hidden`。跳过 `AlwaysVisible`。
+/// 紧随其后的 `enforce_ui_root_display` 会把隐藏根切到 `Display::None`，确保显式
+/// `Visibility::Visible` 的子控件也不会继续渲染。
 fn enforce_dialog_visibility(
     mgr: Res<DialogManager>,
     mut q: Query<(&DialogRoot, &mut Visibility), Without<AlwaysVisible>>,
 ) {
     for (root, mut vis) in &mut q {
-        if !mgr.is_open(root.0) && *vis == Visibility::Visible {
+        if !mgr.is_open(root.0) {
             *vis = Visibility::Hidden;
         }
     }
@@ -711,7 +771,12 @@ impl Plugin for DialogsPlugin {
         // 未 open 的挂 DialogRoot 实体，消除控件泄漏叠加（清理"一堆 UI 堆屏幕"）。
         app.add_systems(
             PostUpdate,
-            enforce_dialog_visibility.run_if(in_state(AppState::Game)),
+            (
+                enforce_dialog_visibility,
+                crate::ui::theme::enforce_ui_root_display,
+            )
+                .chain()
+                .run_if(in_state(AppState::Game)),
         );
         app.add_systems(
             Update,
