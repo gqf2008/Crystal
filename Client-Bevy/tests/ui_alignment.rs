@@ -898,6 +898,84 @@ fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
 }
 
+/// TrustMerchant 左列筛选树（C# `TrustMerchantDialog.SetupFilters/DrawFilters`）：
+/// 主/子按钮 `Prguse2[920..923]`(100x22)、滚动条 `[197..199]`/`[207..209]`(12x12) 与
+/// 拖动手柄 `[205/206]`(12x18) 的精灵存在性、锚点（x=108）、以及不越出 `Title[786]` 面板。
+#[test]
+fn trust_merchant_filter_tree_aligned() {
+    use client_bevy::game::dialogs::market_filter as mf;
+    let mut libs = Libs::new();
+
+    // C# `Title[786]` 面板 492x478（筛选树与滚动条都必须落在面板内）
+    let (pw, ph) = libs.size(LibraryName::Title, 786);
+    assert_eq!(
+        (pw, ph),
+        (492.0, 478.0),
+        "[尺寸] TrustMerchant 面板 = Title[786]"
+    );
+
+    // 行按钮精灵实测 100x22（C# 未设 Size → 精灵原始尺寸）
+    for idx in [920usize, 921, 922, 923] {
+        let (w, h) = libs.size(LibraryName::Prguse2, idx);
+        assert_eq!(
+            (w, h),
+            (mf::FILTER_BTN_W, mf::FILTER_BTN_H),
+            "[尺寸] Prguse2[{idx}] 应等于行按钮常量"
+        );
+    }
+    // 滚动条精灵：上/下箭头 12x12、拖动手柄 12x18
+    for idx in [197usize, 198, 199, 207, 208, 209] {
+        let (w, h) = libs.size(LibraryName::Prguse2, idx);
+        assert_eq!(
+            (w, h),
+            (mf::FILTER_ARROW_W, mf::FILTER_ARROW_H),
+            "[尺寸] Prguse2[{idx}] 应等于上下翻箭头常量"
+        );
+    }
+    for idx in [205usize, 206] {
+        let (w, h) = libs.size(LibraryName::Prguse2, idx);
+        assert_eq!(
+            (w, h),
+            (mf::FILTER_HANDLE_W, mf::FILTER_HANDLE_H),
+            "[尺寸] Prguse2[{idx}] 应等于拖动手柄常量"
+        );
+    }
+
+    // 锚点：按钮 x=7、首行 y=60、步进 20；滚动条 x=108（C# 字面值）
+    assert_eq!((mf::FILTER_BTN_X, mf::FILTER_BTN_Y), (7.0, 60.0));
+    assert_eq!(mf::FILTER_MAIN_STEP, 20.0);
+    assert_eq!(mf::FILTER_BAR_X, 108.0);
+    assert_eq!((mf::FILTER_UP_Y, mf::FILTER_DOWN_Y), (60.0, 429.0));
+    // 行按钮与滚动条同列不重叠、且不侵入列表区（x≥130）
+    assert!(mf::FILTER_BTN_X + mf::FILTER_BTN_W <= mf::FILTER_BAR_X);
+    assert!(mf::FILTER_BAR_X + mf::FILTER_HANDLE_W <= 130.0);
+
+    // 全部行槽 + 滚动条都落在面板内
+    let last_row_y = mf::FILTER_BTN_Y + (mf::FILTER_MAX_LINES - 1) as f32 * mf::FILTER_MAIN_STEP;
+    assert_in_canvas(
+        "筛选树末行",
+        mf::FILTER_BTN_X,
+        last_row_y,
+        mf::FILTER_BTN_W,
+        mf::FILTER_BTN_H,
+    );
+    assert!(
+        last_row_y + mf::FILTER_BTN_H <= ph,
+        "[包含] 末行 y={last_row_y} 应落在面板高 {ph} 内"
+    );
+    assert!(mf::FILTER_DOWN_Y + mf::FILTER_ARROW_H <= ph);
+    assert!(mf::FILTER_BAR_MAX_Y <= ph);
+
+    // 行 y 递推与 C# `DrawFilters` 一致（展开「衣服」：主 20 步进 → +2 → 子 21 步进）
+    let f = mf::setup_filters();
+    let rows = mf::visible_rows(&f, 2, -1, 0, mf::FILTER_MAX_LINES);
+    assert_eq!((rows[0].y, rows[1].y), (60.0, 80.0));
+    assert_eq!(rows[3].y, 122.0, "[递推] 展开子列表首行 = 100 + 20 + 2");
+    assert_eq!(rows[4].y, 143.0, "[递推] 子项步进 21");
+
+    println!("  ✓ 筛选树 Prguse2[920..923]/[197..209] 尺寸与 (7,60)/108 锚点对齐 C#");
+}
+
 /// 物品租赁四窗（C# `ItemRentDialog`/`ItemRentingDialog`/`GuestItemRentDialog`/
 /// `GuestItemRentingDialog`）：每端显示 1 自有窗 + 1 对方窗，四窗同源 `Prguse[238]`(204x109)，
 /// 自有/对方同坐标（费用窗 y=163、物品窗 y=287，互补不重叠）；引用的精灵索引全部存在。
