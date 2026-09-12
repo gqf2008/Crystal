@@ -898,6 +898,63 @@ fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
     x1 < x2 + w2 - EPS && x2 < x1 + w1 - EPS
 }
 
+/// 批10 收尾：Craft 与 Refine 两窗的**资源索引**回归（此前只有模块内的常量断言，
+/// 这里用真实 .Lib 元数据核对精灵存在性与尺寸）。
+/// Craft：面板 `Prguse[1109]` 337x215、标题 `Title[18]`、AUTO `Title[180..182]` 48x25、
+/// CRAFT `Title[336..338]` 80x25、关闭 `Prguse2[360..362]` 24x21；
+/// Refine：材料窗 `Prguse[1002]` 164x207、标题 `Title[18]`、投放窗 `Prguse[392]` 176x146。
+#[test]
+fn craft_refine_sprites_aligned() {
+    use client_bevy::game::dialogs::craft as cf;
+    use client_bevy::game::dialogs::refine as rf;
+    let mut libs = Libs::new();
+
+    // ---- Craft（C# CraftDialog，NPCDialogs.cs:2256）----
+    let (cw, ch) = libs.size(LibraryName::Prguse, 1109);
+    assert_eq!(
+        (cw, ch),
+        (cf::CRAFT_W, cf::CRAFT_H),
+        "[尺寸] Craft 面板应 = Prguse[1109]"
+    );
+    let (tw, th) = libs.size(LibraryName::Title, 18);
+    assert!(tw > 0.0 && th > 0.0, "[精灵] Craft 标题 Title[18] 应存在");
+    for idx in [cf::CRAFT_AUTOFILL_INDEX, cf::CRAFT_AUTOFILL_INDEX + 1, cf::CRAFT_AUTOFILL_INDEX + 2]
+    {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!((w, h), (48.0, 25.0), "[尺寸] Title[{idx}] 应为 AUTO 键 48x25");
+    }
+    for idx in [cf::CRAFT_CONFIRM_INDEX, cf::CRAFT_CONFIRM_INDEX + 1, cf::CRAFT_CONFIRM_INDEX + 2] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!((w, h), (80.0, 25.0), "[尺寸] Title[{idx}] 应为 CRAFT 键 80x25");
+    }
+    for idx in [360usize, 361, 362] {
+        let (w, h) = libs.size(LibraryName::Prguse2, idx);
+        assert_eq!((w, h), (24.0, 21.0), "[尺寸] Prguse2[{idx}] 应为关闭键 24x21");
+    }
+    assert_in_canvas("Craft 面板", 0.0, 0.0, cw, ch);
+    assert!(cf::CRAFT_AUTOFILL_POS.0 + 48.0 <= cw, "AUTO 键越出面板");
+    assert!(cf::CRAFT_CONFIRM_POS.0 + 80.0 <= cw, "CRAFT 键越出面板");
+    assert!(cf::CRAFT_CLOSE_POS.0 + 24.0 <= cw, "关闭键越出面板");
+
+    // ---- Refine（C# RefineDialog，NPCDialogs.cs:2726）----
+    let (rw, rh) = libs.size(LibraryName::Prguse, 1002);
+    assert_eq!(
+        (rw, rh),
+        (rf::REFINE_W, rf::REFINE_H),
+        "[尺寸] Refine 材料窗应 = Prguse[1002]"
+    );
+    let (lx, ly) = rf::refine_cell_pos(rf::REFINE_MATERIAL_SLOTS - 1);
+    assert!(
+        lx + rf::REFINE_CELL_W <= rw && ly + rf::REFINE_CELL_H <= rh,
+        "[包含] 最后一个材料格越出 Prguse[1002]"
+    );
+    // 投放窗（sell_panel 的 Refine/CheckRefine 模式）
+    let (dw, dh) = libs.size(LibraryName::Prguse, 392);
+    assert!(dw > 0.0 && dh > 0.0, "[精灵] 投放窗 Prguse[392] 应存在");
+
+    println!("  ✓ Craft Prguse[1109]/Title[180..182]/[336..338]/Prguse2[360..362] 与 Refine Prguse[1002]/[392] 资源索引对齐 C#");
+}
+
 /// TrustMerchant 价格排序图标与 Mail 按钮：
 /// `PriceFilterIcon` = `Prguse2[925/926]` 12x11 @(371,65)（落在「价格」表头 295..383 内），
 /// `MailButton` = `Prguse[437..439]` 28x25 @(350,448)（仅市场页签，与仅寄售的 COLLECT 不同页签）。

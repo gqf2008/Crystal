@@ -72,23 +72,23 @@ pub fn craft_should_close(npc_panel: mir2_shared::enums::PanelType, goods_visibl
 }
 
 /// C# `CraftDialog`（NPCDialogs.cs:2256）：面板 `Index = 1109; Library = Prguse`（原生 337x215）。
-const CRAFT_W: f32 = 337.0;
-const CRAFT_H: f32 = 215.0;
+pub const CRAFT_W: f32 = 337.0;
+pub const CRAFT_H: f32 = 215.0;
 /// C# `CraftDialog.Show()`（NPCDialogs.cs:2448）：
 /// `Location = (InventoryDialog.X - 12, InventoryDialog.Y + 236)`。
 const CRAFT_REL_X: f32 = -12.0;
 const CRAFT_REL_Y: f32 = 236.0;
 /// C# 控件锚点（NPCDialogs.cs:2280-2391）。
-const CRAFT_TITLE: (f32, f32) = (28.0, 8.0); // Title[18] 57x15
+pub const CRAFT_TITLE: (f32, f32) = (28.0, 8.0); // Title[18] 57x15
 const CRAFT_RECIPE_LABEL: (f32, f32) = (22.0, 5.0); // RecipeLabel
 const CRAFT_MESSAGE_LABEL: (f32, f32) = (10.0, 135.0); // PossibilityLabel
 const CRAFT_GOLD_LABEL: (f32, f32) = (30.0, 190.0); // GoldLabel
-const CRAFT_CLOSE_POS: (f32, f32) = (312.0, 3.0); // CloseButton（Prguse2[360..362] 24x21）
-const CRAFT_AUTOFILL_POS: (f32, f32) = (165.0, 185.0); // AutoFillButton（Title[180..182] 48x25）
-const CRAFT_CONFIRM_POS: (f32, f32) = (215.0, 185.0); // CraftButton（Title[336..338] 80x25）
+pub const CRAFT_CLOSE_POS: (f32, f32) = (312.0, 3.0); // CloseButton（Prguse2[360..362] 24x21）
+pub const CRAFT_AUTOFILL_POS: (f32, f32) = (165.0, 185.0); // AutoFillButton（Title[180..182] 48x25）
+pub const CRAFT_CONFIRM_POS: (f32, f32) = (215.0, 185.0); // CraftButton（Title[336..338] 80x25）
 /// 精灵首帧索引（Index/HoverIndex/PressedIndex 连续 3 帧）。
-const CRAFT_AUTOFILL_INDEX: usize = 180;
-const CRAFT_CONFIRM_INDEX: usize = 336;
+pub const CRAFT_AUTOFILL_INDEX: usize = 180;
+pub const CRAFT_CONFIRM_INDEX: usize = 336;
 /// C# `_toolCount` / `_ingredientCount`（NPCDialogs.cs:2261-2263）
 const CRAFT_TOOL_COUNT: usize = 3;
 const CRAFT_ING_COUNT: usize = 6;
