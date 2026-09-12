@@ -51,10 +51,14 @@ impl Packet for ResizeStorage {
     }
 }
 
-/// NewRecipeInfo - 新配方信息 (264)
-#[derive(Debug, Clone)]
+/// NewRecipeInfo - 新配方信息 (266)
+///
+/// C# `S.NewRecipeInfo` 下发整份 `ClientRecipeInfo`（Gold/Chance/Item/Tools/
+/// Ingredients）；Rust 端报文头自带 `recipe_id` 便于按配方索引。
+#[derive(Debug, Clone, PartialEq)]
 pub struct NewRecipeInfo {
-    pub recipe_id: i32,             // 配方ID
+    pub recipe_id: i32,
+    pub info: crate::data::client_data::ClientRecipeInfo,
 }
 
 impl Packet for NewRecipeInfo {
@@ -62,15 +66,15 @@ impl Packet for NewRecipeInfo {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.recipe_id)?;
-        
-        Ok(())
+        self.info.write_to(writer)
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let recipe_id = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { recipe_id })
+        let info = crate::data::client_data::ClientRecipeInfo::read_from(reader)?;
+        Ok(Self { recipe_id, info })
     }
 }
 
