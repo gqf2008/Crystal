@@ -325,6 +325,7 @@ fn relationship_ui_system(
         if edge(e, inter, &mut prev_inter) && !state.lover_name.is_empty() {
             compose_mail.write(ComposeMail {
                 to: state.lover_name.clone(),
+                message: None,
             });
             state.message = format!("写信给 {}", state.lover_name);
         }

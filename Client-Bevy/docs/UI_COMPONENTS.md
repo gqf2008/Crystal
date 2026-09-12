@@ -30,6 +30,7 @@
 - 批10 TrustMerchant 左列筛选树（新 `dialogs/market_filter.rs`）：C# `SetupFilters` 8 个主项（显示所有物品/武器类物品/衣服类物品/饰品类物品/消耗品/强化/书籍/制作材料）+ 17 个子项（类型 + 形状范围，Index 201..704）逐项移植，文案取 `Client/Localization/Chinese.json`；`DrawFilters` 布局 = 按钮 `Prguse2[920..923]`(100x22) @(7,60)、主项步进 20、展开 +2、子项步进 21、子标签缩进 10（主 2）、`MaxLines=19`；滚动条 `Prguse2[197..199]`(108,60)/`[207..209]`(108,429)/`[205/206]`(108,73) 可拖动（`PosMinY=73`/`PosMaxY=410`，不满一屏隐藏）；点击主项展开（C# 有子项时不发搜索）、点击子项/无子项主项发 **C# 规范 `C.MarketSearch{Match,Type,Usermode=false,MinShape,MaxShape,MarketType}`**（顺带修好 Find 按钮：原 `MarketSearchWire` 只写关键字，网关 `read_body` 失败静默丢弃）；页签语义按 `TMerchantDialog(type)`——Market/GameShop 显示筛选树并复位 `DrawFilters(0,-1)` 后发搜索，寄售/拍卖隐藏整列（Bevy 扩展的寄售/取回/售出按钮改为只在这两个页签露出）。
 - 批10 TrustMerchant 寄售/拍卖页签面板：面板背景按页签换 `Title[786]`/`Title[787]`（均 492x478），`BuyButton` 换 `Title[703..705]`/`[706..708]`（84x25 @380,448）；新增 C# 面板控件 `HelpLabel`(8,237) 115x205（按 `Globals` 数值格式化规则文案，定宽换行）、`ItemCell`(47,104) 36x32（`MirItemCell` 空置态 `BackColour(255,255,125)`+0.5 透明）、`PriceTextBox`(15,165) 100x18、`SellItemButton Title[700..702]`(39,188) 52x25、`CollectSoldButton Title[680..682]`(300,448) 72x25（仅寄售）、`SellNowButton`(324,448)（仅拍卖），以及 5 个表头（出售价格/出售物品/物品/价格/到期，文案随页签）；售价三态（C# `TextBox_TextChanged`：寄售 5000..50,000,000、拍卖 0..50,000，低于下限红/有效绿/达上限橙 + 超上限钳制），提交键禁用态与 `ItemCell_Click` 选物流程（点背包选中物入格 + 聚焦售价框 + 再点取消）照 C#；Buy 键在寄售/拍卖页签按 C# UserMode 语义改发 `C.MarketGetBack{AuctionID}`。
 - 批10 TrustMerchant 列表行（C# `AuctionRow`）：10 行改 `(127, 82+i*33)` 354x32（原为 (130,60+18i) 文本行）；行内 34x32 图标区（有物品 `Items[Info.Image]`、零数量 `Prguse[540]` 占位，按 `(IconArea-Icon.Size)/2` 居中）+ `NameLabel`(38,8)/`PriceLabel`(170,8)/`SellerLabel`(256,0)/`ExpireLabel`(256,14) 四标签 + 选中 1px 橙框（`BorderColour=FromArgb(255,200,100,0)`，C# `BorderInfo` 外扩 1px；`SelectedImage`(Prguse[545]) 是死控件）；文本按 C# 规则：价格千分位 + 拍卖「出价」后缀 + 阈值着色（>10M 红/>1M 橙/>100k 草绿/>10k 天蓝）、名称按品质（`GradeNameColor`，黄→白）、卖家列 UserMode 状态串着色（Sold/Expired/Bid Met）、到期列 = 寄售日期 + 7 天按 `dd/MM/yy HH:mm:ss`；底栏按 C# `UpdateInterface` 联动启用态（选中→Buy 亮/CollectSold 灰，`Bid Met` 才亮 SellNow）。服务端补 `AuctionInfo.GetSellerLabel(userMatch)` 移植（UserMode 下发 Sold/Expired/Bid Met/No Bid/For Sale 标记）并把 `Usermode` 记进搜索缓存供翻页沿用。
+- 批10 TrustMerchant 价格排序 + Mail 按钮：价格表头 `TitlePriceLabel`(295,60,88x21) 加 C# 点击层（`Click → CyclePriceFilter`），三态 `MarketPriceFilter` Normal→Low→High→Normal，图标 `Prguse2[925]`(低)/`[926]`(高) 12x11 @(371,65)（= `X+W-12, Y+(H-14)/2+2`，Normal 隐藏）；列表按 `GetOrderedListings()` 显示（Low 升序/High 降序，稳定排序，Normal 保持服务器顺序；Bevy 服务端按页下发，故排序作用于当前页——见 §7）；`MailButton` `Prguse[437..439]` 28x25 @(350,448)（仅市场页签）→ 选中行时以卖家为收件人、按 `InterestedInPurchase`（「我有意购买{0}，价格为{1}。」）预填正文开写信窗（`ComposeMail` 扩了 `message` 字段）。顺带修正行取数：原 `Page*10 + i` 在服务端按页下发模型下会让第 2 页起取不到行（`listings` 只存当前页），改为 `row_listing_index`（当前页 + 排序映射），行渲染/命中/选中三处同源。
 
 ## 1. 通用交互控件
 
@@ -151,7 +152,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：411 lib + 2 bin + 1 smoke + 21 alignment 通过（批10 列表行后基线）。
+- `cargo test`（Client-Bevy）：415 lib + 2 bin + 1 smoke + 22 alignment 通过（批10 价格排序/Mail 后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -162,6 +163,7 @@
 - 批10 寄售页签面板实机复验（2026-09-13，`--skip-login` + Control API 打开 trust_merchant 截图；临时把进入页签时的 `panel` 设为 `Consign`，验证后已还原）：背景为 `Title[787]`（带寄售表格网格）、表头「出售物品/物品/价格/到期」+「出售价格」(15,142) 就位、物品格(47,104) 显示 C# 空置态浅黄半透明底、售价框(15,165) 按无效态显示红底、SELL(39,188) 呈禁用暗化、底栏 COLLECT(300,448) 与 BUY（`Title[706..708]` 用户模式帧，380,448）就位、说明文案按 115px 宽换行显示、筛选树整列隐藏；与 C# `TMerchantDialog(MarketPanelType.Consign)` 的显隐一致。
 - 批10 列表行实机复验（2026-09-13，`--skip-login --market-buy` + Control API 打开 trust_merchant 截图）：两行按 `(127,82)`/`(127,115)` 渲染，图标（`Items[853]` 书页图）+ 名称 `#853`（mock 无 ItemInfo 名称回退）+ 价格 `100` / `100 出价`（拍卖后缀）+ 卖家 `bevychar` + 到期 `20/09/26 04:20:50`（mock 用当前-1h + 7 天）与表头列对齐；临时置 `selected=Some(0)` 复截（已还原）：选中行出现 1px 橙框、底栏 BUY 由暗化转为亮态。
 - 批10 #2732 漏项修复复验（2026-09-13）：`MarketPanelSprites` 资源此前**从未插入**（`market_panel_system` 拿不到 → 786/787 背景与 Buy 精灵切换实为死代码），本批次补插后重截寄售页签：左列出现 `Title[787]` 位图自带的说明/格子底纹（#2732 截图里是 786 的纯暗底），确认切换生效。
+- 批10 价格排序/Mail 实机复验（2026-09-13，`--skip-login --market-buy` + Control API 截图；临时置 `price_filter=Low`、`selected=Some(0)`，验证后已还原）：价格表头右侧出现 `Prguse2[925]` 蓝色下三角（(371,65)）；底栏出现 Mail 键（`Prguse[437]` 信封图，(350,448)，有选中行时为亮态），位于 Refresh(320) 与 Buy(380) 之间。
 
 ## 7. 已知有意偏差
 
@@ -178,7 +180,8 @@
 - ItemRent：`S.UpdateRentalItem` 除 C# 的 `HasData`+`LoanItem` 外仍带 `rental_fee`/`rental_period`（Rust 扩展，客户端只在 >0 时用作兜底刷新）；`S.CanConfirmItemRental`/`S.ConfirmItemRental` 在 C# 是空包，Rust 端口带 `can_confirm`/`success` 载荷（自洽偏离，双方均为 Rust 实现）。
 - ItemRent：C# 租客侧的合计费用在服务端 `SetItemRentalFee` 里即时扣金币（`S.LoseGold`）；Rust 服务端到 `ConfirmItemRental` 成交时才扣，客户端费用标签两侧都由本地/对包数值驱动，显示一致。
 - ItemRent：mock 单客户端下 `ItemRentalRequest` 固定回 `Renting=false`（物主侧），租客侧窗口与锁定帧的实机验证靠临时把 mock 回包改 `true` 截图（验证后已还原）。
-- TrustMerchant：Mail 按钮（`Prguse[437..439]`，C# `MailButton.Click` 以选中行卖家为收件人开写信窗）与价格排序（`PriceFilter` 三态 + `Prguse2[925/926]` 图标 + `TitlePriceLabel.Click` 循环）尚未移植；行选中态的 `BuyButton.Mail` 联动已按 C# `UpdateInterface` 落地（Mail 按钮本体待移植）。
+- TrustMerchant：价格排序按**当前页**重排（C# 把各页 `AddRange` 累积后对全量 `Listings` 排序；Bevy 服务端按页下发（`MarketPage`），故只对本页 10 条排序 —— 跨页顺序可能与 C# 不同）。
+- TrustMerchant：C# 的 Buy 确认（`MirMessageBox` Yes/No）与写邮件正文的 `MirTextBox` 换行/焦点细节未逐像素复刻：Bevy 直接执行 `MarketBuy`/`MarketGetBack` 并复用邮件窗的正文输入框（预填文本一致）。
 - TrustMerchant：C# `AuctionRow.SelectedImage`（`Prguse[545]` 296x38）构造后 `Visible=false` 且全仓无置真处（原版死控件）；选中高亮只用 `Border`（1px 外扩橙框），Bevy 一致。
 - TrustMerchant：`C.AuctionRow` 到期列在 C# 用本地墙钟 `DateTime`；Bevy 用 `chrono::Local` 格式化（同一时刻的本地显示），mock 侧写「当前-1h」便于核对格式。
 - TrustMerchant：售价框边框三态（C# `PriceTextBox.BorderColour` 只画 1px 边框色）在 Bevy 用输入框底色近似；`Enabled = false` 的灰度统一用 `ImageNode.color` 暗化近似（无灰度着色器，`SellItemButton`/`BuyButton`/`CollectSoldButton`/`SellNowButton` 同）；C# 寄售选物会锁定背包格（`tempCell.Locked`），Bevy 只记录选中物、未锁背包格。

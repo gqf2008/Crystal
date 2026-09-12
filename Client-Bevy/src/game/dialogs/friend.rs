@@ -394,7 +394,10 @@ fn friend_ui_system(
             }
         } else if act.is_email {
             if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
-                compose_mail.write(ComposeMail { to: f.name.clone() });
+                compose_mail.write(ComposeMail {
+                    to: f.name.clone(),
+                    message: None,
+                });
             }
         } else if act.is_whisper {
             if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
