@@ -6,6 +6,7 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::assign_key::AssignKeyState;
 use crate::game::dialogs::hero::HeroState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -99,7 +100,7 @@ fn spawn_hero_skills(
         // 7 行技能：容器（行显隐随容器）+ 图标 + 文本
         for i in 0..ROWS {
             spawn_container(p, PAGE_X + 8.0, PAGE_Y + 8.0 + i as f32 * 33.0, 231.0, 33.0, 9)
-                .insert((HeroSkillRow(i), Visibility::Hidden))
+                .insert((Button, HeroSkillRow(i), Visibility::Hidden))
                 .with_children(|c| {
                     let white = images.add(crate::map_renderer::make_image(
                         vec![255, 255, 255, 255],
@@ -119,11 +120,12 @@ fn spawn_hero_skills(
 fn hero_skill_ui_system(
     mut mgr: ResMut<DialogManager>,
     hero: Res<HeroState>,
+    mut assign_key: ResMut<AssignKeyState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     close: Query<(Entity, &Interaction), With<HeroSkillClose>>,
     mut widgets: Query<&mut Visibility, (With<HeroSkillWidget>, Without<HeroSkillRow>)>,
-    mut rows: Query<(&mut Visibility, &HeroSkillRow)>,
+    mut rows: Query<(Entity, &mut Visibility, &HeroSkillRow, &Interaction)>,
     mut icons: Query<(&mut ImageNode, &HeroSkillIcon)>,
     mut texts: Query<(&mut Text, &HeroSkillText)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -152,13 +154,22 @@ fn hero_skill_ui_system(
             mgr.close(DialogKind::HeroSkill);
         }
     }
-    // 行显隐随容器（子节点自动跟随）
-    for (mut vis, row) in &mut rows {
-        *vis = if hero.magics.get(row.0).is_some() {
+    // 行显隐随容器（子节点自动跟随）；点击技能行进入 Shift+F1..F8 分配。
+    for (e, mut vis, row, inter) in &mut rows {
+        let magic = hero.magics.get(row.0);
+        *vis = if magic.is_some() {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+        if !assign_key.visible {
+            if edge(e, inter, &mut prev_inter) {
+                if let Some(m) = magic {
+                    assign_key.open_hero(m.spell, m.key);
+                    tracing::info!("🔑 打开英雄技能快捷键面板: {} key={}", m.name, m.key);
+                }
+            }
+        }
     }
     // 图标换图 + 文本渲染
     for (mut node, icon) in &mut icons {

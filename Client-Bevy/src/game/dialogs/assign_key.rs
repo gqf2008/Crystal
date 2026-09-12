@@ -20,23 +20,65 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, ImageButton};
 
+/// AssignKeyPanel 目标：玩家 1..16；英雄 17..24（C# KeyOffset 1/17）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum AssignKeyTarget {
+    #[default]
+    Player,
+    Hero,
+}
+
 /// 面板状态（C# AssignKeyPanel：Magic/Key；Save 时发包并本地更新）
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct AssignKeyState {
     pub visible: bool,
+    pub target: AssignKeyTarget,
     pub spell: Option<Spell>,
-    /// 当前选择的键（0 = 无；1..8 = F1..F8；9..16 = Ctrl+F1..F8）
+    /// 当前选择的键（玩家 0..16；英雄 0/17..24）
     pub key: u8,
     /// 打开时的旧键（C.MagicKey.OldKey）
     pub old_key: u8,
+    pub key_offset: u8,
+    pub key_count: usize,
+}
+
+impl Default for AssignKeyState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            target: AssignKeyTarget::Player,
+            spell: None,
+            key: 0,
+            old_key: 0,
+            key_offset: 1,
+            key_count: 16,
+        }
+    }
 }
 
 impl AssignKeyState {
     pub fn open(&mut self, spell: Spell, key: u8) {
+        self.open_player(spell, key);
+    }
+
+    pub fn open_player(&mut self, spell: Spell, key: u8) {
         self.visible = true;
+        self.target = AssignKeyTarget::Player;
         self.spell = Some(spell);
         self.key = key;
         self.old_key = key;
+        self.key_offset = 1;
+        self.key_count = 16;
+    }
+
+    pub fn open_hero(&mut self, spell: Spell, key: u8) {
+        self.visible = true;
+        self.target = AssignKeyTarget::Hero;
+        self.spell = Some(spell);
+        self.key = key;
+        self.old_key = key;
+        self.key_offset = 17;
+        self.key_count = 8;
     }
 
     pub fn close(&mut self) {
@@ -65,6 +107,10 @@ pub struct AssignKeySave;
 /// F 键按钮（0..15 = F1..F8 / Ctrl+F1..F8）
 #[derive(Component)]
 pub struct AssignKeyFKey(pub usize);
+
+/// F 键按钮文本（键域切换后需重算 F/Ctrl/Shift 标签）
+#[derive(Component)]
+pub struct AssignKeyFKeyText(pub usize);
 
 /// F 键三态帧（Prguse 1656/1657/1658；选中态固定用 pressed 帧）
 #[derive(Component)]
@@ -189,6 +235,7 @@ fn spawn_assign_key_panel(
                                 ..default()
                             },
                             Text::new(assign_key_label(i as u8 + 1)),
+                            AssignKeyFKeyText(i),
                             TextFont {
                                 font: FontSource::Handle(font.clone()),
                                 font_size: FontSize::Px(9.0),
@@ -207,6 +254,7 @@ fn spawn_assign_key_panel(
 fn assign_key_system(
     mut state: ResMut<AssignKeyState>,
     mut magics: ResMut<MagicsState>,
+    mut hero: ResMut<crate::game::dialogs::hero::HeroState>,
     net: Res<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -215,12 +263,26 @@ fn assign_key_system(
         (&mut ImageNode, &AssignKeyIcon),
         (Without<AssignKeyTitle>, Without<AssignKeyFKey>),
     >,
-    mut title: Query<(&mut Text, &AssignKeyTitle), Without<AssignKeyIcon>>,
+    mut title: Query<
+        (&mut Text, &AssignKeyTitle),
+        (Without<AssignKeyIcon>, Without<AssignKeyFKeyText>),
+    >,
     mut actions: Query<
         (Entity, &Interaction, Option<&AssignKeyNone>, Option<&AssignKeySave>),
         Without<AssignKeyFKey>,
     >,
-    mut fkeys: Query<(Entity, &Interaction, &AssignKeyFKey, &mut ImageNode, &AssignKeyFrames)>,
+    mut fkeys: Query<
+        (
+            Entity,
+            &Interaction,
+            &AssignKeyFKey,
+            &mut ImageNode,
+            &mut Visibility,
+            &AssignKeyFrames,
+        ),
+        (With<AssignKeyFKey>, Without<AssignKeyWidget>),
+    >,
+    mut fkey_texts: Query<(&mut Text, &AssignKeyFKeyText), Without<AssignKeyTitle>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -271,7 +333,11 @@ fn assign_key_system(
             tracing::info!("🔑 已选择：无快捷键");
         } else if save.is_some() {
             if let Some(spell) = state.spell {
-                let old_key = magics.assign_key(spell, state.key).unwrap_or(state.old_key);
+                let old_key = match state.target {
+                    AssignKeyTarget::Player => magics.assign_key(spell, state.key),
+                    AssignKeyTarget::Hero => hero.assign_key(spell, state.key),
+                }
+                .unwrap_or(state.old_key);
                 net.send_packet(&mir2_shared::packets::client::combat::MagicKey {
                     spell,
                     key: state.key,
@@ -289,11 +355,20 @@ fn assign_key_system(
     }
 
     // F 键：点击选择；选中态固定 pressed 帧（C# AssignKeyPanel_BeforeDraw）
-    for (e, inter, fkey, mut node, frames) in &mut fkeys {
-        if edge(e, inter, &mut prev_inter) {
-            state.key = (fkey.0 + 1) as u8;
+    for (e, inter, fkey, mut node, mut vis, frames) in &mut fkeys {
+        let shown = fkey.0 < state.key_count;
+        *vis = if shown {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if !shown {
+            continue;
         }
-        let selected = state.key as usize == fkey.0 + 1;
+        if edge(e, inter, &mut prev_inter) {
+            state.key = state.key_offset + fkey.0 as u8;
+        }
+        let selected = state.key as usize == state.key_offset as usize + fkey.0;
         let frame = if selected || *inter == Interaction::Pressed {
             &frames.pressed
         } else if *inter == Interaction::Hovered {
@@ -305,11 +380,25 @@ fn assign_key_system(
             node.image = frame.clone();
         }
     }
+    for (mut text, label) in &mut fkey_texts {
+        text.0 = assign_key_label(state.key_offset + label.0 as u8);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assign_key_targets_use_separate_key_domains() {
+        let mut state = AssignKeyState::default();
+        state.open_player(Spell::Fencing, 9);
+        assert_eq!(state.target, AssignKeyTarget::Player);
+        assert_eq!((state.key_offset, state.key_count), (1, 16));
+        state.open_hero(Spell::Fencing, 17);
+        assert_eq!(state.target, AssignKeyTarget::Hero);
+        assert_eq!((state.key_offset, state.key_count), (17, 8));
+    }
 
     /// C# AssignKeyPanel 按钮标签双行（MainDialogs.cs:3302-3333，#2584）
     #[test]
