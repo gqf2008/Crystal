@@ -7,10 +7,14 @@
 - 按批次修复，每批一个 worktree / PR；不把全量窗口混成不可审查的大 PR。
 - 状态只表示“当前盘点结论”，不代表所有细节已验证。
 
-当前进度：
+当前进度（2026-09-12 收口）：
 
 - 批1 通用交互基建：隐藏 `UiButton` 不再点击/悬停/发声/tooltip/拦截世界点击；重叠按钮只触发最上层。
-- 批2-批6：按下表顺序逐批核对和修复。
+- 批2 HUD/Chat/SkillBar/AssignKey：技能栏子树门控、模态 UI 世界输入锁。
+- 批3 Inventory/Character/Hero 系列：补齐英雄技能 Shift+F1..F8 快捷键分配（client+server）。
+- 批4 Social/Trade/Market/Mail：逐项对照后确认现有实现已覆盖，无新增缺陷。
+- 批5 Quest/NPC/系统窗：已关闭的 #2535～#2538 均落地；Timer 按 `NotControl` 允许点击穿透。
+- 批6 Login/Select/NewCharacter：补齐登录页 `InputKeyDialog` 安全键盘。
 
 ## 1. 通用交互控件
 
@@ -114,13 +118,20 @@
 | 新建角色 | `ui/new_character.rs` | `NewCharacterDialog.cs` | 批6 |
 | 删除角色 | `ui/modal_box.rs` | `SelectScene` delete dialogs | 批6 |
 
-## 5. 批次修复顺序
+## 5. 批次完成记录
 
-1. 通用交互基建：不可见控件不得点击/悬停/tooltip/拦截世界点击；重叠控件按最高层处理。
-2. HUD、Chat、SkillBar、AssignKey。
-3. Inventory、Character、Hero、Creature、Storage、Socket、Refine、Craft。
-4. Group、Friend、Trade、Guild、Mail、Market、GameShop、Ranking 等社交/交易。
-5. Quest、NPC、Help、Notice、Timer、Option、Menu 等任务/系统窗。
-6. Login、Select、NewCharacter、ModalBox 全流程。
+| 批次 | 结果 | PR |
+|---|---|---|
+| 批1 通用交互基建 | 隐藏/遮挡按钮命中、层级、音效、tooltip、世界点击统一收口 | #2705 |
+| 批2 HUD/Chat/SkillBar/AssignKey | SkillBar 整树门控；模态输入锁覆盖 AssignKey/数量框/丢弃确认 | #2707 |
+| 批3 背包/角色/英雄 | 英雄技能行可点击；client+server 支持 Key 17..24 路由 `hero_magics` | #2709 |
+| 批4 社交/交易/市场/邮件 | 对照代码和已合并批次，现有实现覆盖；无新增改动 | 已核实 |
+| 批5 任务/NPC/系统窗 | #2535～#2538 已落地；Timer `NotControl` 点击穿透修复 | #2710 |
+| 批6 登录/选角/建角 | 登录 ViewKey `InputKeyDialog` 安全键盘落地 | #2712 |
 
-批次完成后将状态更新为“已验证”，并记录 C# 锚点、回归测试和实机截图证据。
+## 6. 验证基线
+
+- `cargo check --tests`（Client-Bevy）通过。
+- `cargo test`（Client-Bevy）：367 lib + 2 bin + 1 smoke + 17 alignment 通过（批6后基线）。
+- ServerRust：665 lib + protocol integration 通过（批3后基线）。
+- 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源。
