@@ -70,6 +70,8 @@ pub struct RefineState {
     pub message: String,
     pub materials: [Option<RefineMaterial>; REFINE_MATERIAL_SLOTS],
     pub pending: [Option<RefineMaterial>; REFINE_MATERIAL_SLOTS],
+    /// 已请求存入武器（`to=0`）后待发起的精炼 uid（C# Confirm → `C.RefineItem`）
+    pub pending_start: Option<u64>,
 }
 
 impl Default for RefineState {
@@ -78,15 +80,21 @@ impl Default for RefineState {
             message: String::new(),
             materials: Default::default(),
             pending: Default::default(),
+            pending_start: None,
         }
     }
 }
 
-#[derive(Component)]
-pub struct RefineWidget;
+/// 投放武器窗（`PanelType.Refine`）确认后请求「存入武器 + 开始精炼」：
+/// C# `C.RefineItem{UniqueID}`；Rust 服务端语义为两步（先 `to=0` 存入，再按 uid 发起）。
+#[derive(Message, Debug)]
+pub struct RefineWeaponRequest {
+    pub unique_id: u64,
+    pub inv_slot: usize,
+}
 
 #[derive(Component)]
-pub struct RefineClose;
+pub struct RefineWidget;
 
 /// 材料格（0..16）
 #[derive(Component)]
@@ -97,11 +105,12 @@ pub struct RefinePlugin;
 impl Plugin for RefinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RefineState>();
+        app.add_message::<RefineWeaponRequest>();
         app.add_systems(OnEnter(AppState::Game), spawn_refine);
         app.add_systems(OnExit(AppState::Game), cleanup_refine);
         app.add_systems(
             Update,
-            (refine_server_events, refine_ui_system)
+            (refine_weapon_request_system, refine_server_events, refine_ui_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -151,15 +160,9 @@ fn spawn_refine(
         if let Some(title) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 18) {
             spawn_image(p, title, REFINE_TITLE_POS.0, REFINE_TITLE_POS.1, 57.0, 15.0, 9);
         }
-        // 关闭按钮：C# RefineDialog 无关闭键（由 NPC 对话窗联动隐藏）；Bevy 暂补一个，
-        // 待 NPC 精炼页入口落地后移除（见 UI_COMPONENTS.md §7）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 139.0, 3.0, 24.0, 21.0, 10).insert(RefineClose);
-        }
+        // 注：C# `RefineDialog` 没有关闭键 —— 它随 NPC 对话窗收起（NPCDialogs.cs:1031
+        // `NPCDialog.Hide()` → `RefineDialog.Hide()`），故此处不再放关闭按钮；
+        // 收起联动由投放窗（`sell_panel`）在隐藏时关闭本对话框。
         // C# Grid：4x4 材料格（格子 i ↔ 服务端材料槽 i+1）
         for i in 0..REFINE_MATERIAL_SLOTS {
             let (cx, cy) = refine_cell_pos(i);
@@ -179,15 +182,47 @@ fn spawn_refine(
     });
 }
 
+/// 投放武器窗确认 → 存入武器（`to=0`）并记录待发起的精炼 uid
+fn refine_weapon_request_system(
+    mut requests: MessageReader<RefineWeaponRequest>,
+    mut state: ResMut<RefineState>,
+    net: Res<NetConnection>,
+) {
+    for req in requests.read() {
+        net.send_packet(&crate::network::RefineDepositWire {
+            from: req.inv_slot as i32,
+            to: 0,
+        });
+        state.pending_start = Some(req.unique_id);
+        state.message = "已请求存入武器…".to_string();
+        tracing::info!("🔨 存入精炼武器 uid={}", req.unique_id);
+    }
+}
+
 /// 服务端确认包：更新本地材料格镜像（C# `GameScene.DepositRefineItem/RetrieveRefineItem`）
 fn refine_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut state: ResMut<RefineState>,
+    net: Res<NetConnection>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         match ev {
             ServerEvent::RefineDeposited { to, success, .. } => {
+                // 武器槽（to=0）：成功后若有待发起 uid → 发 `RefineItem`（C# Confirm 语义）
+                if *to == 0 {
+                    if *success {
+                        if let Some(uid) = state.pending_start.take() {
+                            net.send_packet(&crate::network::RefineItemWire { unique_id: uid });
+                            state.message = "精炼已开始".to_string();
+                            tracing::info!("🔨 武器已存入，开始精炼 uid={}", uid);
+                        }
+                    } else {
+                        state.pending_start = None;
+                        state.message = "武器存入失败".to_string();
+                    }
+                    continue;
+                }
                 let cell = (*to - 1).max(0) as usize;
                 if cell < REFINE_MATERIAL_SLOTS {
                     if *success {
@@ -210,6 +245,19 @@ fn refine_server_events(
                     state.message = "已取回材料".to_string();
                 }
             }
+            // C# `GameScene.RefineItem/RefineCancel` → `RefineDialog.RefineReset()`
+            ServerEvent::RefineStarted { unique_id } => {
+                state.materials = Default::default();
+                state.pending = Default::default();
+                state.pending_start = None;
+                state.message = format!("精炼进行中（uid={}）", unique_id);
+            }
+            ServerEvent::RefineCancelled { .. } => {
+                state.materials = Default::default();
+                state.pending = Default::default();
+                state.pending_start = None;
+                state.message = "精炼已取消".to_string();
+            }
             _ => {}
         }
     }
@@ -226,7 +274,6 @@ fn refine_ui_system(
     mut image_cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     mut inv_click: ResMut<InvClickState>,
-    close: Query<(Entity, &Interaction), With<RefineClose>>,
     mut cells: Query<(&RefineCell, &mut UiItemCellData), Without<UiItemCellIcon>>,
     cell_inter: Query<(Entity, &Interaction, &RefineCell)>,
     mut widgets: Query<&mut Visibility, With<RefineWidget>>,
@@ -246,11 +293,6 @@ fn refine_ui_system(
     }
     if !open {
         return;
-    }
-    for (e, inter) in &close {
-        if edge(e, inter, &mut prev_inter) {
-            mgr.close(DialogKind::Refine);
-        }
     }
     let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> =
         inv_q.single().map(|inv| inv.items.clone()).unwrap_or_default();

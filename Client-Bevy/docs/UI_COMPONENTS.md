@@ -22,6 +22,7 @@
 - 批10 配方协议：`S.NewRecipeInfo` 由只带 `recipe_id` 扩成 C# `ClientRecipeInfo` 整份（Gold/Chance/Item/Tools/Ingredients，服务端按 DB 配方构造影子 UserItem），客户端缓存到 `CraftState.recipes` 并用于信息行（金币/成功率/工具数/材料数）；材料槽 UI 与 `CraftItem.slots` 待移植。
 - 批10 Craft 材料槽：`RecipeRequirement`（item_index/count/image/name/min_dura）随包下发图标与名称；C# 3 工具格 `((x*44)+108,44)` + 6 材料格 `(52+(x-3)*40,86)` 影子格落地（未放入显示需求图标，放入显示背包物品图标+数量）；背包选中物点格放入（C# `Grid_Click` 索引/数量/工具耐久校验）、`AUTO` 按配方顺序自动填充（C# `AutoFill`）、`CRAFT` 全部就位后发 `CraftItem.slots`（C# `CraftItem`）；配方切换/关闭清空槽位（C# `ResetCells`）。
 - 批10 Refine 材料格：面板改 C# `Prguse[1002]`（原生 164x207）@ (0,225)，标题 `Title[18]`(28,8)；4x4 材料格按 C# `((x*34)+12+x, (y*32)+37+y)`、34x32；格子 i ↔ 服务端材料槽 i+1（Rust `to=0` 为武器槽）；背包选中物点格存入、点已存入格取回到背包空格，服务端 `DepositRefineItem/RetrieveRefineItem` 确认包更新本地镜像；服务端 `REFINE_MATERIAL_SLOTS` 10 → 16 对齐 C# `CharacterInfo.Refine[16]`。
+- 批10 Refine 入口：`S.NPCRefine/NPCCheckRefine/NPCCollectRefine` → 投放窗（`Prguse[392]`，`PanelType.Refine/CheckRefine`，提示「放入武器后点确认精炼」）+ 背包 + 材料窗同开（C# `NPCDialog` PanelType.Refine → `RefineDialog.Show()`）；确认 → 存入武器（`to=0`）后按 uid 发起 `RefineItem`（CheckRefine 模式发 `CheckRefine`）；`S.RefineItem/RefineCancel` → 清空材料格（C# `RefineReset`）；`refining=true`/`NPCCollectRefine` → 收起；`RefineDialog` 不再带关闭键（C# 没有，靠 NPC 窗联动）。顺带修掉投放窗提示用拉丁字体导致的中文豆腐块。
 
 ## 1. 通用交互控件
 
@@ -143,7 +144,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：393 lib + 2 bin + 1 smoke + 17 alignment 通过（批10 Refine 材料格后基线）。
+- `cargo test`（Client-Bevy）：394 lib + 2 bin + 1 smoke + 17 alignment 通过（批10 Refine 入口后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：665 lib + protocol integration 通过（批3后基线）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -159,6 +160,5 @@
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
 - Craft：C# 放入材料后会锁定对应背包格（`SelectedCell.Locked`）直到关窗；Bevy 目前只记录背包槽号，未在背包侧锁定（后续可加 `LockedSlots` 资源）。
-- Refine：C# `RefineDialog` 没有关闭按钮（靠 NPC 对话窗联动隐藏），Bevy 暂在 (139,3) 补一个关闭键；待「NPC 精炼页入口（NPCRefine → NPCDropDialog 放入武器/Confirm → `RefineItem`，CheckRefine → `CheckRefine`）」单元落地后移除。
-- Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell；Bevy 侧该入口未接，当前只能存/取材料（`RefineItem/CheckRefine` 链路待上一行同一单元接入）。
+- Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。

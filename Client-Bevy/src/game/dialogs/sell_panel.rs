@@ -14,13 +14,14 @@ use bevy::sprite::Anchor;
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem};
+use crate::game::dialogs::refine::RefineWeaponRequest;
 use crate::game::dialogs::{DialogKind, DialogRoot};
 use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
@@ -48,6 +49,16 @@ pub struct SellPanelConfirm;
 /// 拖放区（原版 C# ItemCell / NPCDropPanel_Click 的 (20,55,75,75) 区域）
 #[derive(Component)]
 pub struct SellPanelDrop;
+
+/// 面板提示文案（C# `NPCDropDialog` 各 PanelType 的 `text`，NPCDialogs.cs:1760-1805）
+pub fn sell_panel_prompt(mode: Option<PanelType>) -> &'static str {
+    match mode {
+        Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => "放入物品后点确认修理",
+        Some(PanelType::Refine) => "放入武器后点确认精炼",
+        Some(PanelType::CheckRefine) => "放入物品后点确认查看精炼",
+        _ => "放入物品后点确认出售",
+    }
+}
 
 /// 目标物品图标（拖放区子实体）
 #[derive(Component)]
@@ -89,12 +100,14 @@ fn spawn_sell_panel(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[392]（C# NPCDropDialog，176x146 @ (264,224)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 392) else {
@@ -115,8 +128,8 @@ fn spawn_sell_panel(
             spawn_icon_button(p, n, h, pr, 114.0, 62.0, 48.0, 25.0, 10)
                 .insert(SellPanelConfirm);
         }
-        // 提示文本（C# InfoLabel (30,10)）
-        spawn_label(p, &font, "把物品放入面板后点确认", 30.0, 10.0, 12.0, Color::WHITE, 9)
+        // 提示文本（C# InfoLabel (30,10)）——中文走 CJK 主字体（拉丁字体出豆腐块）
+        spawn_label(p, &cjk, "把物品放入面板后点确认", 30.0, 10.0, 12.0, Color::WHITE, 9)
             .insert(SellPanelInfo);
         // 拖放区（C# ItemCell (38,72) 区域 (20,55,75,75)）+ 目标图标
         spawn_container(p, 20.0, 55.0, 75.0, 75.0, 9)
@@ -152,11 +165,7 @@ fn sell_panel_ui_system(
         };
     }
     for (mut text, _) in &mut info_texts {
-        let new = match state.mode {
-            Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => "放入物品后点确认修理",
-            _ => "放入物品后点确认出售",
-        }
-        .to_string();
+        let new = sell_panel_prompt(state.mode).to_string();
         if text.0 != new {
             text.0 = new;
         }
@@ -198,6 +207,7 @@ fn sell_panel_action_system(
     // 面板原点（拖后跟随；挂在 Npc kind 组随 NPC 对话框联合拖动/置顶）
     panel_origin: Query<&Node, With<SellPanelWidget>>,
     confirm_btns: Query<(Entity, &Interaction), With<SellPanelConfirm>>,
+    mut weapon_req: MessageWriter<RefineWeaponRequest>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -278,6 +288,32 @@ fn sell_panel_action_system(
                 });
                 tracing::info!("🔧 面板修理 {} (uid={})", item.name, item.unique_id);
             }
+            // C# Confirm（NPCDialogs.cs:1606）：`C.RefineItem{UniqueID}`；
+            // Rust 服务端语义为「先存入武器(to=0)再按 uid 发起」，交给 refine 模块两步执行
+            Some(PanelType::Refine) => {
+                let slot = inv_q.single().ok().and_then(|inv| {
+                    inv.items
+                        .iter()
+                        .position(|s| s.as_ref().is_some_and(|it| it.unique_id == item.unique_id))
+                });
+                match slot {
+                    Some(inv_slot) => {
+                        weapon_req.write(RefineWeaponRequest {
+                            unique_id: item.unique_id,
+                            inv_slot,
+                        });
+                        tracing::info!("🔨 面板精炼 {} (uid={})", item.name, item.unique_id);
+                    }
+                    None => tracing::warn!("🔨 精炼目标已不在背包 uid={}", item.unique_id),
+                }
+            }
+            // C# CheckRefine：`C.CheckRefine{UniqueID}`（NPCDialogs.cs:1624）
+            Some(PanelType::CheckRefine) => {
+                net.send_packet(&crate::network::RefineCheckWire {
+                    unique_id: item.unique_id,
+                });
+                tracing::info!("🔨 面板查看精炼 {} (uid={})", item.name, item.unique_id);
+            }
             _ => {}
         }
     }
@@ -300,5 +336,55 @@ fn sell_panel_server_events(
                 mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
             }
         }
+        // #2720：C# `GameScene.NPCRefine`（NPCDialogs.cs:1791 `RefineDialog.Show()`）
+        if let ServerEvent::NpcRefinePanel { refining, .. } = ev {
+            if *refining {
+                // C#：精炼进行中 → 收起投放窗与材料窗（GameScene.cs:4291-4295）
+                sell_panel.visible = false;
+                sell_panel.target = None;
+                mgr.close(crate::game::dialogs::DialogKind::Refine);
+            } else {
+                sell_panel.mode = Some(PanelType::Refine);
+                sell_panel.target = None;
+                sell_panel.visible = true;
+                if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
+                    mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+                }
+                mgr.open(crate::game::dialogs::DialogKind::Refine);
+            }
+        }
+        // #2720：C# `GameScene.NPCCheckRefine`（只开投放窗）
+        if let ServerEvent::NpcCheckRefinePanel = ev {
+            sell_panel.mode = Some(PanelType::CheckRefine);
+            sell_panel.target = None;
+            sell_panel.visible = true;
+            if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
+                mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+            }
+        }
+        // #2720：C# `GameScene.NPCCollectRefine`（NPCDialog.Hide）→ 全部收起
+        if let ServerEvent::NpcCollectRefine = ev {
+            sell_panel.visible = false;
+            sell_panel.target = None;
+            mgr.close(crate::game::dialogs::DialogKind::Refine);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2720：投放窗提示随 PanelType 切换（C# `NPCDropDialog` 各分支 text）
+    #[test]
+    fn refine_panel_prompt_matches_csharp() {
+        assert_eq!(sell_panel_prompt(Some(PanelType::Refine)), "放入武器后点确认精炼");
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::CheckRefine)),
+            "放入物品后点确认查看精炼"
+        );
+        assert_eq!(sell_panel_prompt(Some(PanelType::Repair)), "放入物品后点确认修理");
+        assert_eq!(sell_panel_prompt(Some(PanelType::Sell)), "放入物品后点确认出售");
+        assert_eq!(sell_panel_prompt(None), "放入物品后点确认出售");
     }
 }
