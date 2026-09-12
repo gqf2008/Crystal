@@ -12,8 +12,12 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use mir2_shared::enums::{ItemType, MarketPanelType};
 
 use crate::actor::LocalPlayer;
+use crate::game::dialogs::market_filter::{
+    self, MarketFilterDownBtn, MarketFilterSprites, MarketFilterUpBtn,
+};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
@@ -43,7 +47,7 @@ pub struct MarketItem {
 }
 
 /// 市场状态
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct MarketState {
     pub listings: Vec<MarketItem>,
     pub pages: usize,
@@ -56,6 +60,33 @@ pub struct MarketState {
     pub message: String,
     /// 物品名缓存（item_index → name，来自 UserInformation）
     pub item_names: HashMap<i32, String>,
+    /// 当前页签（C# `TrustMerchantDialog.MarketType`）：Market/Consign/Auction/GameShop
+    pub panel: MarketPanelType,
+    /// 筛选树选中主项（C# `SelectedIndex`，默认 0 = 显示所有物品）
+    pub filter_index: i32,
+    /// 筛选树选中子项（C# `SelectedSubIndex`，None = -1）
+    pub filter_sub_index: Option<i32>,
+    /// 筛选树滚动偏移（C# `Skip`）
+    pub filter_skip: usize,
+}
+
+impl Default for MarketState {
+    fn default() -> Self {
+        Self {
+            listings: Vec::new(),
+            pages: 0,
+            page: 0,
+            selected: None,
+            consign_ok: None,
+            message: String::new(),
+            item_names: HashMap::new(),
+            // C# 进入市场页签即 `TMerchantDialog(Market)` → `DrawFilters(0, -1)`
+            panel: MarketPanelType::Market,
+            filter_index: 0,
+            filter_sub_index: None,
+            filter_skip: 0,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -128,6 +159,11 @@ pub struct MarketSearchField;
 #[derive(Component)]
 pub struct MarketPriceField;
 
+/// 仅寄售/拍卖页签可见的控件（C# 那两个页签没有筛选树，改显示物品格/售价框/说明；
+/// 这些面板未移植前，Bevy 扩展的寄售/取回/售出按钮只在对应页签露出）
+#[derive(Component)]
+pub struct MarketConsignOnly;
+
 pub struct MarketPlugin;
 
 impl Plugin for MarketPlugin {
@@ -150,6 +186,10 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
             market_tab_system
                 .chain()
                 .run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
+            market_filter::market_filter_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -205,6 +245,7 @@ fn spawn_market(
         },
     ));
 
+    let mut filter_sprites: Option<MarketFilterSprites> = None;
     commands.entity(panel).with_children(|p| {
         // 滚动条（面板子节点）
         spawn_scroll_bar_ui(p, (435.0, TM_LIST_Y, 4.0, 180.0), 9);
@@ -290,22 +331,64 @@ fn spawn_market(
             spawn_icon_button(p, n, h, pr, TM_NEXT_POS.0, TM_NEXT_POS.1, 16.0, 16.0, 10)
                 .insert(MarketNextBtn);
         }
-        // C# 搜索框 @(11,452) 110x18（Bevy TextInput id 5；id 6 为寄售卖价扩展框）
-        spawn_market_input(p, &mut images, &font, 5, TM_SEARCH_POS.0, TM_SEARCH_POS.1, 110.0, 11.0, 452.0);
-        // Bevy 扩展：寄售/取回/立即出售（C# 在筛选树与外层按钮，筛选树未移植前放左列）
+        // C# 搜索框 @(11,452) 110x18（Bevy TextInput id 5）
+        spawn_market_input(
+            p,
+            &mut images,
+            &font,
+            5,
+            TM_SEARCH_POS.0,
+            TM_SEARCH_POS.1,
+            110.0,
+            11.0,
+            452.0,
+        );
+        // C# 左列筛选树（`Prguse2[920..923]` 按钮 + `[197..209]` 滚动条），仅 Market/GameShop 页签可见
+        filter_sprites = market_filter::spawn_filter_tree(p, &mut libs, &mut images, &cjk);
+        // Bevy 扩展：寄售/取回/立即出售 + 寄售卖价框（C# 寄售/拍卖页签自有面板，未移植前放左列；
+        // 这两个页签才显示，Market/GameShop 页签显示 C# 筛选树）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 920),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 921),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 921),
         ) {
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 10.0, 100.0, 100.0, 22.0, 10)
-                .insert(MarketConsignBtn);
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 10.0, 126.0, 100.0, 22.0, 10)
-                .insert(MarketSellNowBtn);
-            spawn_icon_button(p, n, h, pr, 10.0, 152.0, 100.0, 22.0, 10).insert(MarketGetBackBtn);
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                10.0,
+                100.0,
+                100.0,
+                22.0,
+                10,
+            )
+            .insert((MarketConsignBtn, MarketConsignOnly));
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                10.0,
+                126.0,
+                100.0,
+                22.0,
+                10,
+            )
+            .insert((MarketSellNowBtn, MarketConsignOnly));
+            spawn_icon_button(p, n, h, pr, 10.0, 152.0, 100.0, 22.0, 10)
+                .insert((MarketGetBackBtn, MarketConsignOnly));
         }
-        spawn_market_input(p, &mut images, &font, 6, 10.0, 180.0, 100.0, 11.0, 180.0);
+        // 寄售卖价框（Bevy TextInput id 6）：放在扩展按钮下方
+        if let Some(price_box) =
+            spawn_market_input(p, &mut images, &font, 6, 10.0, 190.0, 100.0, 11.0, 190.0)
+        {
+            p.commands().entity(price_box).insert(MarketConsignOnly);
+        }
     });
+    if let Some(sp) = filter_sprites {
+        commands.insert_resource(sp);
+    }
 }
 
 /// 市场输入框（TextInputField(id) + 子 TextInputDisplay(id)）；面板子节点
@@ -320,8 +403,8 @@ fn spawn_market_input(
     w: f32,
     rect_x: f32,
     rect_y: f32,
-) {
-    spawn_container(parent, x, y, w, 20.0, 10)
+) -> Option<Entity> {
+    let container = spawn_container(parent, x, y, w, 20.0, 10)
         .insert((
             crate::game::dialogs::text_input::TextInputField(id),
             crate::game::dialogs::text_input::TextInputRect(rect_x, rect_y, w, 20.0),
@@ -345,8 +428,10 @@ fn spawn_market_input(
                 ZIndex(11),
                 crate::game::dialogs::text_input::TextInputDisplay(id),
             ));
-        });
+        })
+        .id();
     let _ = images;
+    Some(container)
 }
 
 /// 显隐 + 渲染 + 按钮
@@ -394,11 +479,24 @@ fn market_ui_system(
         *requested = false;
         return;
     }
-    // 打开瞬间刷新市场
+    // 打开瞬间按 C# `TMerchantDialog(MarketPanelType.Market)`：
+    // `DrawFilters(0, -1)` 复位筛选树 + 发 `C.MarketSearch{Match="", Type=Nothing, Usermode=false}`
     if !*requested {
         *requested = true;
-        net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
-        tracing::info!("🏪 刷新市场");
+        market.panel = MarketPanelType::Market;
+        market.filter_index = 0;
+        market.filter_sub_index = None;
+        market.filter_skip = 0;
+        send_market_search(
+            &net,
+            "",
+            ItemType::Nothing,
+            false,
+            0,
+            0,
+            MarketPanelType::Market,
+        );
+        tracing::info!("🏪 打开市场（C# MarketSearch 复位）");
     }
     for (e, inter) in &close {
         if edge(e, inter, &mut prev_inter) {
@@ -486,18 +584,24 @@ fn market_ui_system(
     // 刷新
     for (e, inter) in &refresh_btn {
         if edge(e, inter, &mut prev_inter) {
+            // C# `RefreshButton.Click`：清空搜索框 + `C.MarketRefresh`（保留筛选树选中）
+            if let Some(t) = input.texts.get_mut(5) {
+                t.clear();
+            }
+            input.active = None;
             net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
             tracing::info!("🏪 刷新市场");
         }
     }
-    // 搜索（C# TrustMerchantDialog FindButton → MarketSearch{Match}，名称子串；纯数字兼容编号）
+    // 搜索（C# `FindButton.Click` → `C.MarketSearch{Match, MarketType}`，Type 默认 Nothing 不过滤）
     for (e, inter) in &search_btn {
         if edge(e, inter, &mut prev_inter) {
             let kw = input.texts.get(5).cloned().unwrap_or_default().trim().to_string();
-            net.send_packet(&crate::network::MarketSearchWire { keyword: kw.clone() });
+            if kw.is_empty() {
+                continue;
+            }
+            send_market_search(&net, &kw, ItemType::Nothing, false, 0, 0, market.panel);
             tracing::info!("🏪 搜索市场: {}", kw);
-            input.texts[5].clear();
-            input.active = None;
         }
     }
     // 翻页
@@ -517,12 +621,16 @@ fn market_ui_system(
     }
 }
 
-/// C# 页签：Market 保持本窗；GameShop 开现有商城窗；寄售/拍卖页签待移植
+/// C# 页签：`TMerchantDialog(type)`（TrustMerchantDialog.cs:1117-1314）——
+/// Market：筛选树可见 + 复位到 index 0；GameShop：同上（本端开独立商城窗，见 §7 偏差）；
+/// Consign/Auction：筛选树整列隐藏 + `Usermode=true` 搜索，本端暂用 Bevy 扩展按钮占位。
 /// （独立系统避免 Bevy 16 参数上限）
 fn market_tab_system(
     mut mgr: ResMut<DialogManager>,
     mut market: ResMut<MarketState>,
+    net: Res<NetConnection>,
     tab_btns: Query<(Entity, &Interaction, &MarketTabBtn)>,
+    mut consign_only: Query<&mut Visibility, (With<MarketConsignOnly>, Without<MarketWidget>)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -536,22 +644,88 @@ fn market_tab_system(
     if !mgr.is_open(DialogKind::Market) {
         return;
     }
+    let mut switched = false;
     for (e, inter, tab) in &tab_btns {
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
         match tab.0 {
-            "market" => market.message = "当前：市场".to_string(),
+            "market" => {
+                market.panel = MarketPanelType::Market;
+                market.filter_index = 0;
+                market.filter_sub_index = None;
+                market.filter_skip = 0;
+                market.message = "当前：市场".to_string();
+                switched = true;
+            }
             // C# `GameShopButton.Click` → `TMerchantDialog(MarketPanelType.GameShop)`
             "game_shop" => {
+                market.panel = MarketPanelType::GameShop;
+                market.filter_index = 0;
+                market.filter_sub_index = None;
+                market.filter_skip = 0;
                 mgr.open(DialogKind::GameShop);
                 market.message = "打开游戏商城".to_string();
+                switched = true;
             }
-            "consign" => market.message = "寄售页签待移植（可先用左列「寄售」）".to_string(),
-            "auction" => market.message = "拍卖页签待移植".to_string(),
+            "consign" => {
+                market.panel = MarketPanelType::Consign;
+                market.message = "寄售页签（面板待移植，可先用左列按钮）".to_string();
+                switched = true;
+            }
+            "auction" => {
+                market.panel = MarketPanelType::Auction;
+                market.message = "拍卖页签（面板待移植，可先用左列按钮）".to_string();
+                switched = true;
+            }
             _ => {}
         }
     }
+    // 页签切换：按 C# 补发搜索（Market/GameShop：Usermode=false；寄售/拍卖：Usermode=true）
+    if switched {
+        let (user_mode, item_type) = if matches!(
+            market.panel,
+            MarketPanelType::Consign | MarketPanelType::Auction
+        ) {
+            (true, ItemType::Nothing)
+        } else {
+            (false, ItemType::Nothing)
+        };
+        send_market_search(&net, "", item_type, user_mode, 0, 0, market.panel);
+    }
+    // C# 寄售/拍卖页签隐藏整列筛选按钮（本端隐藏 Bevy 扩展按钮的反向：Market/GameShop 隐藏扩展）
+    let show_consign_only = matches!(
+        market.panel,
+        MarketPanelType::Consign | MarketPanelType::Auction
+    );
+    for mut vis in &mut consign_only {
+        *vis = if show_consign_only {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// C# `C.MarketSearch` 发送（SharedRust 规范包：网关按此格式解析）
+#[allow(clippy::too_many_arguments)]
+fn send_market_search(
+    net: &NetConnection,
+    match_text: &str,
+    item_type: ItemType,
+    user_mode: bool,
+    min_shape: i16,
+    max_shape: i16,
+    market_type: MarketPanelType,
+) {
+    net.send_packet(&mir2_shared::packets::client::market::MarketSearch {
+        match_text: match_text.to_string(),
+        item_type,
+        user_mode,
+        min_shape,
+        max_shape,
+        market_type,
+    });
 }
 
 /// 市场动作：购买 / 寄售 / 取回 / 立即售出（独立系统避免 Bevy 16 参数上限）

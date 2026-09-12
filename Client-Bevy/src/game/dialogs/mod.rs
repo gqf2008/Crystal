@@ -35,6 +35,7 @@ pub mod item_rental_browse;
 pub mod keyboard_layout;
 pub mod mail;
 pub mod market;
+pub mod market_filter;
 pub mod mentor;
 pub mod menu;
 pub mod minimap;
