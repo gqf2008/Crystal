@@ -254,6 +254,9 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("技能栏8", "技能", KeyCode::F8),
         KeyBinding::new("帮助", "系统", KeyCode::KeyH),
         KeyBinding::new("关闭全部", "系统", KeyCode::Escape),
+        // #2720：租赁浏览窗（C# `KeybindOptions.Rental` 有枚举成员但 `KeyBindSettings` 里
+        // 没有默认绑定行 → 原版默认不可用；Bevy 作扩展给 T 键，可在键位面板重绑）
+        KeyBinding::new("租赁", "界面", KeyCode::KeyT),
     ]
 }
 
@@ -675,7 +678,7 @@ fn keyboard_layout_ui_system(
 
 
 /// 快捷键打开/关闭窗口（#148/#1370，C# KeybindOptions 对齐；随键位设置可重绑）
-/// 覆盖：背包/角色/技能/好友/宠物/坐骑/钓鱼/夫妻/队伍/商城/大地图/排行/键位/帮助/行会/小地图/任务/设置
+/// 覆盖：背包/角色/技能/好友/宠物/坐骑/钓鱼/夫妻/队伍/商城/大地图/排行/键位/帮助/行会/小地图/任务/设置/租赁
 /// #2595：文本输入聚焦时让路（C# WinForms 焦点路由——TextBox 聚焦则
 /// GameScene_KeyDown 不触发），F1-F12/Tab 按 ChatTextBox_KeyDown 转发表放行
 /// （MainDialogs.cs:1160-1185）
@@ -701,7 +704,7 @@ fn dialog_hotkey_system(
     // #2595：该绑定在当前聚焦状态下是否应让路
     let blocked = |b: &KeyBinding| gate.0 && !forwarded_while_typing(b.key);
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
-    let map: [(&str, DialogKind); 23] = [
+    let map: [(&str, DialogKind); 24] = [
         ("背包", DialogKind::Inventory),
         ("背包2", DialogKind::Inventory),
         ("角色", DialogKind::Character),
@@ -725,6 +728,8 @@ fn dialog_hotkey_system(
         ("任务", DialogKind::QuestLog),
         ("设置", DialogKind::Settings),
         ("设置2", DialogKind::Settings),
+        // #2720：C# `KeybindOptions.Rental → ItemRentalDialog.Toggle()`（浏览窗）
+        ("租赁", DialogKind::ItemRentalBrowse),
     ];
     // #1386：修饰键感知匹配；若本帧有“必须按住修饰键”的命中，仅触发这些（避免 Ctrl+I 同时开背包+英雄背包）
     let mut hits: Vec<(&str, DialogKind)> = Vec::new();
@@ -944,35 +949,58 @@ mod tests {
         assert_eq!(loaded[7].key, defaults[7].key);
     }
 
+    /// 对话框热键测试脚手架（聚焦门控在无 Window 实体时跳过）
+    fn hotkey_app(gate_on: bool, pressed: KeyCode) -> App {
+        use crate::game::dialogs::DialogManager;
+        use bevy::input::ButtonInput;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.insert_resource(KeyboardState {
+            bindings: default_bindings(),
+            defaults: default_bindings(),
+            top_line: 0,
+            rebinding: None,
+            enforce: true,
+        });
+        app.init_resource::<DialogManager>();
+        app.init_resource::<CharPage>();
+        app.init_resource::<crate::game::dialogs::option::OptionState>();
+        app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
+        app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
+        app.add_systems(Update, dialog_hotkey_system);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(pressed);
+        app
+    }
+
+    /// #2720：租赁浏览窗快捷键（Bevy 扩展；C# `KeybindOptions.Rental` 有枚举成员但
+    /// `KeyBindSettings` 无默认绑定行）
+    #[test]
+    fn rental_hotkey_toggles_browse_window() {
+        let bindings = default_bindings();
+        let rent = bindings
+            .iter()
+            .find(|b| b.action == "租赁")
+            .expect("默认键位应含「租赁」（Bevy 扩展）");
+        assert_eq!(rent.key, KeyCode::KeyT);
+
+        let mut app = hotkey_app(false, KeyCode::KeyT);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::ItemRentalBrowse),
+            "T 应打开租赁浏览窗"
+        );
+    }
+
     /// #2595：文本输入聚焦时对话框热键让路——字母键（背包2=I）不触发，
     /// F 键（背包=F9）按 C# ChatTextBox_KeyDown 转发表（MainDialogs.cs:1160-1185）仍触发，
     /// 门关时字母键恢复触发。回归：去掉 blocked 守卫则第 1/3 断言变红。
     #[test]
     fn dialog_hotkey_yields_while_typing() {
-        fn hotkey_app(gate_on: bool, pressed: KeyCode) -> App {
-            use crate::game::dialogs::DialogManager;
-            use bevy::input::ButtonInput;
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.init_resource::<ButtonInput<KeyCode>>();
-            app.insert_resource(KeyboardState {
-                bindings: default_bindings(),
-                defaults: default_bindings(),
-                top_line: 0,
-                rebinding: None,
-                enforce: true,
-            });
-            app.init_resource::<DialogManager>();
-            app.init_resource::<CharPage>();
-            app.init_resource::<crate::game::dialogs::option::OptionState>();
-            app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
-            app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
-            app.add_systems(Update, dialog_hotkey_system);
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(pressed);
-            app
-        }
         let is_inv_open = |app: &App| {
             app.world()
                 .resource::<crate::game::dialogs::DialogManager>()
