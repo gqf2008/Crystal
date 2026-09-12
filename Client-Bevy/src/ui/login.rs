@@ -3,6 +3,7 @@
 // ============================================================================
 
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 
@@ -22,6 +23,7 @@ impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoginState>();
         app.init_resource::<AuthFeedback>();
+        app.init_resource::<ViewKeyState>();
         app.init_resource::<LoginAnim>();
         app.init_resource::<CursorBlink>();
         app.init_resource::<UiImageCache>();
@@ -49,6 +51,8 @@ impl Plugin for LoginPlugin {
 pub struct LoginState {
     pub show_new_account: bool,
     pub show_change_password: bool,
+    /// C# LoginScene.InputKeyDialog 显示状态
+    pub show_view_key: bool,
     /// 屏幕提示（登录错误/断线/注册结果），is_error=true 时红色显示
     pub status_msg: String,
     pub status_error: bool,
@@ -145,6 +149,7 @@ struct LoginValidation {
 enum DialogKind {
     NewAccount,
     ChangePassword,
+    ViewKey,
 }
 
 #[derive(Component)]
@@ -163,11 +168,95 @@ enum ButtonKind {
     CpOk,
     CpCancel,
     ViewKey,
+    ViewKeyEsc,
+    ViewKeyDel,
+    ViewKeyRand,
+    ViewKeyEnter,
     Close,
 }
 
 #[derive(Component)]
 struct UiButtonKind(ButtonKind);
+
+/// C# InputKeyDialog：数字/字母安全键盘；Random 重新洗牌。
+#[derive(Resource)]
+struct ViewKeyState {
+    letters: Vec<char>,
+    numbers: Vec<char>,
+    seed: u64,
+}
+
+impl Default for ViewKeyState {
+    fn default() -> Self {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9E37_79B9_7F4A_7C15);
+        Self {
+            letters: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
+            numbers: "0123456789".chars().collect(),
+            seed,
+        }
+    }
+}
+
+impl ViewKeyState {
+    fn key(&self, idx: usize) -> char {
+        if idx < self.numbers.len() {
+            self.numbers[idx]
+        } else {
+            self.letters
+                .get(idx - self.numbers.len())
+                .copied()
+                .unwrap_or('?')
+        }
+    }
+
+    fn shuffle(&mut self) {
+        fn next(seed: &mut u64) -> u64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *seed
+        }
+        fn shuffle_chars(chars: &mut [char], seed: &mut u64) {
+            for i in (1..chars.len()).rev() {
+                let j = (next(seed) as usize) % (i + 1);
+                chars.swap(i, j);
+            }
+        }
+        shuffle_chars(&mut self.numbers, &mut self.seed);
+        shuffle_chars(&mut self.letters, &mut self.seed);
+    }
+}
+
+#[derive(Component)]
+struct ViewKeyKey {
+    idx: usize,
+    text_entity: Entity,
+}
+
+#[derive(SystemParam)]
+struct ViewKeyUi<'w, 's> {
+    state: ResMut<'w, ViewKeyState>,
+    buttons: Query<'w, 's, (&'static UiButton, &'static ViewKeyKey)>,
+}
+
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    fn GetKeyState(vkey: i32) -> i16;
+}
+
+fn caps_lock_on() -> bool {
+    #[cfg(windows)]
+    {
+        const VK_CAPITAL: i32 = 0x14;
+        unsafe { GetKeyState(VK_CAPITAL) & 1 != 0 }
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
 
 fn setup_login_ui(
     mut commands: Commands,
@@ -393,11 +482,13 @@ fn setup_login_ui(
     spawn_status_text(&mut commands, &font);
     spawn_new_account_dialog(&mut commands, &mut libs, &mut images, &mut cache, &font);
     spawn_change_password_dialog(&mut commands, &mut libs, &mut images, &mut cache, &font);
+    spawn_view_key_dialog(&mut commands, &mut libs, &mut images, &mut cache, &font);
 
     // 调试：BEVY_OPEN_DIALOG=na / cp 启动时打开对应弹窗（live 截屏验证用）
     match std::env::var("BEVY_OPEN_DIALOG").as_deref() {
         Ok("na") => login.show_new_account = true,
         Ok("cp") => login.show_change_password = true,
+        Ok("vk") => login.show_view_key = true,
         _ => {}
     }
 }
@@ -762,6 +853,111 @@ fn spawn_change_password_dialog(
     );
 }
 
+/// C# LoginScene.InputKeyDialog：安全键盘（数字 + 字母 + Esc/Delete/Random/Enter）。
+fn spawn_view_key_dialog(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    font: &Handle<Font>,
+) {
+    let Some((bw, bh)) = libs
+        .0
+        .get_image(LibraryName::Prguse, 1080)
+        .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+    else {
+        return;
+    };
+    let dx = (1024.0 - bw) / 2.0 + 285.0;
+    let dy = (768.0 - bh) / 2.0 + 150.0;
+
+    if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 1080) {
+        let e = spawn_ui_sprite(commands, h, dx, dy, 6.0, 1.0);
+        commands
+            .entity(e)
+            .insert((InDialog(DialogKind::ViewKey), Visibility::Hidden));
+    }
+
+    // 控制按钮（C# Title 300/303/306/309，三帧差 1）
+    for (index, x, y, kind, label) in [
+        (300usize, 12.0f32, 12.0f32, ButtonKind::ViewKeyEsc, "Esc"),
+        (303, 140.0, 76.0, ButtonKind::ViewKeyDel, "删除"),
+        (309, 76.0, 236.0, ButtonKind::ViewKeyRand, "随机"),
+        (306, 140.0, 236.0, ButtonKind::ViewKeyEnter, "确定"),
+    ] {
+        spawn_btn(
+            commands,
+            libs,
+            images,
+            cache,
+            LibraryName::Title,
+            index,
+            (dx + x, dy + y, 100.0, 25.0),
+            kind,
+            Some(DialogKind::ViewKey),
+        );
+        let text = spawn_ui_text(
+            commands,
+            font,
+            label,
+            dx + x + 32.0,
+            dy + y + 6.0,
+            12.0,
+            Color::WHITE,
+            6.1,
+        );
+        commands
+            .entity(text)
+            .insert((InDialog(DialogKind::ViewKey), Visibility::Hidden));
+    }
+
+    // Prguse[1081/1082/1083]，数字 0-9 两行、字母 A-Z 五行。
+    for idx in 0..36usize {
+        let (offset_x, offset_y) = if idx < 10 {
+            (idx % 6, idx / 6)
+        } else {
+            let letter = idx - 10;
+            (letter % 6, 2 + letter / 6)
+        };
+        let x = dx + 12.0 + offset_x as f32 * 32.0;
+        let y = dy + 44.0 + offset_y as f32 * 32.0;
+        let text = spawn_ui_text(
+            commands,
+            font,
+            "?",
+            x + 11.0,
+            y + 8.0,
+            12.0,
+            Color::WHITE,
+            6.2,
+        );
+        commands
+            .entity(text)
+            .insert((InDialog(DialogKind::ViewKey), Visibility::Hidden));
+        if let Some(e) = spawn_ui_button(
+            commands,
+            libs,
+            images,
+            cache,
+            LibraryName::Prguse,
+            1081,
+            1082,
+            1083,
+            x,
+            y,
+            6.2,
+            32.0,
+            30.0,
+        ) {
+            commands.entity(e).insert((
+                ViewKeyKey { idx, text_entity: text },
+                InDialog(DialogKind::ViewKey),
+                Visibility::Hidden,
+            ));
+        }
+    }
+}
+
 fn cleanup_login_ui(mut commands: Commands, root: Query<Entity, With<UiEntity>>) {
     for e in root.iter() {
         commands.entity(e).despawn();
@@ -773,6 +969,45 @@ fn clear_dialog_focus(inputs: &mut Query<&mut UiInput>) {
     for mut input in inputs.iter_mut() {
         if matches!(input.kind, InputKind::Na(_) | InputKind::Cp(_)) {
             input.focused = false;
+        }
+    }
+}
+
+/// 安全键盘输入优先写聚焦框；无焦点时按 C# GetFocussedTextBox 回退密码框。
+fn view_key_append(inputs: &mut Query<&mut UiInput>, ch: char) {
+    let mut any_focused = false;
+    for input in inputs.iter() {
+        if input.focused {
+            any_focused = true;
+            break;
+        }
+    }
+    for mut input in inputs.iter_mut() {
+        let target = input.focused
+            || (!any_focused && matches!(input.kind, InputKind::LoginPassword));
+        if target {
+            if input.value.len() < MAX_ACC_ID {
+                input.value.push(ch);
+            }
+            break;
+        }
+    }
+}
+
+fn view_key_delete(inputs: &mut Query<&mut UiInput>) {
+    let mut any_focused = false;
+    for input in inputs.iter() {
+        if input.focused {
+            any_focused = true;
+            break;
+        }
+    }
+    for mut input in inputs.iter_mut() {
+        let target = input.focused
+            || (!any_focused && matches!(input.kind, InputKind::LoginPassword));
+        if target {
+            input.value.pop();
+            break;
         }
     }
 }
@@ -793,6 +1028,7 @@ fn login_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut ime: ResMut<PinyinIme>,
     mut focus: ResMut<ImeFocus>,
+    mut view_key: ViewKeyUi,
 ) {
     cursor.timer += time.delta_secs();
     if cursor.timer >= 0.5 {
@@ -902,6 +1138,7 @@ fn login_ui_system(
             Key::Escape => {
                 login.show_new_account = false;
                 login.show_change_password = false;
+                login.show_view_key = false;
                 // #2596-2：关闭子对话框时清除其输入框焦点，避免隐藏字段持续吃键
                 clear_dialog_focus(&mut inputs);
             }
@@ -914,6 +1151,7 @@ fn login_ui_system(
         let show = match dlg.0 {
             DialogKind::NewAccount => login.show_new_account,
             DialogKind::ChangePassword => login.show_change_password,
+            DialogKind::ViewKey => login.show_view_key,
         };
         *vis = if show {
             Visibility::Visible
@@ -922,20 +1160,54 @@ fn login_ui_system(
         };
     }
 
+    // 安全键盘显示内容与点击写入当前焦点输入框。
+    for (_, key) in &view_key.buttons {
+        if let Ok(mut text) = texts.get_mut(key.text_entity) {
+            text.0 = view_key.state.key(key.idx).to_string();
+        }
+    }
+    if login.show_view_key {
+        for (btn, key) in &view_key.buttons {
+            if btn.clicked {
+                let mut ch = view_key.state.key(key.idx);
+                if ch.is_ascii_alphabetic() {
+                    ch = if caps_lock_on() {
+                        ch.to_ascii_uppercase()
+                    } else {
+                        ch.to_ascii_lowercase()
+                    };
+                }
+                view_key_append(&mut inputs, ch);
+            }
+        }
+    }
+
     // 按钮点击
-    let dialog_open = login.show_new_account || login.show_change_password;
+    let dialog_open =
+        login.show_new_account || login.show_change_password || login.show_view_key;
     let mut clicked: Option<ButtonKind> = None;
     for (btn, kind) in buttons.iter() {
         // 对话框按钮：仅在其对话框显示时响应
         let hidden = match kind.0 {
             ButtonKind::NaOk | ButtonKind::NaCancel => !login.show_new_account,
             ButtonKind::CpOk | ButtonKind::CpCancel => !login.show_change_password,
+            ButtonKind::ViewKeyEsc
+            | ButtonKind::ViewKeyDel
+            | ButtonKind::ViewKeyRand
+            | ButtonKind::ViewKeyEnter => !login.show_view_key,
             _ => false,
         };
         if btn.clicked && !hidden {
             let is_dialog_btn = matches!(
                 kind.0,
-                ButtonKind::NaOk | ButtonKind::NaCancel | ButtonKind::CpOk | ButtonKind::CpCancel
+                ButtonKind::NaOk
+                    | ButtonKind::NaCancel
+                    | ButtonKind::CpOk
+                    | ButtonKind::CpCancel
+                    | ButtonKind::ViewKeyEsc
+                    | ButtonKind::ViewKeyDel
+                    | ButtonKind::ViewKeyRand
+                    | ButtonKind::ViewKeyEnter
             );
             // 模态：子对话框打开时，主登录界面按钮不响应点击
             if !is_dialog_btn && dialog_open {
@@ -962,6 +1234,10 @@ fn login_ui_system(
         }
     }
 
+    if clicked == Some(ButtonKind::ViewKeyEnter) {
+        login.show_view_key = false;
+        clicked = Some(ButtonKind::LoginOk);
+    }
     if let Some(kind) = clicked {
         match kind {
             ButtonKind::LoginOk => {
@@ -1059,7 +1335,16 @@ fn login_ui_system(
                 clear_dialog_focus(&mut inputs);
                 login.status_msg = String::new();
             }
-            ButtonKind::ViewKey => {}
+            ButtonKind::ViewKey => login.show_view_key = true,
+            ButtonKind::ViewKeyEsc => {
+                login.show_view_key = false;
+                clear_dialog_focus(&mut inputs);
+            }
+            ButtonKind::ViewKeyDel => {
+                view_key_delete(&mut inputs);
+            }
+            ButtonKind::ViewKeyRand => view_key.state.shuffle(),
+            ButtonKind::ViewKeyEnter => unreachable!("translated to LoginOk above"),
             ButtonKind::Close => std::process::exit(0),
         }
     }
@@ -1134,5 +1419,54 @@ fn login_anim_system(
                 sprite.image = h.clone();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_key_assets_exist() {
+        use crate::resources::libraries::Libraries;
+        let mut libs = Libraries::new("Data");
+        libs.ensure_initialized();
+        assert!(libs.get_image(LibraryName::Prguse, 1080).is_some());
+        for idx in [300usize, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311] {
+            assert!(libs.get_image(LibraryName::Title, idx).is_some(), "Title[{idx}]");
+        }
+        for idx in [1081usize, 1082, 1083] {
+            assert!(libs.get_image(LibraryName::Prguse, idx).is_some(), "Prguse[{idx}]");
+        }
+    }
+
+    #[test]
+    fn view_key_maps_digits_then_letters() {
+        let state = ViewKeyState::default();
+        assert_eq!(state.key(0), '0');
+        assert_eq!(state.key(9), '9');
+        assert_eq!(state.key(10), 'A');
+        assert_eq!(state.key(35), 'Z');
+    }
+
+    #[test]
+    fn view_key_shuffle_keeps_permutation() {
+        let mut state = ViewKeyState {
+            seed: 0x1234_5678_9ABC_DEF0,
+            ..ViewKeyState::default()
+        };
+        let before_numbers = state.numbers.clone();
+        let before_letters = state.letters.clone();
+        state.shuffle();
+        let mut numbers = state.numbers.clone();
+        let mut letters = state.letters.clone();
+        numbers.sort_unstable();
+        letters.sort_unstable();
+        let mut expected_numbers = before_numbers;
+        let mut expected_letters = before_letters;
+        expected_numbers.sort_unstable();
+        expected_letters.sort_unstable();
+        assert_eq!(numbers, expected_numbers);
+        assert_eq!(letters, expected_letters);
     }
 }
