@@ -904,32 +904,69 @@ impl ClientBuff {
     }
 }
 
+/// 配方的一项需求（产物/工具/材料通用）。
+/// Rust 客户端无本地物品库，图标/名称随包下发；工具带 `min_dura` 要求。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipeRequirement {
+    pub item_index: i32,
+    pub count: u16,
+    pub image: u16,
+    pub name: String,
+    pub min_dura: u16,
+}
+
+impl RecipeRequirement {
+    pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let item_index = reader.read_i32::<LittleEndian>()?;
+        let count = reader.read_u16::<LittleEndian>()?;
+        let image = reader.read_u16::<LittleEndian>()?;
+        let name = crate::binary::read_dotnet_string(reader)?;
+        let min_dura = reader.read_u16::<LittleEndian>()?;
+        Ok(Self {
+            item_index,
+            count,
+            image,
+            name,
+            min_dura,
+        })
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.item_index)?;
+        writer.write_u16::<LittleEndian>(self.count)?;
+        writer.write_u16::<LittleEndian>(self.image)?;
+        crate::binary::write_dotnet_string(writer, &self.name)?;
+        writer.write_u16::<LittleEndian>(self.min_dura)?;
+        Ok(())
+    }
+}
+
 /// Client recipe information (crafting system)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientRecipeInfo {
     pub gold: u32,
     pub chance: u8,
-    pub item: crate::data::item::UserItem,
-    pub tools: Vec<crate::data::item::UserItem>,
-    pub ingredients: Vec<crate::data::item::UserItem>,
+    pub item: RecipeRequirement,
+    pub tools: Vec<RecipeRequirement>,
+    pub ingredients: Vec<RecipeRequirement>,
 }
 
 impl ClientRecipeInfo {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let gold = reader.read_u32::<LittleEndian>()?;
         let chance = reader.read_u8()?;
-        let item = crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?;
-        
+        let item = RecipeRequirement::read_from(reader)?;
+
         let tool_count = reader.read_i32::<LittleEndian>()?;
         let mut tools = Vec::with_capacity(tool_count as usize);
         for _ in 0..tool_count {
-            tools.push(crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?);
+            tools.push(RecipeRequirement::read_from(reader)?);
         }
-        
+
         let ingredient_count = reader.read_i32::<LittleEndian>()?;
         let mut ingredients = Vec::with_capacity(ingredient_count as usize);
         for _ in 0..ingredient_count {
-            ingredients.push(crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?);
+            ingredients.push(RecipeRequirement::read_from(reader)?);
         }
 
         Ok(Self {
@@ -945,17 +982,17 @@ impl ClientRecipeInfo {
         writer.write_u32::<LittleEndian>(self.gold)?;
         writer.write_u8(self.chance)?;
         self.item.write_to(writer)?;
-        
+
         writer.write_i32::<LittleEndian>(self.tools.len() as i32)?;
         for tool in &self.tools {
             tool.write_to(writer)?;
         }
-        
+
         writer.write_i32::<LittleEndian>(self.ingredients.len() as i32)?;
         for ingredient in &self.ingredients {
             ingredient.write_to(writer)?;
         }
-        
+
         Ok(())
     }
 }
