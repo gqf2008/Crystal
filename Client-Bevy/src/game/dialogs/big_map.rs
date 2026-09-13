@@ -162,6 +162,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_big_map);
                 big_map_world_system,
                 big_map_viewport_system,
                 big_map_member_system,
+                big_map_hint_system,
                 // 描边副本同步须排在 Text 写方之后（批48 P1：C# MirLabel 默认描边）
                 crate::ui::outlined_text::sync_outline_ui_system,
             )
@@ -743,6 +744,114 @@ fn big_map_world_system(
     }
 }
 
+/// 大地图悬停提示的归属方（`TooltipState.source`，与其它写入方隔离）：#2767
+pub const BIGMAP_TOOLTIP_SOURCE: u16 = 7;
+
+/// #2767 大地图 Hint（C# `BigMapDialog.cs`）：
+/// - `SearchButton.Hint = SearchForNPCs`（「搜索NPC」，:198，@(23, H-36) 32x30）；
+/// - 队友光点 `Players[i].Hint = groupMemberLocation.Key`（队友名，:730；仅同图且非本人可见，与 `big_map_member_system` 同一可见性判定）。
+/// 光标支持控制接口探针（无焦点环境可驱动验证）。
+fn big_map_hint_system(
+    mgr: Res<DialogManager>,
+    state: Res<BigMapState>,
+    locs: Res<MemberLocations>,
+    current: Res<CurrentMapIndex>,
+    windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
+    dots: Query<(&Node, &Visibility, &BigMapMemberDot)>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+) {
+    let clear = |tooltip: &mut crate::ui::tooltip::TooltipState| {
+        tooltip.update(
+            BIGMAP_TOOLTIP_SOURCE,
+            false,
+            String::new(),
+            Vec::new(),
+            0.0,
+            0.0,
+        );
+    };
+    if !mgr.is_open(DialogKind::BigMap) {
+        clear(&mut tooltip);
+        return;
+    }
+    let Some(raw) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
+        clear(&mut tooltip);
+        return;
+    };
+    // UI 相机 Fixed{1024,768}：换算成 UI 逻辑坐标（与 tooltip_hint_system 一致）
+    let cursor = match ui_cameras.single() {
+        Ok((cam, gtf)) => match cam.viewport_to_world_2d(gtf, raw) {
+            Ok(w) => Vec2::new(w.x, -w.y),
+            Err(_) => {
+                clear(&mut tooltip);
+                return;
+            }
+        },
+        Err(_) => {
+            clear(&mut tooltip);
+            return;
+        }
+    };
+    let px = (1024.0 - PANEL_W) / 2.0;
+    let py = (768.0 - PANEL_H) / 2.0;
+    let local = (cursor.x - px, cursor.y - py);
+    // 1) 队友光点：3x3 小方块，命中放宽到 ±4px（C# 控件 Size 同为小方块，人手可点）
+    for (node, vis, dot) in &dots {
+        if *vis != Visibility::Visible || dot.0 >= locs.members.len() {
+            continue;
+        }
+        let (_, map_idx, _, _) = &locs.members[dot.0];
+        if *map_idx as i32 != current.0 {
+            continue;
+        }
+        let (x, y) = match (node.left, node.top) {
+            (Val::Px(x), Val::Px(y)) => (x, y),
+            _ => continue,
+        };
+        if big_map_dot_hit(local, x, y) {
+            let name = locs.members[dot.0].0.clone();
+            tooltip.update(
+                BIGMAP_TOOLTIP_SOURCE,
+                true,
+                String::new(),
+                vec![name],
+                cursor.x,
+                cursor.y,
+            );
+            return;
+        }
+    }
+    // 2) 搜索按钮（C# SearchButton @(23, H-36) 32x30，Hint = 搜索NPC）
+    if big_map_search_hit(local) {
+        tooltip.update(
+            BIGMAP_TOOLTIP_SOURCE,
+            true,
+            String::new(),
+            vec!["搜索NPC".to_string()],
+            cursor.x,
+            cursor.y,
+        );
+        return;
+    }
+    clear(&mut tooltip);
+}
+
+/// 队友光点命中（点在面板局部坐标；光点 3x3，命中放宽到 ±4px）
+fn big_map_dot_hit(local: (f32, f32), dot_x: f32, dot_y: f32) -> bool {
+    (local.0 - dot_x).abs() <= 4.0 && (local.1 - dot_y).abs() <= 4.0
+}
+
+/// 搜索按钮命中（C# `SearchButton` @(23, H-36) 32x30）
+fn big_map_search_hit(local: (f32, f32)) -> bool {
+    let (x, y) = (23.0, PANEL_H - 36.0);
+    local.0 >= x && local.0 <= x + 32.0 && local.1 >= y && local.1 <= y + 30.0
+}
+
 /// 队友点定位（与玩家光点同公式：vx+(x/mw)*tw, vy+(y/mh)*th；x/y 为服务端瓦片坐标）
 fn big_map_member_pos(x: i32, y: i32, mw: f32, mh: f32, tw: f32, th: f32, vx: f32, vy: f32) -> (f32, f32) {
     (vx + (x as f32 / mw) * tw, vy + (y as f32 / mh) * th)
@@ -1059,5 +1168,21 @@ mod tests {
     fn member_pos_origin_and_edge() {
         assert_eq!(big_map_member_pos(0, 0, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0), (0.0, 0.0));
         assert_eq!(big_map_member_pos(200, 400, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0), (400.0, 800.0));
+    }
+
+    /// #2767：大地图两处 Hint 的命中——搜索按钮（C# @(23, H-36) 32x30）与队友点（3x3，放宽 ±4px）
+    #[test]
+    fn big_map_hint_hit_matches_csharp() {
+        // 搜索按钮内部
+        assert!(big_map_search_hit((30.0, PANEL_H - 30.0)));
+        // 按钮上/下/右侧（右侧即搜索输入框区域，C# 无 Hint）
+        assert!(!big_map_search_hit((30.0, PANEL_H - 40.0)));
+        assert!(!big_map_search_hit((30.0, PANEL_H - 4.0)));
+        assert!(!big_map_search_hit((60.0, PANEL_H - 30.0)));
+        // 队友点：±4px 内命中，超过不命中
+        assert!(big_map_dot_hit((100.0, 100.0), 102.0, 98.0));
+        assert!(big_map_dot_hit((100.0, 100.0), 96.0, 104.0));
+        assert!(!big_map_dot_hit((100.0, 100.0), 106.0, 98.0));
+        assert!(!big_map_dot_hit((100.0, 100.0), 100.0, 92.0));
     }
 }
