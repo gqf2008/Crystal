@@ -157,7 +157,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：437 lib + 2 bin + 1 smoke + 24 alignment 通过（批14 仓储锁 per-grid 后基线）。
+- `cargo test`（Client-Bevy）：438 lib + 2 bin + 1 smoke + 24 alignment 通过（批14 交易锁后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -188,6 +188,7 @@
 - 批13 Mail 占位键实机复验（2026-09-13，`--skip-login` + Control API `dialog mail open` 截图）：底栏右侧出现 `Prguse[520]`/`[523]` 两个键，均值 RGB `(110.4,110.6,109.3)`/`(114.4,114.7,112.9)`、色度 `1.46`/`2.15`（≈0 = 批12 灰度公式），同排可用的发送/删除键保持棕色原色 —— 与 C# `GrayScale=true, Enabled=false` 占位态一致。
 - 批14 仓储锁实机复验（2026-09-13，`--auto-enter` + Control API `npc_call{110,"[@STORAGE]"}` 打开仓库、`dialog npc close` 关掉 NPC 页；临时把 mock 仓储密码置空以到达面板，**验证后已还原**；锁定/解锁用临时驱动，**验证后已删除**）：临时锁 `(Storage,3)` + `(Inventory,3)` 后，仓储格 3 均值 RGB `(38.2,28.2,17.9)` 色度 20.6（对照：同行未锁的仓储格 4 `(89.1,69.6,46.1)` 色度 43.3 不变），背包格 3 `(26.3,12.2,16.9)` 色度 19.6；解锁后仓储格 3 恢复 `(93.6,73.2,48.3)` 色度 45.7、背包格 3 恢复 `(70.3,35.1,47.4)` 色度 50.1 —— 两侧网格同色规则、被锁格与对照格差异显著。
 - 批14 仓储锁门禁（2026-09-13）：`store_target_slot_matches_csharp`（C# 目标格选择：空格用它/占用取首个空格/全满 None）、`store_receipt_releases_grid_locks`（`S.StoreItem` 回包清 `(Storage,·)` 两侧锁、Craft 来源不受影响）、`inv_lock_reasons_are_isolated` 扩充（同格号在 `LockGrid::Storage` 与 `Inventory` 互不影响 + 仓储锁定格同色）；红检：把 `store_target_slot` 改成恒返回点击格、把 `is_locked_in` 改成忽略网格，两条断言分别如期 FAILED。
+- 批14 交易锁门禁（2026-09-13）：`trade_receipts_release_locks`（`S.DepositTradeItem` 失败也清 `Trade` 两侧锁且不动 Craft 来源；`S.RetrieveTradeItem` 失败保留槽内物品、成功才清空，两种都解锁）；红检：把成功分支改成恒真（`if true`）→ 断言「取回失败应保留槽内物品」如期 FAILED。实机验证：交易需双端会话，mock 单客户端下用系统级测试覆盖；被锁交易槽的灰化与背包侧共用同一 `LOCKED_ITEM_COLOR` 与 `color_at` 路径（同批仓储/背包已实机确认）。
 - 批13 收尾三窗复验（2026-09-13，合并后单一进程 `--skip-login` + Control API 依次开 Mail/TrustMerchant/Craft 截图）：Mail 底栏占位键灰度保持；TrustMerchant 底栏无选中时 BUY 灰度、售价框无自造底色；Craft `CRAFT` 灰度 / `AUTO` 原色、面板几何无变化。
 
 ## 7. 已知有意偏差
@@ -212,6 +213,7 @@
 - TrustMerchant：C# `AuctionRow.SelectedImage`（`Prguse[545]` 296x38）构造后 `Visible=false` 且全仓无置真处（原版死控件）；选中高亮只用 `Border`（1px 外扩橙框），Bevy 一致。
 - TrustMerchant：`C.AuctionRow` 到期列在 C# 用本地墙钟 `DateTime`；Bevy 用 `chrono::Local` 格式化（同一时刻的本地显示），mock 侧写「当前-1h」便于核对格式。
 - TrustMerchant：底栏 `BuyButton`/`CollectSoldButton`/`MailButton`/`SellNowButton` 与 `SellItemButton` 的禁用态已按 C# `GrayScale`（`:1005-1033` 与 `RefreshCraftCells` 同套语义）走真灰度（`ui::gray`，公式见 `Data/Shaders/grayscale.ps`）。C# 寄售选物锁定背包格（`tempCell.Locked`）已对齐（`InvLockReason::Consign`；放入锁、换物/切页签/关窗/`S.ConsignItem` 回包解锁）；C# `Show()` 把背包推到 `Size.Width + 5`、`Hide()` 复位 (0,0) 也已对齐（`InventoryPlaceAt`）。
+- 交易（`C.DepositTradeItem`/`C.RetrieveTradeItem`，批14 单元2）：放入时锁来源背包格 + 目标交易槽（`InvLockReason::Trade`，`LockGrid::{Inventory,Trade}`），`S.DepositTradeItem`（GameScene.cs:2804-2820）回包解锁；取回时锁交易槽并**保留槽内物品**（此前 Bevy 乐观清空），`S.RetrieveTradeItem`（:2821-2836）回包按 `success` 决定清槽并解锁；被锁交易槽按同一 `LOCKED_ITEM_COLOR` 灰化且不响应点击，关窗（`trade_reset` 语义）清该来源全部锁。
 - TrustMerchant / 数量框：售价框的「三态边框」§7 原描述有误——C# `PriceTextBox.BorderColour` 虽被 `TextBox_TextChanged` 赋值（:1333/1337/1345/1355/1359），但该控件从未置 `Border = true`，`MirControl.Draw()` 的 `DrawBorder()` 因 `_border` 默认 false 早返回 → **原版售价框没有三态视觉**；批13 已删掉 Bevy 自造的底色近似（三态仍驱动 `SellItemButton.Enabled`）。真正画 1px 边框三态的是 `MirAmountBox` 的输入框（`Border = true; BorderColour = Lime`，:80-87、`TextBox_TextChanged`:172-194 → 合法 Lime、`== MaxAmount` Orange、非法 Red 且隐藏 OK 键），批13 已按其坐标 (58,43) 132x19 补框（Bevy 容器取 (57,42) 134x21 使内容区一致）。
 - TrustMerchant：筛选树 `Prguse2[205/206]` 手柄的拖动用「按下时记录抓取偏移 → 按住按光标 y 反算 `Skip`」实现（C# 是 `MirControl.OnMoving`）；手柄高度固定为精灵原始 12x18（C# 也未按 `PossibleTotal` 缩放）。
 - TrustMerchant：Find/筛选/页签搜索改发 C# 规范 `C.MarketSearch`（此前 Bevy `MarketSearchWire` 只写关键字，被网关 `read_body` 静默丢弃 → 搜索无效）；`MarketRefresh` 仅保留在刷新按钮（C# `RefreshButton.Click` 先清空搜索框）。
