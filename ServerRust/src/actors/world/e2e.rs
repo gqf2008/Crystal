@@ -118,6 +118,208 @@ async fn e2e_setup_login(
 // E2E Tests
 // ============================================================
 
+// ============================================================
+// #2827：精炼确认包（C# S.DepositRefineItem / S.RetrieveRefineItem）
+// ============================================================
+
+/// 等待指定 opcode 的包并返回其 body（去掉 4 字节头）；超时返回 None
+async fn wait_opcode_body(rx: &mut RxChannel, opcode: i16, secs: u64) -> Option<Vec<u8>> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    while tokio::time::Instant::now() < deadline {
+        let remaining = deadline - tokio::time::Instant::now();
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(data)) if data.len() >= 4 => {
+                if i16::from_le_bytes([data[2], data[3]]) == opcode {
+                    return Some(data[4..].to_vec());
+                }
+            }
+            Ok(Some(_)) => continue,
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// #2827：存入/取回精炼物品**失败**也必须回确认包（C# `Enqueue(p)`，PlayerObject.cs:12511-12601）——
+/// 客户端只有收到 `S.DepositRefineItem` 才会发 `C.RefineItem`（Bevy refine.rs:227-231），
+/// 缺包会让 UI 精炼链路永久卡在「已请求存入武器…」。
+///
+/// 红检：去掉 `DepositRefineItemRequest`/`RetrieveRefineItemRequest` handler 里的
+/// `send_refine_slot_ack` 调用 → 本用例两个断言都 FAILED。
+#[test]
+fn e2e_refine_deposit_and_retrieve_ack_packets() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = 21u64;
+        let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
+        let db_pool = e2e_setup_login(&gate_ref, session_id, &mut rx).await;
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        // 建角 + 进图（角色无精炼中物品，故两处均为「失败」路径——正是本轮补的缺包处）
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, "RefineChar");
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                5
+            )
+            .await
+            .is_some(),
+            "StartGame"
+        );
+
+        // 存入：from=999 越界（背包无此格）→ 必须回 success=false 的确认包
+        let mut body = Vec::new();
+        body.extend_from_slice(&999i32.to_le_bytes());
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::DepositRefineItem as i16,
+                    &body,
+                ),
+            })
+            .await;
+        let ack = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::DepositRefineItem as i16,
+            3,
+        )
+        .await
+        .expect("deposit ack packet missing (S.DepositRefineItem)");
+        assert_eq!(
+            ack.len(),
+            9,
+            "deposit ack body = [from i32][to i32][success u8]"
+        );
+        assert_eq!(i32::from_le_bytes(ack[0..4].try_into().unwrap()), 999);
+        assert_eq!(i32::from_le_bytes(ack[4..8].try_into().unwrap()), 0);
+        assert_eq!(ack[8], 0, "越界存入必须 success=false");
+
+        // 取回：精炼栏为空（from=0）→ 必须回 success=false 的确认包
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes());
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::RetrieveRefineItem as i16,
+                    &body,
+                ),
+            })
+            .await;
+        let ack = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::RetrieveRefineItem as i16,
+            3,
+        )
+        .await
+        .expect("retrieve ack packet missing (S.RetrieveRefineItem)");
+        assert_eq!(
+            ack.len(),
+            9,
+            "retrieve ack body = [from i32][to i32][success u8]"
+        );
+        assert_eq!(ack[8], 0, "空精炼栏取回必须 success=false");
+    });
+}
+
 #[tokio::test]
 async fn e2e_client_version_handshake() {
     let session_id = 1u64;
