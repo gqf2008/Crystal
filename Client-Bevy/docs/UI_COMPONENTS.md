@@ -166,11 +166,12 @@
 | 批24 任务详情窗（QuestDetailDialog） | 整窗对齐 C#（`QuestDialogs.cs:463-628 / 1003-1390 / 1396-1745`）：① `Prguse[960]` 面板 + `Title[16]` + `Prguse2[360..362]` 关闭键 + 独立 `DialogKind::QuestDetail` + **日记已接行左键打开**（`:1928-1935`）② `QuestMessage` 消息区（行模型 `UpdateQuest`/`AdjustDescription`、16 行槽、上下滚 `Prguse2[197..199]/[207..209]`、位置条 `Prguse2[205/206]` 拖动含原版 `Count-1` 钳位、标题圆点 `Prguse[919]`、首行黄、`{文本/颜色}` 去标记）③ 分享键→`C.ShareQuest`、取消键→`MirMessageBox(AskCancelQuest)`→Yes `C.AbandonQuest`+`Hide()`、`_pauseButton` 按 C# 死控件处理；奖励区 @(5,307)（`Title[17]` + `Prguse[966/965/2447]` 图标与数值偏移链 + 固定/可选各 5 格 + `Prguse[989]/[979]` 底 + 物品图居中 + `###0` 数量 + 多选一记未过滤下标 + 可选排 `FilterRewards` 性别过滤）；**协议补齐** `QuestItemReward` 携带完整 `ItemInfo`（C# `SharedData.cs:75-93`，客户端无本地物品库）+ 顺带修 `close` 宽查询吞掉接受/完成键按下边沿（`#2535` 状态机整条不可用）；**后续修复**：固定排不做性别过滤（对齐 C# `:1534` 注释掉的 `FilterRewards`） | #2802 #2803 #2804 |
 | 批25 任务详情富文本收尾 | ① 消息区 `{文本/颜色}` 彩色叠加（C# `NewColour`，`QuestDialogs.cs:1008/1321-1353`；基础白字 + 原位叠加标签，颜色名走 `Color.FromName` 子集）② 行内链接 `[MONSTER\|NPC\|ITEM:idx(\|name)]` / `<$KIND:idx>` 换名（`NPCDialogs.cs:24-26/920-955`：内嵌名 > 查表 > `Item {idx}` 回退）+ 常色青/悬停橙 + 悬停提示（`NewLink` `:1355-1382`；探针可驱动）③ 奖励格悬停物品说明（`QuestCell.OnMouseEnter` `:1663-1683` → 复用背包 `item_tooltip_lines`，耐久取 `Item.Durability`）④ 文档与实机记录回填（本行） | #2812 #2813 #2815 #2816 |
 | 批26 文本描边（C# `MirLabel` 默认 `OutLine=true`） | ① 描边副本跟随正文**位置/显隐/字号**（`sync_outline_ui_system` 补 `Node` 克隆 + 副本 1px 偏移、`Visibility`、`TextFont`；颜色刻意不镜像，副本恒黑）② 对话框文本**默认带描边**（`theme::spawn_label`/`spawn_label_center` 转调 outlined 版，约 150 处调用点零改动；新增 `*_plain` 显式无描边变体 + 两处例外：数量框 `InputTextBox`、奖励格数量黄字）③ HUD 标签补描边（HP/MP/Top/Bottom/Exp/Level/Gold/Name/Weight/Space/英雄面板/死亡提示）+ **负向断言**（聊天文本 `spawn_ui_text` 路径保持无描边）④ 文档与实机记录回填（本行） | #2818 #2819 #2822 #2823 |
+| 批27 窗口可拖动性（C# `Movable` 默认 false） | ① 给「C# 默认不可拖却被本端拖」的 7 个窗口挂 `NotDraggable`：计时器 / 掷骰 / 小地图 / 耐久面板 / 仓库 / 精炼 / 英雄主窗（`HeroManage` 显式 `Movable=true` 保持可拖）；每窗两个新单测 = 结构（该 kind 的**每个**根都带 `NotDraggable`）+ 行为（真实 spawn 出的窗口 + 真实 `dialog_drag_system`，置 Visible 后按左键断言不起拖）② §7 记录反向结构性差异（腰带/聊天/英雄腰带/好友备注/钓鱼状态/下拉框）+ 技能栏已对齐 ③ 实机截图与注入限制记录 ④ 本行 | #2830 #2833 #2834 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**528 lib** + 2 bin + 1 smoke + 24 alignment 通过（批26 单元③ 后基线；批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
+- `cargo test`（Client-Bevy）：**535 lib** + 2 bin + 1 smoke + 24 alignment 通过（批27 单元① 后基线；批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -251,6 +252,17 @@
     金币 `10,000`（3× 裁剪）均可见 1px 黑描边。
   - 未覆盖（由单测钉住）：逐帧改文本时副本的帧级同步时延（`sync_outline_ui_system` 在 Update 内，最坏 1 帧，肉眼不可见）；
     副本 `ZIndex = z-1` 与同层元素的覆盖顺序（巡回未复现）。
+
+- 批27 实机/复验（2026-09-14，`--auto-enter` + Control API `dialog`/`screenshot`）：
+  - 改后窗口仍正常显示与开关：计时器 `b27_timer.png`、仓库 `b27_storage.png`、耐久面板 `b27_dura.png`、
+    英雄主窗 `b27_hero.png`（小地图常驻）；均无渲染/布局回归。
+  - **真机拖动取证不可得**：本机 `SetForegroundWindow` 返回 0、前台窗口不是客户端
+    （`drag_once.py` 注入后 `foreground now: 2624126 match: False`）→ 鼠标事件到不了 winit，
+    与 #2767/批25 记录的「锁屏/无交互会话只挡输入注入、不挡截图」一致。
+    因此拖动行为改由**行为级单测**覆盖：用真实 `spawn_*` 生成窗口 → 把所有根置 `Visible`
+    （spawn 时是 `Hidden`，置可见前断言会假绿）→ 在窗内按下左键跑真实 `dialog_drag_system`
+    → 断言 `DialogDrag.dragging == None`。该断言已用「删掉 `Without<NotDraggable>`」反向验证会红。
+  - 未覆盖：`RollDialog`/`RefineDialog` 的实机开窗（需要服务端掷骰/精炼流程触发），二者由上述单测覆盖。
 
 ## 7. 已知有意偏差
 
