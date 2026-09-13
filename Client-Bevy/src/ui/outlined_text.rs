@@ -248,19 +248,77 @@ pub fn spawn_outlined_label_center<'a>(
 }
 
 /// bevy_ui 正文内容变化 → 同步到 4 个黑色副本（同 [`sync_outline_system`]）
+///
+/// #2817 单元①：副本是正文的**兄弟**（[`spawn_outlined_label`] 注释 `:127-135`——子实体恒画在
+/// 父之后，描边会盖住正文），因此**不继承**正文的显隐/位置/字号，必须逐项镜像：
+///
+/// - `Text` 内容；
+/// - `Node` 布局：整体克隆后把 `left`/`top` 平移该副本自己的 1px 偏移（[`OUTLINE_OFFSETS_UI`]）；
+/// - `Visibility`：单独隐藏/显示标签时副本跟着走（否则黑副本残留暗字，批19 tooltip 侧曾以
+///   「隐藏即清空正文」绕过）；
+/// - `TextFont`：字号/字体变化（任务详情标题行 +1px、叠加段按行字号）后描边尺寸随之变化。
+///
+/// 颜色**不**镜像：副本恒 [`OUTLINE_COLOR`]（C# `OutLineColour = Color.Black`，`MirLabel.cs:224`）。
 pub fn sync_outline_ui_system(
-    mains: Query<(Ref<Text>, &OutlineUiShadows), (With<OutlinedUiText>, Without<OutlineUiShadow>)>,
-    mut shadows: Query<&mut Text, (With<OutlineUiShadow>, Without<OutlinedUiText>)>,
+    mains: Query<
+        (
+            Ref<Text>,
+            Ref<Node>,
+            Ref<Visibility>,
+            Ref<TextFont>,
+            &OutlineUiShadows,
+        ),
+        (With<OutlinedUiText>, Without<OutlineUiShadow>),
+    >,
+    mut shadows: Query<
+        (&mut Text, &mut Node, &mut Visibility, &mut TextFont),
+        (With<OutlineUiShadow>, Without<OutlinedUiText>),
+    >,
 ) {
-    for (text, list) in &mains {
-        if !text.is_changed() {
+    for (text, node, vis, font, list) in &mains {
+        let text_changed = text.is_changed();
+        let node_changed = node.is_changed();
+        let vis_changed = vis.is_changed();
+        let font_changed = font.is_changed();
+        if !(text_changed || node_changed || vis_changed || font_changed) {
             continue;
         }
-        for id in &list.0 {
-            if let Ok(mut t) = shadows.get_mut(*id) {
-                t.0 = text.0.clone();
+        for (i, id) in list.0.iter().enumerate() {
+            let Ok((mut shadow_text, mut shadow_node, mut shadow_vis, mut shadow_font)) =
+                shadows.get_mut(*id)
+            else {
+                continue;
+            };
+            if text_changed {
+                shadow_text.0 = text.0.clone();
+            }
+            if node_changed {
+                let Some(&(dx, dy)) = OUTLINE_OFFSETS_UI.get(i) else {
+                    continue;
+                };
+                // `node` 是 `Ref<Node>`：显式取内层 Node 再克隆（`Ref::clone` 会得到 Ref）
+                let mut mirrored = Node::clone(&node);
+                mirrored.left = shadow_val(node.left, dx);
+                mirrored.top = shadow_val(node.top, dy);
+                *shadow_node = mirrored;
+            }
+            if font_changed {
+                shadow_font.font = font.font.clone();
+                shadow_font.font_size = font.font_size;
+            }
+            if vis_changed {
+                *shadow_vis = *vis;
             }
         }
+    }
+}
+
+/// 副本坐标 = 正文坐标 + 该副本的 1px 偏移（`MirLabel.cs:222-225` 各 rect 相对前景 (1,1)）。
+/// 只对 `Px` 平移；`Auto`/`Percent` 等无「+1px」语义，原样返回（对话框标签全用 `Px`）。
+pub fn shadow_val(v: Val, delta: f32) -> Val {
+    match v {
+        Val::Px(p) => Val::Px(p + delta),
+        other => other,
     }
 }
 
@@ -637,6 +695,69 @@ mod tests {
         {
             let (_, t) = q.get(&world, e).unwrap();
             assert_eq!(t.0, "new");
+        }
+    }
+
+    /// #2817 单元①：副本坐标 = 正文坐标 + 该副本自己的偏移；只对 `Px` 平移
+    #[test]
+    fn shadow_val_offsets_px_only() {
+        assert_eq!(shadow_val(Val::Px(10.0), -1.0), Val::Px(9.0));
+        assert_eq!(shadow_val(Val::Px(10.0), 1.0), Val::Px(11.0));
+        // 非 Px 无语义上的「+1px」，原样返回
+        assert_eq!(shadow_val(Val::Auto, 1.0), Val::Auto);
+        assert_eq!(shadow_val(Val::Percent(50.0), -1.0), Val::Percent(50.0));
+    }
+
+    /// #2817 单元①：正文 位置/显隐/字号 变化 → 4 个副本镜像（位置带各自的 1px 偏移）；
+    /// 颜色**不**镜像（副本恒黑，`MirLabel.cs:224` `OutLineColour = Color.Black`）。
+    #[test]
+    fn sync_outline_ui_mirrors_layout_visibility_and_font() {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut main_id = None;
+        commands.spawn(Node::default()).with_children(|p| {
+            main_id = Some(
+                spawn_outlined_label(p, Handle::default(), "T", 10.0, 20.0, 11.0, Color::WHITE, 2)
+                    .id(),
+            );
+        });
+        queue.apply(&mut world);
+        let main = main_id.unwrap();
+        world
+            .run_system_once(sync_outline_ui_system)
+            .expect("首跑应成功");
+
+        // 正文：移到 (100,200)、隐藏、字号 11 → 18、前景色改红
+        world.get_mut::<Node>(main).unwrap().left = Val::Px(100.0);
+        world.get_mut::<Node>(main).unwrap().top = Val::Px(200.0);
+        *world.get_mut::<Visibility>(main).unwrap() = Visibility::Hidden;
+        world.get_mut::<TextFont>(main).unwrap().font_size = FontSize::Px(18.0);
+        world.get_mut::<TextColor>(main).unwrap().0 = Color::srgb(1.0, 0.0, 0.0);
+        world
+            .run_system_once(sync_outline_ui_system)
+            .expect("镜像同步应成功");
+
+        let shadows = world
+            .entity(main)
+            .get::<OutlineUiShadows>()
+            .unwrap()
+            .0
+            .clone();
+        assert_eq!(shadows.len(), 4);
+        let mut q = world.query::<(&Text, &Node, &Visibility, &TextFont, &TextColor)>();
+        for (i, e) in shadows.iter().enumerate() {
+            let (t, n, v, f, c) = q.get(&world, *e).unwrap();
+            let (dx, dy) = OUTLINE_OFFSETS_UI[i];
+            assert_eq!(t.0, "T", "副本 {i} 内容");
+            assert_eq!(
+                (n.left, n.top),
+                (Val::Px(100.0 + dx), Val::Px(200.0 + dy)),
+                "副本 {i} 跟随正文移动（带自己的 1px 偏移）"
+            );
+            assert_eq!(*v, Visibility::Hidden, "副本 {i} 跟随正文隐藏");
+            assert_eq!(f.font_size, FontSize::Px(18.0), "副本 {i} 跟随字号");
+            assert_eq!(c.0, Color::BLACK, "副本 {i} 恒黑（颜色不镜像）");
         }
     }
 }
