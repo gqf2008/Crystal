@@ -799,6 +799,10 @@ fn keyboard_layout_ui_system(
     }
 }
 
+/// #2836 单元①：角色对话框的「装备页」页号（`character::CharPage`：0=角色 1=状态 2=状态2 3=技能）
+/// —— C# `CharacterDialog.ShowCharacterPage()` 对应页
+pub const CHAR_PAGE_EQUIPMENT: usize = 0;
+
 /// 快捷键打开/关闭窗口（#148/#1370，C# KeybindOptions 对齐；随键位设置可重绑）
 /// 覆盖：背包/角色/技能/好友/宠物/坐骑/钓鱼/夫妻/队伍/商城/大地图/排行/键位/帮助/行会/小地图/任务/设置/租赁
 /// #2595：文本输入聚焦时让路（C# WinForms 焦点路由——TextBox 聚焦则
@@ -827,11 +831,10 @@ fn dialog_hotkey_system(
     // #2595：该绑定在当前聚焦状态下是否应让路
     let blocked = |b: &KeyBinding| gate.0 && !forwarded_while_typing(b.key);
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
-    let map: [(&str, DialogKind); 24] = [
+    let map: [(&str, DialogKind); 22] = [
         ("背包", DialogKind::Inventory),
         ("背包2", DialogKind::Inventory),
-        ("角色", DialogKind::Character),
-        ("角色2", DialogKind::Character),
+        // #2836 单元①：「角色/角色2」不在此表 —— C# 是**页感知**切换（见下方循环）
         ("英雄背包", DialogKind::HeroInventory),
         ("英雄装备", DialogKind::HeroEquipment),
         ("英雄技能", DialogKind::HeroSkill),
@@ -901,6 +904,27 @@ fn dialog_hotkey_system(
                     page.0 = 3;
                 }
                 tracing::info!("🎯 技能快捷键（{}）→ 角色技能页", action);
+            }
+        }
+    }
+    // #2836 单元①：装备键（C# `GameScene.cs:563-571` `KeybindOptions.Equipment/Equipment2`）：
+    //   if (!CharacterDialog.Visible || !CharacterDialog.CharacterPage.Visible) { Show(); ShowCharacterPage(); }
+    //   else Hide();
+    // 即「不在角色页（CharPage 0）→ 打开并切到角色页；已在角色页 → 关窗」。
+    // 此前走通用 `mgr.toggle`，在技能/状态页按角色键会把整窗关掉，与 C# 相反。
+    for action in ["角色", "角色2"] {
+        if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+            if blocked(b) {
+                continue;
+            }
+            if b.matches(&keys) {
+                if mgr.is_open(DialogKind::Character) && page.0 == CHAR_PAGE_EQUIPMENT {
+                    mgr.close(DialogKind::Character);
+                } else {
+                    mgr.open(DialogKind::Character);
+                    page.0 = CHAR_PAGE_EQUIPMENT;
+                }
+                tracing::info!("🎯 装备快捷键（{}）→ 角色页", action);
             }
         }
     }
@@ -1158,6 +1182,74 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(pressed);
         app
+    }
+
+    /// #2720：租赁浏览窗快捷键（Bevy 扩展；C# `KeybindOptions.Rental` 有枚举成员但
+    /// `KeyBindSettings` 无默认绑定行）
+    ///
+    /// #2836 单元①：装备键的**页感知**语义（C# `GameScene.cs:563-571`）——
+    /// 「不在角色页 → 打开并切到角色页；已在角色页 → 关窗」，而不是无脑 toggle。
+    #[test]
+    fn equipment_hotkey_is_page_aware() {
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        use bevy::input::ButtonInput;
+
+        let key = default_bindings()
+            .into_iter()
+            .find(|b| b.action == "角色")
+            .expect("默认键位应含「角色」")
+            .key;
+        let mut app = hotkey_app(false, key);
+
+        // ① 未开窗 → 打开并落到角色页（CharPage 0）
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Character),
+            "装备键应打开角色窗"
+        );
+        assert_eq!(
+            app.world().resource::<CharPage>().0,
+            CHAR_PAGE_EQUIPMENT,
+            "应切到角色页"
+        );
+
+        // ② 停在技能页再按 → 切回角色页而**不关窗**（C# `!CharacterPage.Visible` 分支）
+        app.world_mut().resource_mut::<CharPage>().0 = 3;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Character),
+            "在别的页按装备键不应关窗"
+        );
+        assert_eq!(
+            app.world().resource::<CharPage>().0,
+            CHAR_PAGE_EQUIPMENT,
+            "应切回角色页"
+        );
+
+        // ③ 已在角色页再按 → 关窗（C# else Hide()）
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Character),
+            "已在角色页按装备键应关窗"
+        );
     }
 
     /// #2720：租赁浏览窗快捷键（Bevy 扩展；C# `KeybindOptions.Rental` 有枚举成员但
