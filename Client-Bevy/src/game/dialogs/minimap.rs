@@ -161,6 +161,7 @@ fn spawn_minimap(
     mut fonts: ResMut<Assets<Font>>,
     mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
 ) {
 if !crate::ui::sprite_ui::ui_enabled("map") {
     return;
@@ -214,14 +215,59 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
         spawn_label(p, &cjk, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3)
             .insert(MiniMapPosText);
         // 大小切换按钮（C# ToggleButton Prguse[2102/2103/2104] (109,3)）
-        spawn_minimap_button(p, &mut libs, &mut images, 2102, 2103, 2104, 109.0, 3.0, 4)
-            .insert(MiniMapToggle);
+        // #2775：Hint 取 C# `MainDialogs.cs:1849`（MiniMapKey =「小地图 ({Minimap})」）
+        spawn_minimap_button(p, &mut libs, &mut images, 2102, 2103, 2104, 109.0, 3.0, 4).insert((
+            MiniMapToggle,
+            crate::ui::tooltip::UiHint {
+                text: crate::game::dialogs::keyboard_layout::hint_with_key(
+                    &kb.bindings,
+                    "小地图 ({0})",
+                    "小地图",
+                ),
+            },
+        ));
         // 邮件按钮（C# MailButton Prguse[2099/2100/2101] (4, bottom_y)）
-        spawn_minimap_button(p, &mut libs, &mut images, 2099, 2100, 2101, 4.0, BOTTOM_Y_BIG, 4)
-            .insert(MiniMapMailButton);
+        // #2775：C# `MainDialogs.cs:1813`（Mail =「邮件」，无键位）
+        spawn_minimap_button(
+            p,
+            &mut libs,
+            &mut images,
+            2099,
+            2100,
+            2101,
+            4.0,
+            BOTTOM_Y_BIG,
+            4,
+        )
+        .insert((
+            MiniMapMailButton,
+            crate::ui::tooltip::UiHint {
+                text: "邮件".to_string(),
+            },
+        ));
         // 大地图按钮（C# BigMapButton Prguse[2096/2097/2098] (25, bottom_y)）
-        spawn_minimap_button(p, &mut libs, &mut images, 2096, 2097, 2098, 25.0, BOTTOM_Y_BIG, 4)
-            .insert(MiniMapBigMapButton);
+        // #2775：C# `MainDialogs.cs:1836`（BigMapKey =「大地图 ({Bigmap})」）
+        spawn_minimap_button(
+            p,
+            &mut libs,
+            &mut images,
+            2096,
+            2097,
+            2098,
+            25.0,
+            BOTTOM_Y_BIG,
+            4,
+        )
+        .insert((
+            MiniMapBigMapButton,
+            crate::ui::tooltip::UiHint {
+                text: crate::game::dialogs::keyboard_layout::hint_with_key(
+                    &kb.bindings,
+                    "大地图 ({0})",
+                    "大地图",
+                ),
+            },
+        ));
         // 灯光状态指示（C# LightSetting：2093 Normal/Day、2095 Dawn、2094 Evening、2092 Night）
         if let (Some(normal), Some(dawn), Some(evening), Some(night)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2093),

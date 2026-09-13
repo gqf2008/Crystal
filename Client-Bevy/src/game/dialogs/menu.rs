@@ -8,14 +8,13 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::keyboard_layout::KeyboardState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
-use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_image,
-};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MenuAction {
@@ -43,6 +42,29 @@ pub struct MenuBtn(pub MenuAction);
 /// 退出确认面板（C# MirMessageBox 对齐）
 #[derive(Component)]
 pub struct MenuExitConfirm;
+
+/// #2775：C# `MainDialogs.cs:3042-3257` MenuDialog 13 个按钮的 Hint（模板取
+/// `Client/Localization/Chinese.json`：ExitKey/LogOutKey/HelpKey/KeyboardKeybind/RankingKey/
+/// CreaturesKey/MountKey/FishingKey/FriendsKey/MentorKey/RelationshipKey/GroupsKey/GuildKey）。
+/// C# `KeybindOptions.Mentor` 默认 `Keys.None` → 键位串为空，C# 实际渲染「师徒 ()」，此处同。
+fn menu_hint(action: MenuAction, kb: &KeyboardState) -> String {
+    let (template, key_action) = match action {
+        MenuAction::Exit => ("退出 ({0})", "退出"),
+        MenuAction::Logout => ("退出游戏 ({0})", "下线"),
+        MenuAction::Help => ("帮助 ({0})", "帮助"),
+        MenuAction::Keyboard => ("键盘 ({0})", "键位"),
+        MenuAction::Ranking => ("排名 ({0})", "排行"),
+        MenuAction::Creature => ("宠物 ({0})", "宠物"),
+        MenuAction::Mount => ("坐骑 ({0})", "坐骑"),
+        MenuAction::Fishing => ("钓鱼 ({0})", "钓鱼"),
+        MenuAction::Friends => ("好友 ({0})", "好友"),
+        MenuAction::Mentor => ("师徒 ({0})", "师徒"),
+        MenuAction::Relationship => ("关系 ({0})", "夫妻"),
+        MenuAction::Group => ("队伍 ({0})", "队伍"),
+        MenuAction::Guild => ("公会 ({0})", "行会"),
+    };
+    crate::game::dialogs::keyboard_layout::hint_with_key(&kb.bindings, template, key_action)
+}
 
 #[derive(Component)]
 pub struct MenuExitYes;
@@ -107,6 +129,7 @@ fn spawn_menu_dialog(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    kb: Res<KeyboardState>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -129,8 +152,12 @@ fn spawn_menu_dialog(
                 load_lib_image(&mut libs, &mut images, *lib, *h),
                 load_lib_image(&mut libs, &mut images, *lib, *pr),
             ) {
-                spawn_icon_button(p, nh, hh, ph, MENU_BTN_DX, *y, 38.0, 19.0, 10)
-                    .insert(MenuBtn(*action));
+                spawn_icon_button(p, nh, hh, ph, MENU_BTN_DX, *y, 38.0, 19.0, 10).insert((
+                    MenuBtn(*action),
+                    crate::ui::tooltip::UiHint {
+                        text: menu_hint(*action, &kb),
+                    },
+                ));
             }
         }
     });
