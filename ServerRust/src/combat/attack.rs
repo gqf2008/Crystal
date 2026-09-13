@@ -188,6 +188,51 @@ pub(crate) fn struck_damage(
     }
 }
 
+/// BOSS 地面法术场的「防御类型 + 概率附加状态」档位（C# `SpellObject.ProcessSpell`，
+/// `Server/MirObjects/SpellObject.cs:214-378`）：
+///
+/// | 法术 | 防御 | 附加状态（概率） |
+/// |---|---|---|
+/// | `MapQuake1`/`MapQuake2`（`:214-222`） | MAC | — |
+/// | `GeneralMeowMeowThunder`（`:223-233`） | MAC | — |
+/// | `TreeQueenRoot`/`TreeQueenMassRoots`（`:234-255`） | MAC | — |
+/// | `TreeQueenGroundRoots`（`:256-270`） | MAC | `Random(3) > 0` → Paralysis 5s |
+/// | `StoneGolemQuake`（`:271-281`）/`EarthGolemPile`（`:282-292`）/`TucsonGeneralRock`（`:293-303`） | AC | — |
+/// | `HornedCommanderRockFall`/`HornedCommanderRockSpike`（`:367-378`） | AC | — |
+/// | `HornedSorcererDustTornado`（`:356-366`） | AC | — |
+/// | `FlyingStatueIceTornado`（`:330-344`） | MAC | `Random(8) == 0` → Slow 5s |
+/// | `DarkOmaKingNuke`（`:345-355`） | AC | 必中 → Dazed 5s |
+///
+/// 返回 `(防御类型, 附加状态档)`；附加状态档为 `(毒类型, 分子, 分母)`——`num/den` 表示命中概率
+/// （`1/1` = 必中）。未列入本组的法术返回 `None`。
+pub(crate) fn boss_ground_spell_profile(
+    spell: mir2_shared::enums::Spell,
+) -> Option<(
+    mir2_shared::enums::DefenceType,
+    Option<(mir2_shared::enums::PoisonType, i32, i32)>,
+)> {
+    use mir2_shared::enums::{DefenceType, PoisonType, Spell};
+    match spell {
+        Spell::MapQuake1
+        | Spell::MapQuake2
+        | Spell::GeneralMeowMeowThunder
+        | Spell::TreeQueenRoot
+        | Spell::TreeQueenMassRoots => Some((DefenceType::Mac, None)),
+        Spell::TreeQueenGroundRoots => {
+            Some((DefenceType::Mac, Some((PoisonType::PARALYSIS, 2, 3))))
+        }
+        Spell::FlyingStatueIceTornado => Some((DefenceType::Mac, Some((PoisonType::SLOW, 1, 8)))),
+        Spell::StoneGolemQuake
+        | Spell::EarthGolemPile
+        | Spell::TucsonGeneralRock
+        | Spell::HornedCommanderRockFall
+        | Spell::HornedCommanderRockSpike
+        | Spell::HornedSorcererDustTornado => Some((DefenceType::Ac, None)),
+        Spell::DarkOmaKingNuke => Some((DefenceType::Ac, Some((PoisonType::DAZED, 1, 1)))),
+        _ => None,
+    }
+}
+
 // ============================================================
 // 命中+护甲判定 GetArmour（MapObject.cs:460）
 // ============================================================
@@ -827,5 +872,60 @@ mod tests {
         assert_eq!(struck_damage(10, 100, 1.0, 1.0, 50), 40);
         // 无护甲且无减伤 → 原值
         assert_eq!(struck_damage(0, 37, 1.0, 1.0, 0), 37);
+    }
+
+    /// #2847：BOSS 地面法术场的 (防御类型, 附加状态) 档位逐项对齐 C# `SpellObject.cs:214-378`
+    #[test]
+    fn boss_ground_spell_profile_matches_csharp() {
+        use mir2_shared::enums::{DefenceType, PoisonType, Spell};
+
+        // MAC 组（无附加状态）
+        for s in [
+            Spell::MapQuake1,
+            Spell::MapQuake2,
+            Spell::GeneralMeowMeowThunder,
+            Spell::TreeQueenRoot,
+            Spell::TreeQueenMassRoots,
+        ] {
+            assert_eq!(
+                boss_ground_spell_profile(s),
+                Some((DefenceType::Mac, None)),
+                "{s:?}"
+            );
+        }
+        // TreeQueenGroundRoots：MAC + 2/3 Paralysis
+        assert_eq!(
+            boss_ground_spell_profile(Spell::TreeQueenGroundRoots),
+            Some((DefenceType::Mac, Some((PoisonType::PARALYSIS, 2, 3))))
+        );
+        // FlyingStatueIceTornado：MAC + 1/8 Slow
+        assert_eq!(
+            boss_ground_spell_profile(Spell::FlyingStatueIceTornado),
+            Some((DefenceType::Mac, Some((PoisonType::SLOW, 1, 8))))
+        );
+        // AC 组（无附加状态）
+        for s in [
+            Spell::StoneGolemQuake,
+            Spell::EarthGolemPile,
+            Spell::TucsonGeneralRock,
+            Spell::HornedCommanderRockFall,
+            Spell::HornedCommanderRockSpike,
+            Spell::HornedSorcererDustTornado,
+        ] {
+            assert_eq!(
+                boss_ground_spell_profile(s),
+                Some((DefenceType::Ac, None)),
+                "{s:?}"
+            );
+        }
+        // DarkOmaKingNuke：AC + 必中 Dazed
+        assert_eq!(
+            boss_ground_spell_profile(Spell::DarkOmaKingNuke),
+            Some((DefenceType::Ac, Some((PoisonType::DAZED, 1, 1))))
+        );
+        // 非本组法术 → None（如 FireWall/HealingCircle 由各自分支处理）
+        assert_eq!(boss_ground_spell_profile(Spell::FireWall), None);
+        assert_eq!(boss_ground_spell_profile(Spell::HealingCircle), None);
+        assert_eq!(boss_ground_spell_profile(Spell::None), None);
     }
 }

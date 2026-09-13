@@ -6548,6 +6548,16 @@ impl WorldActor {
         let mut spell_hits: Vec<(u64, Spell, i32, i32, i32, Vec<u32>)> = Vec::new();
         // #1856：地面法术命中的玩家（C# SpellObject.ProcessSpell Player 分支）
         let mut player_spell_hits: Vec<(u64, Spell, i32, Vec<u64>)> = Vec::new();
+        // #2847：BOSS 地面法术场命中收集（caster_oid, spell, value, 防御类型, 怪物 ids, 玩家 sessions）
+        // ——C# `SpellObject.ProcessSpell`（`SpellObject.cs:214-378`）；须在循环外结算以避免双借用
+        let mut ground_field_hits: Vec<(
+            u32,
+            Spell,
+            i32,
+            mir2_shared::enums::DefenceType,
+            Vec<u32>,
+            Vec<u64>,
+        )> = Vec::new();
         let mut heal_targets: Vec<u64> = Vec::new();
         let mut heal_amounts: Vec<i32> = Vec::new();
 
@@ -6802,6 +6812,67 @@ impl WorldActor {
                         }
                         expired_ids.push(*obj_id);
                     }
+                // #2847：BOSS 地面法术场（TreeQueen 根刺 / HornedCommander 落石·尖刺 / MapQuake /
+                // DarkOmaKing 核爆 / FlyingStatue 冰龙卷 / HornedSorcerer 沙旋 / StoneGolem 震地 /
+                // EarthGolem 土堆 / TucsonGeneral 落石 / GeneralMeowMeow 雷）——
+                // 这些法术对象此前**不产生任何效果**（tick 分派里没有它们的 arm），
+                // 现按 C# `SpellObject.ProcessSpell`（`SpellObject.cs:214-378`）结算。
+                other if crate::combat::attack::boss_ground_spell_profile(other).is_some() => {
+                    let (defence_type, _status) =
+                        crate::combat::attack::boss_ground_spell_profile(other).unwrap();
+                    // C# 门槛：玩家/怪物、非死亡、非施法者本身、`IsAttackTarget(Caster)`；`Value != 0`（三例除外）
+                    let value = spell_obj.tick_value;
+                    // 目标格：cells 为空 = 单格（C# 每个 SpellObject 就是一格）
+                    let in_cell = |x: i32, y: i32| {
+                        if spell_obj.cells.is_empty() {
+                            x == spell_obj.x && y == spell_obj.y
+                        } else {
+                            spell_obj.cells.contains(&(x, y))
+                        }
+                    };
+                    let hit_monsters: Vec<u32> = self
+                        .monsters
+                        .iter()
+                        .filter(|(_, m)| {
+                            m.hp > 0
+                                && m.map_index == spell_obj.map_index
+                                && m.object_id != spell_obj.caster_id
+                                && m.behavior.is_attackable()
+                                && in_cell(m.x, m.y)
+                        })
+                        .map(|(id, _)| *id)
+                        .collect();
+                    let hit_players: Vec<u64> = {
+                        let mut ids = Vec::new();
+                        for (sid, r) in &self.players {
+                            if *sid == spell_obj.caster_session {
+                                continue;
+                            }
+                            if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                                if ps.is_dead || ps.map_index != spell_obj.map_index {
+                                    continue;
+                                }
+                                if self.gm_protected.contains(sid) {
+                                    continue;
+                                }
+                                if in_cell(ps.x, ps.y) {
+                                    ids.push(*sid);
+                                }
+                            }
+                        }
+                        ids
+                    };
+                    if !hit_monsters.is_empty() || !hit_players.is_empty() {
+                        ground_field_hits.push((
+                            spell_obj.caster_id,
+                            other,
+                            value,
+                            defence_type,
+                            hit_monsters,
+                            hit_players,
+                        ));
+                    }
+                }
                 _ => {}
             }
         }
@@ -6908,6 +6979,101 @@ impl WorldActor {
                 &player_ids,
             )
             .await;
+        }
+
+        // #2847：BOSS 地面法术场结算（`Struck` 语义 + 概率附加状态）
+        for (caster_oid, spell, value, defence_type, monster_ids, player_ids) in ground_field_hits {
+            let Some((_, status)) = crate::combat::attack::boss_ground_spell_profile(spell) else {
+                continue;
+            };
+            // C# 只在部分分支做 `Value == 0` 短路（TreeQueen 地根 / 冰龙卷 / DarkOmaKing 核爆 无条件走完）
+            let zero_short_circuit = !matches!(
+                spell,
+                Spell::TreeQueenGroundRoots
+                    | Spell::FlyingStatueIceTornado
+                    | Spell::DarkOmaKingNuke
+            );
+            if zero_short_circuit && value == 0 {
+                continue;
+            }
+            for mid in monster_ids {
+                if let Some(monster) = self.monsters.get_mut(&mid) {
+                    let d = monster.to_combat_stats();
+                    let armour = match defence_type {
+                        mir2_shared::enums::DefenceType::Mac => {
+                            crate::combat::attack::get_defence_power(d.min_mac, d.max_mac)
+                        }
+                        _ => crate::combat::attack::get_defence_power(d.min_ac, d.max_ac),
+                    };
+                    let damage = crate::combat::attack::struck_damage(
+                        armour,
+                        value,
+                        d.armour_rate,
+                        d.damage_rate,
+                        d.damage_reduction_percent,
+                    );
+                    if damage > 0 {
+                        monster.take_damage(damage);
+                    }
+                    if let Some((ptype, num, den)) = status {
+                        if den > 0 && fastrand::i32(0..den) < num {
+                            monster.apply_poison_defended(crate::combat::poison::Poison::new(
+                                ptype, 5, 0, 1000,
+                            ));
+                        }
+                    }
+                }
+            }
+            for sid in player_ids {
+                let Some(record) = self.players.get(&sid) else {
+                    continue;
+                };
+                let Ok(Some(ps)) = record.actor_ref.ask(GetPlayerState).await else {
+                    continue;
+                };
+                if ps.is_dead {
+                    continue;
+                }
+                let d = ps.to_combat_stats();
+                let armour = match defence_type {
+                    mir2_shared::enums::DefenceType::Mac => {
+                        crate::combat::attack::get_defence_power(d.min_mac, d.max_mac)
+                    }
+                    _ => crate::combat::attack::get_defence_power(d.min_ac, d.max_ac),
+                };
+                let damage = crate::combat::attack::struck_damage(
+                    armour,
+                    value,
+                    d.armour_rate,
+                    d.damage_rate,
+                    d.damage_reduction_percent,
+                );
+                if damage > 0 {
+                    let died = record
+                        .actor_ref
+                        .ask(TakeDamage {
+                            attacker_id: caster_oid,
+                            attacker_session: 0,
+                            damage,
+                        })
+                        .await
+                        .unwrap_or(false);
+                    if died {
+                        self.player_death_queue.insert(sid, self.tick_count);
+                    }
+                }
+                if let Some((ptype, num, den)) = status {
+                    if den > 0 && fastrand::i32(0..den) < num {
+                        let poison = crate::combat::poison::Poison::new(ptype, 5, 0, 1000);
+                        let _ = record
+                            .actor_ref
+                            .ask(crate::actors::player::ApplyCombatPoisons {
+                                poisons: vec![poison],
+                            })
+                            .await;
+                    }
+                }
+            }
         }
 
         for (sid, amount) in heal_targets.iter().zip(heal_amounts.iter()) {
