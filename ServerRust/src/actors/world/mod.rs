@@ -10992,22 +10992,53 @@ fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mai
         .try_send();
 }
 
+/// #2786：PlayerInspect 包的**身份段**（两端手写线格式，客户端 `handle_progress.rs`
+/// 的 `PlayerInspect` 分支按同一顺序解析）：
+/// `[object_id u32][name dotnet][guild dotnet][level u16][class u8][gender u8]
+///  [lover_name dotnet][allow_observe u8]`，其后接 `[count u8][装备项...]`。
+///
+/// 字段顺序的语义参照 C# `S.PlayerInspect`（Level → LoverName → AllowObserve）：
+/// C# 侧 `InspectDialog.LoverButton` 的 Hint 就是配偶名（`MainDialogs.cs:2499-2505`），
+/// 故配偶名必须随包下发（服务端 `PlayerState.spouse_name` 已有，无需查库）。
+fn inspect_identity_bytes(
+    object_id: u32,
+    name: &str,
+    guild: &str,
+    level: u16,
+    class: u8,
+    gender: u8,
+    lover_name: &str,
+    allow_observe: bool,
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    write_dotnet_string(&mut body, name);
+    write_dotnet_string(&mut body, guild);
+    body.extend_from_slice(&level.to_le_bytes());
+    body.push(class);
+    body.push(gender);
+    write_dotnet_string(&mut body, lover_name);
+    // #2611：允许观察标志（C# GameScene.cs:3159 从包读 AllowObserve 门控 Observe 按钮）
+    body.push(if allow_observe { 1u8 } else { 0u8 });
+    body
+}
+
 fn send_inspect_packet(
     gate_ref: &ActorRef<GateActor>,
     session_id: u64,
     state: &crate::actors::player::PlayerState,
 ) {
     use mir2_shared::enums::ServerPacketIds;
-    let mut body = Vec::new();
-
-    body.extend_from_slice(&state.object_id.to_le_bytes());
-    write_dotnet_string(&mut body, &state.name);
-    write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));
-    body.extend_from_slice(&state.level.to_le_bytes());
-    body.push(state.class as u8);
-    body.push(state.gender as u8);
-    // #2611：允许观察标志（C# GameScene.cs:3159 从包读 AllowObserve 门控 Observe 按钮）
-    body.push(if state.allow_observe { 1u8 } else { 0u8 });
+    let mut body = inspect_identity_bytes(
+        state.object_id,
+        &state.name,
+        state.guild_name.as_deref().unwrap_or(""),
+        state.level,
+        state.class as u8,
+        state.gender as u8,
+        state.spouse_name.as_deref().unwrap_or(""),
+        state.allow_observe,
+    );
     // 装备信息（只发送已装备的；#2607 每件前置 slot u8——旧格式
     // filter 后槽位下标丢失，客户端 14 格网格无法定位）
     body.push(
@@ -11056,14 +11087,12 @@ fn send_basic_inspect_packet(
     gender: u8,
 ) {
     use mir2_shared::enums::ServerPacketIds;
-    let mut body = Vec::new();
-    body.extend_from_slice(&0u32.to_le_bytes()); // object_id = 0（离线）
-    write_dotnet_string(&mut body, name);
-    write_dotnet_string(&mut body, guild);
-    body.extend_from_slice(&level.to_le_bytes());
-    body.push(class);
-    body.push(gender);
-    body.push(0u8); // allow_observe（#2611：离线排行查看默认禁观察）
+    let mut body = inspect_identity_bytes(
+        0, // object_id = 0（离线）
+        name, guild, level, class, gender,
+        "", // #2786：离线查看不带配偶名（C# 离线同样无该字段值）
+        false,
+    );
     body.push(0u8); // 装备数 = 0
     let _ = gate_ref
         .tell(SendToClient {
@@ -15648,5 +15677,38 @@ mod goods_tests {
         assert_eq!(moved, 1);
         assert_eq!(used[&3].len(), 1);
         assert_eq!(used[&3][0].unique_id, 2);
+    }
+}
+
+#[cfg(test)]
+mod inspect_wire_tests {
+    use super::inspect_identity_bytes;
+
+    /// #2786：`PlayerInspect` 身份段字节契约——与客户端
+    /// `handle_progress::tests::player_inspect_identity_wire_contract` 用**同一串手推字节**互为见证
+    /// （lover_name 夹在 gender 与 allow_observe 之间；dotnet 字符串 = 7bit 长度 + UTF-8）。
+    #[test]
+    fn inspect_identity_wire_contract() {
+        let body = inspect_identity_bytes(7, "abc", "行会", 30, 0, 1, "老婆", true);
+        assert_eq!(
+            body,
+            vec![
+                7, 0, 0, 0, // object_id
+                3, b'a', b'b', b'c', // name
+                6, 0xe8, 0xa1, 0x8c, 0xe4, 0xbc, 0x9a, // guild 行会
+                30, 0, // level
+                0, // class
+                1, // gender
+                6, 0xe8, 0x80, 0x81, 0xe5, 0xa9, 0x86, // lover_name 老婆
+                1,    // allow_observe
+            ]
+        );
+        // 负控：配偶名为空时只少 6 字节 UTF-8（dotnet 字符串的长度字节仍在；离线查看路径同此）
+        let empty = inspect_identity_bytes(7, "abc", "行会", 30, 0, 1, "", true);
+        assert_eq!(
+            body.len() - empty.len(),
+            6,
+            "空配偶名只少 6 字节 UTF-8，长度字节保留"
+        );
     }
 }

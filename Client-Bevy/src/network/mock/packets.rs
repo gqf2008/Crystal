@@ -141,7 +141,9 @@ impl Packet for MockCreatureList {
     }
 }
 
-/// #619/#2607：查看玩家（客户端格式 [oid u32][name dotnet][guild dotnet][level u16][class u8][gender u8][count u8][per: slot u8][uid u64][idx i32][image i32][dura i32][max_dura i32]）
+/// #619/#2607/#2786：查看玩家（客户端格式 [oid u32][name dotnet][guild dotnet][level u16]
+/// [class u8][gender u8][lover_name dotnet][allow_observe u8][count u8]
+/// [per: slot u8][uid u64][idx i32][image i32][dura i32][max_dura i32]）
 pub(crate) struct MockPlayerInspect {
     pub(crate) object_id: u32,
 }
@@ -161,6 +163,8 @@ impl Packet for MockPlayerInspect {
         writer.write_u16::<LittleEndian>(30)?; // level
         writer.write_u8(MirClass::Warrior as u8)?;
         writer.write_u8(MirGender::Male as u8)?;
+        // #2786：配偶名（观察窗伴侣钮；与真实服务端同序）
+        mir2_shared::binary::write_dotnet_string(writer, "示范伴侣")?;
         writer.write_u8(1)?; // allow_observe（#2611）
         writer.write_u8(1)?; // 装备数
         writer.write_u8(0)?; // slot（服务端旧序 0=Weapon）

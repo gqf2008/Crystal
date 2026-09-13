@@ -55,6 +55,8 @@ pub struct InspectState {
     pub level: u16,
     pub class: u8,
     pub gender: u8,
+    /// #2786：配偶名（C# `InspectDialog.LoverName`；非空时显示伴侣钮，Hint 即该名）
+    pub lover_name: String,
     /// 允许观察（#2611：Observe 按钮门控，服务端下发）
     pub allow_observe: bool,
     pub items: Vec<InspectItem>,
@@ -82,6 +84,10 @@ pub struct InspectDoll(pub u8);
 /// 五动作按钮（C# :2223-2315）：组队/加友/邮件/交易/观察
 #[derive(Component)]
 pub struct InspectBtn(pub InspectBtnKind);
+
+/// #2786：伴侣钮（C# `InspectDialog.LoverButton` `Prguse[604]` @(17,17)）
+#[derive(Component)]
+pub struct InspectLoverBtn;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum InspectBtnKind {
@@ -135,12 +141,16 @@ fn spawn_inspect(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<crate::ui::sprite_ui::UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // #2786：名字/行会/伴侣名都是动态中文文本 → 用共享宋体主字体（Arial 的 Hani 回退
+    // 只在实体首次排版生效，行会名会整行豆腐；批17/19 同因）
+    let cjk = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[430]（C# MainDialogs.cs:2153，264x408 @ (536,0)）。
     // 不加 Overflow::clip：纸娃娃锚点在面板上方 y=-20（C# 语义）
@@ -179,9 +189,10 @@ fn spawn_inspect(
             spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(InspectClose);
         }
         // 名字（8F 居中 @ 框心 (145,22)）/ 行会（@ 框心 (145,48)）
-        spawn_label_center(p, &font, "", 145.0, 18.0, 190.0, 8.0, Color::WHITE, 9)
+        // #2786：名字/行会用共享宋体（`font` 是 Arial，中文行会名会整行豆腐）
+        spawn_label_center(p, &cjk, "", 145.0, 18.0, 190.0, 8.0, Color::WHITE, 9)
             .insert(InspectNameText);
-        spawn_label_center(p, &font, "", 145.0, 44.0, 190.0, 8.0, Color::WHITE, 9)
+        spawn_label_center(p, &cjk, "", 145.0, 44.0, 190.0, 8.0, Color::WHITE, 9)
             .insert(InspectGuildText);
         // 纸娃娃层（C# :2166-2206 锚点=对话框原点+(0,-20)，z 层叠）
         for (slot, z) in [(1u8, 9u8), (0u8, 10u8), (2u8, 11u8)] {
@@ -191,6 +202,21 @@ fn spawn_inspect(
         // 职业图标 Prguse[100]@(15,33)（按 class 换帧在 icon_system）
         let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
         spawn_image(p, white, 15.0, 33.0, 1.0, 1.0, 9).insert(InspectClassImage);
+        // #2786：伴侣钮（C# `InspectDialog.LoverButton` `Prguse[604]` @(17,17)，单帧无三态；
+        // 非空配偶名才显示，Hint 就是配偶名本身——C# `:2499-2505`）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 604) {
+            let (w, hh) = match libs.0.get_image(LibraryName::Prguse, 604) {
+                Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                None => (30.0, 30.0),
+            };
+            spawn_image(p, h, 17.0, 17.0, w, hh, 9).insert((
+                InspectLoverBtn,
+                crate::ui::tooltip::UiHint {
+                    text: String::new(),
+                },
+                Visibility::Hidden,
+            ));
+        }
         // 五动作按钮（C# :2223-2315；Group Prguse[431-433]@(55,357)、Friend [434-436]@(85,357)、
         // Mail [437-439]@(115,357)、Trade [523-525]@(145,357)、Observe Title[854-856]@(175,357)）
         let buttons: [(InspectBtnKind, LibraryName, usize, usize, usize, f32); 5] = [
@@ -370,6 +396,19 @@ fn inspect_icon_system(
             Without<InspectCellIcon>,
             Without<InspectPage>,
             Without<InspectClassImage>,
+            // #2786：与下面的伴侣钮查询显式互斥（都写 Visibility，否则 B0001）
+            Without<InspectLoverBtn>,
+        ),
+    >,
+    // #2786：伴侣钮（显隐 + Hint = 配偶名）
+    mut lover: Query<
+        (&mut Visibility, &mut crate::ui::tooltip::UiHint),
+        (
+            With<InspectLoverBtn>,
+            Without<InspectDoll>,
+            Without<InspectCellIcon>,
+            Without<InspectPage>,
+            Without<InspectClassImage>,
         ),
     >,
 ) {
@@ -380,7 +419,21 @@ fn inspect_icon_system(
         for (_, _, mut vis, _) in &mut dolls {
             *vis = Visibility::Hidden;
         }
+        for (mut vis, _) in &mut lover {
+            *vis = Visibility::Hidden;
+        }
         return;
+    }
+    // #2786：伴侣钮 —— C# `RefreshInferface` :2499-2505（`LoverName != ""` 才显示，Hint = 配偶名）
+    for (mut vis, mut hint) in &mut lover {
+        *vis = if state.lover_name.is_empty() {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+        if hint.text != state.lover_name {
+            hint.text = state.lover_name.clone();
+        }
     }
     let page_idx = if state.gender == 1 { 341 } else { 340 };
     for mut node in &mut page {
@@ -458,12 +511,23 @@ fn inspect_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::InspectPlayer { name, guild, level, class, gender, allow_observe, items } = ev {
+        if let ServerEvent::InspectPlayer {
+            name,
+            guild,
+            level,
+            class,
+            gender,
+            lover_name,
+            allow_observe,
+            items,
+        } = ev
+        {
             inspect.name = name.clone();
             inspect.guild = guild.clone();
             inspect.level = *level;
             inspect.class = *class;
             inspect.gender = *gender;
+            inspect.lover_name = lover_name.clone();
             inspect.allow_observe = *allow_observe;
             inspect.items = items.clone();
             mgr.open(DialogKind::Inspect);
