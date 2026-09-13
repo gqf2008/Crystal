@@ -614,6 +614,12 @@ pub struct AwakeningIniSettings {
     pub chance_max: [u8; 5],
     /// C# Awake.AwakeMaterialRate（[Materials_IncreaseValue] Materials_Common..Heroic；默认 [1.0;5]）
     pub material_rate: [f32; 5],
+    /// C# Awake.AwakeMaterials（`[Materials_BaseValue] <Type>_<Grade>_Material1/2`；默认全 1）
+    /// 索引 = `[type-1][slot][grade-1]`，type 顺序 DC/MC/SC/AC/MAC/HPMP（C# 1..6），
+    /// slot 0 = 类型对应 shape、slot 1 = 通用 shape(100)。
+    /// 注：C# 只加载 5 类（`i < (int)AwakeType.HPMP`），访问 HPMP 时越界；
+    /// 本端按 ini 实际写出的 6 类读取（`Daneo1989/Configs/AwakeningSystem.ini` 含 `HPMP_*` 行），避免越界并让护甲觉醒可用。
+    pub materials_base: [[[u8; 5]; 2]; 6],
 }
 
 impl Default for AwakeningIniSettings {
@@ -627,6 +633,7 @@ impl Default for AwakeningIniSettings {
             armor_rate: 5,
             chance_max: [1, 2, 3, 4, 5],
             material_rate: [1.0, 1.0, 1.0, 1.0, 1.0],
+            materials_base: [[[1; 5]; 2]; 6],
         }
     }
 }
@@ -668,6 +675,7 @@ pub fn load_awakening_settings(configs_dir: &Path) -> AwakeningIniSettings {
         out.armor_rate as i64,
     ) as u8;
     const GRADES: [&str; 5] = ["Common", "Rare", "Legendary", "Mythical", "Heroic"];
+    const TYPES: [&str; 6] = ["DC", "MC", "SC", "AC", "MAC", "HPMP"];
     for (i, grade) in GRADES.iter().enumerate() {
         out.chance_max[i] = ini_get_i64(
             &parsed,
@@ -682,6 +690,20 @@ pub fn load_awakening_settings(configs_dir: &Path) -> AwakeningIniSettings {
             &format!("Materials_{}", grade),
             out.material_rate[i],
         );
+    }
+    // C# Awake.AwakeMaterials：`[Materials_BaseValue] <Type>_<Grade>_Material{1,2}`（默认 1）
+    for (t, type_name) in TYPES.iter().enumerate() {
+        for (g, grade) in GRADES.iter().enumerate() {
+            for slot in 0..2 {
+                out.materials_base[t][slot][g] = ini_get_i64(
+                    &parsed,
+                    "Materials_BaseValue",
+                    &format!("{}_{}_Material{}", type_name, grade, slot + 1),
+                    out.materials_base[t][slot][g] as i64,
+                )
+                .max(0) as u8;
+            }
+        }
     }
     out
 }
@@ -1103,7 +1125,7 @@ BuffExpRate=0
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("AwakeningSystem.ini"),
-            "[Attribute]\nSuccessRate=70\nHitRate=70\nMaxUpgradeLevel=5\n\n[IncreaseValue]\nWeaponValue=1\nHelmetValue=1\nArmorValue=5\n\n[Value]\nChanceMax_Common=1\nChanceMax_Rare=2\nChanceMax_Legendary=3\nChanceMax_Mythical=4\n\n[Materials_IncreaseValue]\nMaterials_Common=1\nMaterials_Rare=1\nMaterials_Legendary=1\nMaterials_Mythical=1\n",
+            "[Attribute]\nSuccessRate=70\nHitRate=70\nMaxUpgradeLevel=5\n\n[IncreaseValue]\nWeaponValue=1\nHelmetValue=1\nArmorValue=5\n\n[Value]\nChanceMax_Common=1\nChanceMax_Rare=2\nChanceMax_Legendary=3\nChanceMax_Mythical=4\n\n[Materials_IncreaseValue]\nMaterials_Common=1\nMaterials_Rare=1\nMaterials_Legendary=1\nMaterials_Mythical=1\n\n[Materials_BaseValue]\nDC_Common_Material1=5\nDC_Common_Material2=2\nHPMP_Common_Material1=7\n",
         ).unwrap();
         std::fs::write(
             dir.join("GemSystem.ini"),
@@ -1120,6 +1142,11 @@ BuffExpRate=0
         // Heroic 未配置 → 保持默认 5（对齐 C# ReadByte 默认值）
         assert_eq!(a.chance_max, [1, 2, 3, 4, 5]);
         assert_eq!(a.material_rate, [1.0, 1.0, 1.0, 1.0, 1.0]);
+        // C# Awake.AwakeMaterials（[Materials_BaseValue]；未配置项保持默认 1）
+        assert_eq!(a.materials_base[0][0], [5, 1, 1, 1, 1]); // DC_Material1
+        assert_eq!(a.materials_base[0][1], [2, 1, 1, 1, 1]); // DC_Material2
+        assert_eq!(a.materials_base[1][0], [1, 1, 1, 1, 1]); // MC 未配置
+        assert_eq!(a.materials_base[5][0], [7, 1, 1, 1, 1]); // HPMP_Material1（本端读 6 类）
         let g = load_gem_settings(&dir);
         assert!(g.stat_independent);
         std::fs::remove_dir_all(&dir).ok();
@@ -1141,6 +1168,9 @@ BuffExpRate=0
             assert_eq!(a2.helmet_rate, 1);
             assert_eq!(a2.armor_rate, 5);
             assert_eq!(a2.chance_max, [1, 2, 3, 4, 5]);
+            // 真实 ini 的 [Materials_BaseValue] 全为 1（DC/…/HPMP × Grade1..4）
+            assert_eq!(a2.materials_base[0][0][0], 1);
+            assert_eq!(a2.materials_base[5][1][3], 1);
             assert!(load_gem_settings(real).stat_independent);
         }
     }
