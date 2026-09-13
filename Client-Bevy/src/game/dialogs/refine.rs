@@ -16,7 +16,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::inventory::InvClickState;
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -157,7 +157,9 @@ fn spawn_refine(
     );
     commands
         .entity(panel)
-        .insert((DialogRoot(DialogKind::Refine), RefineWidget));
+        // #2825 单元①：C# `RefineDialog`（`NPCDialogs.cs:2726`）未设 `Movable` →
+        // 默认 false（`MirControl.cs:372`）→ 精炼窗不可拖动
+        .insert((DialogRoot(DialogKind::Refine), RefineWidget, NotDraggable));
 
     commands.entity(panel).with_children(|p| {
         // 标题精灵 C# Title[18] @(28,8)
@@ -404,5 +406,44 @@ mod tests {
     fn refine_material_slot_mapping() {
         assert_eq!(refine_material_slot(0), 1);
         assert_eq!(refine_material_slot(15), 16);
+    }
+
+    /// #2825 单元①：C# `RefineDialog`（`NPCDialogs.cs:2726`）未设 `Movable` → 默认 false →
+    /// 精炼窗所有根都必须挂 `NotDraggable`，且拖动系统在窗内按下左键不得起拖
+    #[test]
+    fn refine_window_roots_are_not_draggable() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world
+            .run_system_once(super::spawn_refine)
+            .expect("spawn_refine 应成功");
+
+        let mut q = world.query::<(Entity, &DialogRoot)>();
+        let roots: Vec<Entity> = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Refine)
+            .map(|(e, _)| e)
+            .collect();
+        assert!(!roots.is_empty(), "应生成精炼窗根面板");
+        for e in roots {
+            assert!(
+                world.entity(e).contains::<NotDraggable>(),
+                "Refine 根 {e:?} 缺 NotDraggable（C# Movable = false）"
+            );
+        }
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(REFINE_POS.0 + REFINE_W / 2.0, REFINE_POS.1 + REFINE_H / 2.0),
+        );
     }
 }
