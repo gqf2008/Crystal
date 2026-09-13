@@ -155,7 +155,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：430 lib + 2 bin + 1 smoke + 24 alignment 通过（批12 禁用态灰度后基线）。
+- `cargo test`（Client-Bevy）：433 lib + 2 bin + 1 smoke + 24 alignment 通过（批12 背包锁定来源后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -176,6 +176,8 @@
 - 批11 收尾三窗复验（2026-09-13，合并后单一进程 `--skip-login --market-many` + Control API 依次开 Market/Creature/Inventory+Craft 截图）：Market = 10 行 + `第 1/3 页` + 右侧滚动条可滚范围=已累积页；Creature（mock 小猪为已召唤态）= RENAME/OPTIONS/DISABLE/DISMISS 亮态、RELEASE 灰化、无 SUMMON（与 C# `RefreshUI` 已召唤分支一致）；Craft = `Prguse[1109]` 面板 + 「未选择产物——点击左侧商品列表」提示 + AUTO/CRAFT 按钮就位。
 - 批12 禁用态灰度实机复验（2026-09-13，`--skip-login --market-many` + Control API；「有选中」态用临时系统置 `market.selected = Some(0)`，验证后已删除）：Market 无选中时 BUY 区域平均 RGB `(85.3,85.3,85.3)`、色度 `max|R-G|+|G-B| = 0`（真灰度 = `grayscale.ps`），同屏可用的 REFRESH/FIND 保留色度（26/40）——即「灰度只作用于禁用的那一键」；临时选中第 1 行后 BUY 变为 `(101.1,82.7,57.1)`、色度 44（`GrayScale=false` 回原色）。Craft 无配方时 CRAFT 按钮 `(85.4,85.4,85.4)` 色度 0、同排 AUTO `(102.9,92.4,75.4)` 色度 28。
 - 批12 灰度门禁（2026-09-13）：`gray_pixel_matches_csharp_shader`（0.3/0.59/0.11 逐通道 + alpha 保留）、`gray_rgba_keeps_size_and_alpha`、`gray_cache_round_trips_and_dedups`（同源去重 + 灰度→源回溯）、`craft_button_enabled_matches_refresh_craft_cells`、`market_bottom_buttons_gray_when_disabled`；红检：把 `GRAY_COEFFS[0]` 改成 0.25、把 `craft_button_enabled` 改成恒真，两条断言分别如期失败。
+- 批12 背包锁定实机复验（2026-09-13，`--auto-enter --market-many` + Control API；寄售放入/切页签用临时驱动系统注入 `Interaction::Pressed` 与 `market.panel`，验证后已删除）：切到寄售页签并点寄售格后，来源背包格（第 3 格）图标均值 RGB `(73.7,36.6,49.6)` → `(30.2,13.7,19.3)`、色度 52.7 → 23.1（≈`Color.DimGray` 0.412 系数）；切回市场页签后恢复 `(73.7,36.6,49.6)`/52.7。同屏可见 C# `Show()` 的背包右移（`Size.Width + 5 = 497`，`InventoryPlaceAt`）。
+- 批12 背包锁定门禁（2026-09-13）：`inv_lock_reasons_are_isolated`（Craft 收敛不动其它来源、同格多来源需全部解锁）、`inventory_events_release_source_locks`（`ItemEquipped`/`EquipSlotItemResult`/`SplitItem1Result` 分别解锁 Equip/Socket/Split，Craft/寄售不受影响）、`use_item_core_reports_source_lock_reason`（背包来源装备→Equip、仓库来源→不锁）、`inventory_shift_right_repositions_entities_and_origin`（新增 `InventoryPlaceAt` 复位断言）；红检：`unlock_all` 改空实现、`use_item_core` 不登记锁来源，两条断言分别如期失败。
 
 ## 7. 已知有意偏差
 
@@ -185,7 +187,7 @@
 - Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
-- Craft：C# 放入材料后会锁定对应背包格（`SelectedCell.Locked`）直到关窗（`AutoFill` 逐格锁定、`ResetCells()` 全解锁）；Bevy 已对齐（`InvLockedSlots` 资源 + 图标按 `Color.DimGray` 灰化 + 锁定格不响应点击/选择）。残留偏差：C# 还以 0.8 不透明度叠加绘制，Bevy 只改图标色（无 alpha 混合）；C# `MirItemCell.Locked` 的其它来源（装备/拆分/移入腰带/镶嵌等）Bevy 未逐个实现，当前仅 Craft 驱动锁定。
+- 背包格锁定（`MirItemCell.Locked`，批12 单元2）：Craft `SelectedCell`（`AutoFill` 逐格锁定、`ResetCells()` 解锁）、装备 `C.EquipItem`（`S.EquipItem` 解锁）、拆分 `C.SplitItem`（`S.SplitItem1` 解锁）、镶嵌/钓具坐骑槽 `C.EquipSlotItem`（`S.EquipSlotItem` 解锁）、交易所寄售选物 `tempCell`（换物/切页签/关窗/`S.ConsignItem` 解锁）五类已对齐，Bevy 按 `InvLockReason` 分组存放故互不干扰（`InvLockedSlots` + 图标 `Color.DimGray` + 锁定格不响应点击/选择）。残留偏差：C# 的 `DimGray` 还叠 0.8 不透明度（Bevy 只改图标色）；C# 移入腰带/仓库/交易等 `Grid` 来源的锁未实现（那些格不在玩家背包索引空间）。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
 - ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `T`）并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。
 - ItemRent：`Prguse[238]` 面板位图**自带**右上角关闭图样（C# 四窗都画得到），但只有自有窗挂了可点关闭键（`Prguse2[360..362]`）——C# `GuestItemRentDialog`/`GuestItemRentingDialog` 本身没有 `closeButton`，Bevy 同样只在自有窗挂 `ItemRentalClose`，对方窗的 X 是装饰。
@@ -197,7 +199,7 @@
 - TrustMerchant：拍卖出价在 C# 走 `MirAmountBox`（带物品图标、默认 `Price+1`），Bevy 复用底栏价格输入框（缺省 `当前价+1`），确认框文案一致（批11 已补 `MirMessageBox`）。
 - TrustMerchant：C# `AuctionRow.SelectedImage`（`Prguse[545]` 296x38）构造后 `Visible=false` 且全仓无置真处（原版死控件）；选中高亮只用 `Border`（1px 外扩橙框），Bevy 一致。
 - TrustMerchant：`C.AuctionRow` 到期列在 C# 用本地墙钟 `DateTime`；Bevy 用 `chrono::Local` 格式化（同一时刻的本地显示），mock 侧写「当前-1h」便于核对格式。
-- TrustMerchant：售价框边框三态（C# `PriceTextBox.BorderColour` 只画 1px 边框色）在 Bevy 用输入框底色近似；底栏 `BuyButton`/`CollectSoldButton`/`MailButton`/`SellNowButton` 的禁用态已按 C# `GrayScale = !Enabled`（`:1005-1033`）走真灰度（`ui::gray`，公式见 `Data/Shaders/grayscale.ps`）。C# 寄售选物会锁定背包格（`tempCell.Locked`），Bevy 只记录选中物、未锁背包格。
+- TrustMerchant：售价框边框三态（C# `PriceTextBox.BorderColour` 只画 1px 边框色）在 Bevy 用输入框底色近似；底栏 `BuyButton`/`CollectSoldButton`/`MailButton`/`SellNowButton` 与 `SellItemButton` 的禁用态已按 C# `GrayScale`（`:1005-1033` 与 `RefreshCraftCells` 同套语义）走真灰度（`ui::gray`，公式见 `Data/Shaders/grayscale.ps`）。C# 寄售选物锁定背包格（`tempCell.Locked`）已对齐（`InvLockReason::Consign`；放入锁、换物/切页签/关窗/`S.ConsignItem` 回包解锁）；C# `Show()` 把背包推到 `Size.Width + 5`、`Hide()` 复位 (0,0) 也已对齐（`InventoryPlaceAt`）。
 - TrustMerchant：筛选树 `Prguse2[205/206]` 手柄的拖动用「按下时记录抓取偏移 → 按住按光标 y 反算 `Skip`」实现（C# 是 `MirControl.OnMoving`）；手柄高度固定为精灵原始 12x18（C# 也未按 `PossibleTotal` 缩放）。
 - TrustMerchant：Find/筛选/页签搜索改发 C# 规范 `C.MarketSearch`（此前 Bevy `MarketSearchWire` 只写关键字，被网关 `read_body` 静默丢弃 → 搜索无效）；`MarketRefresh` 仅保留在刷新按钮（C# `RefreshButton.Click` 先清空搜索框）。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。

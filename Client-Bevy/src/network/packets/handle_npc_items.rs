@@ -200,6 +200,11 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::EquipSlotItem as i16 => {
             if let Ok(p) = item_operations::EquipSlotItem::read_body(&mut cur) {
+                // #2742：C# `GameScene.EquipSlotItem` 在此解锁来源格/目标格
+                server_events.write(ServerEvent::EquipSlotItemResult {
+                    unique_id: p.unique_id as u64,
+                    success: p.success,
+                });
                 tracing::debug!(
                     "⚔️ 装备槽物品 uid={} to={} success={}",
                     p.unique_id,

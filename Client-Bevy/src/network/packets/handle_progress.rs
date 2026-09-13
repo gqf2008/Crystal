@@ -951,8 +951,12 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         // #291：C# 服务端包面收尾（SplitItem1）
         x if x == ServerPacketIds::SplitItem1 as i16 => {
-            if item::SplitItem1::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 SplitItem1 解码");
+            if let Ok(p) = item::SplitItem1::read_body(&mut cur) {
+                // #2742：C# `GameScene.SplitItem1` 在此解锁被拆分的来源格
+                server_events.write(ServerEvent::SplitItem1Result {
+                    unique_id: p.unique_id,
+                });
+                tracing::info!("📦 SplitItem1 解码 uid={}", p.unique_id);
             }
         }
         // #291：C# 服务端包面收尾（ObjectHero）

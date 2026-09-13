@@ -54,9 +54,13 @@ pub fn sync_craft_locks(
     locked: &mut crate::game::dialogs::inventory::InvLockedSlots,
     slots: &[Option<CraftPlaced>; CRAFT_SLOT_COUNT],
 ) {
-    locked.clear();
+    // 只收敛 Craft 来源：装备/拆分/寄售等其它来源的锁不受影响
+    locked.unlock_all(crate::game::dialogs::inventory::InvLockReason::Craft);
     for placed in slots.iter().flatten() {
-        locked.lock(placed.inv_slot);
+        locked.lock(
+            crate::game::dialogs::inventory::InvLockReason::Craft,
+            placed.inv_slot,
+        );
     }
 }
 

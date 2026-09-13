@@ -725,6 +725,9 @@ mod tests {
         app.init_resource::<PotionBeltState>();
         app.init_resource::<PendingPlayerEvents>();
         app.init_resource::<crate::game::dialogs::buff::BuffState>();
+        // #2742：`inventory_events` 现在按来源解锁背包格锁 → 需该资源（生产由
+        // InventoryDialogPlugin `init_resource`）
+        app.init_resource::<crate::game::dialogs::inventory::InvLockedSlots>();
         app.configure_sets(Update, GameSet::PlayerState.before(GameSet::Hud));
         // CRITICAL-1：登出回登录界面须清 LocalPlayer 实体（防"换角色重登出现双实体"）。
         // ⚠️ 同步注：生产注册在 actor/mod.rs ActorPlugin——本行仅测试装配，勿只改一边

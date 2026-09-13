@@ -122,6 +122,17 @@ pub enum ServerEvent {
     InventoryMoved { from: usize, to: usize },
     /// EquipItem：装备成功（背包→装备槽，旧装备放回背包）
     ItemEquipped { unique_id: u64, to: usize },
+    /// #2742：EquipSlotItem 响应（镶嵌/钓具坐骑槽）—— C# `S.EquipSlotItem` 处理器会解锁
+    /// 来源格与目标格（`MirItemCell.Locked = false`），Bevy 据此解除 `InvLockReason::Socket`
+    EquipSlotItemResult {
+        unique_id: u64,
+        success: bool,
+    },
+    /// #2742：SplitItem1 响应 —— C# `GameScene.SplitItem1` 解锁被拆分的来源格
+    /// （`cell.Locked = false`，GameScene.cs:2911-2962），Bevy 据此解除 `InvLockReason::Split`
+    SplitItem1Result {
+        unique_id: u64,
+    },
     /// RemoveItem：卸下装备（装备槽→背包）
     ItemRemoved { unique_id: u64 },
     /// UseItem：使用成功（背包计数减一/移除）

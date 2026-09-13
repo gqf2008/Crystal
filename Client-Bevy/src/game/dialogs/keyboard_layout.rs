@@ -888,7 +888,19 @@ fn secondary_hotkey_system(
                 check_fishing: false,
                 allow_consumable: true,
             };
-            if use_item_core(item, &net, riding, fishing, equipment, ctx, now, &mut feedback, &mut confirm)
+            if use_item_core(
+                item,
+                &net,
+                riding,
+                fishing,
+                equipment,
+                ctx,
+                now,
+                &mut feedback,
+                &mut confirm,
+                // 英雄格来源（grid=HeroInventory）不产生玩家背包锁
+                &mut None,
+            )
                 == UseOutcome::Sent
             {
                 // #2611：腰带用尽补货武装（C# :574 Item.Count == 1 才发——
