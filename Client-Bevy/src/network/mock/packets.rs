@@ -101,6 +101,11 @@ impl Packet for MockCreatureList {
             ..Default::default()
         }
         .write_to(writer)?;
+        // #2761：图标（`Prguse2[501]`）/完整度 7500/到期 7 天后/黑石计时 1 小时
+        writer.write_i32::<LittleEndian>(501)?; // icon
+        writer.write_i32::<LittleEndian>(7500)?; // fullness
+        writer.write_i64::<LittleEndian>(7 * 86400)?; // expire_in_secs
+        writer.write_i32::<LittleEndian>(3600)?; // blackstone_time
         writer.write_u8(mir2_shared::enums::IntelligentCreatureType::BabyPig as u8)?;
         writer.write_u8(1)?; // pickup
         writer.write_u8(1)?; // enabled
@@ -118,6 +123,16 @@ impl Packet for MockCreatureList {
             ..Default::default()
         }
         .write_to(writer)?;
+        // #2761：`Prguse2[500]`/满值 10000/永久（0）/黑石未开始
+        writer.write_i32::<LittleEndian>(500)?; // icon
+        writer.write_i32::<LittleEndian>(10000)?; // fullness
+        writer.write_i64::<LittleEndian>(0)?; // expire_in_secs（0 = 永久）
+        writer.write_i32::<LittleEndian>(0)?; // blackstone_time
+
+        // #2761 包尾三字段：召唤态（第 1 条已召唤）/召唤种类/玩家珍珠数
+        writer.write_u8(1)?; // creature_summoned
+        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::Chick as u8)?; // summoned_type
+        writer.write_i32::<LittleEndian>(1234)?; // pearl_count
         Ok(())
     }
 }

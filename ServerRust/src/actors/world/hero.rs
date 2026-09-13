@@ -302,7 +302,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             log.active_creature = None;
             log.owned_creatures
                 .retain(|c| c.creature_type != creature_type);
-            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log, state.pearl_count);
             let _ = record
                 .actor_ref
                 .ask(SetCreature { creature_log: log })
@@ -338,7 +338,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                 f.others = msg.filter[8] != 0;
                 f.grade = msg.grade;
             }
-            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log, state.pearl_count);
             let _ = record
                 .actor_ref
                 .ask(SetCreature { creature_log: log })
@@ -357,7 +357,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                     log.owned_creatures.push(active);
                 }
             }
-            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log, state.pearl_count);
             let _ = record
                 .actor_ref
                 .ask(SetCreature { creature_log: log })
@@ -375,7 +375,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                 c.enabled = true;
                 log.active_creature = Some(c);
             }
-            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log, state.pearl_count);
             let _ = record
                 .actor_ref
                 .ask(SetCreature { creature_log: log })
@@ -402,7 +402,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             // 原语义：关闭宠物（type=None 且无动作）
             log.active_creature = None;
         }
-        send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+        send_creature_list_packet(&self.gate_ref, msg.session_id, &log, state.pearl_count);
         let _ = record
             .actor_ref
             .ask(SetCreature { creature_log: log })
@@ -583,7 +583,12 @@ impl Message<RequestIntelligentCreatureUpdates> for WorldActor {
         };
 
         // 发送当前宠物列表（owned + active）
-        send_creature_list_packet(&self.gate_ref, msg.session_id, &state.creature_log);
+        send_creature_list_packet(
+            &self.gate_ref,
+            msg.session_id,
+            &state.creature_log,
+            state.pearl_count,
+        );
     }
 }
 

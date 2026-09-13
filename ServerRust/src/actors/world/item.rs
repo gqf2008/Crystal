@@ -1920,9 +1920,20 @@ impl Message<UseItemRequest> for WorldActor {
                                 );
                                 return;
                             }
+                            // #2761：C# `PlayerObject.cs:6231` 用宠物蛋 `Info.Effect`（天数）
+                            // 设 `Expire = Now + effect 天`，`effect == 0` 为永久
                             log.owned_creatures
-                                .push(IntelligentCreature::new(creature_type));
-                            super::send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+                                .push(crate::actors::creature::new_from_egg(
+                                    creature_type,
+                                    db.effect,
+                                    crate::db::now_unix_ms() / 1000,
+                                ));
+                            super::send_creature_list_packet(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &log,
+                                player_state.pearl_count,
+                            );
                             let _ = record
                                 .actor_ref
                                 .ask(crate::actors::player::SetCreature { creature_log: log })

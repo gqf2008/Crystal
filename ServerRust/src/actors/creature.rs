@@ -85,6 +85,47 @@ pub fn creature_rules(t: CreatureType) -> mir2_shared::data::client_data::Intell
     }
 }
 
+/// 宠物图标（C# `IntelligentCreatureInfo.Icon`，`Prguse2` 索引，`Server/MirDatabase/IntelligentCreatureInfo.cs:30-44`）。
+///
+/// 与 `creature_rules` 同一张 C# 静态表、同一套名称对应：`BabyPig`=500、`BabyChicken`(Chick)=501、
+/// `BabyKitten`(Kitten)=502、`BabySkeleton`=503、`BabyBabyDragon`(BabyDragon)=507；
+/// 本端独有类型（None/Panda/Oma/Sheep/Gorilla/Custom）C# 表中无对应 → `0`（客户端跳过绘制图标，
+/// 与 C# `PetButton.Index` 构造默认 0 一致）。
+pub fn creature_icon(t: CreatureType) -> i32 {
+    match t {
+        CreatureType::BabyPig => 500,
+        CreatureType::BabyChicken => 501,
+        CreatureType::BabyKitten => 502,
+        CreatureType::BabySkeleton => 503,
+        CreatureType::BabyBabyDragon => 507,
+        _ => 0,
+    }
+}
+
+/// 宠物蛋 `Info.Effect`（天数）→ 到期时刻（unix 秒；`0` = 永久）。
+///
+/// C# `PlayerObject.cs:6231`：`new UserIntelligentCreature(..., item.Info.Effect)`，
+/// 构造里 `Expire = effect > 0 ? Now.AddDays(effect) : DateTime.MinValue`。
+/// （C# `Info.Effect` 是 `byte`，本端物品库读出来是 `i32`，故参数取 `i32`。）
+pub fn expire_from_effect_days(effect_days: i32, now_secs: i64) -> i64 {
+    if effect_days == 0 {
+        0
+    } else {
+        now_secs + effect_days as i64 * 86400
+    }
+}
+
+/// 由宠物蛋创建宠物（C# `PlayerObject.cs:6231`）：`effect_days` 为 `Info.Effect`（0 = 永久）。
+pub fn new_from_egg(
+    creature_type: CreatureType,
+    effect_days: i32,
+    now_secs: i64,
+) -> IntelligentCreature {
+    let mut creature = IntelligentCreature::new(creature_type);
+    creature.expire_at = expire_from_effect_days(effect_days, now_secs);
+    creature
+}
+
 impl From<u8> for CreatureType {
     fn from(v: u8) -> Self {
         match v {
@@ -187,6 +228,10 @@ pub struct IntelligentCreature {
     /// 黑曜石产出计时（秒；C# CreatureInfo.BlackstoneTime，持久化，serde 兼容旧存档）
     #[serde(default)]
     pub blackstone_time: u32,
+    /// #2761 到期时间（unix 秒；0 = 永久，对齐 C# `UserIntelligentCreature.Expire == DateTime.MinValue`）。
+    /// C# 由宠物蛋 `Info.Effect`（天数）在 `PlayerObject.cs:6231` 设定，`effect=0` 表示永久。
+    #[serde(default)]
+    pub expire_at: i64,
 }
 
 fn default_creature_level() -> u8 {
@@ -205,6 +250,24 @@ impl IntelligentCreature {
             filter: CreatureFilter::default(),
             pearl_ticker: 0,
             blackstone_time: 0,
+            expire_at: 0,
+        }
+    }
+
+    /// 完整度（0..10000，C# `ClientIntelligentCreature.Fullness` 同一量纲）。
+    /// 本端内部用 `hunger`(0..100) 并且满值 100 → 显示值 `hunger × 100`，
+    /// 于是 `CreatureRules.MinimalFullness`（C# 4000/6000/7000/1000）可直接当比例用。
+    pub fn fullness(&self) -> i32 {
+        self.hunger as i32 * 100
+    }
+
+    /// 到期剩余秒数（C# 客户端用 `Expire - Now` 渲染 `过期: {PrintTimeSpanFromSeconds}`）；
+    /// `expire_at == 0`（永久）返回 `None`。
+    pub fn expire_in_secs(&self, now_secs: i64) -> Option<i64> {
+        if self.expire_at <= 0 {
+            None
+        } else {
+            Some((self.expire_at - now_secs).max(0))
         }
     }
 
@@ -316,6 +379,65 @@ mod tests {
     /// `BabyChicken`(=C# Chick) 与 `BabySkeleton` 开 M11/A7/S7 且产黑石、
     /// `BabyKitten`(=C# Kitten) Semi 3/满 6000、`BabyBabyDragon`(=C# BabyDragon) M7/A5/S5/满 7000；
     /// 本端独有类型（Panda/Oma/Sheep/Gorilla/Custom/None）C# 表无对应 → 全禁用默认。
+    /// #2761：宠物蛋 `Effect`（天数）→ 到期时刻（C# `PlayerObject.cs:6231`，0 = 永久）。
+    #[test]
+    fn expire_from_effect_days_matches_csharp() {
+        assert_eq!(expire_from_effect_days(0, 1_000_000), 0);
+        assert_eq!(expire_from_effect_days(1, 1_000_000), 1_000_000 + 86400);
+        assert_eq!(
+            expire_from_effect_days(30, 1_000_000),
+            1_000_000 + 30 * 86400
+        );
+    }
+
+    /// #2761：宠物蛋创建路径把 `Effect` 落到 `expire_at`（0 = 永久）。
+    #[test]
+    fn new_from_egg_sets_expire_at() {
+        let permanent = new_from_egg(CreatureType::BabyPig, 0, 1_000_000);
+        assert_eq!(permanent.expire_at, 0);
+        assert_eq!(permanent.expire_in_secs(1_000_000), None);
+
+        let week = new_from_egg(CreatureType::BabyPig, 7, 1_000_000);
+        assert_eq!(week.expire_in_secs(1_000_000), Some(7 * 86400));
+    }
+
+    /// #2761：图标表按名称对应 C# `IntelligentCreatureInfo.Icon`（500..514），
+    /// 本端独有类型无对应 → 0（客户端跳过绘制）。
+    #[test]
+    fn creature_icon_mirrors_csharp_table() {
+        assert_eq!(creature_icon(CreatureType::BabyPig), 500);
+        assert_eq!(creature_icon(CreatureType::BabyChicken), 501);
+        assert_eq!(creature_icon(CreatureType::BabyKitten), 502);
+        assert_eq!(creature_icon(CreatureType::BabySkeleton), 503);
+        assert_eq!(creature_icon(CreatureType::BabyBabyDragon), 507);
+        for t in [
+            CreatureType::None,
+            CreatureType::BabyPanda,
+            CreatureType::BabyOma,
+            CreatureType::BabySheep,
+            CreatureType::BabyGorilla,
+            CreatureType::Custom,
+        ] {
+            assert_eq!(creature_icon(t), 0, "{t:?} 应无图标");
+        }
+    }
+
+    /// #2761：完整度 = `hunger × 100`（0..10000，C# `Fullness` 量纲），
+    /// 到期剩余秒数：0 = 永久（`None`），过期钳到 0。
+    #[test]
+    fn creature_fullness_and_expire_match_csharp_scale() {
+        let mut c = IntelligentCreature::new(CreatureType::BabyPig);
+        assert_eq!(c.fullness(), 10000); // 新宠物 hunger=100
+        assert_eq!(c.expire_in_secs(1_000), None); // expire_at=0 → 永久
+
+        c.hunger = 40;
+        assert_eq!(c.fullness(), 4000); // = C# BabyPig 的 MinimalFullness（40%）
+
+        c.expire_at = 1_000 + 7 * 86400;
+        assert_eq!(c.expire_in_secs(1_000), Some(7 * 86400));
+        assert_eq!(c.expire_in_secs(1_000 + 8 * 86400), Some(0)); // 已过期钳到 0
+    }
+
     #[test]
     fn creature_rules_mirror_csharp_table() {
         let pig = creature_rules(CreatureType::BabyPig);
