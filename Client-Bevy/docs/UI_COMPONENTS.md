@@ -165,11 +165,12 @@
 | 批23 §7 收尾（三） | ① Exp/Drop 加成进 Buff 窗（服务端 `SetExpMultiplier`/`SetDropMultiplier` 带显示载荷：生效发 `S.AddBuff`、到期发 `S.RemoveBuff`，tag 29/30 = C# `BuffType.Exp/Drop`；客户端显示表补图标 260/162 + `ExpRatePercent`/`ItemDropRatePercent` 属性行）② Buff 窗按 C# `Movable = false` 不可拖动（`NotDraggable` + `dialog_drag_system` 排除）③ §7 记录结论落档（`PoisonBuffDialog` = 原版 `//UNFINISHED` 死代码，不实现） | #2798 #2799 #2800 |
 | 批24 任务详情窗（QuestDetailDialog） | 整窗对齐 C#（`QuestDialogs.cs:463-628 / 1003-1390 / 1396-1745`）：① `Prguse[960]` 面板 + `Title[16]` + `Prguse2[360..362]` 关闭键 + 独立 `DialogKind::QuestDetail` + **日记已接行左键打开**（`:1928-1935`）② `QuestMessage` 消息区（行模型 `UpdateQuest`/`AdjustDescription`、16 行槽、上下滚 `Prguse2[197..199]/[207..209]`、位置条 `Prguse2[205/206]` 拖动含原版 `Count-1` 钳位、标题圆点 `Prguse[919]`、首行黄、`{文本/颜色}` 去标记）③ 分享键→`C.ShareQuest`、取消键→`MirMessageBox(AskCancelQuest)`→Yes `C.AbandonQuest`+`Hide()`、`_pauseButton` 按 C# 死控件处理；奖励区 @(5,307)（`Title[17]` + `Prguse[966/965/2447]` 图标与数值偏移链 + 固定/可选各 5 格 + `Prguse[989]/[979]` 底 + 物品图居中 + `###0` 数量 + 多选一记未过滤下标 + 可选排 `FilterRewards` 性别过滤）；**协议补齐** `QuestItemReward` 携带完整 `ItemInfo`（C# `SharedData.cs:75-93`，客户端无本地物品库）+ 顺带修 `close` 宽查询吞掉接受/完成键按下边沿（`#2535` 状态机整条不可用）；**后续修复**：固定排不做性别过滤（对齐 C# `:1534` 注释掉的 `FilterRewards`） | #2802 #2803 #2804 |
 | 批25 任务详情富文本收尾 | ① 消息区 `{文本/颜色}` 彩色叠加（C# `NewColour`，`QuestDialogs.cs:1008/1321-1353`；基础白字 + 原位叠加标签，颜色名走 `Color.FromName` 子集）② 行内链接 `[MONSTER\|NPC\|ITEM:idx(\|name)]` / `<$KIND:idx>` 换名（`NPCDialogs.cs:24-26/920-955`：内嵌名 > 查表 > `Item {idx}` 回退）+ 常色青/悬停橙 + 悬停提示（`NewLink` `:1355-1382`；探针可驱动）③ 奖励格悬停物品说明（`QuestCell.OnMouseEnter` `:1663-1683` → 复用背包 `item_tooltip_lines`，耐久取 `Item.Durability`）④ 文档与实机记录回填（本行） | #2812 #2813 #2815 #2816 |
+| 批26 文本描边（C# `MirLabel` 默认 `OutLine=true`） | ① 描边副本跟随正文**位置/显隐/字号**（`sync_outline_ui_system` 补 `Node` 克隆 + 副本 1px 偏移、`Visibility`、`TextFont`；颜色刻意不镜像，副本恒黑）② 对话框文本**默认带描边**（`theme::spawn_label`/`spawn_label_center` 转调 outlined 版，约 150 处调用点零改动；新增 `*_plain` 显式无描边变体 + 两处例外：数量框 `InputTextBox`、奖励格数量黄字）③ HUD 标签补描边（HP/MP/Top/Bottom/Exp/Level/Gold/Name/Weight/Space/英雄面板/死亡提示）+ **负向断言**（聊天文本 `spawn_ui_text` 路径保持无描边）④ 文档与实机记录回填（本行） | #2818 #2819 #2822 #2823 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**523 lib** + 2 bin + 1 smoke + 24 alignment 通过（批25 单元③ 后基线；批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
+- `cargo test`（Client-Bevy）：**528 lib** + 2 bin + 1 smoke + 24 alignment 通过（批26 单元③ 后基线；批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -239,6 +240,18 @@
   - 单元③：探针落在固定奖励格（面板内 (15,24) 32x32）→ 弹出物品说明「金创药(小) / 类型: 其他 / 需要职业: 战士/法师/道士/刺客/弓箭手」（复用背包 `item_tooltip_lines`，耐久取 `Item.Durability`）。
   - 未覆盖（由单测钉住）：折行到第二行的叠加段定位（`quest_segment_offset`）；悬停提示的富内容（物品完整 `ItemLabel`、怪物形象图）见 §7 残余差异。
 
+- 批26 实机/JPG 复验（2026-09-14，`--auto-enter` + Control API `dialog`/`screenshot`；A/B 用同一 worktree 两次构建，
+  唯一变量 = `theme::spawn_label` 是否带描边）：
+  - **A/B（背包窗金币文本 `10000`，坐标 (60,316)-(190,352) 的 8× 放大裁剪）**：带描边版每个笔画外缘有 1px 黑边、
+    无描边版是纯白字；该区域像素差 `>20` 的 226/4680 个，全部落在字形边缘。反例：对话框按钮标题
+    （`ITEMS I`/`QUEST`/`BUY`）是 `Title[...]` **精灵内嵌文字**，两版无差异 —— 证明改动只命中真正的文本控件。
+  - **回归巡回**：inventory / storage / character / guild / mail / market / game_shop / help / ranking / skills /
+    quest_log / keyboard_layout / mentor / relationship 逐窗实机截图，未见副本错位、重影或层级异常。
+  - **HUD（单元③）**：HP/MP 球标签 `HP 810/850` / `MP 420/420`（4× 裁剪）与右下负重/空格 `120` / `31`、
+    金币 `10,000`（3× 裁剪）均可见 1px 黑描边。
+  - 未覆盖（由单测钉住）：逐帧改文本时副本的帧级同步时延（`sync_outline_ui_system` 在 Update 内，最坏 1 帧，肉眼不可见）；
+    副本 `ZIndex = z-1` 与同层元素的覆盖顺序（巡回未复现）。
+
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
@@ -284,3 +297,14 @@
   **残余差异**：本端无本地物品库、也无 C# 的按需 `RequestItemInfo/RequestMonsterInfo`——物品链接只查 `UserInformation` 下发的物品名表（查不到回退 `Item {idx}`），悬停提示物品/ NPC 仅给名字（C# 物品走完整 `ItemLabel`、怪物另画形象图），怪物提示给等级/经验；折行场景的叠加段定位用 `text_markup::wrap_text` + `est_text_width`（宋体双宽度量）近似 C# 的 `MeasureText(前缀)` 盒子量宽。
 - QuestDetail（批25 单元③）：奖励格**悬停物品说明已补齐**（`QuestCell.OnMouseEnter` → `CreateItemLabel`，`QuestDialogs.cs:1663-1683`）——复用背包 `item_tooltip_lines`（类型/耐久/成对属性/需求/重量价格），耐久按 C# 取 `Item.Durability` 作当前=最大；固定排与可选排所有格都可悬停。残余差异：C# `QuestRewards` 是 `static` 共享格数组（QuestListDialog 与 QuestDetailDialog 共用），本端按窗口各自渲染（视觉等价，选择态各窗独立）。
 - QuestDetail（批24）：奖励区**固定排不做性别过滤**——C# `UpdateInterface` 的固定排直接用 `quest.RewardsFixedItem`（`:1533-1548`），`FilterRewards` 那一行在 `:1534` 被**注释掉**，只有可选排在 `:1551-1553` 过滤（`FilterRewards` 定义在 `:1588-1610`）；本端照抄原版：固定排原样显示（含性别不符的物品、槽位不因过滤前移），可选排仍按性别过滤且 `SelectedItemIndex` 记**未过滤**下标（`FindSelectedItemIndex`）。
+- 文本描边（批26 已对齐）：C# `MirLabel` 构造器默认 `_outLine = true; _outLineColour = Color.Black`
+  （`MirLabel.cs:181-182`，画法 `:220-226`：正文在 (1,0)/(0,1)/(2,1)/(1,2) 各画一遍黑字再画前景），
+  且 `MirButton` 的标题就是 `MirLabel`（`MirButton.cs:167-174`，`//OutLine = true,` 是被注释掉的冗余行）
+  → 对话框文本/HUD 标签/按钮标题默认全部带描边。**显式无描边只有 4 处**（物品格数量黄字
+  `MirItemCell.cs:2615`、奖励格数量黄字 `QuestDialogs.cs:1726`、聊天标签 `MainDialogs.cs:962/1040`）
+  + `MirTextBox`（原生 WinForms `TextBox`，`MirTextBox.cs:143`）。
+  Bevy 约定：UI 侧默认 `theme::spawn_label`/`spawn_label_center`（带描边），例外位置用
+  `*_plain`（当前两处：数量框 `InputTextBox` 文本、奖励格数量黄字）；世界空间用 `outline_on`；
+  聊天文本走 `sprite_ui::spawn_ui_text`（无描边，已加负向单测 `chat_text_path_stays_unoutlined` 钉住）。
+  副本必须随正文**位置/显隐/字号**同步（UI 版副本是兄弟实体、不继承），见
+  `ui/outlined_text.rs::sync_outline_ui_system`。
