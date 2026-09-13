@@ -1890,6 +1890,11 @@ impl Message<TakeDamage> for PlayerActor {
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
             self.state.last_damage_ms = now_ms;
+            // #2853：C# `HumanObject.Struck`（`HumanObject.cs:7355-7365`）/ `Attacked`（`:7163-7173`）——
+            // 受击按 `(damage - armour) * 60ms` 缩短 MagicShield / ElementalBarrier 剩余时长。
+            // 本端两条伤害路径都汇入本 handler（`msg.damage` 已是净伤害），故在此统一处理；
+            // 剩余时长归零后由 buff tick 走既有过期路径（移除 buff + 重置减伤 + Down 特效）。
+            crate::combat::buff::shrink_shield_buffs(&mut self.state.buffs, damage);
         }
         // #942：C# SpecialItemMode.Protection——装备含 Protection 且 MP>0 时伤害全部由 MP 吸收
         // （HumanObject.ChangeHP → ChangeMP(amount)，不致死；Struck 动画照常）

@@ -217,6 +217,37 @@ pub fn expire_buffs(buffs: &mut Vec<BuffInstance>) {
     buffs.retain(|b| b.remaining_ticks > 0);
 }
 
+/// #2853：C# `HumanObject.Struck`（`HumanObject.cs:7355-7365`）/ `Attacked`（`:7163-7173`、`:7273-7283`）——
+/// 受击时 MagicShield / ElementalBarrier 的剩余时长按 `(damage - armour) * 60ms` 缩短
+/// （两者 `StackType` 均为 `ResetDuration`：`ExpireTime = 旧 ExpireTime - (damage-armour)*60`）。
+///
+/// 本端 `BuffInstance` 以 `BUFF_TICK_MS`（100ms）为粒度，折算口径取 **向下取整**
+/// `(damage * 60) / 100`：不足 1 tick 的余量丢弃（C# 为毫秒精度）。
+/// 调用方传入的 `damage` 已是净伤害（`armour >= damage` 的完全吸收分支不会走到这里），
+/// 即 C# 的 `damage - armour`。返回被扣除的 tick 总数（供测试与调试）。
+pub fn shrink_shield_buffs(buffs: &mut [BuffInstance], damage: i32) -> u32 {
+    if damage <= 0 {
+        return 0;
+    }
+    let ticks = ((damage as u64 * 60) / BUFF_TICK_MS).min(u32::MAX as u64) as u32;
+    let mut applied = 0u32;
+    for buff in buffs.iter_mut() {
+        if !matches!(
+            buff.buff_type,
+            BuffType::DamageReduction {
+                kind: ShieldKind::MagicShield | ShieldKind::ElementalBarrier,
+                ..
+            }
+        ) {
+            continue;
+        }
+        let before = buff.remaining_ticks;
+        buff.remaining_ticks = buff.remaining_ticks.saturating_sub(ticks);
+        applied += before - buff.remaining_ticks;
+    }
+    applied
+}
+
 /// 添加 Buff（同类型的新 Buff 替换旧的）
 pub fn apply_buff(buffs: &mut Vec<BuffInstance>, new_buff: BuffInstance) {
     // 移除同类型的旧 Buff
@@ -405,6 +436,61 @@ mod tests {
             get_stat_bonus(&buffs, &BuffType::DefenseBoost { bonus: 0 }),
             0
         );
+    }
+
+    /// #2853：受击按 `(damage-armour)*60ms` 缩短 MagicShield/ElementalBarrier 剩余时长
+    /// （C# `HumanObject.cs:7355-7365`；本端 100ms tick 粒度 → 向下取整）
+    #[test]
+    fn shrink_shield_buffs_matches_csharp() {
+        let mut buffs = vec![
+            BuffInstance::new(
+                BuffType::DamageReduction {
+                    percent: 40,
+                    kind: ShieldKind::MagicShield,
+                },
+                960, // 96 秒
+                1,
+            ),
+            BuffInstance::new(
+                BuffType::DamageReduction {
+                    percent: 30,
+                    kind: ShieldKind::ElementalBarrier,
+                },
+                200,
+                1,
+            ),
+            // 非护盾 buff 不受影响（C# 只处理 MagicShield/ElementalBarrier）
+            BuffInstance::new(BuffType::HpRegen { amount_per_tick: 5 }, 50, 1),
+        ];
+
+        // damage=100 → 100*60/100 = 60 tick（6 秒），两个护盾各扣 60
+        assert_eq!(shrink_shield_buffs(&mut buffs, 100), 120);
+        assert_eq!(buffs[0].remaining_ticks, 900);
+        assert_eq!(buffs[1].remaining_ticks, 140);
+        assert_eq!(buffs[2].remaining_ticks, 50);
+
+        // damage=1 → 60ms < 1 tick → 不扣（向下取整）
+        assert_eq!(shrink_shield_buffs(&mut buffs, 1), 0);
+        assert_eq!(buffs[0].remaining_ticks, 900);
+
+        // damage<=0 → 不动
+        assert_eq!(shrink_shield_buffs(&mut buffs, 0), 0);
+        assert_eq!(shrink_shield_buffs(&mut buffs, -5), 0);
+        assert_eq!(buffs[0].remaining_ticks, 900);
+
+        // 超大伤害不下溢（saturating）
+        assert_eq!(shrink_shield_buffs(&mut buffs, i32::MAX), 900 + 140);
+        assert_eq!(buffs[0].remaining_ticks, 0);
+        assert_eq!(buffs[1].remaining_ticks, 0);
+
+        // 无护盾 buff → 0
+        let mut only_regen = vec![BuffInstance::new(
+            BuffType::HpRegen { amount_per_tick: 5 },
+            50,
+            1,
+        )];
+        assert_eq!(shrink_shield_buffs(&mut only_regen, 100), 0);
+        assert_eq!(only_regen[0].remaining_ticks, 50);
     }
 
     #[test]
