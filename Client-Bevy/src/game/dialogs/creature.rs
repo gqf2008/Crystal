@@ -185,12 +185,36 @@ const CREATURE_OP_BUTTONS: [(&str, f32, f32, usize, f32, f32); 7] = [
     ("semi", 375.0, 187.0, 613, 60.0, 25.0),
 ];
 
-/// C# `RefreshMode()`：Automatic 模式显示「自动」按钮，其余（含非 0 值）显示
-/// 「半自动」；未选中宠物时两个都不显示（C# error 分支置 Enabled=false，
-/// Bevy 用 Hidden 表达不可用）。
+/// 操作按钮种类（C# `RefreshUI`/`RefreshMode` 的 `Enabled` 开关）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CreatureOp {
+    Rename,
+    Dismiss,
+    Summon,
+    Release,
+    Options,
+    Auto,
+    Semi,
+}
+
+/// C# `RefreshUI()`（IntelligentCreatureDialogs.cs:606-668）的 `Enabled` 语义：
+/// 未选中宠物 → 全部 `Enabled = false`（但 **`Visible` 不变**，即按钮仍在、只是灰掉）；
+/// 选中后 改名/选项/自动/半自动可用；召唤仅在未激活时可用；解散仅在该宠已激活（召唤中）时可用；
+/// 释放仅在该宠未召唤时可用（C# :647 `ReleaseButton.Enabled = false`）。
+pub fn creature_op_enabled(op: CreatureOp, has_selection: bool, is_active: bool) -> bool {
+    match op {
+        CreatureOp::Dismiss => has_selection && is_active,
+        CreatureOp::Summon | CreatureOp::Release => has_selection && !is_active,
+        _ => has_selection,
+    }
+}
+
+/// C# `RefreshMode()`：Automatic 模式显示「自动」按钮，其余（含非 0 值）显示「半自动」；
+/// 未选中宠物时该方法**早返回**，两个按钮保持构造时的 `Visible = true`（都可见、都禁用，
+/// 同坐标 (375,187) → 后建的 SemiAuto 覆盖在上面，与原版绘制顺序一致）。
 fn creature_mode_buttons_visible(has_selection: bool, pickup_mode: u8) -> (bool, bool) {
     if !has_selection {
-        (false, false)
+        (true, true)
     } else {
         (pickup_mode == 0, pickup_mode != 0)
     }
@@ -553,15 +577,17 @@ fn creature_action_system(
     net: Res<NetConnection>,
     mut input: ResMut<TextInputState>,
     mut submit: MessageReader<TextInputSubmit>,
-    buttons: Query<(
+    mut buttons: Query<(
         Entity,
         &Interaction,
+        &mut ImageNode,
         Has<CreatureRenameBtn>,
         Has<CreatureDismissBtn>,
         Has<CreatureSummonBtn>,
         Has<CreatureReleaseBtn>,
         Has<CreatureAutoBtn>,
         Has<CreatureSemiBtn>,
+        Has<CreatureOptionsBtn>,
         Has<CreatureRenameOk>,
         Has<CreatureReleaseOk>,
     )>,
@@ -605,7 +631,9 @@ fn creature_action_system(
         if is_dismiss {
             *vis = if is_active { Visibility::Visible } else { Visibility::Hidden };
         } else if is_summon {
-            *vis = if selected.is_some() && !is_active { Visibility::Visible } else { Visibility::Hidden };
+            // C# `RefreshUI`：无选中时 `SummonButton.Enabled = false` 但 **Visible 不变**（灰化）；
+            // 选中且该宠已召唤时由 Dismiss 顶替（两者同坐标）
+            *vis = if !is_active { Visibility::Visible } else { Visibility::Hidden };
         } else if is_auto {
             // C# RefreshMode：Automatic 模式只显示「自动」按钮
             *vis = if auto_visible { Visibility::Visible } else { Visibility::Hidden };
@@ -632,8 +660,56 @@ fn creature_action_system(
     let submits: Vec<usize> = submit.read().map(|s| s.0).collect();
     let mut rename_confirm = false;
     let mut release_confirm = false;
-    for (e, inter, is_rename, is_dismiss, is_summon, is_release, is_auto, is_semi, is_rok, is_relok) in &buttons {
+    for (
+        e,
+        inter,
+        mut node,
+        is_rename,
+        is_dismiss,
+        is_summon,
+        is_release,
+        is_auto,
+        is_semi,
+        is_opts,
+        is_rok,
+        is_relok,
+    ) in &mut buttons
+    {
+        // C# `RefreshUI`：未选中宠物时按钮保持可见但 `Enabled = false`（灰化且不响应点击）
+        let op = if is_rename {
+            Some(CreatureOp::Rename)
+        } else if is_dismiss {
+            Some(CreatureOp::Dismiss)
+        } else if is_summon {
+            Some(CreatureOp::Summon)
+        } else if is_release {
+            Some(CreatureOp::Release)
+        } else if is_auto {
+            Some(CreatureOp::Auto)
+        } else if is_semi {
+            Some(CreatureOp::Semi)
+        } else if is_opts {
+            Some(CreatureOp::Options)
+        } else {
+            None
+        };
+        let enabled = match op {
+            Some(op) => creature_op_enabled(op, selected.is_some(), is_active),
+            // 改名/释放确认键与其它按钮（关闭等）不参与 C# 的 `Enabled` 开关
+            None => true,
+        };
+        let want_color = if enabled {
+            Color::WHITE
+        } else {
+            Color::srgb(0.55, 0.55, 0.55)
+        };
+        if node.color != want_color {
+            node.color = want_color;
+        }
         if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        if !enabled {
             continue;
         }
         if is_rename {
@@ -986,6 +1062,45 @@ fn creature_server_events(
 mod tests {
     use super::*;
 
+    /// #2736：C# `RefreshUI()` 的 `Enabled` 语义——未选中宠物时全部按钮禁用（但保持可见），
+    /// 选中后按召唤状态区分（C# IntelligentCreatureDialogs.cs:606-668）
+    #[test]
+    fn creature_op_enabled_matches_csharp() {
+        use CreatureOp::*;
+        // 未选中：全部禁用
+        for op in [Rename, Dismiss, Summon, Release, Options, Auto, Semi] {
+            assert!(
+                !creature_op_enabled(op, false, false),
+                "{op:?} 未选中宠物时应禁用"
+            );
+        }
+        // 选中且未召唤：改名/选项/自动/半自动/召唤/释放可用，解散禁用
+        for op in [Rename, Options, Auto, Semi, Summon, Release] {
+            assert!(
+                creature_op_enabled(op, true, false),
+                "{op:?} 选中未召唤时应可用"
+            );
+        }
+        assert!(!creature_op_enabled(Dismiss, true, false));
+        // 选中且已召唤（激活）：解散可用；召唤/释放禁用（C# :647 ReleaseButton.Enabled = false）
+        assert!(creature_op_enabled(Dismiss, true, true));
+        assert!(!creature_op_enabled(Summon, true, true));
+        assert!(!creature_op_enabled(Release, true, true));
+        assert!(creature_op_enabled(Rename, true, true));
+        assert!(creature_op_enabled(Options, true, true));
+    }
+
+    /// #2736：C# `RefreshMode()` 早返回 → 未选中宠物时两个模式按钮都保持可见（都禁用）
+    #[test]
+    fn creature_mode_buttons_keep_visible_without_selection() {
+        assert_eq!(creature_mode_buttons_visible(false, 0), (true, true));
+        assert_eq!(creature_mode_buttons_visible(false, 1), (true, true));
+        // 选中后按模式二选一（C# `RefreshMode` 的 Visible 切换）
+        assert_eq!(creature_mode_buttons_visible(true, 0), (true, false));
+        assert_eq!(creature_mode_buttons_visible(true, 1), (false, true));
+        assert_eq!(creature_mode_buttons_visible(true, 2), (false, true));
+    }
+
     #[test]
     fn filter_toggle_all() {
         let mut f = [false; 9];
@@ -1075,15 +1190,19 @@ mod layout_tests {
         assert_eq!(spec("auto").1, spec("semi").1);
     }
 
-    /// 自动/半自动按钮必须互斥，且未选中宠物时两者都隐藏。
+    /// 自动/半自动按钮在「选中宠物」时按模式互斥；未选中宠物时按 C# `RefreshMode`（早返回 +
+    /// 构造默认 `Visible = true`）两者都保持可见、但都禁用（同坐标 → 后建的 SemiAuto 覆盖）。
     #[test]
     fn creature_mode_buttons_are_mutually_exclusive() {
-        assert_eq!(creature_mode_buttons_visible(false, 0), (false, false));
-        assert_eq!(creature_mode_buttons_visible(false, 1), (false, false));
+        assert_eq!(creature_mode_buttons_visible(false, 0), (true, true));
+        assert_eq!(creature_mode_buttons_visible(false, 1), (true, true));
         assert_eq!(creature_mode_buttons_visible(true, 0), (true, false));
         assert_eq!(creature_mode_buttons_visible(true, 1), (false, true));
         // C# 非 Automatic 一律按 SemiAuto 显示
         assert_eq!(creature_mode_buttons_visible(true, 7), (false, true));
+        // 未选中时两者都禁用（`Enabled = false`），故不会误点
+        assert!(!creature_op_enabled(CreatureOp::Auto, false, false));
+        assert!(!creature_op_enabled(CreatureOp::Semi, false, false));
     }
 
     /// 槽位标签必须放得进 76px 列（自 sx+4 起，72px 内），否则相邻槽互相压叠。

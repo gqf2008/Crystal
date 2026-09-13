@@ -32,6 +32,7 @@
 - 批10 TrustMerchant 列表行（C# `AuctionRow`）：10 行改 `(127, 82+i*33)` 354x32（原为 (130,60+18i) 文本行）；行内 34x32 图标区（有物品 `Items[Info.Image]`、零数量 `Prguse[540]` 占位，按 `(IconArea-Icon.Size)/2` 居中）+ `NameLabel`(38,8)/`PriceLabel`(170,8)/`SellerLabel`(256,0)/`ExpireLabel`(256,14) 四标签 + 选中 1px 橙框（`BorderColour=FromArgb(255,200,100,0)`，C# `BorderInfo` 外扩 1px；`SelectedImage`(Prguse[545]) 是死控件）；文本按 C# 规则：价格千分位 + 拍卖「出价」后缀 + 阈值着色（>10M 红/>1M 橙/>100k 草绿/>10k 天蓝）、名称按品质（`GradeNameColor`，黄→白）、卖家列 UserMode 状态串着色（Sold/Expired/Bid Met）、到期列 = 寄售日期 + 7 天按 `dd/MM/yy HH:mm:ss`；底栏按 C# `UpdateInterface` 联动启用态（选中→Buy 亮/CollectSold 灰，`Bid Met` 才亮 SellNow）。服务端补 `AuctionInfo.GetSellerLabel(userMatch)` 移植（UserMode 下发 Sold/Expired/Bid Met/No Bid/For Sale 标记）并把 `Usermode` 记进搜索缓存供翻页沿用。
 - 批10 TrustMerchant 价格排序 + Mail 按钮：价格表头 `TitlePriceLabel`(295,60,88x21) 加 C# 点击层（`Click → CyclePriceFilter`），三态 `MarketPriceFilter` Normal→Low→High→Normal，图标 `Prguse2[925]`(低)/`[926]`(高) 12x11 @(371,65)（= `X+W-12, Y+(H-14)/2+2`，Normal 隐藏）；列表按 `GetOrderedListings()` 显示（Low 升序/High 降序，稳定排序，Normal 保持服务器顺序；Bevy 服务端按页下发，故排序作用于当前页——见 §7）；`MailButton` `Prguse[437..439]` 28x25 @(350,448)（仅市场页签）→ 选中行时以卖家为收件人、按 `InterestedInPurchase`（「我有意购买{0}，价格为{1}。」）预填正文开写信窗（`ComposeMail` 扩了 `message` 字段）。顺带修正行取数：原 `Page*10 + i` 在服务端按页下发模型下会让第 2 页起取不到行（`listings` 只存当前页），改为 `row_listing_index`（当前页 + 排序映射），行渲染/命中/选中三处同源。
 - 批11（#2736）TrustMerchant 买/取回确认框：Buy 键按 C# `BuyButton.Click`（:360-440）分支改弹 `MirMessageBox` YesNo（`Prguse[360]` 456x190 居中 @(284,289)、文本 (35,35) 390x110、Yes `Title[206..208]`@(260,157)、No `Title[210..212]`@(360,157)，均 76x25）——UserMode 寄售 `For Sale`/拍卖 `No Bid` → 「{物品}尚未售出，确定要取回它吗？」（Yes = `MarketGetBack{AuctionID}`）；UserMode 其余状态直接取回；非 UserMode 寄售/商城 → 「确定要以{价格:#,##0} {金币|积分}购买{物品}吗？」（Yes = `MarketBuy{AuctionID}`）；非 UserMode 拍卖 → 「你确定要为{物品}出价{额:#,##0}金币吗？」（出价取价格输入框，缺省 `当前价+1`）。确认框为独立根节点（z=45，不在 TM 面板裁剪内），随市场窗关闭自动收起。
+- 批11（#2736）Creature 操作按钮禁用态：按 C# `RefreshUI()`（IntelligentCreatureDialogs.cs:606-668）把「未选中宠物」从 Bevy 的 `Visibility::Hidden` 改为 C# 的 **`Enabled = false`**——RENAME/OPTIONS/AUTO/SEMI/RELEASE/SUMMON 保持可见但灰化（`ImageNode.color` 暗化近似 `GrayScale`）且不响应点击；`DISMISS` 仍按 C# 显式 `Visible = false`；召唤/释放仅在未召唤时可用、解散仅在已召唤时可用（C# :647 `ReleaseButton.Enabled = false`）。模式按钮在未选中时按 C# `RefreshMode()` 早返回 + 构造默认 `Visible = true` → 两个都可见（同坐标 (375,187)，后建的 SemiAuto 覆盖，与 C# 绘制顺序一致）且都禁用。
 
 ## 1. 通用交互控件
 
@@ -153,7 +154,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：417 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 确认框后基线）。
+- `cargo test`（Client-Bevy）：419 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 Creature 禁用态后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -166,12 +167,13 @@
 - 批10 #2732 漏项修复复验（2026-09-13）：`MarketPanelSprites` 资源此前**从未插入**（`market_panel_system` 拿不到 → 786/787 背景与 Buy 精灵切换实为死代码），本批次补插后重截寄售页签：左列出现 `Title[787]` 位图自带的说明/格子底纹（#2732 截图里是 786 的纯暗底），确认切换生效。
 - 批10 价格排序/Mail 实机复验（2026-09-13，`--skip-login --market-buy` + Control API 截图；临时置 `price_filter=Low`、`selected=Some(0)`，验证后已还原）：价格表头右侧出现 `Prguse2[925]` 蓝色下三角（(371,65)）；底栏出现 Mail 键（`Prguse[437]` 信封图，(350,448)，有选中行时为亮态），位于 Refresh(320) 与 Buy(380) 之间。
 - 批11 买/取回确认框实机复验（2026-09-13，`--skip-login --market-buy` + Control API 截图；临时把确认框设为可见并填 `ConfirmBuyItemWithPrice` 文案，验证后已还原）：`Prguse[360]` 456x190 居中面板 + 文本「确定要以12,345 金币购买屠龙吗？」(35,35) + YES(260,157)/NO(360,157) 76x25 精灵按钮，与 C# `MirMessageBox` YesNo 一致。
+- 批11 Creature 禁用态实机复验（2026-09-13，`--skip-login` + Control API `dialog creature open` 截图；临时注释掉打开时的宠物列表请求以制造「无选中」状态，验证后已还原）：无选中时 RENAME/OPTIONS/DISABLE(=SemiAuto)/RELEASE/**SUMMON** 全部可见但灰化、DISMISS 隐藏；有选中（mock 小猪）时改为 RENAME/OPTIONS/DISABLE/RELEASE 亮态且 Dismiss 顶替 Summon——两态与 C# `RefreshUI` error/else 分支一致。
 
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
 - Creature：C# `CreatureInfo`/`CreatureInfo1` 是选中宠物的能力文案（`CanPickupItems`/`CanProduceBlackStones`），`CreatureInfo2` @(19,191) 未实现；Bevy 用 (19,161) 一行承载「数量 + 选中宠物名/模式/饥饿度」，语义不同但坐标对齐。
-- Creature：C# 未选中宠物时模式按钮是 `Enabled = false`（`RefreshMode()` 早返回、保留原可见性）；Bevy 无禁用态，未选中时直接 `Visibility::Hidden`。
+- Creature：未选中宠物时按 C# `RefreshUI` 保留按钮但灰化（`Enabled=false`）；禁用视觉仍用 `ImageNode.color` 暗化近似 C# `GrayScale`（无灰度着色器）。C# 「已召唤**其它种类**宠物」时 `SummonButton` 会切到 `Title[593..595]` 并禁用，Bevy 无该区分（按当前宠物的召唤状态处理）。
 - Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
