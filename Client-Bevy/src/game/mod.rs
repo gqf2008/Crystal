@@ -21,6 +21,7 @@ pub mod player_state;
 pub mod sets;
 pub mod skills;
 pub mod sound;
+pub mod time_format;
 pub mod weather;
 
 use bevy::prelude::*;

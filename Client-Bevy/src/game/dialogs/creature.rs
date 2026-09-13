@@ -386,25 +386,8 @@ fn marker_left(bar_x: f32, section: f32) -> f32 {
     bar_x + section - CREATURE_MARKER_OFFSET
 }
 
-/// C# `Functions.PrintTimeSpanFromSeconds`（`accurate = true`，`Shared/Functions/Functions.cs:86-108`）：
-/// <1m → `{s}s`；<1h → `{m}m {s:02}s`；<1d → `{h}h {m:02}m {s:02}s`；
-/// 否则 `{d}d {h:02}h {m:02}m {s:02}s`（本批用于黑石条悬停与 `CreatureDeadline`）。
-fn format_time_span(secs: f64) -> String {
-    let total = secs.max(0.0) as u64;
-    let s = total % 60;
-    let m = (total / 60) % 60;
-    let h = (total / 3600) % 24;
-    let d = total / 86400;
-    if total < 60 {
-        format!("{s}s")
-    } else if total < 3600 {
-        format!("{m}m {s:02}s")
-    } else if total < 86400 {
-        format!("{h}h {m:02}m {s:02}s")
-    } else {
-        format!("{d}d {h:02}h {m:02}m {s:02}s")
-    }
-}
+// 时间格式移植统一在 `game::time_format`（#2767：技能栏 Hint 也要用同一份 C# `Functions`）
+use crate::game::time_format::format_time_span;
 
 /// C# `Control_MouseEnter`（:403-431）三处悬停的文案与 `HoverLabel` 尺寸/位置。
 /// 返回 `(文案, 标签左上角 x, y, 标签宽, 标签高)`；未命中返回 `None`。
@@ -2236,18 +2219,6 @@ mod layout_tests {
         assert_eq!(bar_section(CREATURE_FULLNESS_W, 1.0), 248.0);
         // C# `percent <= 0` 时 `FullnessNow` 复位到 (179,143)（= FG.X - 6）
         assert_eq!(CREATURE_FULLNESS_X - CREATURE_MARKER_OFFSET, 177.0);
-    }
-
-    /// #2761：`Functions.PrintTimeSpanFromSeconds` 四档格式（C# `Functions.cs:86-108`）。
-    #[test]
-    fn creature_format_time_span_matches_csharp() {
-        assert_eq!(format_time_span(0.0), "0s");
-        assert_eq!(format_time_span(59.0), "59s");
-        assert_eq!(format_time_span(61.0), "1m 01s");
-        assert_eq!(format_time_span(3661.0), "1h 01m 01s");
-        assert_eq!(format_time_span(90061.0), "1d 01h 01m 01s");
-        // 负数（理论上不会出现）按 C# TimeSpan 语义不崩：钳到 0
-        assert_eq!(format_time_span(-5.0), "0s");
     }
 
     /// #2761：悬停文案三处（C# `Control_MouseEnter`:403-431）——

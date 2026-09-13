@@ -351,6 +351,7 @@ impl Plugin for SkillsPlugin {
                 skill_bar_system,
                 magic_cooldown_system,
                 skill_bar_pointer_system,
+                skill_bar_tooltip_system,
             )
                 .in_set(GameSet::Skills),
         );
@@ -568,6 +569,41 @@ mod tests {
         assert_eq!(skill_key_label(0, 7), "F8");
         assert_eq!(skill_key_label(1, 0), "C+F1");
         assert_eq!(skill_key_label(1, 7), "C+F8");
+    }
+
+    /// #2767：技能栏格 Hint 文案 = C# `SkillMpCooldownKey`
+    /// （`MainDialogs.cs:1695-1696`：名称 / `BaseCost+LevelCost*Level` / `PrintTimeSpanFromMilliSeconds(Delay)` / 键位）
+    #[test]
+    fn skill_hint_lines_match_csharp() {
+        let magic = ClientMagic {
+            name: "火球术".to_string(),
+            spell: Spell::FireBall,
+            base_cost: 4,
+            level_cost: 2,
+            icon: 10,
+            level1: 1,
+            level2: 2,
+            level3: 3,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            level: 3,
+            key: 1,
+            experience: 0,
+            delay: 1500,
+            range: 8,
+            cast_time: 0,
+        };
+        // 魔法值 = 4 + 2*3 = 10；冷却 1500ms → "1.5s"
+        assert_eq!(
+            skill_hint_lines(&magic, "F1"),
+            vec!["魔法值: 10", "冷却时间: 1.5s", "键位: F1"]
+        );
+        assert_eq!(skill_hint_lines(&magic, "C+F1")[2], "键位: C+F1");
+        // 冷却跨到分钟档：`TotalMinutes` 保留小数（C# 同一格式）
+        let mut slow = magic.clone();
+        slow.delay = 90_000;
+        assert_eq!(skill_hint_lines(&slow, "F2")[1], "冷却时间: 1.5m 30s");
     }
 
     /// C# MirControl.OnMouseMove（L901-913）：拖动位置钳制在父容器（全屏）内，栏不可拖出屏幕。
@@ -1094,6 +1130,25 @@ pub fn skill_key_label(bar_idx: usize, i: usize) -> String {
     }
 }
 
+/// 技能栏格悬停提示的归属方（`TooltipState.source`，与其它写入方隔离）：#2767
+pub const SKILL_TOOLTIP_SOURCE: u16 = 6;
+
+/// C# `SkillMpCooldownKey`（`MainDialogs.cs:1695-1696`，
+/// 中文文案 = `{0}\n魔法值: {1}\n冷却时间: {2}\n键位: {3}`）：
+/// 第一行是技能名（本端作为 tooltip 标题），其余三行：
+/// 魔法值 = `BaseCost + LevelCost * Level`；冷却 = `PrintTimeSpanFromMilliSeconds(Delay)`；键位 = `GetKey(BarIndex, i)`。
+pub fn skill_hint_lines(magic: &ClientMagic, key_label: &str) -> Vec<String> {
+    let cost = magic.base_cost as i64 + magic.level_cost as i64 * magic.level as i64;
+    vec![
+        format!("魔法值: {cost}"),
+        format!(
+            "冷却时间: {}",
+            crate::game::time_format::format_time_span_ms(magic.delay)
+        ),
+        format!("键位: {key_label}"),
+    ]
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn spawn_one_skill_bar(
@@ -1179,6 +1234,77 @@ fn skill_slot_at(bar: &SkillBarState, cursor: Vec2) -> Option<usize> {
         }
     }
     None
+}
+
+/// #2767 技能栏格悬停提示（C# `SkillBarDialog.Update` 给 `Cells[i].Hint` 赋 `SkillMpCooldownKey`）：
+/// 命中已绑定技能的格子 → 技能名 + 魔法值/冷却/键位；空格或无技能 → 清除自己归属的提示。
+/// 光标同样支持控制接口的光标探针（无焦点环境可驱动验证）。
+fn skill_bar_tooltip_system(
+    windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
+    opt: Res<crate::game::dialogs::option::OptionState>,
+    bar: Res<SkillBarState>,
+    magics: Res<MagicsState>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+) {
+    let clear = |tooltip: &mut crate::ui::tooltip::TooltipState| {
+        tooltip.update(
+            SKILL_TOOLTIP_SOURCE,
+            false,
+            String::new(),
+            Vec::new(),
+            0.0,
+            0.0,
+        );
+    };
+    // 与 spawn_skill_bar 同一道门：UI_BITS 关掉 skill 或设置里隐藏技能栏时不提示
+    if !crate::ui::sprite_ui::ui_enabled("skill")
+        || !crate::game::dialogs::option::view_should_show(
+            crate::game::dialogs::option::OptionViewKind::SkillBar,
+            &opt,
+        )
+    {
+        clear(&mut tooltip);
+        return;
+    }
+    let Some(raw) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
+        clear(&mut tooltip);
+        return;
+    };
+    // UI 相机 Fixed{1024,768}：窗口缩放/DPI 下须换算成 UI 逻辑坐标（对齐 tooltip_hint_system）
+    let cursor = match ui_cameras.single() {
+        Ok((cam, gtf)) => match cam.viewport_to_world_2d(gtf, raw) {
+            Ok(w) => Vec2::new(w.x, -w.y),
+            Err(_) => {
+                clear(&mut tooltip);
+                return;
+            }
+        },
+        Err(_) => {
+            clear(&mut tooltip);
+            return;
+        }
+    };
+    match skill_slot_at(&bar, cursor)
+        .and_then(|slot| magics.by_key(slot as u8 + 1).map(|m| (slot, m.clone())))
+    {
+        Some((slot, magic)) => {
+            let key = skill_key_label(slot / 8, slot % 8);
+            tooltip.update(
+                SKILL_TOOLTIP_SOURCE,
+                true,
+                magic.name.clone(),
+                skill_hint_lines(&magic, &key),
+                cursor.x,
+                cursor.y,
+            );
+        }
+        None => clear(&mut tooltip),
+    }
 }
 
 /// 技能栏指针交互（C# SkillBarDialog Movable + Cells[i].Click→UseSpell）：
