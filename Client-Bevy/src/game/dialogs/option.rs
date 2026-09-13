@@ -180,6 +180,12 @@ pub struct OptionBar {
     pub rect: (f32, f32, f32, f32),
 }
 
+/// #2775：音量滑条的 Hint 文案（C# `MainDialogs.cs:2844/2880` `$"{Settings.Volume}%"`，
+/// 0.0-1.0 内部音量 → 整数百分比）。
+fn volume_hint_text(vol: f32) -> String {
+    format!("{:.0}%", (vol * 100.0).round())
+}
+
 /// 面板初始原点兜底（Title[411] 259x354 居中：与 setup 的 fallback 尺寸一致）
 const OPTION_ORIGIN: (f32, f32) = ((1024.0 - 259.0) / 2.0, (768.0 - 354.0) / 2.0);
 
@@ -418,6 +424,10 @@ fn spawn_volume_bar(
             is_music,
             rect: (bar_x, bar_y, 76.0, 19.0),
         })
+        // #2775：Hint 初值随实际音量，由 option_ui_system 每帧同步（C# SoundBar.Hint = N%）
+        .insert(crate::ui::tooltip::UiHint {
+            text: String::new(),
+        })
         .with_children(|bc| {
             spawn_image(bc, bar_tex, 0.0, 0.0, 0.0, 19.0, 11)
                 .insert(OptionVolumeFill(is_music));
@@ -451,7 +461,7 @@ fn option_ui_system(
     // 再与下方只读 panel(Node) 互斥，写×读同样计入冲突）
     mut fills: Query<(&mut Node, &OptionVolumeFill), (Without<OptionVolumeKnob>, Without<OptionWidget>)>,
     mut knobs: Query<(&mut Node, &OptionVolumeKnob), (Without<OptionVolumeFill>, Without<OptionWidget>)>,
-    bars: Query<&OptionBar>,
+    mut bars: Query<(&OptionBar, &mut crate::ui::tooltip::UiHint)>,
     panel: Query<&Node, With<OptionWidget>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -506,6 +516,20 @@ fn option_ui_system(
             ib.pressed = f[2].clone();
         }
     }
+    // #2775：音量滑条 Hint（C# `MainDialogs.cs:2844/2880` `SoundBar.Hint = $"{Settings.Volume}%"`）
+    // 必须在下面两处早退**之前**写：无光标环境（控制接口探针驱动）时 `cursor_position()` 恒 None，
+    // 写在早退之后会让 Hint 永远空串（实机复现：命中 rect 正确但 text=""）。
+    for (bar, mut hint) in &mut bars {
+        let vol = if bar.is_music {
+            state.music_volume
+        } else {
+            state.sound_volume
+        };
+        let text = volume_hint_text(vol);
+        if hint.text != text {
+            hint.text = text;
+        }
+    }
     // 音量滑条：点击设置音量（rect 为面板内相对坐标，命中前取面板原点——
     // 设置面板可拖动，生成期绝对坐标在拖后即成死区）
     let Ok(window) = windows.single() else { return };
@@ -514,7 +538,7 @@ fn option_ui_system(
         .single()
         .map(|n| crate::ui::theme::node_origin(n, OPTION_ORIGIN))
         .unwrap_or(OPTION_ORIGIN);
-    for bar in &bars {
+    for (bar, _) in &mut bars {
         let (rx, ry, rw, rh) = bar.rect;
         let (bx, by) = (ox + rx, oy + ry);
         if mouse.just_pressed(MouseButton::Left)
@@ -562,6 +586,15 @@ fn option_ui_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2775：音量滑条 Hint = 整数百分比（C# `$"{Settings.Volume}%"`）
+    #[test]
+    fn volume_hint_formats_percent() {
+        assert_eq!(volume_hint_text(0.0), "0%");
+        assert_eq!(volume_hint_text(0.3), "30%");
+        assert_eq!(volume_hint_text(0.999), "100%");
+        assert_eq!(volume_hint_text(1.0), "100%");
+    }
 
     #[test]
     fn test_from_ini_empty_uses_defaults() {

@@ -188,6 +188,11 @@ pub fn ui_hint_system(
         if !vis.get() {
             continue;
         }
+        // #2775：空文案不参与命中——否则会写入 `lines = [""]`，`lines` 非空但无内容，
+        // 面板显示成一个空框（实机复现：队伍成员行在无成员时留下空提示框）
+        if hint.text.is_empty() {
+            continue;
+        }
         let (w, h) = match ui_hint_size(node, computed) {
             Some(s) => s,
             None => continue,
@@ -318,7 +323,9 @@ pub fn tooltip_panel_system(
     if !state.is_changed() {
         return;
     }
-    let show = state.visible && (!state.title.is_empty() || !state.lines.is_empty());
+    // #2775：`lines = [""]` 这类「有元素但无内容」的写入同样不显示（各写入方兜底）
+    let show =
+        state.visible && (!state.title.is_empty() || state.lines.iter().any(|l| !l.is_empty()));
     // 描边副本（outlined_text 的兄弟层级副本）随父节点 bg 显隐自动跟随：
     // bevy_ui 里子实体恒画在父之后且 `Inherited` 继承父可见性，无需单独同步；
     // 正文内容变化由 `sync_outline_ui_system` 复制到 4 个副本（见插件注册顺序）。
@@ -344,6 +351,10 @@ pub fn tooltip_panel_system(
         *vis = if show && !state.title.is_empty() { Visibility::Visible } else { Visibility::Hidden };
         if show && !state.title.is_empty() {
             if t.0 != state.title { t.0 = state.title.clone(); }
+        } else if !t.0.is_empty() {
+            // 隐藏时必须清空正文：描边副本由 `sync_outline_ui_system` 按正文内容同步，
+            // 只隐藏正文会让 4 个黑副本留在屏幕上（实机复现：切换提示对象后残留暗字）
+            t.0.clear();
         }
     }
     for (mut t, mut vis, line) in &mut lines {
@@ -352,6 +363,8 @@ pub fn tooltip_panel_system(
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
         if visible {
             if t.0 != s { t.0 = s; }
+        } else if !t.0.is_empty() {
+            t.0.clear();
         }
     }
 }
@@ -574,6 +587,26 @@ mod tests {
             .map(|(t, _)| t.0.clone())
             .expect("第 0 行存在");
         assert_eq!(line0, "按钮提示");
+
+        // #2775：`lines = [""]`（有元素无内容）不得显示空框
+        world.resource_mut::<TooltipState>().update(
+            8,
+            true,
+            String::new(),
+            vec![String::new()],
+            100.0,
+            200.0,
+        );
+        world
+            .run_system_once(tooltip_panel_system)
+            .expect("面板渲染应成功");
+        let vis = world
+            .query_filtered::<&Visibility, With<TooltipBg>>()
+            .iter(&world)
+            .next()
+            .copied()
+            .expect("面板背景存在");
+        assert_eq!(vis, Visibility::Hidden, "空内容不得显示空提示框");
 
         // 清除 → 面板隐藏
         world

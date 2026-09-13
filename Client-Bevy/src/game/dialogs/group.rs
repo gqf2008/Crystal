@@ -57,6 +57,12 @@ fn center_origin(w: f32, h: f32) -> (f32, f32) {
     (((1024.0 - w) / 2.0).floor(), ((768.0 - h) / 2.0).floor())
 }
 
+/// #2775：成员行 Hint 文案（C# `GroupDialog.cs:161` `GroupMembers[i].Hint = player.Value`，
+/// 只给玩家名，不带界面上的 `★`/「（离线）」装饰；越界行给空串）
+fn member_row_hint(members: &[GroupMember], i: usize) -> String {
+    members.get(i).map(|m| m.name.clone()).unwrap_or_default()
+}
+
 /// 窗口原点 = 屏幕中心（C# GroupDialog.cs:27 `Location = Center`；W/H = 背景真实尺寸）
 fn group_dialog_origin(libs: &mut GameLibraries) -> (f32, f32) {
     match libs.0.get_image(LibraryName::Prguse, GROUP_BG_INDEX) {
@@ -236,7 +242,13 @@ fn spawn_group(
                 )
             };
             spawn_container(p, x, y, 100.0, 18.0, 9)
-                .insert((GroupMemberLine(i),))
+                .insert((
+                    GroupMemberLine(i),
+                    // #2775：C# `GroupDialog.cs:161` GroupMembers[i].Hint = 玩家名（逐行随成员刷新）
+                    crate::ui::tooltip::UiHint {
+                        text: String::new(),
+                    },
+                ))
                 .with_children(|rc| {
                     rc.spawn((
                         Node {
@@ -358,6 +370,8 @@ fn group_ui_system(
         (With<GroupWidget>, Without<GroupInviteWidget>, Without<GroupMemberText>),
     >,
     mut lines: Query<(&mut Text, &GroupMemberText), Without<GroupInviteText>>,
+    // #2775：成员行 Hint（C# `GroupDialog.cs:161`）
+    mut row_hints: Query<(&mut crate::ui::tooltip::UiHint, &GroupMemberLine)>,
     mut invite_widgets: Query<&mut Visibility, (With<GroupInviteWidget>, Without<GroupWidget>)>,
     mut invite_texts: Query<(&mut Text, &GroupInviteText), Without<GroupMemberText>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -396,6 +410,13 @@ fn group_ui_system(
             Some(m) => m.name.clone(),
             None => String::new(),
         };
+    }
+    // #2775：行 Hint = 玩家名（C# 只给名字，不带 ★/离线装饰）
+    for (mut hint, row) in &mut row_hints {
+        let name = member_row_hint(&group.members, row.0);
+        if hint.text != name {
+            hint.text = name;
+        }
     }
     let has_invite = group.invite.is_some();
     for mut vis in &mut invite_widgets {
@@ -803,6 +824,30 @@ fn group_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2775：成员行 Hint = 玩家名（C# `GroupDialog.cs:161`），越界行为空
+    #[test]
+    fn member_row_hint_uses_raw_name() {
+        let members = vec![
+            GroupMember {
+                name: "队长甲".to_string(),
+                is_leader: true,
+                online: true,
+            },
+            GroupMember {
+                name: "队友乙".to_string(),
+                is_leader: false,
+                online: false,
+            },
+        ];
+        assert_eq!(
+            member_row_hint(&members, 0),
+            "队长甲",
+            "C# 用原始玩家名（行内容才加 ★）"
+        );
+        assert_eq!(member_row_hint(&members, 1), "队友乙", "离线也不加装饰");
+        assert_eq!(member_row_hint(&members, 7), "", "空行为空串（不弹提示）");
+    }
 
     /// C# GroupDialog `Location = Center`（GroupDialog.cs:27）+ MirControl.Center 整除
     /// （MirControl.cs:645）。背景 Prguse[120] 实测 232x249 → 原点 (396,259)；

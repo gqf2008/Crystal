@@ -315,11 +315,24 @@ fn spawn_hero(
         spawn_label(p, &cjk, "行为:", 130.0, 186.0, 12.0, Color::WHITE, 10);
         for i in 0..4usize {
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1840 + i) {
-                crate::ui::theme::spawn_image(p, h.clone(), 160.0 + i as f32 * 18.0, 182.0, 16.0, 17.0, 10)
-                    .insert((
-                        HeroBehaviourBtn(i),
-                        Button,
-                    ));
+                crate::ui::theme::spawn_image(
+                    p,
+                    h.clone(),
+                    160.0 + i as f32 * 18.0,
+                    182.0,
+                    16.0,
+                    17.0,
+                    10,
+                )
+                .insert((
+                    HeroBehaviourBtn(i),
+                    Button,
+                    // #2775：C# `HeroDialogs.cs:774` BehaviourButtons[i].Hint =
+                    // `HeroBehaviourFormat`（「英雄行为：{0}」+ `HeroBehaviour` 枚举本地化名）
+                    crate::ui::tooltip::UiHint {
+                        text: behaviour_hint(i),
+                    },
+                ));
             }
         }
         // 复活按钮（默认隐藏，hero_hp<=0 时由 hero_revive_system 显示）
@@ -900,9 +913,22 @@ fn behaviour_name(b: mir2_shared::enums::HeroBehaviour) -> &'static str {
         Attack => "攻击",
         CounterAttack => "反击",
         Follow => "跟随",
-        Custom => "自定义",
+        // #2775：C# `ClientTextKeys.HeroBehaviour_Custom` = 「自动」（此前写作「自定义」属自造文案）
+        Custom => "自动",
         _ => "未知",
     }
+}
+
+/// #2775：英雄行为按钮 Hint（C# `HeroDialogs.cs:774` `HeroBehaviourFormat` =「英雄行为：{0}」，
+/// `{0}` 取 `HeroBehaviour` 枚举的本地化名；按钮下标 i 即枚举值，C# `Enum.Parse` 同序）。
+fn behaviour_hint(i: usize) -> String {
+    let name = match i {
+        0 => "攻击",
+        1 => "反击",
+        2 => "跟随",
+        _ => "自动",
+    };
+    format!("英雄行为：{name}")
 }
 
 // C# Stat 枚举：HP=12, MP=13（服务端同）
@@ -927,9 +953,35 @@ fn autopot_text(hp: u8, mp: u8) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::HeroState;
+    use super::{behaviour_hint, behaviour_name, HeroState};
     use mir2_shared::data::client_data::ClientMagic;
     use mir2_shared::enums::Spell;
+
+    /// #2775：行为按钮 Hint（C# `HeroDialogs.cs:774` `HeroBehaviourFormat` +
+    /// `HeroBehaviour` 枚举本地化名）
+    #[test]
+    fn behaviour_hint_matches_csharp_enum_names() {
+        assert_eq!(
+            [
+                behaviour_hint(0),
+                behaviour_hint(1),
+                behaviour_hint(2),
+                behaviour_hint(3)
+            ],
+            [
+                "英雄行为：攻击",
+                "英雄行为：反击",
+                "英雄行为：跟随",
+                "英雄行为：自动"
+            ],
+            "0=攻击 1=反击 2=跟随 3=自动（C# Enum.Parse 顺序）"
+        );
+        // C# `ClientTextKeys.HeroBehaviour_Custom` = 自动（此前 Bevy 写作「自定义」属自造文案）
+        assert_eq!(
+            behaviour_name(mir2_shared::enums::HeroBehaviour::Custom),
+            "自动"
+        );
+    }
 
     fn cm(spell: Spell) -> ClientMagic {
         ClientMagic {

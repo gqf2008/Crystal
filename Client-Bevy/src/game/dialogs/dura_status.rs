@@ -145,6 +145,10 @@ fn spawn_dura_status(
             ImageNode::new(n.clone()),
             ImageButton { normal: n, hover: h, pressed: pr },
             DuraToggleBtn,
+            // #2775：C# `MainDialogs.cs:3923` DuraPanel.Character.Hint（中文「耐久面板」）
+            crate::ui::tooltip::UiHint {
+                text: "耐久面板".to_string(),
+            },
             // 恒可见（C# DuraStatusDialog 不随面板显隐）：标记 AlwaysVisible，
             // 使通用对话框兜底（enforce_dialog_visibility）跳过本钮
             crate::game::dialogs::AlwaysVisible,
