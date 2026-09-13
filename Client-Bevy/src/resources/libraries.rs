@@ -131,6 +131,12 @@ impl std::fmt::Display for ArrayLibType {
 /// 优先使用本 crate 的 Data/，其次仓库根 Data/（游戏数据在仓库根，本地保留不入库）。
 pub fn resolve_data_path() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    // #2809：`CRYSTAL_NO_DATA_ASSETS=1` → 返回一个不存在的目录，忠实复现 CI（只 checkout
+    // 仓库、无 `Data/`）的无资产环境。若只让 `data_assets_present()` 说谎、这里仍能读到真实
+    // 资产，则"跳过判据"无法红检（去掉判据也不会 FAILED）。
+    if std::env::var_os("CRYSTAL_NO_DATA_ASSETS").is_some() {
+        return PathBuf::from(format!("{}/Data.crystal_no_assets", manifest_dir));
+    }
     // 运行时候选（cwd / exe 相对）：worktree 构建的 exe 共享主检出 target 目录时，
     // CARGO_MANIFEST_DIR 是编译期常量、指向 worktree（无 Data 资产，gitignore 不入库），
     // 曾导致地图地面 0 瓦片全黑屏（#2599 排查记录）。运行时路径按启动环境解析，
@@ -165,6 +171,18 @@ pub fn resolve_data_path() -> PathBuf {
         }
     }
     PathBuf::from(format!("{}/Data", manifest_dir))
+}
+
+/// 游戏资产（`Data/`，核心标志 `Items.Lib`）是否可用。
+///
+/// CI 只 checkout 仓库：`Data/` 是本地保留、不入库的游戏资源，因此依赖真实 `.Lib` 精灵的
+/// 单测应据此**跳过**而不是 FAILED（本函数就是那份判据）。
+/// 设 `CRYSTAL_NO_DATA_ASSETS=1` 可强制判定为"无资产"，用于在本机复现 CI 的跳过路径。
+pub fn data_assets_present() -> bool {
+    if std::env::var_os("CRYSTAL_NO_DATA_ASSETS").is_some() {
+        return false;
+    }
+    resolve_data_path().join("Items.Lib").exists()
 }
 
 /// 全局库管理器

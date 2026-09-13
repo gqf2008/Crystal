@@ -1902,7 +1902,7 @@ impl Message<UseItemRequest> for WorldActor {
                 }
                 // Pets（C# UseItem Pets：shape<20 宠物蛋，>=20 智能宠物道具；PlayerObject.cs:6118-6248）
                 36 => {
-                    use crate::actors::creature::{CreatureType, IntelligentCreature};
+                    use crate::actors::creature::CreatureType;
                     use crate::combat::buff::{BuffInstance, BuffType};
                     use mir2_shared::enums::Stat;
                     let get_added = |stat: Stat| {

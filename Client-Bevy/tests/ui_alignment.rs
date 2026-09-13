@@ -23,6 +23,20 @@ const SW: f32 = 1024.0;
 const SH: f32 = 768.0;
 const EPS: f32 = 0.5;
 
+/// CI 只 checkout 仓库，而 `Data/`（游戏资源，不入库，含 `Items.Lib`/`Prguse.Lib`）只存在于
+/// 本机 → 依赖真实精灵尺寸的断言在无资产时必须**跳过**而不是 FAILED（与 lib 侧
+/// `game/dialogs/character.rs` / `ui/login.rs` 同一判据 `libraries::data_assets_present`）。
+/// `CRYSTAL_NO_DATA_ASSETS=1` 可在本机忠实复现 CI 的无资产路径（该变量同时让
+/// `resolve_data_path` 指向不存在的目录，见 `resources::libraries`）。
+macro_rules! require_assets {
+    ($name:expr) => {
+        if !client_bevy::resources::libraries::data_assets_present() {
+            eprintln!("skip {}: 无 Data 资产（CI 只 checkout 仓库）", $name);
+            return;
+        }
+    };
+}
+
 struct Libs(Libraries);
 
 impl Libs {
@@ -98,6 +112,7 @@ fn assert_in_canvas(name: &str, x: f32, y: f32, w: f32, h: f32) {
 
 #[test]
 fn login_dialog_aligned() {
+    require_assets!("login_dialog_aligned");
     let mut libs = Libs::new();
     assert_centered(
         "登录框",
@@ -154,6 +169,7 @@ fn login_dialog_aligned() {
 
 #[test]
 fn new_account_dialog_aligned() {
+    require_assets!("new_account_dialog_aligned");
     let mut libs = Libs::new();
     assert_centered(
         "新建账号框",
@@ -200,6 +216,7 @@ fn new_account_dialog_aligned() {
 
 #[test]
 fn change_password_dialog_aligned() {
+    require_assets!("change_password_dialog_aligned");
     let mut libs = Libs::new();
     assert_centered(
         "修改密码框",
@@ -244,6 +261,7 @@ fn change_password_dialog_aligned() {
 
 #[test]
 fn new_character_dialog_aligned() {
+    require_assets!("new_character_dialog_aligned");
     let mut libs = Libs::new();
     assert_centered(
         "新建角色框",
@@ -388,6 +406,7 @@ fn new_character_dialog_aligned() {
 
 #[test]
 fn delete_dialogs_aligned() {
+    require_assets!("delete_dialogs_aligned");
     let mut libs = Libs::new();
     // MirInputBox Prguse[660]
     assert_centered(
@@ -475,6 +494,7 @@ fn delete_dialogs_aligned() {
 
 #[test]
 fn select_screen_aligned() {
+    require_assets!("select_screen_aligned");
     let mut libs = Libs::new();
     // 标题 Title[40](468,20)
     let (tw, th) = libs.size(LibraryName::Title, 40);
@@ -529,6 +549,7 @@ fn select_screen_aligned() {
 
 #[test]
 fn game_chat_death_aligned() {
+    require_assets!("game_chat_death_aligned");
     let mut libs = Libs::new();
 
     // C# ChatDialog：面板背景 Prguse[2221] 632x68 @(230,671)
@@ -606,6 +627,7 @@ fn game_chat_death_aligned() {
 #[test]
 fn skill_bar_aligned() {
     use client_bevy::game::skills as sk;
+    require_assets!("skill_bar_aligned");
     let mut libs = Libs::new();
 
     // C# 源码字面值（MainDialogs.cs L1516-1744）——独立于被测代码的真源，
@@ -704,6 +726,7 @@ fn skill_bar_aligned() {
 #[test]
 fn hud_labels_aligned() {
     use client_bevy::game::hud;
+    require_assets!("hud_labels_aligned");
     let mut libs = Libs::new();
 
     // C# 源码字面值（MainDialogs.cs）——独立于被测代码的真源，常量漂移任意一个即红：
@@ -800,6 +823,7 @@ fn hud_labels_aligned() {
 #[test]
 fn character_dialog_aligned() {
     use client_bevy::game::dialogs::character as ch;
+    require_assets!("character_dialog_aligned");
     let mut libs = Libs::new();
 
     // C# 源码字面值（CharacterDialog.cs / MirItemCell.cs）——独立于被测代码的真源，漂移即红：
@@ -896,6 +920,7 @@ fn character_dialog_aligned() {
 fn inventory_bigmap_aligned() {
     use client_bevy::game::dialogs::big_map as bm;
     use client_bevy::game::dialogs::inventory as inv;
+    require_assets!("inventory_bigmap_aligned");
     let mut libs = Libs::new();
 
     // ---- 背包（C# InventoryDialog.cs）常量 == C# 字面值（防漂移）----
@@ -1010,6 +1035,7 @@ fn hero_inventory_origin_aligned() {
 
 #[test]
 fn login_select_meta_aligned() {
+    require_assets!("login_select_meta_aligned");
     let mut libs = Libs::new();
 
     // LoginScene.Version：左下角 Build 标签 @(5, ScreenHeight-20)
@@ -1040,6 +1066,7 @@ fn login_select_meta_aligned() {
 fn menu_dura_aligned() {
     use client_bevy::game::dialogs::dura_status as ds;
     use client_bevy::game::dialogs::menu as mu;
+    require_assets!("menu_dura_aligned");
     let mut libs = Libs::new();
 
     // ---- 菜单（C# MenuDialog，MainDialogs.cs:3024-3029）常量 == C# 字面值/实测 ----
@@ -1263,6 +1290,7 @@ fn overlap(x1: f32, w1: f32, x2: f32, w2: f32) -> bool {
 fn craft_refine_sprites_aligned() {
     use client_bevy::game::dialogs::craft as cf;
     use client_bevy::game::dialogs::refine as rf;
+    require_assets!("craft_refine_sprites_aligned");
     let mut libs = Libs::new();
 
     // ---- Craft（C# CraftDialog，NPCDialogs.cs:2256）----
@@ -1335,6 +1363,7 @@ fn craft_refine_sprites_aligned() {
 #[test]
 fn trust_merchant_confirm_box_aligned() {
     use client_bevy::game::dialogs::market as mk;
+    require_assets!("trust_merchant_confirm_box_aligned");
     let mut libs = Libs::new();
     let (w, h) = libs.size(LibraryName::Prguse, 360);
     assert_eq!(
@@ -1387,6 +1416,7 @@ fn trust_merchant_confirm_box_aligned() {
 #[test]
 fn trust_merchant_price_filter_and_mail_aligned() {
     use client_bevy::game::dialogs::market as mk;
+    require_assets!("trust_merchant_price_filter_and_mail_aligned");
     let mut libs = Libs::new();
 
     for idx in [mk::TM_PRICE_ICON_LOW, mk::TM_PRICE_ICON_HIGH] {
@@ -1439,6 +1469,7 @@ fn trust_merchant_price_filter_and_mail_aligned() {
 fn trust_merchant_rows_aligned() {
     use bevy::prelude::Color;
     use client_bevy::game::dialogs::market as mk;
+    require_assets!("trust_merchant_rows_aligned");
     let mut libs = Libs::new();
 
     // 行/图标区/步进（C# `AuctionRow.Size`/`IconArea`/`Rows[i].Location`）
@@ -1490,6 +1521,7 @@ fn trust_merchant_rows_aligned() {
 #[test]
 fn trust_merchant_consign_panel_aligned() {
     use client_bevy::game::dialogs::market as mk;
+    require_assets!("trust_merchant_consign_panel_aligned");
     let mut libs = Libs::new();
 
     // 两个页签背景都是 492x478（C# `Index = 786` / `787`）
@@ -1575,6 +1607,7 @@ fn trust_merchant_consign_panel_aligned() {
 #[test]
 fn trust_merchant_filter_tree_aligned() {
     use client_bevy::game::dialogs::market_filter as mf;
+    require_assets!("trust_merchant_filter_tree_aligned");
     let mut libs = Libs::new();
 
     // C# `Title[786]` 面板 492x478（筛选树与滚动条都必须落在面板内）
@@ -1653,6 +1686,7 @@ fn trust_merchant_filter_tree_aligned() {
 #[test]
 fn item_rental_guest_windows_aligned() {
     use client_bevy::game::dialogs::item_rental as ir;
+    require_assets!("item_rental_guest_windows_aligned");
     let mut libs = Libs::new();
 
     // 面板 Prguse[238] 实测 204x109（C# 四窗同源）

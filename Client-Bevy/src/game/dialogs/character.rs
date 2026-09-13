@@ -1018,6 +1018,11 @@ mod tests {
         use crate::resources::libraries::Libraries;
         use bevy::ecs::system::RunSystemOnce;
 
+        // CI 无游戏资产（Data/ 不入库）→ 跳过（详见 libraries::data_assets_present）
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip stat_labels_ride_correct_page_bg: 无 Data 资产（CI 只 checkout 仓库）");
+            return;
+        }
         let mut world = World::new();
         world.insert_resource(GameLibraries(Libraries::new("Data")));
         world.insert_resource(Assets::<Image>::default());
@@ -1102,6 +1107,11 @@ mod tests {
         use crate::resources::libraries::Libraries;
         use bevy::ecs::system::RunSystemOnce;
 
+        // CI 无游戏资产（Data/ 不入库）→ 跳过（详见 libraries::data_assets_present）
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip guildless_player_panel_renders: 无 Data 资产（CI 只 checkout 仓库）");
+            return;
+        }
         let mut world = World::new();
         world.insert_resource(GameLibraries(Libraries::new("Data")));
         world.insert_resource(Assets::<Image>::default());
