@@ -2167,7 +2167,8 @@ impl Message<HarvestRequest> for WorldActor {
         // 延迟发送 ObjectHarvested 视觉包
         let object_id = state.object_id;
         let gate_ref = self.gate_ref.clone();
-        tokio::spawn(async move {
+        // #2606：fire-and-forget 的延迟视觉包同样登记（生命周期 = 1.5s + 一次 tell）
+        crate::util::tasks::spawn("world.harvest_visual", async move {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             let mut b = Vec::new();
             b.extend_from_slice(&object_id.to_le_bytes());

@@ -40,6 +40,10 @@ async fn async_main() -> anyhow::Result<()> {
     } else {
         tracing_subscriber::EnvFilter::from_default_env()
             .add_directive("crystal_server=info".parse()?)
+            // #2606：bin target 的 crate 名是 mirrors* 之外的 `mir2_server`，没有被
+            // `crystal_server=info` 覆盖 → 默认配置下 main.rs 自己的启动/关闭日志全被丢弃
+            // （优雅关闭取证时看不到 "Background tasks drained"）。显式补上。
+            .add_directive("mir2_server=info".parse()?)
             .add_directive("tokio=warn".parse()?)
             .add_directive("kameo=warn".parse()?)
     };
@@ -346,7 +350,8 @@ async fn async_main() -> anyhow::Result<()> {
 
     let gate_addr = cfg.network.listen_addr.clone();
     let gate_ref_for_listener = gate_ref.clone();
-    tokio::spawn(async move {
+    // #2606：kameo 之外的后台任务统一登记（见 util::tasks）
+    crystal_server::util::tasks::spawn("gate.listener", async move {
         if let Err(e) =
             crystal_server::gate::actor::run_gate_listener(gate_addr, gate_ref_for_listener).await
         {
@@ -358,7 +363,7 @@ async fn async_main() -> anyhow::Result<()> {
     let admin_stats = Arc::new(crystal_server::util::admin::AdminStats::default());
     let admin_stats_clone = admin_stats.clone();
     let admin_port = 7001; // 固定端口(后续可从 cfg 读)
-    tokio::spawn(async move {
+    crystal_server::util::tasks::spawn("admin.server", async move {
         crystal_server::util::admin::run_admin_server(
             admin_stats_clone,
             format!("0.0.0.0:{}", admin_port),
@@ -369,8 +374,21 @@ async fn async_main() -> anyhow::Result<()> {
 
     info!("Server is ready! Press Ctrl+C to stop.");
 
-    // 保持运行
-    tokio::signal::ctrl_c().await?;
+    // 保持运行。
+    // #2606：测试挂钩——设 CRYSTAL_EXIT_AFTER_MS 时用定时器替代 Ctrl+C，
+    // 供无交互环境（CI/自动化取证）验证优雅关闭；生产交互启动不设该变量。
+    match std::env::var("CRYSTAL_EXIT_AFTER_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        Some(ms) => {
+            info!("Shutdown timer armed: {}ms (CRYSTAL_EXIT_AFTER_MS)", ms);
+            tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
+        }
+        None => {
+            tokio::signal::ctrl_c().await?;
+        }
+    }
     info!("Shutdown signal received, initiating graceful shutdown...");
 
     // Phase 2.2: 优雅关机 — 断开所有 session 触发自动保存
@@ -382,6 +400,21 @@ async fn async_main() -> anyhow::Result<()> {
     }
     // 给 actor 5 秒处理断连 + 保存
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+    // #2606：收拢 kameo 之外的后台任务（广播关闭信号 → 逐个 await），
+    // 超时则如实报告残留，不让个别任务拖死进程。
+    match tokio::time::timeout(
+        tokio::time::Duration::from_secs(10),
+        crystal_server::util::tasks::shutdown(),
+    )
+    .await
+    {
+        Ok(metrics) => info!("Background tasks drained: {}", metrics.summary()),
+        Err(_) => warn!(
+            "Background tasks not drained within 10s: {}",
+            crystal_server::util::tasks::metrics().summary()
+        ),
+    }
     info!("Graceful shutdown complete. Goodbye.");
 
     Ok(())

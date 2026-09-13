@@ -100,8 +100,16 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
 
     let mut session_id: SessionId = 1;
 
+    // #2606：进程关闭时退出 accept 循环（否则它活过 ShutdownAll，成为残留任务）
+    let shutdown = crate::util::tasks::shutdown_signal();
     loop {
-        let (mut stream, peer_addr) = listener.accept().await?;
+        let (mut stream, peer_addr) = tokio::select! {
+            _ = shutdown.cancelled() => {
+                info!("Gate listener shutting down after {} sessions", session_id - 1);
+                return Ok(());
+            }
+            accepted = listener.accept() => accepted?,
+        };
         debug!("New connection from {}", peer_addr);
 
         let sid = session_id;
@@ -121,12 +129,19 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
 
         let gate_ref = actor_ref.clone();
 
-        tokio::spawn(async move {
+        // #2606：每连接读循环也登记（生命周期 = 连接；关闭信号兜底唤醒）
+        let session_shutdown = shutdown.clone();
+        crate::util::tasks::spawn("gate.session_reader", async move {
             let mut buf = Vec::with_capacity(4096);
             let mut temp = [0u8; 4096];
 
             loop {
                 tokio::select! {
+                    // 进程关闭：不再读，交由 ShutdownAll 的断连/存档流程收尾
+                    _ = session_shutdown.cancelled() => {
+                        debug!("Session {} stopped by server shutdown", sid);
+                        return;
+                    }
                     // 从网络读取数据
                     read_result = stream.read(&mut temp) => {
                         match read_result {
