@@ -249,12 +249,13 @@ pub fn spawn_tooltip_panel_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<crate::ui::sprite_ui::UiFont>,
+    mut cjk_font: ResMut<crate::ui::sprite_ui::UiCjkFont>,
 ) {
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    spawn_tooltip_panel(&mut commands, &mut images, &ui_font.0);
+    // #2767：提示文本是**动态文本**（每次悬停换内容 → 每帧重排版）。parley 的 Hani 脚本回退
+    // 只在实体首次排版时生效，用 Arial（`UiFont`）会在换文本后退化成 .notdef 豆腐（#2599）：
+    // 悬停怪物「怪物5」实测渲染成「□□5」。与 NPC/公告等动态文本一致改用共享宋体主字体。
+    let font = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
+    spawn_tooltip_panel(&mut commands, &mut images, &font);
 }
 
 /// 清理提示面板（OnExit(Game)）

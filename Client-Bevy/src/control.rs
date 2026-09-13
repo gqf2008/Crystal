@@ -11,11 +11,14 @@
 //   pickup {object_id}  拾取指定地面物品
 //   chat {message}    发送聊天/GM 命令（@MAKE 等）
 //   dialog {kind,action?}  打开/关闭/切换对话框（默认 toggle；验收截图巡回用，#2586）
+//   cursor {x,y} | {clear:true}  注入/清除「光标探针」（#2767：自动化环境 winit 收不到真实
+//                               光标 → 悬停类系统用探针坐标驱动；`nearby` 的 vp 字段给出目标视口坐标）
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -83,6 +86,11 @@ enum ControlCommand {
         kind: DialogKind,
         action: DialogAction,
     },
+    /// #2767：注入/清除光标探针（视口逻辑坐标 0..1024/0..768）
+    Cursor {
+        pos: Option<Vec2>,
+        reply: Sender<String>,
+    },
 }
 
 /// dialog 命令的动作（#2586）
@@ -95,12 +103,81 @@ enum DialogAction {
 #[derive(Resource)]
 struct ControlRx(Receiver<ControlCommand>);
 
+/// #2767 光标探针：自动化环境（无焦点/共享桌面）里 `Window::cursor_position()` 不可用，
+/// 悬停类系统改读这里注入的视口坐标；`None` = 用真实光标。
+#[derive(Resource, Default)]
+pub struct CursorProbe {
+    pub pos: Option<Vec2>,
+}
+
+/// 悬停用的光标位置：探针优先，其次真实窗口光标（纯函数便于单测）。
+pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2> {
+    probe.or(window)
+}
+
+/// #2767：控制接口用到的实体查询打包（原先 16 个系统参数已是 Bevy 上限，
+/// 再加「光标探针 + 相机」就编译失败）。
+#[derive(SystemParam)]
+struct ControlQueries<'w, 's> {
+    players: Query<
+        'w,
+        's,
+        (Entity, &'static Transform, &'static ActorAnim),
+        (With<LocalPlayer>, With<NetObjectId>),
+    >,
+    monsters: Query<
+        'w,
+        's,
+        (
+            &'static Transform,
+            &'static MonsterName,
+            &'static NetObjectId,
+        ),
+        (With<Monster>, Without<LocalPlayer>),
+    >,
+    npcs: Query<
+        'w,
+        's,
+        (&'static Transform, &'static NpcName, &'static NetObjectId),
+        (With<Npc>, Without<LocalPlayer>),
+    >,
+    others: Query<
+        'w,
+        's,
+        (
+            &'static Transform,
+            &'static PlayerName,
+            &'static NetObjectId,
+        ),
+        (With<Player>, Without<LocalPlayer>),
+    >,
+    items: Query<
+        'w,
+        's,
+        (
+            &'static Transform,
+            &'static GroundItem,
+            &'static NetObjectId,
+        ),
+        (With<GroundItem>, Without<LocalPlayer>),
+    >,
+    dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Visibility)>,
+    map_cameras: Query<
+        'w,
+        's,
+        (&'static Camera, &'static GlobalTransform),
+        (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
+}
+
 pub struct ControlPlugin;
 
 impl Plugin for ControlPlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = bounded::<ControlCommand>(64);
         app.insert_resource(ControlRx(rx));
+        // #2767：光标探针（悬停类系统的自动化入口）
+        app.init_resource::<CursorProbe>();
         std::thread::spawn(move || control_listener(tx));
         app.add_systems(
             Update,
@@ -219,6 +296,31 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"ok": true})
                 } else {
                     json!({"error": "missing message"})
+                }
+            }
+            "cursor" => {
+                // #2767：{x,y} 注入视口坐标；{clear:true} 或省略坐标 = 恢复真实光标
+                let pos = match (
+                    params.get("x").and_then(|v| v.as_f64()),
+                    params.get("y").and_then(|v| v.as_f64()),
+                ) {
+                    (Some(x), Some(y)) => Some(Vec2::new(x as f32, y as f32)),
+                    _ => None,
+                };
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::Cursor {
+                        pos,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
                 }
             }
             "pickup" => {
@@ -455,20 +557,13 @@ fn apply_control_commands(
     mut libs: ResMut<GameLibraries>,
     chat: Res<crate::game::chat::ChatState>,
     ime: Res<crate::ui::pinyin_ime::PinyinIme>,
-    players: Query<(Entity, &Transform, &ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
-    monsters: Query<
-        (&Transform, &MonsterName, &NetObjectId),
-        (With<Monster>, Without<LocalPlayer>),
-    >,
-    npcs: Query<(&Transform, &NpcName, &NetObjectId), (With<Npc>, Without<LocalPlayer>)>,
-    others: Query<(&Transform, &PlayerName, &NetObjectId), (With<Player>, Without<LocalPlayer>)>,
-    items: Query<(&Transform, &GroundItem, &NetObjectId), (With<GroundItem>, Without<LocalPlayer>)>,
-    dialog_roots: Query<(&DialogRoot, &Visibility)>,
+    mut cursor_probe: ResMut<CursorProbe>,
+    q: ControlQueries,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
             ControlCommand::Move { dx, dy, run } => {
-                let Ok((pe, ptf, _)) = players.single() else {
+                let Ok((pe, ptf, _)) = q.players.single() else {
                     continue;
                 };
                 let Some(map) = &game_data.map else { continue };
@@ -526,7 +621,7 @@ fn apply_control_commands(
             }
             ControlCommand::GetVisible { reply } => {
                 let mut map: std::collections::BTreeMap<String, usize> = Default::default();
-                for (root, vis) in &dialog_roots {
+                for (root, vis) in &q.dialog_roots {
                     if *vis == Visibility::Visible {
                         *map.entry(format!("{:?}", root.0)).or_insert(0) += 1;
                     }
@@ -534,46 +629,65 @@ fn apply_control_commands(
                 let _ = reply.send(format!("{map:?}"));
             }
             ControlCommand::Nearby { reply } => {
-                let Ok((_, ptf, _)) = players.single() else {
+                let Ok((_, ptf, _)) = q.players.single() else {
                     let _ = reply.send("{}".to_string());
                     continue;
                 };
                 let px = ptf.translation.x;
                 let py = ptf.translation.y;
+                // #2767：附带视口坐标（世界 → 逻辑视口），自动化脚本据此驱动 `cursor` 探针做悬停验证
+                let viewport = |tf: &Transform| -> Option<(f32, f32)> {
+                    let (cam, gtf) = q.map_cameras.single().ok()?;
+                    let vp = cam.world_to_viewport(gtf, tf.translation).ok()?;
+                    Some((vp.x, vp.y))
+                };
                 let mut arr = Vec::new();
-                for (tf, name, oid) in monsters.iter() {
+                for (tf, name, oid) in q.monsters.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "monster", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        let vp = viewport(tf);
+                        arr.push(json!({"kind": "monster", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
                 }
-                for (tf, name, oid) in npcs.iter() {
+                for (tf, name, oid) in q.npcs.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "npc", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        let vp = viewport(tf);
+                        arr.push(json!({"kind": "npc", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
                 }
-                for (tf, name, oid) in others.iter() {
+                for (tf, name, oid) in q.others.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "player", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        let vp = viewport(tf);
+                        arr.push(json!({"kind": "player", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
                 }
-                for (tf, item, oid) in items.iter() {
+                for (tf, item, oid) in q.items.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
                     if d < 600.0 {
-                        arr.push(json!({"kind": "item", "name": item.name, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32)}));
+                        let vp = viewport(tf);
+                        arr.push(json!({"kind": "item", "name": item.name, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
                 }
                 arr.sort_by_key(|v| v.get("dist").and_then(|d| d.as_i64()).unwrap_or(0));
                 let _ = reply.send(json!({"count": arr.len(), "entities": arr}).to_string());
             }
+            ControlCommand::Cursor { pos, reply } => {
+                cursor_probe.pos = pos;
+                let s = match pos {
+                    Some(v) => json!({"ok": true, "cursor": {"x": v.x, "y": v.y}}),
+                    None => json!({"ok": true, "cursor": null}),
+                }
+                .to_string();
+                let _ = reply.send(s);
+            }
             ControlCommand::GetState { reply } => {
-                let Ok((_, ptf, anim)) = players.single() else {
+                let Ok((_, ptf, anim)) = q.players.single() else {
                     let _ = reply.send("{}".to_string());
                     continue;
                 };
@@ -597,7 +711,7 @@ fn apply_control_commands(
             ControlCommand::Attack { object_id } => {
                 control_state.attack_target = Some(object_id);
                 control_state.last_attack = 0.0;
-                if let Ok((pe, _, _)) = players.single() {
+                if let Ok((pe, _, _)) = q.players.single() {
                     commands.entity(pe).remove::<LocalMove>();
                 }
                 tracing::info!("🎮 control attack: {object_id}");
@@ -619,10 +733,10 @@ fn apply_control_commands(
                 });
             }
             ControlCommand::Pickup { object_id } => {
-                let Ok((pe, ptf, _)) = players.single() else {
+                let Ok((pe, ptf, _)) = q.players.single() else {
                     continue;
                 };
-                let Some((item_tf, _, _)) = items.iter().find(|(_, _, id)| id.0 == object_id)
+                let Some((item_tf, _, _)) = q.items.iter().find(|(_, _, id)| id.0 == object_id)
                 else {
                     tracing::warn!("🎮 control pickup: item {object_id} not found");
                     continue;
@@ -670,6 +784,18 @@ fn apply_control_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2767：悬停光标解析——探针优先（自动化环境无真实光标），否则用窗口光标；
+    /// 两者都无 → `None`（悬停系统据此早退）。
+    #[test]
+    fn resolve_cursor_prefers_probe() {
+        let probe = Some(Vec2::new(300.0, 200.0));
+        let window = Some(Vec2::new(1.0, 2.0));
+        assert_eq!(resolve_cursor(probe, window), probe);
+        assert_eq!(resolve_cursor(probe, None), probe);
+        assert_eq!(resolve_cursor(None, window), window);
+        assert_eq!(resolve_cursor(None, None), None);
+    }
 
     /// parse_dialog_kind 覆盖除 GuestTrade 外全部变体 + 未知返回 None（#2586）
     /// GuestTrade 由网络 trade 会话驱动无独立开关，刻意不做 RPC 映射（批M 审查）

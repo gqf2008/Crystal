@@ -429,6 +429,7 @@ pub(crate) fn demo_drive(
 /// 实测帧顶：玩家 ~48px、小怪 50~90px、NPC 47~613px、BOSS 最高 921px，固定值只对玩家大致成立。
 pub(crate) fn actor_hover_tooltip_system(
     windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
     map_cameras: Query<
         (&Camera, &GlobalTransform),
         (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
@@ -452,7 +453,10 @@ pub(crate) fn actor_hover_tooltip_system(
     layers: Query<&SpriteLayer>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    // #2767：自动化环境（无焦点/共享桌面）用 `cursor` 探针注入视口坐标；否则用真实光标
+    let Some(cursor) = crate::control::resolve_cursor(probe.pos, window.cursor_position()) else {
+        return;
+    };
     let Ok((map_cam, map_gtf)) = map_cameras.single() else { return };
     let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else { return };
 
