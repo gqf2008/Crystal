@@ -128,8 +128,13 @@ fn spawn_guild_territory(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 362),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 363),
         ) {
-            spawn_icon_button(p, n, h, pr, 480.0, 8.0, 20.0, 20.0, 10)
-                .insert(GuildTerritoryClose);
+            // #2775：C# `GuildTerritoryDialog .cs:104` closeButton.Hint（退出）
+            spawn_icon_button(p, n, h, pr, 480.0, 8.0, 20.0, 20.0, 10).insert((
+                GuildTerritoryClose,
+                crate::ui::tooltip::UiHint {
+                    text: "退出".to_string(),
+                },
+            ));
         }
         // 领地列表 7 行 @(18,45+22i)
         for i in 0..7usize {
@@ -147,16 +152,26 @@ fn spawn_guild_territory(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 241),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 242),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 270.0, 20.0, 16.0, 10)
-                .insert(GuildTerritoryPrev);
+            // #2775：C# `:117` prevButton.Hint（上一页）
+            spawn_icon_button(p, n, h, pr, 20.0, 270.0, 20.0, 16.0, 10).insert((
+                GuildTerritoryPrev,
+                crate::ui::tooltip::UiHint {
+                    text: "上一页".to_string(),
+                },
+            ));
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 243),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 244),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 245),
         ) {
-            spawn_icon_button(p, n, h, pr, 60.0, 270.0, 20.0, 16.0, 10)
-                .insert(GuildTerritoryNext);
+            // #2775：C# `:138` nextButton.Hint（下一页）
+            spawn_icon_button(p, n, h, pr, 60.0, 270.0, 20.0, 16.0, 10).insert((
+                GuildTerritoryNext,
+                crate::ui::tooltip::UiHint {
+                    text: "下一页".to_string(),
+                },
+            ));
         }
         // 购买按钮（C# Prguse 437/438/439）@(110,265)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -164,8 +179,24 @@ fn spawn_guild_territory(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 438),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 439),
         ) {
-            spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 110.0, 265.0, 60.0, 25.0, 10)
-                .insert(GuildTerritoryBuy);
+            // #2775：C# `:180` BuyButton.Hint（购买）
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                110.0,
+                265.0,
+                60.0,
+                25.0,
+                10,
+            )
+            .insert((
+                GuildTerritoryBuy,
+                crate::ui::tooltip::UiHint {
+                    text: "购买".to_string(),
+                },
+            ));
             // 宣战按钮（同图）@(210,308)
             spawn_icon_button(p, n, h, pr, 210.0, 308.0, 60.0, 25.0, 10)
                 .insert(GuildTerritoryWar);

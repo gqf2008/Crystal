@@ -11,7 +11,7 @@
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::prelude::*;
 
-use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity};
+use crate::ui::sprite_ui::UiButton;
 
 /// 通用提示状态
 #[derive(Resource, Default)]
@@ -85,67 +85,64 @@ pub struct TooltipTitle;
 #[derive(Component)]
 pub struct TooltipLine(pub usize);
 
-/// tooltip 文本描边副本标记（面板系统按面板显隐同步；
-/// 区别于其他描边文本的副本，见 outlined_text::OutlineShadow）
-#[derive(Component)]
-pub struct TooltipOutlineShadow;
+/// 提示面板层级（根节点 `GlobalZIndex`）：必须高于**所有**对话框（当前最大
+/// `amount_box` = 60，见 `dialogs/amount_box.rs`）——C# 侧 `HintTextLabel`
+/// 恒画在所有控件之后（`CMain.cs:534-540`），Bevy 旧实现把面板画在 sprite 层，
+/// 而同一相机里 bevy_ui 节点整体画在 sprite 之后 → 面板内的按钮 Hint 被自己
+/// 所属对话框盖住（光标在面板内时+16 偏移的提示框必然重叠，实机不可见）。
+pub const TOOLTIP_Z: i32 = 90;
 
-/// 生成常驻提示面板（背景 + 标题 + 6 行），返回背景实体
-pub fn spawn_tooltip_panel(
-    commands: &mut Commands,
-    images: &mut Assets<Image>,
-    font: &Handle<Font>,
-) -> Entity {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+/// 生成常驻提示面板（背景 + 标题 + 6 行），返回背景实体。
+///
+/// #2775：改为 **bevy_ui 节点**（根节点 `GlobalZIndex(TOOLTIP_Z)` + 子文本），
+/// 否则被对话框（bevy_ui）整体遮挡。描边用 `outlined_text::spawn_outlined_label`
+/// （4 向 1px 黑副本的兄弟层级方案），内容变化由 `sync_outline_ui_system` 同步。
+pub fn spawn_tooltip_panel(commands: &mut Commands, font: &Handle<Font>) -> Entity {
     let bg = commands
         .spawn((
-            UiEntity,
             TooltipBg,
-            Sprite {
-                image: white,
-                color: Color::srgba(0.08, 0.08, 0.12, 0.95),
-                custom_size: Some(Vec2::new(10.0, 10.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Px(10.0),
+                height: Val::Px(10.0),
                 ..default()
             },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(0.0, 0.0, 30.0),
+            BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.95)),
+            GlobalZIndex(TOOLTIP_Z),
             Visibility::Hidden,
         ))
         .id();
-    let title = spawn_ui_text(
-        commands, font, "", 0.0, 0.0, 13.0,
-        Color::srgb(1.0, 0.9, 0.3), 30.1,
-    );
-    commands.entity(title).insert(TooltipTitle);
-    let mut line_entities = Vec::with_capacity(6);
-    for i in 0..6usize {
-        let t = spawn_ui_text(
-            commands, font, "", 0.0, 0.0, 12.0,
-            Color::srgb(1.0, 1.0, 0.9), 30.2,
-        );
-        commands.entity(t).insert(TooltipLine(i));
-        line_entities.push(t);
-    }
-    // C# tooltip 文本全部有描边：物品信息面板标签 OutLine=true（GameScene.cs
-    // CreateItemLabel），按钮 Hint 的 HintTextLabel 未显式设 OutLine 但
-    // MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 同样有描边。
-    // 描边副本常驻，tooltip_panel_system 按面板显隐同步
-    for (t, size) in
-        std::iter::once((title, 13.0)).chain(line_entities.into_iter().map(|t| (t, 12.0)))
-    {
-        let shadows = crate::ui::outlined_text::outline_on(
-            commands,
-            t,
-            "",
+    commands.entity(bg).with_children(|p| {
+        // C# tooltip 文本全部有描边：物品信息面板标签 OutLine=true（GameScene.cs
+        // CreateItemLabel），按钮 Hint 的 HintTextLabel 未显式设 OutLine 但
+        // MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 同样有描边。
+        crate::ui::outlined_text::spawn_outlined_label(
+            p,
             font.clone(),
-            size,
-            bevy::sprite::Anchor::TOP_LEFT,
-            false,
-        );
-        for s in shadows {
-            commands.entity(s).insert(TooltipOutlineShadow);
+            "",
+            8.0,
+            5.0,
+            13.0,
+            Color::srgb(1.0, 0.9, 0.3),
+            1,
+        )
+        .insert(TooltipTitle);
+        for i in 0..6usize {
+            crate::ui::outlined_text::spawn_outlined_label(
+                p,
+                font.clone(),
+                "",
+                8.0,
+                24.0 + i as f32 * 16.0,
+                12.0,
+                Color::srgb(1.0, 1.0, 0.9),
+                1,
+            )
+            .insert(TooltipLine(i));
         }
-    }
+    });
     bg
 }
 
@@ -160,7 +157,7 @@ pub fn ui_hint_system(
     ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
     nodes: Query<&Node>,
     parents: Query<&ChildOf>,
-    hints: Query<(Entity, &UiHint, &Node, &InheritedVisibility, &ZIndex)>,
+    hints: Query<(Entity, &UiHint, &Node, &ComputedNode, &InheritedVisibility, &ZIndex)>,
     mut state: ResMut<TooltipState>,
 ) {
     let clear = |state: &mut TooltipState| {
@@ -187,13 +184,13 @@ pub fn ui_hint_system(
         }
     };
     let mut topmost: Option<(&str, i32)> = None;
-    for (entity, hint, node, vis, z) in &hints {
+    for (entity, hint, node, computed, vis, z) in &hints {
         if !vis.get() {
             continue;
         }
-        let (w, h) = match (node.width, node.height) {
-            (Val::Px(w), Val::Px(h)) => (w, h),
-            _ => continue,
+        let (w, h) = match ui_hint_size(node, computed) {
+            Some(s) => s,
+            None => continue,
         };
         let (x, y) = match abs_ui_origin(&nodes, &parents, entity) {
             Some(p) => p,
@@ -239,6 +236,22 @@ fn abs_ui_origin(
         }
     }
     Some((x, y))
+}
+
+/// #2775：Hint 命中矩形尺寸——显式 `Px` 控件用声明尺寸（与 C# 控件尺寸同源），
+/// 自动尺寸（`spawn_label` 这类文本按钮 `width/height = Auto`，如排行页签）回退到
+/// 布局结果；`ComputedNode` 存的是**物理像素**，乘 `inverse_scale_factor` 转逻辑像素。
+fn ui_hint_size(node: &Node, computed: &ComputedNode) -> Option<(f32, f32)> {
+    match (node.width, node.height) {
+        (Val::Px(w), Val::Px(h)) => Some((w, h)),
+        _ => {
+            if computed.is_empty() {
+                return None;
+            }
+            let s = computed.size() * computed.inverse_scale_factor;
+            Some((s.x, s.y))
+        }
+    }
 }
 
 /// 通用按钮 Hint 命中（绝对 UI 矩形 + 光标；边界含等号）
@@ -290,30 +303,25 @@ pub fn tooltip_hint_system(
 }
 
 /// 面板渲染：内容 + 跟随光标 + 防出屏
+///
+/// #2775：面板现在是 **bevy_ui 节点**，而 bevy_ui 的 `FocusPolicy` 默认是 `Block`
+/// （bevy_ui-0.19.1 `focus.rs:323`）——若提示框覆盖光标点，就会抢掉下方按钮的
+/// `Interaction`。本函数保证绝不发生：跟随偏移 +16 时框的左/上边在光标右下，
+/// 翻转时框的右/下边在光标左上（见 `tooltip_origin` 与其单测）。
 pub fn tooltip_panel_system(
     state: Res<TooltipState>,
-    mut bg: Query<(&mut Transform, &mut Sprite, &mut Visibility), (With<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>)>,
-    mut title: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>)>,
-    mut lines: Query<(&mut Text2d, &mut Transform, &mut Visibility, &TooltipLine), (Without<TooltipBg>, Without<TooltipTitle>)>,
-    mut shadows: Query<&mut Visibility, (With<TooltipOutlineShadow>, Without<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>)>,
+    mut bg: Query<(&mut Node, &mut Visibility), (With<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>)>,
+    mut title: Query<(&mut Text, &mut Visibility), (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>)>,
+    mut lines: Query<(&mut Text, &mut Visibility, &TooltipLine), (Without<TooltipBg>, Without<TooltipTitle>)>,
 ) {
-    // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
+        // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
     if !state.is_changed() {
         return;
     }
     let show = state.visible && (!state.title.is_empty() || !state.lines.is_empty());
-    // C# 依据：tooltip 文本全部有描边——物品面板标签 OutLine=true
-    // （GameScene.cs CreateItemLabel）；按钮 Hint 的 HintTextLabel 未显式设
-    // OutLine，但 MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→
-    // 同样有描边。故描边副本只随面板显隐，无 source 门控
-    let outline_vis = if show {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for mut vis in &mut shadows {
-        *vis = outline_vis;
-    }
+    // 描边副本（outlined_text 的兄弟层级副本）随父节点 bg 显隐自动跟随：
+    // bevy_ui 里子实体恒画在父之后且 `Inherited` 继承父可见性，无需单独同步；
+    // 正文内容变化由 `sync_outline_ui_system` 复制到 4 个副本（见插件注册顺序）。
     // 估算尺寸：CJK 约 1 字符 = 字号 px
     let mut max_chars = state.title.chars().count().max(1);
     for l in &state.lines {
@@ -321,48 +329,51 @@ pub fn tooltip_panel_system(
     }
     let w = (max_chars as f32 * 13.0 + 20.0).clamp(40.0, 500.0);
     let h = 24.0 + state.lines.len() as f32 * 16.0 + 8.0;
-    let (mut px, mut py) = (state.x + 16.0, state.y + 16.0);
+    let (px, py) = tooltip_origin(state.x, state.y, w, h);
+
+    if let Ok((mut node, mut vis)) = bg.single_mut() {
+        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        if show {
+            node.left = Val::Px(px);
+            node.top = Val::Px(py);
+            node.width = Val::Px(w);
+            node.height = Val::Px(h);
+        }
+    }
+    if let Ok((mut t, mut vis)) = title.single_mut() {
+        *vis = if show && !state.title.is_empty() { Visibility::Visible } else { Visibility::Hidden };
+        if show && !state.title.is_empty() {
+            if t.0 != state.title { t.0 = state.title.clone(); }
+        }
+    }
+    for (mut t, mut vis, line) in &mut lines {
+        let s = state.lines.get(line.0).cloned().unwrap_or_default();
+        let visible = show && !s.is_empty();
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+        if visible {
+            if t.0 != s { t.0 = s; }
+        }
+    }
+}
+
+/// 提示框左上角（对齐 C# 光标跟随：+16；接近屏幕右下角时翻到光标左上侧防出屏）。
+///
+/// **关键不变量**：光标点恒在框外（框的边最多贴到光标，永不越过），
+/// 故面板（bevy_ui，`FocusPolicy` 默认 `Block`）不会挡住它下方按钮的点击。
+fn tooltip_origin(x: f32, y: f32, w: f32, h: f32) -> (f32, f32) {
+    let (mut px, mut py) = (x + 16.0, y + 16.0);
     if px + w > 1024.0 {
         px = (px - w - 32.0).max(0.0);
     }
     if py + h > 768.0 {
         py = (py - h - 32.0).max(0.0);
     }
-
-    if let Ok((mut tf, mut sp, mut vis)) = bg.single_mut() {
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
-        if show {
-            tf.translation.x = px;
-            tf.translation.y = -py;
-            if let Some(cs) = sp.custom_size.as_mut() {
-                *cs = Vec2::new(w, h);
-            }
-        }
-    }
-    if let Ok((mut t, mut tf, mut vis)) = title.single_mut() {
-        *vis = if show && !state.title.is_empty() { Visibility::Visible } else { Visibility::Hidden };
-        if show && !state.title.is_empty() {
-            if t.0 != state.title { t.0 = state.title.clone(); }
-            tf.translation.x = px + 8.0;
-            tf.translation.y = -(py + 5.0);
-        }
-    }
-    for (mut t, mut tf, mut vis, line) in &mut lines {
-        let s = state.lines.get(line.0).cloned().unwrap_or_default();
-        let visible = show && !s.is_empty();
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
-        if visible {
-            if t.0 != s { t.0 = s; }
-            tf.translation.x = px + 8.0;
-            tf.translation.y = -(py + 24.0 + line.0 as f32 * 16.0);
-        }
-    }
+    (px, py)
 }
 
 /// 生成提示面板系统（加载字体后调用 spawn_tooltip_panel）
 pub fn spawn_tooltip_panel_system(
     mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut cjk_font: ResMut<crate::ui::sprite_ui::UiCjkFont>,
 ) {
@@ -370,7 +381,7 @@ pub fn spawn_tooltip_panel_system(
     // 只在实体首次排版时生效，用 Arial（`UiFont`）会在换文本后退化成 .notdef 豆腐（#2599）：
     // 悬停怪物「怪物5」实测渲染成「□□5」。与 NPC/公告等动态文本一致改用共享宋体主字体。
     let font = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
-    spawn_tooltip_panel(&mut commands, &mut images, &font);
+    spawn_tooltip_panel(&mut commands, &font);
 }
 
 /// 清理提示面板（OnExit(Game)）
@@ -412,6 +423,37 @@ mod tests {
         assert!(!s.visible);
     }
 
+    /// #2775：文本按钮（Auto 尺寸，如排行页签）靠布局结果命中；显式 Px 控件仍用声明尺寸
+    #[test]
+    fn ui_hint_size_prefers_declared_px_then_layout() {
+        let px = Node {
+            width: Val::Px(24.0),
+            height: Val::Px(22.0),
+            ..default()
+        };
+        let laid_out = ComputedNode {
+            size: Vec2::new(40.0, 28.0),
+            inverse_scale_factor: 0.5,
+            ..ComputedNode::default()
+        };
+        assert_eq!(ui_hint_size(&px, &laid_out), Some((24.0, 22.0)), "显式 Px 用声明值");
+        let auto = Node {
+            width: Val::Auto,
+            height: Val::Auto,
+            ..default()
+        };
+        assert_eq!(
+            ui_hint_size(&auto, &laid_out),
+            Some((20.0, 14.0)),
+            "Auto 尺寸走布局结果（物理像素 × inverse_scale_factor）"
+        );
+        assert_eq!(
+            ui_hint_size(&auto, &ComputedNode::default()),
+            None,
+            "尚未布局（0 尺寸）不得命中"
+        );
+    }
+
     /// #2771：通用按钮 Hint 的命中（绝对 UI 矩形 + 光标；边界含等号）
     #[test]
     fn ui_hint_hit_covers_rect_and_borders() {
@@ -423,70 +465,129 @@ mod tests {
         assert!(!ui_hint_hit(rect, Vec2::new(112.0, 225.0)), "下外侧不命中");
     }
 
+    /// #2775：提示框永不含光标点（+16 跟随 / 贴边翻转都不越过）——面板是 bevy_ui 节点，
+    /// `FocusPolicy` 默认 `Block`，一旦覆盖光标就会抢掉下方按钮的点击。
+    #[test]
+    fn tooltip_origin_never_covers_cursor() {
+        let (w, h) = (200.0, 100.0);
+        for (x, y) in [
+            (0.0, 0.0),
+            (100.0, 200.0),
+            (900.0, 300.0),
+            (1000.0, 760.0),
+            (1024.0, 768.0),
+            (500.0, 700.0),
+        ] {
+            let (px, py) = tooltip_origin(x, y, w, h);
+            let inside = x >= px && x <= px + w && y >= py && y <= py + h;
+            assert!(
+                !inside,
+                "光标 ({x},{y}) 落在提示框 ({px},{py},{w},{h}) 内会拦截点击"
+            );
+            assert!(px >= 0.0 && py >= 0.0, "提示框不得出屏左上");
+        }
+    }
+
+    /// #2775：面板是 bevy_ui 根节点、`GlobalZIndex` 必须高于所有对话框（当前最大 60），
+    /// 否则面板内按钮的 Hint 会被自己所属对话框整块盖住（旧 sprite 层级方案的回归点）。
+    #[test]
+    fn tooltip_z_sits_above_every_dialog() {
+        assert!(
+            TOOLTIP_Z > 60,
+            "提示面板层级（{TOOLTIP_Z}）必须高于 amount_box(60) 等全部对话框"
+        );
+    }
+
     /// C# MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 按钮 Hint
     /// （CMain.cs:534-540 HintTextLabel 未显式设 OutLine）同样有描边。
-    /// 真实面板：source=1 按钮 Hint 显示 → 描边副本 Inherited；清除 → Hidden
+    /// #2775：面板改 bevy_ui 后，描边副本是 `outlined_text` 的兄弟层级副本
+    /// （title + 6 行各 4 个 = 28），随面板 bg 显隐跟随；正文与副本内容由
+    /// `sync_outline_ui_system` 同步。
     #[test]
-    fn tooltip_panel_outline_shadows_follow_panel() {
+    fn tooltip_panel_is_ui_node_with_outlined_copies() {
         use bevy::ecs::system::RunSystemOnce;
         use bevy::ecs::world::CommandQueue;
 
-        use crate::ui::outlined_text::OutlineShadow;
+        use crate::ui::outlined_text::{OutlineUiShadow, OutlineUiShadows};
 
         let mut world = World::new();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);
-        let mut images = Assets::<Image>::default();
-        spawn_tooltip_panel(&mut commands, &mut images, &Handle::default());
+        spawn_tooltip_panel(&mut commands, &Handle::default());
         queue.apply(&mut world);
 
-        // 面板含 title + 6 行 = 7 个描边文本 × 4 副本
+        // 面板背景是根 UI 节点且带最高层级（不是旧的 sprite + Transform）
+        let bg_z = world
+            .query_filtered::<&GlobalZIndex, With<TooltipBg>>()
+            .iter(&world)
+            .next()
+            .copied()
+            .expect("面板背景应是根 UI 节点");
+        assert_eq!(bg_z, GlobalZIndex(TOOLTIP_Z));
+
+        // title + 6 行 = 7 个描边文本 × 4 副本
         assert_eq!(
             world
-                .query_filtered::<Entity, With<OutlineShadow>>()
+                .query_filtered::<Entity, With<OutlineUiShadow>>()
                 .iter(&world)
                 .count(),
             28,
             "title + 6 行各 4 个黑色副本"
         );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<OutlineUiShadows>>()
+                .iter(&world)
+                .count(),
+            7,
+            "7 个正文各自记录 4 个副本 id"
+        );
 
-        // 按钮 Hint（source=1）：C# HintTextLabel 默认 _outLine=true → 描边可见
+        // 按钮 Hint（source=1）：面板显示 → 背景 Visible、行文本写入、位置跟随光标
         let mut state = TooltipState::default();
         state.update(
             1,
             true,
             String::new(),
             vec!["按钮提示".to_string()],
-            0.0,
-            0.0,
+            100.0,
+            200.0,
         );
         world.insert_resource(state);
         world
             .run_system_once(tooltip_panel_system)
             .expect("面板渲染应成功");
         {
-            let mut q = world.query_filtered::<&Visibility, With<TooltipOutlineShadow>>();
-            for v in q.iter(&world) {
-                assert_eq!(
-                    *v,
-                    Visibility::Inherited,
-                    "按钮 Hint 描边可见（C# 默认 OutLine=true）"
-                );
-            }
+            let (vis, node) = world
+                .query_filtered::<(&Visibility, &Node), With<TooltipBg>>()
+                .iter(&world)
+                .next()
+                .expect("面板背景存在");
+            assert_eq!(*vis, Visibility::Visible, "有内容时面板可见");
+            assert_eq!(node.left, Val::Px(116.0), "跟随光标 +16");
+            assert_eq!(node.top, Val::Px(216.0), "跟随光标 +16");
         }
+        let line0 = world
+            .query_filtered::<(&Text, &TooltipLine), Without<TooltipTitle>>()
+            .iter(&world)
+            .find(|(_, l)| l.0 == 0)
+            .map(|(t, _)| t.0.clone())
+            .expect("第 0 行存在");
+        assert_eq!(line0, "按钮提示");
 
-        // 清除 → 面板隐藏 → 描边隐藏
+        // 清除 → 面板隐藏
         world
             .resource_mut::<TooltipState>()
             .update(1, false, String::new(), Vec::new(), 0.0, 0.0);
         world
             .run_system_once(tooltip_panel_system)
             .expect("面板渲染应成功");
-        {
-            let mut q = world.query_filtered::<&Visibility, With<TooltipOutlineShadow>>();
-            for v in q.iter(&world) {
-                assert_eq!(*v, Visibility::Hidden, "面板隐藏描边隐藏");
-            }
-        }
+        let vis = world
+            .query_filtered::<&Visibility, With<TooltipBg>>()
+            .iter(&world)
+            .next()
+            .copied()
+            .expect("面板背景存在");
+        assert_eq!(vis, Visibility::Hidden, "面板隐藏");
     }
 }

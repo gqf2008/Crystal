@@ -197,6 +197,7 @@ fn spawn_potion_belt(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -263,8 +264,14 @@ fn spawn_potion_belt(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1927),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1928),
         ) {
-            spawn_icon_button(p, n, h, pr, 222.0, 3.0, 16.0, 15.0, 3)
-                .insert((PotionBeltWidget, PotionBeltRotate));
+            // #2775：C# `InventoryDialog.cs:637` RotateButton.Hint（旋转）
+            spawn_icon_button(p, n, h, pr, 222.0, 3.0, 16.0, 15.0, 3).insert((
+                PotionBeltWidget,
+                PotionBeltRotate,
+                crate::ui::tooltip::UiHint {
+                    text: "旋转".to_string(),
+                },
+            ));
         }
         // 关闭按钮（C# CloseButton Prguse[1923-1925] @(222,19)）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -272,8 +279,20 @@ fn spawn_potion_belt(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1924),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1925),
         ) {
-            spawn_icon_button(p, n, h, pr, 222.0, 19.0, 16.0, 15.0, 3)
-                .insert((PotionBeltWidget, PotionBeltClose));
+            // #2775：C# `InventoryDialog.cs:650` CloseButton.Hint（关闭 ({Belt 键})）
+            spawn_icon_button(p, n, h, pr, 222.0, 19.0, 16.0, 15.0, 3).insert((
+                PotionBeltWidget,
+                PotionBeltClose,
+                crate::ui::tooltip::UiHint {
+                    text: format!(
+                        "关闭 ({})",
+                        crate::game::dialogs::keyboard_layout::binding_text_for(
+                            &kb.bindings,
+                            "腰带"
+                        )
+                    ),
+                },
+            ));
         }
     });
 }

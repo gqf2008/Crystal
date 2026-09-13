@@ -153,21 +153,39 @@ fn spawn_mentor(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 115),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
         ) {
-            spawn_icon_button(p, n, h, pr, 30.0, 178.0, 24.0, 22.0, 10).insert(MentorAllow);
+            // #2775：C# `MentorDialog.cs:60` AllowButton.Hint（允许/拒绝导师请求）
+            spawn_icon_button(p, n, h, pr, 30.0, 178.0, 24.0, 22.0, 10).insert((
+                MentorAllow,
+                crate::ui::tooltip::UiHint {
+                    text: "允许/拒绝导师请求".to_string(),
+                },
+            ));
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 213),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 214),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 215),
         ) {
-            spawn_icon_button(p, n, h, pr, 60.0, 178.0, 24.0, 22.0, 10).insert(MentorAdd);
+            // #2775：C# `MentorDialog.cs:90` AddButton.Hint（添加导师）
+            spawn_icon_button(p, n, h, pr, 60.0, 178.0, 24.0, 22.0, 10).insert((
+                MentorAdd,
+                crate::ui::tooltip::UiHint {
+                    text: "添加导师".to_string(),
+                },
+            ));
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 216),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 217),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 218),
         ) {
-            spawn_icon_button(p, n, h, pr, 135.0, 178.0, 24.0, 22.0, 10).insert(MentorRemove);
+            // #2775：C# `MentorDialog.cs:123` RemoveButton.Hint（移除师徒关系）
+            spawn_icon_button(p, n, h, pr, 135.0, 178.0, 24.0, 22.0, 10).insert((
+                MentorRemove,
+                crate::ui::tooltip::UiHint {
+                    text: "移除师徒关系".to_string(),
+                },
+            ));
         }
         // 师父名字输入框（TextInput id 4）@(15,160)
         spawn_container(p, 15.0, 150.0, 180.0, 18.0, 10)
