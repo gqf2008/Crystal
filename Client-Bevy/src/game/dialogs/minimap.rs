@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::actor::{LocalPlayer, Monster, Npc};
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::resources::libraries::LibraryName;
@@ -190,6 +190,9 @@ fn spawn_minimap(
     );
     commands.entity(panel).insert((
         DialogRoot(DialogKind::Minimap),
+        // #2825 单元①：C# `MiniMapDialog` 未设 `Movable`（`MainDialogs.cs:1764`）→
+        // 默认 false（`MirControl.cs:372`）→ 本端不可拖动
+        NotDraggable,
         MiniMapWidget,
         MiniMapBg {
             big: big.clone(),
@@ -598,6 +601,45 @@ fn minimap_ui_system(
 mod tests {
     use super::*;
     use crate::resources::libraries::{resolve_data_path, Libraries};
+
+    /// #2825 单元①：C# `MiniMapDialog` 未设 `Movable`（`MainDialogs.cs:1764` → 默认 false）→
+    /// 小地图根面板必须挂 `NotDraggable`
+    #[test]
+    fn minimap_root_is_not_draggable() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
+        world
+            .run_system_once(spawn_minimap)
+            .expect("spawn_minimap 应成功");
+
+        let mut q = world.query::<(Entity, &DialogRoot)>();
+        let roots: Vec<Entity> = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Minimap)
+            .map(|(e, _)| e)
+            .collect();
+        assert!(!roots.is_empty(), "应生成小地图根面板");
+        for e in roots {
+            assert!(
+                world.entity(e).contains::<NotDraggable>(),
+                "Minimap 根 {e:?} 缺 NotDraggable（C# Movable = false）"
+            );
+        }
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(MINIMAP_X + 64.0, MINIMAP_Y + 77.0),
+        );
+    }
 
     /// 批38-40 评审 P0（B0001 实证）：小地图系统多个查询同写 Visibility/Node/
     /// ImageNode 且互斥矩阵在迁移中被删——调度器初始化即 panic（`run_if` 只拦

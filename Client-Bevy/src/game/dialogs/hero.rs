@@ -9,7 +9,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -334,7 +334,10 @@ fn spawn_hero(
     let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 310.0, 30);
     commands
         .entity(panel)
-        .insert((DialogRoot(DialogKind::Hero), HeroWidget));
+        // #2825 单元①：本窗对应 C# `HeroMenuPanel`（`HeroDialogs.cs:385`，切换/创建/行为/自动药/导航钮）
+        // 与 `HeroInfoPanel`——两者都没设 `Movable` → 默认 false（`MirControl.cs:372`）→ 不可拖动。
+        // 注意 `HeroManageDialog`（`:804`）显式 `Movable = true`，所以 HeroManage 窗保持可拖。
+        .insert((DialogRoot(DialogKind::Hero), HeroWidget, NotDraggable));
 
     commands.entity(panel).with_children(|p| {
         // 关闭 Prguse2[360/361/362] @(300,3)
@@ -531,6 +534,9 @@ fn spawn_hero(
             BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.96)),
             HeroCreatePanel,
             DialogRoot(DialogKind::Hero),
+            // #2825 单元①：创建英雄面板是 Hero 主窗的模态子面板（C# 里同属不可拖的
+            // `HeroMenuPanel`/`NewHeroDialog` 组合）→ 一并排除拖动
+            NotDraggable,
             GlobalZIndex(45),
             Visibility::Hidden,
         ))
@@ -1529,6 +1535,53 @@ mod tests {
     use bevy::prelude::*;
     use mir2_shared::data::client_data::{ClientHeroInformation, ClientMagic};
     use mir2_shared::enums::Spell;
+
+    /// #2825 单元①：本窗对应 C# `HeroMenuPanel`(`HeroDialogs.cs:385`)/`HeroInfoPanel`（都没设
+    /// `Movable` → 默认 false）→ `DialogKind::Hero` 必须 `NotDraggable`；而 `HeroManageDialog`
+    /// 显式 `Movable = true`（`:804`）→ `DialogKind::HeroManage` 保持可拖。
+    #[test]
+    fn hero_menu_window_is_not_draggable_but_manage_is() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
+        world
+            .run_system_once(super::spawn_hero)
+            .expect("spawn_hero 应成功");
+
+        let mut q = world.query::<(Entity, &DialogRoot)>();
+        let roots: Vec<(Entity, DialogKind)> = q
+            .iter(&world)
+            .filter(|(_, r)| matches!(r.0, DialogKind::Hero | DialogKind::HeroManage))
+            .map(|(e, r)| (e, r.0))
+            .collect();
+        assert!(
+            roots.iter().any(|(_, k)| *k == DialogKind::Hero),
+            "应有 Hero 主窗根"
+        );
+        for (e, k) in &roots {
+            let not_draggable = world.entity(*e).contains::<NotDraggable>();
+            if *k == DialogKind::Hero {
+                assert!(not_draggable, "Hero 主窗根 {e:?} 应 NotDraggable");
+            } else {
+                assert!(!not_draggable, "HeroManage 根 {e:?} 应保持可拖");
+            }
+        }
+        // 行为级：Hero 主窗中心按下左键 → 不得起拖
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(440.0, 235.0),
+        );
+    }
 
     /// #2775：行为按钮 Hint（C# `HeroDialogs.cs:774` `HeroBehaviourFormat` +
     /// `HeroBehaviour` 枚举本地化名）

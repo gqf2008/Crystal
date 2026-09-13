@@ -12,7 +12,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::minimap::MiniMapMode;
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -227,6 +227,9 @@ fn spawn_dura_status(
             // 使通用对话框兜底（enforce_dialog_visibility）跳过本钮
             crate::game::dialogs::AlwaysVisible,
             DialogRoot(DialogKind::DuraStatus),
+            // #2825 单元①：C# `CharacterDuraPanel` 显式 `Movable = false`（`MainDialogs.cs:3949`），
+            // 常驻切换钮也挂 DialogRoot → 一并排除，避免从钮上起拖
+            NotDraggable,
             GlobalZIndex(35),
             Visibility::Visible,
         ));
@@ -239,7 +242,7 @@ fn spawn_dura_status(
     let panel = spawn_panel(&mut commands, bg, PANEL_X, PANEL_Y, 64.0, 85.0, 30);
     commands
         .entity(panel)
-        .insert((DialogRoot(DialogKind::DuraStatus), DuraWidget));
+        .insert((DialogRoot(DialogKind::DuraStatus), NotDraggable, DuraWidget));
 
     // 部位图（C# Background @ (3,3) 内相对坐标；面板子节点，随面板显隐）
     commands.entity(panel).with_children(|p| {
@@ -400,6 +403,42 @@ fn dura_status_ui_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2825 单元①：C# `CharacterDuraPanel.Movable = false`（`MainDialogs.cs:3949`）→
+    /// 常驻切换钮 + 面板两个 `DialogRoot(DialogKind::DuraStatus)` 都必须挂 `NotDraggable`
+    #[test]
+    fn dura_status_roots_are_not_draggable() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world
+            .run_system_once(spawn_dura_status)
+            .expect("spawn_dura_status 应成功");
+
+        let mut q = world.query::<(Entity, &DialogRoot)>();
+        let roots: Vec<Entity> = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::DuraStatus)
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(roots.len(), 2, "耐久面板有「切换钮 + 面板」两个根");
+        for e in roots {
+            assert!(
+                world.entity(e).contains::<NotDraggable>(),
+                "DuraStatus 根 {e:?} 缺 NotDraggable（C# Movable = false）"
+            );
+        }
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(PANEL_X + 32.0, PANEL_Y + 42.0),
+        );
+    }
 
     fn item(cur: u16, max: u16) -> InvItem {
         InvItem {

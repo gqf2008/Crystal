@@ -9,7 +9,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -78,7 +78,9 @@ fn spawn_timer(
     let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 262.0, 30);
     commands
         .entity(panel)
-        .insert((DialogRoot(DialogKind::Timer), TimerWidget));
+        // #2825 单元①：C# `TimerDialog` 显式 `Movable = false`（`TimerDialog.cs:29`），
+        // 且 `MirControl._movable` 默认 false（`MirControl.cs:372`）→ 本端不可拖动
+        .insert((DialogRoot(DialogKind::Timer), TimerWidget, NotDraggable));
 
     commands.entity(panel).with_children(|p| {
         // 关闭 Prguse2[360/361/362] @(300,3)
@@ -190,5 +192,50 @@ fn timer_countdown(time: Res<Time>, mut mgr: ResMut<DialogManager>, mut timer: R
         timer.message = String::new();
         mgr.close(DialogKind::Timer);
         tracing::info!("⏱️ [TIMER] 倒计时归零");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2825 单元①：C# `TimerDialog.Movable = false`（`TimerDialog.cs:29`）→ 本窗
+    /// **所有** `DialogRoot(DialogKind::Timer)` 都必须挂 `NotDraggable`，否则拖动系统仍会命中。
+    #[test]
+    fn timer_window_roots_are_not_draggable() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world
+            .run_system_once(spawn_timer)
+            .expect("spawn_timer 应成功");
+
+        let mut q = world.query::<(Entity, &DialogRoot)>();
+        let roots: Vec<Entity> = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Timer)
+            .map(|(e, _)| e)
+            .collect();
+        assert!(!roots.is_empty(), "应生成 Timer 根面板");
+        for e in roots {
+            assert!(
+                world.entity(e).contains::<NotDraggable>(),
+                "Timer 根 {e:?} 缺 NotDraggable（C# Movable = false）"
+            );
+        }
+        // 行为级：面板中心按下左键 → 拖动系统不得起拖
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(440.0, 200.0),
+        );
     }
 }

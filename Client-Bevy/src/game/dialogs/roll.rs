@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::npc::NpcDialogState;
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -96,7 +96,9 @@ fn spawn_roll(
             ImageNode::new(white),
             GlobalZIndex(50),
             RollResultImage,
+            // #2825 单元①：C# `RollDialog` 显式 `Movable = false`（`RollDialog.cs:24`）→ 不可拖
             DialogRoot(DialogKind::Roll),
+            NotDraggable,
             RollWidget,
             Visibility::Hidden,
         ))
@@ -121,6 +123,7 @@ fn spawn_roll(
             GlobalZIndex(51),
             RollPrompt,
             DialogRoot(DialogKind::Roll),
+            NotDraggable,
             RollWidget,
             Visibility::Hidden,
         ))
@@ -240,5 +243,48 @@ fn roll_server_events(
             roll.started_at = *started_at;
             roll.finished = *finished;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2825 单元①：C# `RollDialog.Movable = false`（`RollDialog.cs:24`）→ 本窗两个
+    /// `DialogRoot(DialogKind::Roll)`（结果图 + 提示文字）都必须挂 `NotDraggable`
+    #[test]
+    fn roll_window_roots_are_not_draggable() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world
+            .run_system_once(spawn_roll)
+            .expect("spawn_roll 应成功");
+
+        let mut q = world.query::<(Entity, &DialogRoot)>();
+        let roots: Vec<Entity> = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Roll)
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(roots.len(), 2, "RollDialog 有结果图 + 提示文字两个根");
+        for e in roots {
+            assert!(
+                world.entity(e).contains::<NotDraggable>(),
+                "Roll 根 {e:?} 缺 NotDraggable（C# Movable = false）"
+            );
+        }
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(506.0, 376.0),
+        );
     }
 }

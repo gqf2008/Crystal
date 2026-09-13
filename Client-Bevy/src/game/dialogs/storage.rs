@@ -19,7 +19,7 @@ use crate::game::dialogs::inventory::{
     InvLockReason, InvLockedSlots, InvUiState, ItemUseFeedback, LockGrid, UseItemCtx, UseOutcome,
 };
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::game::player_state::{Inventory, Loadout, StatusFlags};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -178,7 +178,9 @@ fn spawn_storage_dialog(
     );
     commands
         .entity(panel)
-        .insert((DialogRoot(DialogKind::Storage), StorageWidget));
+        // #2825 单元①：C# `StorageDialog` 未设 `Movable`（`NPCDialogs.cs:2798`）→
+        // 默认 false（`MirControl.cs:372`）→ 本端不可拖动（三个根面板 + 格子都要排除）
+        .insert((DialogRoot(DialogKind::Storage), StorageWidget, NotDraggable));
 
     commands.entity(panel).with_children(|p| {
         // 关闭按钮（Prguse2 360/361/362）@(363,3)
@@ -216,6 +218,7 @@ fn spawn_storage_dialog(
             BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
             StoragePwdPanel,
             DialogRoot(DialogKind::Storage),
+            NotDraggable,
             GlobalZIndex(45),
             Visibility::Hidden,
         ))
@@ -313,6 +316,7 @@ fn spawn_storage_dialog(
             BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
             StorageUnlockPanel,
             DialogRoot(DialogKind::Storage),
+            NotDraggable,
             GlobalZIndex(46),
             Visibility::Hidden,
         ))
@@ -1097,6 +1101,9 @@ fn storage_grid_sync_system(
         commands.entity(cell).insert((
             StorageSlot(i),
             DialogRoot(DialogKind::Storage),
+            // 格子用 `ZIndex`（相对）而非 `GlobalZIndex`，本身不是拖动根（`dialog_drag_system`
+            // 的查询要求 `&GlobalZIndex`）；此处显式排除，防止后续误加 GlobalZIndex
+            NotDraggable,
             StorageWidget,
         ));
     }
@@ -1104,6 +1111,48 @@ fn storage_grid_sync_system(
 
 #[cfg(test)]
 mod tests {
+    /// #2825 单元①：C# `StorageDialog` 未设 `Movable`（`NPCDialogs.cs:2798` → 默认 false）→
+    /// 面板/密码面板/解锁面板/格子等**所有** `DialogRoot(DialogKind::Storage)` 都要 `NotDraggable`
+    #[test]
+    fn storage_roots_are_not_draggable() {
+        use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world
+            .run_system_once(super::spawn_storage_dialog)
+            .expect("spawn_storage_dialog 应成功");
+
+        let mut q = world.query::<(bevy::prelude::Entity, &DialogRoot)>();
+        let roots: Vec<bevy::prelude::Entity> = q
+            .iter(&world)
+            .filter(|(_, r)| r.0 == DialogKind::Storage)
+            .map(|(e, _)| e)
+            .collect();
+        assert!(!roots.is_empty(), "应生成仓库根面板");
+        for e in roots {
+            assert!(
+                world.entity(e).contains::<NotDraggable>(),
+                "Storage 根 {e:?} 缺 NotDraggable（C# Movable = false）"
+            );
+        }
+        crate::game::dialogs::test_support::assert_no_drag_start(
+            &mut world,
+            bevy::math::Vec2::new(
+                super::DIALOG_X + super::STORAGE_W / 2.0,
+                super::DIALOG_Y + 173.0,
+            ),
+        );
+    }
+
     /// 仓库格命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn slot_at_origin_and_drag() {
