@@ -243,6 +243,7 @@ fn spawn_hero_belt(
 /// 单查询（Option 组件区分角色）避免 Bevy 16 参数上限。
 #[allow(clippy::type_complexity)]
 fn hero_belt_ui_system(
+    chat: Res<crate::game::chat::ChatState>,
     mut visible: ResMut<HeroBeltVisible>,
     mut vertical: ResMut<HeroBeltVertical>,
     mut libs: ResMut<GameLibraries>,
@@ -288,7 +289,13 @@ fn hero_belt_ui_system(
     let (px, py, pw, ph) = if vert {
         (BELT_VERT_X, BELT_VERT_Y, 40.0, 101.0)
     } else {
-        (BELT_X, BELT_Y, 100.0, 38.0)
+        // #2781：横向英雄腰带随聊天窗口档位上移（C# `MainDialogs.cs:1284-1285`）
+        (
+            BELT_X,
+            BELT_Y - crate::game::dialogs::potion_belt::chat_belt_lift(chat.size),
+            100.0,
+            38.0,
+        )
     };
 
     for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {

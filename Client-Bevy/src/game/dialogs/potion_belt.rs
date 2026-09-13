@@ -37,6 +37,12 @@ const BELT_Y: f32 = 618.0;
 const BELT_VERT_X: f32 = 0.0;
 const BELT_VERT_Y: f32 = 200.0;
 
+/// #2781：聊天窗口档位带来的腰带上移量（C# `ChatDialog.ChangeSize` 每档长高 48，
+/// 控制栏随之上移，腰带再贴到控制栏上方 → 同样上移 48/96）
+pub fn chat_belt_lift(size: usize) -> f32 {
+    48.0 * size.min(2) as f32
+}
+
 /// 药水腰带状态（每格存背包物品 unique_id）
 #[derive(Resource, Default)]
 pub struct PotionBeltState {
@@ -301,6 +307,7 @@ fn spawn_potion_belt(
 /// 单查询（Option 组件区分角色）避免 Bevy 16 参数上限（#1374 同款 B0001 预防）。
 #[allow(clippy::type_complexity)]
 fn potion_belt_ui_system(
+    chat: Res<crate::game::chat::ChatState>,
     mut belt: ResMut<PotionBeltState>,
     mut visible: ResMut<PotionBeltVisible>,
     mut vertical: ResMut<PotionBeltVertical>,
@@ -357,7 +364,9 @@ fn potion_belt_ui_system(
     let (px, py, pw, ph) = if vert {
         (BELT_VERT_X, BELT_VERT_Y, 40.0, 241.0)
     } else {
-        (BELT_X, BELT_Y, 240.0, 38.0)
+        // #2781：横向腰带随聊天窗口档位上移（C# `MainDialogs.cs:1281-1282`
+        // `BeltDialog.Location.Y = 控制栏顶边 - 腰带高`；控制栏顶边 = 656 - 48*档位）
+        (BELT_X, BELT_Y - chat_belt_lift(chat.size), 240.0, 38.0)
     };
 
     for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls) in &mut items {
@@ -524,5 +533,21 @@ fn potion_belt_icon_system(
         } else {
             *vis = Visibility::Hidden;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2781：腰带随聊天窗口档位上移（C# `MainDialogs.cs:1281-1285`；每档长高 48）
+    #[test]
+    fn chat_belt_lift_matches_chat_size() {
+        assert_eq!(chat_belt_lift(0), 0.0, "0 档：腰带停在 (230,618)");
+        assert_eq!(chat_belt_lift(1), 48.0);
+        assert_eq!(chat_belt_lift(2), 96.0);
+        assert_eq!(chat_belt_lift(9), 96.0, "越界钳到最大档");
+        // 腰带与控制栏同步上移（C#：腰带 Y = 控制栏顶边 - 腰带高）
+        assert_eq!(BELT_Y - chat_belt_lift(2), 618.0 - 96.0);
     }
 }

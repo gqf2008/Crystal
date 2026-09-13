@@ -468,6 +468,14 @@ struct ChatPanelBg;
 #[derive(Component)]
 struct ChatSizeImages([Handle<Image>; 3]);
 
+/// #2781：滚动条轨道（C# `CountBar.Index = 2012/2013/2014`，随档位换图）
+#[derive(Component)]
+struct ChatScrollTrack([Handle<Image>; 3]);
+
+/// #2781：滚动条滑块（C# `PositionBar`，随 `StartIndex` 移动）
+#[derive(Component)]
+struct ChatScrollKnob;
+
 /// 聊天设置面板（过滤/透明）
 #[derive(Component)]
 struct ChatOptionWidget;
@@ -498,6 +506,11 @@ impl Plugin for ChatPlugin {
             chat_size_system
                 .after(chat_bar_system)
                 .run_if(in_state(AppState::Game)),
+        );
+        // #2781：滚动条滑块随滚动位置移动（C# ChatDialog.Update 的比例公式）
+        app.add_systems(
+            Update,
+            chat_scroll_knob_system.run_if(in_state(AppState::Game)),
         );
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
@@ -635,12 +648,43 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
             commands.entity(e).insert(ChatScrollBtn(kind));
         }
     }
-    // 滚动条轨道（C# CountBar Prguse[2012] @(622,16)，4x21）+ 滑块（PositionBar 2015 @(619,16)，8x14）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2012) {
-        spawn_ui_sprite(&mut commands, h, panel_x + 622.0, panel_y + 16.0, 2.3, 1.0);
-    }
+    // 滚动条轨道（C# CountBar Prguse[2012/2013/2014] @(622,16)）+ 滑块（PositionBar 2015 @(619,16)，8x14）
+    let track_imgs: Vec<Handle<Image>> = CHAT_SCROLLBAR_IMAGES
+        .iter()
+        .map(|idx| {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Prguse,
+                *idx,
+            )
+            .unwrap_or_else(|| white.clone())
+        })
+        .collect();
+    let track = spawn_ui_sprite(
+        &mut commands,
+        track_imgs[0].clone(),
+        panel_x + 622.0,
+        chat_panel_top(0) + 16.0,
+        2.3,
+        1.0,
+    );
+    commands.entity(track).insert(ChatScrollTrack([
+        track_imgs[0].clone(),
+        track_imgs[1].clone(),
+        track_imgs[2].clone(),
+    ]));
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2015) {
-        spawn_ui_sprite(&mut commands, h, panel_x + 619.0, panel_y + 16.0, 2.35, 1.0);
+        let knob = spawn_ui_sprite(
+            &mut commands,
+            h,
+            panel_x + 619.0,
+            chat_panel_top(0) + 16.0,
+            2.35,
+            1.0,
+        );
+        commands.entity(knob).insert(ChatScrollKnob);
     }
     // 输入行（C# ChatTextBox @ (1,54) 627x13，ForeColour Black）
     let e = spawn_ui_text(
@@ -860,6 +904,7 @@ fn chat_size_system(
             Without<ChatBarBg>,
         ),
     >,
+    mut track: Query<(&mut Sprite, &ChatScrollTrack), Without<ChatPanelBg>>,
 ) {
     let size = chat.size.min(2);
     if *applied == Some(size) {
@@ -909,6 +954,48 @@ fn chat_size_system(
     for mut tf in &mut bar_btns {
         tf.translation.y -= dy;
     }
+    // 滚动条轨道换图（C# `CountBar.Index = 2012/2013/2014`；轨道高度随之变化）
+    for (mut sp, handles) in &mut track {
+        let img = &handles.0[size];
+        if sp.image != *img {
+            sp.image = img.clone();
+        }
+    }
+}
+
+/// #2781：滚动条滑块位置（C# `ChatDialog.Update()`：
+/// `h = (CountBar.高 - PositionBar.高) * StartIndex / (History.Count - 1)`，`PositionBar.Y = 16 + h`）。
+/// Bevy 侧 `scroll_up` 是「距最新行向上滚了几行」，故 `StartIndex ≈ 总行数 - 可见行数 - scroll_up`。
+fn chat_scroll_knob_system(
+    chat: Res<ChatState>,
+    mut applied: Local<Option<(usize, usize, usize)>>,
+    track: Query<&Sprite, With<ChatScrollTrack>>,
+    mut knob: Query<&mut Transform, (With<ChatScrollKnob>, Without<ChatScrollTrack>)>,
+) {
+    let Ok(track) = track.single() else { return };
+    let track_h = track.custom_size.map(|s| s.y).unwrap_or(21.0);
+    let total = chat.lines.len();
+    let start = total
+        .saturating_sub(chat.visible_lines)
+        .saturating_sub(chat.scroll_up);
+    let key = (chat.size, start, total);
+    if *applied == Some(key) {
+        return;
+    }
+    *applied = Some(key);
+    let y = chat_scroll_knob_y(track_h, 14.0, start, total);
+    for mut tf in &mut knob {
+        tf.translation.y = -y;
+    }
+}
+
+/// #2781：滑块 y（屏幕坐标）——C# `Update()` 的比例公式，`total <= 1` 时停在轨道顶
+pub fn chat_scroll_knob_y(track_h: f32, knob_h: f32, start_index: usize, total: usize) -> f32 {
+    if total <= 1 {
+        return 16.0;
+    }
+    let h = (track_h - knob_h).max(0.0);
+    16.0 + h * (start_index as f32 / (total - 1) as f32)
 }
 
 /// 聊天设置面板（过滤 + 透明，C# ChatOptionDialog）
@@ -1902,9 +1989,9 @@ mod chat_scroll_tests {
 mod whisper_partner_tests {
     use super::{
         chat_bar_hint, chat_bar_prefix, chat_bar_system, chat_bar_top, chat_panel_top,
-        chat_size_lines, chat_size_system, whisper_partner, ChatBarAction, ChatBarBg,
-        ChatBarButton, ChatBarFrames, ChatLine, ChatPanelBg, ChatScrollBtn, ChatSizeImages,
-        ChatState, KeyScroll,
+        chat_scroll_knob_y, chat_size_lines, chat_size_system, whisper_partner, ChatBarAction,
+        ChatBarBg, ChatBarButton, ChatBarFrames, ChatLine, ChatPanelBg, ChatScrollBtn,
+        ChatSizeImages, ChatState, KeyScroll,
     };
     use crate::ui::sprite_ui::UiButton;
     use bevy::prelude::{
@@ -2145,6 +2232,29 @@ mod whisper_partner_tests {
         assert_eq!(
             world.entity(bar).get::<Transform>().unwrap().translation.y,
             -608.0
+        );
+    }
+
+    /// #2781：滚动条滑块比例位置（C# `Update()`：
+    /// `h = (CountBar.高 - PositionBar.高) * StartIndex / (History.Count - 1)`）
+    #[test]
+    fn chat_scroll_knob_y_matches_csharp() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(
+            close(chat_scroll_knob_y(69.0, 14.0, 0, 10), 16.0),
+            "顶部停 16"
+        );
+        assert!(
+            close(chat_scroll_knob_y(69.0, 14.0, 9, 10), 16.0 + 55.0),
+            "底部 = 16 + (轨道高-滑块高)"
+        );
+        assert!(
+            close(chat_scroll_knob_y(69.0, 14.0, 0, 1), 16.0),
+            "单行不停在底部"
+        );
+        assert!(
+            close(chat_scroll_knob_y(21.0, 14.0, 2, 4), 16.0 + 7.0 * 2.0 / 3.0),
+            "0 档轨道 21 高：按 StartIndex 比例"
         );
     }
 }
