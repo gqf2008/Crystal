@@ -6558,6 +6558,21 @@ impl WorldActor {
             Vec<u32>,
             Vec<u64>,
         )> = Vec::new();
+        // #2851：传送门配对表（同施法者的 Portal 对象）——循环体内不能再借用 spell_objects
+        let mut portal_partners: std::collections::HashMap<u64, Vec<(u32, i32, i32, u16)>> =
+            std::collections::HashMap::new();
+        for (oid, so) in self.spell_objects.iter() {
+            if so.spell == Spell::Portal {
+                portal_partners.entry(so.caster_session).or_default().push((
+                    *oid,
+                    so.x,
+                    so.y,
+                    so.map_index,
+                ));
+            }
+        }
+        // #2851：踩门触发的传送（循环外统一执行，需要 &mut self）
+        let mut portal_teleports: Vec<(u64, u16, i32, i32)> = Vec::new();
         let mut heal_targets: Vec<u64> = Vec::new();
         let mut heal_amounts: Vec<i32> = Vec::new();
 
@@ -6565,6 +6580,13 @@ impl WorldActor {
         for (obj_id, spell_obj) in &mut self.spell_objects {
             let elapsed = now.duration_since(spell_obj.created_at).as_millis() as u64;
             if spell_obj.is_expired(elapsed) && spell_obj.spell != Spell::DelayedExplosion {
+                expired_ids.push(*obj_id);
+                continue;
+            }
+            // #2851：C# `SpellObject.Process`（`SpellObject.cs:57`）——施法者离线（`Caster == null`）后传送门立即消失
+            if spell_obj.spell == Spell::Portal
+                && !self.players.contains_key(&spell_obj.caster_session)
+            {
                 expired_ids.push(*obj_id);
                 continue;
             }
@@ -6812,6 +6834,70 @@ impl WorldActor {
                         }
                         expired_ids.push(*obj_id);
                     }
+                // #2851：传送门（C# `SpellObject.ProcessSpell` 的 `case Spell.Portal`，SpellObject.cs:304-329）——
+                // 施法者本人 + 同组玩家踩门 → 传到"配对门"（同施法者的另一个 Portal）旁、按该玩家朝向的 1 格；
+                // 每处理一人 `Value -= 1`（配对门落点无效时 C# 直接 `return`，既不传送也不扣次数）；
+                // `Value < 1` 时门消失（C# `ExpireTime = 0`）。
+                Spell::Portal => {
+                    let caster_session = spell_obj.caster_session;
+                    let partner = portal_partners
+                        .get(&caster_session)
+                        .and_then(|v| v.iter().find(|(oid, _, _, _)| *oid != *obj_id).copied());
+                    // 施法者组号（C# `Caster.GroupMembers.Contains(ob)`）
+                    let caster_group = match self.players.get(&caster_session) {
+                        Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                            Ok(Some(cs)) => cs.group_id,
+                            _ => None,
+                        },
+                        None => None,
+                    };
+                    let mut consumed = 0i32;
+                    for (sid, rec) in &self.players {
+                        let Ok(Some(ps)) = rec.actor_ref.ask(GetPlayerState).await else {
+                            continue;
+                        };
+                        if ps.is_dead || ps.map_index != spell_obj.map_index {
+                            continue;
+                        }
+                        if ps.x != spell_obj.x || ps.y != spell_obj.y {
+                            continue;
+                        }
+                        let allowed = *sid == caster_session
+                            || (caster_group.is_some() && ps.group_id == caster_group);
+                        if !allowed {
+                            continue;
+                        }
+                        // C# `PointMove(portal.CurrentLocation, ob.Direction, 1)`：配对门朝"玩家朝向"的前一格
+                        let step = partner.map(|(_poid, px, py, pmap)| {
+                            let (ex, ey) = super::point_move(px, py, ps.direction, 1);
+                            let ok = self
+                                .maps
+                                .get(&pmap)
+                                .map(|m| m.is_valid(ex, ey))
+                                .unwrap_or(false);
+                            (pmap, ex, ey, ok)
+                        });
+                        let (teleport, consume) = crate::combat::attack::portal_step_outcome(
+                            step.is_some(),
+                            step.map(|s| s.3).unwrap_or(false),
+                        );
+                        if teleport {
+                            if let Some((pmap, ex, ey, _)) = step {
+                                portal_teleports.push((*sid, pmap, ex, ey));
+                            }
+                        }
+                        if !consume {
+                            continue;
+                        }
+                        consumed += 1;
+                    }
+                    if consumed > 0 {
+                        spell_obj.tick_value -= consumed;
+                        if spell_obj.tick_value < 1 {
+                            expired_ids.push(*obj_id);
+                        }
+                    }
+                }
                 // #2847：BOSS 地面法术场（TreeQueen 根刺 / HornedCommander 落石·尖刺 / MapQuake /
                 // DarkOmaKing 核爆 / FlyingStatue 冰龙卷 / HornedSorcerer 沙旋 / StoneGolem 震地 /
                 // EarthGolem 土堆 / TucsonGeneral 落石 / GeneralMeowMeow 雷）——
@@ -7076,13 +7162,30 @@ impl WorldActor {
             }
         }
 
+        // #2851：传送门把踩门玩家送到配对门旁（循环外执行，`teleport_player` 需要 &mut self）
+        for (sid, map_index, tx, ty) in portal_teleports {
+            crate::actors::world::npc_script::teleport_player(self, sid, map_index, tx, ty).await;
+        }
         for (sid, amount) in heal_targets.iter().zip(heal_amounts.iter()) {
             if let Some(record) = self.players.get(sid) {
                 let _ = record.actor_ref.ask(Heal { amount: *amount }).await;
             }
         }
+        // #2851：C# `SpellObject.Despawn`（`SpellObject.cs:599-610`）——传送门一旦消失，
+        // 同施法者的"配对门"一并消失（`ExpireTime = 0` + 立即 `Process()`），避免留下单门。
+        let portal_casters: Vec<u64> = expired_ids
+            .iter()
+            .filter_map(|id| self.spell_objects.get(id))
+            .filter(|so| so.spell == Spell::Portal)
+            .map(|so| so.caster_session)
+            .collect();
         for id in &expired_ids {
             self.spell_objects.remove(id);
+        }
+        if !portal_casters.is_empty() {
+            self.spell_objects.retain(|_, so| {
+                !(so.spell == Spell::Portal && portal_casters.contains(&so.caster_session))
+            });
         }
     }
 

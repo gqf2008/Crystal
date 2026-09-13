@@ -169,8 +169,10 @@ fn make_spell_config(
         },
         Spell::Portal => SpellConfig {
             spell: Spell::Portal,
+            // C# `Map.cs:2186-2195`：ExpireTime = now + duration*1000、TickSpeed = 2000；
+            // Value（通行次数）与 ExpireTime 在 `combat.rs` 施法时按 `magic.Level` 覆盖（#2851）。
             duration_ms: 60_000,
-            tick_interval_ms: 500,
+            tick_interval_ms: 2_000,
             tick_value: 0,
         },
         _ => SpellConfig {
