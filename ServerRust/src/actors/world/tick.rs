@@ -175,16 +175,8 @@ async fn apply_monster_hit_player(
             // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1；
             // #1230 致死也扣——C# DamageDura 在 ChangeHP 前调用）
             {
-                let armor_slots = [
-                    EquipmentSlot::Armour,
-                    EquipmentSlot::Helmet,
-                    EquipmentSlot::BraceletL,
-                    EquipmentSlot::BraceletR,
-                    EquipmentSlot::RingL,
-                    EquipmentSlot::RingR,
-                    EquipmentSlot::Shoes,
-                    EquipmentSlot::Necklace,
-                ];
+                // #2853：槽位单一来源（C# `DamageDura`：非武器装备各 -1）
+                let armor_slots = crate::combat::attack::DAMAGE_DURA_ARMOR_SLOTS;
                 for slot in armor_slots {
                     let broke = record
                         .actor_ref
@@ -2496,59 +2488,27 @@ impl WorldActor {
                         }
                     }
                 }
-                // 落点玩家 MAC 伤害（C# `player.Struck(Value, MAC)`，无攻击者）：
-                // #2845 起改走 `struck_damage`（必中 + 仅护甲减免），不再经 `resolve_attack`
-                // ——修前该路径会受 defender.magic_resist 免疫、可被 reflect 反射，与 C# `Struck` 不符。
-                for (sid, record) in &self.players {
-                    if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                        if st.is_dead || st.map_index != map_index || st.x != sx || st.y != sy {
-                            continue;
-                        }
-                        let defender = st.to_combat_stats();
-                        // C# `Stats[Stat.MinMAC]..Stats[Stat.MaxMAC]` 随机护甲（GetAttackPower）
-                        let armour = crate::combat::attack::get_defence_power(
-                            defender.min_mac,
-                            defender.max_mac,
-                        );
-                        let damage = crate::combat::attack::struck_damage(
-                            armour,
-                            value.max(0),
-                            defender.armour_rate,
-                            defender.damage_rate,
-                            defender.damage_reduction_percent,
-                        );
-                        if damage > 0 {
-                            let died = record
-                                .actor_ref
-                                .ask(TakeDamage {
-                                    attacker_id: 0, // environment
-                                    attacker_session: 0,
-                                    damage,
-                                })
-                                .await
-                                .unwrap_or(false);
-                            if died {
-                                self.player_death_queue.insert(*sid, self.tick_count);
-                                broadcast_system_message(
-                                    &self.gate_ref,
-                                    &self.players,
-                                    &format!(
-                                        "{} 在{}中倒下了",
-                                        st.name,
-                                        if is_lightning { "雷暴" } else { "火海" }
-                                    ),
-                                );
-                            } else {
-                                let msg = if is_lightning {
-                                    "你受到了闪电伤害！"
-                                } else {
-                                    "你受到了火焰伤害！"
-                                };
-                                send_system_message(&self.gate_ref, *sid, msg);
-                            }
-                        }
-                    }
-                }
+                // #2853：C# `Map.cs:683-729` 的落雷/岩浆是 **寿命 1000ms + TickSpeed 500ms** 的
+                // `SpellObject`（`Caster = null`）：视觉立即广播，**伤害在生成后 500ms 的首次 tick 才结算**，
+                // 且结算的是"当时站在该格上的人"（本端此前为生成瞬间直接结算，走进落点的人反而不吃伤害）。
+                // 首跳结算后 `Value = 0`（`SpellObject.cs:121`），故整段寿命内只造成一次伤害。
+                let oid = self.alloc_object_id();
+                let mut spell_obj = super::spell::create_persistent_spell(
+                    oid,
+                    0,
+                    0,
+                    map_index,
+                    sx,
+                    sy,
+                    0,
+                    0,
+                    value.max(0),
+                    spell,
+                );
+                spell_obj.tick_value = value.max(0);
+                spell_obj.tick_interval_ms = 500;
+                spell_obj.expires_at_ms = 1_000;
+                self.spell_objects.insert(oid, spell_obj);
             }
         }
 
@@ -6558,6 +6518,8 @@ impl WorldActor {
             Vec<u32>,
             Vec<u64>,
         )> = Vec::new();
+        // #2853：地图落雷/岩浆命中收集（value, map_index, x, y, 是否落雷）——`Struck` 路径须在循环外结算
+        let mut env_strikes: Vec<(i32, u16, i32, i32, bool)> = Vec::new();
         // #2851：传送门配对表（同施法者的 Portal 对象）——循环体内不能再借用 spell_objects
         let mut portal_partners: std::collections::HashMap<u64, Vec<(u32, i32, i32, u16)>> =
             std::collections::HashMap::new();
@@ -6959,6 +6921,21 @@ impl WorldActor {
                         ));
                     }
                 }
+                // #2853：地图落雷/岩浆（C# `SpellObject.ProcessSpell` 的 `MapLava`/`MapLightning` 分支，
+                // `SpellObject.cs:204-212`）——落点玩家 `Struck(Value, MAC)`（必中 + 仅护甲减免）；
+                // 本跳结算后 `Value = 0`（`SpellObject.cs:121`）⇒ 整段寿命只结算一次。
+                Spell::MapLightning | Spell::MapLava => {
+                    if spell_obj.tick_value > 0 {
+                        env_strikes.push((
+                            spell_obj.tick_value,
+                            spell_obj.map_index,
+                            spell_obj.x,
+                            spell_obj.y,
+                            spell_obj.spell == Spell::MapLightning,
+                        ));
+                        spell_obj.tick_value = 0;
+                    }
+                }
                 _ => {}
             }
         }
@@ -7144,6 +7121,11 @@ impl WorldActor {
                         })
                         .await
                         .unwrap_or(false);
+                    // #2853：C# `HumanObject.Struck`（`:7353-7370`）——法术场的 `Struck` 路径同样调用
+                    // `DamageDura()`（净伤害 > 0 才走到，非武器槽 -1，NoDuraLoss 免疫）
+                    if !crate::combat::attack::struck_dura_slots(damage).is_empty() {
+                        self.damage_armor_on_pvp_hit(sid).await;
+                    }
                     if died {
                         self.player_death_queue.insert(sid, self.tick_count);
                     }
@@ -7165,6 +7147,65 @@ impl WorldActor {
         // #2851：传送门把踩门玩家送到配对门旁（循环外执行，`teleport_player` 需要 &mut self）
         for (sid, map_index, tx, ty) in portal_teleports {
             crate::actors::world::npc_script::teleport_player(self, sid, map_index, tx, ty).await;
+        }
+        // #2853：环境落雷/岩浆结算（`Struck` 路径：必中 + 仅护甲减免 + `DamageDura()`）——
+        // 落点判定与 C# `SpellObject.ProcessSpell` 一致：只看"本跳时站在该格上"的玩家。
+        // 注：C# 另有 `AdminAccount && Observer` 观察者免疫，本端无观察者状态（协议恒 false），无法表达。
+        for (value, map_index, sx, sy, is_lightning) in env_strikes {
+            for (sid, record) in &self.players {
+                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else {
+                    continue;
+                };
+                if st.is_dead || st.map_index != map_index || st.x != sx || st.y != sy {
+                    continue;
+                }
+                let defender = st.to_combat_stats();
+                // C# `Stats[Stat.MinMAC]..Stats[Stat.MaxMAC]` 随机护甲（GetAttackPower）
+                let armour =
+                    crate::combat::attack::get_defence_power(defender.min_mac, defender.max_mac);
+                let damage = crate::combat::attack::struck_damage(
+                    armour,
+                    value.max(0),
+                    defender.armour_rate,
+                    defender.damage_rate,
+                    defender.damage_reduction_percent,
+                );
+                if damage <= 0 {
+                    continue;
+                }
+                let died = record
+                    .actor_ref
+                    .ask(TakeDamage {
+                        attacker_id: 0, // environment
+                        attacker_session: 0,
+                        damage,
+                    })
+                    .await
+                    .unwrap_or(false);
+                // #2853：C# `HumanObject.Struck`（`:7353-7370`）——净伤害 > 0 才 `DamageDura()`
+                if !crate::combat::attack::struck_dura_slots(damage).is_empty() {
+                    self.damage_armor_on_pvp_hit(*sid).await;
+                }
+                if died {
+                    self.player_death_queue.insert(*sid, self.tick_count);
+                    broadcast_system_message(
+                        &self.gate_ref,
+                        &self.players,
+                        &format!(
+                            "{} 在{}中倒下了",
+                            st.name,
+                            if is_lightning { "雷暴" } else { "火海" }
+                        ),
+                    );
+                } else {
+                    let msg = if is_lightning {
+                        "你受到了闪电伤害！"
+                    } else {
+                        "你受到了火焰伤害！"
+                    };
+                    send_system_message(&self.gate_ref, *sid, msg);
+                }
+            }
         }
         for (sid, amount) in heal_targets.iter().zip(heal_amounts.iter()) {
             if let Some(record) = self.players.get(sid) {

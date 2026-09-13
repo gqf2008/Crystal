@@ -1,17 +1,8 @@
 use super::*;
 
-/// #895：PvP/受击耐久损耗的非武器装备槽（C# DamageDura 排除 Weapon，且 Amulet 由
-/// DamageItem 内部免疫；与 tick.rs 怪物命中路径的槽位一致）
-const DAMAGE_DURA_ARMOR_SLOTS: [EquipmentSlot; 8] = [
-    EquipmentSlot::Armour,
-    EquipmentSlot::Helmet,
-    EquipmentSlot::BraceletL,
-    EquipmentSlot::BraceletR,
-    EquipmentSlot::RingL,
-    EquipmentSlot::RingR,
-    EquipmentSlot::Shoes,
-    EquipmentSlot::Necklace,
-];
+/// #895/#2853：PvP/受击耐久损耗的非武器装备槽——单一来源在 `crate::combat::attack`
+/// （C# `DamageDura` 排除 Weapon；Amulet 由 `DamageItem` 内部免疫）。
+use crate::combat::attack::DAMAGE_DURA_ARMOR_SLOTS;
 
 impl WorldActor {
     /// #1858：即时法术命中玩家（C# Map.cs Attacked(player, value, MAC, false)）

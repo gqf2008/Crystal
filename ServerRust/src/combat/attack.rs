@@ -267,6 +267,31 @@ pub(crate) fn portal_passthrough_count(level: u8) -> i32 {
     (level as i32 * 2 - 1).max(1)
 }
 
+/// C# `HumanObject.DamageDura`（`Server/MirObjects/HumanObject.cs:7837-7843`）——受击时的装备耐久损耗槽：
+/// **不含武器**（武器只在玩家攻击命中时经 `DamageWeapon` 按 `Random(4)+1` 损耗）。
+pub(crate) const DAMAGE_DURA_ARMOR_SLOTS: [crate::actors::inventory::EquipmentSlot; 8] = [
+    crate::actors::inventory::EquipmentSlot::Armour,
+    crate::actors::inventory::EquipmentSlot::Helmet,
+    crate::actors::inventory::EquipmentSlot::BraceletL,
+    crate::actors::inventory::EquipmentSlot::BraceletR,
+    crate::actors::inventory::EquipmentSlot::RingL,
+    crate::actors::inventory::EquipmentSlot::RingR,
+    crate::actors::inventory::EquipmentSlot::Shoes,
+    crate::actors::inventory::EquipmentSlot::Necklace,
+];
+
+/// C# `HumanObject.Struck`（`:7353-7370`）——`if (armour >= damage) return 0;` 早退，
+/// 故 **只有净伤害 > 0** 才走到 `DamageDura()`；净伤害 ≤ 0 时返回空切片（不扣任何耐久）。
+pub(crate) fn struck_dura_slots(
+    net_damage: i32,
+) -> &'static [crate::actors::inventory::EquipmentSlot] {
+    if net_damage > 0 {
+        &DAMAGE_DURA_ARMOR_SLOTS
+    } else {
+        &[]
+    }
+}
+
 /// C# `HumanObject.Portal`（`:5802`）：`duration = 30 + magic.Level * 30`（秒）
 pub(crate) fn portal_duration_secs(level: u8) -> u64 {
     (30 + level as u64 * 30).max(1)
@@ -1025,5 +1050,30 @@ mod tests {
         assert_eq!(portal_step_outcome(true, true), (true, true));
         assert_eq!(portal_step_outcome(true, false), (false, false));
         assert_eq!(portal_step_outcome(false, false), (false, true));
+    }
+
+    /// #2853：C# `HumanObject.Struck`（`:7353-7370`）——只有净伤害 > 0（越过 `armour >= damage` 早退）
+    /// 才走 `DamageDura()`；且 `DamageDura` 不含武器槽（武器只在攻击命中时经 `DamageWeapon` 损耗）。
+    /// 环境伤害（落雷/岩浆/BOSS 法术场）与本判定共用同一槽位表。
+    #[test]
+    fn struck_dura_slots_only_on_net_damage() {
+        use crate::actors::inventory::EquipmentSlot;
+
+        let slots = struck_dura_slots(1);
+        assert_eq!(slots.len(), 8, "DamageDura 覆盖 8 个非武器装备槽");
+        assert!(slots.contains(&EquipmentSlot::Armour));
+        assert!(slots.contains(&EquipmentSlot::Helmet));
+        assert!(slots.contains(&EquipmentSlot::BraceletL));
+        assert!(slots.contains(&EquipmentSlot::BraceletR));
+        assert!(slots.contains(&EquipmentSlot::RingL));
+        assert!(slots.contains(&EquipmentSlot::RingR));
+        assert!(slots.contains(&EquipmentSlot::Shoes));
+        assert!(slots.contains(&EquipmentSlot::Necklace));
+        // 武器不在 DamageDura 范围内（C# `if (i != (int)EquipmentSlot.Weapon)`）
+        assert!(!slots.contains(&EquipmentSlot::Weapon));
+
+        // 净伤害 0 / 负数（已被 armour 完全吸收）→ 不扣任何耐久
+        assert!(struck_dura_slots(0).is_empty());
+        assert!(struck_dura_slots(-5).is_empty());
     }
 }
