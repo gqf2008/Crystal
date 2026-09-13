@@ -211,6 +211,8 @@ impl MonsterBehavior for DarkOmaKingBehavior {
                         tick_ms: 1000,
                         caster_oid: monster.object_id,
                         caster_session: 0,
+                        cells: Vec::new(),
+                        show: true,
                     });
                 // Nuke 模式冷却更长（C# ActionTime + 3400）
                 monster.next_attack_tick = ctx.tick_count + 34;

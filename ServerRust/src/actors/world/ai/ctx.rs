@@ -121,6 +121,10 @@ pub struct SpellFieldSpawn {
     pub tick_ms: u64,
     pub caster_oid: u32,
     pub caster_session: u64,
+    /// #2849：伤害格集合（C# `CastLocation` + 每格一个 `SpellObject` 的等价聚合；空 = 仅 (x,y) 单格）
+    pub cells: Vec<(i32, i32)>,
+    /// #2849：是否广播 `S.ObjectSpell` 视觉（C# `SpellObject.Show`——大面积伤害域里只有"锚点格"可见）
+    pub show: bool,
 }
 
 /// 召唤物生成（Boss 召唤小怪）

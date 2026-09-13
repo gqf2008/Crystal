@@ -10728,12 +10728,18 @@ impl Message<Tick> for WorldActor {
             // Boss 地面法术场：转为 SpellObject
             for sf in &boss_spell_fields {
                 let oid = self.alloc_object_id();
-                let spell_obj = spell::SpellObject::new(
+                // #2849：地图索引取施法怪所在图（此前硬编码 0 ⇒ 非 0 图上的法术场永远命中不到任何人）
+                let map_index = self
+                    .monsters
+                    .get(&sf.caster_oid)
+                    .map(|m| m.map_index)
+                    .unwrap_or(0);
+                let mut spell_obj = spell::SpellObject::new(
                     oid,
                     sf.spell,
                     sf.caster_oid,
                     sf.caster_session,
-                    0,
+                    map_index,
                     sf.x,
                     sf.y,
                     sf.duration_ms,
@@ -10742,7 +10748,38 @@ impl Message<Tick> for WorldActor {
                     1,
                     sf.value,
                 );
+                // #2849：大面积伤害域（C# 每格一个 SpellObject 的等价聚合）
+                spell_obj.cells = sf.cells.clone();
                 self.spell_objects.insert(oid, spell_obj);
+                // #2849：可见性（C# `SpellObject.Show`）——只给"锚点格/单格"广播 ObjectSpell 视觉
+                if sf.show {
+                    let object_spell = mir2_shared::packets::server::magic_combat::ObjectSpell {
+                        object_id: oid,
+                        location_x: sf.x,
+                        location_y: sf.y,
+                        spell: sf.spell,
+                    };
+                    let mut body = Vec::new();
+                    if object_spell.write_body(&mut body).is_ok() {
+                        let pkt = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectSpell as i16,
+                            &body,
+                        );
+                        for (sid, r) in &self.players {
+                            if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                                if ps.map_index == map_index {
+                                    let _ = self
+                                        .gate_ref
+                                        .tell(SendToClient {
+                                            session_id: *sid,
+                                            data: pkt.clone(),
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             // Boss 召唤：按名称查 MonsterInfo 后生成（对齐 C# Envir.GetMonsterInfo(name)）
             for bs in &boss_summons {

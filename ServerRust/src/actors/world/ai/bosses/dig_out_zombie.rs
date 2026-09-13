@@ -99,6 +99,8 @@ impl MonsterBehavior for DigOutZombieBehavior {
                     tick_ms: 2000,
                     caster_oid: monster.object_id,
                     caster_session: 0,
+                    cells: Vec::new(),
+                    show: true,
                 });
         }
 

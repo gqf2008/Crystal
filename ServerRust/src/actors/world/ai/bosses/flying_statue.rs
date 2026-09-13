@@ -98,6 +98,8 @@ impl MonsterBehavior for FlyingStatueBehavior {
                                 tick_ms: 3000,
                                 caster_oid: monster.object_id,
                                 caster_session: 0,
+                                cells: Vec::new(),
+                                show: true,
                             });
                     }
                 }

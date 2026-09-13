@@ -10,6 +10,32 @@ use crate::actors::world::ai::helpers::*;
 use crate::actors::world::MonsterState;
 use mir2_shared::enums::Spell;
 
+/// #2849：C# `MassSpawnRockFall`（`HornedCommander.cs:356-369`）的锚点偏移——
+/// `for (x = -15; x < 15; x += 10)`（y 同理）⇒ `{-15, -5, +5}²`，共 9 个锚点。
+pub(crate) const ROCK_FALL_ANCHOR_OFFSETS: [(i32, i32); 9] = [
+    (-15, -15),
+    (-15, -5),
+    (-15, 5),
+    (-5, -15),
+    (-5, -5),
+    (-5, 5),
+    (5, -15),
+    (5, -5),
+    (5, 5),
+];
+
+/// #2849：C# `SpawnRockFall`（`:375-411`）每个锚点的伤害格集合 = 锚点 ±10 格（21×21 = 441 格）。
+/// C# 为每格建一个 `SpellObject`；本端用「一个对象 + `cells` 面积」表达同一伤害域。
+pub(crate) fn rock_fall_area_cells(cx: i32, cy: i32) -> Vec<(i32, i32)> {
+    let mut cells = Vec::with_capacity(21 * 21);
+    for y in (cy - 10)..=(cy + 10) {
+        for x in (cx - 10)..=(cx + 10) {
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
 pub struct HornedCommanderBehavior {
     start_advanced: bool,
     immune: bool,
@@ -184,6 +210,10 @@ impl MonsterBehavior for HornedCommanderBehavior {
                                     tick_ms: 1000,
                                     caster_oid: monster.object_id,
                                     caster_session: 0,
+                                    cells: Vec::new(),
+                                    // C# `SpawnRockSpike`：`Show = location.X == x && location.Y == y`
+                                    // ——25 格里只有锚点格对客户端可见（其余是纯伤害域）
+                                    show: dx == 0 && dy == 0,
                                 });
                         }
                     }
@@ -230,6 +260,34 @@ impl MonsterBehavior for HornedCommanderBehavior {
                             damage: damage.saturating_mul(loops),
                             spell_id: 0,
                         });
+                    // #2849：C# `MassSpawnRockFall(front, rockFallDuration)`（HornedCommander.cs:356-412）——
+                    // 以 front 为中心、锚点间距 10 的 3×3 网格，每锚点铺 ±10 格（21×21）落石伤害域：
+                    // 值 = MC（每格独立 roll，C# :391）、500ms 起始延迟、2s 一跳、持续 rockFallDuration。
+                    // `Show` 只给锚点格（其余为纯伤害域）——本端用「1 个对象 + cells 面积」表示一个锚点，
+                    // 与 C# 每格一个对象在伤害与可见性上等价。
+                    for (ax, ay) in ROCK_FALL_ANCHOR_OFFSETS {
+                        let sx = fx + ax;
+                        let sy = fy + ay;
+                        let cell_damage = crate::combat::attack::get_attack_power(
+                            monster.min_mc,
+                            monster.max_mc,
+                            0,
+                        )
+                        .max(1);
+                        ctx.out_spell_fields
+                            .push(crate::actors::world::ai::SpellFieldSpawn {
+                                spell: Spell::HornedCommanderRockFall,
+                                x: sx,
+                                y: sy,
+                                value: cell_damage,
+                                duration_ms: (loops as u64 * 500) + 500,
+                                tick_ms: 2000,
+                                caster_oid: monster.object_id,
+                                caster_session: 0,
+                                cells: rock_fall_area_cells(sx, sy),
+                                show: true,
+                            });
+                    }
                     return;
                 }
                 // 1/15 SpinHit（C# :211-232）：蓄力期免疫，DC×loops(5-10)，自身 AOE3
@@ -298,6 +356,23 @@ impl MonsterBehavior for HornedCommanderBehavior {
 
 #[cfg(test)]
 mod tests {
+
+    /// #2849：RockFall 落石场几何对齐 C# `MassSpawnRockFall`/`SpawnRockFall`
+    #[test]
+    fn rock_fall_geometry_matches_csharp() {
+        // 锚点 = {-15,-5,+5}²（9 个）
+        assert_eq!(ROCK_FALL_ANCHOR_OFFSETS.len(), 9);
+        assert_eq!(ROCK_FALL_ANCHOR_OFFSETS[0], (-15, -15));
+        assert!(ROCK_FALL_ANCHOR_OFFSETS.contains(&(5, 5)));
+        assert!(!ROCK_FALL_ANCHOR_OFFSETS.contains(&(0, 0)));
+        // 每锚点 ±10 格（21×21 = 441），含边界、不含 ±11
+        let cells = rock_fall_area_cells(100, 200);
+        assert_eq!(cells.len(), 441);
+        assert!(cells.contains(&(100, 200)));
+        assert!(cells.contains(&(90, 190)) && cells.contains(&(110, 210)));
+        assert!(!cells.contains(&(89, 200)));
+        assert!(!cells.contains(&(100, 211)));
+    }
     use super::*;
 
     #[test]
