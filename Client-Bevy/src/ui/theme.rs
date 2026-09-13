@@ -179,8 +179,33 @@ pub fn spawn_panel(
         .id()
 }
 
-/// 子节点：绝对定位文本标签（相对父面板左上角）
+/// 子节点：绝对定位文本标签（相对父面板左上角），**默认带 4 向黑色描边**。
+///
+/// #2817：C# `MirLabel` 构造器默认 `_outLine = true; _outLineColour = Color.Black`
+/// （`Client/MirControls/MirLabel.cs:181-182`），按钮标题也吃这个默认
+/// （`MirButton.cs:167-174` 里 `//OutLine = true,` 是被注释掉的冗余行）——
+/// 全仓 `TextRenderer.DrawText` 只命中 `MirLabel.cs`，即 C# 文本默认全部带描边。
+/// 显式关描边只有 4 处：物品格数量黄字（`MirItemCell.cs:2615`、`QuestDialogs.cs:1726`）、
+/// 聊天文本（`MainDialogs.cs:962/1040`）；此外 `MirTextBox` 是原生 WinForms `TextBox`
+/// （`MirTextBox.cs:143`）也不带描边。这些位置请用 [`spawn_label_plain`]。
 pub fn spawn_label<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    x: f32,
+    y: f32,
+    size: f32,
+    color: Color,
+    z: i32,
+) -> EntityCommands<'a> {
+    crate::ui::outlined_text::spawn_outlined_label(parent, font.clone(), text, x, y, size, color, z)
+}
+
+/// 子节点：绝对定位**无描边**文本标签。
+///
+/// 只用于 C# 里确实没有描边的文本（见 [`spawn_label`] 注释的 4 处 `OutLine = false`
+/// 与 `MirTextBox` 显示文本）。C# 证据写进调用点注释。
+pub fn spawn_label_plain<'a>(
     parent: &'a mut ChildSpawnerCommands,
     font: &Handle<Font>,
     text: &str,
@@ -228,8 +253,26 @@ pub fn spawn_icon_button<'a>(
     ))
 }
 
-/// 子节点：水平居中文本（cx=中心 x，width=排版宽度，Justify::Center）
+/// 子节点：水平居中文本（cx=中心 x，width=排版宽度，`Justify::Center`），**默认带描边**
+/// （理由同 [`spawn_label`]）。
 pub fn spawn_label_center<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    cx: f32,
+    y: f32,
+    width: f32,
+    size: f32,
+    color: Color,
+    z: i32,
+) -> EntityCommands<'a> {
+    crate::ui::outlined_text::spawn_outlined_label_center(
+        parent, font, text, cx, y, width, size, color, z,
+    )
+}
+
+/// 子节点：水平居中的**无描边**文本（例外清单同 [`spawn_label_plain`]）
+pub fn spawn_label_center_plain<'a>(
     parent: &'a mut ChildSpawnerCommands,
     font: &Handle<Font>,
     text: &str,
@@ -870,6 +913,62 @@ mod tests {
         let panel = spawn_panel(&mut commands, Handle::default(), 0.0, 0.0, 10.0, 10.0, 1);
         queue.apply(&mut world);
         assert!(world.get::<UiRootDisplay>(panel).is_some());
+    }
+
+    /// 耐久条宽度：满耐久=整格，随比例缩短，最小 1px（C# MirItemCell DrawDurability）
+    #[test]
+    fn spawn_label_is_outlined_by_default() {
+        // #2817：C# `MirLabel` 构造器默认 `_outLine = true`（`MirLabel.cs:181-182`），
+        // 对话框文本默认必须带描边 → `spawn_label`/`spawn_label_center` 等价于 outlined 版；
+        // 例外位置（物品格数量黄字 `OutLine = false`、`InputTextBox` 文本）走 `*_plain`
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut main = None;
+        commands.spawn(Node::default()).with_children(|p| {
+            main =
+                Some(spawn_label(p, &Handle::default(), "T", 1.0, 2.0, 12.0, Color::WHITE, 5).id());
+            spawn_label_plain(p, &Handle::default(), "1", 3.0, 4.0, 12.0, Color::WHITE, 5);
+            spawn_label_center(
+                p,
+                &Handle::default(),
+                "C",
+                50.0,
+                6.0,
+                40.0,
+                12.0,
+                Color::WHITE,
+                5,
+            );
+            spawn_label_center_plain(
+                p,
+                &Handle::default(),
+                "P",
+                50.0,
+                8.0,
+                40.0,
+                12.0,
+                Color::WHITE,
+                5,
+            );
+        });
+        queue.apply(&mut world);
+        assert!(
+            world
+                .entity(main.unwrap())
+                .contains::<crate::ui::outlined_text::OutlinedUiText>(),
+            "spawn_label 默认应带描边"
+        );
+        let shadows = world
+            .query_filtered::<Entity, With<crate::ui::outlined_text::OutlineUiShadow>>()
+            .iter(&world)
+            .count();
+        let outlined = world
+            .query_filtered::<Entity, With<crate::ui::outlined_text::OutlinedUiText>>()
+            .iter(&world)
+            .count();
+        assert_eq!(shadows, 8, "两个带描边主体各 4 个黑副本");
+        assert_eq!(outlined, 2, "只有 label / label_center 两个主体带描边");
     }
 
     /// 耐久条宽度：满耐久=整格，随比例缩短，最小 1px（C# MirItemCell DrawDurability）
