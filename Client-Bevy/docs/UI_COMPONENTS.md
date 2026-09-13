@@ -157,7 +157,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：435 lib + 2 bin + 1 smoke + 24 alignment 通过（批13 输入框边框三态后基线）。
+- `cargo test`（Client-Bevy）：437 lib + 2 bin + 1 smoke + 24 alignment 通过（批14 仓储锁 per-grid 后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -186,6 +186,8 @@
 - 批13 锁定格透明度实机复验（2026-09-13，`--auto-enter --market-many` + Control API；寄售放入/切页签用临时驱动，验证后已删除）：同一来源格（第 3 格）未锁均值 `(73.7,36.6,49.6)`；锁定后 `(27.4,12.5,17.5)`，locked/unlocked 比例 **0.371/0.342/0.352**（批12 无 alpha 时为 0.410/0.374/0.389）——与 C# `0.412 × 0.8 = 0.330` 加单元格底色的 alpha 混合一致。
 - 批13 输入框边框实机复验（2026-09-13，`--skip-login --market-buy` + Control API；选拍卖行/按 BUY/改数量/切页签用临时驱动，验证后已删除）：数量框 `Lime` 态 = 绿 1px 边框 + `OKAY` 可见（默认 151）；把值改成 100（低于下限 151）→ **红 1px 边框 + OKAY 隐藏**（只剩 CANCEL），与 C# `TextBox_TextChanged` 合法/非法分支一致；切到寄售页签后售价框为纯深色输入框（不再有红/绿/橙自造底色），SELL 键保持禁用灰。
 - 批13 Mail 占位键实机复验（2026-09-13，`--skip-login` + Control API `dialog mail open` 截图）：底栏右侧出现 `Prguse[520]`/`[523]` 两个键，均值 RGB `(110.4,110.6,109.3)`/`(114.4,114.7,112.9)`、色度 `1.46`/`2.15`（≈0 = 批12 灰度公式），同排可用的发送/删除键保持棕色原色 —— 与 C# `GrayScale=true, Enabled=false` 占位态一致。
+- 批14 仓储锁实机复验（2026-09-13，`--auto-enter` + Control API `npc_call{110,"[@STORAGE]"}` 打开仓库、`dialog npc close` 关掉 NPC 页；临时把 mock 仓储密码置空以到达面板，**验证后已还原**；锁定/解锁用临时驱动，**验证后已删除**）：临时锁 `(Storage,3)` + `(Inventory,3)` 后，仓储格 3 均值 RGB `(38.2,28.2,17.9)` 色度 20.6（对照：同行未锁的仓储格 4 `(89.1,69.6,46.1)` 色度 43.3 不变），背包格 3 `(26.3,12.2,16.9)` 色度 19.6；解锁后仓储格 3 恢复 `(93.6,73.2,48.3)` 色度 45.7、背包格 3 恢复 `(70.3,35.1,47.4)` 色度 50.1 —— 两侧网格同色规则、被锁格与对照格差异显著。
+- 批14 仓储锁门禁（2026-09-13）：`store_target_slot_matches_csharp`（C# 目标格选择：空格用它/占用取首个空格/全满 None）、`store_receipt_releases_grid_locks`（`S.StoreItem` 回包清 `(Storage,·)` 两侧锁、Craft 来源不受影响）、`inv_lock_reasons_are_isolated` 扩充（同格号在 `LockGrid::Storage` 与 `Inventory` 互不影响 + 仓储锁定格同色）；红检：把 `store_target_slot` 改成恒返回点击格、把 `is_locked_in` 改成忽略网格，两条断言分别如期 FAILED。
 - 批13 收尾三窗复验（2026-09-13，合并后单一进程 `--skip-login` + Control API 依次开 Mail/TrustMerchant/Craft 截图）：Mail 底栏占位键灰度保持；TrustMerchant 底栏无选中时 BUY 灰度、售价框无自造底色；Craft `CRAFT` 灰度 / `AUTO` 原色、面板几何无变化。
 
 ## 7. 已知有意偏差
@@ -197,7 +199,7 @@
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
 - Creature：C# `CreatureInfo`(19,161) = `CanPickupItems`（含 auto/semi-auto/mouse 拾取范围）、`CreatureInfo1`(19,176) = `CanProduceBlackStones`、`CreatureInfo2`(19,191) = `CanProducePearlsBuyCreatureItems`（后两条仅 `CreatureRules.CanProduceBlackStone` 为真时显示），另 `CreatureDeadline`/`CreatureMaintainFoodBuff` 显示到期与食物增益时间（IntelligentCreatureDialogs.cs:293-315 / 727-752）。**Bevy 暂以一行（19,161）承载「数量 + 选中宠物名/模式/饥饿度」**：这三行依赖 `IntelligentCreatureRules`（拾取范围/黑石产出）、到期与食物增益时间，而 Rust 服务端 `UpdateIntelligentCreatureList` 只发 `type/pickup/enabled/hunger/name/active/filter/grade`，`ServerRust::IntelligentCreature` 结构也没有这些字段 —— 需先做服务端宠物规则协议扩展，留待宠物系统批次（C# 文案键已确认：`CanPickupItems`/`CanProduceBlackStones`/`CanProducePearlsBuyCreatureItems`/`Expire`/`ExpireNever`/`FoodBuff`）。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
-- 背包格锁定（`MirItemCell.Locked`，批12 单元2 + 批13 单元1）：Craft `SelectedCell`（`AutoFill` 逐格锁定、`ResetCells()` 解锁）、装备 `C.EquipItem`（`S.EquipItem` 解锁）、拆分 `C.SplitItem`（`S.SplitItem1` 解锁）、镶嵌/钓具坐骑槽 `C.EquipSlotItem`（`S.EquipSlotItem` 解锁）、交易所寄售选物 `tempCell`（换物/切页签/关窗/`S.ConsignItem` 解锁）五类已对齐，Bevy 按 `InvLockReason` 分组存放故互不干扰（`InvLockedSlots` + 图标 `Color::srgba_u8(105,105,105,204)` = `Color.DimGray` × 0.8 + 锁定格不响应点击/选择）。残留偏差：C# 移入腰带/仓库/交易等 `Grid` 来源的锁未实现（那些格不在玩家背包索引空间）。
+- 背包格锁定（`MirItemCell.Locked`，批12 单元2 + 批13 单元1 + 批14 单元1）：Craft `SelectedCell`（`AutoFill` 逐格锁定、`ResetCells()` 解锁）、装备 `C.EquipItem`（`S.EquipItem` 解锁）、拆分 `C.SplitItem`（`S.SplitItem1` 解锁）、镶嵌/钓具坐骑槽 `C.EquipSlotItem`（`S.EquipSlotItem` 解锁）、交易所寄售选物 `tempCell`（换物/切页签/关窗/`S.ConsignItem` 解锁）、**仓库存入/取出**（`C.StoreItem`/`C.TakeBackItem` → `S.StoreItem`/`S.TakeBackItem` 解锁，含 C# 的「点击格空则用它、否则首个空格」目标选择）六类已对齐；锁按 `(InvLockReason, LockGrid, index)` 三元组存放（`LockGrid::{Inventory,Belt,HeroInventory,HeroBelt,Storage,Trade}`），故「背包格 3」与「仓储格 3」互不影响，图标按 `Color::srgba_u8(105,105,105,204)`（= `Color.DimGray` × 0.8）灰化且锁定格不响应点击。残留偏差：C# 交易存入/取回（`C.DepositTradeItem`/`RetrieveTradeItem`）与移入腰带等 `Grid` 来源的锁未实现（`LockGrid::Trade` 已就位，待批14 单元2）。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
 - ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `T`）并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。
 - ItemRent：`Prguse[238]` 面板位图**自带**右上角关闭图样（C# 四窗都画得到），但只有自有窗挂了可点关闭键（`Prguse2[360..362]`）——C# `GuestItemRentDialog`/`GuestItemRentingDialog` 本身没有 `closeButton`，Bevy 同样只在自有窗挂 `ItemRentalClose`，对方窗的 X 是装饰。

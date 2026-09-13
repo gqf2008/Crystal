@@ -1322,6 +1322,23 @@ pub enum InvLockReason {
     Socket,
     /// TrustMerchant 寄售选物（`tempCell.Locked`，TrustMerchantDialog.cs:1392）；换物/切页签/关窗/寄售回包解锁
     Consign,
+    /// `C.StoreItem`/`C.TakeBackItem`（仓库存入/取出，`MirItemCell.cs:1362/1071`）：
+    /// 同时锁来源格与目标（或首个空格），`S.StoreItem`/`S.TakeBackItem` 解锁（GameScene.cs:2737/2720）
+    Storage,
+    /// `C.DepositTradeItem`/`C.RetrieveTradeItem`（交易放入/取回，`MirItemCell.cs:1554/1564`）：
+    /// 锁来源格 + 交易槽，`S.DepositTradeItem`/`S.RetrieveTradeItem` 解锁（GameScene.cs:2804/2821）
+    Trade,
+}
+
+/// 锁定格所属网格（C# `MirItemCell.GridType`；`Locked` 语义在各网格一致，但格号空间不同）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LockGrid {
+    Inventory,
+    Belt,
+    HeroInventory,
+    HeroBelt,
+    Storage,
+    Trade,
 }
 
 /// 被其它对话框锁定的背包格（C# `MirItemCell.Locked`；按 [`InvLockReason`] 分组）。
@@ -1333,7 +1350,8 @@ pub enum InvLockReason {
 /// - `MirItemCell` 交互：锁定格不可作为 `SelectedCell` 取出/移动（`:2410` `SelectedCell.Locked` 直接 return）
 #[derive(Resource, Default)]
 pub struct InvLockedSlots {
-    by_reason: std::collections::HashMap<InvLockReason, std::collections::HashSet<usize>>,
+    by_reason:
+        std::collections::HashMap<InvLockReason, std::collections::HashSet<(LockGrid, usize)>>,
 }
 
 /// C# `MirItemCell.DrawControl` 锁定格：`Library.Draw(image, pos, Color.DimGray, UseOffSet, 0.8F)`
@@ -1343,14 +1361,26 @@ pub struct InvLockedSlots {
 pub const LOCKED_ITEM_COLOR: Color = Color::srgba_u8(105, 105, 105, 204);
 
 impl InvLockedSlots {
+    /// 背包格（`LockGrid::Inventory`）便捷包装
     pub fn lock(&mut self, reason: InvLockReason, slot: usize) {
-        self.by_reason.entry(reason).or_default().insert(slot);
+        self.lock_in(reason, LockGrid::Inventory, slot);
+    }
+
+    pub fn lock_in(&mut self, reason: InvLockReason, grid: LockGrid, index: usize) {
+        self.by_reason
+            .entry(reason)
+            .or_default()
+            .insert((grid, index));
     }
 
     /// 解除某一来源对某格的锁定
     pub fn unlock(&mut self, reason: InvLockReason, slot: usize) {
+        self.unlock_in(reason, LockGrid::Inventory, slot);
+    }
+
+    pub fn unlock_in(&mut self, reason: InvLockReason, grid: LockGrid, index: usize) {
         if let Some(set) = self.by_reason.get_mut(&reason) {
-            set.remove(&slot);
+            set.remove(&(grid, index));
             if set.is_empty() {
                 self.by_reason.remove(&reason);
             }
@@ -1363,7 +1393,13 @@ impl InvLockedSlots {
     }
 
     pub fn is_locked(&self, slot: usize) -> bool {
-        self.by_reason.values().any(|set| set.contains(&slot))
+        self.is_locked_in(LockGrid::Inventory, slot)
+    }
+
+    pub fn is_locked_in(&self, grid: LockGrid, index: usize) -> bool {
+        self.by_reason
+            .values()
+            .any(|set| set.contains(&(grid, index)))
     }
 
     /// 解除全部来源的锁定（C# `ResetCells()` 等价；关卡/登出等整体复位用）
@@ -1373,10 +1409,19 @@ impl InvLockedSlots {
 
     /// 某一来源当前锁定的格（测试用）
     pub fn locked_slots(&self, reason: InvLockReason) -> Vec<usize> {
+        self.locked_slots_in(reason, LockGrid::Inventory)
+    }
+
+    pub fn locked_slots_in(&self, reason: InvLockReason, grid: LockGrid) -> Vec<usize> {
         let mut v: Vec<usize> = self
             .by_reason
             .get(&reason)
-            .map(|s| s.iter().copied().collect())
+            .map(|s| {
+                s.iter()
+                    .filter(|(g, _)| *g == grid)
+                    .map(|(_, i)| *i)
+                    .collect()
+            })
             .unwrap_or_default();
         v.sort_unstable();
         v
@@ -1384,7 +1429,12 @@ impl InvLockedSlots {
 
     /// 锁定格物品图标色（C# `Color.DimGray`），未锁定为白色（原色）
     pub fn icon_color(&self, slot: usize) -> Color {
-        if self.is_locked(slot) {
+        self.color_at(LockGrid::Inventory, slot)
+    }
+
+    /// 任意网格的锁定格图标色
+    pub fn color_at(&self, grid: LockGrid, index: usize) -> Color {
+        if self.is_locked_in(grid, index) {
             LOCKED_ITEM_COLOR
         } else {
             Color::WHITE
@@ -2566,6 +2616,26 @@ mod tests {
         );
         locked.unlock(InvLockReason::Craft, 2);
         assert!(!locked.is_locked(2));
+
+        // #2747+：网格隔离——同一格号在不同网格互不影响（C# 各 Grid 的 `Locked` 独立）
+        locked.lock_in(InvLockReason::Storage, LockGrid::Storage, 9);
+        assert!(locked.is_locked_in(LockGrid::Storage, 9));
+        assert!(
+            !locked.is_locked_in(LockGrid::Inventory, 9),
+            "仓库格 9 锁定不影响背包格 9"
+        );
+        assert_eq!(
+            locked.locked_slots_in(InvLockReason::Storage, LockGrid::Storage),
+            vec![9]
+        );
+        assert!(locked
+            .locked_slots_in(InvLockReason::Storage, LockGrid::Inventory)
+            .is_empty());
+        assert_eq!(
+            locked.color_at(LockGrid::Storage, 9),
+            LOCKED_ITEM_COLOR,
+            "仓库锁定格同样按 DimGray × 0.8 灰化"
+        );
     }
 
     /// #2742：装备/镶嵌/拆分的服务端回包解锁对应来源
