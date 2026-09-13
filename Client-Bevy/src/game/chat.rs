@@ -258,6 +258,8 @@ pub struct ChatState {
     pub scroll_up: usize,
     /// 窗口尺寸档（0/1/2 → 行数 4/7/11，C# ChangeSize）
     pub size: usize,
+    /// #2781：控制栏选中的发送前缀（C# `ChatDialog.ChatPrefix`，`:579`）
+    pub prefix: String,
     /// #813：最近私聊对象（C# ChatPanel LastPM；/ 键召回）
     pub last_pm: Option<String>,
 }
@@ -272,6 +274,7 @@ impl Default for ChatState {
             visible_lines: 4,
             scroll_up: 0,
             size: 1,
+            prefix: String::new(),
             last_pm: None,
         }
     }
@@ -329,6 +332,24 @@ struct ChatInputCursor;
 const CHAT_INPUT_X: f32 = 231.0;
 const CHAT_INPUT_Y: f32 = 725.0;
 
+/// #2781：聊天控制栏（C# `ChatControlBar` `Prguse[2034]`）
+/// C# `Location = (MainDialog.X + 230, ScreenHeight - 112)`，面板底边固定（换尺寸时顶边向上长）
+const CHAT_BAR_X: f32 = 230.0;
+const CHAT_BAR_Y: f32 = 656.0;
+
+/// 控制栏按钮表（C# `MainDialogs.cs:1265-1451`）：(动作, 常态帧, 悬停帧, 按下帧, 相对 x)
+const CHAT_BAR_BUTTONS: &[(ChatBarAction, usize, usize, usize, f32)] = &[
+    (ChatBarAction::All, 2036, 2037, 2038, 12.0),
+    (ChatBarAction::Shout, 2039, 2040, 2041, 34.0),
+    (ChatBarAction::Whisper, 2042, 2043, 2044, 56.0),
+    (ChatBarAction::Lover, 2045, 2046, 2047, 78.0),
+    (ChatBarAction::Mentor, 2048, 2049, 2050, 100.0),
+    (ChatBarAction::Group, 2051, 2052, 2053, 122.0),
+    (ChatBarAction::Guild, 2054, 2055, 2056, 144.0),
+    (ChatBarAction::Trade, 2004, 2005, 2006, 166.0),
+    (ChatBarAction::Settings, 2060, 2061, 2062, 596.0),
+];
+
 /// 频道页签按钮
 #[derive(Component)]
 struct ChatTabBtn(ChatChannel);
@@ -337,9 +358,75 @@ struct ChatTabBtn(ChatChannel);
 #[derive(Component)]
 pub struct ChatScrollBtn(KeyScroll);
 
-/// 发送频道快捷按钮（C# ChatControlBar）
+/// #2781：聊天控制栏底板（C# `ChatControlBar` 背景）
 #[derive(Component)]
-struct ChatBarBtn(&'static str, &'static str);
+pub struct ChatBarBg;
+
+/// 聊天控制栏按钮（C# `ChatControlBar`，`MainDialogs.cs:1255-1514`）
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChatBarAction {
+    All,
+    Shout,
+    Whisper,
+    Lover,
+    Mentor,
+    Group,
+    Guild,
+    Trade,
+    Report,
+    Settings,
+}
+
+/// 控制栏按钮组件
+#[derive(Component)]
+pub struct ChatBarButton(pub ChatBarAction);
+
+/// 控制栏按钮三态帧（选中态常显按下帧，需要能还原——C# `Index = HoverIndex = PressedIndex`）
+#[derive(Component, Clone)]
+pub struct ChatBarFrames {
+    pub normal: Handle<Image>,
+    pub hover: Handle<Image>,
+    pub pressed: Handle<Image>,
+}
+
+/// #2781：频道按钮的发送前缀（C# `ChatControlBar.ToggleChatFilter`，`:1456-1513`）；
+/// 非频道按钮返回 `None`。注意这是**发送前缀**语义（不是显示过滤）。
+pub fn chat_bar_prefix(action: ChatBarAction) -> Option<&'static str> {
+    Some(match action {
+        ChatBarAction::All => "",
+        ChatBarAction::Shout => "!",
+        ChatBarAction::Whisper => "/",
+        ChatBarAction::Group => "!!",
+        ChatBarAction::Guild => "!~",
+        ChatBarAction::Lover => ":)",
+        ChatBarAction::Mentor => "!#",
+        _ => return None,
+    })
+}
+
+/// #2781：控制栏按钮 Hint（C# `MainDialogs.cs` 各按钮 Hint，文案取 `Chinese.json`）
+pub fn chat_bar_hint(
+    action: ChatBarAction,
+    kb: &crate::game::dialogs::keyboard_layout::KeyboardState,
+) -> String {
+    match action {
+        ChatBarAction::All => "全部".to_string(),
+        ChatBarAction::Shout => "喊话".to_string(),
+        ChatBarAction::Whisper => "密语".to_string(),
+        ChatBarAction::Lover => "情侣".to_string(),
+        ChatBarAction::Mentor => "导师".to_string(),
+        ChatBarAction::Group => "队伍".to_string(),
+        ChatBarAction::Guild => "公会".to_string(),
+        ChatBarAction::Report => "报告".to_string(),
+        ChatBarAction::Settings => "聊天设置".to_string(),
+        // C# `:1432` `TradeKey` = 「交易 ({0})」+ `GetKey(KeybindOptions.Trade)`
+        ChatBarAction::Trade => crate::game::dialogs::keyboard_layout::hint_with_key(
+            &kb.bindings,
+            "交易 ({0})",
+            crate::game::player_menu::TRADE_KEYBIND_ACTION,
+        ),
+    }
+}
 
 /// 聊天设置按钮（打开 ChatOptionDialog）
 #[derive(Component)]
@@ -370,6 +457,9 @@ impl Plugin for ChatPlugin {
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
         app.add_systems(OnEnter(AppState::Game), chat_apply_persisted_tab);
         app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
+        // #2781：聊天控制栏（C# ChatControlBar）
+        app.add_systems(OnEnter(AppState::Game), spawn_chat_control_bar);
+        app.add_systems(Update, chat_bar_system.run_if(in_state(AppState::Game)));
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
@@ -520,6 +610,145 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
     ));
 }
 
+
+/// #2781：聊天控制栏（C# `ChatControlBar` `Prguse[2034]` @ (MainDialog.X+230, ScreenHeight-112)）。
+///
+/// C# 的 `ReportButton`（`Prguse[2063..2065]` @(552,1)）构造即 `Visible = false` 且全仓无处置真
+/// （`MainDialogs.cs:1446`）→ **原版死控件**，按惯例只记录不创建（见 §7）。
+fn spawn_chat_control_bar(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+) {
+    let Some(bg) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        2034,
+    ) else {
+        return;
+    };
+    let (bw, bh) = match libs.0.get_image(LibraryName::Prguse, 2034) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => (632.0, 15.0),
+    };
+    commands
+        .spawn((
+            UiEntity,
+            ChatBarBg,
+            Sprite {
+                image: bg,
+                custom_size: Some(Vec2::new(bw, bh)),
+                ..default()
+            },
+            Anchor::TOP_LEFT,
+            Transform::from_xyz(CHAT_BAR_X, -CHAT_BAR_Y, 2.4),
+        ))
+        .id();
+    for (action, n, h, p, x) in CHAT_BAR_BUTTONS {
+        let Some(n_img) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, *n)
+        else {
+            continue;
+        };
+        let Some(h_img) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, *h)
+        else {
+            continue;
+        };
+        let Some(p_img) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, *p)
+        else {
+            continue;
+        };
+        let (w, bh_btn) = match libs.0.get_image(LibraryName::Prguse, *n) {
+            Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+            None => (20.0, 16.0),
+        };
+        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            *n,
+            *h,
+            *p,
+            CHAT_BAR_X + x,
+            CHAT_BAR_Y + 1.0,
+            2.5,
+            w,
+            bh_btn,
+        ) {
+            commands.entity(e).insert((
+                ChatBarButton(*action),
+                crate::ui::tooltip::TooltipHint(chat_bar_hint(*action, &kb)),
+                ChatBarFrames {
+                    normal: n_img,
+                    hover: h_img,
+                    pressed: p_img,
+                },
+            ));
+            // 设置按钮复用聊天设置面板的开合通道（C# SettingsButton → ChatOptionDialog）
+            if *action == ChatBarAction::Settings {
+                commands.entity(e).insert(ChatSettingsBtn);
+            }
+        }
+    }
+}
+
+/// #2781：控制栏点击 —— 频道按钮设发送前缀（C# `ToggleChatFilter`），交易发 `C.TradeRequest`；
+/// 选中项常显按下帧、其余还原常态帧（C# `Index = HoverIndex = PressedIndex`）。
+fn chat_bar_system(
+    mut chat: ResMut<ChatState>,
+    net: Res<NetConnection>,
+    mut buttons: Query<
+        (
+            &UiButton,
+            &ChatBarButton,
+            &mut crate::ui::sprite_ui::ButtonFrames,
+            &mut Sprite,
+            &ChatBarFrames,
+        ),
+        Without<ChatOptionWidget>,
+    >,
+) {
+    for (btn, action, _, _, _) in &buttons {
+        if !btn.clicked {
+            continue;
+        }
+        match action.0 {
+            ChatBarAction::Trade => {
+                net.send_packet(&mir2_shared::packets::client::trade::TradeRequest);
+                tracing::info!("💬 控制栏: 请求交易");
+            }
+            ChatBarAction::Settings => {} // 由 chat_option_system 处理
+            a => {
+                if let Some(prefix) = chat_bar_prefix(a) {
+                    chat.prefix = prefix.to_string();
+                    tracing::info!("💬 控制栏前缀 -> {:?}", chat.prefix);
+                }
+            }
+        }
+    }
+    // 选中帧（每帧对齐，代价仅是 10 个按钮的句柄比较）
+    for (_, action, mut frames, mut sprite, orig) in &mut buttons {
+        let Some(prefix) = chat_bar_prefix(action.0) else {
+            continue;
+        };
+        let want = if prefix == chat.prefix {
+            orig.pressed.clone()
+        } else {
+            orig.normal.clone()
+        };
+        if frames.normal != want {
+            frames.normal = want.clone();
+            frames.hover = want.clone();
+            frames.pressed = want.clone();
+            sprite.image = want;
+        }
+    }
+}
 
 /// 聊天设置面板（过滤 + 透明，C# ChatOptionDialog）
 fn spawn_chat_option_panel(
@@ -814,7 +1043,12 @@ pub(crate) fn chat_input_system(
                 }
                 _ => None,
             };
-            if let Some(prefix) = prefix {
+            if let Some(mut prefix) = prefix {
+                // #2781：控制栏选中的发送前缀优先（C# `MainDialogs.cs:1107`
+                // `if (ChatPrefix != "") ChatTextBox.Text = ChatPrefix;`）
+                if !chat.prefix.is_empty() {
+                    prefix = chat.prefix.clone();
+                }
                 chat.input_active = true;
                 chat.input_text = prefix;
                 opened_trigger = Some(key.logical_key.clone());
@@ -1081,12 +1315,14 @@ fn chat_apply_persisted_tab(mut chat: ResMut<ChatState>, filter: Res<ChatFilter>
     }
 }
 
-/// 页签点击切换 + 发送频道快捷按钮（切换即持久化 [Chat] Tab）
+/// 页签点击切换（切换即持久化 [Chat] Tab）
+///
+/// #2781：原「频道快捷按钮」分支（`ChatBarBtn`）已由控制栏的 `chat_bar_system` 取代——
+/// C# 控制栏按钮是**发送前缀**语义（`ToggleChatFilter`），不再是「开框即填前缀」的扩展行为。
 fn chat_tab_system(
     mut chat: ResMut<ChatState>,
     mut filter: ResMut<ChatFilter>,
     tabs: Query<(&UiButton, &ChatTabBtn)>,
-    bar: Query<(&UiButton, &ChatBarBtn)>,
 ) {
     for (btn, tab) in &tabs {
         if btn.clicked && chat.tab != tab.0 {
@@ -1095,13 +1331,6 @@ fn chat_tab_system(
             filter.tab = tab.0;
             filter.save();
             tracing::info!("💬 聊天页签 -> {:?}", tab.0);
-        }
-    }
-    for (btn, bar_btn) in &bar {
-        if btn.clicked {
-            chat.input_active = true;
-            chat.input_text = bar_btn.1.to_string();
-            tracing::info!("💬 频道快捷: {} -> prefix", bar_btn.0);
         }
     }
 }
@@ -1510,7 +1739,12 @@ mod chat_scroll_tests {
 
 #[cfg(test)]
 mod whisper_partner_tests {
-    use super::whisper_partner;
+    use super::{
+        chat_bar_hint, chat_bar_prefix, chat_bar_system, whisper_partner, ChatBarAction,
+        ChatBarButton, ChatBarFrames, ChatState,
+    };
+    use crate::ui::sprite_ui::UiButton;
+    use bevy::prelude::{Handle, Image, Sprite, World};
     use mir2_shared::enums::ChatType;
 
     #[test]
@@ -1525,6 +1759,90 @@ mod whisper_partner_tests {
         );
         assert_eq!(whisper_partner("普通消息", ChatType::Normal), None);
         assert_eq!(whisper_partner("没有分隔符", ChatType::WhisperIn), None);
+    }
+
+    /// #2781：控制栏前缀表逐条对齐 C# `ToggleChatFilter`（`MainDialogs.cs:1477-1511`）
+    #[test]
+    fn chat_bar_prefix_matches_csharp_toggle_chat_filter() {
+        use ChatBarAction::*;
+        assert_eq!(chat_bar_prefix(All), Some(""), "全部 = 空前缀");
+        assert_eq!(chat_bar_prefix(Shout), Some("!"));
+        assert_eq!(chat_bar_prefix(Whisper), Some("/"));
+        assert_eq!(chat_bar_prefix(Group), Some("!!"));
+        assert_eq!(chat_bar_prefix(Guild), Some("!~"));
+        assert_eq!(chat_bar_prefix(Lover), Some(":)"));
+        assert_eq!(chat_bar_prefix(Mentor), Some("!#"));
+        assert_eq!(chat_bar_prefix(Trade), None, "交易不是频道按钮");
+        assert_eq!(chat_bar_prefix(Settings), None);
+        assert_eq!(chat_bar_prefix(Report), None, "报告是死控件（不创建）");
+    }
+
+    /// #2781：控制栏 Hint 文案（C# 各按钮 Hint；交易带键位，C# `:1432`）
+    #[test]
+    fn chat_bar_hint_matches_csharp_localization() {
+        use ChatBarAction::*;
+        let kb = crate::game::dialogs::keyboard_layout::KeyboardState::default();
+        assert_eq!(chat_bar_hint(All, &kb), "全部");
+        assert_eq!(chat_bar_hint(Shout, &kb), "喊话");
+        assert_eq!(chat_bar_hint(Whisper, &kb), "密语");
+        assert_eq!(chat_bar_hint(Lover, &kb), "情侣");
+        assert_eq!(chat_bar_hint(Mentor, &kb), "导师");
+        assert_eq!(chat_bar_hint(Group, &kb), "队伍");
+        assert_eq!(chat_bar_hint(Guild, &kb), "公会");
+        assert_eq!(chat_bar_hint(Settings, &kb), "聊天设置");
+        assert_eq!(chat_bar_hint(Report, &kb), "报告");
+        assert_eq!(chat_bar_hint(Trade, &kb), "交易 (T)", "C# 交易键位默认 T");
+    }
+
+    /// #2781：点击频道按钮 → 改写发送前缀，且该按钮常显按下帧、其余还原常态帧
+    ///（C# `ToggleChatFilter`：`Index = HoverIndex = PressedIndex`）
+    #[test]
+    fn chat_bar_system_sets_prefix_and_selected_frame() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(ChatState::default());
+        world.insert_resource(crate::network::NetConnection::default());
+        let (n, h, p) = (
+            Handle::<Image>::default(),
+            Handle::<Image>::default(),
+            Handle::<Image>::default(),
+        );
+        let shout = world
+            .spawn((
+                UiButton {
+                    rect: (0.0, 0.0, 20.0, 16.0),
+                    clicked: true,
+                },
+                ChatBarButton(ChatBarAction::Shout),
+                crate::ui::sprite_ui::ButtonFrames {
+                    normal: n.clone(),
+                    hover: h.clone(),
+                    pressed: p.clone(),
+                },
+                Sprite::default(),
+                ChatBarFrames {
+                    normal: n.clone(),
+                    hover: h.clone(),
+                    pressed: p.clone(),
+                },
+            ))
+            .id();
+        world
+            .run_system_once(chat_bar_system)
+            .expect("控制栏系统应成功");
+        assert_eq!(
+            world.resource::<ChatState>().prefix,
+            "!",
+            "喊话按钮 → C# ChatPrefix 「!」"
+        );
+        let frames = world
+            .entity(shout)
+            .get::<crate::ui::sprite_ui::ButtonFrames>()
+            .expect("按钮有帧组件")
+            .clone();
+        assert_eq!(frames.normal, p, "选中项常显按下帧");
+        assert_eq!(frames.hover, p);
     }
 }
 
