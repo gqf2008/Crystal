@@ -1468,6 +1468,12 @@ mod tests {
     #[test]
     fn view_key_assets_exist() {
         use crate::resources::libraries::Libraries;
+
+        // CI 无游戏资产（Data/ 不入库）→ 跳过（详见 libraries::data_assets_present）
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip view_key_assets_exist: 无 Data 资产（CI 只 checkout 仓库）");
+            return;
+        }
         let mut libs = Libraries::new("Data");
         libs.ensure_initialized();
         assert!(libs.get_image(LibraryName::Prguse, 1080).is_some());
