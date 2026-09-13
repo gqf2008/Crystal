@@ -153,6 +153,7 @@
 | 批11 §7 偏差收口 | TrustMerchant 买/取回确认框；Creature 未选中按钮灰化；Craft 放入后锁定来源背包格；TrustMerchant 跨页累积排序 | #2737 #2738 #2739 #2740 |
 | 批12 §7 偏差收口（二） | 禁用态按 `grayscale.ps` 真灰度（含 Creature 自造灰化纠正）；背包格锁定覆盖装备/拆分/镶嵌/寄售 + 交易所推背包；拍卖出价改用 `MirAmountBox` | #2743 #2744 #2745 |
 | 批13 §7 偏差收口（三） | 锁定格 `DimGray` × 0.8 不透明度；数量框补 1px 三态边框 + 售价框去掉自造三态底色（§7 描述更正）；Mail 两个灰度禁用占位键 | #2748 #2749 #2750 |
+| 批14 背包锁定 per-grid 化 | 锁资源升为 `(reason, LockGrid, index)`；仓库存入/取出锁与解锁（含 C# 目标格选择）；交易存入/取回锁与解锁 + 交易槽灰化 | #2753 #2754 |
 
 ## 6. 验证基线
 
@@ -189,6 +190,7 @@
 - 批14 仓储锁实机复验（2026-09-13，`--auto-enter` + Control API `npc_call{110,"[@STORAGE]"}` 打开仓库、`dialog npc close` 关掉 NPC 页；临时把 mock 仓储密码置空以到达面板，**验证后已还原**；锁定/解锁用临时驱动，**验证后已删除**）：临时锁 `(Storage,3)` + `(Inventory,3)` 后，仓储格 3 均值 RGB `(38.2,28.2,17.9)` 色度 20.6（对照：同行未锁的仓储格 4 `(89.1,69.6,46.1)` 色度 43.3 不变），背包格 3 `(26.3,12.2,16.9)` 色度 19.6；解锁后仓储格 3 恢复 `(93.6,73.2,48.3)` 色度 45.7、背包格 3 恢复 `(70.3,35.1,47.4)` 色度 50.1 —— 两侧网格同色规则、被锁格与对照格差异显著。
 - 批14 仓储锁门禁（2026-09-13）：`store_target_slot_matches_csharp`（C# 目标格选择：空格用它/占用取首个空格/全满 None）、`store_receipt_releases_grid_locks`（`S.StoreItem` 回包清 `(Storage,·)` 两侧锁、Craft 来源不受影响）、`inv_lock_reasons_are_isolated` 扩充（同格号在 `LockGrid::Storage` 与 `Inventory` 互不影响 + 仓储锁定格同色）；红检：把 `store_target_slot` 改成恒返回点击格、把 `is_locked_in` 改成忽略网格，两条断言分别如期 FAILED。
 - 批14 交易锁门禁（2026-09-13）：`trade_receipts_release_locks`（`S.DepositTradeItem` 失败也清 `Trade` 两侧锁且不动 Craft 来源；`S.RetrieveTradeItem` 失败保留槽内物品、成功才清空，两种都解锁）；红检：把成功分支改成恒真（`if true`）→ 断言「取回失败应保留槽内物品」如期 FAILED。实机验证：交易需双端会话，mock 单客户端下用系统级测试覆盖；被锁交易槽的灰化与背包侧共用同一 `LOCKED_ITEM_COLOR` 与 `color_at` 路径（同批仓储/背包已实机确认）。
+- 批14 收尾复验（2026-09-13，合并后单一进程 `--auto-enter --market-many` + Control API 依次开 Mail/TrustMerchant/Craft 截图）：四窗渲染正常、既有灰度无回归 —— Market 无选中 BUY 均值 `(85.3,85.3,85.3)` 色度 **0.00**、Mail 占位键区域色度 5.36（≈灰，区域被同屏其它面板部分遮挡故均值与前次单开不同）；锁资源新增的网格维度不影响既有五类背包锁（438 lib 全绿覆盖）。
 - 批13 收尾三窗复验（2026-09-13，合并后单一进程 `--skip-login` + Control API 依次开 Mail/TrustMerchant/Craft 截图）：Mail 底栏占位键灰度保持；TrustMerchant 底栏无选中时 BUY 灰度、售价框无自造底色；Craft `CRAFT` 灰度 / `AUTO` 原色、面板几何无变化。
 
 ## 7. 已知有意偏差
