@@ -261,6 +261,7 @@ pub struct InventoryDialogPlugin;
 impl Plugin for InventoryDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InvClickState>();
+        app.init_resource::<InvLockedSlots>();
         app.init_resource::<InvDropConfirm>();
         app.init_resource::<InvPendingAmount>();
         app.init_resource::<ItemUseFeedback>();
@@ -289,6 +290,7 @@ impl Plugin for InventoryDialogPlugin {
                 inventory_ui_system,
                 inv_weight_bar_system,
                 inv_selection_system,
+                inv_locked_icon_system,
                 inv_tooltip_system,
                 inv_socket_open_system,
                 inv_item_action_system,
@@ -1277,6 +1279,66 @@ fn inventory_shift_right_system(
     *inv_origin = InventoryOrigin(target_x, 0.0);
 }
 
+/// 被其它对话框锁定的背包格（C# `MirItemCell.Locked`；如 Craft 放入材料/自动填充后锁定来源格）。
+///
+/// C# 依据：
+/// - `NPCDialogs.cs:2433`（Craft `Grid_Click` 放入后 `SelectedCell.Locked = true`）、
+///   `:2479/:2506`（`AutoFill` 逐格锁定）、`:2636-2641`（`ResetCells()` 全部解锁）
+/// - `MirItemCell.DrawControl`：`Locked` 时物品按 `Color.DimGray`（105,105,105）以 0.8 不透明度绘制
+/// - `MirItemCell` 交互：锁定格不可作为 `SelectedCell` 取出/移动（`:2410` `SelectedCell.Locked` 直接 return）
+#[derive(Resource, Default)]
+pub struct InvLockedSlots(pub std::collections::HashSet<usize>);
+
+/// C# `Color.DimGray`
+pub const LOCKED_ITEM_COLOR: Color = Color::srgb_u8(105, 105, 105);
+
+impl InvLockedSlots {
+    pub fn lock(&mut self, slot: usize) {
+        self.0.insert(slot);
+    }
+
+    pub fn is_locked(&self, slot: usize) -> bool {
+        self.0.contains(&slot)
+    }
+
+    /// C# `ResetCells()`：解除全部锁定
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// 锁定格物品图标色（C# `Color.DimGray`），未锁定为白色（原色）
+    pub fn icon_color(&self, slot: usize) -> Color {
+        if self.is_locked(slot) {
+            LOCKED_ITEM_COLOR
+        } else {
+            Color::WHITE
+        }
+    }
+}
+
+/// C# `MirItemCell` 交互门：`OnMouseClick`/`OnMouseDoubleClick`/`UseItem` 都以
+/// `if (Locked) return;` 开头 —— 被其它对话框锁定的背包格不响应点击/选择/使用。
+pub fn inv_clickable_slot(slot: usize, locked: &InvLockedSlots) -> bool {
+    !locked.is_locked(slot)
+}
+
+/// 锁定格物品图标灰化（C# `MirItemCell.DrawControl`：`Locked` 时 `Color.DimGray`）
+fn inv_locked_icon_system(
+    locked: Res<InvLockedSlots>,
+    slots: Query<&InvSlot>,
+    mut icons: Query<(&ChildOf, &mut ImageNode), With<crate::ui::theme::UiItemCellIcon>>,
+) {
+    for (child_of, mut node) in &mut icons {
+        let Ok(slot) = slots.get(child_of.parent()) else {
+            continue;
+        };
+        let want = locked.icon_color(slot.0);
+        if node.color != want {
+            node.color = want;
+        }
+    }
+}
+
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
 fn inv_selection_system(
     click: Res<InvClickState>,
@@ -1979,6 +2041,7 @@ fn inv_item_action_system(
         MessageReader<AmountBoxResult>,
         Res<InventoryOrigin>,
         Query<(&Node, &Visibility), With<DialogRoot>>,
+        Res<InvLockedSlots>,
     ),
     // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
     mut last_modal: Local<bool>,
@@ -2039,21 +2102,9 @@ fn inv_item_action_system(
     let size = inv.items.len().min(MAX_INV_SLOTS);
     let (ox, oy) = (misc.2.0, misc.2.1);
     let slot_at = |cx: f32, cy: f32| -> Option<usize> {
-        let range: std::ops::Range<usize> = match page {
-            0 => 0..size.min(GRID_COLS * GRID_ROWS),
-            1 => (GRID_COLS * GRID_ROWS)..size,
-            _ => 0..0,
-        };
-        for i in range {
-            let x = i % GRID_COLS;
-            let y = (i / GRID_COLS) % GRID_ROWS;
-            let sx = ox + 9.0 + x as f32 * (CELL_W + 1.0);
-            let sy = oy + 37.0 + y as f32 * (CELL_H + 1.0);
-            if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
-                return Some(i);
-            }
-        }
-        None
+        // 命中复用 [`inv_slot_at`]（几何与仓库/交易/英雄对话框同一真源），
+        // 再按 C# `MirItemCell.Locked` 剔除锁定格（Craft 放入材料后来源格不响应点击）。
+        inv_slot_at(cx, cy, page, size, (ox, oy)).filter(|i| !inv_clickable_slot(*i, &misc.4))
     };
 
     // 弹窗模态门（原版 C# Modal：弹窗打开期间/刚关闭帧不响应格子点击）
@@ -2298,6 +2349,55 @@ pub fn pick_auto_hp_potion<'a>(items: impl Iterator<Item = &'a InvItem>) -> Opti
 mod tests {
     use super::*;
     use mir2_shared::enums::ItemType;
+
+    /// #2736：背包格锁定（C# `MirItemCell.Locked`）——锁定期间图标按 `Color.DimGray`（105,105,105）
+    /// 绘制，`ResetCells()` 等价的全清后恢复原色。
+    #[test]
+    fn inv_locked_slots_match_csharp() {
+        let mut locked = InvLockedSlots::default();
+        assert!(!locked.is_locked(3));
+        assert_eq!(locked.icon_color(3), Color::WHITE);
+
+        locked.lock(3);
+        locked.lock(7);
+        assert!(locked.is_locked(3) && locked.is_locked(7));
+        assert_eq!(
+            locked.icon_color(3),
+            Color::srgb_u8(105, 105, 105),
+            "C# `Color.DimGray`"
+        );
+
+        // C# `ResetCells()`：全部解锁 → 恢复原色
+        locked.clear();
+        assert!(!locked.is_locked(3) && !locked.is_locked(7));
+        assert_eq!(locked.icon_color(7), Color::WHITE);
+    }
+
+    /// #2736：Craft 放入材料后锁定的来源格不再响应背包点击（C# `MirItemCell` 的
+    /// `if (Locked) return;`）——命中判定必须落到「锁定格 = 无命中」。
+    #[test]
+    fn inv_locked_slot_is_not_clickable() {
+        let origin = (0.0, 0.0);
+        let (cw, ch) = (CELL_W, CELL_H);
+        // 第 4 格（0 基）中心：与 `inv_slot_at` 同一几何公式
+        let cx = origin.0 + 9.0 + 4.0 * (cw + 1.0) + cw / 2.0;
+        let cy = origin.1 + 37.0 + ch / 2.0;
+        assert_eq!(
+            inv_slot_at(cx, cy, 0, 40, origin),
+            Some(4),
+            "几何命中第 4 格"
+        );
+
+        let mut locked = InvLockedSlots::default();
+        assert!(inv_clickable_slot(4, &locked));
+        locked.lock(4);
+        assert!(
+            !inv_clickable_slot(4, &locked),
+            "C# `Locked` 格必须不响应点击"
+        );
+        // 未锁定邻格不受影响
+        assert!(inv_clickable_slot(5, &locked));
+    }
 
     /// 推位/拖动后 inv_slot_at 必须用 InventoryOrigin（PR #2553 审查：仓库开仓把背包
     /// 推到 (393,0)，静态原点 0,0 的命中全部落空——存取/使用/选择失效）。
