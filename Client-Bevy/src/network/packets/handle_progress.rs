@@ -553,6 +553,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // ---- M47: 宠物 ----
         x if x == ServerPacketIds::UpdateIntelligentCreatureList as i16 => {
             // [count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]
+            // [active u8][filter 9×u8][grade u8][rules: minimal i32][mouse u8][mouseR i32]
+            // [auto u8][autoR i32][semi u8][semiR i32][blackstone u8]（#2757 起）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -571,7 +573,12 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     *b = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 }
                 let grade = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name, active, filter, grade });
+                // #2757：宠物规则（C# `IntelligentCreatureRules`）——字段不足（旧服务端）即全禁用默认
+                let rules = mir2_shared::data::client_data::IntelligentCreatureRules::read_from(
+                    &mut cur,
+                )
+                .unwrap_or_default();
+                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name, active, filter, grade, rules });
             }
             if ok {
                 let count = creatures.len();
@@ -1067,5 +1074,165 @@ mod tests {
             }
             other => panic!("unexpected event: {:?}", other),
         }
+    }
+
+    /// 构造 S.UpdateIntelligentCreatureList 包；`with_rules=false` 模拟 #2757 之前的老服务端。
+    /// 字节顺序即 wire 契约（与 ServerRust `send_creature_list_packet` 一致）：
+    /// [count i32][type u8][pickup u8][enabled u8][hunger u8][name dotnet][active u8]
+    /// [filter 9×u8][grade u8][rules: minimal i32][mouse u8][mouseR i32][auto u8][autoR i32]
+    /// [semi u8][semiR i32][blackstone u8]
+    fn build_creature_list_payload(with_rules: bool) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i32.to_le_bytes()); // count
+        body.push(2); // type = BabyPig
+        body.push(1); // pickup
+        body.push(1); // enabled
+        body.push(42); // hunger
+        let name = "小猪";
+        body.extend_from_slice(&[name.len() as u8]);
+        body.extend_from_slice(name.as_bytes());
+        body.push(1); // active
+        body.extend_from_slice(&[0u8; 9]); // filter
+        body.push(3); // grade
+        if with_rules {
+            // C# `BabyDragon` 行（仅借其数值覆盖四个字段同时非零的情形）
+            body.extend_from_slice(&7000i32.to_le_bytes());
+            body.push(1);
+            body.extend_from_slice(&7i32.to_le_bytes());
+            body.push(1);
+            body.extend_from_slice(&5i32.to_le_bytes());
+            body.push(1);
+            body.extend_from_slice(&5i32.to_le_bytes());
+            body.push(0);
+        }
+        let mut payload = Vec::new();
+        PacketHeader::new(
+            (PacketHeader::HEADER_SIZE + body.len()) as u16,
+            ServerPacketIds::UpdateIntelligentCreatureList as i16,
+        )
+        .write_to(&mut payload)
+        .unwrap();
+        payload.extend_from_slice(&body);
+        payload
+    }
+
+    fn decode_creature_list(mut events: MessageWriter<ServerEvent>, mut payload: Local<Option<Vec<u8>>>) {
+        let payload = payload.get_or_insert_with(|| build_creature_list_payload(true));
+        let _ = handle_progress(&mut events, payload);
+    }
+
+    fn decode_creature_list_legacy(
+        mut events: MessageWriter<ServerEvent>,
+        mut payload: Local<Option<Vec<u8>>>,
+    ) {
+        let payload = payload.get_or_insert_with(|| build_creature_list_payload(false));
+        let _ = handle_progress(&mut events, payload);
+    }
+
+    fn drain_creatures(app: &mut App) -> Vec<crate::game::dialogs::creature::CreatureEntry> {
+        let mut messages = app.world_mut().resource_mut::<Messages<ServerEvent>>();
+        let drained: Vec<ServerEvent> = messages.drain().collect();
+        assert_eq!(drained.len(), 1, "应恰好产出 1 个 ServerEvent");
+        match drained.into_iter().next().unwrap() {
+            ServerEvent::CreatureList { creatures } => creatures,
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    /// #2757：规则字段（C# `IntelligentCreatureRules`）随列表条目解析。
+    #[test]
+    fn creature_list_decodes_rules() {
+        let mut app = App::new();
+        app.init_resource::<Messages<ServerEvent>>();
+        app.add_systems(Update, decode_creature_list);
+        app.update();
+
+        let creatures = drain_creatures(&mut app);
+        assert_eq!(creatures.len(), 1);
+        let c = &creatures[0];
+        assert_eq!((c.creature_type, c.hunger, c.grade), (2, 42, 3));
+        assert_eq!(c.name, "小猪");
+        assert!(c.active);
+        assert_eq!(
+            c.rules,
+            mir2_shared::data::client_data::IntelligentCreatureRules {
+                minimal_fullness: 7000,
+                mouse_pickup_enabled: true,
+                mouse_pickup_range: 7,
+                auto_pickup_enabled: true,
+                auto_pickup_range: 5,
+                semi_auto_pickup_enabled: true,
+                semi_auto_pickup_range: 5,
+                can_produce_black_stone: false,
+            }
+        );
+    }
+
+    /// #2757：老服务端不带规则字段时列表仍可解析，规则取全禁用默认（其余字段不受影响）。
+    #[test]
+    fn creature_list_without_rules_falls_back_to_disabled() {
+        let mut app = App::new();
+        app.init_resource::<Messages<ServerEvent>>();
+        app.add_systems(Update, decode_creature_list_legacy);
+        app.update();
+
+        let creatures = drain_creatures(&mut app);
+        assert_eq!(creatures.len(), 1);
+        let c = &creatures[0];
+        assert_eq!((c.creature_type, c.hunger, c.grade), (2, 42, 3));
+        assert_eq!(
+            c.rules,
+            mir2_shared::data::client_data::IntelligentCreatureRules::default()
+        );
+        assert!(!c.rules.semi_auto_pickup_enabled && !c.rules.can_produce_black_stone);
+    }
+
+    /// 构造 mock 服务端（`--auto-enter` 离线实机走的路径）的宠物列表包。
+    fn build_mock_creature_list_payload() -> Vec<u8> {
+        let mut body = Vec::new();
+        crate::network::mock::packets::MockCreatureList
+            .write_body(&mut body)
+            .unwrap();
+        let mut payload = Vec::new();
+        PacketHeader::new(
+            (PacketHeader::HEADER_SIZE + body.len()) as u16,
+            ServerPacketIds::UpdateIntelligentCreatureList as i16,
+        )
+        .write_to(&mut payload)
+        .unwrap();
+        payload.extend_from_slice(&body);
+        payload
+    }
+
+    fn decode_mock_creature_list(
+        mut events: MessageWriter<ServerEvent>,
+        mut payload: Local<Option<Vec<u8>>>,
+    ) {
+        let payload = payload.get_or_insert_with(build_mock_creature_list_payload);
+        let _ = handle_progress(&mut events, payload);
+    }
+
+    /// #2757：mock 必须与真实服务端同格式——mock 的 BabyPig 条目解码出 Semi 3 / MinimalFullness 4000
+    /// （C# `IntelligentCreatureInfo` 的 BabyPig 行），否则实机截图验证不具备说服力。
+    #[test]
+    fn mock_creature_list_decodes_baby_pig_rules() {
+        let mut app = App::new();
+        app.init_resource::<Messages<ServerEvent>>();
+        app.add_systems(Update, decode_mock_creature_list);
+        app.update();
+
+        let creatures = drain_creatures(&mut app);
+        assert_eq!(creatures.len(), 1);
+        let c = &creatures[0];
+        assert_eq!(c.name, "小猪");
+        assert_eq!(
+            c.rules,
+            mir2_shared::data::client_data::IntelligentCreatureRules {
+                minimal_fullness: 4000,
+                semi_auto_pickup_enabled: true,
+                semi_auto_pickup_range: 3,
+                ..Default::default()
+            }
+        );
     }
 }

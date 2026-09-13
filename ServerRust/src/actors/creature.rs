@@ -17,6 +17,74 @@ pub enum CreatureType {
     Custom = 100,
 }
 
+/// 宠物规则（C# `IntelligentCreatureRules`；随 `S.UpdateIntelligentCreatureList` 下发给客户端，
+/// 客户端据此渲染 `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行）。
+///
+/// 数据源：C# 服务端静态表 `Server/MirDatabase/IntelligentCreatureInfo.cs:30-44`
+/// （每行含 Icon/MinimalFullness/MousePickup*/AutoPickup*/SemiAutoPickup*/CanProduceBlackStone，
+/// 由 `:185-195` 组装成 `CreatureRules`）。本端 `CreatureType` 与之按名称对应：
+/// `BabyPig`/`BabySkeleton`/`BabyKitten`(C# Kitten)/`BabyChicken`(C# Chick)/
+/// `BabyBabyDragon`(C# BabyDragon) 取对应行；本端独有类型（Panda/Oma/Sheep/Gorilla/Custom/None）
+/// C# 表中没有对应宠物，取全禁用默认（`MinimalFullness` 沿用 C# 字段默认 1000）。
+pub fn creature_rules(t: CreatureType) -> mir2_shared::data::client_data::IntelligentCreatureRules {
+    use mir2_shared::data::client_data::IntelligentCreatureRules as R;
+    // C# 字段默认：全禁用 + `MinimalFullness = 1000`（`IntelligentCreatureInfo.cs:17`）
+    let base = R {
+        minimal_fullness: 1000,
+        ..R::default()
+    };
+    match t {
+        // C# `BabyPig`：SemiAutoPickupEnabled=true, SemiAutoPickupRange=3, MinimalFullness=4000
+        CreatureType::BabyPig => R {
+            minimal_fullness: 4000,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 3,
+            ..base
+        },
+        // C# `Chick`：Mouse 11 / Auto 7 / Semi 7 + CanProduceBlackStone
+        CreatureType::BabyChicken => R {
+            mouse_pickup_enabled: true,
+            mouse_pickup_range: 11,
+            auto_pickup_enabled: true,
+            auto_pickup_range: 7,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 7,
+            can_produce_black_stone: true,
+            ..base
+        },
+        // C# `Kitten`：Semi 3, MinimalFullness=6000
+        CreatureType::BabyKitten => R {
+            minimal_fullness: 6000,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 3,
+            ..base
+        },
+        // C# `BabySkeleton`：Mouse 11 / Auto 7 / Semi 7 + CanProduceBlackStone
+        CreatureType::BabySkeleton => R {
+            mouse_pickup_enabled: true,
+            mouse_pickup_range: 11,
+            auto_pickup_enabled: true,
+            auto_pickup_range: 7,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 7,
+            can_produce_black_stone: true,
+            ..base
+        },
+        // C# `BabyDragon`：Mouse 7 / Auto 5 / Semi 5, MinimalFullness=7000
+        CreatureType::BabyBabyDragon => R {
+            minimal_fullness: 7000,
+            mouse_pickup_enabled: true,
+            mouse_pickup_range: 7,
+            auto_pickup_enabled: true,
+            auto_pickup_range: 5,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 5,
+            ..base
+        },
+        _ => base,
+    }
+}
+
 impl From<u8> for CreatureType {
     fn from(v: u8) -> Self {
         match v {
@@ -241,6 +309,65 @@ mod tests {
         c.hunger = 0;
         c.restore_hunger(1);
         assert_eq!(c.hunger, 1);
+    }
+
+    /// #2757：规则表按名称对应 C# `IntelligentCreatureInfo`
+    /// （Server/MirDatabase/IntelligentCreatureInfo.cs:30-44）——`BabyPig` 只开 Semi 3/满 4000、
+    /// `BabyChicken`(=C# Chick) 与 `BabySkeleton` 开 M11/A7/S7 且产黑石、
+    /// `BabyKitten`(=C# Kitten) Semi 3/满 6000、`BabyBabyDragon`(=C# BabyDragon) M7/A5/S5/满 7000；
+    /// 本端独有类型（Panda/Oma/Sheep/Gorilla/Custom/None）C# 表无对应 → 全禁用默认。
+    #[test]
+    fn creature_rules_mirror_csharp_table() {
+        let pig = creature_rules(CreatureType::BabyPig);
+        assert_eq!(pig.minimal_fullness, 4000);
+        assert!(pig.semi_auto_pickup_enabled && pig.semi_auto_pickup_range == 3);
+        assert!(!pig.mouse_pickup_enabled && !pig.auto_pickup_enabled && !pig.can_produce_black_stone);
+
+        let chick = creature_rules(CreatureType::BabyChicken);
+        assert_eq!(
+            (
+                chick.mouse_pickup_range,
+                chick.auto_pickup_range,
+                chick.semi_auto_pickup_range,
+                chick.can_produce_black_stone
+            ),
+            (11, 7, 7, true)
+        );
+
+        let kitten = creature_rules(CreatureType::BabyKitten);
+        assert_eq!((kitten.minimal_fullness, kitten.semi_auto_pickup_range), (6000, 3));
+
+        let skeleton = creature_rules(CreatureType::BabySkeleton);
+        assert!(skeleton.can_produce_black_stone && skeleton.mouse_pickup_range == 11);
+
+        let dragon = creature_rules(CreatureType::BabyBabyDragon);
+        assert_eq!(
+            (
+                dragon.minimal_fullness,
+                dragon.mouse_pickup_range,
+                dragon.auto_pickup_range,
+                dragon.semi_auto_pickup_range
+            ),
+            (7000, 7, 5, 5)
+        );
+
+        for t in [
+            CreatureType::None,
+            CreatureType::BabyPanda,
+            CreatureType::BabyOma,
+            CreatureType::BabySheep,
+            CreatureType::BabyGorilla,
+            CreatureType::Custom,
+        ] {
+            let r = creature_rules(t);
+            assert!(
+                !r.mouse_pickup_enabled
+                    && !r.auto_pickup_enabled
+                    && !r.semi_auto_pickup_enabled
+                    && !r.can_produce_black_stone,
+                "{t:?} 应取全禁用默认"
+            );
+        }
     }
 
     #[test]

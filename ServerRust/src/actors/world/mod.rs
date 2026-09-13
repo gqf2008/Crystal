@@ -11169,7 +11169,8 @@ pub(crate) fn send_manage_heroes_packet(
 // 宠物系统网络辅助函数
 // ============================================================
 
-/// 发送宠物列表（owned + active 标记；wire：[count i32][per: type u8][pet_mode u8][enabled u8][hunger u8][name dotnet][active u8]）
+/// 发送宠物列表（owned + active 标记；wire：[count i32][per: type u8][pet_mode u8][enabled u8]
+/// [hunger u8][name dotnet][active u8][filter 9×u8][grade u8][rules 8 字段]，#2757 起带宠物规则）
 fn send_creature_list_packet(
     gate_ref: &ActorRef<GateActor>,
     session_id: u64,
@@ -11209,6 +11210,14 @@ fn send_creature_list_packet(
         body.push(if c.filter.accessories { 1u8 } else { 0u8 });
         body.push(if c.filter.others { 1u8 } else { 0u8 });
         body.push(c.filter.grade);
+        // #2757：宠物规则（C# `IntelligentCreatureRules`）。
+        // 放在条目末尾：与 Client-Bevy `handle_progress` 的读取顺序 + `MockCreatureList` 一致
+        // （序列化与解析共用 `IntelligentCreatureRules::write_to`/`read_from`，两端不会漂移）。
+        let rules = crate::actors::creature::creature_rules(c.creature_type);
+        if rules.write_to(&mut body).is_err() {
+            warn!("Failed to serialize IntelligentCreatureRules");
+            return;
+        }
     }
     let _ = gate_ref
         .tell(SendToClient {

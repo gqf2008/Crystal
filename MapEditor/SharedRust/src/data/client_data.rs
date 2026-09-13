@@ -152,7 +152,7 @@ impl ClientMagic {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IntelligentCreatureRules {
     pub minimal_fullness: i32,
     pub mouse_pickup_enabled: bool,

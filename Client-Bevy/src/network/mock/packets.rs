@@ -85,6 +85,15 @@ impl Packet for MockCreatureList {
         writer.write_u8(1)?; // active
         for _ in 0..9 { writer.write_u8(0)?; } // filter（默认全部关闭）
         writer.write_u8(0)?; // grade
+        // #2757：宠物规则（C# `IntelligentCreatureInfo` 的 BabyPig 行：Semi 3 / MinimalFullness 4000）。
+        // 与 ServerRust 共用 `IntelligentCreatureRules::write_to`，不手写字段布局。
+        mir2_shared::data::client_data::IntelligentCreatureRules {
+            minimal_fullness: 4000,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 3,
+            ..Default::default()
+        }
+        .write_to(writer)?;
         Ok(())
     }
 }
