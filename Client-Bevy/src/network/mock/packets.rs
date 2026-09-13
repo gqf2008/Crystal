@@ -46,8 +46,12 @@ impl Packet for MockGameshopMail {
     }
 }
 
-/// #619：AddBuff（客户端格式 [tag u8][ticks u32]）
-pub(crate) struct MockAddBuff;
+/// #619：AddBuff（#2791 单元④ wire：`[tag u8][remaining_ms u32][paused u8][count u8][values i32…]`）
+pub(crate) struct MockAddBuff {
+    pub tag: u8,
+    pub remaining_ms: u32,
+    pub values: Vec<i32>,
+}
 
 impl Packet for MockAddBuff {
     const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::AddBuff as i16;
@@ -58,8 +62,13 @@ impl Packet for MockAddBuff {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u8(3)?; // tag=3 防御提升
-        writer.write_u32::<LittleEndian>(10)?; // ticks
+        writer.write_u8(self.tag)?;
+        writer.write_u32::<LittleEndian>(self.remaining_ms)?;
+        writer.write_u8(0)?; // paused = false
+        writer.write_u8(self.values.len() as u8)?;
+        for v in &self.values {
+            writer.write_i32::<LittleEndian>(*v)?;
+        }
         Ok(())
     }
 }
