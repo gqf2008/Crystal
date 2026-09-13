@@ -156,6 +156,26 @@ pub(crate) fn mock_recipe_info() -> mir2_shared::data::client_data::ClientRecipe
     }
 }
 
+/// #2801 单元③：任务奖励项。C# `QuestItemReward.Item` 随任务定义下发**完整 ItemInfo**
+/// （`Shared/Data/SharedData.cs:75-93`），客户端奖励区据此出图标/名称/性别过滤。
+pub(crate) fn quest_reward(
+    item_index: i32,
+    name: &str,
+    image: u16,
+    count: u16,
+) -> mir2_shared::data::shared_data::QuestItemReward {
+    mir2_shared::data::shared_data::QuestItemReward {
+        item: ItemInfo {
+            index: item_index,
+            name: name.to_string(),
+            image,
+            required_gender: mir2_shared::enums::RequiredGender::NONE,
+            ..Default::default()
+        },
+        count,
+    }
+}
+
 pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     mir2_shared::data::item::UserItem {
         unique_id: 9000 + index as u64,

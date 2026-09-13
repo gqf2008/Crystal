@@ -122,27 +122,26 @@ impl RankCharacterInfo {
     }
 }
 
-/// Quest item reward definition
+/// Quest item reward definition（与 `SharedRust` 主副本同源；#2801 单元③）
 ///
-/// Defines an item reward for completing quests. Contains the item index
-/// (reference to ItemInfo database) and the quantity to be rewarded.
-/// Used in both fixed rewards and selectable reward pools.
+/// C# `QuestItemReward`（`Shared/Data/SharedData.cs:75-93`）携带**完整 `ItemInfo`**：
+/// 客户端 `QuestRewards` 用它取图标/名称/`RequiredGender` 过滤。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestItemReward {
-    pub item_index: i32,
+    pub item: crate::data::item::ItemInfo,
     pub count: u16,
 }
 
 impl QuestItemReward {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let item_index = reader.read_i32::<LittleEndian>()?;
+        let item = crate::data::item::ItemInfo::read_default(reader)?;
         let count = reader.read_u16::<LittleEndian>()?;
 
-        Ok(Self { item_index, count })
+        Ok(Self { item, count })
     }
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_i32::<LittleEndian>(self.item_index)?;
+        self.item.write_to(writer)?;
         writer.write_u16::<LittleEndian>(self.count)?;
         Ok(())
     }

@@ -124,25 +124,27 @@ impl RankCharacterInfo {
 
 /// Quest item reward definition
 ///
-/// Defines an item reward for completing quests. Contains the item index
-/// (reference to ItemInfo database) and the quantity to be rewarded.
-/// Used in both fixed rewards and selectable reward pools.
+/// C# `QuestItemReward`（`Shared/Data/SharedData.cs:75-93`）在任务定义里携带**完整
+/// `ItemInfo`**（`Item = new ItemInfo(reader); Count = reader.ReadUInt16();`），
+/// 客户端 `QuestRewards` 用它取图标（`Item.Image`）、名称、`RequiredGender`
+/// 过滤（`QuestDialogs.cs:1330-1350`）与鼠标悬停物品说明。
+/// 本端原实现只带 `item_index`，导致奖励区无法出图标；#2801 单元③ 按 C# 补齐。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestItemReward {
-    pub item_index: i32,
+    pub item: crate::data::item::ItemInfo,
     pub count: u16,
 }
 
 impl QuestItemReward {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let item_index = reader.read_i32::<LittleEndian>()?;
+        let item = crate::data::item::ItemInfo::read_default(reader)?;
         let count = reader.read_u16::<LittleEndian>()?;
 
-        Ok(Self { item_index, count })
+        Ok(Self { item, count })
     }
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_i32::<LittleEndian>(self.item_index)?;
+        self.item.write_to(writer)?;
         writer.write_u16::<LittleEndian>(self.count)?;
         Ok(())
     }

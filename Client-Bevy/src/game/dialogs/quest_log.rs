@@ -23,7 +23,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 use mir2_shared::data::client_data::ClientQuestInfo;
 use mir2_shared::data::shared_data::QuestItemReward;
@@ -78,6 +78,11 @@ pub struct QuestDetailState {
     pub quest_id: Option<i32>,
     /// C# `QuestMessage.TopLine`（`:1013`；分页首行下标，换任务时归零）
     pub top_line: usize,
+    /// #2801 单元③：C# `MirMessageBox(AskCancelQuest, YesNo)` 是否在弹（`:588-599`）
+    pub confirm_cancel: bool,
+    /// #2801 单元③：C# `QuestDetailDialog.Reward.SelectedItemIndex`（`:475`）——
+    /// 可选奖励**未过滤**列表的下标（`FindSelectedItemIndex`，`:1268-1284`）
+    pub selected_reward: Option<usize>,
 }
 
 /// #2535 C# QuestListDialog.ReDisplayButtons 按钮状态机（纯函数）
@@ -311,6 +316,65 @@ pub struct QuestDetailScrollDown;
 #[derive(Component)]
 pub struct QuestDetailPositionBar;
 
+/// #2801 单元③：分享按钮（C# `_shareButton` `Title[616/617/618]` @(40,436)，`:560-575`）
+#[derive(Component)]
+pub struct QuestDetailShare;
+
+/// #2801 单元③：取消按钮（C# `_cancelButton` `Title[203/204/205]` @(200,436)，`:585-599`）
+#[derive(Component)]
+pub struct QuestDetailCancel;
+
+/// #2801 单元③：取消确认框（C# `MirMessageBox(AskCancelQuest, YesNo)`，`:590-598`）
+#[derive(Component)]
+pub struct QuestCancelConfirm;
+
+#[derive(Component)]
+pub struct QuestCancelYes;
+
+#[derive(Component)]
+pub struct QuestCancelNo;
+
+/// #2801 单元③：奖励区币种图标（C# `BeforeDraw` 的 `Prguse[966/965/2447]`，`:1424-1443`）
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum QuestRewardIcon {
+    Exp,
+    Gold,
+    Credit,
+}
+
+/// #2801 单元③：奖励区币种数值（C# `_expLabel/_goldLabel/_creditLabel`，`:1400-1402`）
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum QuestRewardValue {
+    Exp,
+    Gold,
+    Credit,
+}
+
+/// #2801 单元③：奖励物品格（C# `QuestCell`，`:1650-1745`）；`fixed` 决定底图与排位
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub struct QuestRewardCell {
+    pub fixed: bool,
+    pub slot: usize,
+}
+
+/// #2801 单元③：奖励区部件标记。**一个枚举一种部件**——Bevy 无法证明多个
+/// `&mut Node`/`&mut Visibility` 查询互斥，用单组件分派可免去成对 `Without` 过滤
+/// （同 LESSON_Option-Marker分派须配Or过滤 的反面用法：能合并就别拆）。
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum QuestRewardPart {
+    Icon(QuestRewardIcon),
+    Value(QuestRewardValue),
+    /// 格底图（固定排 `Prguse[989]` / 可选排选中时 `Prguse[979]`）
+    CellBg(QuestRewardCell),
+    /// 格内物品图（`LibraryName::Items` 的 `Item.Image`）
+    CellItem(QuestRewardCell),
+    /// 格内数量（C# `QuestCell.CreateDisposeLabel`，`:1725-1745`）
+    CellCount(QuestRewardCell),
+}
+
+/// C# `ClientTextKeys.AskCancelQuest`（`Client/Localization/Chinese.json`）
+pub const QUEST_CANCEL_ASK: &str = "你确定要取消这个任务吗？";
+
 /// #2801 单元①：任务日志 UI 的对话框状态打包。
 /// `quest_log_ui_system` 原本已是 16 个系统参数（Bevy `SystemParam` 上限，
 /// 同 `<control.rs>` 的 `ControlQueries`），新增「详情窗状态」必须与 `DialogManager` 打包，
@@ -339,7 +403,13 @@ impl Plugin for QuestLogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_quest_log);
         app.add_systems(
             Update,
-            (quest_log_ui_system, quest_detail_ui_system)
+            (
+                quest_log_ui_system,
+                quest_detail_ui_system,
+                // 单元③：奖励区渲染 + 取消确认框（独立系统，避开 16 参数上限）
+                quest_detail_reward_system,
+                quest_detail_confirm_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -645,6 +715,70 @@ pub fn quest_msg_top_line_at_bar(y: i32, len: usize, line_count: usize) -> usize
     (location / interval).max(0) as usize
 }
 
+// ---------------------------------------------------------------------------
+// #2801 单元③：分享/暂停/取消按钮 + 奖励区（C# `QuestDetailDialog` `:560-599`
+// 与 `QuestRewards` `:1396-1530`）
+// ---------------------------------------------------------------------------
+
+/// 奖励区原点（C# `Reward = new QuestRewards { Size=(315,130), Location=(5,307) }`，`:544-548`）
+pub const QUEST_REWARD_ORIGIN: (f32, f32) = (5.0, 307.0);
+/// 奖励物品格尺寸（C# `QuestCell.Size = new Size(32,32)`，`:1657`）
+pub const QUEST_REWARD_CELL: f32 = 32.0;
+/// 物品格间距 45（C# `i * 45 + 15`，`:1476/1496`）
+pub const QUEST_REWARD_CELL_DX: f32 = 45.0;
+/// 物品格 x 起点偏移 15（C# `i * 45 + 15`）
+pub const QUEST_REWARD_CELL_X0: f32 = 15.0;
+/// 固定奖励排 y（C# `Location = new Point(i * 45 + 15, 24)`，`:1476`）
+pub const QUEST_REWARD_FIXED_Y: f32 = 24.0;
+/// 可选奖励排 y（C# `Location = new Point(i * 45 + 15, 89)`，`:1496`）
+pub const QUEST_REWARD_SELECT_Y: f32 = 89.0;
+/// 两排各 5 格（C# `static QuestCell[] FixedItems/SelectItems = new QuestCell[5]`，`:1404-1405`）
+pub const QUEST_REWARD_SLOTS: usize = 5;
+
+/// C# `QuestRewards.UpdateInterface`/`BeforeDraw`（`:1424-1456`）的横向偏移链：
+/// 无经验奖励 → 金币与信用各左移 90；无金币奖励 → 信用再左移 90
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QuestRewardOffsets {
+    /// 金币列的 x 偏移（加到 C# `100`/`120` 基址上）
+    pub gold: f32,
+    /// 信用列的 x 偏移（加到 C# `190`/`210` 基址上）
+    pub credit: f32,
+}
+
+/// 见 [`QuestRewardOffsets`]；逐条照抄 C# 的两级 `-= 90`
+pub fn quest_reward_offsets(reward_exp: u32, reward_gold: u32) -> QuestRewardOffsets {
+    let mut gold = 0.0f32;
+    let mut credit = 0.0f32;
+    if reward_exp == 0 {
+        gold = -90.0;
+        credit -= 90.0;
+    }
+    if reward_gold == 0 {
+        credit -= 90.0;
+    }
+    QuestRewardOffsets { gold, credit }
+}
+
+/// C# `QuestRewards.FilterRewards`（`:1330-1350`）：只保留与玩家性别匹配的奖励物品
+/// （`None`/未设位不显示——C# 用 `RequiredGender.HasFlag`，位掩码 0 对任何性别都是 false）
+pub fn quest_reward_visible_for_gender(
+    item: &mir2_shared::data::item::ItemInfo,
+    gender: mir2_shared::enums::MirGender,
+) -> bool {
+    use mir2_shared::enums::{MirGender, RequiredGender};
+    let want = match gender {
+        MirGender::Male => RequiredGender::MALE,
+        MirGender::Female => RequiredGender::FEMALE,
+    };
+    item.required_gender.contains(want)
+}
+
+/// C# `QuestCell.DrawControl`（`:1690-1696`）：物品图居中偏移 `(40 - 图宽)/2, (32 - 图高)/2`
+/// （整数除法，负数向零截断——与 C# 一致）
+pub fn quest_reward_item_offset(w: i32, h: i32) -> (f32, f32) {
+    (((40 - w) / 2) as f32, ((32 - h) / 2) as f32)
+}
+
 /// #2801 单元①：详情窗面板原点（C# `QuestDialogs.cs:476`
 /// `Location = new Point(Settings.ScreenWidth / 2 + 20, 60)`；1024/2+20 = 532）
 pub fn quest_detail_origin() -> (f32, f32) {
@@ -738,7 +872,150 @@ fn spawn_quest_detail(
                     .insert((QuestDetailBullet(i), Visibility::Hidden));
             }
         }
+        // ===== 单元③：分享/暂停/取消（C# `:560-599`）=====
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 616),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 617),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 618),
+        ) {
+            spawn_icon_button(p, n, h, pr, 40.0, 436.0, 76.0, 25.0, 11).insert(QuestDetailShare);
+        }
+        // `_pauseButton`：C# 建了控件但 `Visible = false` 且无 Click（`:577-584`，死控件）→
+        // 结构上保留（下单元/后续可复用时只改显隐），本端恒隐藏
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 270),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 271),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 272),
+        ) {
+            spawn_icon_button(p, n, h, pr, 120.0, 436.0, 76.0, 25.0, 11).insert(Visibility::Hidden);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 203),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 204),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 205),
+        ) {
+            spawn_icon_button(p, n, h, pr, 200.0, 436.0, 76.0, 25.0, 11).insert(QuestDetailCancel);
+        }
+        // ===== 单元③：奖励区（C# `QuestRewards` @(5,307) 315x130，`:544-548`）=====
+        let (rx, ry) = QUEST_REWARD_ORIGIN;
+        // 奖励区标题 Title[17] @(20,66)（68x16）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 17) {
+            spawn_image(p, h, rx + 20.0, ry + 66.0, 68.0, 16.0, 8);
+        }
+        // 币种图标：经验 Prguse[966] 28x13 / 金币 Prguse[965] 16x12 / 信用 Prguse[2447]
+        // （本端 Data 的 Prguse.Lib 只有 2447 张（0..2446），2447 越界 → 信用图标拿不到，
+        //  按缺失跳过；C# 客户端 Data 版本更全才有该图。数值/偏移链仍按 C# 计算）
+        let reward_icons: [(QuestRewardIcon, usize, f32, f32); 3] = [
+            (QuestRewardIcon::Exp, 966, 28.0, 13.0),
+            (QuestRewardIcon::Gold, 965, 16.0, 12.0),
+            (QuestRewardIcon::Credit, 2447, 16.0, 16.0),
+        ];
+        for (kind, idx, w, h) in reward_icons {
+            if let Some(ih) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx) {
+                spawn_image(p, ih, rx, ry, w, h, 8)
+                    .insert((QuestRewardPart::Icon(kind), Visibility::Hidden));
+            }
+        }
+        // 币种数值（C# `_expLabel/_goldLabel/_creditLabel` 75x20，`:1400-1402/1424-1456`）
+        for kind in [
+            QuestRewardValue::Exp,
+            QuestRewardValue::Gold,
+            QuestRewardValue::Credit,
+        ] {
+            spawn_label(p, &cjk, "", rx, ry, QUEST_MSG_FONT_PX, Color::WHITE, 8)
+                .insert((QuestRewardPart::Value(kind), Visibility::Hidden));
+        }
+        // 物品格：固定排 y=24（`Prguse[989]` 底）/ 可选排 y=89（选中时 `Prguse[979]` 底）
+        let bg_fixed = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 989);
+        let bg_select = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 979);
+        for fixed in [true, false] {
+            for slot in 0..QUEST_REWARD_SLOTS {
+                let cell = QuestRewardCell { fixed, slot };
+                let x = rx + QUEST_REWARD_CELL_X0 + slot as f32 * QUEST_REWARD_CELL_DX;
+                let y = ry
+                    + if fixed {
+                        QUEST_REWARD_FIXED_Y
+                    } else {
+                        QUEST_REWARD_SELECT_Y
+                    };
+                let holder = spawn_container(p, x, y, QUEST_REWARD_CELL, QUEST_REWARD_CELL, 8)
+                    .insert(cell)
+                    .id();
+                if !fixed {
+                    // 只有可选排响应点击（C# `SelectItems[i].Click`，`:1497-1515`）
+                    p.commands_mut().entity(holder).insert(Button);
+                }
+                let mut cmds = p.commands_mut();
+                cmds.entity(holder).with_children(|c| {
+                    // 底图按 .Lib 真实尺寸（`Prguse[989]`=40x34 固定框 / `Prguse[979]`=40x41 选中框），
+                    // y 偏移照抄 C#：固定 `-1`、选中 `-5`（`:1692-1695`）
+                    let (bg, dy) = if fixed {
+                        (bg_fixed.clone(), -1.0)
+                    } else {
+                        (bg_select.clone(), -5.0)
+                    };
+                    if let Some(bg) = bg {
+                        let (w, h) = if fixed { (40.0, 34.0) } else { (40.0, 41.0) };
+                        spawn_image(c, bg, 0.0, dy, w, h, 1)
+                            .insert((QuestRewardPart::CellBg(cell), Visibility::Hidden));
+                    }
+                    spawn_image(c, Handle::default(), 0.0, 0.0, 0.0, 0.0, 2)
+                        .insert((QuestRewardPart::CellItem(cell), Visibility::Hidden));
+                    spawn_label(
+                        c,
+                        &cjk,
+                        "",
+                        0.0,
+                        0.0,
+                        QUEST_MSG_FONT_PX,
+                        Color::srgb(1.0, 1.0, 0.0),
+                        3,
+                    )
+                    .insert((QuestRewardPart::CellCount(cell), Visibility::Hidden));
+                });
+            }
+        }
     });
+
+    // 取消任务询问框（C# `MirMessageBox(AskCancelQuest, YesNo)`，`:590-598`）——规格同
+    // hero.rs 的 MakeActiveHero 询问框：`Prguse[360]` 456x190 居中 @(284,289)，
+    // Yes `Title[206..208]` @(260,157)、No `Title[210..212]` @(360,157)。
+    // 挂 `AlwaysVisible`（显隐由 `detail.confirm_cancel` 驱动，同 kind 不随主窗开合强隐）
+    if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let confirm = spawn_panel(&mut commands, bg, 284.0, 289.0, 456.0, 190.0, 41);
+        commands.entity(confirm).insert((
+            QuestCancelConfirm,
+            DialogRoot(DialogKind::QuestDetail),
+            crate::game::dialogs::AlwaysVisible,
+            Visibility::Hidden,
+        ));
+        commands.entity(confirm).with_children(|p| {
+            spawn_label(
+                p,
+                &cjk,
+                QUEST_CANCEL_ASK,
+                35.0,
+                35.0,
+                QUEST_MSG_FONT_PX,
+                Color::WHITE,
+                9,
+            );
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(p, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10).insert(QuestCancelYes);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(p, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10).insert(QuestCancelNo);
+            }
+        });
+    }
 }
 
 /// #2801 单元①②：任务详情窗显隐 + 关闭键（C# `closeButton.Click += Hide()`，`QuestDialogs.cs:611`）
@@ -793,7 +1070,17 @@ fn quest_detail_ui_system(
         ),
         Or<(With<QuestDetailScrollUp>, With<QuestDetailScrollDown>)>,
     >,
+    actions: Query<
+        (
+            Entity,
+            &Interaction,
+            Option<&QuestDetailShare>,
+            Option<&QuestDetailCancel>,
+        ),
+        Or<(With<QuestDetailShare>, With<QuestDetailCancel>)>,
+    >,
     close: Query<(Entity, &Interaction), With<QuestDetailClose>>,
+    net: Res<NetConnection>,
     mut wheels: MessageReader<MouseWheel>,
     panels: Query<
         &Node,
@@ -822,7 +1109,27 @@ fn quest_detail_ui_system(
         let was = prev_inter.insert(e, *inter);
         if *inter == Interaction::Pressed && was != Some(Interaction::Pressed) {
             dialogs.mgr.close(DialogKind::QuestDetail);
+            dialogs.detail.confirm_cancel = false;
             tracing::info!("📜 关闭任务详情窗");
+        }
+    }
+
+    // 分享 / 取消（C# `_shareButton.Click` `:568-575`、`_cancelButton.Click` `:585-599`）
+    for (e, inter, is_share, is_cancel) in &actions {
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        let Some(qid) = dialogs.detail.quest_id else {
+            continue;
+        };
+        if is_share.is_some() {
+            net.send_packet(&mir2_shared::packets::client::quest::ShareQuest { quest_index: qid });
+            tracing::info!("🔗 分享任务 #{}", qid);
+        } else if is_cancel.is_some() {
+            // C#：弹 YesNo 询问框，Yes 才发 `C.AbandonQuest`（`:590-598`）
+            dialogs.detail.confirm_cancel = true;
+            tracing::info!("📜 取消任务询问框：任务 #{}", qid);
         }
     }
 
@@ -981,14 +1288,269 @@ fn quest_detail_ui_system(
     }
 }
 
-/// 奖励物品显示名（目录无 ItemLibrary 全量名，未知名回退 物品#索引）
-fn reward_item_display(catalog: &QuestCatalog, r: &QuestItemReward) -> String {
-    catalog
+/// #2801 单元③：取消任务询问框（C# `MirMessageBox(AskCancelQuest, YesNo)`，`:590-598`）。
+/// Yes → `C.AbandonQuest{QuestIndex}` + `Hide()`；No → 仅关框。
+fn quest_detail_confirm_system(
+    mut dialogs: QuestDialogAccess,
+    net: Res<NetConnection>,
+    mut confirm: Query<
+        &mut Visibility,
+        (
+            With<QuestCancelConfirm>,
+            Without<QuestRewardPart>,
+            Without<QuestRewardCell>,
+        ),
+    >,
+    yesno: Query<
+        (
+            Entity,
+            &Interaction,
+            Option<&QuestCancelYes>,
+            Option<&QuestCancelNo>,
+        ),
+        Or<(With<QuestCancelYes>, With<QuestCancelNo>)>,
+    >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    let open = dialogs.mgr.is_open(DialogKind::QuestDetail) && dialogs.detail.confirm_cancel;
+    for mut vis in &mut confirm {
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    if !open {
+        return;
+    }
+    for (e, inter, is_yes, is_no) in &yesno {
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        if is_yes.is_some() {
+            if let Some(qid) = dialogs.detail.quest_id {
+                net.send_packet(&mir2_shared::packets::client::quest::AbandonQuest {
+                    quest_index: qid,
+                });
+                tracing::info!("📜 取消任务 #{}（AbandonQuest）", qid);
+            }
+            dialogs.detail.confirm_cancel = false;
+            dialogs.mgr.close(DialogKind::QuestDetail);
+        } else if is_no.is_some() {
+            dialogs.detail.confirm_cancel = false;
+            tracing::info!("📜 取消任务询问框：否");
+        }
+    }
+}
+
+/// #2801 单元③：奖励区渲染 + 可选奖励多选一
+/// （C# `QuestRewards.UpdateInterface` `:1420-1530` / `QuestCell.DrawControl` `:1685-1700`）。
+///
+/// 部件用单个 `QuestRewardPart` 分派（Bevy 无法证明多个 `&mut Node` 查询互斥，
+/// 拆组件会逼出成对 `Without` 过滤；见 `QuestRewardPart` 注释）。
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn quest_detail_reward_system(
+    mut dialogs: QuestDialogAccess,
+    catalog: Res<QuestCatalog>,
+    player: Query<&crate::actor::ActorAppearance, With<crate::actor::LocalPlayer>>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
+    mut parts: Query<(
+        &QuestRewardPart,
+        &mut Visibility,
+        &mut Node,
+        Option<&mut Text>,
+        Option<&mut ImageNode>,
+    )>,
+    cells: Query<
+        (Entity, &QuestRewardCell, &Interaction),
+        (With<Button>, Without<QuestRewardPart>),
+    >,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    let open = dialogs.mgr.is_open(DialogKind::QuestDetail);
+    let info = dialogs
+        .detail
+        .quest_id
+        .and_then(|id| catalog.infos.iter().find(|c| c.index == id));
+    // C# `FilterRewards`（`:1330-1350`）用 `MapObject.User.Gender` 过滤
+    let gender = player
+        .single()
+        .map(|a| a.gender)
+        .unwrap_or(mir2_shared::enums::MirGender::Male);
+    let (rx, ry) = QUEST_REWARD_ORIGIN;
+    let (exp, gold, credit) = info
+        .map(|i| (i.reward_exp, i.reward_gold, i.reward_credit))
+        .unwrap_or((0, 0, 0));
+    let offs = quest_reward_offsets(exp, gold);
+    let fixed: Vec<&QuestItemReward> = info
+        .map(|i| {
+            i.rewards_fixed_item
+                .iter()
+                .filter(|r| quest_reward_visible_for_gender(&r.item, gender))
+                .collect()
+        })
+        .unwrap_or_default();
+    // 可选排：过滤后的显示序 + 原（未过滤）下标——C# `SelectedItemIndex` 用原下标
+    let select: Vec<(usize, &QuestItemReward)> = info
+        .map(|i| {
+            i.rewards_select_item
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| quest_reward_visible_for_gender(&r.item, gender))
+                .collect()
+        })
+        .unwrap_or_default();
+    let reward_at = |cell: QuestRewardCell| -> Option<&QuestItemReward> {
+        if cell.fixed {
+            fixed.get(cell.slot).copied()
+        } else {
+            select.get(cell.slot).map(|(_, r)| *r)
+        }
+    };
+    let selected_at = |cell: QuestRewardCell| -> bool {
+        !cell.fixed
+            && select
+                .get(cell.slot)
+                .map(|(idx, _)| dialogs.detail.selected_reward == Some(*idx))
+                .unwrap_or(false)
+    };
+
+    for (part, mut vis, mut node, text, image) in &mut parts {
+        let show = |b: bool| {
+            if open && b {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            }
+        };
+        match *part {
+            QuestRewardPart::Icon(kind) => {
+                let (vis_on, x) = match kind {
+                    QuestRewardIcon::Exp => (exp > 0, rx + 10.0),
+                    QuestRewardIcon::Gold => (gold > 0, rx + 100.0 + offs.gold),
+                    QuestRewardIcon::Credit => (credit > 0, rx + 190.0 + offs.credit),
+                };
+                *vis = show(vis_on);
+                node.left = Val::Px(x);
+                node.top = Val::Px(ry + 2.0);
+            }
+            QuestRewardPart::Value(kind) => {
+                let (vis_on, x, value) = match kind {
+                    QuestRewardValue::Exp => (exp > 0, rx + 40.0, exp),
+                    QuestRewardValue::Gold => (gold > 0, rx + 120.0 + offs.gold, gold),
+                    QuestRewardValue::Credit => (credit > 0, rx + 210.0 + offs.credit, credit),
+                };
+                *vis = show(vis_on);
+                node.left = Val::Px(x);
+                node.top = Val::Px(ry);
+                if let Some(mut t) = text {
+                    t.0 = if vis_on {
+                        value.to_string()
+                    } else {
+                        String::new()
+                    };
+                }
+            }
+            QuestRewardPart::CellBg(cell) => {
+                // C#：固定格恒画 `Prguse[989]`；可选格仅在选中时画 `Prguse[979]`（`:1690-1696`）
+                let has = reward_at(cell).is_some();
+                let on = has && (cell.fixed || selected_at(cell));
+                *vis = show(on);
+            }
+            QuestRewardPart::CellItem(cell) => {
+                let Some(r) = reward_at(cell) else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let idx = r.item.image as usize;
+                let Some(handle) = crate::ui::sprite_ui::ui_image(
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    LibraryName::Items,
+                    idx,
+                ) else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let (w, h) = libs
+                    .0
+                    .get_image(LibraryName::Items, idx)
+                    .map(|i| (i.width as i32, i.height as i32))
+                    .unwrap_or((0, 0));
+                let (ox, oy) = quest_reward_item_offset(w, h);
+                if let Some(mut img) = image {
+                    if img.image != handle {
+                        img.image = handle;
+                    }
+                }
+                node.left = Val::Px(ox);
+                node.top = Val::Px(oy);
+                node.width = Val::Px(w.max(0) as f32);
+                node.height = Val::Px(h.max(0) as f32);
+                *vis = show(true);
+            }
+            QuestRewardPart::CellCount(cell) => {
+                let count = reward_at(cell).map(|r| r.count).unwrap_or(0);
+                let on = count > 1;
+                *vis = show(on);
+                if let Some(mut t) = text {
+                    // C# `Count.ToString("###0")`（`QuestCell.CreateDisposeLabel`，`:1743`）
+                    t.0 = if on { count.to_string() } else { String::new() };
+                }
+                // C# 用标签实测宽度贴右下角（`:1743`：`Size.Width - 宽 + 8, Size.Height - 高`）；
+                // Bevy 无法同帧量文字宽 → 按两位数近似贴右下
+                node.left = Val::Px(QUEST_REWARD_CELL - 2.0);
+                node.top = Val::Px(QUEST_REWARD_CELL - 13.0);
+            }
+        }
+    }
+
+    // 可选排点击 = 多选一（C# `SelectItems[i].Click`，`:1497-1515`；其余格取消选中）
+    for (e, cell, inter) in &cells {
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        let Some((idx, r)) = select.get(cell.slot) else {
+            continue;
+        };
+        dialogs.detail.selected_reward = Some(*idx);
+        tracing::info!(
+            "🎁 选择奖励：{}（未过滤下标 {}）",
+            reward_item_display_with_catalog(&catalog, r),
+            idx
+        );
+    }
+}
+
+/// #2801 单元③：奖励物品显示名。C# `QuestItemReward.Item.Name` 随任务定义下发
+/// （`Shared/Data/SharedData.cs:77`）；名缺失时回退 `UserInformation` 的物品名表，
+/// 再回退 `物品#索引`（旧实现的兜底路径保留）。
+pub fn reward_item_display(r: &QuestItemReward) -> String {
+    let name = if r.item.name.is_empty() {
+        format!("物品#{}", r.item.index)
+    } else {
+        r.item.name.clone()
+    };
+    format!("{name}×{}", r.count)
+}
+
+/// #2801 单元③：奖励名称回退表（`RewardsFixedItem/RewardsSelectItem` 显示用）。
+/// 名字优先取随包下发的 `ItemInfo.Name`，否则查目录物品名表。
+pub fn reward_item_display_with_catalog(catalog: &QuestCatalog, r: &QuestItemReward) -> String {
+    if !r.item.name.is_empty() {
+        return reward_item_display(r);
+    }
+    let name = catalog
         .item_names
-        .get(&r.item_index)
+        .get(&r.item.index)
         .cloned()
-        .unwrap_or_else(|| format!("物品#{}", r.item_index))
-        + &format!("×{}", r.count)
+        .unwrap_or_else(|| format!("物品#{}", r.item.index));
+    format!("{name}×{}", r.count)
 }
 
 /// 显隐 + 渲染 + 选择 + 接受/完成/放弃（#2535）
@@ -1216,7 +1778,7 @@ fn quest_log_ui_system(
                         "固定: {}",
                         i.rewards_fixed_item
                             .iter()
-                            .map(|r| reward_item_display(&catalog, r))
+                            .map(|r| reward_item_display_with_catalog(&catalog, r))
                             .collect::<Vec<_>>()
                             .join(" ")
                     ),
@@ -1232,7 +1794,7 @@ fn quest_log_ui_system(
                             .iter()
                             .enumerate()
                             .map(|(k, r)| {
-                                let s = reward_item_display(&catalog, r);
+                                let s = reward_item_display_with_catalog(&catalog, r);
                                 if state.selected_reward == Some(k) {
                                     format!("【{}】", s)
                                 } else {
@@ -1303,6 +1865,10 @@ fn quest_log_ui_system(
                                 // C# `DisplayQuestDetails` → `Message.UpdateQuest` →
                                 // `NewText(resetIndex: true)` 把 TopLine 归零（`:1130-1136`）
                                 detail.top_line = 0;
+                                // C# `Reward.UpdateRewards` → `CleanRewards`：
+                                // `SelectedItemIndex = -1`、`SelectedItem = null`（`:1451-1462`）
+                                detail.selected_reward = None;
+                                detail.confirm_cancel = false;
                                 mgr.open(DialogKind::QuestDetail);
                                 tracing::info!(
                                     "📜 打开任务详情: {}（任务 {}）",
@@ -1536,6 +2102,7 @@ mod tests {
         world.insert_resource(QuestLogState::default());
         world.insert_resource(QuestCatalog::default());
         world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+        world.insert_resource(crate::network::NetConnection::default());
         world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
         let root = world
             .spawn((
@@ -1797,6 +2364,7 @@ mod tests {
         world.insert_resource(QuestDetailState {
             quest_id: Some(1),
             top_line: 0,
+            ..Default::default()
         });
         let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
         q.name = "消灭稻草人".to_string();
@@ -1811,6 +2379,7 @@ mod tests {
         });
         world.insert_resource(QuestLogState::default());
         world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+        world.insert_resource(crate::network::NetConnection::default());
         world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
 
         // 根面板（提供 `panel_origin`，滚轮命中区用）
@@ -1921,6 +2490,345 @@ mod tests {
         assert_eq!(world.get::<Visibility>(bar), Some(&Visibility::Hidden));
     }
 
+    /// #2801 单元③：奖励区横向偏移链（C# `QuestRewards.UpdateInterface` `:1424-1456`）
+    #[test]
+    fn quest_reward_offsets_match_csharp() {
+        assert_eq!(
+            quest_reward_offsets(100, 50),
+            QuestRewardOffsets {
+                gold: 0.0,
+                credit: 0.0
+            }
+        );
+        assert_eq!(
+            quest_reward_offsets(0, 50),
+            QuestRewardOffsets {
+                gold: -90.0,
+                credit: -90.0
+            },
+            "无经验奖励 → 金币与信用各左移 90"
+        );
+        assert_eq!(
+            quest_reward_offsets(100, 0),
+            QuestRewardOffsets {
+                gold: 0.0,
+                credit: -90.0
+            }
+        );
+        assert_eq!(
+            quest_reward_offsets(0, 0),
+            QuestRewardOffsets {
+                gold: -90.0,
+                credit: -180.0
+            },
+            "两级 `-= 90` 叠加"
+        );
+    }
+
+    /// #2801 单元③：奖励性别过滤（C# `QuestRewards.FilterRewards` `:1330-1350`）
+    #[test]
+    fn quest_reward_gender_filter_matches_csharp() {
+        use mir2_shared::enums::{MirGender, RequiredGender};
+        let mk = |g: RequiredGender| mir2_shared::data::item::ItemInfo {
+            required_gender: g,
+            ..Default::default()
+        };
+        assert!(quest_reward_visible_for_gender(
+            &mk(RequiredGender::MALE),
+            MirGender::Male
+        ));
+        assert!(!quest_reward_visible_for_gender(
+            &mk(RequiredGender::MALE),
+            MirGender::Female
+        ));
+        assert!(quest_reward_visible_for_gender(
+            &mk(RequiredGender::NONE),
+            MirGender::Female
+        ));
+        // 未设性别位（0）：C# `HasFlag` 对两种性别都是 false → 不显示
+        assert!(!quest_reward_visible_for_gender(
+            &mk(RequiredGender::empty()),
+            MirGender::Male
+        ));
+    }
+
+    /// #2801 单元③：物品图居中偏移（C# `QuestCell.DrawControl` `:1690` 整数除法，
+    /// 负数向零截断）
+    #[test]
+    fn quest_reward_item_offset_matches_csharp() {
+        assert_eq!(quest_reward_item_offset(40, 32), (0.0, 0.0));
+        assert_eq!(quest_reward_item_offset(45, 37), (-2.0, -2.0));
+        assert_eq!(quest_reward_item_offset(20, 20), (10.0, 6.0));
+    }
+
+    /// #2801 单元③：分享键发 `C.ShareQuest{QuestIndex}`（C# `_shareButton.Click` `:568-575`）
+    #[test]
+    fn quest_detail_share_sends_share_quest() {
+        use mir2_shared::packets::base::Packet;
+
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::QuestDetail);
+        world.insert_resource(mgr);
+        world.insert_resource(QuestDetailState {
+            quest_id: Some(7),
+            ..Default::default()
+        });
+        world.insert_resource(QuestLogState::default());
+        world.insert_resource(QuestCatalog::default());
+        world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+        world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+        world.insert_resource(ButtonInput::<MouseButton>::default());
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        world.insert_resource(crate::network::NetConnection {
+            to_server: Some(tx),
+            ..Default::default()
+        });
+        world.spawn((
+            Button,
+            QuestDetailShare,
+            Interaction::Pressed,
+            Node::default(),
+        ));
+
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("详情窗 UI 系统应运行");
+
+        let sent = rx.try_recv().expect("分享键必须发出 ShareQuest");
+        let opcode = i16::from_le_bytes([sent[2], sent[3]]);
+        assert_eq!(
+            opcode,
+            mir2_shared::enums::ClientPacketIds::ShareQuest as i16,
+            "opcode 必须是 C.ShareQuest"
+        );
+        let body = mir2_shared::packets::client::quest::ShareQuest::read_body(
+            &mut std::io::Cursor::new(&sent[4..]),
+        )
+        .expect("ShareQuest body 应可解析");
+        assert_eq!(body.quest_index, 7);
+    }
+
+    /// #2801 单元③：取消询问框 Yes → `C.AbandonQuest` + 关窗；No → 只关框（C# `:590-598`）
+    #[test]
+    fn quest_detail_cancel_confirm_yes_and_no() {
+        fn setup(press_yes: bool) -> (World, Entity, crossbeam_channel::Receiver<Vec<u8>>) {
+            let mut world = World::new();
+            let mut mgr = DialogManager::default();
+            mgr.open(DialogKind::QuestDetail);
+            world.insert_resource(mgr);
+            world.insert_resource(QuestDetailState {
+                quest_id: Some(9),
+                confirm_cancel: true,
+                ..Default::default()
+            });
+            let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+            world.insert_resource(crate::network::NetConnection {
+                to_server: Some(tx),
+                ..Default::default()
+            });
+            let root = world.spawn((QuestCancelConfirm, Visibility::Hidden)).id();
+            let btn = world
+                .spawn((Button, Interaction::Pressed, Node::default()))
+                .id();
+            if press_yes {
+                world.entity_mut(btn).insert(QuestCancelYes);
+            } else {
+                world.entity_mut(btn).insert(QuestCancelNo);
+            }
+            (world, root, rx)
+        }
+
+        // Yes：发 AbandonQuest + 关闭主窗 + 关框
+        let (mut world, root, rx) = setup(true);
+        world
+            .run_system_once(quest_detail_confirm_system)
+            .expect("取消确认系统应运行");
+        assert_eq!(
+            world.get::<Visibility>(root),
+            Some(&Visibility::Visible),
+            "开框时确认框可见（Yes 同帧先置可见再收尾）"
+        );
+        assert!(!world.resource::<QuestDetailState>().confirm_cancel);
+        assert!(!world
+            .resource::<DialogManager>()
+            .is_open(DialogKind::QuestDetail));
+        let sent = rx.try_recv().expect("Yes 必须发出 AbandonQuest");
+        let opcode = i16::from_le_bytes([sent[2], sent[3]]);
+        assert_eq!(
+            opcode,
+            mir2_shared::enums::ClientPacketIds::AbandonQuest as i16
+        );
+
+        // No：不发包、主窗保持打开
+        let (mut world, _, rx) = setup(false);
+        world
+            .run_system_once(quest_detail_confirm_system)
+            .expect("取消确认系统应运行");
+        assert!(!world.resource::<QuestDetailState>().confirm_cancel);
+        assert!(world
+            .resource::<DialogManager>()
+            .is_open(DialogKind::QuestDetail));
+        assert!(rx.try_recv().is_err(), "No 不应发包");
+    }
+
+    /// #2801 单元③：奖励区系统级渲染 + 多选一
+    /// （C# `QuestRewards.UpdateInterface` `:1420-1530` / `FilterRewards` `:1330-1350`）
+    #[test]
+    fn quest_detail_reward_area_lays_out_and_selects() {
+        use mir2_shared::enums::{MirClass, MirGender, RequiredGender};
+
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::QuestDetail);
+        world.insert_resource(mgr);
+        world.insert_resource(QuestDetailState {
+            quest_id: Some(1),
+            ..Default::default()
+        });
+        // 玩家性别 = 女：可选奖励第 0 件（仅男性）被过滤 → 过滤序 0 对应**未过滤下标 1**
+        world.spawn((
+            crate::actor::ActorAppearance {
+                class: MirClass::Warrior,
+                gender: MirGender::Female,
+                armour: 0,
+                hair: 0,
+                weapon: 0,
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
+            crate::actor::LocalPlayer,
+        ));
+        // 未初始化 GameLibraries → 无磁盘 IO（物品图取不到，本测试只钉布局/显隐/选择）
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+
+        let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+        q.reward_exp = 100;
+        q.reward_gold = 0;
+        q.reward_credit = 0;
+        q.rewards_fixed_item = vec![reward_gendered(10, RequiredGender::NONE, 3)];
+        q.rewards_select_item = vec![
+            reward_gendered(20, RequiredGender::MALE, 1),
+            reward_gendered(21, RequiredGender::FEMALE, 1),
+        ];
+        world.insert_resource(QuestCatalog {
+            infos: vec![q],
+            ..Default::default()
+        });
+
+        let exp_icon = world
+            .spawn((
+                QuestRewardPart::Icon(QuestRewardIcon::Exp),
+                Visibility::Hidden,
+                Node::default(),
+            ))
+            .id();
+        let gold_value = world
+            .spawn((
+                QuestRewardPart::Value(QuestRewardValue::Gold),
+                Visibility::Hidden,
+                Node::default(),
+                Text::new(""),
+            ))
+            .id();
+        let exp_value = world
+            .spawn((
+                QuestRewardPart::Value(QuestRewardValue::Exp),
+                Visibility::Hidden,
+                Node::default(),
+                Text::new(""),
+            ))
+            .id();
+        let fixed_cell = QuestRewardCell {
+            fixed: true,
+            slot: 0,
+        };
+        let fixed_bg = world
+            .spawn((
+                QuestRewardPart::CellBg(fixed_cell),
+                Visibility::Hidden,
+                Node::default(),
+            ))
+            .id();
+        let fixed_count = world
+            .spawn((
+                QuestRewardPart::CellCount(fixed_cell),
+                Visibility::Hidden,
+                Node::default(),
+                Text::new(""),
+            ))
+            .id();
+        let select_cell = QuestRewardCell {
+            fixed: false,
+            slot: 0,
+        };
+        let select_bg = world
+            .spawn((
+                QuestRewardPart::CellBg(select_cell),
+                Visibility::Hidden,
+                Node::default(),
+            ))
+            .id();
+        let select_btn = world
+            .spawn((Button, select_cell, Interaction::Pressed, Node::default()))
+            .id();
+
+        world
+            .run_system_once(quest_detail_reward_system)
+            .expect("奖励区系统应运行");
+
+        let vis = |w: &World, e: Entity| w.get::<Visibility>(e).copied();
+        assert_eq!(
+            vis(&world, exp_icon),
+            Some(Visibility::Visible),
+            "有经验奖励 → 图标可见"
+        );
+        assert_eq!(
+            world.get::<Node>(exp_icon).unwrap().left,
+            Val::Px(QUEST_REWARD_ORIGIN.0 + 10.0),
+            "经验图标 @(10,2)（C# `:1424`）"
+        );
+        assert_eq!(world.get::<Text>(exp_value).unwrap().0, "100");
+        assert_eq!(
+            vis(&world, gold_value),
+            Some(Visibility::Hidden),
+            "无金币奖励 → 数值隐藏"
+        );
+        assert_eq!(
+            vis(&world, fixed_bg),
+            Some(Visibility::Visible),
+            "固定奖励格底图恒显（C# `Prguse[989]`）"
+        );
+        assert_eq!(
+            world.get::<Text>(fixed_count).unwrap().0,
+            "3",
+            "数量 >1 显示 `###0`"
+        );
+        assert_eq!(vis(&world, fixed_count), Some(Visibility::Visible));
+        assert_eq!(
+            vis(&world, select_bg),
+            Some(Visibility::Hidden),
+            "可选格未选中时无底图"
+        );
+
+        // 点可选排过滤序 0 = 未过滤下标 1（C# `FindSelectedItemIndex` `:1268-1284`）
+        assert_eq!(
+            world.resource::<QuestDetailState>().selected_reward,
+            Some(1)
+        );
+        let _ = select_btn;
+        world
+            .run_system_once(quest_detail_reward_system)
+            .expect("奖励区系统应可重复运行");
+        assert_eq!(
+            vis(&world, select_bg),
+            Some(Visibility::Visible),
+            "选中后底图切 `Prguse[979]`"
+        );
+    }
+
     /// 任务行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn row_rect_origin_and_drag() {
@@ -1983,8 +2891,29 @@ mod tests {
 
     fn reward(item_index: i32) -> QuestItemReward {
         QuestItemReward {
-            item_index,
+            item: mir2_shared::data::item::ItemInfo {
+                index: item_index,
+                name: format!("奖励物品{item_index}"),
+                ..Default::default()
+            },
             count: 1,
+        }
+    }
+
+    /// #2801 单元③：带性别/数量的奖励项（性别过滤与数量角标用）
+    fn reward_gendered(
+        item_index: i32,
+        gender: mir2_shared::enums::RequiredGender,
+        count: u16,
+    ) -> QuestItemReward {
+        QuestItemReward {
+            item: mir2_shared::data::item::ItemInfo {
+                index: item_index,
+                name: format!("奖励物品{item_index}"),
+                required_gender: gender,
+                ..Default::default()
+            },
+            count,
         }
     }
 

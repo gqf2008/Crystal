@@ -2098,8 +2098,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     reward_gold: 100,
                                                     reward_exp: 50,
                                                     reward_credit: 0,
-                                                    rewards_fixed_item: vec![],
-                                                    rewards_select_item: vec![],
+                                                    // #2801 单元③：奖励区实机取证用——
+                                                    // 2 件固定奖励 + 3 件可选（多选一），
+                                                    // ItemInfo 随任务定义下发（C# 同构）
+                                                    rewards_fixed_item: vec![
+                                                        quest_reward(1, "金创药(小)", 5, 1),
+                                                        quest_reward(2, "金创药(中)", 6, 1),
+                                                    ],
+                                                    rewards_select_item: vec![
+                                                        quest_reward(5, "木剑", 5, 1),
+                                                        quest_reward(221, "青铜剑", 221, 1),
+                                                        quest_reward(6, "铜戒指", 6, 1),
+                                                    ],
                                                     finish_npc_index: 0,
                                                 },
                                             },
