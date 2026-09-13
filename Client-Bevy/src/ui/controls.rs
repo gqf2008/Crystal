@@ -57,8 +57,7 @@ pub fn spawn_checkbox(
     let e = spawn_ui_button(
         commands, libs, images, cache, name,
         // 帧索引只是占位（spawn_ui_button 会加载一次），随后用预载图柄覆盖
-        off_idx[0], off_idx[1], off_idx[2],
-        x, y, z, w, h,
+        off_idx[0], off_idx[1], off_idx[2], x, y, z, w, h,
     )?;
     commands.entity(e).insert((
         CheckBox { checked, off, on },
@@ -268,7 +267,11 @@ pub fn spawn_dropdown(
     popup_rows: usize,
     z: f32,
 ) -> Entity {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let popup_w = w + 4.0;
     let row_h = h;
 
@@ -285,16 +288,35 @@ pub fn spawn_dropdown(
             bevy::sprite::Anchor::TOP_LEFT,
             Transform::from_xyz(x, -y, z),
             Visibility::Visible,
-            UiButton { rect: (x, y, w, h), clicked: false },
+            UiButton {
+                rect: (x, y, w, h),
+                clicked: false,
+            },
         ))
         .id();
     let text = spawn_ui_text(
-        commands, font,
-        &items.get(selected.unwrap_or(usize::MAX)).cloned().unwrap_or_default(),
-        x + 6.0, y + (h - 12.0) / 2.0,
-        12.0, Color::WHITE, z + 0.1,
+        commands,
+        font,
+        &items
+            .get(selected.unwrap_or(usize::MAX))
+            .cloned()
+            .unwrap_or_default(),
+        x + 6.0,
+        y + (h - 12.0) / 2.0,
+        12.0,
+        Color::WHITE,
+        z + 0.1,
     );
-    let arrow = spawn_ui_text(commands, font, "▼", x + w - 14.0, y + (h - 12.0) / 2.0, 10.0, Color::srgb(0.8, 0.8, 0.8), z + 0.1);
+    let arrow = spawn_ui_text(
+        commands,
+        font,
+        "▼",
+        x + w - 14.0,
+        y + (h - 12.0) / 2.0,
+        10.0,
+        Color::srgb(0.8, 0.8, 0.8),
+        z + 0.1,
+    );
 
     // 弹出面板：深色底 + 选项行
     let popup_y = y + h;
@@ -316,9 +338,14 @@ pub fn spawn_dropdown(
     let mut option_texts = Vec::new();
     for i in 0..popup_rows {
         let t = spawn_ui_text(
-            commands, font, "",
-            x + 4.0, popup_y + 2.0 + i as f32 * row_h,
-            12.0, Color::WHITE, z + 0.3,
+            commands,
+            font,
+            "",
+            x + 4.0,
+            popup_y + 2.0 + i as f32 * row_h,
+            12.0,
+            Color::WHITE,
+            z + 0.3,
         );
         option_texts.push(t);
     }
@@ -326,14 +353,22 @@ pub fn spawn_dropdown(
     // 否则对话框隐藏时只有闭合框被隐藏，文字与 ▼ 箭头是独立实体仍会渲染在屏幕上
     // （用户看到的各对话框残留“▼”就是这里来的）。
     // 挂为子实体后 Transform 改为相对父实体的局部坐标（父实体位于 (x, -y, z)）。
-    commands.entity(text).insert(Transform::from_xyz(6.0, -(h - 12.0) / 2.0, 0.1));
-    commands.entity(arrow).insert(Transform::from_xyz(w - 14.0, -(h - 12.0) / 2.0, 0.1));
-    commands.entity(popup).insert(Transform::from_xyz(-2.0, -h, 0.2));
+    commands
+        .entity(text)
+        .insert(Transform::from_xyz(6.0, -(h - 12.0) / 2.0, 0.1));
+    commands
+        .entity(arrow)
+        .insert(Transform::from_xyz(w - 14.0, -(h - 12.0) / 2.0, 0.1));
+    commands
+        .entity(popup)
+        .insert(Transform::from_xyz(-2.0, -h, 0.2));
     commands.entity(box_e).add_child(text);
     commands.entity(box_e).add_child(arrow);
     commands.entity(box_e).add_child(popup);
     for (i, ent) in option_texts.iter().enumerate() {
-        commands.entity(*ent).insert(Transform::from_xyz(6.0, -(2.0 + i as f32 * row_h), 0.3));
+        commands
+            .entity(*ent)
+            .insert(Transform::from_xyz(6.0, -(2.0 + i as f32 * row_h), 0.3));
         commands.entity(popup).add_child(*ent);
     }
 
@@ -369,7 +404,9 @@ pub fn dropdown_system(
     windows: Query<&Window>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
 
     // 1. 闭合框点击 → 切换展开
     for (btn, mut dd) in &mut dd_q {
@@ -392,10 +429,16 @@ pub fn dropdown_system(
             if !dd.open {
                 continue;
             }
-            let (px, py, pw, ph) = (dd.popup_pos.0, dd.popup_pos.1, dd.popup_w, dd.row_h * dd.popup_rows as f32);
+            let (px, py, pw, ph) = (
+                dd.popup_pos.0,
+                dd.popup_pos.1,
+                dd.popup_w,
+                dd.row_h * dd.popup_rows as f32,
+            );
             if cursor.x >= px && cursor.x <= px + pw && cursor.y >= py && cursor.y <= py + ph {
                 let max = dd.items.len().saturating_sub(dd.popup_rows);
-                dd.scroll = (dd.scroll as i32 + scroll_y.round() as i32).clamp(0, max as i32) as usize;
+                dd.scroll =
+                    (dd.scroll as i32 + scroll_y.round() as i32).clamp(0, max as i32) as usize;
                 break;
             }
         }
@@ -407,8 +450,14 @@ pub fn dropdown_system(
             if !dd.open {
                 continue;
             }
-            let (px, py, pw, ph) = (dd.popup_pos.0, dd.popup_pos.1, dd.popup_w, dd.row_h * dd.popup_rows as f32);
-            let in_popup = cursor.x >= px && cursor.x <= px + pw && cursor.y >= py && cursor.y <= py + ph;
+            let (px, py, pw, ph) = (
+                dd.popup_pos.0,
+                dd.popup_pos.1,
+                dd.popup_w,
+                dd.row_h * dd.popup_rows as f32,
+            );
+            let in_popup =
+                cursor.x >= px && cursor.x <= px + pw && cursor.y >= py && cursor.y <= py + ph;
             if in_popup {
                 for i in 0..dd.popup_rows {
                     let ry = py + i as f32 * dd.row_h;
@@ -424,7 +473,8 @@ pub fn dropdown_system(
             } else {
                 // 点不在面板内：若也不在闭合框内则关闭（闭合框内由第 1 步切换）
                 let (bx, by, bw, bh) = dd.box_rect;
-                let in_box = cursor.x >= bx && cursor.x <= bx + bw && cursor.y >= by && cursor.y <= by + bh;
+                let in_box =
+                    cursor.x >= bx && cursor.x <= bx + bw && cursor.y >= by && cursor.y <= by + bh;
                 if !in_box {
                     dd.open = false;
                 }
@@ -435,14 +485,22 @@ pub fn dropdown_system(
     // 4. 刷新：面板显隐、选项文字、选中文字
     for (_, dd) in dd_q.iter_mut() {
         // 闭合框文字
-        let sel_text = dd.items.get(dd.selected.unwrap_or(usize::MAX)).cloned().unwrap_or_default();
+        let sel_text = dd
+            .items
+            .get(dd.selected.unwrap_or(usize::MAX))
+            .cloned()
+            .unwrap_or_default();
         if let Ok(mut t) = texts.get_mut(dd.text) {
             if t.0 != sel_text {
                 t.0 = sel_text;
             }
         }
         if let Ok(mut v) = popups.get_mut(dd.popup) {
-            *v = if dd.open { Visibility::Visible } else { Visibility::Hidden };
+            *v = if dd.open {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
         }
         if dd.open {
             for (i, ent) in dd.option_texts.iter().enumerate() {
@@ -457,7 +515,6 @@ pub fn dropdown_system(
         }
     }
 }
-
 
 /// 滚动标签（MirScrollingLabel 简化版）：多行文本 + `{text/color}` 标签剥离
 #[derive(Component)]
@@ -493,9 +550,7 @@ pub fn strip_color_tags(line: &str) -> String {
 }
 
 /// 滚动标签系统：把 ScrollingLabel.text 按行剥离标签并写入 Text2d（最多 visible_lines 行）
-pub fn scrolling_label_system(
-    mut labels: Query<(&mut Text2d, &ScrollingLabel)>,
-) {
+pub fn scrolling_label_system(mut labels: Query<(&mut Text2d, &ScrollingLabel)>) {
     for (mut text, label) in &mut labels {
         let lines: Vec<String> = label
             .text
@@ -557,7 +612,11 @@ pub fn spawn_item_cell(
     cell_h: f32,
     slot: usize,
 ) -> Entity {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let cell = commands
         .spawn((
             UiEntity,
@@ -624,7 +683,12 @@ fn dura_width(full: f32, ratio: f32) -> f32 {
 pub fn item_cell_system(
     cells: Query<
         &ItemCellData,
-        (With<ItemCell>, Without<ItemCellIcon>, Without<ItemCellCount>, Without<ItemCellDura>),
+        (
+            With<ItemCell>,
+            Without<ItemCellIcon>,
+            Without<ItemCellCount>,
+            Without<ItemCellDura>,
+        ),
     >,
     mut icons: Query<
         (&ChildOf, &mut Sprite, &mut Visibility, &ItemCellIcon),
@@ -646,8 +710,14 @@ pub fn item_cell_system(
             Some(_) => {}
             None => {}
         }
-        let show = data.and_then(|d| d.icon.as_ref()).is_some_and(|h| h.is_strong());
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        let show = data
+            .and_then(|d| d.icon.as_ref())
+            .is_some_and(|h| h.is_strong());
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (child_of, mut text, mut vis, _count) in &mut counts {
         let data = cells.get(child_of.parent()).ok();
@@ -660,9 +730,12 @@ pub fn item_cell_system(
         if text.0 != s {
             text.0 = s;
         }
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
-
 
     for (child_of, mut sprite, mut vis, dura) in &mut duras {
         let data = cells.get(child_of.parent()).ok();

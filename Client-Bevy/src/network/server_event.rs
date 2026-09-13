@@ -7,43 +7,79 @@
 // 使用：`events.write(ServerEvent::...)`；消费方 `EventReader<ServerEvent>`。
 
 use bevy::prelude::*;
-use mir2_shared::packets::server::{chat, combat, drops, experience, item_operations, npc_interaction};
+use mir2_shared::packets::server::{
+    chat, combat, drops, experience, item_operations, npc_interaction,
+};
 
 /// 服务端事件（按包类型组织；字段为消费方需要的最终值）
 /// Bevy 0.19：Message（替代旧 EventReader/EventWriter）
 #[derive(Message, Debug, Clone)]
 pub enum ServerEvent {
     /// #1388：宠物模式变更（S.ChangePMode）
-    PetModeChanged { mode: mir2_shared::enums::PetMode },
+    PetModeChanged {
+        mode: mir2_shared::enums::PetMode,
+    },
 
     /// HealthChanged：HP/MP 当前值
-    HealthChanged { hp: i32, mp: i32 },
+    HealthChanged {
+        hp: i32,
+        mp: i32,
+    },
     /// GainedGold：增量（击杀掉落等），消费方负责累加余额
-    GoldGained { gold: u32 },
+    GoldGained {
+        gold: u32,
+    },
     /// LoseGold：扣减金额（C# S.LoseGold），消费方负责余额扣减
-    GoldLost { amount: u32 },
+    GoldLost {
+        amount: u32,
+    },
     /// TimeOfDay：服务端昼夜（C# S.TimeOfDay）
-    TimeOfDay { light: mir2_shared::enums::LightSetting },
+    TimeOfDay {
+        light: mir2_shared::enums::LightSetting,
+    },
     /// ObjectColourChanged：对象名字颜色（C# PK 红名）
-    ObjectColourChanged { object_id: u32, name_colour_argb: i32 },
+    ObjectColourChanged {
+        object_id: u32,
+        name_colour_argb: i32,
+    },
     /// StoragePasswordResult：仓库密码设置/移除结果（C# result：4=成功 2=当前密码错误 5=未设置）
-    StoragePasswordResult { result: u8 },
+    StoragePasswordResult {
+        result: u8,
+    },
     /// #200 StorageUnlockResult：仓库解锁结果（C# S.StorageUnlockResult；0=成功 1=格式错 2=密码错 3=不可用 4=无密码）
-    StorageUnlockResult { result: u8, has_password: bool },
+    StorageUnlockResult {
+        result: u8,
+        has_password: bool,
+    },
     /// #200 NPCStorage：仓库对话框打开信号（有密码时客户端先弹解锁框，C# S.NPCStorage）
     StoragePrompt,
     /// #281 ResizeStorage：仓库扩容（size = 新格数，C# S.ResizeStorage → Array.Resize）
-    StorageResized { size: usize },
+    StorageResized {
+        size: usize,
+    },
     /// #283 ObjectLeveled：对象升级（C# S.ObjectLeveled → Magic2[1180] 升级特效 + LevelUp 音效）
-    ObjectLeveled { object_id: u32, level: u16 },
+    ObjectLeveled {
+        object_id: u32,
+        level: u16,
+    },
     /// #285 NewChatItem：聊天物品信息（C# S.NewChatItem → ChatItemCache，供聊天链接解析）
-    ChatItemReceived { item: InvItem },
+    ChatItemReceived {
+        item: InvItem,
+    },
     /// #289 LoginBanned：登录被封禁（reason + 到期 ticks）
-    LoginBanned { reason: String, expiry_date: i64 },
+    LoginBanned {
+        reason: String,
+        expiry_date: i64,
+    },
     /// #289 StartGameBanned：进游戏被封禁
-    StartGameBanned { reason: String, expiry_date: i64 },
+    StartGameBanned {
+        reason: String,
+        expiry_date: i64,
+    },
     /// #289 StartGameDelay：进游戏延迟（毫秒）
-    StartGameDelay { milliseconds: i64 },
+    StartGameDelay {
+        milliseconds: i64,
+    },
     /// #289 LogOutFailed：登出失败
     LogOutFailed,
     /// #289 ReturnToLogin：服务端要求返回登录界面
@@ -71,13 +107,25 @@ pub enum ServerEvent {
         wings_effect: u8,
     },
     /// #279 NewMonsterInfo：怪物信息（名称/形象，C# S.NewMonsterInfo）
-    MonsterInfo { info: mir2_shared::data::client_data::ClientMonsterInfo },
+    MonsterInfo {
+        info: mir2_shared::data::client_data::ClientMonsterInfo,
+    },
     /// #279 NewNPCInfo：NPC 信息（C# S.NewNPCInfo）
-    NpcInfo { info: mir2_shared::data::client_data::ClientNPCInfo },
+    NpcInfo {
+        info: mir2_shared::data::client_data::ClientNPCInfo,
+    },
     /// #279 StoreItem：存入仓库回执（C# S.StoreItem）
-    ItemStored { from: i32, to: i32, success: bool },
+    ItemStored {
+        from: i32,
+        to: i32,
+        success: bool,
+    },
     /// #279 TakeBackItem：取出仓库回执（C# S.TakeBackItem）
-    ItemTakenBack { from: i32, to: i32, success: bool },
+    ItemTakenBack {
+        from: i32,
+        to: i32,
+        success: bool,
+    },
     /// #279 RemoveSlotItem：槽位物品移除回执（C# S.RemoveSlotItem）
     SlotItemRemoved {
         grid: mir2_shared::enums::MirGridType,
@@ -87,13 +135,20 @@ pub enum ServerEvent {
         success: bool,
     },
     /// #279 RetrieveTradeItem：交易取回回执（C# S.RetrieveTradeItem）
-    TradeItemRetrieved { from_slot: i32, success: bool },
+    TradeItemRetrieved {
+        from_slot: i32,
+        success: bool,
+    },
     /// #279 AllowObserve：允许观察（C# S.AllowObserve）
-    ObserveAllowed { allowed: bool },
+    ObserveAllowed {
+        allowed: bool,
+    },
     /// LogOutSuccess：登出成功，返回选角
     LogOutSuccess,
     /// ChangeAMode：攻击模式确认（C# S.ChangeAMode）
-    AttackModeChanged { mode: mir2_shared::enums::AttackMode },
+    AttackModeChanged {
+        mode: mir2_shared::enums::AttackMode,
+    },
     /// ManageHeroes：英雄列表（C# S.ManageHeroes）
     HeroManageReceived {
         heroes: Vec<mir2_shared::data::client_data::ClientHeroInformation>,
@@ -103,28 +158,53 @@ pub enum ServerEvent {
         max_count: i32,
     },
     /// NewHero：创建英雄结果（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success）
-    NewHeroResult { result: u8 },
+    NewHeroResult {
+        result: u8,
+    },
     /// SetHeroBehaviour：英雄行为确认（C# S.SetHeroBehaviour，值 0=攻击 1=反击 2=跟随 3=自定义）
-    HeroBehaviourSet { behaviour: u8 },
+    HeroBehaviourSet {
+        behaviour: u8,
+    },
     /// SetAutoPotValue：英雄自动药阈值（C# S.SetAutoPotValue；stat 12=HP 13=MP）
-    HeroAutoPotSet { stat: u8, value: u32 },
+    HeroAutoPotSet {
+        stat: u8,
+        value: u32,
+    },
     /// SetAutoPotItem：英雄自动药物品（C# S.SetAutoPotItem）
-    HeroAutoPotItemSet { grid: u8, item_index: i32 },
+    HeroAutoPotItemSet {
+        grid: u8,
+        item_index: i32,
+    },
     /// GainExperience：经验增量
-    ExperienceGained { amount: i64 },
+    ExperienceGained {
+        amount: i64,
+    },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）
-    LevelChanged { level: u16, exp: i64, max_exp: i64 },
+    LevelChanged {
+        level: u16,
+        exp: i64,
+        max_exp: i64,
+    },
     /// Chat / ObjectChat：聊天消息（颜色映射由消费端 chat.rs 负责）
     Chat {
         text: String,
         chat_type: mir2_shared::enums::ChatType,
     },
     /// NPCResponse：NPC 对话页（行 + 可见）
-    NpcDialog { lines: Vec<String>, visible: bool },
+    NpcDialog {
+        lines: Vec<String>,
+        visible: bool,
+    },
     /// MoveItem：背包内交换（仅 Inventory grid 成功响应）
-    InventoryMoved { from: usize, to: usize },
+    InventoryMoved {
+        from: usize,
+        to: usize,
+    },
     /// EquipItem：装备成功（背包→装备槽，旧装备放回背包）
-    ItemEquipped { unique_id: u64, to: usize },
+    ItemEquipped {
+        unique_id: u64,
+        to: usize,
+    },
     /// #2742：EquipSlotItem 响应（镶嵌/钓具坐骑槽）—— C# `S.EquipSlotItem` 处理器会解锁
     /// 来源格与目标格（`MirItemCell.Locked = false`），Bevy 据此解除 `InvLockReason::Socket`
     EquipSlotItemResult {
@@ -137,25 +217,49 @@ pub enum ServerEvent {
         unique_id: u64,
     },
     /// RemoveItem：卸下装备（装备槽→背包）
-    ItemRemoved { unique_id: u64 },
+    ItemRemoved {
+        unique_id: u64,
+    },
     /// UseItem：使用成功（背包计数减一/移除）
-    ItemUsed { unique_id: u64 },
+    ItemUsed {
+        unique_id: u64,
+    },
     /// #228 DuraChanged：物品持久度变化
-    ItemDuraChanged { unique_id: u64, current_dura: u16 },
+    ItemDuraChanged {
+        unique_id: u64,
+        current_dura: u16,
+    },
     /// #228 DeleteItem：物品删除/消耗
-    ItemDeleted { unique_id: u64 },
+    ItemDeleted {
+        unique_id: u64,
+    },
     /// #228 GainedItem：获得物品入包
-    ItemGained { item: InvItem },
+    ItemGained {
+        item: InvItem,
+    },
     /// #276 ResizeInventory：背包扩容（size = 新格数，C# S.ResizeInventory）
-    InventoryResized { size: usize },
+    InventoryResized {
+        size: usize,
+    },
     /// #230 MapEffect：地图范围特效
-    MapEffect { x: i32, y: i32, effect: u8 },
+    MapEffect {
+        x: i32,
+        y: i32,
+        effect: u8,
+    },
     /// #230 PlaySound：服务端指定音效
-    PlaySound { sound_id: u32 },
+    PlaySound {
+        sound_id: u32,
+    },
     /// #230 SetTimer：启动计时器（秒）
-    TimerSet { timer_id: i32, seconds: i32 },
+    TimerSet {
+        timer_id: i32,
+        seconds: i32,
+    },
     /// #230 ExpireTimer：计时器到期/关闭
-    TimerExpired { timer_id: i32 },
+    TimerExpired {
+        timer_id: i32,
+    },
     /// #232 MountUpdate：坐骑上/下马
     MountUpdated {
         object_id: u32,
@@ -164,10 +268,17 @@ pub enum ServerEvent {
     },
     /// #236 Poisoned/ObjectPoisoned：中毒状态
     /// #1550：InTrapRock：本地玩家陷阱岩石状态（C# User.InTrapRock：陷阱中不可走/跑）
-    TrapRockChanged { in_trap: bool },
-    ObjectPoisoned { object_id: u32, poisoned: bool },
+    TrapRockChanged {
+        in_trap: bool,
+    },
+    ObjectPoisoned {
+        object_id: u32,
+        poisoned: bool,
+    },
     /// #1616：本地玩家麻痹/冰冻毒变化（C# CheckInput：锁定移动/攻击/施法）
-    LocalPoisonChanged { paralysis: bool },
+    LocalPoisonChanged {
+        paralysis: bool,
+    },
     /// #240 ItemRepaired：修理结果（耐久/最大耐久更新）
     ItemRepaired {
         unique_id: u64,
@@ -175,77 +286,142 @@ pub enum ServerEvent {
         current_dura: u16,
     },
     /// #240 ItemSlotSizeChanged：镶嵌槽位数量变化
-    ItemSlotSizeChanged { unique_id: u64, slot_size: i32 },
+    ItemSlotSizeChanged {
+        unique_id: u64,
+        slot_size: i32,
+    },
     /// #242 SpellToggle：开关技能状态同步
     SpellToggled {
         spell: mir2_shared::enums::Spell,
         can_use: bool,
     },
     /// #248 NPCImageUpdate：NPC 形象变化
-    NpcImageUpdated { npc_id: u32, image: u16 },
+    NpcImageUpdated {
+        npc_id: u32,
+        image: u16,
+    },
     /// #248 GainedCredit：声望增加
-    CreditGained { credit: u32 },
+    CreditGained {
+        credit: u32,
+    },
     /// #248 LoseCredit：声望减少
-    CreditLost { amount: u32 },
+    CreditLost {
+        amount: u32,
+    },
     /// #250 SetCompass：罗盘目标方向
-    CompassTarget { x: i32, y: i32 },
+    CompassTarget {
+        x: i32,
+        y: i32,
+    },
     /// #254 SendMemberLocation：小队成员位置
-    MemberLocation { name: String, map_index: u16, x: i32, y: i32 },
+    MemberLocation {
+        name: String,
+        map_index: u16,
+        x: i32,
+        y: i32,
+    },
     /// #256 UpdateNotice：服务器公告（C# Notice: Title + Message）
-    NoticeUpdated { title: String, message: String },
+    NoticeUpdated {
+        title: String,
+        message: String,
+    },
     /// #258 ItemUpgraded：物品升级（替换背包物品）
-    ItemUpgraded { item: InvItem },
+    ItemUpgraded {
+        item: InvItem,
+    },
     /// #258 RemoveMagic：移除技能
-    MagicRemoved { spell: mir2_shared::enums::Spell },
+    MagicRemoved {
+        spell: mir2_shared::enums::Spell,
+    },
     /// #258/#2563 SendOutputMessage：顶部浮动系统消息（C# GameScene.cs:5621 只进
     /// OutputLines 浮动行不进聊天；message_type = OutputMessageType：3=Normal/4=Quest/5=Guild）
-    OutputMessage { message: String, message_type: u8 },
+    OutputMessage {
+        message: String,
+        message_type: u8,
+    },
     /// #260/#2535 NewQuestInfo：任务定义（全量目录，登录下发；入 QuestCatalog 而非任务日志）
     QuestInfo {
         info: mir2_shared::data::client_data::ClientQuestInfo,
     },
     /// #260 ShareQuest：共享任务
-    QuestShared { quest_id: i32 },
+    QuestShared {
+        quest_id: i32,
+    },
     /// #262/#2720 NewRecipeInfo：学会配方（C# S.NewRecipeInfo 整份 ClientRecipeInfo）
     RecipeLearned {
         recipe_id: i32,
         info: mir2_shared::data::client_data::ClientRecipeInfo,
     },
     /// #2720 精炼材料存入确认（C# S.DepositRefineItem：[from][to][success]）
-    RefineDeposited { from: i32, to: i32, success: bool },
+    RefineDeposited {
+        from: i32,
+        to: i32,
+        success: bool,
+    },
     /// #2720 精炼材料取回确认（C# S.RetrieveRefineItem：[from][to][success]）
-    RefineRetrieved { from: i32, to: i32, success: bool },
+    RefineRetrieved {
+        from: i32,
+        to: i32,
+        success: bool,
+    },
     /// #2720 精炼入口（C# GameScene.NPCRefine：`NPCDropDialog.PType=Refine` +
     /// `RefineDialog.Show()`；`refining=true` 表示精炼进行中 → 收起入口）
-    NpcRefinePanel { rate: f32, refining: bool },
+    NpcRefinePanel {
+        rate: f32,
+        refining: bool,
+    },
     /// #2720 精炼结果查看入口（C# GameScene.NPCCheckRefine）
     NpcCheckRefinePanel,
     /// #2720 精炼收取（C# GameScene.NPCCollectRefine：收起对话框）
     NpcCollectRefine,
     /// #2720 精炼开始确认（C# GameScene.RefineItem → `RefineDialog.RefineReset()`）
-    RefineStarted { unique_id: u64 },
+    RefineStarted {
+        unique_id: u64,
+    },
     /// #2720 精炼取消/重置（C# GameScene.RefineCancel → `RefineDialog.RefineReset()`）
-    RefineCancelled { unlock: bool },
+    RefineCancelled {
+        unlock: bool,
+    },
     /// #2720 已租出物品列表（C# `S.GetRentedItems` → `ItemRentalDialog.ReceiveRentedItems`）
     RentedItems {
         items: Vec<mir2_shared::packets::server::rental_system::RentalItemInfo>,
     },
     /// #262 PauseBuff：Buff 暂停
-    BuffPaused { buff_type: u8, object_id: u32, paused: bool },
+    BuffPaused {
+        buff_type: u8,
+        object_id: u32,
+        paused: bool,
+    },
     /// #264 ObjectName：对象改名
-    ObjectName { object_id: u32, name: String },
+    ObjectName {
+        object_id: u32,
+        name: String,
+    },
     /// #264 UserName：本地玩家改名
-    PlayerNameUpdated { name: String },
+    PlayerNameUpdated {
+        name: String,
+    },
     /// #268 BaseStatsInfo/HeroBaseStatsInfo：基础属性
-    BaseStats { stats: Vec<i32> },
+    BaseStats {
+        stats: Vec<i32>,
+    },
     /// #272 NPCRequestInput：NPC 请求输入
-    NpcInputRequest { npc_id: u32, page_name: String },
+    NpcInputRequest {
+        npc_id: u32,
+        page_name: String,
+    },
     /// #274 NewIntelligentCreature：获得新宠物
-    CreatureAcquired { creature_type: u8 },
+    CreatureAcquired {
+        creature_type: u8,
+    },
     /// #274 IntelligentCreatureEnableRename：可重命名
-    CreatureRenameEnabled { can_rename: bool },
+    CreatureRenameEnabled {
+        can_rename: bool,
+    },
     /// #274 IntelligentCreaturePickup：拾取模式
-    CreaturePickupToggled { enabled: bool },
+    CreaturePickupToggled {
+        enabled: bool,
+    },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,
@@ -257,13 +433,23 @@ pub enum ServerEvent {
         finished: bool,
     },
     /// AwakeningNeedMaterials：觉醒材料需求（item_id, count）
-    AwakeningMaterials { materials: Vec<(i32, i32)> },
+    AwakeningMaterials {
+        materials: Vec<(i32, i32)>,
+    },
     /// Awakening：觉醒结果
-    AwakeningResult { result: i32, result_text: String },
+    AwakeningResult {
+        result: i32,
+        result_text: String,
+    },
     /// UserStorage：仓库物品全量（服务端打开仓库时下发）
-    StorageOpened { items: Vec<Option<InvItem>>, visible: bool },
+    StorageOpened {
+        items: Vec<Option<InvItem>>,
+        visible: bool,
+    },
     /// GuildStatus（1 字节格式）：是否在行会；false 时消费端清空行会数据
-    GuildInGuild { in_guild: bool },
+    GuildInGuild {
+        in_guild: bool,
+    },
     /// #1362：行会职务名（3 个，C# 自定义职务名简化）
     GuildData {
         name: String,
@@ -275,19 +461,33 @@ pub enum ServerEvent {
         gold: u32,
     },
     /// GuildStorageList：行会仓库物品（unique_id, item_index, count, info_name）
-    GuildStorage { items: Vec<(u64, i32, u16, String)> },
+    GuildStorage {
+        items: Vec<(u64, i32, u16, String)>,
+    },
     /// GroupMembersMap：组队成员全量
-    GroupMembers { members: Vec<GroupMember> },
+    GroupMembers {
+        members: Vec<GroupMember>,
+    },
     /// GroupInvite：收到组队邀请
-    GroupInvite { inviter_name: String, inviter_id: u64 },
+    GroupInvite {
+        inviter_name: String,
+        inviter_id: u64,
+    },
     /// DeleteGroup：组队解散
     GroupDeleted,
     /// DeleteMember：成员离开
-    GroupMemberLeft { name: String },
+    GroupMemberLeft {
+        name: String,
+    },
     /// SwitchGroup：服务端同步“允许组队”开关（登录/切换时）
-    GroupAllowChanged { allow_group: bool },
+    GroupAllowChanged {
+        allow_group: bool,
+    },
     /// MentorRequest：收到拜师邀请
-    MentorInvite { name: String, level: u16 },
+    MentorInvite {
+        name: String,
+        level: u16,
+    },
     /// MentorUpdate：师徒信息更新
     MentorUpdate {
         name: String,
@@ -296,15 +496,26 @@ pub enum ServerEvent {
         mentee_exp: i64,
     },
     /// FriendUpdate：好友列表增量（列表或单个）
-    FriendUpdated { entries: Vec<FriendEntry> },
+    FriendUpdated {
+        entries: Vec<FriendEntry>,
+    },
     /// Rankings：排行榜
-    Rankings { entries: Vec<RankEntry>, my_rank: i32 },
+    Rankings {
+        entries: Vec<RankEntry>,
+        my_rank: i32,
+    },
     /// GuildNoticeChange：行会公告更新
-    GuildNotice { notice: Vec<String> },
+    GuildNotice {
+        notice: Vec<String>,
+    },
     /// ChangeQuest：任务进度更新（C# 语义：仅更新，移除由 CompleteQuest 负责）
-    QuestChanged { entry: QuestEntry },
+    QuestChanged {
+        entry: QuestEntry,
+    },
     /// CompleteQuest：任务完成（从日志移除）
-    QuestCompleted { id: i32 },
+    QuestCompleted {
+        id: i32,
+    },
     /// AddBuff：获得/刷新状态
     /// （#2791 单元④：wire 补 `ClientBuff` 渲染所需的 `paused`/`values`，剩余量改 ms）
     BuffAdded {
@@ -317,7 +528,9 @@ pub enum ServerEvent {
         values: Vec<i32>,
     },
     /// RemoveBuff：状态消失
-    BuffRemoved { tag: u8 },
+    BuffRemoved {
+        tag: u8,
+    },
     /// PlayerInspect：查看玩家
     InspectPlayer {
         name: String,
@@ -340,9 +553,13 @@ pub enum ServerEvent {
         pearl_count: i32,
     },
     /// ChangeHero：切换英雄
-    HeroChanged { index: u8 },
+    HeroChanged {
+        index: u8,
+    },
     /// MarriageRequest：求婚邀请
-    MarriageInvite { name: String },
+    MarriageInvite {
+        name: String,
+    },
     /// LoverUpdate：婚姻状态（#1329 全量：配偶名/结婚日期/地图/结婚天数）
     LoverUpdate {
         lover_name: String,
@@ -355,7 +572,10 @@ pub enum ServerEvent {
     /// ItemRentalRequest：租赁会话建立（C# `S.ItemRentalRequest{Name, Renting}`）
     /// `renting = false` → 本端物主（自有物品窗 + 对方费用窗）
     /// `renting = true`  → 本端租客（自有费用窗 + 对方物品窗）；`name` = 对方名
-    RentalRequest { renting: bool, name: String },
+    RentalRequest {
+        renting: bool,
+        name: String,
+    },
     /// UpdateRentalItem：租赁物品更新（C# `HasData` + `LoanItem` → 租客侧对方物品窗）
     RentalItemUpdate {
         item: Option<InvItem>,
@@ -363,13 +583,23 @@ pub enum ServerEvent {
         period: i32,
     },
     /// ItemRentalFee：对方（租客）设置的费用（物主侧对方费用窗）
-    RentalFee { fee: u32 },
+    RentalFee {
+        fee: u32,
+    },
     /// ItemRentalPeriod：对方（物主）设置的期限（租客侧对方物品窗）
-    RentalPeriod { period: i32 },
+    RentalPeriod {
+        period: i32,
+    },
     /// DepositRentalItem：存入租赁物品
-    RentalDeposit { uid: u64, success: bool },
+    RentalDeposit {
+        uid: u64,
+        success: bool,
+    },
     /// RetrieveRentalItem：取回租赁物品
-    RentalRetrieve { uid: u64, success: bool },
+    RentalRetrieve {
+        uid: u64,
+        success: bool,
+    },
     /// ItemRentalLock：本侧锁定（C# `Success/GoldLocked/ItemLocked`）
     RentalLocked {
         gold_locked: bool,
@@ -381,52 +611,100 @@ pub enum ServerEvent {
         item_locked: bool,
     },
     /// CanConfirmItemRental：可确认状态
-    RentalCanConfirm { can_confirm: bool },
+    RentalCanConfirm {
+        can_confirm: bool,
+    },
     /// ConfirmItemRental：确认结果
-    RentalConfirmed { success: bool },
+    RentalConfirmed {
+        success: bool,
+    },
     /// CancelItemRental：取消
     RentalCancelled,
     /// NPCMarket：市场页数
-    MarketPages { pages: usize },
+    MarketPages {
+        pages: usize,
+    },
     /// NPCMarketPage：市场列表（C# `ClientAuction` 形状，见 `MarketPageEntry`）
-    MarketListings { listings: Vec<MarketPageEntry> },
+    MarketListings {
+        listings: Vec<MarketPageEntry>,
+    },
     /// ConsignItem：寄售结果
-    MarketConsign { uid: u64, success: bool },
+    MarketConsign {
+        uid: u64,
+        success: bool,
+    },
     /// MarketSuccess：市场成功消息
-    MarketSuccess { message: String },
+    MarketSuccess {
+        message: String,
+    },
     /// MarketFail：市场失败
-    MarketFail { reason: u8 },
+    MarketFail {
+        reason: u8,
+    },
     /// GameShopInfo：商城目录（见 [`ShopCatalogItem`]）
     ShopCatalog {
         items: Vec<ShopCatalogItem>,
         gold: u32,
     },
     /// GameShopStock：商品库存更新
-    ShopStock { item_id: i32, stock: i32 },
+    ShopStock {
+        item_id: i32,
+        stock: i32,
+    },
     /// GuildTerritoryPage：领地列表
-    TerritoryList { rows: Vec<TerritoryRow> },
+    TerritoryList {
+        rows: Vec<TerritoryRow>,
+    },
     /// GuildRequestWar：宣战确认
-    TerritoryWar { guild_name: String },
+    TerritoryWar {
+        guild_name: String,
+    },
     /// TradeGold：对方交易金币
-    TradeGold { amount: u64 },
+    TradeGold {
+        amount: u64,
+    },
     /// TradeCancel：交易关闭/取消
     TradeCancelled,
     /// FishingUpdate：钓鱼进度
-    FishingUpdate { progress: i32, success: bool },
+    FishingUpdate {
+        progress: i32,
+        success: bool,
+    },
     /// ReceiveMail：邮件（列表条目 + 可选详情）
-    MailReceived { entry: MailEntry, detail: Option<MailDetail> },
+    MailReceived {
+        entry: MailEntry,
+        detail: Option<MailDetail>,
+    },
     /// ParcelCollected：收取邮件附件结果（C# sbyte：-1=无 0=已全部收取 1=成功）
-    ParcelCollected { result: i8 },
+    ParcelCollected {
+        result: i8,
+    },
     /// #2538 MailCost：邮资查询结果（写信面板邮资显示，C# ParcelCostLabel）
-    MailCost { cost: u32 },
+    MailCost {
+        cost: u32,
+    },
     /// TradeRequest：交易请求/打开（状态机由消费端根据自身状态应用）
-    TradeRequested { name: String },
+    TradeRequested {
+        name: String,
+    },
     /// TradeConfirm：锁定状态（a=发起者）
-    TradeConfirm { a_locked: bool, b_locked: bool },
+    TradeConfirm {
+        a_locked: bool,
+        b_locked: bool,
+    },
     /// TradeItem：对方物品更新
-    TradeItemUpdate { uid: u64, grid: usize, count: u16, is_add: bool },
+    TradeItemUpdate {
+        uid: u64,
+        grid: usize,
+        count: u16,
+        is_add: bool,
+    },
     /// DepositTradeItem：放入交易槽结果
-    TradeDeposit { from: i32, to: i32, success: bool },
+    TradeDeposit {
+        from: i32,
+        to: i32,
+        success: bool,
+    },
     /// GuildMemberChange：行会成员变化（加入/离开/更新）
     GuildMemberChanged {
         name: String,
@@ -436,7 +714,9 @@ pub enum ServerEvent {
         removed: bool,
     },
     /// GuildInvite：收到行会邀请
-    GuildInvited { name: String },
+    GuildInvited {
+        name: String,
+    },
     /// #2537 GuildBuffList：行会技能（激活列表 + Buff 定义目录）
     GuildBuffList {
         active: Vec<i32>,
@@ -445,7 +725,9 @@ pub enum ServerEvent {
     /// Rankings 解析失败：清空排行
     RankingsCleared,
     /// MapChanged：天气更新
-    WeatherChanged { code: u16 },
+    WeatherChanged {
+        code: u16,
+    },
     /// NewMapInfo：地图信息（大地图）
     MapInfo {
         map_index: i32,
@@ -465,9 +747,13 @@ pub enum ServerEvent {
     /// Revived：本地玩家复活
     PlayerRevived,
     /// #226 ObjectHide：对象隐藏（隐身等）
-    ObjectHidden { object_id: u32 },
+    ObjectHidden {
+        object_id: u32,
+    },
     /// #226 ObjectShow：对象显形
-    ObjectShown { object_id: u32 },
+    ObjectShown {
+        object_id: u32,
+    },
     /// #226/#1354 ObjectSitDown：对象坐下/起身（sitting=true 坐下，false 起身）
     ObjectSitDown {
         object_id: u32,
@@ -482,21 +768,45 @@ pub enum ServerEvent {
         direction: u8,
     },
     /// #226 ObjectTeleportOut：对象传送消失（Rust 扩展带旧位置）
-    ObjectTeleportOut { object_id: u32, location_x: u32, location_y: u32 },
+    ObjectTeleportOut {
+        object_id: u32,
+        location_x: u32,
+        location_y: u32,
+    },
     /// #226 ObjectTeleportIn：对象传送出现（Rust 扩展带新位置）
-    ObjectTeleportIn { object_id: u32, location_x: u32, location_y: u32 },
+    ObjectTeleportIn {
+        object_id: u32,
+        location_x: u32,
+        location_y: u32,
+    },
     /// NewMagic：学会技能
-    MagicLearned { magic: ClientMagic },
+    MagicLearned {
+        magic: ClientMagic,
+    },
     /// NewMagic(hero=true)：英雄学会技能（#1128）
-    HeroMagicLearned { magic: ClientMagic },
+    HeroMagicLearned {
+        magic: ClientMagic,
+    },
     /// HeroHealthChanged：英雄 HP/MP 实时同步（#1135，C# S.HeroHealthChanged）
-    HeroHealthChanged { hp: u32, mp: u32 },
+    HeroHealthChanged {
+        hp: u32,
+        mp: u32,
+    },
     /// GainHeroExperience：英雄经验增加（#1135，C# S.GainHeroExperience）
-    GainHeroExperience { amount: u32 },
+    GainHeroExperience {
+        amount: u32,
+    },
     /// HeroLevelChanged：英雄升级（#1135，C# S.HeroLevelChanged）
-    HeroLevelChanged { level: u16, exp: i64, max_exp: i64 },
+    HeroLevelChanged {
+        level: u16,
+        exp: i64,
+        max_exp: i64,
+    },
     /// #1376：技能冷却（S.MagicDelay）
-    MagicCooldown { spell: mir2_shared::enums::Spell, delay_ms: i64 },
+    MagicCooldown {
+        spell: mir2_shared::enums::Spell,
+        delay_ms: i64,
+    },
 
     /// MagicLeveled：技能升级（C# S.MagicLeveled）
     MagicLeveled {
@@ -506,13 +816,26 @@ pub enum ServerEvent {
         experience: u16,
     },
     /// CraftItem：合成结果
-    CraftResult { recipe_id: u32, count: u16, success: bool },
+    CraftResult {
+        recipe_id: u32,
+        count: u16,
+        success: bool,
+    },
     /// NPCGoods：商品对话框（Buy/BuySub/Craft 等；Craft → 联动合成对话框）
-    NpcGoods { goods: Vec<GoodsEntry>, rate: f32, panel: mir2_shared::enums::PanelType },
+    NpcGoods {
+        goods: Vec<GoodsEntry>,
+        rate: f32,
+        panel: mir2_shared::enums::PanelType,
+    },
     /// #珍珠商店：NPC 珍珠商品（S.NPCPearlGoods → 商品对话框珍珠模式）
-    PearlShop { goods: Vec<GoodsEntry>, rate: f32 },
+    PearlShop {
+        goods: Vec<GoodsEntry>,
+        rate: f32,
+    },
     /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板
-    NpcSellPanel { panel_type: mir2_shared::enums::PanelType },
+    NpcSellPanel {
+        panel_type: mir2_shared::enums::PanelType,
+    },
     /// UserInformation：进图初始化同步（HUD/技能/背包/装备/物品名缓存）
     UserInformation {
         name: String,
@@ -559,12 +882,19 @@ pub enum ServerEvent {
         poison_atk: i32,
     },
     /// GainedQuestItem：任务物品进入任务格（C# S.GainedQuestItem）
-    QuestItemGained { item: InvItem },
+    QuestItemGained {
+        item: InvItem,
+    },
     /// DeleteQuestItem：任务物品移除（C# S.DeleteQuestItem UniqueID+Count）
-    QuestItemDeleted { unique_id: u64, count: u16 },
+    QuestItemDeleted {
+        unique_id: u64,
+        count: u16,
+    },
 
     /// #1356：NPC 觉醒面板打开（0=觉醒 1=分解 2=降级 3=重置；C# S.NPCAwakening 等）
-    NpcAwakePanel { service: u8 },
+    NpcAwakePanel {
+        service: u8,
+    },
 
     /// HeroInformation：英雄完整信息（C# S.HeroInformation : UserInformation + autopot，#203）
     HeroInformation {
@@ -632,7 +962,6 @@ use crate::game::dialogs::mail::{MailDetail, MailEntry};
 
 use crate::game::dialogs::guild_territory::TerritoryRow;
 
-
 use crate::game::dialogs::buff::BuffEntry;
 use crate::game::dialogs::creature::CreatureEntry;
 use crate::game::dialogs::inspect::InspectItem;
@@ -651,7 +980,10 @@ pub mod from_packet {
     use super::*;
 
     pub fn health_changed(p: &combat::HealthChanged) -> ServerEvent {
-        ServerEvent::HealthChanged { hp: p.hp as i32, mp: p.mp as i32 }
+        ServerEvent::HealthChanged {
+            hp: p.hp as i32,
+            mp: p.mp as i32,
+        }
     }
     pub fn gold_gained(p: &drops::GainedGold) -> ServerEvent {
         ServerEvent::GoldGained { gold: p.gold }
@@ -660,7 +992,9 @@ pub mod from_packet {
         ServerEvent::GoldLost { amount: p.gold }
     }
     pub fn experience_gained(p: &experience::GainExperience) -> ServerEvent {
-        ServerEvent::ExperienceGained { amount: p.amount as i64 }
+        ServerEvent::ExperienceGained {
+            amount: p.amount as i64,
+        }
     }
     pub fn level_changed(p: &experience::LevelChanged) -> ServerEvent {
         ServerEvent::LevelChanged {
@@ -670,24 +1004,43 @@ pub mod from_packet {
         }
     }
     pub fn chat(p: &chat::Chat) -> ServerEvent {
-        ServerEvent::Chat { text: p.message.clone(), chat_type: p.chat_type }
+        ServerEvent::Chat {
+            text: p.message.clone(),
+            chat_type: p.chat_type,
+        }
     }
     pub fn object_chat(p: &chat::ObjectChat) -> ServerEvent {
-        ServerEvent::Chat { text: p.text.clone(), chat_type: p.chat_type }
+        ServerEvent::Chat {
+            text: p.text.clone(),
+            chat_type: p.chat_type,
+        }
     }
     pub fn npc_dialog(p: &npc_interaction::NPCResponse) -> ServerEvent {
-        ServerEvent::NpcDialog { lines: p.page.clone(), visible: true }
+        ServerEvent::NpcDialog {
+            lines: p.page.clone(),
+            visible: true,
+        }
     }
     pub fn move_item(p: &item_operations::MoveItem) -> ServerEvent {
-        ServerEvent::InventoryMoved { from: p.from as usize, to: p.to as usize }
+        ServerEvent::InventoryMoved {
+            from: p.from as usize,
+            to: p.to as usize,
+        }
     }
     pub fn equip_item(p: &item_operations::EquipItem) -> ServerEvent {
-        ServerEvent::ItemEquipped { unique_id: p.unique_id as u64, to: p.to as usize }
+        ServerEvent::ItemEquipped {
+            unique_id: p.unique_id as u64,
+            to: p.to as usize,
+        }
     }
     pub fn remove_item(p: &item_operations::RemoveItem) -> ServerEvent {
-        ServerEvent::ItemRemoved { unique_id: p.unique_id as u64 }
+        ServerEvent::ItemRemoved {
+            unique_id: p.unique_id as u64,
+        }
     }
     pub fn use_item(p: &item_operations::UseItem) -> ServerEvent {
-        ServerEvent::ItemUsed { unique_id: p.unique_id as u64 }
+        ServerEvent::ItemUsed {
+            unique_id: p.unique_id as u64,
+        }
     }
 }

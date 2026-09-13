@@ -110,9 +110,10 @@ fn spawn_item_rental_browse(
     };
     let (px, py) = crate::game::dialogs::center_origin(PANEL_W, PANEL_H);
     let panel = spawn_panel(&mut commands, bg, px, py, PANEL_W, PANEL_H, 30);
-    commands
-        .entity(panel)
-        .insert((DialogRoot(DialogKind::ItemRentalBrowse), ItemRentalBrowseWidget));
+    commands.entity(panel).insert((
+        DialogRoot(DialogKind::ItemRentalBrowse),
+        ItemRentalBrowseWidget,
+    ));
 
     commands.entity(panel).with_children(|p| {
         // 标题 Prguse3[0]（52x18）+ 两个页签（C# 两页签 Enabled=false，仅作当前页标识）
@@ -147,18 +148,8 @@ fn spawn_item_rental_browse(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 5),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 6),
         ) {
-            spawn_icon_button(
-                p,
-                n,
-                h,
-                pr,
-                RENT_BTN_POS.0,
-                RENT_BTN_POS.1,
-                85.0,
-                29.0,
-                10,
-            )
-            .insert(ItemRentalRentBtn);
+            spawn_icon_button(p, n, h, pr, RENT_BTN_POS.0, RENT_BTN_POS.1, 85.0, 29.0, 10)
+                .insert(ItemRentalRentBtn);
         }
         // 关闭 Prguse2[360..362]（24x21）@(375,3)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -174,7 +165,7 @@ fn spawn_item_rental_browse(
             let y = ROW_Y0 + row as f32 * ROW_DY;
             for col in 0..3usize {
                 spawn_label(p, &cjk, "", ROW_COL_X[col], y, 12.0, Color::WHITE, 9)
-                .insert(ItemRentalRowLabel(row, col));
+                    .insert(ItemRentalRowLabel(row, col));
             }
         }
     });
@@ -217,7 +208,11 @@ fn rental_browse_ui_system(
     }
     let open = mgr.is_open(DialogKind::ItemRentalBrowse);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // C# `Toggle()`：打开时 `RequestRentedItems()`（60s 节流）→ `C.GetRentedItems`
     if open && !*was_open {

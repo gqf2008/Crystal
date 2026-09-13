@@ -15,8 +15,8 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
+use bevy::render::RenderPlugin;
 use client_bevy::actor::ActorPlugin;
 use client_bevy::control::ControlPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;

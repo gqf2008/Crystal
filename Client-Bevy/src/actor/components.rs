@@ -2,9 +2,9 @@
 // actor 模块拆分（#72）
 // ============================================================================
 
+use crate::resources::libraries::ArrayLibType;
 use bevy::prelude::*;
 use mir2_shared::{MirAction, MirClass, MirGender};
-use crate::resources::libraries::ArrayLibType;
 use std::collections::HashMap;
 
 #[derive(Component, Default)]

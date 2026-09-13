@@ -1,7 +1,7 @@
 //! auto::world 自动化验证系统（从 auto.rs 拆分，#1146）
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 /// --fishing-test：打开钓鱼 → 抛竿 → 等 FishingUpdate → 等收获聊天消息
 #[allow(clippy::too_many_arguments)]
@@ -58,7 +58,9 @@ pub(crate) fn auto_fishing_test(
                 .rev()
                 .take(30)
                 .find(|(text, _, _, _)| {
-                    text.contains("钓到了") || text.contains("鱼跑了") || text.contains("需要装备鱼竿")
+                    text.contains("钓到了")
+                        || text.contains("鱼跑了")
+                        || text.contains("需要装备鱼竿")
                 })
                 .map(|(text, _, _, _)| text.clone());
             match hit {
@@ -226,10 +228,7 @@ pub(crate) fn auto_buff_test(
             if *t < 4.0 {
                 return;
             }
-            tracing::info!(
-                "[BUFFTEST] ✅ 完成（当前 {} 个状态）",
-                buff.buffs.len()
-            );
+            tracing::info!("[BUFFTEST] ✅ 完成（当前 {} 个状态）", buff.buffs.len());
             *stage = 9;
         }
         _ => {}
@@ -253,7 +252,11 @@ pub(crate) fn auto_report_test(
     }
     *t += time.delta_secs();
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _, _, _)| t.contains(needle))
+        chat.lines
+            .iter()
+            .rev()
+            .take(60)
+            .any(|(t, _, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -436,14 +439,21 @@ pub(crate) fn auto_hero_test(
         }
         1 => {
             if *t >= 8.0 {
-                tracing::warn!("[HEROTEST] ❌ 未收到 ChangeHero（index={}）", hero.hero_index);
+                tracing::warn!(
+                    "[HEROTEST] ❌ 未收到 ChangeHero（index={}）",
+                    hero.hero_index
+                );
                 *stage = 9;
                 return;
             }
             if hero.hero_index == 1 {
                 tracing::info!("[HEROTEST] ✅ 英雄切换成功: {}", hero.message);
                 // #206：英雄背包 布衣(槽1) 双击装备 → 装备槽 1
-                let uid = hero.inventory.get(1).and_then(|s| s.as_ref()).map(|i| i.unique_id);
+                let uid = hero
+                    .inventory
+                    .get(1)
+                    .and_then(|s| s.as_ref())
+                    .map(|i| i.unique_id);
                 match uid {
                     Some(uid) => {
                         net.send_packet(&mir2_shared::packets::client::item::EquipItem {
@@ -471,7 +481,13 @@ pub(crate) fn auto_hero_test(
                 return;
             }
             if hero.equipment.get(1).and_then(|s| s.as_ref()).is_some() {
-                tracing::info!("[HEROTEST] ✅ 英雄装备成功: {:?}", hero.equipment.get(1).and_then(|s| s.as_ref()).map(|i| i.name.clone()));
+                tracing::info!(
+                    "[HEROTEST] ✅ 英雄装备成功: {:?}",
+                    hero.equipment
+                        .get(1)
+                        .and_then(|s| s.as_ref())
+                        .map(|i| i.name.clone())
+                );
                 let uid = hero.equipment[1].as_ref().unwrap().unique_id;
                 net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
                     grid: mir2_shared::enums::MirGridType::HeroEquipment,
@@ -499,7 +515,9 @@ pub(crate) fn auto_hero_test(
                     .map(|i| i.unique_id);
                 match book_uid {
                     Some(uid) => {
-                        net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
+                        net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                            unique_id: uid,
+                        });
                         tracing::info!("[HEROTEST] 英雄使用技能书 uid={}", uid);
                         *stage = 5;
                         *t = 0.0;
@@ -519,12 +537,27 @@ pub(crate) fn auto_hero_test(
                 *stage = 9;
                 return;
             }
-            if hero.magics.iter().any(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall) {
-                tracing::info!("[HEROTEST] ✅ 英雄学会 GreatFireBall（{} 个技能）", hero.magics.len());
+            if hero
+                .magics
+                .iter()
+                .any(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall)
+            {
+                tracing::info!(
+                    "[HEROTEST] ✅ 英雄学会 GreatFireBall（{} 个技能）",
+                    hero.magics.len()
+                );
                 // #220：等待 MagicLeveled 升级路由到英雄技能面板
-                let lv = hero.magics.iter().find(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall).map(|m| m.level).unwrap_or(0);
+                let lv = hero
+                    .magics
+                    .iter()
+                    .find(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall)
+                    .map(|m| m.level)
+                    .unwrap_or(0);
                 if lv >= 1 {
-                    tracing::info!("[HEROTEST] ✅ 英雄技能升级 Lv.{}（MagicLeveled 路由成功）", lv);
+                    tracing::info!(
+                        "[HEROTEST] ✅ 英雄技能升级 Lv.{}（MagicLeveled 路由成功）",
+                        lv
+                    );
                     net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
                     tracing::info!("[HEROTEST] 切回主角色");
                     *stage = 2;
@@ -597,12 +630,20 @@ pub(crate) fn auto_hero_exp_test(
         2 => {
             // 英雄击杀怪物 → 主人得经验 → 英雄分得经验（GainHeroExperience → HeroState.hero_exp）
             if *t >= 40.0 {
-                tracing::warn!("[HEROEXP] ❌ 经验未增长（initial={} now={}）", *initial_exp, hero.hero_exp);
+                tracing::warn!(
+                    "[HEROEXP] ❌ 经验未增长（initial={} now={}）",
+                    *initial_exp,
+                    hero.hero_exp
+                );
                 *stage = 9;
                 return;
             }
             if hero.hero_exp > *initial_exp {
-                tracing::info!("[HEROEXP] ✅ 英雄经验增长: {} -> {}", *initial_exp, hero.hero_exp);
+                tracing::info!(
+                    "[HEROEXP] ✅ 英雄经验增长: {} -> {}",
+                    *initial_exp,
+                    hero.hero_exp
+                );
                 net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
                 *stage = 3;
                 *t = 0.0;
@@ -669,12 +710,20 @@ pub(crate) fn auto_hero_battle_test(
         2 => {
             // 等待 HP 下降（收到 HeroHealthChanged → HeroState.hero_hp 更新）
             if *t >= 30.0 {
-                tracing::warn!("[HEROBATTLE] ❌ HP 未下降（initial={} now={}）", *initial_hp, hero.hero_hp);
+                tracing::warn!(
+                    "[HEROBATTLE] ❌ HP 未下降（initial={} now={}）",
+                    *initial_hp,
+                    hero.hero_hp
+                );
                 *stage = 9;
                 return;
             }
             if hero.hero_hp < *initial_hp {
-                tracing::info!("[HEROBATTLE] ✅ 英雄 HP 实时同步: {} -> {}", *initial_hp, hero.hero_hp);
+                tracing::info!(
+                    "[HEROBATTLE] ✅ 英雄 HP 实时同步: {} -> {}",
+                    *initial_hp,
+                    hero.hero_hp
+                );
                 net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
                 *stage = 3;
                 *t = 0.0;
@@ -708,8 +757,8 @@ pub(crate) fn auto_mount_test(
     mut phase: Local<f32>,
     mut rode: Local<bool>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     use mir2_shared::packets::client::chat::Chat;
     if *state != AppState::Game {
         return;
@@ -951,7 +1000,10 @@ pub(crate) fn auto_reincarnation_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     // #2633 批次4 步4：dead/reincarnation_offered 读改 StatusFlags（本系统不再用 HudState）；实体缺失视同未死亡/无 offer
-    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
+    flags: Query<
+        &client_bevy::game::player_state::StatusFlags,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -1299,7 +1351,11 @@ pub(crate) fn auto_map_fx_test(
                 if delta >= 1 && timer_on {
                     tracing::info!("[MAPFX] ✅ 地图特效/计时器启动通过");
                 } else {
-                    tracing::warn!("[MAPFX] ❌ 启动未通过（特效={} 计时器={}）", delta, timer_on);
+                    tracing::warn!(
+                        "[MAPFX] ❌ 启动未通过（特效={} 计时器={}）",
+                        delta,
+                        timer_on
+                    );
                 }
                 *stage = 3;
                 *t = 0.0;
@@ -1313,7 +1369,10 @@ pub(crate) fn auto_map_fx_test(
                 if expired {
                     tracing::info!("[MAPFX] ✅ 计时器关闭通过");
                 } else {
-                    tracing::warn!("[MAPFX] ❌ 计时器未关闭（remaining={:.1}）", timer.remaining);
+                    tracing::warn!(
+                        "[MAPFX] ❌ 计时器未关闭（remaining={:.1}）",
+                        timer.remaining
+                    );
                 }
                 *stage = 9;
             }
@@ -1425,9 +1484,7 @@ pub(crate) fn auto_mount_sync_test(
         3 => {
             // mock t+4s 发 MountUpdate(下马)
             if *t >= 6.0 {
-                let mounted = mounts
-                    .iter()
-                    .any(|(id, m)| id.0 == 100 && m.is_some());
+                let mounted = mounts.iter().any(|(id, m)| id.0 == 100 && m.is_some());
                 let dismounted = !mounted;
                 tracing::info!("[MOUNT] 阶段3: 已下马={}", dismounted);
                 if dismounted {
@@ -1450,7 +1507,10 @@ pub(crate) fn auto_npc_credit_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    credit_q: Query<&client_bevy::game::player_state::Credit, With<client_bevy::actor::LocalPlayer>>,
+    credit_q: Query<
+        &client_bevy::game::player_state::Credit,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcAppearance,
@@ -2021,7 +2081,10 @@ pub(crate) fn auto_misc2_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    base_stats_q: Query<&client_bevy::game::player_state::BaseStats, With<client_bevy::actor::LocalPlayer>>,
+    base_stats_q: Query<
+        &client_bevy::game::player_state::BaseStats,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
@@ -2478,7 +2541,10 @@ pub(crate) fn auto_level_fx_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    prog_q: Query<&client_bevy::game::player_state::Progression, With<client_bevy::actor::LocalPlayer>>,
+    prog_q: Query<
+        &client_bevy::game::player_state::Progression,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut hits: Local<u32>,
@@ -2637,5 +2703,3 @@ pub(crate) fn auto_session_feedback_test(
         _ => {}
     }
 }
-
-

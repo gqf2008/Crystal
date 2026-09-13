@@ -5,6 +5,7 @@
 // mock 回包（codec 外帧编码）。仅实现里程碑所需的最小闭环。
 // 从 mock.rs 拆分（#1147）：spawn_mock 主循环在 mod.rs，包结构体/发送器/状态按域模块化。
 
+use crate::network::codec;
 use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::data::client_data::{ClientMagic, ClientQuestProgress, SelectInfo};
 use mir2_shared::data::item::ItemInfo;
@@ -12,11 +13,10 @@ use mir2_shared::enums::{
     ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
     MirGender, PoisonType, Spell, SpellEffect, Stat,
 };
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
-use crate::network::codec;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // #2757：`pub(crate)` 以便 `handle_progress` 的测试直接解码 mock 包（校验 mock 与解析器同一 wire）
 pub(crate) mod packets;
@@ -3554,7 +3554,12 @@ mod roundtrip_tests {
         let mut cur = Cursor::new(&buf);
         let read = mir2_shared::data::item::UserItem::read_from_with_info(&mut cur).unwrap();
         let info = read.info.as_ref().expect("info");
-        assert_eq!(info.item_type, item.info.as_ref().unwrap().item_type, "item_type mismatch for index {}", index);
+        assert_eq!(
+            info.item_type,
+            item.info.as_ref().unwrap().item_type,
+            "item_type mismatch for index {}",
+            index
+        );
     }
 
     #[test]
@@ -3567,7 +3572,7 @@ mod roundtrip_tests {
 
     #[test]
     fn test_user_information_roundtrip_with_inventory() {
-        use mir2_shared::enums::{MirClass, MirGender, MirDirection, HeroBehaviour, LevelEffects};
+        use mir2_shared::enums::{HeroBehaviour, LevelEffects, MirClass, MirDirection, MirGender};
         let info = server::user::UserInformation {
             object_id: 100,
             real_id: 100,
@@ -3643,4 +3648,3 @@ mod roundtrip_tests {
         assert!(inv[1].is_some(), "slot1 should have item");
     }
 }
-

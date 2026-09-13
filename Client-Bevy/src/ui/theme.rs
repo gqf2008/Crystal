@@ -82,9 +82,7 @@ pub fn load_lib_image(
 }
 
 /// 图按钮交互系统：根据 Interaction 切换三帧
-pub fn image_button_system(
-    mut q: Query<(&Interaction, &ImageButton, &mut ImageNode)>,
-) {
+pub fn image_button_system(mut q: Query<(&Interaction, &ImageButton, &mut ImageNode)>) {
     for (interaction, btn, mut node) in &mut q {
         let target = match interaction {
             Interaction::Pressed => &btn.pressed,
@@ -221,7 +219,11 @@ pub fn spawn_icon_button<'a>(
         Button,
         abs_node(x, y, Some(w), Some(h)),
         ImageNode::new(normal.clone()),
-        ImageButton { normal, hover, pressed },
+        ImageButton {
+            normal,
+            hover,
+            pressed,
+        },
         ZIndex(z),
     ))
 }
@@ -498,8 +500,8 @@ pub fn dropdown_ui_system(
             );
             if cursor.x >= px && cursor.x <= px + pw && cursor.y >= py && cursor.y <= py + ph {
                 let max = dd.items.len().saturating_sub(dd.popup_rows);
-                dd.scroll = (dd.scroll as i32 + scroll_y.round() as i32)
-                    .clamp(0, max as i32) as usize;
+                dd.scroll =
+                    (dd.scroll as i32 + scroll_y.round() as i32).clamp(0, max as i32) as usize;
                 break;
             }
         }
@@ -517,10 +519,8 @@ pub fn dropdown_ui_system(
                 dd.popup_w,
                 dd.row_h * dd.popup_rows as f32,
             );
-            let in_popup = cursor.x >= px
-                && cursor.x <= px + pw
-                && cursor.y >= py
-                && cursor.y <= py + ph;
+            let in_popup =
+                cursor.x >= px && cursor.x <= px + pw && cursor.y >= py && cursor.y <= py + ph;
             if in_popup {
                 for (i, ent) in dd.option_rows.iter().enumerate() {
                     if let Ok(inter) = options.get(*ent) {
@@ -538,10 +538,8 @@ pub fn dropdown_ui_system(
             } else {
                 // 点不在面板内：若也不在闭合框内则关闭（闭合框内由第 1 步切换）
                 let (bx, by, bw, bh) = dd.box_rect;
-                let in_box = cursor.x >= bx
-                    && cursor.x <= bx + bw
-                    && cursor.y >= by
-                    && cursor.y <= by + bh;
+                let in_box =
+                    cursor.x >= bx && cursor.x <= bx + bw && cursor.y >= by && cursor.y <= by + bh;
                 if !in_box {
                     dd.open = false;
                 }
@@ -562,7 +560,11 @@ pub fn dropdown_ui_system(
             }
         }
         if let Ok(mut v) = popups.get_mut(dd.popup) {
-            *v = if dd.open { Visibility::Visible } else { Visibility::Hidden };
+            *v = if dd.open {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
         }
         if dd.open {
             for (i, ent) in dd.option_texts.iter().enumerate() {
@@ -723,7 +725,11 @@ pub fn spawn_item_cell_ui<'a>(
     z: i32,
     slot: usize,
 ) -> EntityCommands<'a> {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let mut cmds = parent.spawn((
         abs_node(x, y, Some(w), Some(h)),
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.18)),
@@ -732,36 +738,36 @@ pub fn spawn_item_cell_ui<'a>(
         ZIndex(z),
     ));
     cmds.with_children(|p| {
-            // 物品图标（白图占位，系统换物品图）
-            p.spawn((
-                abs_node(2.0, 2.0, Some(w - 4.0), Some(h - 4.0)),
-                ImageNode::new(white.clone()),
-                UiItemCellIcon(slot),
-                Visibility::Hidden,
-                ZIndex(z + 1),
-            ));
-            // 堆叠数量（右下角）
-            p.spawn((
-                abs_node(w - 16.0, h - 13.0, None, None),
-                Text::new(String::new()),
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(10.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 1.0, 0.6)),
-                UiItemCellCount(slot),
-                Visibility::Hidden,
-                ZIndex(z + 2),
-            ));
-            // 耐久条（C# MirItemCell DrawDurability：红色随耐久缩短）
-            p.spawn((
-                abs_node(2.0, h - 4.0, Some(w - 4.0), Some(2.0)),
-                BackgroundColor(Color::srgb(1.0, 0.2, 0.2)),
-                UiItemCellDura(slot, w - 4.0),
-                Visibility::Hidden,
-                ZIndex(z + 3),
-            ));
+        // 物品图标（白图占位，系统换物品图）
+        p.spawn((
+            abs_node(2.0, 2.0, Some(w - 4.0), Some(h - 4.0)),
+            ImageNode::new(white.clone()),
+            UiItemCellIcon(slot),
+            Visibility::Hidden,
+            ZIndex(z + 1),
+        ));
+        // 堆叠数量（右下角）
+        p.spawn((
+            abs_node(w - 16.0, h - 13.0, None, None),
+            Text::new(String::new()),
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(10.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 0.6)),
+            UiItemCellCount(slot),
+            Visibility::Hidden,
+            ZIndex(z + 2),
+        ));
+        // 耐久条（C# MirItemCell DrawDurability：红色随耐久缩短）
+        p.spawn((
+            abs_node(2.0, h - 4.0, Some(w - 4.0), Some(2.0)),
+            BackgroundColor(Color::srgb(1.0, 0.2, 0.2)),
+            UiItemCellDura(slot, w - 4.0),
+            Visibility::Hidden,
+            ZIndex(z + 3),
+        ));
     });
     cmds
 }
@@ -800,7 +806,11 @@ pub fn item_cell_ui_system(
         let show = data
             .and_then(|d| d.icon.as_ref())
             .is_some_and(|h| h.is_strong());
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (child_of, mut text, mut vis, _count) in &mut counts {
         let data = cells.get(child_of.parent()).ok();
@@ -813,7 +823,11 @@ pub fn item_cell_ui_system(
         if text.0 != s {
             text.0 = s;
         }
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (child_of, mut node, mut vis, dura) in &mut duras {
         let data = cells.get(child_of.parent()).ok();
@@ -998,7 +1012,12 @@ pub fn spawn_scroll_bar_ui(
     // 轨道（半透明深色）
     let track = parent
         .spawn((
-            abs_node(track_rel.0, track_rel.1, Some(track_rel.2), Some(track_rel.3)),
+            abs_node(
+                track_rel.0,
+                track_rel.1,
+                Some(track_rel.2),
+                Some(track_rel.3),
+            ),
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
             ZIndex(z),
         ))
@@ -1049,10 +1068,7 @@ pub fn scroll_list_ui_system(
     }
 
     // 找某列表的子滑块（UiScrollThumb 且 parent == 列表实体）
-    fn list_thumb(
-        e: Entity,
-        thumbs: &Query<(&ChildOf, &UiScrollThumb)>,
-    ) -> Option<Entity> {
+    fn list_thumb(e: Entity, thumbs: &Query<(&ChildOf, &UiScrollThumb)>) -> Option<Entity> {
         thumbs
             .iter()
             .find(|(co, _)| co.parent() == e)
@@ -1070,7 +1086,11 @@ pub fn scroll_list_ui_system(
             let (tx, ty, tw, th) = list.track_rel;
             let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
             let max_off = list.max_offset();
-            let ratio = if max_off == 0 { 0.0 } else { list.offset as f32 / max_off as f32 };
+            let ratio = if max_off == 0 {
+                0.0
+            } else {
+                list.offset as f32 / max_off as f32
+            };
             let thumb_y = oy + ty + ratio * (th - thumb_h);
             if cursor.x >= ox + tx
                 && cursor.x <= ox + tx + tw
@@ -1101,8 +1121,8 @@ pub fn scroll_list_ui_system(
                     list.offset = 0;
                     break;
                 }
-                let ty_clamped = (cursor.y - drag.grab_offset)
-                    .clamp(track_top, track_top + th - thumb_h);
+                let ty_clamped =
+                    (cursor.y - drag.grab_offset).clamp(track_top, track_top + th - thumb_h);
                 let ratio = ((ty_clamped - track_top) / (th - thumb_h)).clamp(0.0, 1.0);
                 list.offset = (ratio * max_off as f32).round() as usize;
                 break;
@@ -1187,7 +1207,11 @@ pub fn spawn_item_cell_ui_root(
     z: i32,
     slot: usize,
 ) -> Entity {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let cell = commands
         .spawn((
             Node {

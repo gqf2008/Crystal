@@ -125,12 +125,20 @@ fn spawn_sell_panel(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 291),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 292),
         ) {
-            spawn_icon_button(p, n, h, pr, 114.0, 62.0, 48.0, 25.0, 10)
-                .insert(SellPanelConfirm);
+            spawn_icon_button(p, n, h, pr, 114.0, 62.0, 48.0, 25.0, 10).insert(SellPanelConfirm);
         }
         // 提示文本（C# InfoLabel (30,10)）——中文走 CJK 主字体（拉丁字体出豆腐块）
-        spawn_label(p, &cjk, "把物品放入面板后点确认", 30.0, 10.0, 12.0, Color::WHITE, 9)
-            .insert(SellPanelInfo);
+        spawn_label(
+            p,
+            &cjk,
+            "把物品放入面板后点确认",
+            30.0,
+            10.0,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(SellPanelInfo);
         // 拖放区（C# ItemCell (38,72) 区域 (20,55,75,75)）+ 目标图标
         spawn_container(p, 20.0, 55.0, 75.0, 75.0, 9)
             .insert((
@@ -378,13 +386,22 @@ mod tests {
     /// #2720：投放窗提示随 PanelType 切换（C# `NPCDropDialog` 各分支 text）
     #[test]
     fn refine_panel_prompt_matches_csharp() {
-        assert_eq!(sell_panel_prompt(Some(PanelType::Refine)), "放入武器后点确认精炼");
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::Refine)),
+            "放入武器后点确认精炼"
+        );
         assert_eq!(
             sell_panel_prompt(Some(PanelType::CheckRefine)),
             "放入物品后点确认查看精炼"
         );
-        assert_eq!(sell_panel_prompt(Some(PanelType::Repair)), "放入物品后点确认修理");
-        assert_eq!(sell_panel_prompt(Some(PanelType::Sell)), "放入物品后点确认出售");
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::Repair)),
+            "放入物品后点确认修理"
+        );
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::Sell)),
+            "放入物品后点确认出售"
+        );
         assert_eq!(sell_panel_prompt(None), "放入物品后点确认出售");
     }
 }

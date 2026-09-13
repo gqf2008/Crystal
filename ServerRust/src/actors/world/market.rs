@@ -2331,22 +2331,20 @@ impl Message<GetRentedItemsRequest> for WorldActor {
             .map(|rentals| {
                 rentals
                     .iter()
-                    .map(
-                        |r| {
-                            // C# `ItemRentalInformation`：ItemId/ItemName/RentingPlayerName/ItemReturnDate
-                            let item_name = self
-                                .item_infos
-                                .get(&r.item.item_index)
-                                .map(|i| i.name.clone())
-                                .unwrap_or_else(|| format!("#{}", r.item.item_index));
-                            mir2_shared::packets::server::rental_system::RentalItemInfo {
-                                item_id: r.item.unique_id,
-                                item_name,
-                                renting_player_name: r.renter_name.clone(),
-                                return_date: r.expiry_timestamp,
-                            }
-                        },
-                    )
+                    .map(|r| {
+                        // C# `ItemRentalInformation`：ItemId/ItemName/RentingPlayerName/ItemReturnDate
+                        let item_name = self
+                            .item_infos
+                            .get(&r.item.item_index)
+                            .map(|i| i.name.clone())
+                            .unwrap_or_else(|| format!("#{}", r.item.item_index));
+                        mir2_shared::packets::server::rental_system::RentalItemInfo {
+                            item_id: r.item.unique_id,
+                            item_name,
+                            renting_player_name: r.renter_name.clone(),
+                            return_date: r.expiry_timestamp,
+                        }
+                    })
                     .collect()
             })
             .unwrap_or_default();

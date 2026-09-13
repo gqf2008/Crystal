@@ -275,7 +275,12 @@ impl Libraries {
         let path_ref = path.as_ref();
         match MLibrary::open(path_ref) {
             Ok(lib) => {
-                tracing::debug!("✓ MapLibs[{}] = {} ({} 张图像)", index, path_ref.display(), lib.count());
+                tracing::debug!(
+                    "✓ MapLibs[{}] = {} ({} 张图像)",
+                    index,
+                    path_ref.display(),
+                    lib.count()
+                );
                 self.map_libs[index] = Some(lib);
                 self.loaded += 1;
             }
@@ -374,10 +379,7 @@ impl Libraries {
 
     /// 加载数组库到指定槽位（懒加载：只有实际用到才打开文件）
     fn ensure_array_lib(&mut self, ty: ArrayLibType, index: usize) -> Option<()> {
-        let slot = self
-            .array_libs
-            .entry(ty)
-            .or_default();
+        let slot = self.array_libs.entry(ty).or_default();
         if index >= slot.len() {
             slot.resize_with(index + 1, || None);
         }
@@ -387,7 +389,13 @@ impl Libraries {
         let path = self.data_path.join(ty.default_path(index));
         match MLibrary::open(&path) {
             Ok(lib) => {
-                tracing::debug!("✓ {}[{}] = {} ({} 张图像)", ty, index, path.display(), lib.count());
+                tracing::debug!(
+                    "✓ {}[{}] = {} ({} 张图像)",
+                    ty,
+                    index,
+                    path.display(),
+                    lib.count()
+                );
                 slot[index] = Some(lib);
                 self.loaded += 1;
                 Some(())
@@ -432,9 +440,12 @@ impl Libraries {
         let slot = self.array_libs.get_mut(&ty).unwrap();
         let lib = slot[index].as_mut().unwrap();
         let count = lib.count();
-        lib.get_or_load_image(image_index)
-            .cloned()
-            .map_err(|e| format!("{}[{}] idx {} (count {}): {}", ty, index, image_index, count, e))
+        lib.get_or_load_image(image_index).cloned().map_err(|e| {
+            format!(
+                "{}[{}] idx {} (count {}): {}",
+                ty, index, image_index, count, e
+            )
+        })
     }
 
     /// 获取单体库
@@ -486,9 +497,12 @@ impl Libraries {
             .as_mut()
             .ok_or_else(|| format!("MapLibs[{}] not loaded", file_index))?;
         let count = slot.count();
-        slot.get_or_load_image(idx)
-            .cloned()
-            .map_err(|e| format!("MapLibs[{}] idx {} (count {}): {}", file_index, idx, count, e))
+        slot.get_or_load_image(idx).cloned().map_err(|e| {
+            format!(
+                "MapLibs[{}] idx {} (count {}): {}",
+                file_index, idx, count, e
+            )
+        })
     }
 
     /// 获取单体库图像

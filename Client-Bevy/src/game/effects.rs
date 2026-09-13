@@ -15,15 +15,9 @@ use crate::scenes::AppState;
 #[derive(Message, Debug, Clone, Copy)]
 pub enum PendingEffect {
     /// 魔法弹道：从玩家飞向目标
-    Projectile {
-        target_id: u32,
-        color: [f32; 3],
-    },
+    Projectile { target_id: u32, color: [f32; 3] },
     /// 命中爆炸：在目标位置扩散
-    Burst {
-        target_id: u32,
-        color: [f32; 3],
-    },
+    Burst { target_id: u32, color: [f32; 3] },
     /// 世界对象弹道：从 source 对象飞向 destination 对象（#224 ObjectProjectile/ObjectMagic/ObjectRangeAttack）
     ProjectileFromTo {
         source_id: u32,
@@ -118,7 +112,11 @@ fn spawn_pending_effects(
     if pending.is_empty() {
         return;
     }
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let player_pos = players
         .single()
         .map(|tf| Vec2::new(tf.translation.x, tf.translation.y))
@@ -259,4 +257,3 @@ fn advance_bursts(
         }
     }
 }
-

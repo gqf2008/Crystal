@@ -1,7 +1,7 @@
 //! auto::dialogs 自动化验证系统（从 auto.rs 拆分，#1146）
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 /// --auto-char：进游戏 3 秒后自动打开角色对话框
 pub(crate) fn auto_open_character(
@@ -51,8 +51,8 @@ pub(crate) fn auto_bigmap_test(
     mut phase: Local<f32>,
     mut target: Local<(i32, i32)>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -70,7 +70,11 @@ pub(crate) fn auto_bigmap_test(
         if bm.npcs.is_empty() {
             tracing::warn!("[BIGMAP] ⚠️ 无 NewMapInfo NPC 数据（服务端需 M53 支持）");
         } else {
-            tracing::info!("[BIGMAP] ✅ NewMapInfo: {} 个 NPC（{}）", bm.npcs.len(), bm.title);
+            tracing::info!(
+                "[BIGMAP] ✅ NewMapInfo: {} 个 NPC（{}）",
+                bm.npcs.len(),
+                bm.title
+            );
         }
         *stage = 2;
         *phase = *t;
@@ -78,7 +82,11 @@ pub(crate) fn auto_bigmap_test(
     }
     if *stage == 2 {
         if bm.viewport_ready {
-            tracing::info!("[BIGMAP] ✅ 地形纹理生成完成 {}x{}", bm.tex_size.0, bm.tex_size.1);
+            tracing::info!(
+                "[BIGMAP] ✅ 地形纹理生成完成 {}x{}",
+                bm.tex_size.0,
+                bm.tex_size.1
+            );
             *stage = 3;
             *phase = *t;
         } else if *t - *phase >= 8.0 {
@@ -92,7 +100,12 @@ pub(crate) fn auto_bigmap_test(
         if let Some(npc) = tp {
             bm.selected = Some(0);
             *target = (npc.x, npc.y);
-            tracing::info!("[BIGMAP] ✅ 选中可传送 NPC: {} ({},{})", npc.name, npc.x, npc.y);
+            tracing::info!(
+                "[BIGMAP] ✅ 选中可传送 NPC: {} ({},{})",
+                npc.name,
+                npc.x,
+                npc.y
+            );
             net.send_packet(&mir2_shared::packets::client::npc::TeleportToNPC {
                 object_id: npc.object_id,
             });
@@ -160,8 +173,8 @@ pub(crate) fn auto_worldmap_test(
     mut stage: Local<u8>,
     mut phase: Local<f32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -203,12 +216,21 @@ pub(crate) fn auto_worldmap_test(
     }
     if *stage == 3 {
         if *t - *phase >= 8.0 {
-            tracing::warn!("[WORLDMAP] ❌ 地图切换超时 map={} title={} npcs={}", bm.map_index, bm.title, bm.npcs.len());
+            tracing::warn!(
+                "[WORLDMAP] ❌ 地图切换超时 map={} title={} npcs={}",
+                bm.map_index,
+                bm.title,
+                bm.npcs.len()
+            );
             *stage = 9;
             return;
         }
         if bm.map_index == 1 && bm.npcs.len() >= 2 && bm.title == "比奇省" {
-            tracing::info!("[WORLDMAP] ✅ 切换地图: {} {} 个NPC", bm.title, bm.npcs.len());
+            tracing::info!(
+                "[WORLDMAP] ✅ 切换地图: {} {} 个NPC",
+                bm.title,
+                bm.npcs.len()
+            );
             *phase = *t;
             *stage = 4;
         }
@@ -228,7 +250,11 @@ pub(crate) fn auto_worldmap_test(
             return;
         }
         if bm.map_index == 0 && bm.npcs.len() >= 3 && bm.title == "新手村" {
-            tracing::info!("[WORLDMAP] ✅ 回到当前地图: {} {} 个NPC", bm.title, bm.npcs.len());
+            tracing::info!(
+                "[WORLDMAP] ✅ 回到当前地图: {} {} 个NPC",
+                bm.title,
+                bm.npcs.len()
+            );
             bm.world_open = false;
             if mgr.is_open(DialogKind::BigMap) {
                 mgr.close(DialogKind::BigMap);
@@ -259,8 +285,8 @@ pub(crate) fn auto_real_worldmap_test(
     mut current_map: Local<i32>,
     mut target_map: Local<i32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -295,7 +321,11 @@ pub(crate) fn auto_real_worldmap_test(
                 .map(|i| i.map_index)
                 .find(|m| *m != *current_map)
                 .unwrap_or_else(|| bm.world_icons[0].map_index);
-            tracing::info!("[REALWM] 当前地图={} 目标地图={}", *current_map, *target_map);
+            tracing::info!(
+                "[REALWM] 当前地图={} 目标地图={}",
+                *current_map,
+                *target_map
+            );
             *phase = *t;
             *stage = 2;
         }
@@ -322,7 +352,12 @@ pub(crate) fn auto_real_worldmap_test(
             return;
         }
         if bm.map_index == *target_map {
-            tracing::info!("[REALWM] ✅ 切图成功: map={} title={} npcs={}", bm.map_index, bm.title, bm.npcs.len());
+            tracing::info!(
+                "[REALWM] ✅ 切图成功: map={} title={} npcs={}",
+                bm.map_index,
+                bm.title,
+                bm.npcs.len()
+            );
             *phase = *t;
             *stage = 4;
         }
@@ -368,9 +403,9 @@ pub(crate) fn auto_keyboard_test(
     mut stage: Local<u8>,
     mut phase: Local<f32>,
 ) {
-    use client_bevy::scenes::AppState;
-    use client_bevy::game::dialogs::DialogKind;
     use bevy::input::keyboard::KeyCode;
+    use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -436,8 +471,8 @@ pub(crate) fn auto_option_test(
     mut stage: Local<u8>,
     mut phase: Local<f32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -508,8 +543,8 @@ pub(crate) fn auto_ui_dialog_test(
     mut stage: Local<u8>,
     mut phase: Local<f32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -550,7 +585,10 @@ pub(crate) fn auto_upgrade_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     magics: Res<client_bevy::game::skills::MagicsState>,
     chat: Res<client_bevy::game::chat::ChatState>,
     mut t: Local<f32>,
@@ -782,5 +820,3 @@ pub(crate) fn auto_recipe_test(
         _ => {}
     }
 }
-
-

@@ -40,7 +40,8 @@ pub(crate) fn parse_shop_catalog_item(cur: &mut std::io::Cursor<&[u8]>) -> Optio
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_guild(    net: &mut NetConnection,
+pub(crate) fn handle_guild(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -166,7 +167,8 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 let mut rank_defs: Vec<(String, u8)> = Vec::new();
                 for _ in 0..rank_count.min(255) {
                     let _idx = cur.read_u8().unwrap_or(0);
-                    let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                    let name =
+                        mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
                     let options = cur.read_u8().unwrap_or(0);
                     rank_defs.push((name, options));
                 }
@@ -181,7 +183,8 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 let member_count = cur.read_u8().unwrap_or(0) as usize;
                 let mut members = Vec::new();
                 for _ in 0..member_count {
-                    let mname = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                    let mname =
+                        mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
                     let rank = cur.read_u8().unwrap_or(0);
                     let rank_index = cur.read_u8().unwrap_or(0);
                     let online = cur.read_u8().unwrap_or(0) != 0;
@@ -280,7 +283,10 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             for _ in 0..count {
                 let auction_id = match cur.read_u64::<LittleEndian>() {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 let item = match mir2_shared::data::item::UserItem::read_from(
                     &mut cur,
@@ -288,27 +294,45 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     i32::MAX,
                 ) {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 let seller = match mir2_shared::binary::read_dotnet_string(&mut cur) {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 let price = match cur.read_u32::<LittleEndian>() {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 let item_type = match cur.read_u8() {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 let current_bid = match cur.read_u32::<LittleEndian>() {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 let consignment_date = match cur.read_i64::<LittleEndian>() {
                     Ok(v) => v,
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 };
                 // #2720：整条按 C# `ClientAuction` 形状交给 UI（含图标 index/品质/寄售日期）
                 listings.push(crate::network::server_event::MarketPageEntry {

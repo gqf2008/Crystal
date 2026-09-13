@@ -1,7 +1,7 @@
 //! auto::inventory 自动化验证系统（从 auto.rs 拆分，#1146）
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 /// --shop-test：自动 NPC 商店买卖链路（CallNPC → [@Buy] → BuyItem → SellItem）
 /// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
@@ -13,7 +13,10 @@ pub(crate) fn auto_shop_test(
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
     mut npc_goods: ResMut<client_bevy::game::dialogs::npc_goods::NpcGoodsState>,
     sell_panel: Res<client_bevy::game::dialogs::sell_panel::SellPanelState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -87,16 +90,13 @@ pub(crate) fn auto_shop_test(
             }
             // 出售刚购买的物品（按 item_index 匹配，uid 每次服务端启动都会重新分配）
             if let Some(idx) = *bought_idx {
-                let sell_uid = inv_q
-                    .single()
-                    .ok()
-                    .and_then(|inv| {
-                        inv.items
-                            .iter()
-                            .flatten()
-                            .find(|i| i.item_index == idx)
-                            .map(|it| it.unique_id)
-                    });
+                let sell_uid = inv_q.single().ok().and_then(|inv| {
+                    inv.items
+                        .iter()
+                        .flatten()
+                        .find(|i| i.item_index == idx)
+                        .map(|it| it.unique_id)
+                });
                 if let Some(uid) = sell_uid {
                     net.send_packet(&mir2_shared::packets::client::npc::SellItem {
                         unique_id: uid,
@@ -194,7 +194,10 @@ pub(crate) fn auto_storage_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     storage: Res<client_bevy::game::dialogs::storage::StorageState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -202,7 +205,10 @@ pub(crate) fn auto_storage_test(
     )>,
     players: Query<
         &Transform,
-        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
     >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -221,13 +227,17 @@ pub(crate) fn auto_storage_test(
             }
             // 名字匹配且距离最近的 NPC（真实服务器 NPC 分散，纯名字匹配会选到远处 NPC 被距离校验拒绝）
             let oid = players.single().ok().and_then(|ptf| {
-                let (px, py) =
-                    client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+                let (px, py) = client_bevy::game::movement::world_to_tile(
+                    ptf.translation.x,
+                    ptf.translation.y,
+                );
                 npcs.iter()
                     .filter(|(_, n, _)| n.0.contains("Alchemist") || n.0.contains("Merchant"))
                     .map(|(id, _, tf)| {
-                        let (nx, ny) =
-                            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                        let (nx, ny) = client_bevy::game::movement::world_to_tile(
+                            tf.translation.x,
+                            tf.translation.y,
+                        );
                         (id.0, (nx - px).abs() + (ny - py).abs())
                     })
                     .min_by_key(|(_, d)| *d)
@@ -307,7 +317,6 @@ pub(crate) fn auto_storage_test(
     }
 }
 
-
 /// --storage-equip-test：仓库格双击装备链路（#1546：Storage EquipItem → mock 处理 → 客户端装备槽更新）
 /// #2633 批次4 步9：装备槽读 `Loadout` 组件（HudState 已删）；实体缺失视同无装备。
 #[allow(clippy::too_many_arguments)]
@@ -316,7 +325,10 @@ pub(crate) fn auto_storage_equip_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     storage: Res<client_bevy::game::dialogs::storage::StorageState>,
-    loadout_q: Query<&client_bevy::game::player_state::Loadout, With<client_bevy::actor::LocalPlayer>>,
+    loadout_q: Query<
+        &client_bevy::game::player_state::Loadout,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -324,7 +336,10 @@ pub(crate) fn auto_storage_equip_test(
     )>,
     players: Query<
         &Transform,
-        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
     >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -341,13 +356,17 @@ pub(crate) fn auto_storage_equip_test(
                 return;
             }
             let oid = players.single().ok().and_then(|ptf| {
-                let (px, py) =
-                    client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+                let (px, py) = client_bevy::game::movement::world_to_tile(
+                    ptf.translation.x,
+                    ptf.translation.y,
+                );
                 npcs.iter()
                     .filter(|(_, n, _)| n.0.contains("Alchemist") || n.0.contains("Merchant"))
                     .map(|(id, _, tf)| {
-                        let (nx, ny) =
-                            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                        let (nx, ny) = client_bevy::game::movement::world_to_tile(
+                            tf.translation.x,
+                            tf.translation.y,
+                        );
                         (id.0, (nx - px).abs() + (ny - py).abs())
                     })
                     .min_by_key(|(_, d)| *d)
@@ -396,7 +415,11 @@ pub(crate) fn auto_storage_equip_test(
                         unique_id: item.unique_id,
                         to: 0, // Weapon
                     });
-                    tracing::info!("[STORAGEEQUIP] 仓库格4装备 {} uid={}", item.name, item.unique_id);
+                    tracing::info!(
+                        "[STORAGEEQUIP] 仓库格4装备 {} uid={}",
+                        item.name,
+                        item.unique_id
+                    );
                     *stage = 3;
                     *t = 0.0;
                 } else {
@@ -427,7 +450,6 @@ pub(crate) fn auto_storage_equip_test(
     }
 }
 
-
 /// --refine-test：精炼全流程（存入 → 开始 60 秒 → 查看 → 取回）
 /// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
@@ -436,7 +458,10 @@ pub(crate) fn auto_refine_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     chat: Res<client_bevy::game::chat::ChatState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -449,7 +474,11 @@ pub(crate) fn auto_refine_test(
     *t += time.delta_secs();
     // 聊天辅助：最近 60 条里找子串
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _, _, _)| t.contains(needle))
+        chat.lines
+            .iter()
+            .rev()
+            .take(60)
+            .any(|(t, _, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -459,15 +488,12 @@ pub(crate) fn auto_refine_test(
             if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Refine) {
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Refine);
             }
-            let first = inv_q
-                .single()
-                .ok()
-                .and_then(|inv| {
-                    inv.items
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, s)| s.as_ref().map(|it| (i, it.unique_id)))
-                });
+            let first = inv_q.single().ok().and_then(|inv| {
+                inv.items
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, s)| s.as_ref().map(|it| (i, it.unique_id)))
+            });
             match first {
                 Some((i, item_uid)) => {
                     *uid = Some(item_uid);
@@ -530,8 +556,12 @@ pub(crate) fn auto_refine_test(
                 *stage = 9;
                 return;
             }
-            if chat_has(&chat, "精炼成功") || chat_has(&chat, "精炼失败") || chat_has(&chat, "已完成")
-                || chat_has(&chat, "粉碎") || chat_has(&chat, "损毁") {
+            if chat_has(&chat, "精炼成功")
+                || chat_has(&chat, "精炼失败")
+                || chat_has(&chat, "已完成")
+                || chat_has(&chat, "粉碎")
+                || chat_has(&chat, "损毁")
+            {
                 tracing::info!("[REFINETEST] ✅ 精炼结果已返回");
                 // 无材料精炼 → 物品粉碎（C# CheckRefine 失败销毁），跳过取回
                 if chat_has(&chat, "粉碎") || chat_has(&chat, "损毁") {
@@ -593,7 +623,11 @@ pub(crate) fn auto_craft_test(
     }
     *t += time.delta_secs();
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _, _, _)| t.contains(needle))
+        chat.lines
+            .iter()
+            .rev()
+            .take(60)
+            .any(|(t, _, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -614,10 +648,7 @@ pub(crate) fn auto_craft_test(
         }
         1 => {
             if *t >= 8.0 {
-                tracing::warn!(
-                    "[CRAFTTEST] ❌ 未收到合成结果: message={}",
-                    craft.message
-                );
+                tracing::warn!("[CRAFTTEST] ❌ 未收到合成结果: message={}", craft.message);
                 *stage = 9;
                 return;
             }
@@ -627,10 +658,7 @@ pub(crate) fn auto_craft_test(
                 || chat_has(&chat, "材料不足")
                 || chat_has(&chat, "未知配方");
             if ok {
-                tracing::info!(
-                    "[CRAFTTEST] ✅ 合成结果: {}",
-                    craft.message
-                );
+                tracing::info!("[CRAFTTEST] ✅ 合成结果: {}", craft.message);
                 *stage = 9;
             }
         }
@@ -646,7 +674,10 @@ pub(crate) fn auto_rental_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -771,7 +802,10 @@ pub(crate) fn auto_rental_renter(
                 return;
             }
             if rental.request_received && rental.role == RentalRole::Renter {
-                tracing::info!("[RENTALRENTER] ✅ 收到租赁请求（物主={}）", rental.partner_name);
+                tracing::info!(
+                    "[RENTALRENTER] ✅ 收到租赁请求（物主={}）",
+                    rental.partner_name
+                );
                 *stage = 1;
                 *t = 0.0;
             }
@@ -817,13 +851,16 @@ pub(crate) fn auto_socket_test(
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut socket: ResMut<client_bevy::game::dialogs::socket::SocketState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -899,13 +936,16 @@ pub(crate) fn auto_dura_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
-    loadout_q: Query<&client_bevy::game::player_state::Loadout, With<client_bevy::actor::LocalPlayer>>,
+    loadout_q: Query<
+        &client_bevy::game::player_state::Loadout,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
+    use client_bevy::scenes::AppState;
     if *state != AppState::Game {
         return;
     }
@@ -926,11 +966,22 @@ pub(crate) fn auto_dura_test(
                 l.slots
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, s)| s.as_ref().map(|it| format!("slot{}={}({}/{})", i, it.name, it.current_dura, it.max_dura)))
+                    .filter_map(|(i, s)| {
+                        s.as_ref().map(|it| {
+                            format!("slot{}={}({}/{})", i, it.name, it.current_dura, it.max_dura)
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        tracing::info!("[DURA] ✅ 装备耐久数据: {}", if equipped.is_empty() { "无".to_string() } else { equipped.join(", ") });
+        tracing::info!(
+            "[DURA] ✅ 装备耐久数据: {}",
+            if equipped.is_empty() {
+                "无".to_string()
+            } else {
+                equipped.join(", ")
+            }
+        );
         *stage = 2;
         *phase = *t;
         return;
@@ -956,17 +1007,20 @@ pub(crate) fn auto_awake_test(
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut aw: ResMut<client_bevy::game::dialogs::npc_awake::NpcAwakeState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     net: ResMut<client_bevy::network::NetConnection>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
     mut attempts: Local<u32>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::game::dialogs::DialogKind;
-    use mir2_shared::packets::client::misc::{Awakening, AwakeningNeedMaterials};
+    use client_bevy::scenes::AppState;
     use mir2_shared::enums::AwakeType;
+    use mir2_shared::packets::client::misc::{Awakening, AwakeningNeedMaterials};
     if *state != AppState::Game {
         return;
     }
@@ -1006,7 +1060,11 @@ pub(crate) fn auto_awake_test(
             aw.selected_uid = Some(item.unique_id);
             aw.selected_item = Some(item.clone());
             aw.awake_type = None;
-            tracing::info!("[AWAKE] ✅ 选择武器: {} (uid={})", item.name, item.unique_id);
+            tracing::info!(
+                "[AWAKE] ✅ 选择武器: {} (uid={})",
+                item.name,
+                item.unique_id
+            );
             *stage = 2;
         } else {
             tracing::warn!("[AWAKE] ❌ 背包中没有 WoodenSword");
@@ -1070,7 +1128,13 @@ pub(crate) fn auto_awake_test(
             let swords: Vec<_> = inv_q
                 .single()
                 .ok()
-                .map(|inv| inv.items.iter().flatten().filter(|it| it.item_index == 221).collect())
+                .map(|inv| {
+                    inv.items
+                        .iter()
+                        .flatten()
+                        .filter(|it| it.item_index == 221)
+                        .collect()
+                })
                 .unwrap_or_default();
             let next = swords
                 .get((*attempts) as usize % swords.len().max(1))
@@ -1110,7 +1174,10 @@ pub(crate) fn auto_item_state_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
@@ -1205,16 +1272,16 @@ pub(crate) fn auto_item_state_test(
                     .iter()
                     .flatten()
                     .any(|it| it.unique_id == 9005 && it.current_dura == 3);
-                tracing::info!(
-                    "[ITEMST] 获得={} 删除={} 耐久={}",
-                    gained,
-                    deleted,
-                    dura
-                );
+                tracing::info!("[ITEMST] 获得={} 删除={} 耐久={}", gained, deleted, dura);
                 if gained && deleted && dura {
                     tracing::info!("[ITEMST] ✅ 物品状态同步全部通过");
                 } else {
-                    tracing::warn!("[ITEMST] ❌ 部分未通过（获得={} 删除={} 耐久={}）", gained, deleted, dura);
+                    tracing::warn!(
+                        "[ITEMST] ❌ 部分未通过（获得={} 删除={} 耐久={}）",
+                        gained,
+                        deleted,
+                        dura
+                    );
                 }
                 *stage = 9;
             }
@@ -1231,7 +1298,10 @@ pub(crate) fn auto_repair_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
@@ -1343,7 +1413,10 @@ pub(crate) fn auto_resize_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -1425,12 +1498,16 @@ pub(crate) fn auto_storage_unlock_test(
                 return;
             }
             let oid = players.single().ok().and_then(|ptf| {
-                let (px, py) =
-                    client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+                let (px, py) = client_bevy::game::movement::world_to_tile(
+                    ptf.translation.x,
+                    ptf.translation.y,
+                );
                 npcs.iter()
                     .map(|(id, n, tf)| {
-                        let (nx, ny) =
-                            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                        let (nx, ny) = client_bevy::game::movement::world_to_tile(
+                            tf.translation.x,
+                            tf.translation.y,
+                        );
                         (id.0, n.0.clone(), (nx - px).abs() + (ny - py).abs())
                     })
                     .min_by_key(|(_, _, d)| *d)
@@ -1567,5 +1644,3 @@ pub(crate) fn auto_storage_resize_test(
         _ => {}
     }
 }
-
-

@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
-use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
+use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::map_renderer::{GameLibraries, make_image};
+use crate::map_renderer::{make_image, GameLibraries};
 use crate::resources::libraries::LibraryName;
 
 #[derive(Resource, Clone, Default)]
@@ -792,5 +792,4 @@ mod tests {
             true
         ));
     }
-
 }

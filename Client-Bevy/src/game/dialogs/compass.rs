@@ -216,7 +216,10 @@ mod tests {
         // 依赖真实 .Lib 数据：本地无数据（CI/新检出）时跳过，避免假红
         let data_path = resolve_data_path();
         if !data_path.join("Items.Lib").exists() {
-            eprintln!("跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源", data_path.display());
+            eprintln!(
+                "跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源",
+                data_path.display()
+            );
             return;
         }
         let mut world = World::new();

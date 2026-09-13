@@ -1,8 +1,8 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 // #2630：显式引入本处理器构造的 UI 载荷类型（原经 super::* 隐私链隐式传入，见 handle_guild 注）。
 use crate::game::dialogs::npc_goods::GoodsEntry;
 
@@ -10,7 +10,8 @@ use crate::game::dialogs::npc_goods::GoodsEntry;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_npc_items(    net: &mut NetConnection,
+pub(crate) fn handle_npc_items(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -22,7 +23,8 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) -> bool {
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -30,25 +32,61 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectMana as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::DuraChanged as i16, ServerPacketIds::DeleteItem as i16, ServerPacketIds::GainedItem as i16, ServerPacketIds::ItemRepaired as i16, ServerPacketIds::ItemSlotSizeChanged as i16, ServerPacketIds::EquipSlotItem as i16, ServerPacketIds::ItemSealChanged as i16, ServerPacketIds::CombineItem as i16, ServerPacketIds::ItemUpgraded as i16, ServerPacketIds::NPCAwakening as i16, ServerPacketIds::NPCConsign as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::NPCResponse as i16,
+        ServerPacketIds::ObjectStruck as i16,
+        ServerPacketIds::Struck as i16,
+        ServerPacketIds::ObjectHealth as i16,
+        ServerPacketIds::ObjectMana as i16,
+        ServerPacketIds::ObjectDied as i16,
+        ServerPacketIds::Death as i16,
+        ServerPacketIds::Revived as i16,
+        ServerPacketIds::ObjectRevived as i16,
+        ServerPacketIds::DamageIndicator as i16,
+        ServerPacketIds::RangeAttack as i16,
+        ServerPacketIds::ObjectRangeAttack as i16,
+        ServerPacketIds::DuraChanged as i16,
+        ServerPacketIds::DeleteItem as i16,
+        ServerPacketIds::GainedItem as i16,
+        ServerPacketIds::ItemRepaired as i16,
+        ServerPacketIds::ItemSlotSizeChanged as i16,
+        ServerPacketIds::EquipSlotItem as i16,
+        ServerPacketIds::ItemSealChanged as i16,
+        ServerPacketIds::CombineItem as i16,
+        ServerPacketIds::ItemUpgraded as i16,
+        ServerPacketIds::NPCAwakening as i16,
+        ServerPacketIds::NPCConsign as i16,
+        ServerPacketIds::NPCGoods as i16,
+        ServerPacketIds::MoveItem as i16,
+        ServerPacketIds::EquipItem as i16,
+        ServerPacketIds::RemoveItem as i16,
+        ServerPacketIds::UseItem as i16,
+        ServerPacketIds::SplitItem as i16,
+        ServerPacketIds::DropItem as i16,
+        ServerPacketIds::MergeItem as i16,
+        ServerPacketIds::SellItem as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
-
         // ---- M9: NPC 对话 ----
         x if x == ServerPacketIds::NPCResponse as i16 => {
             match npc_interaction::NPCResponse::read_body(&mut cur) {
-            Ok(p) => {
-                tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
-                server_events.write(crate::network::server_event::from_packet::npc_dialog(&p));
-            }
-            Err(e) => tracing::warn!("⚠️ NPCResponse 解析失败: {} (len={})", e, payload.len()),
+                Ok(p) => {
+                    tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
+                    server_events.write(crate::network::server_event::from_packet::npc_dialog(&p));
+                }
+                Err(e) => tracing::warn!("⚠️ NPCResponse 解析失败: {} (len={})", e, payload.len()),
             }
         }
 
         // ---- M10: 战斗反馈 ----
         x if x == ServerPacketIds::ObjectStruck as i16 => {
             if let Ok(p) = combat::ObjectStruck::read_body(&mut cur) {
-                combat_evt.write(CombatEvent::Struck { object_id: p.object_id, attacker_id: p.attacker_id, direction: p.direction });
+                combat_evt.write(CombatEvent::Struck {
+                    object_id: p.object_id,
+                    attacker_id: p.attacker_id,
+                    direction: p.direction,
+                });
                 // M38：选中的目标受击 → 命中爆炸特效
                 if control.attack_target == Some(p.object_id) {
                     effects.write(PendingEffect::Burst {
@@ -74,7 +112,12 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                     expire: p.expire,
                 });
                 // #1141：英雄头顶血条验证（ActorHp 挂载）
-                tracing::debug!("❤️ ObjectHealth: oid={} percent={} expire={}", p.object_id, p.percent, p.expire);
+                tracing::debug!(
+                    "❤️ ObjectHealth: oid={} percent={} expire={}",
+                    p.object_id,
+                    p.percent,
+                    p.expire
+                );
             }
         }
         x if x == ServerPacketIds::ObjectMana as i16 => {
@@ -89,7 +132,10 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::ObjectDied as i16 => {
             if let Ok(p) = combat::ObjectDied::read_body(&mut cur) {
-                combat_evt.write(CombatEvent::Died { object_id: p.object_id, death_type: p.death_type });
+                combat_evt.write(CombatEvent::Died {
+                    object_id: p.object_id,
+                    death_type: p.death_type,
+                });
             }
         }
         // ---- M46: 玩家死亡/复活 ----
@@ -104,8 +150,16 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
             }
             let pid = session.local_player_id.unwrap_or(100);
             server_events.write(ServerEvent::PlayerDied);
-            combat_evt.write(CombatEvent::Died { object_id: pid, death_type: 0 });
-            tracing::info!("💀 玩家死亡 ({},{}){}", loc.0, loc.1, if parsed { "" } else { "（空 body 容错）" });
+            combat_evt.write(CombatEvent::Died {
+                object_id: pid,
+                death_type: 0,
+            });
+            tracing::info!(
+                "💀 玩家死亡 ({},{}){}",
+                loc.0,
+                loc.1,
+                if parsed { "" } else { "（空 body 容错）" }
+            );
         }
         x if x == ServerPacketIds::Revived as i16 => {
             if combat::Revived::read_body(&mut cur).is_ok() {
@@ -117,13 +171,19 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::ObjectRevived as i16 => {
             if let Ok(p) = combat::ObjectRevived::read_body(&mut cur) {
-                combat_evt.write(CombatEvent::Revived { object_id: p.object_id });
+                combat_evt.write(CombatEvent::Revived {
+                    object_id: p.object_id,
+                });
                 tracing::debug!("💚 对象复活 id={}", p.object_id);
             }
         }
         x if x == ServerPacketIds::DamageIndicator as i16 => {
             if let Ok(p) = combat::DamageIndicator::read_body(&mut cur) {
-                combat_evt.write(CombatEvent::Damage { object_id: p.object_id, damage: p.damage, dmg_type: p.damage_type });
+                combat_evt.write(CombatEvent::Damage {
+                    object_id: p.object_id,
+                    damage: p.damage,
+                    dmg_type: p.damage_type,
+                });
             }
         }
         // #270：NPC 寄售（空包）
@@ -326,7 +386,11 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                                         .map(|i| i.item_type as u8)
                                         .unwrap_or(0),
                                     tool_tip: item.info.as_ref().and_then(|i| i.tool_tip.clone()),
-                                    stack_size: item.info.as_ref().map(|i| i.stack_size).unwrap_or(1),
+                                    stack_size: item
+                                        .info
+                                        .as_ref()
+                                        .map(|i| i.stack_size)
+                                        .unwrap_or(1),
                                 })
                                 .collect();
                             let rate = p.rate;
@@ -390,24 +454,37 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::DropItem as i16 => {
             if let Ok(p) = item_operations::DropItem::read_body(&mut cur) {
-                tracing::info!("🗑️ 丢弃响应: uid={} count={} success={}", p.unique_id, p.count, p.success);
+                tracing::info!(
+                    "🗑️ 丢弃响应: uid={} count={} success={}",
+                    p.unique_id,
+                    p.count,
+                    p.success
+                );
             }
         }
         x if x == ServerPacketIds::MergeItem as i16 => {
             if let Ok(p) = item_operations::MergeItem::read_body(&mut cur) {
-                tracing::info!("🧬 合并响应: from={} to={} success={}", p.id_from, p.id_to, p.success);
+                tracing::info!(
+                    "🧬 合并响应: from={} to={} success={}",
+                    p.id_from,
+                    p.id_to,
+                    p.success
+                );
             }
         }
         x if x == ServerPacketIds::SellItem as i16 => {
             if let Ok(p) = item::SellItem::read_body(&mut cur) {
-                tracing::info!("💰 出售响应: uid={} count={} success={}", p.unique_id, p.count, p.success);
+                tracing::info!(
+                    "💰 出售响应: uid={} count={} success={}",
+                    p.unique_id,
+                    p.count,
+                    p.success
+                );
             }
         }
 
         // ---- M13: 技能 ----
-
         _ => {}
     }
     handled
 }
-

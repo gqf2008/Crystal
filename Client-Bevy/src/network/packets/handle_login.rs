@@ -1,14 +1,15 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 
 // 网络包解码分派（#72 拆分；#1148 再按域拆分）：handle_login 处理服务端包 登录/选角/登出 分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_login(    net: &mut NetConnection,
+pub(crate) fn handle_login(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -20,7 +21,8 @@ pub(crate) fn handle_login(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) -> bool {
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -28,7 +30,26 @@ pub(crate) fn handle_login(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::LoginBanned as i16, ServerPacketIds::StartGameBanned as i16, ServerPacketIds::StartGameDelay as i16, ServerPacketIds::LogOutFailed as i16, ServerPacketIds::ReturnToLogin as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::Connected as i16,
+        ServerPacketIds::Disconnect as i16,
+        ServerPacketIds::ClientVersion as i16,
+        ServerPacketIds::NewAccount as i16,
+        ServerPacketIds::ChangePassword as i16,
+        ServerPacketIds::Login as i16,
+        ServerPacketIds::LoginSuccess as i16,
+        ServerPacketIds::StartGame as i16,
+        ServerPacketIds::NewCharacter as i16,
+        ServerPacketIds::NewCharacterSuccess as i16,
+        ServerPacketIds::DeleteCharacter as i16,
+        ServerPacketIds::DeleteCharacterSuccess as i16,
+        ServerPacketIds::LogOutSuccess as i16,
+        ServerPacketIds::LoginBanned as i16,
+        ServerPacketIds::StartGameBanned as i16,
+        ServerPacketIds::StartGameDelay as i16,
+        ServerPacketIds::LogOutFailed as i16,
+        ServerPacketIds::ReturnToLogin as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         x if x == ServerPacketIds::Connected as i16 => {
@@ -203,7 +224,10 @@ pub(crate) fn handle_login(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::LoginBanned as i16 => {
             if let Ok(p) = login::LoginBanned::read_body(&mut cur) {
-                auth.login_error = Some(format!("账号被封禁：{}（到期 ticks={}）", p.reason, p.expiry_date));
+                auth.login_error = Some(format!(
+                    "账号被封禁：{}（到期 ticks={}）",
+                    p.reason, p.expiry_date
+                ));
                 server_events.write(ServerEvent::LoginBanned {
                     reason: p.reason.clone(),
                     expiry_date: p.expiry_date,
@@ -222,7 +246,9 @@ pub(crate) fn handle_login(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::StartGameDelay as i16 => {
             if let Ok(p) = login::StartGameDelay::read_body(&mut cur) {
-                server_events.write(ServerEvent::StartGameDelay { milliseconds: p.milliseconds });
+                server_events.write(ServerEvent::StartGameDelay {
+                    milliseconds: p.milliseconds,
+                });
                 tracing::info!("⏳ 进游戏延迟: {}ms", p.milliseconds);
             }
         }

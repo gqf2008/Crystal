@@ -23,9 +23,7 @@ use bevy::sprite::Anchor;
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::inventory::{
-    InvItem, InventoryOrigin, InventoryShiftRight, inv_slot_at,
-};
+use crate::game::dialogs::inventory::{inv_slot_at, InvItem, InventoryOrigin, InventoryShiftRight};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::{Gold, Inventory};
 use crate::map_renderer::GameLibraries;
@@ -35,8 +33,8 @@ use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label_center;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, UiItemCellData,
-    UiItemCellIcon, ImageButton,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, ImageButton,
+    UiItemCellData, UiItemCellIcon,
 };
 
 /// 交易物品（槽内显示用）
@@ -258,9 +256,11 @@ fn spawn_trade(
         return;
     };
     let panel = spawn_panel(&mut commands, bg, TRADE_X, TRADE_Y, TRADE_W, TRADE_H, 30);
-    commands
-        .entity(panel)
-        .insert((DialogRoot(DialogKind::Trade), TradeWidget, Visibility::Hidden));
+    commands.entity(panel).insert((
+        DialogRoot(DialogKind::Trade),
+        TradeWidget,
+        Visibility::Hidden,
+    ));
 
     commands.entity(panel).with_children(|p| {
         // 确认按钮 Title[520-522] @(135,120)
@@ -278,17 +278,36 @@ fn spawn_trade(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, CLOSE_DX, 3.0, 24.0, 21.0, 10)
-                .insert(TradeClose);
+            spawn_icon_button(p, n, h, pr, CLOSE_DX, 3.0, 24.0, 21.0, 10).insert(TradeClose);
         }
         // 名字标签（框内居中）。子实体不显式 Hidden：随面板根级联显隐——旧版
         // 每个子实体都挂 TradeWidget 由 widgets blast 逐个刷（Sprite 树无级联），
         // 迁移后只有面板根有 TradeWidget，子实体显式 Hidden 将永无写方而不可见
-        spawn_outlined_label_center(p, &font, "", NAME_X + NAME_W / 2.0, NAME_Y + 2.0, NAME_W, 12.0, Color::WHITE, 9)
-            .insert(TradeLabel(TradeText::MyName));
+        spawn_outlined_label_center(
+            p,
+            &font,
+            "",
+            NAME_X + NAME_W / 2.0,
+            NAME_Y + 2.0,
+            NAME_W,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(TradeLabel(TradeText::MyName));
         // 金币标签（框内居中；可点击开数量框）
-        spawn_outlined_label_center(p, &font, "", GOLD_X + GOLD_W / 2.0, GOLD_Y + 1.0, GOLD_W, 12.0, Color::WHITE, 9)
-            .insert((TradeLabel(TradeText::MyGold), TradeGoldHit));
+        spawn_outlined_label_center(
+            p,
+            &font,
+            "",
+            GOLD_X + GOLD_W / 2.0,
+            GOLD_Y + 1.0,
+            GOLD_W,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert((TradeLabel(TradeText::MyGold), TradeGoldHit));
         // 我方 5x2 格（列主序）
         for i in 0..TRADE_SLOTS {
             let (sx, sy) = trade_slot_pos(i);
@@ -302,15 +321,37 @@ fn spawn_trade(
         return;
     };
     let gpanel = spawn_panel(&mut commands, gbg, GUEST_X, GUEST_Y, TRADE_W, TRADE_H, 30);
-    commands
-        .entity(gpanel)
-        .insert((DialogRoot(DialogKind::GuestTrade), TradeWidget, Visibility::Hidden));
+    commands.entity(gpanel).insert((
+        DialogRoot(DialogKind::GuestTrade),
+        TradeWidget,
+        Visibility::Hidden,
+    ));
 
     commands.entity(gpanel).with_children(|p| {
-        spawn_outlined_label_center(p, &font, "", GUEST_NAME_X + TRADE_W / 2.0, NAME_Y + 2.0, TRADE_W, 12.0, Color::WHITE, 9)
-            .insert(TradeLabel(TradeText::GuestName));
-        spawn_outlined_label_center(p, &font, "", GOLD_X + GOLD_W / 2.0, GOLD_Y + 1.0, GOLD_W, 12.0, Color::WHITE, 9)
-            .insert(TradeLabel(TradeText::GuestGold));
+        spawn_outlined_label_center(
+            p,
+            &font,
+            "",
+            GUEST_NAME_X + TRADE_W / 2.0,
+            NAME_Y + 2.0,
+            TRADE_W,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(TradeLabel(TradeText::GuestName));
+        spawn_outlined_label_center(
+            p,
+            &font,
+            "",
+            GOLD_X + GOLD_W / 2.0,
+            GOLD_Y + 1.0,
+            GOLD_W,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(TradeLabel(TradeText::GuestGold));
         for i in 0..TRADE_SLOTS {
             let (sx, sy) = trade_slot_pos(i);
             spawn_item_cell_ui(p, &mut images, &font, sx, sy, CELL_W, CELL_H, 9, i)
@@ -322,27 +363,44 @@ fn spawn_trade(
     let Some(ih) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) else {
         return;
     };
-    let inv = spawn_panel(&mut commands, ih, INVITE_X, INVITE_Y, INVITE_W, INVITE_H, 45);
-    commands.entity(inv).insert((TradeInviteWidget, Visibility::Hidden));
+    let inv = spawn_panel(
+        &mut commands,
+        ih,
+        INVITE_X,
+        INVITE_Y,
+        INVITE_W,
+        INVITE_H,
+        45,
+    );
+    commands
+        .entity(inv)
+        .insert((TradeInviteWidget, Visibility::Hidden));
     commands.entity(inv).with_children(|ip| {
         // C# MirMessageBox 文本为 MirLabel（默认描边）
-        crate::ui::outlined_text::spawn_outlined_label(ip, font.clone(), "", 35.0, 35.0, 12.0, Color::WHITE, 9)
-            .insert(TradeInviteText);
+        crate::ui::outlined_text::spawn_outlined_label(
+            ip,
+            font.clone(),
+            "",
+            35.0,
+            35.0,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(TradeInviteText);
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
         ) {
-            spawn_icon_button(ip, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10)
-                .insert(TradeInviteYes);
+            spawn_icon_button(ip, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10).insert(TradeInviteYes);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
         ) {
-            spawn_icon_button(ip, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10)
-                .insert(TradeInviteNo);
+            spawn_icon_button(ip, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10).insert(TradeInviteNo);
         }
     });
 }
@@ -571,13 +629,7 @@ fn trade_action_system(
             if locked.is_locked_in(crate::game::dialogs::inventory::LockGrid::Trade, i) {
                 return;
             }
-            if !trade.my_locked
-                && trade
-                    .my_items
-                    .get(i)
-                    .and_then(|s| s.as_ref())
-                    .is_some()
-            {
+            if !trade.my_locked && trade.my_items.get(i).and_then(|s| s.as_ref()).is_some() {
                 net.send_packet(&mir2_shared::packets::client::trade::RetrieveTradeItem {
                     from: i as i32,
                     to: 0,
@@ -610,7 +662,10 @@ fn trade_action_system(
     // 复用 inv_slot_at + InventoryOrigin 命中——背包可能已被推到右侧或拖动过，
     // 旧 Transform 残留命中在 bevy_ui 迁移后已失效）
     if !trade.my_locked {
-        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+        let items = inv_q
+            .single()
+            .map(|inv| inv.items.as_slice())
+            .unwrap_or(&[]);
         let hit = inv_slot_at(
             cursor.x,
             cursor.y,
@@ -726,7 +781,10 @@ fn trade_server_events(
     mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
 ) {
     use crate::network::server_event::ServerEvent;
-    let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+    let items = inv_q
+        .single()
+        .map(|inv| inv.items.as_slice())
+        .unwrap_or(&[]);
     for ev in events.read() {
         match ev {
             ServerEvent::TradeGold { amount } => {

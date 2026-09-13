@@ -22,8 +22,8 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_panel, UiItemCellData,
-    UiItemCellIcon,
+    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_panel,
+    UiItemCellData, UiItemCellIcon,
 };
 
 /// C# `RefineDialog` 面板原生尺寸（Prguse[1002]）
@@ -110,7 +110,11 @@ impl Plugin for RefinePlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_refine);
         app.add_systems(
             Update,
-            (refine_weapon_request_system, refine_server_events, refine_ui_system)
+            (
+                refine_weapon_request_system,
+                refine_server_events,
+                refine_ui_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -158,7 +162,15 @@ fn spawn_refine(
     commands.entity(panel).with_children(|p| {
         // 标题精灵 C# Title[18] @(28,8)
         if let Some(title) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 18) {
-            spawn_image(p, title, REFINE_TITLE_POS.0, REFINE_TITLE_POS.1, 57.0, 15.0, 9);
+            spawn_image(
+                p,
+                title,
+                REFINE_TITLE_POS.0,
+                REFINE_TITLE_POS.1,
+                57.0,
+                15.0,
+                9,
+            );
         }
         // 注：C# `RefineDialog` 没有关闭键 —— 它随 NPC 对话窗收起（NPCDialogs.cs:1031
         // `NPCDialog.Hide()` → `RefineDialog.Hide()`），故此处不再放关闭按钮；
@@ -289,13 +301,19 @@ fn refine_ui_system(
     }
     let open = mgr.is_open(DialogKind::Refine);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
     }
-    let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> =
-        inv_q.single().map(|inv| inv.items.clone()).unwrap_or_default();
+    let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> = inv_q
+        .single()
+        .map(|inv| inv.items.clone())
+        .unwrap_or_default();
     // 材料格渲染：已存入（或待确认）显示物品图标 + 数量
     for (cell, mut data) in &mut cells {
         let item = state.materials[cell.0]

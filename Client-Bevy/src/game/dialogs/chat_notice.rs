@@ -44,10 +44,7 @@ impl Plugin for ChatNoticePlugin {
         app.init_resource::<ChatNoticeState>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat_notice);
         app.add_systems(OnExit(AppState::Game), cleanup_chat_notice);
-        app.add_systems(
-            Update,
-            chat_notice_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, chat_notice_system.run_if(in_state(AppState::Game)));
     }
 }
 

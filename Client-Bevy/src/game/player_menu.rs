@@ -7,9 +7,9 @@ use bevy::prelude::*;
 
 use crate::actor::{LocalPlayer, NetObjectId, PlayerName};
 use crate::game::chat::ChatState;
-use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::game::dialogs::mail::MailState;
 use crate::game::dialogs::text_input::TextInputState;
+use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{spawn_ui_text, ui_button_system, UiButton, UiEntity, UiFont};
@@ -74,7 +74,11 @@ impl Plugin for PlayerMenuPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_player_menu);
         app.add_systems(
             Update,
-            (player_menu_open_system, player_menu_ui_system, ui_button_system)
+            (
+                player_menu_open_system,
+                player_menu_ui_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -98,7 +102,11 @@ fn spawn_player_menu(
     // parley 的 Hani 回退只在首次排版生效，而本菜单文本先以 (-999,-999) 建好、打开时才移进视野
     // → 首次排版时机与可见性错开）。改用共享宋体主字体（与 NPC/公告等动态文本一致）。
     let font = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     commands.spawn((
         UiEntity,
         PlayerMenuWidget,
@@ -132,9 +140,14 @@ fn spawn_player_menu(
         .unwrap_or_default();
     for (i, (label, action)) in items.iter().enumerate() {
         let t = spawn_ui_text(
-            &mut commands, &font, label,
-            -999.0, -999.0,
-            12.0, Color::WHITE, 20.2,
+            &mut commands,
+            &font,
+            label,
+            -999.0,
+            -999.0,
+            12.0,
+            Color::WHITE,
+            20.2,
         );
         commands.entity(t).insert((
             PlayerMenuOption {
@@ -169,7 +182,9 @@ fn player_menu_open_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let Ok(cam) = camera.single() else { return };
     let world = crate::game::player_control::screen_to_world(cursor, cam, &window);
     let mut target: Option<(String, u32)> = None;
@@ -238,8 +253,16 @@ pub(crate) fn player_menu_ui_system(
     keys: Res<ButtonInput<KeyCode>>,
     gate: Res<crate::game::input_gate::TextInputGate>,
     windows: Query<&Window>,
-    mut options: Query<(&mut Transform, &mut UiButton, &mut Visibility, &PlayerMenuOption)>,
-    mut widgets: Query<(&mut Transform, &mut Visibility), (With<PlayerMenuWidget>, Without<PlayerMenuOption>)>,
+    mut options: Query<(
+        &mut Transform,
+        &mut UiButton,
+        &mut Visibility,
+        &PlayerMenuOption,
+    )>,
+    mut widgets: Query<
+        (&mut Transform, &mut Visibility),
+        (With<PlayerMenuWidget>, Without<PlayerMenuOption>),
+    >,
 ) {
     // ESC 关闭（#146）。#2604：输入态（聊天/数量框/通用输入框）激活时不抢
     // Esc——那些模态自己消费（否则同帧 Esc 既关菜单又关输入框，层级穿透）
@@ -250,7 +273,11 @@ pub(crate) fn player_menu_ui_system(
     if state.visible && mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
-                if cursor.x < state.x || cursor.x > state.x + 90.0 || cursor.y < state.y || cursor.y > state.y + 140.0 {
+                if cursor.x < state.x
+                    || cursor.x > state.x + 90.0
+                    || cursor.y < state.y
+                    || cursor.y > state.y + 140.0
+                {
                     state.visible = false;
                 }
             }
@@ -258,7 +285,11 @@ pub(crate) fn player_menu_ui_system(
     }
     // 面板定位 + 显隐
     for (mut tf, mut vis) in &mut widgets {
-        *vis = if state.visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if state.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if state.visible {
             tf.translation.x = state.x;
             tf.translation.y = -state.y;
@@ -345,5 +376,3 @@ pub(crate) fn player_menu_ui_system(
         state.visible = false;
     }
 }
-
-

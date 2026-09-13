@@ -406,5 +406,3 @@ mod tests {
         assert!(chat.whisper);
     }
 }
-
-

@@ -91,8 +91,17 @@ fn spawn_timer(
         }
         // 10 行信息 @(18,40+22i)
         for i in 0..10usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
-                .insert(TimerLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                40.0 + i as f32 * 22.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(TimerLine(i));
         }
     });
 }
@@ -116,7 +125,11 @@ fn timer_ui_system(
     }
     let open = mgr.is_open(DialogKind::Timer);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -126,10 +139,7 @@ fn timer_ui_system(
             mgr.close(DialogKind::Timer);
         }
     }
-    const TIMER_LINES: [&str; 2] = [
-        "—— 计时器 ——",
-        "服务端计时（S.SetTimer）",
-    ];
+    const TIMER_LINES: [&str; 2] = ["—— 计时器 ——", "服务端计时（S.SetTimer）"];
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             i if i < 2 => TIMER_LINES[i].to_string(),

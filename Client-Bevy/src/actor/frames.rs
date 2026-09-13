@@ -2,10 +2,10 @@
 // actor 模块拆分（#72）
 // ============================================================================
 
+use super::components::{ActorAnim, ActorAppearance, MonsterAppearance, NpcAppearance};
+use crate::objects::frames::{get_default_npc_frame, get_monster_frame, get_player_frame, Frame};
 use bevy::prelude::*;
 use mir2_shared::{MirAction, MirDirection};
-use crate::objects::frames::{get_default_npc_frame, get_monster_frame, get_player_frame, Frame};
-use super::components::{ActorAnim, ActorAppearance, MonsterAppearance, NpcAppearance};
 
 pub(crate) fn mount_lib_frames(action: MirAction) -> (i32, i32) {
     match action {
@@ -59,4 +59,3 @@ pub(crate) fn actor_frame(
     }
     None
 }
-

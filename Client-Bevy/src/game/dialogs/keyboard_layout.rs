@@ -21,11 +21,11 @@ use crate::game::dialogs::inventory::{
     UseItemCtx, UseOutcome,
 };
 use crate::game::dialogs::potion_belt::PotionBeltState;
-use crate::game::player_state::{Loadout, StatusFlags};
 use crate::game::dialogs::settings_file;
-use crate::network::NetConnection;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::player_state::{Loadout, StatusFlags};
 use crate::map_renderer::GameLibraries;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
@@ -48,11 +48,34 @@ pub struct KeyBinding {
 
 impl KeyBinding {
     fn new(action: &'static str, group: &'static str, key: KeyCode) -> Self {
-        Self { action, group, key, require_alt: 2, require_shift: 2, require_ctrl: 2, require_tilde: 2 }
+        Self {
+            action,
+            group,
+            key,
+            require_alt: 2,
+            require_shift: 2,
+            require_ctrl: 2,
+            require_tilde: 2,
+        }
     }
     /// 带修饰键默认（C# KeyBindSettings：HeroInventory Ctrl+I 等）
-    fn new_mod(action: &'static str, group: &'static str, key: KeyCode, ctrl: u8, alt: u8, shift: u8) -> Self {
-        Self { action, group, key, require_alt: alt, require_shift: shift, require_ctrl: ctrl, require_tilde: 2 }
+    fn new_mod(
+        action: &'static str,
+        group: &'static str,
+        key: KeyCode,
+        ctrl: u8,
+        alt: u8,
+        shift: u8,
+    ) -> Self {
+        Self {
+            action,
+            group,
+            key,
+            require_alt: alt,
+            require_shift: shift,
+            require_ctrl: ctrl,
+            require_tilde: 2,
+        }
     }
     /// 当前按键+修饰键是否匹配（C# Require* 语义：2=不限）
     pub(crate) fn matches(&self, keys: &ButtonInput<KeyCode>) -> bool {
@@ -62,7 +85,9 @@ impl KeyBinding {
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
         let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
         let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-        mod_ok(self.require_ctrl, ctrl) && mod_ok(self.require_alt, alt) && mod_ok(self.require_shift, shift)
+        mod_ok(self.require_ctrl, ctrl)
+            && mod_ok(self.require_alt, alt)
+            && mod_ok(self.require_shift, shift)
     }
 }
 
@@ -234,7 +259,10 @@ fn bindings_from_ini(content: &str, defaults: &[KeyBinding]) -> Vec<KeyBinding> 
 
 /// 从 KeyBinds.ini 加载（不存在返回默认）
 fn load_bindings(defaults: &[KeyBinding]) -> Vec<KeyBinding> {
-    bindings_from_ini(&fs::read_to_string(KEYBINDS_PATH).unwrap_or_default(), defaults)
+    bindings_from_ini(
+        &fs::read_to_string(KEYBINDS_PATH).unwrap_or_default(),
+        defaults,
+    )
 }
 
 /// 保存绑定到 KeyBinds.ini
@@ -346,8 +374,16 @@ impl Default for KeyboardState {
 
 /// 可见行（y 为行区内的相对偏移，组标题 30px、绑定行 18px）
 enum RowSpec {
-    Group { y: f32, text: String },
-    Bind { y: f32, text: String, index: usize, waiting: bool },
+    Group {
+        y: f32,
+        text: String,
+    },
+    Bind {
+        y: f32,
+        text: String,
+        index: usize,
+        waiting: bool,
+    },
 }
 
 /// 按 C# UpdateText 规则生成可见行
@@ -450,7 +486,11 @@ impl Plugin for KeyboardPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_keyboard_layout);
         app.add_systems(
             Update,
-            (dialog_hotkey_system, secondary_hotkey_system, keyboard_layout_ui_system)
+            (
+                dialog_hotkey_system,
+                secondary_hotkey_system,
+                keyboard_layout_ui_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -522,8 +562,7 @@ fn spawn_keyboard_layout(
         }
         // 位置条 (491,101)
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205) {
-            spawn_image(p, h, 491.0, 101.0, 12.0, 18.0, 9)
-                .insert(KeyboardPositionBar(101.0));
+            spawn_image(p, h, 491.0, 101.0, 12.0, 18.0, 9).insert(KeyboardPositionBar(101.0));
         }
         // 重置按钮 Title[120/121/122] (30,400) 72x25
         if let (Some(n), Some(h), Some(pr)) = (
@@ -531,25 +570,23 @@ fn spawn_keyboard_layout(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 121),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 122),
         ) {
-            spawn_icon_button(p, n, h, pr, 30.0, 400.0, 72.0, 25.0, 10)
-                .insert((
-                    KeyboardReset,
-                    // #93 通用 Tooltip：C# 重置按钮 Hint
-                    crate::ui::tooltip::TooltipHint("重置为默认键位".to_string()),
-                ));
+            spawn_icon_button(p, n, h, pr, 30.0, 400.0, 72.0, 25.0, 10).insert((
+                KeyboardReset,
+                // #93 通用 Tooltip：C# 重置按钮 Hint
+                crate::ui::tooltip::TooltipHint("重置为默认键位".to_string()),
+            ));
         }
         // 严格规则复选框（C# CheckBox：Prguse[1346] 未勾 / [1347] 勾选；本系统内联处理）
         if let (Some(off), Some(on)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1346),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1347),
         ) {
-            spawn_container(p, 105.0, 406.0, 16.0, 14.0, 10)
-                .insert((
-                    Button,
-                    ImageNode::new(off.clone()),
-                    KeyboardEnforce,
-                    KeyboardEnforceFrames { off, on },
-                ));
+            spawn_container(p, 105.0, 406.0, 16.0, 14.0, 10).insert((
+                Button,
+                ImageNode::new(off.clone()),
+                KeyboardEnforce,
+                KeyboardEnforceFrames { off, on },
+            ));
         }
         spawn_label(p, &cjk, "严格规则", 125.0, 405.0, 12.0, Color::WHITE, 9);
         // 行区文字实体（16 个槽，位置每帧按 build_rows 更新）
@@ -568,7 +605,10 @@ fn keyboard_layout_ui_system(
     scroll_up: Query<(Entity, &Interaction), With<KeyboardScrollUp>>,
     scroll_down: Query<(Entity, &Interaction), With<KeyboardScrollDown>>,
     reset: Query<(Entity, &Interaction), With<KeyboardReset>>,
-    mut enforce: Query<(Entity, &Interaction, &mut ImageNode, &KeyboardEnforceFrames), With<KeyboardEnforce>>,
+    mut enforce: Query<
+        (Entity, &Interaction, &mut ImageNode, &KeyboardEnforceFrames),
+        With<KeyboardEnforce>,
+    >,
     mut widgets: Query<&mut Visibility, With<KeyboardWidget>>,
     mut pos_bar: Query<(&mut Node, &KeyboardPositionBar), Without<KeyboardRow>>,
     mut rows: Query<(&mut Text, &mut Node, &KeyboardRow)>,
@@ -597,7 +637,11 @@ fn keyboard_layout_ui_system(
     }
     let open = mgr.is_open(DialogKind::KeyboardLayout);
     for mut vis in &mut widgets {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         state.rebinding = None;
@@ -637,7 +681,11 @@ fn keyboard_layout_ui_system(
         if edge(e, inter, &mut prev_inter) {
             state.enforce = !state.enforce;
         }
-        let want = if state.enforce { frames.on.clone() } else { frames.off.clone() };
+        let want = if state.enforce {
+            frames.on.clone()
+        } else {
+            frames.off.clone()
+        };
         if img.image != want {
             img.image = want;
         }
@@ -651,7 +699,12 @@ fn keyboard_layout_ui_system(
                     let base = 90.0;
                     let (ox, oy) = panel_origin
                         .single()
-                        .map(|n| crate::ui::theme::node_origin(n, ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0)))
+                        .map(|n| {
+                            crate::ui::theme::node_origin(
+                                n,
+                                ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0),
+                            )
+                        })
                         .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
                     for spec in build_rows(&state) {
                         if let RowSpec::Bind { y, index, .. } = spec {
@@ -685,12 +738,31 @@ fn keyboard_layout_ui_system(
                 tracing::info!("🎹 绑定 {} → {}", b.action, key_name(k));
                 b.key = k;
                 // #1386：修饰键按按住状态写入（C# KeyboardLayoutDialog：按住=1，Enforce=0，否则 2）
-                let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+                let ctrl =
+                    keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
                 let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
                 let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-                b.require_ctrl = if ctrl { 1 } else if enforce { 0 } else { 2 };
-                b.require_alt = if alt { 1 } else if enforce { 0 } else { 2 };
-                b.require_shift = if shift { 1 } else if enforce { 0 } else { 2 };
+                b.require_ctrl = if ctrl {
+                    1
+                } else if enforce {
+                    0
+                } else {
+                    2
+                };
+                b.require_alt = if alt {
+                    1
+                } else if enforce {
+                    0
+                } else {
+                    2
+                };
+                b.require_shift = if shift {
+                    1
+                } else if enforce {
+                    0
+                } else {
+                    2
+                };
                 state.rebinding = None;
                 changed = true;
             }
@@ -701,7 +773,6 @@ fn keyboard_layout_ui_system(
             save_bindings(&state.bindings);
         }
     }
-
 
     // 位置条（面板子节点，相对坐标）
     for (mut node, bar) in &mut pos_bar {
@@ -727,7 +798,6 @@ fn keyboard_layout_ui_system(
         }
     }
 }
-
 
 /// 快捷键打开/关闭窗口（#148/#1370，C# KeybindOptions 对齐；随键位设置可重绑）
 /// 覆盖：背包/角色/技能/好友/宠物/坐骑/钓鱼/夫妻/队伍/商城/大地图/排行/键位/帮助/行会/小地图/任务/设置/租赁
@@ -805,7 +875,8 @@ fn dialog_hotkey_system(
     });
     for (action, kind) in hits {
         if has_mod {
-            let mod_req = kb.bindings
+            let mod_req = kb
+                .bindings
                 .iter()
                 .find(|b| b.action == action)
                 .map(|b| b.require_ctrl == 1 || b.require_alt == 1 || b.require_shift == 1)
@@ -914,12 +985,24 @@ fn secondary_hotkey_system(
     // 骑乘判定读 `MountState`（实体缺失视同未骑乘，同原 hud.riding=false）
     let riding = player.map(|(_, _, m)| m.is_some()).unwrap_or(false);
     let digits = [
-        KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4,
-        KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8,
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+        KeyCode::Digit6,
+        KeyCode::Digit7,
+        KeyCode::Digit8,
     ];
     let numpads = [
-        KeyCode::Numpad1, KeyCode::Numpad2, KeyCode::Numpad3, KeyCode::Numpad4,
-        KeyCode::Numpad5, KeyCode::Numpad6, KeyCode::Numpad7, KeyCode::Numpad8,
+        KeyCode::Numpad1,
+        KeyCode::Numpad2,
+        KeyCode::Numpad3,
+        KeyCode::Numpad4,
+        KeyCode::Numpad5,
+        KeyCode::Numpad6,
+        KeyCode::Numpad7,
+        KeyCode::Numpad8,
     ];
     for i in 0..8usize {
         let pressed = keys.just_pressed(digits[i]) || keys.just_pressed(numpads[i]);
@@ -964,8 +1047,7 @@ fn secondary_hotkey_system(
                 &mut confirm,
                 // 英雄格来源（grid=HeroInventory）不产生玩家背包锁
                 &mut None,
-            )
-                == UseOutcome::Sent
+            ) == UseOutcome::Sent
             {
                 // #2611：腰带用尽补货武装（C# :574 Item.Count == 1 才发——
                 // 只有用最后一瓶时武装，非耗尽使用不得闩锁）
@@ -987,7 +1069,14 @@ mod tests {
 
     #[test]
     fn key_code_name_roundtrip() {
-        for k in [KeyCode::KeyW, KeyCode::F1, KeyCode::Tab, KeyCode::Space, KeyCode::Escape, KeyCode::ArrowUp] {
+        for k in [
+            KeyCode::KeyW,
+            KeyCode::F1,
+            KeyCode::Tab,
+            KeyCode::Space,
+            KeyCode::Escape,
+            KeyCode::ArrowUp,
+        ] {
             let name = format!("{:?}", k);
             assert_eq!(key_code_from_name(&name), Some(k), "{}", name);
         }
@@ -1016,7 +1105,10 @@ mod tests {
         let mut bindings = defaults.clone();
         let i_bag = bindings.iter().position(|b| b.action == "背包").unwrap();
         bindings[i_bag].key = KeyCode::KeyB;
-        let i_hero = bindings.iter().position(|b| b.action == "英雄背包").unwrap();
+        let i_hero = bindings
+            .iter()
+            .position(|b| b.action == "英雄背包")
+            .unwrap();
         bindings[i_hero].key = KeyCode::KeyQ;
         bindings[i_hero].require_ctrl = 2;
         let ini = bindings_to_ini(&bindings);
@@ -1164,4 +1256,3 @@ mod tests {
         assert!(is_inv_open(&app), "未聚焦时 I 应正常开背包");
     }
 }
-

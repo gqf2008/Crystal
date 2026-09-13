@@ -2,9 +2,9 @@
 // map_renderer 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
-use super::*;
 use super::chunks_build::build_chunk;
+use super::*;
+use bevy::prelude::*;
 
 pub(crate) fn spawn_front_chunk(
     commands: &mut Commands,
@@ -40,17 +40,24 @@ pub(crate) fn spawn_front_chunk(
                     //  - fileIndex 14/27/100..199：3 格上 + 顶对齐 + 偏移
                     //  - 其他 blend（含路灯 image 2723..=2732）：底边对齐 + 偏移
                     // Bevy 原实现对所有 blend 统一 3 格上且漏了 2723..=2732 → 路灯位置错位（#88）
-                    let is_3cell_anchor = file_index == 14
-                        || file_index == 27
-                        || (100..199).contains(&file_index);
+                    let is_3cell_anchor =
+                        file_index == 14 || file_index == 27 || (100..199).contains(&file_index);
                     let should_apply_offset = if blend {
                         is_3cell_anchor || (2723..=2732).contains(&base_image_index)
                     } else {
                         file_index == 28
                     };
                     if let Some(info) = libraries.get_map_image(file_index, base_image_index) {
-                        let off_x = if should_apply_offset { info.offset_x as f32 } else { 0.0 };
-                        let off_y = if should_apply_offset { info.offset_y as f32 } else { 0.0 };
+                        let off_x = if should_apply_offset {
+                            info.offset_x as f32
+                        } else {
+                            0.0
+                        };
+                        let off_y = if should_apply_offset {
+                            info.offset_y as f32
+                        } else {
+                            0.0
+                        };
                         let left = x as f32 * TILE_WIDTH as f32 + off_x;
                         let (anchor_y, top_anchored) = if blend {
                             if is_3cell_anchor {
@@ -63,18 +70,38 @@ pub(crate) fn spawn_front_chunk(
                         };
                         if blend {
                             if let Some(e) = spawn_blend_tile(
-                                commands, libraries, assets, tile_cache,
-                                blend_materials, blend_quad.clone(),
-                                TileAnimKind::Front, file_index, base_image_index,
-                                animation, tick, left, anchor_y, top_anchored,
+                                commands,
+                                libraries,
+                                assets,
+                                tile_cache,
+                                blend_materials,
+                                blend_quad.clone(),
+                                TileAnimKind::Front,
+                                file_index,
+                                base_image_index,
+                                animation,
+                                tick,
+                                left,
+                                anchor_y,
+                                top_anchored,
                                 depth_y(base_y_world),
                             ) {
                                 commands.entity(e).insert(FrontChunkKey(cx, cy));
                             }
                         } else if let Some(e) = spawn_anim_tile(
-                            commands, libraries, assets, tile_cache,
-                            TileAnimKind::Front, file_index, base_image_index,
-                            animation, tick, false, left, anchor_y, top_anchored,
+                            commands,
+                            libraries,
+                            assets,
+                            tile_cache,
+                            TileAnimKind::Front,
+                            file_index,
+                            base_image_index,
+                            animation,
+                            tick,
+                            false,
+                            left,
+                            anchor_y,
+                            top_anchored,
                             depth_y(base_y_world),
                         ) {
                             commands.entity(e).insert(FrontChunkKey(cx, cy));
@@ -142,7 +169,6 @@ pub(crate) fn spawn_front_chunk(
     count
 }
 
-
 /// #88：生成一个 chunk 的地图灯光（C# DrawLights Map Lights 公式/颜色）
 pub(crate) fn spawn_light_chunk(
     commands: &mut Commands,
@@ -191,7 +217,12 @@ pub(crate) fn spawn_light_chunk(
                 _ => (255.0, 255.0, 255.0),
             };
             let mat = blend_materials.add(crate::map_tile_anim::MapBlendMaterial {
-                color: bevy::prelude::LinearRgba::new(cr * 0.4 / 255.0, cg * 0.4 / 255.0, cb * 0.4 / 255.0, 1.0),
+                color: bevy::prelude::LinearRgba::new(
+                    cr * 0.4 / 255.0,
+                    cg * 0.4 / 255.0,
+                    cb * 0.4 / 255.0,
+                    1.0,
+                ),
                 texture: light_tex.clone(),
             });
             commands.spawn((
@@ -199,8 +230,7 @@ pub(crate) fn spawn_light_chunk(
                 LightChunkKey(cx, cy),
                 bevy::prelude::Mesh2d(blend_quad.clone()),
                 bevy::prelude::MeshMaterial2d(mat),
-                Transform::from_xyz(cx_w, cy_w, 0.9)
-                    .with_scale(Vec3::new(lw, lh, 1.0)),
+                Transform::from_xyz(cx_w, cy_w, 0.9).with_scale(Vec3::new(lw, lh, 1.0)),
                 Visibility::default(),
             ));
             count += 1;
@@ -228,7 +258,11 @@ pub(crate) fn chunk_stream_system(
         ),
     >,
     chunks: Query<(Entity, &ChunkKey, &Sprite)>,
-    front_chunks: Query<(Entity, &FrontChunkKey, Option<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>>)>,
+    front_chunks: Query<(
+        Entity,
+        &FrontChunkKey,
+        Option<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>>,
+    )>,
     light_tex: Res<MapLightTexture>,
     lights: Query<(
         Entity,
@@ -236,7 +270,9 @@ pub(crate) fn chunk_stream_system(
         Option<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>>,
     )>,
 ) {
-    let Some(map_reader) = game_data.map_reader.clone() else { return };
+    let Some(map_reader) = game_data.map_reader.clone() else {
+        return;
+    };
     let Ok(cam) = camera.single() else { return };
     let cam_cx = (cam.translation.x / CHUNK_PIXEL_W as f32) as i32;
     let cam_cy = ((-cam.translation.y) / CHUNK_PIXEL_H as f32) as i32;
@@ -275,14 +311,9 @@ pub(crate) fn chunk_stream_system(
         if existing.contains(&(*cx, *cy, *layer)) {
             continue;
         }
-        if let Some(handle) = build_chunk(
-            &mut game_libs.0,
-            &map_reader,
-            *layer,
-            *cx,
-            *cy,
-            &mut assets,
-        ) {
+        if let Some(handle) =
+            build_chunk(&mut game_libs.0, &map_reader, *layer, *cx, *cy, &mut assets)
+        {
             let rect_x = (*cx * CHUNK_TILES as i32) as f32 * TILE_WIDTH;
             let rect_y = (*cy * CHUNK_TILES as i32) as f32 * TILE_HEIGHT;
             let px = rect_x + CHUNK_PIXEL_W as f32 / 2.0;

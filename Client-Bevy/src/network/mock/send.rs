@@ -1,5 +1,7 @@
 //! mock 发送/奖励/信息构建（从 mock.rs 拆分，#1147）
 
+use super::state::*;
+use crate::network::codec;
 use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::data::client_data::{ClientMagic, ClientQuestProgress, SelectInfo};
 use mir2_shared::data::item::ItemInfo;
@@ -7,12 +9,10 @@ use mir2_shared::enums::{
     ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
     MirGender, PoisonType, Spell, SpellEffect, Stat,
 };
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
-use crate::network::codec;
-use super::state::*;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
     let mut inner = Vec::new();
@@ -34,7 +34,12 @@ pub(crate) fn grant_exp(to_client: &Sender<Vec<u8>>, stats: &mut MockPlayerStats
             chat_type: ChatType::System,
         },
     );
-    tracing::info!("⭐ [MOCK] 获得经验 {}，当前 {}/{}", amount, stats.exp, stats.max_exp);
+    tracing::info!(
+        "⭐ [MOCK] 获得经验 {}，当前 {}/{}",
+        amount,
+        stats.exp,
+        stats.max_exp
+    );
 
     while stats.exp >= stats.max_exp {
         stats.exp -= stats.max_exp;
@@ -50,7 +55,13 @@ pub(crate) fn grant_exp(to_client: &Sender<Vec<u8>>, stats: &mut MockPlayerStats
                 max_experience: stats.max_exp,
             },
         );
-        send(to_client, &server::experience::ObjectLeveled { object_id: 100, level: stats.level });
+        send(
+            to_client,
+            &server::experience::ObjectLeveled {
+                object_id: 100,
+                level: stats.level,
+            },
+        );
         send(
             to_client,
             &server::chat::Chat {
@@ -74,7 +85,11 @@ pub(crate) fn on_kill_reward(
         return;
     }
     quest.kills += 1;
-    tracing::info!("📜 [MOCK] 任务击杀计数 {}/{}", quest.kills, QUEST_KILL_TARGET);
+    tracing::info!(
+        "📜 [MOCK] 任务击杀计数 {}/{}",
+        quest.kills,
+        QUEST_KILL_TARGET
+    );
     let task = format!("击杀 稻草人 {}/{}", quest.kills, QUEST_KILL_TARGET);
     if quest.kills >= QUEST_KILL_TARGET {
         quest.completed = true;
@@ -119,9 +134,18 @@ pub(crate) fn player_attack_damage(equipment: &[Option<mir2_shared::data::item::
     let weapon = equipment.get(0).and_then(|s| s.as_ref());
     let (min_dc, max_dc) = weapon
         .and_then(|w| w.info.as_ref())
-        .map(|i| (i.stats.get(Stat::MinDC).max(0) as u32, i.stats.get(Stat::MaxDC).max(0) as u32))
+        .map(|i| {
+            (
+                i.stats.get(Stat::MinDC).max(0) as u32,
+                i.stats.get(Stat::MaxDC).max(0) as u32,
+            )
+        })
         .unwrap_or((0, 0));
-    15 + if max_dc > 0 { min_dc + (max_dc - min_dc) / 2 } else { 0 }
+    15 + if max_dc > 0 {
+        min_dc + (max_dc - min_dc) / 2
+    } else {
+        0
+    }
 }
 
 /// 玩家防御：护甲槽 MaxAC（#47）
@@ -151,7 +175,13 @@ pub(crate) fn revive_player(
     stats.hp = 1000;
     stats.mp = 500;
     send(to_client, &server::combat::Revived);
-    send(to_client, &server::combat::ObjectRevived { object_id: 100, effect: 1 });
+    send(
+        to_client,
+        &server::combat::ObjectRevived {
+            object_id: 100,
+            effect: 1,
+        },
+    );
     send_user_information(to_client, char_index, inventory, equipment, gold, *stats);
     send(
         to_client,
@@ -289,7 +319,13 @@ pub(crate) fn send_user_information(
             poison_atk: 0,
         },
     );
-    send(to_client, &server::combat::HealthChanged { hp: stats.hp, mp: stats.mp });
+    send(
+        to_client,
+        &server::combat::HealthChanged {
+            hp: stats.hp,
+            mp: stats.mp,
+        },
+    );
 }
 
 /// #203：发送 S.HeroInformation（mock 英雄完整信息）
@@ -374,10 +410,38 @@ pub(crate) fn send_map_and_objects(
                 icon: 0,
             }],
             npcs: vec![
-                server::map::NpcMapInfo { object_id: 2001, name: "仓库管理员".to_string(), location_x: 352, location_y: 353, icon: 0, can_teleport_to: true },
-                server::map::NpcMapInfo { object_id: 2002, name: "武器店老板".to_string(), location_x: 356, location_y: 352, icon: 0, can_teleport_to: true },
-                server::map::NpcMapInfo { object_id: 2003, name: "药店老板".to_string(), location_x: 352, location_y: 355, icon: 0, can_teleport_to: false },
-                server::map::NpcMapInfo { object_id: 2004, name: "Merchant".to_string(), location_x: 355, location_y: 353, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo {
+                    object_id: 2001,
+                    name: "仓库管理员".to_string(),
+                    location_x: 352,
+                    location_y: 353,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2002,
+                    name: "武器店老板".to_string(),
+                    location_x: 356,
+                    location_y: 352,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2003,
+                    name: "药店老板".to_string(),
+                    location_x: 352,
+                    location_y: 355,
+                    icon: 0,
+                    can_teleport_to: false,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2004,
+                    name: "Merchant".to_string(),
+                    location_x: 355,
+                    location_y: 353,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
             ],
         },
     );
@@ -469,7 +533,11 @@ pub(crate) fn send_map_and_objects(
     );
 
     // 怪物
-    for (id, img, x, y) in [(101u32, 1u16, 353i32, 352i32), (102, 5, 354, 351), (103, 9, 353, 353)] {
+    for (id, img, x, y) in [
+        (101u32, 1u16, 353i32, 352i32),
+        (102, 5, 354, 351),
+        (103, 9, 353, 353),
+    ] {
         send(
             to_client,
             &server::objects::ObjectMonster {
@@ -573,10 +641,26 @@ pub(crate) fn send_map_and_objects(
         &server::map::WorldMapSetupInfo {
             enabled: true,
             world_maps: vec![
-                server::map::WorldMapIcon { image_index: 0, title: "新手村".to_string(), map_index: 0 },
-                server::map::WorldMapIcon { image_index: 1, title: "比奇省".to_string(), map_index: 1 },
-                server::map::WorldMapIcon { image_index: 2, title: "盟重省".to_string(), map_index: 2 },
-                server::map::WorldMapIcon { image_index: 3, title: "沙漠".to_string(), map_index: 3 },
+                server::map::WorldMapIcon {
+                    image_index: 0,
+                    title: "新手村".to_string(),
+                    map_index: 0,
+                },
+                server::map::WorldMapIcon {
+                    image_index: 1,
+                    title: "比奇省".to_string(),
+                    map_index: 1,
+                },
+                server::map::WorldMapIcon {
+                    image_index: 2,
+                    title: "盟重省".to_string(),
+                    map_index: 2,
+                },
+                server::map::WorldMapIcon {
+                    image_index: 3,
+                    title: "沙漠".to_string(),
+                    map_index: 3,
+                },
             ],
             teleport_cost: 1000,
         },
@@ -599,10 +683,38 @@ pub(crate) fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
                 icon: 0,
             }],
             npcs: vec![
-                server::map::NpcMapInfo { object_id: 2001, name: "仓库管理员".to_string(), location_x: 352, location_y: 353, icon: 0, can_teleport_to: true },
-                server::map::NpcMapInfo { object_id: 2002, name: "武器店老板".to_string(), location_x: 356, location_y: 352, icon: 0, can_teleport_to: true },
-                server::map::NpcMapInfo { object_id: 2003, name: "药店老板".to_string(), location_x: 352, location_y: 355, icon: 0, can_teleport_to: false },
-                server::map::NpcMapInfo { object_id: 2004, name: "Merchant".to_string(), location_x: 355, location_y: 353, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo {
+                    object_id: 2001,
+                    name: "仓库管理员".to_string(),
+                    location_x: 352,
+                    location_y: 353,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2002,
+                    name: "武器店老板".to_string(),
+                    location_x: 356,
+                    location_y: 352,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2003,
+                    name: "药店老板".to_string(),
+                    location_x: 352,
+                    location_y: 355,
+                    icon: 0,
+                    can_teleport_to: false,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2004,
+                    name: "Merchant".to_string(),
+                    location_x: 355,
+                    location_y: 353,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
             ],
         },
         1 => server::map::NewMapInfo {
@@ -619,8 +731,22 @@ pub(crate) fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
                 icon: 0,
             }],
             npcs: vec![
-                server::map::NpcMapInfo { object_id: 2101, name: "比奇城主".to_string(), location_x: 400, location_y: 300, icon: 0, can_teleport_to: true },
-                server::map::NpcMapInfo { object_id: 2102, name: "比奇铁匠".to_string(), location_x: 410, location_y: 310, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo {
+                    object_id: 2101,
+                    name: "比奇城主".to_string(),
+                    location_x: 400,
+                    location_y: 300,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2102,
+                    name: "比奇铁匠".to_string(),
+                    location_x: 410,
+                    location_y: 310,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
             ],
         },
         2 => server::map::NewMapInfo {
@@ -631,8 +757,22 @@ pub(crate) fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
             big_map: 1,
             movements: vec![],
             npcs: vec![
-                server::map::NpcMapInfo { object_id: 2201, name: "盟重城主".to_string(), location_x: 450, location_y: 350, icon: 0, can_teleport_to: true },
-                server::map::NpcMapInfo { object_id: 2202, name: "盟重药店".to_string(), location_x: 460, location_y: 360, icon: 0, can_teleport_to: false },
+                server::map::NpcMapInfo {
+                    object_id: 2201,
+                    name: "盟重城主".to_string(),
+                    location_x: 450,
+                    location_y: 350,
+                    icon: 0,
+                    can_teleport_to: true,
+                },
+                server::map::NpcMapInfo {
+                    object_id: 2202,
+                    name: "盟重药店".to_string(),
+                    location_x: 460,
+                    location_y: 360,
+                    icon: 0,
+                    can_teleport_to: false,
+                },
             ],
         },
         3 => server::map::NewMapInfo {
@@ -642,9 +782,14 @@ pub(crate) fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
             height: 500,
             big_map: 1,
             movements: vec![],
-            npcs: vec![
-                server::map::NpcMapInfo { object_id: 2301, name: "沙漠商队".to_string(), location_x: 350, location_y: 250, icon: 0, can_teleport_to: true },
-            ],
+            npcs: vec![server::map::NpcMapInfo {
+                object_id: 2301,
+                name: "沙漠商队".to_string(),
+                location_x: 350,
+                location_y: 250,
+                icon: 0,
+                can_teleport_to: true,
+            }],
         },
         _ => server::map::NewMapInfo {
             map_index,
@@ -657,8 +802,3 @@ pub(crate) fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
         },
     }
 }
-
-
-
-
-

@@ -121,10 +121,7 @@ impl Plugin for FriendPlugin {
         );
         app.add_systems(OnEnter(AppState::Game), spawn_friend);
         app.add_systems(OnExit(AppState::Game), cleanup_friend);
-        app.add_systems(
-            Update,
-            friend_ui_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, friend_ui_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -146,7 +143,11 @@ fn spawn_friend(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
 
     // 面板 Title[199] 原生 264x272，C# Location = Center。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 199) else {
@@ -154,7 +155,9 @@ fn spawn_friend(
     };
     let (px, py) = crate::game::dialogs::center_origin(264.0, 272.0);
     let panel = spawn_panel(&mut commands, bg, px, py, 264.0, 272.0, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Friend), FriendWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Friend), FriendWidget));
 
     commands.entity(panel).with_children(|p| {
         // 标题 Title[6] @(18,9)
@@ -278,7 +281,11 @@ fn friend_ui_system(
     mut input_box: Query<&mut Visibility, With<FriendInputBox>>,
     mut widgets: Query<
         &mut Visibility,
-        (With<FriendWidget>, Without<FriendInputBox>, Without<FriendLineText>),
+        (
+            With<FriendWidget>,
+            Without<FriendInputBox>,
+            Without<FriendLineText>,
+        ),
     >,
     mut local: Local<FriendLocal>,
 ) {
@@ -337,7 +344,8 @@ fn friend_ui_system(
         };
     }
     if scroll_y.abs() > 0.0 {
-        local.offset = ((local.offset as i32) - (scroll_y * 3.0) as i32).clamp(0, max_offset as i32) as usize;
+        local.offset =
+            ((local.offset as i32) - (scroll_y * 3.0) as i32).clamp(0, max_offset as i32) as usize;
     }
     local.offset = (local.offset).min(max_offset);
     // 列表文本（含在线标记/备注/选中高亮）
@@ -346,7 +354,11 @@ fn friend_ui_system(
         let selected = friend.selected == Some(idx);
         text.0 = match list.get(idx) {
             Some(f) => {
-                let mark = if f.online { "（在线）" } else { "（离线）" };
+                let mark = if f.online {
+                    "（在线）"
+                } else {
+                    "（离线）"
+                };
                 let name = if f.memo.is_empty() {
                     f.name.clone()
                 } else {
@@ -511,7 +523,10 @@ mod tests {
 
     #[test]
     fn friend_origin_is_csharp_center() {
-        assert_eq!(crate::game::dialogs::center_origin(264.0, 272.0), (380.0, 248.0));
+        assert_eq!(
+            crate::game::dialogs::center_origin(264.0, 272.0),
+            (380.0, 248.0)
+        );
     }
 
     #[test]

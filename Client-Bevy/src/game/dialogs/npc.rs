@@ -440,9 +440,18 @@ fn npc_ui_system(
             let mut child = None;
             commands.entity(panel).with_children(|p| {
                 child = Some(
-                    spawn_outlined_label(p, cjk.clone(), &seg_text, lx + x_off, ly, font_px, seg_col, 9)
-                        .insert((NpcDialogWidget, FontHinting::Enabled))
-                        .id(),
+                    spawn_outlined_label(
+                        p,
+                        cjk.clone(),
+                        &seg_text,
+                        lx + x_off,
+                        ly,
+                        font_px,
+                        seg_col,
+                        9,
+                    )
+                    .insert((NpcDialogWidget, FontHinting::Enabled))
+                    .id(),
                 );
             });
             if let Some(e) = child {
@@ -736,7 +745,9 @@ fn spawn_npc_input_overlay(
         return;
     };
     let root = spawn_panel(commands, bg, 280.0, 80.0, 244.0, 207.0, 40);
-    commands.entity(root).insert((NpcInputRoot, Visibility::Hidden));
+    commands
+        .entity(root)
+        .insert((NpcInputRoot, Visibility::Hidden));
 
     commands.entity(root).with_children(|p| {
         // 提示（C# CaptionLabel @(25,25) 语义）

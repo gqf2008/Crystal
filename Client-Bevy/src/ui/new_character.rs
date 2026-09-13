@@ -18,8 +18,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{
-    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity,
-    UiImageCache,
+    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity, UiImageCache,
 };
 
 pub struct NewCharacterPlugin;
@@ -157,7 +156,11 @@ const PREVIEW_Y: f32 = 250.0;
 
 /// 预览起始帧（对齐原版 UpdateInterface）
 pub(crate) fn new_char_preview_base(class: MirClass, gender: MirGender) -> usize {
-    let g = if gender == MirGender::Female { 1usize } else { 0 };
+    let g = if gender == MirGender::Female {
+        1usize
+    } else {
+        0
+    };
     match class {
         MirClass::Archer => {
             if g == 0 {
@@ -295,13 +298,17 @@ pub fn spawn_new_character_dialog(
     if let Some(h) = state.preview_handles.first().cloned() {
         let (px, py) = preview_pos(state, 0);
         let e = spawn_ui_sprite(commands, h, px, py, 5.0, 1.0);
-        commands.entity(e).insert((NcDlg, NcPreview, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((NcDlg, NcPreview, Visibility::Hidden));
     }
     // 法师 blend 叠加层（z=5.1 略高于预览；显隐由 new_char_ui_system 按 class==Wizard 控制）
     if let Some(h) = state.blend_handles.first().cloned() {
         let (bx, by) = blend_pos(state, 0);
         let e = spawn_ui_sprite(commands, h, bx, by, 5.1, 1.0);
-        commands.entity(e).insert((NcDlg, NcBlend, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((NcDlg, NcBlend, Visibility::Hidden));
     }
     // 描述
     let desc_e = spawn_ui_text(
@@ -463,7 +470,9 @@ pub fn spawn_new_character_dialog(
         60.0,
         25.0,
     ) {
-        commands.entity(e).insert((NcDlg, NcOkBtn, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((NcDlg, NcOkBtn, Visibility::Hidden));
     }
     if let Some(e) = spawn_ui_button(
         commands,
@@ -480,7 +489,9 @@ pub fn spawn_new_character_dialog(
         60.0,
         25.0,
     ) {
-        commands.entity(e).insert((NcDlg, NcCancelBtn, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((NcDlg, NcCancelBtn, Visibility::Hidden));
     }
 }
 
@@ -520,7 +531,11 @@ fn new_char_ui_system(
     // 显隐
     let show = state.visible;
     for mut vis in dlg.iter_mut() {
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // 法师 blend 叠加层：仅对话框可见且职业为法师时显示（对齐 C# AfterDraw: Class==Wizard）
     let blend_show = show && state.class == MirClass::Wizard;
@@ -587,8 +602,18 @@ fn new_char_ui_system(
             state.class = btn.class;
         }
         let selected = state.class == btn.class;
-        let frame = if selected { btn.frames[1] } else { btn.frames[0] };
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, frame) {
+        let frame = if selected {
+            btn.frames[1]
+        } else {
+            btn.frames[0]
+        };
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            frame,
+        ) {
             if sprite.image != h {
                 sprite.image = h;
             }
@@ -602,8 +627,18 @@ fn new_char_ui_system(
             state.gender = btn.gender;
         }
         let selected = state.gender == btn.gender;
-        let frame = if selected { btn.frames[1] } else { btn.frames[0] };
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, frame) {
+        let frame = if selected {
+            btn.frames[1]
+        } else {
+            btn.frames[0]
+        };
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            frame,
+        ) {
             if sprite.image != h {
                 sprite.image = h;
             }
@@ -781,4 +816,3 @@ fn new_char_anim_system(
         }
     }
 }
-

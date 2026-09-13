@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 #[derive(Resource)]
 pub struct NetServerAddr(pub String);

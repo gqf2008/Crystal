@@ -15,24 +15,56 @@ use bevy::sprite::Anchor;
 #[derive(Message, Debug, Clone, Copy)]
 pub enum CombatEvent {
     /// 对象受击（S.ObjectStruck：怪物/NPC 受击动画；#1568 带攻击者用于受击音）
-    Struck { object_id: u32, attacker_id: u32, direction: u8 },
+    Struck {
+        object_id: u32,
+        attacker_id: u32,
+        direction: u8,
+    },
     /// S.Struck：本地玩家被击中（C# User.Struck 受击动画）
     PlayerStruck,
     /// S.ObjectHealth：对象血量百分比（C# 头顶血条）
-    ObjectHealth { object_id: u32, percent: u8, expire: u16 },
-    Died { object_id: u32, death_type: u8 },
-    Revived { object_id: u32 },
-    Damage { object_id: u32, damage: i32, dmg_type: u8 },
+    ObjectHealth {
+        object_id: u32,
+        percent: u8,
+        expire: u16,
+    },
+    Died {
+        object_id: u32,
+        death_type: u8,
+    },
+    Revived {
+        object_id: u32,
+    },
+    Damage {
+        object_id: u32,
+        damage: i32,
+        dmg_type: u8,
+    },
     /// #224 对象施法（S.ObjectMagic）：施法者播 Spell 动作
-    SpellCast { object_id: u32 },
+    SpellCast {
+        object_id: u32,
+    },
     /// #224/#1765 对象远程攻击（S.ObjectRangeAttack）：施法者播 AttackRange 动作（Type→AttackRange1/2/3）
-    RangeAttack { object_id: u32, attack_type: u8 },
+    RangeAttack {
+        object_id: u32,
+        attack_type: u8,
+    },
     /// #234/#1624 对象近战攻击（S.ObjectAttack）：施法者按 attack_type 播 Attack1-5 动作
-    Attack { object_id: u32, direction: u8, attack_type: u8 },
+    Attack {
+        object_id: u32,
+        direction: u8,
+        attack_type: u8,
+    },
     /// #238 对象蓝量（S.ObjectMana）
-    ObjectMana { object_id: u32, percent: u8 },
+    ObjectMana {
+        object_id: u32,
+        percent: u8,
+    },
     /// #246 采集（S.ObjectHarvest/ObjectHarvested）：目标播 Harvest 动作
-    Harvest { object_id: u32, direction: u8 },
+    Harvest {
+        object_id: u32,
+        direction: u8,
+    },
 }
 
 /// 真实服务器命中探测（#57）：DamageIndicator（非本地玩家）计数，
@@ -128,10 +160,7 @@ impl Plugin for CombatPlugin {
         app.init_resource::<RealHitProbe>();
         app.init_resource::<AttackModeState>();
         app.add_message::<CombatEvent>();
-        app.add_systems(
-            Update,
-            attack_mode_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, attack_mode_system.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
             attack_mode_server_events.run_if(in_state(AppState::Game)),
@@ -207,7 +236,11 @@ fn apply_combat_events(
     let local_gender = local.map(|(_, a)| a.gender as u8).unwrap_or(0);
     for ev in events.read() {
         match ev {
-            CombatEvent::Struck { object_id, attacker_id, direction } => {
+            CombatEvent::Struck {
+                object_id,
+                attacker_id,
+                direction,
+            } => {
                 // #1568：C# MonsterObject.PlayStruckSound——本地玩家攻击时按自己武器播受击音
                 // （武器 shape 读 `Loadout` 组件，#2633 批次4 步6）
                 let weapon_shape = loadout_q
@@ -223,7 +256,12 @@ fn apply_combat_events(
                     Some(10060) // 默认 StruckShort（非本地玩家攻击者武器未知）
                 };
                 if let Some(sound_id) = struck_sound {
-                    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                    crate::game::sound::play_sound(
+                        &mut commands,
+                        &mut audio_assets,
+                        &sound_bank,
+                        sound_id,
+                    );
                 }
                 for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
@@ -264,7 +302,11 @@ fn apply_combat_events(
                     }
                 }
             }
-            CombatEvent::ObjectHealth { object_id, percent, expire } => {
+            CombatEvent::ObjectHealth {
+                object_id,
+                percent,
+                expire,
+            } => {
                 // C# S.ObjectHealth：挂载血量（血条系统渲染/过期）
                 for (e, id, _, _, _) in &mut actors {
                     if id.0 == *object_id {
@@ -307,7 +349,10 @@ fn apply_combat_events(
                     }
                 }
             }
-            CombatEvent::Died { object_id, death_type } => {
+            CombatEvent::Died {
+                object_id,
+                death_type,
+            } => {
                 // #1564：本地玩家死亡音（C# PlayDieSound 按性别）
                 if local_id == Some(*object_id) {
                     crate::game::sound::play_sound(
@@ -396,18 +441,28 @@ fn apply_combat_events(
                             if let Some(appr) = appr {
                                 let sound_id = match action {
                                     mir2_shared::enums::MirAction::Attack2 => {
-                                        Some(crate::game::sound::monster_second_attack_sound(appr.monster_type))
+                                        Some(crate::game::sound::monster_second_attack_sound(
+                                            appr.monster_type,
+                                        ))
                                     }
                                     mir2_shared::enums::MirAction::Attack3 => {
-                                        crate::game::sound::monster_third_attack_sound(appr.monster_type)
+                                        crate::game::sound::monster_third_attack_sound(
+                                            appr.monster_type,
+                                        )
                                     }
                                     mir2_shared::enums::MirAction::Attack4 => {
-                                        crate::game::sound::monster_fourth_attack_sound(appr.monster_type)
+                                        crate::game::sound::monster_fourth_attack_sound(
+                                            appr.monster_type,
+                                        )
                                     }
                                     mir2_shared::enums::MirAction::Attack5 => {
-                                        Some(crate::game::sound::monster_fifth_attack_sound(appr.monster_type))
+                                        Some(crate::game::sound::monster_fifth_attack_sound(
+                                            appr.monster_type,
+                                        ))
                                     }
-                                    _ => Some(crate::game::sound::monster_attack_sound(appr.monster_type)),
+                                    _ => Some(crate::game::sound::monster_attack_sound(
+                                        appr.monster_type,
+                                    )),
                                 };
                                 if let Some(sound_id) = sound_id {
                                     crate::game::sound::play_sound(
@@ -423,7 +478,10 @@ fn apply_combat_events(
                     }
                 }
             }
-            CombatEvent::RangeAttack { object_id, attack_type } => {
+            CombatEvent::RangeAttack {
+                object_id,
+                attack_type,
+            } => {
                 // #224/#1765：远程攻击动作——玩家用 AttackRange1（C# Action.AttackRange1）；
                 // 怪物按 Type 选 AttackRange1/2/3，无帧表回退 Attack1（避免动画冻结）
                 for (e, id, mut anim, mon, appr) in &mut actors {
@@ -443,7 +501,9 @@ fn apply_combat_events(
                         // #1629：怪物远程攻击动作起始音（C# PlayRangeSound，AttackRange1）
                         if mon.is_some() {
                             if let Some(appr) = appr {
-                                if let Some(sound_id) = crate::game::sound::monster_range_sound(appr.monster_type) {
+                                if let Some(sound_id) =
+                                    crate::game::sound::monster_range_sound(appr.monster_type)
+                                {
                                     crate::game::sound::play_sound(
                                         &mut commands,
                                         &mut audio_assets,
@@ -467,7 +527,9 @@ fn apply_combat_events(
                         // #1634：怪物复活音（C# PlayReviveSound，MonsterObject.cs:4128；僵尸 705）
                         if mon.is_some() {
                             if let Some(appr) = appr {
-                                if let Some(sound_id) = crate::game::sound::monster_revive_sound(appr.monster_type) {
+                                if let Some(sound_id) =
+                                    crate::game::sound::monster_revive_sound(appr.monster_type)
+                                {
                                     crate::game::sound::play_sound(
                                         &mut commands,
                                         &mut audio_assets,
@@ -482,7 +544,11 @@ fn apply_combat_events(
                 }
             }
             // 伤害飘字（挂到目标实体上自动跟随）
-            CombatEvent::Damage { object_id, damage, dmg_type } => {
+            CombatEvent::Damage {
+                object_id,
+                damage,
+                dmg_type,
+            } => {
                 // 命中探测：非本地玩家的伤害事件 = 玩家攻击命中目标（#57）
                 if local_id != Some(*object_id) {
                     probe.hits += 1;
@@ -580,7 +646,12 @@ fn advance_combat_timers(
             // #1634：怪物 Dead 状态音（C# PlayDeadSound，MonsterObject.cs:4113；仅特殊怪 +5）
             if let Some(appr) = appr {
                 if let Some(sound_id) = crate::game::sound::monster_dead_sound(appr.monster_type) {
-                    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                    crate::game::sound::play_sound(
+                        &mut commands,
+                        &mut audio_assets,
+                        &sound_bank,
+                        sound_id,
+                    );
                 }
             }
             commands.entity(e).despawn();
@@ -611,7 +682,11 @@ fn actor_hp_bar_system(
     mut actors: Query<(Entity, &mut ActorHp, Option<&ActorHpBar>)>,
     mut bars: Query<(Entity, &ChildOf, &mut Sprite, &HpBarFill)>,
 ) {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     for (e, mut hp, bar) in &mut actors {
         hp.expire -= time.delta_secs();
         if hp.expire <= 0.0 {
@@ -623,7 +698,10 @@ fn actor_hp_bar_system(
             for c in children {
                 commands.entity(c).despawn();
             }
-            commands.entity(e).remove::<ActorHp>().remove::<ActorHpBar>();
+            commands
+                .entity(e)
+                .remove::<ActorHp>()
+                .remove::<ActorHpBar>();
             continue;
         }
         if bar.is_none() {
@@ -670,7 +748,11 @@ fn actor_mp_bar_system(
     mut actors: Query<(Entity, &mut ActorMp, Option<&ActorMpBar>)>,
     mut bars: Query<(Entity, &ChildOf, &mut Sprite, &MpBarFill)>,
 ) {
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     for (e, mut mp, bar) in &mut actors {
         mp.expire -= time.delta_secs();
         if mp.expire <= 0.0 {
@@ -682,7 +764,10 @@ fn actor_mp_bar_system(
             for c in children {
                 commands.entity(c).despawn();
             }
-            commands.entity(e).remove::<ActorMp>().remove::<ActorMpBar>();
+            commands
+                .entity(e)
+                .remove::<ActorMp>()
+                .remove::<ActorMpBar>();
             continue;
         }
         if bar.is_none() {

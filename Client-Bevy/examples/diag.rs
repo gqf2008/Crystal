@@ -3,7 +3,9 @@ use client_bevy::resources::libraries::{resolve_data_path, ArrayLibType, Librari
 use client_bevy::resources::map_reader::{resolve_map_path, MapReader};
 
 fn main() {
-    let map_name = std::env::args().nth(1).unwrap_or_else(|| "0100".to_string());
+    let map_name = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "0100".to_string());
     let path = resolve_map_path(&map_name);
     println!("map path: {}", path);
     let map = MapReader::new(&path).expect("map load failed");
@@ -15,12 +17,21 @@ fn main() {
     for x in 0..map.width {
         for y in 0..map.height {
             let c = &map.map_cells[x as usize][y as usize];
-            if c.back_tile().is_some() { back += 1; }
-            if c.middle_tile().is_some() { middle += 1; }
-            if c.front_tile().is_some() { front += 1; }
+            if c.back_tile().is_some() {
+                back += 1;
+            }
+            if c.middle_tile().is_some() {
+                middle += 1;
+            }
+            if c.front_tile().is_some() {
+                front += 1;
+            }
         }
     }
-    println!("cells with tiles: back={} middle={} front={}", back, middle, front);
+    println!(
+        "cells with tiles: back={} middle={} front={}",
+        back, middle, front
+    );
 
     let data_path = resolve_data_path();
     println!("data path: {}", data_path.display());
@@ -32,9 +43,18 @@ fn main() {
     // 采样：每层前 10 个瓦片
     type LayerGetter = fn(&client_bevy::resources::map_reader::CellInfo) -> Option<(i16, i32)>;
     let layers: [(&str, LayerGetter); 3] = [
-        ("back", client_bevy::resources::map_reader::CellInfo::back_tile),
-        ("middle", client_bevy::resources::map_reader::CellInfo::middle_tile),
-        ("front", client_bevy::resources::map_reader::CellInfo::front_tile),
+        (
+            "back",
+            client_bevy::resources::map_reader::CellInfo::back_tile,
+        ),
+        (
+            "middle",
+            client_bevy::resources::map_reader::CellInfo::middle_tile,
+        ),
+        (
+            "front",
+            client_bevy::resources::map_reader::CellInfo::front_tile,
+        ),
     ];
     for (layer_name, getter) in layers {
         let mut sampled = 0;
@@ -46,16 +66,27 @@ fn main() {
                         Ok(info) => {
                             println!(
                                 "  {} tile ({},{}): lib={} img={} -> OK {}x{} rgba={}",
-                                layer_name, x, y, li, ii,
-                                info.width, info.height, info.rgba.is_some()
+                                layer_name,
+                                x,
+                                y,
+                                li,
+                                ii,
+                                info.width,
+                                info.height,
+                                info.rgba.is_some()
                             );
                         }
                         Err(e) => {
-                            println!("  {} tile ({},{}): lib={} img={} -> {}", layer_name, x, y, li, ii, e);
+                            println!(
+                                "  {} tile ({},{}): lib={} img={} -> {}",
+                                layer_name, x, y, li, ii, e
+                            );
                         }
                     }
                     sampled += 1;
-                    if sampled >= 10 { break 'outer; }
+                    if sampled >= 10 {
+                        break 'outer;
+                    }
                 }
             }
         }
@@ -101,34 +132,47 @@ fn main() {
             for y in 0..map.height {
                 let c = &map.map_cells[x as usize][y as usize];
                 if x % 2 == 0 && y % 2 == 0 {
-                    if c.back_tile().is_some() { even_total += 1; }
+                    if c.back_tile().is_some() {
+                        even_total += 1;
+                    }
                     continue;
                 }
                 // 奇数格子
-                let Some((li, ii)) = c.back_tile() else { continue };
+                let Some((li, ii)) = c.back_tile() else {
+                    continue;
+                };
                 odd_checked += 1;
                 let ex = x - (x % 2);
                 let ey = y - (y % 2);
                 let even_cell = &map.map_cells[ex as usize][ey as usize];
                 match even_cell.back_tile() {
                     Some((eli, eii)) if eli == li && eii == ii => {}
-                    Some(_) => { mismatch += 1; }
-                    None => { odd_only += 1; }
+                    Some(_) => {
+                        mismatch += 1;
+                    }
+                    None => {
+                        odd_only += 1;
+                    }
                 }
                 if mismatch <= 6 && sample < 20 {
                     let ec = even_cell.back_tile();
                     println!(
                         "  MISMATCH ({},{}): odd lib={} img={}, even({},{}) -> {:?}",
-                        x, y, li, ii, ex, ey,
-                        ec
+                        x, y, li, ii, ex, ey, ec
                     );
                 }
                 if sample < 8 {
                     let got = libs.get_map_image_debug(li, ii);
                     println!(
                         "  odd cell ({},{}): lib={} img={} -> {}",
-                        x, y, li, ii,
-                        match got { Ok(info) => format!("OK {}x{}", info.width, info.height), Err(e) => e }
+                        x,
+                        y,
+                        li,
+                        ii,
+                        match got {
+                            Ok(info) => format!("OK {}x{}", info.width, info.height),
+                            Err(e) => e,
+                        }
                     );
                     sample += 1;
                 }
@@ -148,7 +192,15 @@ fn main() {
 
     // 检查地砖图像本身的 alpha 分布（96x64，底半是否透明）
     {
-        for (lib, img) in [(104i16, 7952i32), (104, 7951), (104, 7950), (100, 0), (100, 1), (100, 2), (100, 3)] {
+        for (lib, img) in [
+            (104i16, 7952i32),
+            (104, 7951),
+            (104, 7950),
+            (100, 0),
+            (100, 1),
+            (100, 2),
+            (100, 3),
+        ] {
             match libs.get_map_image_debug(lib, img) {
                 Ok(info) => {
                     if let Some(rgba) = &info.rgba {
@@ -156,16 +208,21 @@ fn main() {
                         let h = info.height as usize;
                         let mut opaque_bottom = 0usize;
                         let mut total_bottom = 0usize;
-                        for y in (h/2)..h {
+                        for y in (h / 2)..h {
                             for x in 0..w {
                                 let a = rgba[(y * w + x) * 4 + 3];
-                                if a > 0 { opaque_bottom += 1; }
+                                if a > 0 {
+                                    opaque_bottom += 1;
+                                }
                                 total_bottom += 1;
                             }
                         }
                         println!(
                             "tile lib={} img={} {}x{} bottom-half opaque {:.1}%",
-                            lib, img, w, h,
+                            lib,
+                            img,
+                            w,
+                            h,
                             opaque_bottom as f64 * 100.0 / total_bottom as f64
                         );
                     }
@@ -225,16 +282,23 @@ fn main() {
         let mut tall = 0usize;
         for x in 0..map.width {
             for y in 0..map.height {
-                let Some((li, ii)) = map.map_cells[x as usize][y as usize].front_tile() else { continue };
+                let Some((li, ii)) = map.map_cells[x as usize][y as usize].front_tile() else {
+                    continue;
+                };
                 tiles += 1;
                 if let Some(info) = libs.get_map_image(li, ii) {
                     let h = info.height as usize;
                     bands += h.div_ceil(32);
-                    if h > 48 { tall += 1; }
+                    if h > 48 {
+                        tall += 1;
+                    }
                 }
             }
         }
-        println!("front bands estimate: tiles={} bands={} tall(>48px)={}", tiles, bands, tall);
+        println!(
+            "front bands estimate: tiles={} bands={} tall(>48px)={}",
+            tiles, bands, tall
+        );
     }
 
     // 验证 UI 素材（登录/选角）

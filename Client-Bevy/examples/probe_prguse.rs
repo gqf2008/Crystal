@@ -23,14 +23,33 @@ fn main() {
                     let at = |x: usize, y: usize| -> String {
                         let idx = (y * w + x) * 4;
                         if idx + 3 < rgba.len() {
-                            format!("{:02x}{:02x}{:02x}{:02x}", rgba[idx], rgba[idx+1], rgba[idx+2], rgba[idx+3])
+                            format!(
+                                "{:02x}{:02x}{:02x}{:02x}",
+                                rgba[idx],
+                                rgba[idx + 1],
+                                rgba[idx + 2],
+                                rgba[idx + 3]
+                            )
                         } else {
                             "??".to_string()
                         }
                     };
-                    px = format!(" px(0,0)={} px(10,10)={} px(mid)={}", at(0,0), at(10.min(w-1), 10.min(h-1)), at(w/2, h/2));
+                    px = format!(
+                        " px(0,0)={} px(10,10)={} px(mid)={}",
+                        at(0, 0),
+                        at(10.min(w - 1), 10.min(h - 1)),
+                        at(w / 2, h / 2)
+                    );
                 }
-                println!("{:?}[{}] {}x{} rgba={}{}", lib, i, w, h, info.rgba.as_ref().map(|r| r.len()).unwrap_or(0), px);
+                println!(
+                    "{:?}[{}] {}x{} rgba={}{}",
+                    lib,
+                    i,
+                    w,
+                    h,
+                    info.rgba.as_ref().map(|r| r.len()).unwrap_or(0),
+                    px
+                );
             }
             None => println!("{:?}[{}] MISSING", lib, i),
         }

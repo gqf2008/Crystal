@@ -29,7 +29,9 @@ fn main() {
         row(&mut libs, LibraryName::Title, idx);
     }
     println!("\n=== Title 各按钮（命中框尺寸假设）===");
-    for idx in [320, 323, 326, 329, 332, 340, 343, 346, 349, 352, 200, 203, 206, 210, 280, 360, 107, 110] {
+    for idx in [
+        320, 323, 326, 329, 332, 340, 343, 346, 349, 352, 200, 203, 206, 210, 280, 360, 107, 110,
+    ] {
         row(&mut libs, LibraryName::Title, idx);
     }
     println!("\n=== Prguse 职业按钮/空槽 ===");

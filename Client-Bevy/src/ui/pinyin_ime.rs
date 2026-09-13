@@ -21,11 +21,11 @@
 //     （手心/搜狗用户的「中/英指示 + Shift 切换」通用约定），否则内置 IME 无从发现。
 // ============================================================================
 
+use crate::ui::libpinyin_ime::LibpinyinEngine;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::ButtonState;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use crate::ui::libpinyin_ime::LibpinyinEngine;
 
 use crate::ui::sprite_ui::{UiEntity, UiFont};
 
@@ -720,7 +720,6 @@ mod tests {
         assert_eq!(ime.take_commit(), Some(want));
     }
 
-
     /// consumes_key：英文模式不接管任何键；中文模式接管字母（组合中）
     #[test]
     fn consumes_key_contract() {
@@ -800,7 +799,10 @@ mod tests {
         for c in "nihaomawojiao".chars() {
             ime.feed_letter(c);
         }
-        assert_eq!(ime.candidates.first().map(String::as_str), Some("你好吗我叫"));
+        assert_eq!(
+            ime.candidates.first().map(String::as_str),
+            Some("你好吗我叫")
+        );
     }
 
     /// libpinyin 候选含常用字/词（hao→好、jintian→今天、nv→女、lv 有候选）。
@@ -812,7 +814,13 @@ mod tests {
             for c in py.chars() {
                 ime.feed_letter(c);
             }
-            assert!(ime.candidates.iter().any(|c| c == want), "{} 候选中应含「{}」，实际 {:?}", py, want, ime.candidates);
+            assert!(
+                ime.candidates.iter().any(|c| c == want),
+                "{} 候选中应含「{}」，实际 {:?}",
+                py,
+                want,
+                ime.candidates
+            );
             ime.cancel();
             ime.toggle(); // cancel 后仍中文？toggle 切回中文
             ime.toggle(); // 回到中文
@@ -854,15 +862,22 @@ mod tests {
         assert_eq!(ime.take_commit(), Some("你好".to_string()));
         // 剩余拼音 "ma" 继续组合
         assert_eq!(ime.composing, "ma");
-        assert!(ime.candidates.iter().any(|c| c == "吗"), "剩余 ma 候选应含「吗」，实际 {:?}", ime.candidates);
+        assert!(
+            ime.candidates.iter().any(|c| c == "吗"),
+            "剩余 ma 候选应含「吗」，实际 {:?}",
+            ime.candidates
+        );
         // 继续输入 wojiao → mawojiao
         for c in "wojiao".chars() {
             ime.feed_letter(c);
         }
         assert_eq!(ime.composing, "mawojiao");
-        assert!(ime.candidates.iter().any(|c| c == "吗我叫"), "mawojiao 候选应含「吗我叫」，实际 {:?}", ime.candidates);
+        assert!(
+            ime.candidates.iter().any(|c| c == "吗我叫"),
+            "mawojiao 候选应含「吗我叫」，实际 {:?}",
+            ime.candidates
+        );
     }
-
 
     /// 空组合回归：无输入时候选为空且不 panic。
     #[test]
@@ -882,7 +897,10 @@ mod tests {
         ime.feed_letter('n');
         ime.feed_letter('i');
         assert!(ime.is_composing());
-        assert!(!ime.candidates.is_empty(), "前置：音节 ni 应有候选（后续复位断言才有区分度）");
+        assert!(
+            !ime.candidates.is_empty(),
+            "前置：音节 ni 应有候选（后续复位断言才有区分度）"
+        );
         ime.backspace(); // 删到 "n"
         assert!(ime.is_composing());
         ime.backspace(); // 删到空 → 旧实现此处 panic
@@ -1001,7 +1019,10 @@ mod tests {
         app.add_plugins(bevy::asset::AssetPlugin::default());
         app.init_asset::<Font>();
         let bytes = include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
-        let handle = app.world_mut().resource_mut::<Assets<Font>>().add(Font::from_bytes(bytes.to_vec()));
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Font>>()
+            .add(Font::from_bytes(bytes.to_vec()));
         app.insert_resource(crate::ui::sprite_ui::UiFont(handle));
         // Update 阶段回填 focus（对齐生产契约：各文本框每帧 Update 回填 ImeFocus）
         app.add_systems(Update, |mut f: ResMut<ImeFocus>| {
@@ -1021,8 +1042,16 @@ mod tests {
             .world_mut()
             .query_filtered::<&Text2d, With<PinyinBarText>>();
         let bar_text = q.single(app.world()).unwrap().0.clone();
-        assert!(bar_text.contains("nihao"), "候选条应含拼音 nihao，实际: {:?}", bar_text);
-        assert!(bar_text.contains("你好"), "候选条应含候选「你好」，实际: {:?}", bar_text);
+        assert!(
+            bar_text.contains("nihao"),
+            "候选条应含拼音 nihao，实际: {:?}",
+            bar_text
+        );
+        assert!(
+            bar_text.contains("你好"),
+            "候选条应含候选「你好」，实际: {:?}",
+            bar_text
+        );
         // 4) 候选条可见
         let mut vq = app
             .world_mut()
@@ -1186,14 +1215,17 @@ mod tests {
         assert!(app.world().resource::<PinyinIme>().is_composing());
 
         focus(&mut app, Some((0.0, 0.0, 100.0, 20.0)));
-        send(&mut app, bevy::input::keyboard::KeyboardInput {
-            key_code: KeyCode::Escape,
-            logical_key: Key::Escape,
-            state: ButtonState::Pressed,
-            text: None,
-            repeat: false,
-            window: Entity::PLACEHOLDER,
-        });
+        send(
+            &mut app,
+            bevy::input::keyboard::KeyboardInput {
+                key_code: KeyCode::Escape,
+                logical_key: Key::Escape,
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            },
+        );
         app.update();
         let mut ime = app.world_mut().resource_mut::<PinyinIme>();
         assert!(!ime.is_composing());
@@ -1218,5 +1250,4 @@ mod tests {
         assert!(ime.consume_backspace());
         assert!(!ime.consume_backspace());
     }
-
 }

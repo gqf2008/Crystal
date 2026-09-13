@@ -62,13 +62,18 @@ fn main() {
                     p.len(),
                     dt.as_secs_f64() * 1000.0
                 ),
-                None => println!("    -> ({tx},{ty}): 不可达, {:.2}ms", dt.as_secs_f64() * 1000.0),
+                None => println!(
+                    "    -> ({tx},{ty}): 不可达, {:.2}ms",
+                    dt.as_secs_f64() * 1000.0
+                ),
             }
         }
         // 性能：随机 100 条路径（仅在地图内随机取点，统计平均耗时）
         let mut rng: u64 = 0xC0FFEE;
         let mut next = move || {
-            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (rng >> 33) as u32
         };
         let mut total = 0.0f64;

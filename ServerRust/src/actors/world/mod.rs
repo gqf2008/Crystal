@@ -11469,11 +11469,9 @@ fn build_client_quest_info(
                 item: item_infos
                     .get(&r.item_index)
                     .map(client_item_info_from_db)
-                    .unwrap_or_else(|| {
-                        mir2_shared::data::item::ItemInfo {
-                            index: r.item_index,
-                            ..Default::default()
-                        }
+                    .unwrap_or_else(|| mir2_shared::data::item::ItemInfo {
+                        index: r.item_index,
+                        ..Default::default()
                     }),
                 count: r.count,
             })
@@ -11485,11 +11483,9 @@ fn build_client_quest_info(
                 item: item_infos
                     .get(&r.item_index)
                     .map(client_item_info_from_db)
-                    .unwrap_or_else(|| {
-                        mir2_shared::data::item::ItemInfo {
-                            index: r.item_index,
-                            ..Default::default()
-                        }
+                    .unwrap_or_else(|| mir2_shared::data::item::ItemInfo {
+                        index: r.item_index,
+                        ..Default::default()
                     }),
                 count: r.count,
             })
@@ -12097,63 +12093,59 @@ pub(crate) fn enrich_item_info(
 /// 随任务定义下发完整 ItemInfo）共用，避免两处字段漂移。
 pub(crate) fn client_item_info_from_db(info: &db::ItemInfo) -> mir2_shared::data::item::ItemInfo {
     mir2_shared::data::item::ItemInfo {
-            index: info.index,
-            name: info.name.clone(),
-            item_type: shared_item_type(info.item_type),
-            // SharedRust 枚举从 3 开始（C# 从 0 开始），默认值 0 会让客户端 try_from 失败
-            grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
-                .unwrap_or(mir2_shared::enums::ItemGrade::None),
-            required_type: mir2_shared::enums::RequiredType::try_from(
-                (info.required_type + 3) as u8,
-            )
+        index: info.index,
+        name: info.name.clone(),
+        item_type: shared_item_type(info.item_type),
+        // SharedRust 枚举从 3 开始（C# 从 0 开始），默认值 0 会让客户端 try_from 失败
+        grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
+            .unwrap_or(mir2_shared::enums::ItemGrade::None),
+        required_type: mir2_shared::enums::RequiredType::try_from((info.required_type + 3) as u8)
             .unwrap_or(mir2_shared::enums::RequiredType::Level),
-            required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
-                info.required_class as u8,
-            ),
-            required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
-                info.required_gender as u8,
-            ),
-            set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
-                .unwrap_or(mir2_shared::enums::ItemSet::None),
-            // C# SpecialItemMode 位值与 SharedRust 一致（如 Revival=0x10），无需 +3；共享字段名 unique
-            unique: mir2_shared::enums::SpecialItemMode::from_bits_truncate(
-                info.special_mode as u16,
-            ),
-            shape: info.shape as i16,
-            weight: info.weight as u8,
-            light: info.light as u8,
-            required_amount: info.required_amount as u8,
-            image: info.image as u16,
-            durability: info.durability as u16,
-            price: info.price,
-            stack_size: info.stack_size as u16,
-            start_item: info.start_item,
-            effect: info.effect as u8,
-            // C# ItemInfo bools 位：0x01 NeedIdentify / 0x02 ShowGroupPickup / 0x04 ClassBased / 0x08 LevelBased / 0x10 CanMine / 0x20 GlobalDropNotify
-            need_identify: (info.bool_flags & 0x01) != 0,
-            show_group_pickup: (info.bool_flags & 0x02) != 0,
-            class_based: (info.bool_flags & 0x04) != 0,
-            level_based: (info.bool_flags & 0x08) != 0,
-            can_mine: (info.bool_flags & 0x10) != 0,
-            global_drop_notify: (info.bool_flags & 0x20) != 0,
-            can_fast_run: info.can_fast_run,
-            can_awakening: info.can_awakening,
-            // C# BindMode 位值与 SharedRust 一致（DontDeathdrop=0x1 等），无需 +3
-            bind: mir2_shared::enums::BindMode::from_bits_truncate(info.bind_mode as u16),
-            random_stats_id: info.random_stats_id as u8,
-            slots: info.slots as u8,
-            tool_tip: info.tool_tip.clone(),
-            // DB stats 已在加载层 +3 转 SharedRust key；转成共享 Stats
-            stats: {
-                let mut s = mir2_shared::data::stats::Stats::new();
-                for (k, v) in &info.stats {
-                    if let Ok(stat) = mir2_shared::enums::Stat::try_from(*k) {
-                        s.set(stat, *v);
-                    }
+        required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
+            info.required_class as u8,
+        ),
+        required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
+            info.required_gender as u8,
+        ),
+        set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
+            .unwrap_or(mir2_shared::enums::ItemSet::None),
+        // C# SpecialItemMode 位值与 SharedRust 一致（如 Revival=0x10），无需 +3；共享字段名 unique
+        unique: mir2_shared::enums::SpecialItemMode::from_bits_truncate(info.special_mode as u16),
+        shape: info.shape as i16,
+        weight: info.weight as u8,
+        light: info.light as u8,
+        required_amount: info.required_amount as u8,
+        image: info.image as u16,
+        durability: info.durability as u16,
+        price: info.price,
+        stack_size: info.stack_size as u16,
+        start_item: info.start_item,
+        effect: info.effect as u8,
+        // C# ItemInfo bools 位：0x01 NeedIdentify / 0x02 ShowGroupPickup / 0x04 ClassBased / 0x08 LevelBased / 0x10 CanMine / 0x20 GlobalDropNotify
+        need_identify: (info.bool_flags & 0x01) != 0,
+        show_group_pickup: (info.bool_flags & 0x02) != 0,
+        class_based: (info.bool_flags & 0x04) != 0,
+        level_based: (info.bool_flags & 0x08) != 0,
+        can_mine: (info.bool_flags & 0x10) != 0,
+        global_drop_notify: (info.bool_flags & 0x20) != 0,
+        can_fast_run: info.can_fast_run,
+        can_awakening: info.can_awakening,
+        // C# BindMode 位值与 SharedRust 一致（DontDeathdrop=0x1 等），无需 +3
+        bind: mir2_shared::enums::BindMode::from_bits_truncate(info.bind_mode as u16),
+        random_stats_id: info.random_stats_id as u8,
+        slots: info.slots as u8,
+        tool_tip: info.tool_tip.clone(),
+        // DB stats 已在加载层 +3 转 SharedRust key；转成共享 Stats
+        stats: {
+            let mut s = mir2_shared::data::stats::Stats::new();
+            for (k, v) in &info.stats {
+                if let Ok(stat) = mir2_shared::enums::Stat::try_from(*k) {
+                    s.set(stat, *v);
                 }
-                s
-            },
-            ..Default::default()
+            }
+            s
+        },
+        ..Default::default()
     }
 }
 
@@ -14791,7 +14783,9 @@ mod hero_tests {
         assert_eq!(packet.heroes.len(), 1);
 
         let mut body = Vec::new();
-        packet.write_body(&mut body).expect("serialize ManageHeroes");
+        packet
+            .write_body(&mut body)
+            .expect("serialize ManageHeroes");
         let parsed = mir2_shared::packets::server::hero::ManageHeroes::read_body(
             &mut std::io::Cursor::new(&body),
         )

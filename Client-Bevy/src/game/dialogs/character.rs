@@ -139,11 +139,7 @@ fn slot_screen_origin(pos: usize, ox: f32, oy: f32) -> Option<(f32, f32)> {
 }
 
 /// 装备格屏幕矩形（server_slot 0..13 → 绝对屏幕坐标 + C# MirItemCell 36x32 尺寸）
-fn equip_slot_screen_rect(
-    server_slot: usize,
-    ox: f32,
-    oy: f32,
-) -> Option<(f32, f32, f32, f32)> {
+fn equip_slot_screen_rect(server_slot: usize, ox: f32, oy: f32) -> Option<(f32, f32, f32, f32)> {
     let pos_idx = *SERVER_SLOT_TO_POS.get(server_slot)?;
     let (x, y) = slot_screen_origin(pos_idx, ox, oy)?;
     Some((x, y, SLOT_W, SLOT_H))
@@ -161,12 +157,12 @@ fn stat_label_text(idx: usize, vitals: &Vitals, combat: &CombatStats) -> String 
         4 => format!("{}-{}", combat.stats[2][0], combat.stats[2][1]), // DC
         5 => format!("{}-{}", combat.stats[3][0], combat.stats[3][1]), // MC
         6 => format!("{}-{}", combat.stats[4][0], combat.stats[4][1]), // SC
-        7 => format!("{}%", combat.critical_rate),  // CritR {0}%
-        8 => format!("{}", combat.critical_damage), // CritD {0}（C# 无 %）
-        9 => format!("{}", combat.attack_speed),    // AtkSpd {0}
-        10 => format!("+{}", combat.accuracy),      // Acc +{0}
-        11 => format!("+{}", combat.agility),       // Agil +{0}
-        12 => format!("{}", combat.luck),           // Luck {0}
+        7 => format!("{}%", combat.critical_rate),       // CritR {0}%
+        8 => format!("{}", combat.critical_damage),      // CritD {0}（C# 无 %）
+        9 => format!("{}", combat.attack_speed),         // AtkSpd {0}
+        10 => format!("+{}", combat.accuracy),           // Acc +{0}
+        11 => format!("+{}", combat.agility),            // Agil +{0}
+        12 => format!("{}", combat.luck),                // Luck {0}
         _ => String::new(),
     }
 }
@@ -185,7 +181,9 @@ fn char_equip_tooltip_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     // #2633 批次4 步6：读 Loadout 组件（实体缺失默认空，同旧 HudState.equipment 默认 [None;14]）
     let equipment = loadout_q
         .single()
@@ -241,7 +239,12 @@ impl Plugin for CharacterDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_character_dialog);
         app.add_systems(
             Update,
-            (character_ui_system, char_equip_system, char_skill_system, char_equip_tooltip_system)
+            (
+                character_ui_system,
+                char_equip_system,
+                char_skill_system,
+                char_equip_tooltip_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -270,14 +273,20 @@ fn spawn_character_dialog(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
 
     // bevy_ui 面板 Title[504]（264x380 @ 760,0）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 504) else {
         return;
     };
     let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 264.0, 380.0, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Character), CharDialogWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Character), CharDialogWidget));
 
     commands.entity(panel).with_children(|p| {
         // 标签页 Title[500-503]（64x20，y=70）
@@ -297,18 +306,29 @@ fn spawn_character_dialog(
         }
         // 职业图（Prguse[100+职业] @(15,33)）
         // #2633 批次4 步7：实体缺失默认 Warrior=0，同原 hud.class 默认
-        let class_idx = 100 + appearance_q
-            .single()
-            .map(|a| (a.class as usize).min(4))
-            .unwrap_or(0); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
+        let class_idx = 100
+            + appearance_q
+                .single()
+                .map(|a| (a.class as usize).min(4))
+                .unwrap_or(0); // MirClass Warrior=0..Archer=4 → Prguse[100..104]
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, class_idx) {
             spawn_image(p, h, CLASS_IMG_X, CLASS_IMG_Y, 30.0, 30.0, 9);
         }
         // 名字/行会（框内居中）
         spawn_label_center(p, &cjk, "", NAME_CX, 2.0, 200.0, 14.0, Color::WHITE, 9)
             .insert(CharNameText);
-        spawn_label_center(p, &cjk, "", NAME_CX, 28.0, 200.0, 12.0, Color::srgb(1.0, 0.85, 0.3), 9)
-            .insert(CharGuildText);
+        spawn_label_center(
+            p,
+            &cjk,
+            "",
+            NAME_CX,
+            28.0,
+            200.0,
+            12.0,
+            Color::srgb(1.0, 0.85, 0.3),
+            9,
+        )
+        .insert(CharGuildText);
 
         // 4 页容器（页区 (8,90)，页背景 248x284）
         let page_bgs: [(usize, LibraryName, usize); 4] = [
@@ -337,12 +357,19 @@ fn spawn_character_dialog(
                                             if let Some(si) =
                                                 SERVER_SLOT_TO_POS.iter().position(|pp| *pp == pos)
                                             {
-                                                spawn_container(sc, 2.0, 2.0, SLOT_W - 4.0, SLOT_H - 4.0, 10)
-                                                    .insert((
-                                                        ImageNode::new(white.clone()),
-                                                        CharEquipIcon(si),
-                                                        Visibility::Hidden,
-                                                    ));
+                                                spawn_container(
+                                                    sc,
+                                                    2.0,
+                                                    2.0,
+                                                    SLOT_W - 4.0,
+                                                    SLOT_H - 4.0,
+                                                    10,
+                                                )
+                                                .insert((
+                                                    ImageNode::new(white.clone()),
+                                                    CharEquipIcon(si),
+                                                    Visibility::Hidden,
+                                                ));
                                             }
                                         });
                                 }
@@ -354,8 +381,17 @@ fn spawn_character_dialog(
                                     182.0, 200.0, 218.0, 236.0,
                                 ];
                                 for (i, y) in stat_ys.iter().enumerate() {
-                                    spawn_label(pg, &font, "0", 126.0, y - 2.0, 11.0, Color::WHITE, 9)
-                                        .insert(CharStatText(i));
+                                    spawn_label(
+                                        pg,
+                                        &font,
+                                        "0",
+                                        126.0,
+                                        y - 2.0,
+                                        11.0,
+                                        Color::WHITE,
+                                        9,
+                                    )
+                                    .insert(CharStatText(i));
                                 }
                             }
                             2 => {
@@ -365,8 +401,17 @@ fn spawn_character_dialog(
                                     182.0, 200.0, 218.0, 236.0,
                                 ];
                                 for (i, y) in stat_ys.iter().take(12).enumerate() {
-                                    spawn_label(pg, &font, "0", 126.0, y - 2.0, 11.0, Color::WHITE, 9)
-                                        .insert(CharState2Text(i));
+                                    spawn_label(
+                                        pg,
+                                        &font,
+                                        "0",
+                                        126.0,
+                                        y - 2.0,
+                                        11.0,
+                                        Color::WHITE,
+                                        9,
+                                    )
+                                    .insert(CharState2Text(i));
                                 }
                             }
                             3 => {
@@ -383,13 +428,14 @@ fn spawn_character_dialog(
                                             },
                                         ))
                                         .with_children(|rc| {
-                                            spawn_container(rc, 36.0, 0.0, 36.0, 36.0, 10)
-                                                .insert((
+                                            spawn_container(rc, 36.0, 0.0, 36.0, 36.0, 10).insert(
+                                                (
                                                     ImageNode::new(white.clone()),
                                                     CharSkillIcon(i),
                                                     CharSkillRowChild(i),
                                                     Visibility::Hidden,
-                                                ));
+                                                ),
+                                            );
                                             for (tex, oy) in [(516usize, 7.0f32), (517, 19.0)] {
                                                 if let Some(h) = load_lib_image(
                                                     &mut libs,
@@ -406,36 +452,56 @@ fn spawn_character_dialog(
                                                 }
                                             }
                                             for (kind, ox, oy, size) in [
-                                                (
-                                                    SkillTextKind::Key,
-                                                    2.0f32,
-                                                    2.0f32,
-                                                    10.0f32,
-                                                ),
+                                                (SkillTextKind::Key, 2.0f32, 2.0f32, 10.0f32),
                                                 (SkillTextKind::Level, 88.0, 2.0, 11.0),
                                                 (SkillTextKind::Name, 109.0, 2.0, 11.0),
                                                 (SkillTextKind::Exp, 109.0, 15.0, 11.0),
                                             ] {
-                                                spawn_label(rc, &cjk, "", ox, oy, size, Color::WHITE, 11)
-                                                    .insert((
-                                                        CharSkillText { row: i, kind },
-                                                        CharSkillRowChild(i),
-                                                        Visibility::Hidden,
-                                                    ));
+                                                spawn_label(
+                                                    rc,
+                                                    &cjk,
+                                                    "",
+                                                    ox,
+                                                    oy,
+                                                    size,
+                                                    Color::WHITE,
+                                                    11,
+                                                )
+                                                .insert((
+                                                    CharSkillText { row: i, kind },
+                                                    CharSkillRowChild(i),
+                                                    Visibility::Hidden,
+                                                ));
                                             }
                                         });
                                 }
                                 // Next/Back（Prguse[396/397] @(140,250) / [398/399] @(90,250)）
-                                for (is_next, idx, x) in [
-                                    (true, 396usize, 140.0f32),
-                                    (false, 398usize, 90.0f32),
-                                ] {
+                                for (is_next, idx, x) in
+                                    [(true, 396usize, 140.0f32), (false, 398usize, 90.0f32)]
+                                {
                                     if let (Some(n), Some(h), Some(pr)) = (
-                                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
-                                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
-                                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 1),
+                                        load_lib_image(
+                                            &mut libs,
+                                            &mut images,
+                                            LibraryName::Prguse,
+                                            idx,
+                                        ),
+                                        load_lib_image(
+                                            &mut libs,
+                                            &mut images,
+                                            LibraryName::Prguse,
+                                            idx,
+                                        ),
+                                        load_lib_image(
+                                            &mut libs,
+                                            &mut images,
+                                            LibraryName::Prguse,
+                                            idx + 1,
+                                        ),
                                     ) {
-                                        let mut b = spawn_icon_button(pg, n, h, pr, x, 250.0, 40.0, 22.0, 10);
+                                        let mut b = spawn_icon_button(
+                                            pg, n, h, pr, x, 250.0, 40.0, 22.0, 10,
+                                        );
                                         if is_next {
                                             b.insert(CharSkillNext);
                                         } else {
@@ -454,7 +520,16 @@ fn spawn_character_dialog(
 
 fn character_ui_system(
     mut mgr: ResMut<DialogManager>,
-    player_q: Query<(&PlayerName, Option<&PlayerGuildName>, &Vitals, &CombatStats, &Progression), With<LocalPlayer>>,
+    player_q: Query<
+        (
+            &PlayerName,
+            Option<&PlayerGuildName>,
+            &Vitals,
+            &CombatStats,
+            &Progression,
+        ),
+        With<LocalPlayer>,
+    >,
     assign_key: Res<AssignKeyState>,
     mut page: ResMut<CharPage>,
     mut widgets: Query<&mut Visibility, (With<CharDialogWidget>, Without<CharPageBg>)>,
@@ -509,7 +584,11 @@ fn character_ui_system(
 
     let open = mgr.is_open(DialogKind::Character);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (mut vis, bg) in &mut page_bgs {
         *vis = if open && bg.0 == page.0 {
@@ -595,8 +674,7 @@ fn char_equip_system(
         .single()
         .map(|l| l.slots.as_slice())
         .unwrap_or(&[]);
-    if mouse.just_pressed(MouseButton::Right) && mgr.is_open(DialogKind::Character) && page.0 == 0
-    {
+    if mouse.just_pressed(MouseButton::Right) && mgr.is_open(DialogKind::Character) && page.0 == 0 {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) = panel_origin
@@ -623,11 +701,9 @@ fn char_equip_system(
                         && cursor.y >= sy
                         && cursor.y <= sy + SLOT_H
                     {
-                        if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
-                            if let Some(item) = equipment
-                                .get(server_idx)
-                                .and_then(|s| s.as_ref())
-                            {
+                        if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos)
+                        {
+                            if let Some(item) = equipment.get(server_idx).and_then(|s| s.as_ref()) {
                                 net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
                                     grid: mir2_shared::enums::MirGridType::Inventory,
                                     unique_id: item.unique_id,
@@ -711,7 +787,11 @@ fn char_skill_system(
             Option<&CharSkillBack>,
             Option<&mut crate::ui::tooltip::UiHint>,
         ),
-        (Without<CharSkillRowChild>, Without<CharSkillText>, Without<CharSkillIcon>),
+        (
+            Without<CharSkillRowChild>,
+            Without<CharSkillText>,
+            Without<CharSkillIcon>,
+        ),
     >,
     mut children: Query<(&mut Visibility, &CharSkillRowChild), Without<Interaction>>,
     mut icons: Query<(&mut ImageNode, &CharSkillIcon), Without<CharSkillText>>,
@@ -739,7 +819,11 @@ fn char_skill_system(
         } else {
             (open, None) // Next/Back 仅在技能页显示
         };
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if !show || assign_key.visible {
             continue;
         }
@@ -756,13 +840,16 @@ fn char_skill_system(
                     assign_key.open(m.spell, m.key);
                     tracing::info!(
                         "🔑 打开技能快捷键面板: {} ({:?}) key={}",
-                        m.name, m.spell, m.key
+                        m.name,
+                        m.spell,
+                        m.key
                     );
                 }
             }
             // 图标帧：按下 = icon*2+1，否则 icon*2（原版 MagIcon2 Index/PressedIndex）
             if let Some(m) = magic {
-                let frame = m.icon as usize * 2 + if *inter == Interaction::Pressed { 1 } else { 0 };
+                let frame =
+                    m.icon as usize * 2 + if *inter == Interaction::Pressed { 1 } else { 0 };
                 if let Some(h) =
                     load_lib_image(&mut libs, &mut images, LibraryName::MagIcon2, frame)
                 {
@@ -794,7 +881,11 @@ fn char_skill_system(
     // 子控件可见性：行有技能时显示
     for (mut vis, child) in &mut children {
         let show = open && magics.magics.get(start.0 + child.0).is_some();
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // 文本内容
@@ -974,7 +1065,12 @@ mod tests {
     /// #2633 批次4 步8：改用玩家组件构造（Vitals/CombatStats）。
     #[test]
     fn stat_label_text_matches_csharp() {
-        let vitals = Vitals { hp: 120, max_hp: 130, mp: 40, max_mp: 50 };
+        let vitals = Vitals {
+            hp: 120,
+            max_hp: 130,
+            mp: 40,
+            max_mp: 50,
+        };
         let mut combat = CombatStats::default();
         combat.stats = [[1, 9], [2, 8], [3, 7], [4, 6], [5, 10]]; // AC/MAC/DC/MC/SC [min,max]
         combat.critical_rate = 15;
@@ -1026,7 +1122,12 @@ mod tests {
         world.spawn((
             LocalPlayer,
             PlayerName("无行会者".to_string()),
-            Vitals { hp: 120, max_hp: 130, mp: 40, max_mp: 50 },
+            Vitals {
+                hp: 120,
+                max_hp: 130,
+                mp: 40,
+                max_mp: 50,
+            },
             CombatStats::default(),
             Progression::default(),
         ));

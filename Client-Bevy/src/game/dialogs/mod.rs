@@ -697,10 +697,7 @@ pub fn dialog_drag_system(
         if !on_button {
             let mut top: Option<(DialogKind, i32)> = None;
             for (kind, (minx, miny, maxx, maxy, maxz)) in &boxes {
-                if cursor.x >= *minx
-                    && cursor.x <= *maxx
-                    && cursor.y >= *miny
-                    && cursor.y <= *maxy
+                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy
                 {
                     if top.map(|(_, z)| *maxz > z).unwrap_or(true) {
                         top = Some((*kind, *maxz));
@@ -728,16 +725,31 @@ pub fn dialog_drag_system(
                 // 输入框/下拉框命中矩形（绝对屏幕坐标）跟随：只收集挂在被拖 kind 根面板下的
                 drag.text_origins = text_rects
                     .iter()
-                    .filter(|(e, _)| roots.iter().any(|r| is_descendant_of(*e, *r, &mut |x| parents.get(x).ok().map(|c| c.parent()))))
+                    .filter(|(e, _)| {
+                        roots.iter().any(|r| {
+                            is_descendant_of(*e, *r, &mut |x| {
+                                parents.get(x).ok().map(|c| c.parent())
+                            })
+                        })
+                    })
                     .map(|(e, tr)| (e, (tr.0, tr.1)))
                     .collect();
                 drag.dd_origins = drop_downs
                     .iter()
-                    .filter(|(e, _)| roots.iter().any(|r| is_descendant_of(*e, *r, &mut |x| parents.get(x).ok().map(|c| c.parent()))))
+                    .filter(|(e, _)| {
+                        roots.iter().any(|r| {
+                            is_descendant_of(*e, *r, &mut |x| {
+                                parents.get(x).ok().map(|c| c.parent())
+                            })
+                        })
+                    })
                     .map(|(e, dd)| {
                         (
                             e,
-                            ((dd.box_rect.0, dd.box_rect.1), (dd.popup_pos.0, dd.popup_pos.1)),
+                            (
+                                (dd.box_rect.0, dd.box_rect.1),
+                                (dd.popup_pos.0, dd.popup_pos.1),
+                            ),
                         )
                     })
                     .collect();
@@ -766,10 +778,10 @@ pub fn dialog_drag_system(
             }
             for (e, mut dd) in drop_downs.iter_mut() {
                 if let Some(o) = drag.dd_origins.get(&e) {
-                    dd.box_rect.0 = o.0.0 + delta.x;
-                    dd.box_rect.1 = o.0.1 + delta.y;
-                    dd.popup_pos.0 = o.1.0 + delta.x;
-                    dd.popup_pos.1 = o.1.1 + delta.y;
+                    dd.box_rect.0 = o.0 .0 + delta.x;
+                    dd.box_rect.1 = o.0 .1 + delta.y;
+                    dd.popup_pos.0 = o.1 .0 + delta.x;
+                    dd.popup_pos.1 = o.1 .1 + delta.y;
                 }
             }
             // 背包拖动 → 命中用原点同步平移（与实体/rect 同一 delta）

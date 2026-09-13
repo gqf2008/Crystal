@@ -15,9 +15,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, ImageButton,
-};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, ImageButton};
 
 /// 背包背景 Title[196] 缺失时的兜底尺寸（真实值运行时从库读取）
 const INV_W_FALLBACK: f32 = 316.0;
@@ -70,10 +68,7 @@ impl Plugin for SocketPlugin {
         app.init_resource::<SocketState>();
         app.add_systems(OnEnter(AppState::Game), spawn_socket);
         app.add_systems(OnExit(AppState::Game), cleanup_socket);
-        app.add_systems(
-            Update,
-            socket_ui_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, socket_ui_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -142,8 +137,7 @@ fn spawn_socket(
             let y = (idx / 6) as f32;
             let cell_x = x * 36.0 + 23.0 + x;
             let cell_y = y * 33.0 + 15.0 + y;
-            spawn_image(p, white.clone(), cell_x, cell_y, 30.0, 30.0, 9)
-                .insert(SocketCell(idx));
+            spawn_image(p, white.clone(), cell_x, cell_y, 30.0, 30.0, 9).insert(SocketCell(idx));
         }
     });
 }
@@ -154,10 +148,16 @@ fn socket_ui_system(
     inv_origin: Res<InventoryOrigin>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut close: Query<(Entity, &Interaction, &mut Node), (With<SocketClose>, Without<SocketCell>, Without<SocketPanel>)>,
+    mut close: Query<
+        (Entity, &Interaction, &mut Node),
+        (With<SocketClose>, Without<SocketCell>, Without<SocketPanel>),
+    >,
     mut widgets: Query<&mut Visibility, (With<SocketWidget>, Without<SocketCell>)>,
     mut cells: Query<(&mut Visibility, &mut ImageNode, &SocketCell), Without<SocketPanel>>,
-    mut panel: Query<(&mut Node, &mut ImageNode), (With<SocketPanel>, Without<SocketCell>, Without<SocketClose>)>,
+    mut panel: Query<
+        (&mut Node, &mut ImageNode),
+        (With<SocketPanel>, Without<SocketCell>, Without<SocketClose>),
+    >,
     mut logged: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -210,7 +210,12 @@ fn socket_ui_system(
         node.left = Val::Px(px);
         node.top = Val::Px(py);
         node.width = Val::Px(w);
-        node.height = Val::Px(libs.0.get_image(LibraryName::Prguse3, idx).map(|i| i.height.max(0) as f32).unwrap_or(62.0));
+        node.height = Val::Px(
+            libs.0
+                .get_image(LibraryName::Prguse3, idx)
+                .map(|i| i.height.max(0) as f32)
+                .unwrap_or(62.0),
+        );
     }
     for (_, _, mut node) in &mut close {
         node.left = Val::Px(w - 23.0);
@@ -226,12 +231,9 @@ fn socket_ui_system(
         let mut show = false;
         if cell.0 < slot_count {
             if let Some(g) = gem {
-                if let Some(h) = load_lib_image(
-                    &mut libs,
-                    &mut images,
-                    LibraryName::Items,
-                    g.image as usize,
-                ) {
+                if let Some(h) =
+                    load_lib_image(&mut libs, &mut images, LibraryName::Items, g.image as usize)
+                {
                     node.image = h;
                     show = true;
                 }

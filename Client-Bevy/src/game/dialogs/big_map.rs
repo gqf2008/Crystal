@@ -11,18 +11,18 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::game::dialogs::minimap::{CurrentMapIndex, MemberLocations};
 use crate::game::dialogs::text_input::{
     TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
 };
-use crate::game::dialogs::minimap::{CurrentMapIndex, MemberLocations};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::network::NetConnection;
-use crate::ui::outlined_text::spawn_outlined_label;
 use crate::resources::libraries::LibraryName;
 use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
+use crate::ui::outlined_text::spawn_outlined_label;
 use crate::ui::sprite_ui::{UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
@@ -86,14 +86,8 @@ pub struct BigMapState {
 #[derive(Component)]
 pub struct BigMapWidget;
 
-
-
-
 #[derive(Component)]
 pub struct BigMapWorld;
-
-
-
 
 #[derive(Component)]
 pub struct BigMapPosBar;
@@ -149,11 +143,11 @@ pub struct BigMapPlugin;
 impl Plugin for BigMapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BigMapState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             big_map_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_big_map);
+        app.add_systems(OnEnter(AppState::Game), spawn_big_map);
         app.add_systems(OnExit(AppState::Game), cleanup_big_map);
         app.add_systems(
             Update,
@@ -241,20 +235,18 @@ fn spawn_big_map(
         }
         // NPC 点池（绿色小方块 3x3）
         for i in 0..DOT_POOL {
-            spawn_container(p, VIEW_X, VIEW_Y, 3.0, 3.0, 2)
-                .insert((
-                    BackgroundColor(Color::srgb(0.0, 1.0, 0.2)),
-                    BigMapDot(i),
-                    BigMapWidget,
-                ));
+            spawn_container(p, VIEW_X, VIEW_Y, 3.0, 3.0, 2).insert((
+                BackgroundColor(Color::srgb(0.0, 1.0, 0.2)),
+                BigMapDot(i),
+                BigMapWidget,
+            ));
         }
         // 队友点池（黄色小方块 3x3）
         for i in 0..MEMBER_DOT_POOL {
-            spawn_container(p, VIEW_X, VIEW_Y, 3.0, 3.0, 2)
-                .insert((
-                    BackgroundColor(Color::srgb(1.0, 0.9, 0.2)),
-                    BigMapMemberDot(i),
-                ));
+            spawn_container(p, VIEW_X, VIEW_Y, 3.0, 3.0, 2).insert((
+                BackgroundColor(Color::srgb(1.0, 0.9, 0.2)),
+                BigMapMemberDot(i),
+            ));
         }
         // 上滚/下滚 (W-21,48)/(W-21,417)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -283,8 +275,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 828),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 829),
         ) {
-            spawn_icon_button(p, n, h, pr, 250.0, ph - 33.0, 80.0, 25.0, 8)
-                .insert(BigMapWorld);
+            spawn_icon_button(p, n, h, pr, 250.0, ph - 33.0, 80.0, 25.0, 8).insert(BigMapWorld);
         }
         // 我的位置 Title[824/825/826] (400, H-33)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -314,36 +305,43 @@ fn spawn_big_map(
                 .insert(BigMapBtn(BigMapBtnKind::Search));
         }
         // 搜索输入框（C# SearchTextBox (59, H-27) 130x10；TextInputField id=10）
-        spawn_container(p, SEARCH_X, ph - SEARCH_Y_FROM_BOTTOM, SEARCH_W, SEARCH_H, 8)
-            .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                TextInputField(10),
-                TextInputRect(
-                    px + SEARCH_X,
-                    py + ph - SEARCH_Y_FROM_BOTTOM,
-                    SEARCH_W,
-                    SEARCH_H,
-                ),
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(2.0),
-                        top: Val::Px(0.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(10.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    ZIndex(9),
-                    TextInputDisplay(10),
-                ));
-            });
+        spawn_container(
+            p,
+            SEARCH_X,
+            ph - SEARCH_Y_FROM_BOTTOM,
+            SEARCH_W,
+            SEARCH_H,
+            8,
+        )
+        .insert((
+            BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+            TextInputField(10),
+            TextInputRect(
+                px + SEARCH_X,
+                py + ph - SEARCH_Y_FROM_BOTTOM,
+                SEARCH_W,
+                SEARCH_H,
+            ),
+        ))
+        .with_children(|ic| {
+            ic.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(2.0),
+                    top: Val::Px(0.0),
+                    ..default()
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(10.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                ZIndex(9),
+                TextInputDisplay(10),
+            ));
+        });
         // 世界地图覆盖层（C# WorldMapImage：Prguse2[1360] 底 + 1365 云 + 1366 边框 @(10,0)）
         for (idx, z) in [(1360usize, 6), (1365, 7), (1366, 8)] {
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, idx) {
@@ -352,8 +350,11 @@ fn spawn_big_map(
             }
         }
         // 悬停标题（C# WorldMapImage.TitleLabel：黑底白字，顶部居中）
-        spawn_outlined_label(p, cjk.clone(), "", 10.0, 8.0, 12.0, Color::WHITE, 9)
-            .insert((BigMapWorldTitle, BigMapWorldRoot, Visibility::Hidden));
+        spawn_outlined_label(p, cjk.clone(), "", 10.0, 8.0, 12.0, Color::WHITE, 9).insert((
+            BigMapWorldTitle,
+            BigMapWorldRoot,
+            Visibility::Hidden,
+        ));
         // 世界地图图标池（MapLinkIcon 帧带 offset，C# UseOffSet=true）
         let wm_white = images.add(crate::map_renderer::make_image(
             vec![255, 255, 255, 255],
@@ -361,19 +362,27 @@ fn spawn_big_map(
             1,
         ));
         for k in 0..WORLD_ICON_POOL {
-            spawn_container(p, 10.0, 0.0, 16.0, 16.0, 9)
-                .insert((
-                    Button,
-                    ImageNode::new(wm_white.clone()),
-                    BigMapWorldIcon(k),
-                    BigMapWorldRoot,
-                    Visibility::Hidden,
-                ));
+            spawn_container(p, 10.0, 0.0, 16.0, 16.0, 9).insert((
+                Button,
+                ImageNode::new(wm_white.clone()),
+                BigMapWorldIcon(k),
+                BigMapWorldRoot,
+                Visibility::Hidden,
+            ));
         }
         // NPC 列表行（x=590, y=50+i*21，右侧）
         for i in 0..MAX_ROWS {
-            spawn_outlined_label(p, cjk.clone(), "", 590.0, 50.0 + i as f32 * 21.0, 12.0, Color::WHITE, 4)
-                .insert(BigMapRow(i));
+            spawn_outlined_label(
+                p,
+                cjk.clone(),
+                "",
+                590.0,
+                50.0 + i as f32 * 21.0,
+                12.0,
+                Color::WHITE,
+                4,
+            )
+            .insert(BigMapRow(i));
         }
         // 坐标标签 (519,435)
         spawn_outlined_label(p, cjk.clone(), "", 519.0, 435.0, 12.0, Color::WHITE, 4)
@@ -390,8 +399,16 @@ fn big_map_ui_system(
     mut input: ResMut<TextInputState>,
     mut submits: MessageReader<TextInputSubmit>,
     mut widgets: Query<
-        (&mut Visibility, Option<&BigMapDot>, Option<&BigMapPlayerDot>),
-        (With<BigMapWidget>, Without<BigMapWorldRoot>, Without<BigMapWorld>),
+        (
+            &mut Visibility,
+            Option<&BigMapDot>,
+            Option<&BigMapPlayerDot>,
+        ),
+        (
+            With<BigMapWidget>,
+            Without<BigMapWorldRoot>,
+            Without<BigMapWorld>,
+        ),
     >,
     mut rows: Query<(&mut Text, &BigMapRow)>,
     mut pos_bar: Query<&mut Node, With<BigMapPosBar>>,
@@ -399,20 +416,9 @@ fn big_map_ui_system(
     windows: Query<&Window>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     // B0001：只读 panel_origin(R Node) × 本系统 Node 写方需互斥（面板根不带其标记，不错杀）
-    panel_origin: Query<
-        &Node,
-        (
-            With<BigMapWidget>,
-            With<DialogRoot>,
-            Without<BigMapPosBar>,
-        ),
-    >,
+    panel_origin: Query<&Node, (With<BigMapWidget>, With<DialogRoot>, Without<BigMapPosBar>)>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -584,7 +590,10 @@ fn big_map_world_system(
             Without<BigMapWorld>,
         ),
     >,
-    mut world_title: Query<(&mut Text, &mut Visibility), (With<BigMapWorldTitle>, Without<BigMapWorld>)>,
+    mut world_title: Query<
+        (&mut Text, &mut Visibility),
+        (With<BigMapWorldTitle>, Without<BigMapWorld>),
+    >,
     mut world_icons: Query<
         (
             Entity,
@@ -615,11 +624,7 @@ fn big_map_world_system(
         ),
     >,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -663,12 +668,7 @@ fn big_map_world_system(
     };
     let (ox, oy) = panel_origin
         .single()
-        .map(|n| {
-            crate::ui::theme::node_origin(
-                n,
-                ((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0),
-            )
-        })
+        .map(|n| crate::ui::theme::node_origin(n, ((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0)))
         .unwrap_or(((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0));
     let (wm_x, wm_y) = (ox + 10.0, oy);
 
@@ -692,8 +692,7 @@ fn big_map_world_system(
             let h = info.height.max(0) as f32;
             let x = wm_x + info.offset_x as f32;
             let y = wm_y + info.offset_y as f32;
-            let Some(hnd) =
-                load_lib_image(&mut libs, &mut images, LibraryName::MapLinkIcon, idx)
+            let Some(hnd) = load_lib_image(&mut libs, &mut images, LibraryName::MapLinkIcon, idx)
             else {
                 *vis = Visibility::Hidden;
                 continue;
@@ -853,7 +852,16 @@ fn big_map_search_hit(local: (f32, f32)) -> bool {
 }
 
 /// 队友点定位（与玩家光点同公式：vx+(x/mw)*tw, vy+(y/mh)*th；x/y 为服务端瓦片坐标）
-fn big_map_member_pos(x: i32, y: i32, mw: f32, mh: f32, tw: f32, th: f32, vx: f32, vy: f32) -> (f32, f32) {
+fn big_map_member_pos(
+    x: i32,
+    y: i32,
+    mw: f32,
+    mh: f32,
+    tw: f32,
+    th: f32,
+    vx: f32,
+    vy: f32,
+) -> (f32, f32) {
     (vx + (x as f32 / mw) * tw, vy + (y as f32 / mh) * th)
 }
 
@@ -915,13 +923,7 @@ fn big_map_viewport_system(
             Without<BigMapDot>,
         ),
     >,
-    mut player_dot: Query<
-        &mut Node,
-        (
-            With<BigMapPlayerDot>,
-            Without<BigMapTerrain>,
-        ),
-    >,
+    mut player_dot: Query<&mut Node, (With<BigMapPlayerDot>, Without<BigMapTerrain>)>,
     mut npc_dots: Query<
         (&mut Node, &mut BackgroundColor, &BigMapDot),
         (
@@ -932,7 +934,11 @@ fn big_map_viewport_system(
     >,
     players: Query<&Transform, (With<crate::actor::LocalPlayer>, Without<BigMapWidget>)>,
     windows: Query<&Window>,
-    mut texts: Query<(&mut Text, Option<&BigMapTitleText>, Option<&BigMapCoordText>)>,
+    mut texts: Query<(
+        &mut Text,
+        Option<&BigMapTitleText>,
+        Option<&BigMapCoordText>,
+    )>,
     // B0001：只读 panel_origin(R Node) × terrain/dots(W Node) 需互斥（面板根不带其标记）
     panel_origin: Query<
         &Node,
@@ -981,10 +987,7 @@ fn big_map_viewport_system(
     let (ox, oy) = panel_origin
         .single()
         .map(|n| {
-            crate::ui::theme::node_origin(
-                n,
-                ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0),
-            )
+            crate::ui::theme::node_origin(n, ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0))
         })
         .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
     let vx = ox + VIEW_X + (VIEW_W - tw) / 2.0;
@@ -1036,8 +1039,7 @@ fn big_map_viewport_system(
             }
             if s.is_none() {
                 if let Ok(player_tf) = players.single() {
-                    let (tx, ty) =
-                        world_to_tile(player_tf.translation.x, player_tf.translation.y);
+                    let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
                     s = Some(format!("[ {}, {} ]", tx, ty));
                 }
             }
@@ -1049,7 +1051,6 @@ fn big_map_viewport_system(
         }
     }
 }
-
 
 /// 由地图瓦片采样生成大地图地形纹理（每个采样点取该格背景瓦片平均色）
 fn build_terrain_texture(
@@ -1069,22 +1070,23 @@ fn build_terrain_texture(
     let tw = (map.width as usize).div_ceil(step);
     let th = (map.height as usize).div_ceil(step);
 
-    let mut cache: std::collections::HashMap<(i16, i32), [u8; 4]> = std::collections::HashMap::new();
+    let mut cache: std::collections::HashMap<(i16, i32), [u8; 4]> =
+        std::collections::HashMap::new();
     let mut rgba = Vec::with_capacity(tw * th * 4);
     for ty in 0..th {
         for tx in 0..tw {
             let cx = tx * step;
             let cy = ty * step;
-            let cell = reader
-                .map_cells
-                .get(cy)
-                .and_then(|row| row.get(cx));
+            let cell = reader.map_cells.get(cy).and_then(|row| row.get(cx));
             let mut color = match cell {
                 Some(c) => tile_avg_color(libs, &mut cache, c).unwrap_or([64, 110, 56, 255]),
                 None => [64, 110, 56, 255],
             };
             // 不可行走（障碍）压暗
-            if !map.is_walkable((cx as i32).min(map.width - 1), (cy as i32).min(map.height - 1)) {
+            if !map.is_walkable(
+                (cx as i32).min(map.width - 1),
+                (cy as i32).min(map.height - 1),
+            ) {
                 for ch in color.iter_mut().take(3) {
                     *ch = (*ch as u16 * 6 / 10) as u8;
                 }
@@ -1127,7 +1129,6 @@ fn tile_avg_color(
     Some(c)
 }
 
-
 /// 消费服务端大地图信息事件（网络层只广播 ServerEvent）
 fn big_map_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -1135,7 +1136,12 @@ fn big_map_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::MapInfo { map_index, title, npcs } = ev {
+        if let ServerEvent::MapInfo {
+            map_index,
+            title,
+            npcs,
+        } = ev
+        {
             big_map.map_index = *map_index;
             big_map.title = title.clone();
             big_map.npcs = npcs.clone();
@@ -1143,11 +1149,21 @@ fn big_map_server_events(
             big_map.top_line = 0;
         }
         // #300：世界地图配置（C# S.WorldMapSetupInfo，进图首次下发）
-        if let ServerEvent::WorldMapSetup { enabled, icons, teleport_cost } = ev {
+        if let ServerEvent::WorldMapSetup {
+            enabled,
+            icons,
+            teleport_cost,
+        } = ev
+        {
             big_map.world_enabled = *enabled;
             big_map.world_icons = icons.clone();
             big_map.teleport_cost = *teleport_cost;
-            tracing::info!("🗺️ 世界地图配置: enabled={} icons={} cost={}", enabled, icons.len(), teleport_cost);
+            tracing::info!(
+                "🗺️ 世界地图配置: enabled={} icons={} cost={}",
+                enabled,
+                icons.len(),
+                teleport_cost
+            );
         }
     }
 }
@@ -1166,8 +1182,14 @@ mod tests {
 
     #[test]
     fn member_pos_origin_and_edge() {
-        assert_eq!(big_map_member_pos(0, 0, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0), (0.0, 0.0));
-        assert_eq!(big_map_member_pos(200, 400, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0), (400.0, 800.0));
+        assert_eq!(
+            big_map_member_pos(0, 0, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0),
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            big_map_member_pos(200, 400, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0),
+            (400.0, 800.0)
+        );
     }
 
     /// #2767：大地图两处 Hint 的命中——搜索按钮（C# @(23, H-36) 32x30）与队友点（3x3，放宽 ±4px）

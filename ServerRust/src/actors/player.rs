@@ -798,7 +798,7 @@ pub(crate) fn buff_values(t: &crate::combat::buff::BuffType) -> Vec<i32> {
             max_dc,
             max_mc,
             max_sc,
-        // C# `RhinoPriest.cs:91-93`：`damage * -1`
+            // C# `RhinoPriest.cs:91-93`：`damage * -1`
         } => vec![-*max_dc, -*max_mc, -*max_sc],
         // 无数值的标记型 buff
         B::Silence | B::Stun | B::Invisibility | B::Taunt | B::Frozen => Vec::new(),
@@ -8047,18 +8047,24 @@ mod tests {
     /// （tag 29/30 + 剩余时长 + 百分比），C# `HumanObject.AddBuff` 对本人无条件 Enqueue
     #[test]
     fn multiplier_buff_body_matches_add_buff_wire() {
-        let body = super::build_add_buff_body_raw(super::BUFF_TAG_EXP, 30 * 60 * 1000, false, &[50]);
+        let body =
+            super::build_add_buff_body_raw(super::BUFF_TAG_EXP, 30 * 60 * 1000, false, &[50]);
         assert_eq!(body[0], super::BUFF_TAG_EXP);
-        assert_eq!(i32::from_le_bytes(body[1..5].try_into().unwrap()), 1_800_000);
+        assert_eq!(
+            i32::from_le_bytes(body[1..5].try_into().unwrap()),
+            1_800_000
+        );
         assert_eq!(body[5], 0);
         assert_eq!(body[6], 1);
         assert_eq!(i32::from_le_bytes(body[7..11].try_into().unwrap()), 50);
         assert_eq!(body.len(), 11);
         // Drop 同构，仅 tag 不同
-        let drop_body =
-            super::build_add_buff_body_raw(super::BUFF_TAG_DROP, 1_000, false, &[120]);
+        let drop_body = super::build_add_buff_body_raw(super::BUFF_TAG_DROP, 1_000, false, &[120]);
         assert_eq!(drop_body[0], super::BUFF_TAG_DROP);
-        assert_eq!(i32::from_le_bytes(drop_body[7..11].try_into().unwrap()), 120);
+        assert_eq!(
+            i32::from_le_bytes(drop_body[7..11].try_into().unwrap()),
+            120
+        );
     }
 
     #[test]
@@ -9130,6 +9136,4 @@ mod tests {
             assert_eq!(super::magic_key_targets_hero(key, old_key), hero);
         }
     }
-
-
 }

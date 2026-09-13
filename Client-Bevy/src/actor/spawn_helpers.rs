@@ -2,12 +2,12 @@
 // actor 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
-use mir2_shared::{MirAction, MirClass, MirGender};
-use crate::resources::libraries::{ArrayLibType, LibraryName};
-use crate::ui::sprite_ui::{UiFont, UiImageCache};
 use super::components::*;
 use super::spawn::depth_z;
+use crate::resources::libraries::{ArrayLibType, LibraryName};
+use crate::ui::sprite_ui::{UiFont, UiImageCache};
+use bevy::prelude::*;
+use mir2_shared::{MirAction, MirClass, MirGender};
 
 pub(crate) fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
     spawn_player_with(
@@ -196,7 +196,15 @@ pub(crate) fn spawn_local_player_with(
     commands
         .entity(root)
         .insert(crate::game::player_state::LocalPlayerStateBundle::default());
-    attach_player_layers(commands, root, armour, hair, weapon, weapon_effect, wing_effect);
+    attach_player_layers(
+        commands,
+        root,
+        armour,
+        hair,
+        weapon,
+        weapon_effect,
+        wing_effect,
+    );
     if is_mounted && mount_type >= 0 {
         commands.entity(root).insert(MountState { mount_type });
         attach_mount_layer(commands, root, mount_type);
@@ -240,7 +248,15 @@ pub(crate) fn spawn_remote_player_with(
             Visibility::default(),
         ))
         .id();
-    attach_player_layers(commands, root, armour, hair, weapon, weapon_effect, wing_effect);
+    attach_player_layers(
+        commands,
+        root,
+        armour,
+        hair,
+        weapon,
+        weapon_effect,
+        wing_effect,
+    );
     if is_mounted && mount_type >= 0 {
         commands.entity(root).insert(MountState { mount_type });
         attach_mount_layer(commands, root, mount_type);
@@ -361,7 +377,13 @@ pub(crate) fn attach_player_layers(
     });
 }
 
-pub(crate) fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, direction: u8) -> Entity {
+pub(crate) fn spawn_monster(
+    commands: &mut Commands,
+    monster_type: u16,
+    x: f32,
+    y: f32,
+    direction: u8,
+) -> Entity {
     let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
@@ -410,7 +432,13 @@ pub(crate) fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, 
     root
 }
 
-pub(crate) fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction: u8) -> Entity {
+pub(crate) fn spawn_npc(
+    commands: &mut Commands,
+    npc_index: u16,
+    x: f32,
+    y: f32,
+    direction: u8,
+) -> Entity {
     let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((

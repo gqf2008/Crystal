@@ -2,17 +2,17 @@
 // actor 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
-use bevy::sprite::Anchor;
-use mir2_shared::{MirAction, MirClass, MirGender};
-use crate::map_renderer::{GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
-use crate::game::movement::MoveTween;
-use crate::resources::libraries::{ArrayLibType, LibraryName};
-use crate::ui::sprite_ui::{UiFont, UiImageCache};
-use crate::network::{NetObject, NetObjectRemoved};
 use super::components::*;
 use super::frames::actor_frame;
 use super::spawn_helpers::*;
+use crate::game::movement::MoveTween;
+use crate::map_renderer::{GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
+use crate::network::{NetObject, NetObjectRemoved};
+use crate::resources::libraries::{ArrayLibType, LibraryName};
+use crate::ui::sprite_ui::{UiFont, UiImageCache};
+use bevy::prelude::*;
+use bevy::sprite::Anchor;
+use mir2_shared::{MirAction, MirClass, MirGender};
 
 pub(crate) fn spawn_net_objects_when_ready(
     mut commands: Commands,
@@ -107,11 +107,11 @@ pub(crate) fn spawn_net_objects_when_ready(
                     .find(|(_, id, _)| id.0 == *object_id)
                     .map(|(e, _, _)| e);
                 if let Some(ent) = existing {
-                    let has_mount = actors
-                        .iter()
-                        .any(|(e, _, m)| e == ent && m.is_some());
+                    let has_mount = actors.iter().any(|(e, _, m)| e == ent && m.is_some());
                     if *is_mounted && *mount_type >= 0 && !has_mount {
-                        commands.entity(ent).insert(MountState { mount_type: *mount_type });
+                        commands.entity(ent).insert(MountState {
+                            mount_type: *mount_type,
+                        });
                         commands.entity(ent).with_children(|p| {
                             p.spawn((
                                 Sprite::default(),
@@ -160,18 +160,34 @@ pub(crate) fn spawn_net_objects_when_ready(
                     });
                     continue;
                 }
-                spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets, None);
+                spawn_net_object_entity(
+                    &mut commands,
+                    obj,
+                    is_local,
+                    &sound_bank,
+                    &mut audio_assets,
+                    None,
+                );
             }
             _ => {
                 // #1813：Monster/Npc 同 id 已存在 → 传给生成函数做去重更新
                 let existing = match obj {
-                    NetObject::Monster { object_id, .. } | NetObject::Npc { object_id, .. } => actors
-                        .iter()
-                        .find(|(_, id, _)| id.0 == *object_id)
-                        .map(|(e, _, _)| e),
+                    NetObject::Monster { object_id, .. } | NetObject::Npc { object_id, .. } => {
+                        actors
+                            .iter()
+                            .find(|(_, id, _)| id.0 == *object_id)
+                            .map(|(e, _, _)| e)
+                    }
                     _ => None,
                 };
-                spawn_net_object_entity(&mut commands, obj, is_local, &sound_bank, &mut audio_assets, existing);
+                spawn_net_object_entity(
+                    &mut commands,
+                    obj,
+                    is_local,
+                    &sound_bank,
+                    &mut audio_assets,
+                    existing,
+                );
             }
         }
     }
@@ -210,10 +226,21 @@ fn spawn_net_object_entity(
             mount_type,
             is_mounted,
         } => {
-            tracing::debug!("🧍 NetObject::Player id={} name={} loc=({},{}) local={}", object_id, name, location_x, location_y, is_local_player);
+            tracing::debug!(
+                "🧍 NetObject::Player id={} name={} loc=({},{}) local={}",
+                object_id,
+                name,
+                location_x,
+                location_y,
+                is_local_player
+            );
             // 注意：世界坐标 y 向下取负（与地图/怪物/NPC 一致），此前玩家未取负导致镜像位置
             let e = if is_local_player {
-                tracing::debug!("🧍 生成本地玩家 world=({:.0},{:.0})", wx(*location_x), -wy(*location_y));
+                tracing::debug!(
+                    "🧍 生成本地玩家 world=({:.0},{:.0})",
+                    wx(*location_x),
+                    -wy(*location_y)
+                );
                 spawn_local_player_with(
                     commands,
                     wx(*location_x),
@@ -267,7 +294,8 @@ fn spawn_net_object_entity(
             // （否则幽灵实体停在旧位置，ObjectWalk 更新 A、攻击读 B → 近战瞄错格空挥）
             if let Some(ent) = existing {
                 let (nx, ny) = (wx(*location_x), wy(*location_y));
-                commands.entity(ent)
+                commands
+                    .entity(ent)
                     .insert(Transform::from_xyz(nx, -ny, depth_z(-ny)))
                     .insert(MonsterName(name.clone()))
                     .insert(ActorAnim {
@@ -305,7 +333,8 @@ fn spawn_net_object_entity(
             // #1813：同 id 已存在 → 更新位置/名字/方向，不重复生成（同 Monster 去重）
             if let Some(ent) = existing {
                 let (nx, ny) = (wx(*location_x), wy(*location_y));
-                commands.entity(ent)
+                commands
+                    .entity(ent)
                     .insert(Transform::from_xyz(nx, -ny, depth_z(-ny)))
                     .insert(NpcName(name.clone()))
                     .insert(ActorAnim {
@@ -364,13 +393,9 @@ fn spawn_ground_item(
             Visibility::default(),
         ))
         .id();
-    if let Some(h) = crate::ui::sprite_ui::ui_image(
-        libs,
-        images,
-        cache,
-        LibraryName::Items,
-        item.image as usize,
-    ) {
+    if let Some(h) =
+        crate::ui::sprite_ui::ui_image(libs, images, cache, LibraryName::Items, item.image as usize)
+    {
         commands.entity(e).with_children(|p| {
             // 物品图标（原版 ItemObject.Draw 用 Items 库帧）
             p.spawn((
@@ -390,10 +415,10 @@ fn spawn_ground_item(
                 // #1737：地面物品名字按品质着色（C# ItemObject NameColour by Grade：
                 // Rare DeepSkyBlue / Legendary DarkOrange / Mythical Plum / Heroic Red）
                 TextColor(match item.grade {
-                    5 => Color::srgb(0.0, 0.749, 1.0),      // Rare DeepSkyBlue
-                    6 => Color::srgb(1.0, 0.549, 0.0),      // Legendary DarkOrange
-                    7 => Color::srgb(0.867, 0.627, 0.867),  // Mythical Plum
-                    8 => Color::srgb(1.0, 0.0, 0.0),        // Heroic Red
+                    5 => Color::srgb(0.0, 0.749, 1.0),     // Rare DeepSkyBlue
+                    6 => Color::srgb(1.0, 0.549, 0.0),     // Legendary DarkOrange
+                    7 => Color::srgb(0.867, 0.627, 0.867), // Mythical Plum
+                    8 => Color::srgb(1.0, 0.0, 0.0),       // Heroic Red
                     _ => Color::WHITE,
                 }),
                 Transform::from_xyz(-22.0, -22.0, 0.2),
@@ -540,5 +565,3 @@ pub(crate) fn spawn_demo_actors_when_ready(
 pub fn depth_z(world_y: f32) -> f32 {
     crate::map_renderer::depth_y(world_y)
 }
-
-

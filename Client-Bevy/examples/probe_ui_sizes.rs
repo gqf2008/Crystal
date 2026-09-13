@@ -56,7 +56,10 @@ fn main() {
         (LibraryName::Prguse, 660, "InputBox 底"),
     ];
 
-    println!("{:<8} {:<6} {:<10} {:<10} {}", "Lib", "Idx", "W", "H", "用途");
+    println!(
+        "{:<8} {:<6} {:<10} {:<10} {}",
+        "Lib", "Idx", "W", "H", "用途"
+    );
     println!("{}", "-".repeat(70));
     for (lib, i, desc) in checks {
         match libs.get_image(*lib, *i) {
@@ -74,7 +77,14 @@ fn main() {
                     has_rgba
                 );
             }
-            None => println!("{:<8} {:<6} {:<10} {:<10} {} *** MISSING ***", format!("{:?}", lib), i, "-", "-", desc),
+            None => println!(
+                "{:<8} {:<6} {:<10} {:<10} {} *** MISSING ***",
+                format!("{:?}", lib),
+                i,
+                "-",
+                "-",
+                desc
+            ),
         }
     }
 }

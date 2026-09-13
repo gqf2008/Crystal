@@ -6,7 +6,10 @@ fn main() {
     libs.ensure_initialized();
     println!("data = {}", data.display());
     let mut d = |l: LibraryName, i: usize, tag: &str| match libs.get_image(l, i) {
-        Some(x) => println!("{:?}[{}] {} {}x{} offset=({},{})", l, i, tag, x.width, x.height, x.offset_x, x.offset_y),
+        Some(x) => println!(
+            "{:?}[{}] {} {}x{} offset=({},{})",
+            l, i, tag, x.width, x.height, x.offset_x, x.offset_y
+        ),
         None => println!("{:?}[{}] {} MISSING", l, i, tag),
     };
     d(LibraryName::Prguse, 0, "底栏800");

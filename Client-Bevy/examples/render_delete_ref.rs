@@ -19,8 +19,22 @@ fn main() {
         let dy = (768 - h) / 2;
         paste_lib(&mut libs, &mut img, LibraryName::Prguse, 360, dx, dy);
         // Yes Title[206]@(260,157)  No Title[210]@(360,157)
-        paste_lib(&mut libs, &mut img, LibraryName::Title, 206, dx + 260, dy + 157);
-        paste_lib(&mut libs, &mut img, LibraryName::Title, 210, dx + 360, dy + 157);
+        paste_lib(
+            &mut libs,
+            &mut img,
+            LibraryName::Title,
+            206,
+            dx + 260,
+            dy + 157,
+        );
+        paste_lib(
+            &mut libs,
+            &mut img,
+            LibraryName::Title,
+            210,
+            dx + 360,
+            dy + 157,
+        );
         img.save("../tools/ref_del_ask.png").unwrap();
         println!("saved ref_del_ask.png");
     }
@@ -37,8 +51,22 @@ fn main() {
         // 输入框边框示意 (23,86) 240x19 绿框
         draw_rect(&mut img, dx + 23, dy + 86, 240, 19, [0, 255, 0, 255]);
         // OK Title[200]@(60,123)  Cancel Title[203]@(160,123)
-        paste_lib(&mut libs, &mut img, LibraryName::Title, 200, dx + 60, dy + 123);
-        paste_lib(&mut libs, &mut img, LibraryName::Title, 203, dx + 160, dy + 123);
+        paste_lib(
+            &mut libs,
+            &mut img,
+            LibraryName::Title,
+            200,
+            dx + 60,
+            dy + 123,
+        );
+        paste_lib(
+            &mut libs,
+            &mut img,
+            LibraryName::Title,
+            203,
+            dx + 160,
+            dy + 123,
+        );
         img.save("../tools/ref_del_input.png").unwrap();
         println!("saved ref_del_input.png");
     }
@@ -51,7 +79,14 @@ fn main() {
     }
 }
 
-fn paste_lib(libs: &mut Libraries, img: &mut RgbaImage, name: LibraryName, idx: usize, x: i32, y: i32) {
+fn paste_lib(
+    libs: &mut Libraries,
+    img: &mut RgbaImage,
+    name: LibraryName,
+    idx: usize,
+    x: i32,
+    y: i32,
+) {
     if let Some(info) = libs.get_image(name, idx) {
         if let Some(rgba) = info.rgba {
             paste(img, &rgba, info.width as u32, info.height as u32, x, y);
@@ -114,7 +149,11 @@ fn paste(img: &mut RgbaImage, rgba: &[u8], iw: u32, ih: u32, x: i32, y: i32) {
             } else {
                 0
             };
-            img.put_pixel(px as u32, py as u32, Rgba([r as u8, g as u8, b as u8, out_a as u8]));
+            img.put_pixel(
+                px as u32,
+                py as u32,
+                Rgba([r as u8, g as u8, b as u8, out_a as u8]),
+            );
         }
     }
 }

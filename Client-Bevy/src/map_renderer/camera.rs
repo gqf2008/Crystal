@@ -2,8 +2,8 @@
 // map_renderer 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 pub(crate) fn spawn_camera(mut commands: Commands) {
     commands.spawn((
@@ -64,7 +64,6 @@ pub(crate) fn camera_control(
     }
 }
 
-
 /// 图层调试热键：1=Back 2=Middle 3=Front静态 F=动画/混合
 /// （#2595：文本输入聚焦时让路——数字/F 是文本按键）
 pub(crate) fn map_layer_toggle_system(
@@ -73,32 +72,78 @@ pub(crate) fn map_layer_toggle_system(
     mut show: ResMut<MapLayerShow>,
     mut floors: Query<(&MapFloorMark, &mut Visibility), (Without<FrontTile>,)>,
     mut fronts: Query<&mut Visibility, (With<FrontTile>, Without<MapFloorMark>)>,
-    mut anims: Query<&mut Visibility, (With<crate::map_tile_anim::MapTileAnim>, Without<MapFloorMark>, Without<FrontTile>)>,
-    mut lights: Query<&mut Visibility, (With<MapLight>, Without<MapFloorMark>, Without<FrontTile>, Without<crate::map_tile_anim::MapTileAnim>)>,
+    mut anims: Query<
+        &mut Visibility,
+        (
+            With<crate::map_tile_anim::MapTileAnim>,
+            Without<MapFloorMark>,
+            Without<FrontTile>,
+        ),
+    >,
+    mut lights: Query<
+        &mut Visibility,
+        (
+            With<MapLight>,
+            Without<MapFloorMark>,
+            Without<FrontTile>,
+            Without<crate::map_tile_anim::MapTileAnim>,
+        ),
+    >,
 ) {
     if gate.0 {
         return;
     }
-    if keys.just_pressed(KeyCode::Digit1) { show.back = !show.back; tracing::info!("[LAYER] Back {}", if show.back {"ON"} else {"OFF"}); }
-    if keys.just_pressed(KeyCode::Digit2) { show.middle = !show.middle; tracing::info!("[LAYER] Middle {}", if show.middle {"ON"} else {"OFF"}); }
-    if keys.just_pressed(KeyCode::Digit3) { show.front = !show.front; tracing::info!("[LAYER] Front {}", if show.front {"ON"} else {"OFF"}); }
-    if keys.just_pressed(KeyCode::KeyF) { show.anim = !show.anim; tracing::info!("[LAYER] Anim {}", if show.anim {"ON"} else {"OFF"}); }
+    if keys.just_pressed(KeyCode::Digit1) {
+        show.back = !show.back;
+        tracing::info!("[LAYER] Back {}", if show.back { "ON" } else { "OFF" });
+    }
+    if keys.just_pressed(KeyCode::Digit2) {
+        show.middle = !show.middle;
+        tracing::info!("[LAYER] Middle {}", if show.middle { "ON" } else { "OFF" });
+    }
+    if keys.just_pressed(KeyCode::Digit3) {
+        show.front = !show.front;
+        tracing::info!("[LAYER] Front {}", if show.front { "ON" } else { "OFF" });
+    }
+    if keys.just_pressed(KeyCode::KeyF) {
+        show.anim = !show.anim;
+        tracing::info!("[LAYER] Anim {}", if show.anim { "ON" } else { "OFF" });
+    }
     for (mark, mut vis) in floors.iter_mut() {
-        let on = match mark.0 { Layer::Back => show.back, Layer::Middle => show.middle, Layer::Front => show.front };
-        *vis = if on { Visibility::Visible } else { Visibility::Hidden };
+        let on = match mark.0 {
+            Layer::Back => show.back,
+            Layer::Middle => show.middle,
+            Layer::Front => show.front,
+        };
+        *vis = if on {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut vis in fronts.iter_mut() {
-        *vis = if show.front { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show.front {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // F 键同时控制动画/混合瓦片与地图灯光（原版 F 键开关动画/灯光）
     for mut vis in anims.iter_mut() {
-        *vis = if show.anim { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show.anim {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut vis in lights.iter_mut() {
-        *vis = if show.anim { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show.anim {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
-
 
 /// 相机跟随（参考 macroquad CameraFollowSystem）：远距直跳 + lerp 平滑
 pub(crate) fn camera_follow_system(
@@ -119,7 +164,9 @@ pub(crate) fn camera_follow_system(
         ),
     >,
 ) {
-    let Ok(mut cam) = camera.single_mut() else { return };
+    let Ok(mut cam) = camera.single_mut() else {
+        return;
+    };
     let Ok(player) = players.single() else { return };
     // C# 风格：相机精确跟随玩家（玩家恒定在屏幕中心），
     // 消除 lerp 滞后造成的画面轻微抖动/拖影

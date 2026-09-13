@@ -98,11 +98,11 @@ pub struct RankingPlugin;
 impl Plugin for RankingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RankingState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             ranking_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_ranking);
+        app.add_systems(OnEnter(AppState::Game), spawn_ranking);
         app.add_systems(OnExit(AppState::Game), cleanup_ranking);
         app.add_systems(
             Update,
@@ -130,11 +130,15 @@ fn spawn_ranking(
     let font = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // bevy_ui 面板 Title[728]（324x441 @ 200,150）——bevy_ui 迁移样板
-    let Some(bg) = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 728) else {
+    let Some(bg) =
+        crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 728)
+    else {
         return;
     };
     let panel = crate::ui::theme::spawn_panel(&mut commands, bg, 200.0, 150.0, 324.0, 441.0, 40);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Ranking), RankingWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Ranking), RankingWidget));
 
     commands.entity(panel).with_children(|p| {
         // 关闭 X（C# relative (289,3) → 面板内 (296,4)）
@@ -216,8 +220,18 @@ fn spawn_ranking(
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2086),
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2087),
         ) {
-            crate::ui::theme::spawn_icon_button(p, u.clone(), t.clone(), u, 190.0, 410.0, 16.0, 14.0, 9)
-                .insert(RankingOnlineOnly);
+            crate::ui::theme::spawn_icon_button(
+                p,
+                u.clone(),
+                t.clone(),
+                u,
+                190.0,
+                410.0,
+                16.0,
+                14.0,
+                9,
+            )
+            .insert(RankingOnlineOnly);
         }
         crate::ui::theme::spawn_label(
             p,
@@ -266,7 +280,10 @@ fn ranking_ui_system(
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
     close: Query<(Entity, &Interaction), (With<RankingClose>, Without<RankingTab>)>,
     tabs: Query<(Entity, &Interaction, &RankingTab)>,
-    prev: Query<(Entity, &Interaction), (With<RankingPrev>, Without<RankingTab>, Without<RankingNext>)>,
+    prev: Query<
+        (Entity, &Interaction),
+        (With<RankingPrev>, Without<RankingTab>, Without<RankingNext>),
+    >,
     next: Query<
         (Entity, &Interaction),
         (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>),
@@ -293,7 +310,11 @@ fn ranking_ui_system(
 
     let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *requested = false;
@@ -329,7 +350,11 @@ fn ranking_ui_system(
             });
             tracing::info!(
                 "🏅 排行榜页签 {}",
-                if t.0 == 0 { "全部" } else { rank_class_name(t.0 - 1) }
+                if t.0 == 0 {
+                    "全部"
+                } else {
+                    rank_class_name(t.0 - 1)
+                }
             );
         }
     }
@@ -356,7 +381,11 @@ fn ranking_ui_system(
             });
             tracing::info!("🏅 排行榜仅在线 {}", ranking.online_only);
         }
-        let want = if ranking.online_only { &ib.pressed } else { &ib.normal };
+        let want = if ranking.online_only {
+            &ib.pressed
+        } else {
+            &ib.normal
+        };
         if node.image != *want {
             node.image = want.clone();
         }
@@ -376,7 +405,10 @@ fn ranking_ui_system(
         };
     }
     // 我的排名
-    let self_name = local_player.single().map(|n| n.0.clone()).unwrap_or_default();
+    let self_name = local_player
+        .single()
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
     for mut text in &mut my_rank_text {
         text.0 = if ranking.my_rank > 0 {
             format!("我的排名：第 {} 名", ranking.my_rank)
@@ -423,7 +455,13 @@ mod tests {
 
     #[test]
     fn rank_tab_filter() {
-        let entries = vec![entry(1, 0), entry(2, 1), entry(3, 2), entry(4, 3), entry(5, 4)];
+        let entries = vec![
+            entry(1, 0),
+            entry(2, 1),
+            entry(3, 2),
+            entry(4, 3),
+            entry(5, 4),
+        ];
         assert_eq!(filter_rank_tab(&entries, 0).len(), 5);
         assert_eq!(filter_rank_tab(&entries, 1).len(), 1);
         assert_eq!(filter_rank_tab(&entries, 1)[0].rank, 1);

@@ -99,18 +99,25 @@ fn spawn_hero_skills(
         }
         // 7 行技能：容器（行显隐随容器）+ 图标 + 文本
         for i in 0..ROWS {
-            spawn_container(p, PAGE_X + 8.0, PAGE_Y + 8.0 + i as f32 * 33.0, 231.0, 33.0, 9)
-                .insert((Button, HeroSkillRow(i), Visibility::Hidden))
-                .with_children(|c| {
-                    let white = images.add(crate::map_renderer::make_image(
-                        vec![255, 255, 255, 255],
-                        1,
-                        1,
-                    ));
-                    spawn_image(c, white, 36.0, 0.0, 36.0, 36.0, 10).insert(HeroSkillIcon(i));
-                    spawn_label(c, &font, "", 78.0, 6.0, 12.0, Color::WHITE, 10)
-                        .insert(HeroSkillText(i));
-                });
+            spawn_container(
+                p,
+                PAGE_X + 8.0,
+                PAGE_Y + 8.0 + i as f32 * 33.0,
+                231.0,
+                33.0,
+                9,
+            )
+            .insert((Button, HeroSkillRow(i), Visibility::Hidden))
+            .with_children(|c| {
+                let white = images.add(crate::map_renderer::make_image(
+                    vec![255, 255, 255, 255],
+                    1,
+                    1,
+                ));
+                spawn_image(c, white, 36.0, 0.0, 36.0, 36.0, 10).insert(HeroSkillIcon(i));
+                spawn_label(c, &font, "", 78.0, 6.0, 12.0, Color::WHITE, 10)
+                    .insert(HeroSkillText(i));
+            });
         }
     });
 }

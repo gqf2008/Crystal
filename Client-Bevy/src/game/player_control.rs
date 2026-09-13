@@ -15,16 +15,21 @@ use crate::actor::{
     ActorAnim, ActorAppearance, GroundItem, LocalPlayer, Monster, MountState, NetObjectId, Npc,
     Player,
 };
-use crate::game::player_state::{CombatStats, Inventory, Loadout, PetModeState, Progression, StatusFlags};
-use crate::game::sets::GameSet;
-use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
-use mir2_shared::enums::MirDirection;
+use crate::game::dialogs::assign_key::AssignKeyState;
+use crate::game::movement::{
+    direction_from_delta, mouse_direction, next_direction, point_move, previous_direction,
+    world_to_tile, LocalMove,
+};
 use crate::game::pathfinding;
+use crate::game::player_state::{
+    CombatStats, Inventory, Loadout, PetModeState, Progression, StatusFlags,
+};
+use crate::game::sets::GameSet;
 use crate::map_renderer::{GameData, GameLibraries, TILE_WIDTH};
 use crate::network::NetConnection;
 use crate::scenes::AppState;
-use crate::game::dialogs::assign_key::AssignKeyState;
 use crate::ui::sprite_ui::UiButton;
+use mir2_shared::enums::MirDirection;
 
 #[derive(Resource)]
 pub struct ControlState {
@@ -144,8 +149,7 @@ pub fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec
 pub fn actor_hit_area(anchor: Vec2, click: Vec2) -> bool {
     let dx = click.x - anchor.x;
     let dy = click.y - anchor.y;
-    (dx.abs() <= 44.0 && dy >= -16.0 && dy <= 128.0)
-        || (dx * dx + dy * dy) <= 60.0 * 60.0
+    (dx.abs() <= 44.0 && dy >= -16.0 && dy <= 128.0) || (dx * dx + dy * dy) <= 60.0 * 60.0
 }
 
 /// 上下文光标（#1321：对齐 C# SetMouseCursor——NPC→手型、怪物→准星、其他→默认）
@@ -156,8 +160,12 @@ fn context_cursor_system(
     mut commands: Commands,
     mut last: Local<SystemCursorIcon>,
 ) {
-    let Ok((w_entity, window)) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((w_entity, window)) = windows.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let Ok(cam) = camera.single() else { return };
     let world = screen_to_world(cursor, cam, window);
     let mut icon = SystemCursorIcon::Default;
@@ -248,22 +256,14 @@ fn is_shift_down(keys: &ButtonInput<KeyCode>) -> bool {
     keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
 }
 
-
-
 /// 推进攻击计时（原 player_input_system 末尾逻辑独立成系统；保持既有行为）
 /// 门控（dead/fishing/paralysis）由 .run_if(player_input_enabled) 承担。
-fn advance_attack_timer_system(
-    time: Res<Time>,
-    mut control: ResMut<ControlState>,
-) {
+fn advance_attack_timer_system(time: Res<Time>, mut control: ResMut<ControlState>) {
     control.last_attack += time.delta_secs();
 }
 
 /// 中键：AutoRun 切换（原版 GameScene.OnMouseClick Middle）
-fn autorun_toggle_system(
-    mut control: ResMut<ControlState>,
-    mouse: Res<ButtonInput<MouseButton>>,
-) {
+fn autorun_toggle_system(mut control: ResMut<ControlState>, mouse: Res<ButtonInput<MouseButton>>) {
     if mouse.just_pressed(MouseButton::Middle) {
         control.autorun = !control.autorun;
         tracing::info!("🏃 AutoRun: {}", control.autorun);
@@ -278,7 +278,14 @@ fn right_click_move_system(
     mut libs: ResMut<GameLibraries>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera2d>,
+            Without<UiButton>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+        ),
+    >,
     players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
     objects: Query<
         (&NetObjectId, &Transform),
@@ -291,15 +298,22 @@ fn right_click_move_system(
     ui: UiLockState,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.physical_cursor_position() else { return };
-    let Some(cursor_logical) = window.cursor_position() else { return };
+    let Some(cursor) = window.physical_cursor_position() else {
+        return;
+    };
+    let Some(cursor_logical) = window.cursor_position() else {
+        return;
+    };
     let Ok(cam_tf) = camera.single() else { return };
     let over_ui = buttons.iter().any(|(b, inherited)| {
         if !inherited.get() {
             return false;
         }
         let (x, y, w, h) = b.rect;
-        cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
+        cursor_logical.x >= x
+            && cursor_logical.x <= x + w
+            && cursor_logical.y >= y
+            && cursor_logical.y <= y + h
     });
     // #1830：窗口类对话框打开时不寻路移动（小地图除外）
     // #2487：技能栏控件吃掉落在其上的右键（C# 对话框 Hidden 时不吃）
@@ -316,11 +330,17 @@ fn right_click_move_system(
     let world = screen_to_world(cursor, cam_tf, window);
     // C# OnMouseClick Right：仅当 MouseObject == null（空地）才寻路移动；
     // 点到怪物/NPC/玩家不移动（玩家右键由 player_menu 弹菜单）
-    let Some(cursor_logical) = window.cursor_position() else { return };
+    let Some(cursor_logical) = window.cursor_position() else {
+        return;
+    };
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
     let hit_object = objects.iter().any(|(_, tf)| {
         let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
-        let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+        let d2 = Vec2::new(
+            tf.translation.x - world_logical.x,
+            tf.translation.y - world_logical.y,
+        )
+        .length();
         d1.min(d2) < 60.0
     });
     if hit_object {
@@ -328,7 +348,9 @@ fn right_click_move_system(
         return;
     }
     let target_tile = world_to_tile(world.x, world.y);
-    let Ok((pe, ptf, _)) = players.single() else { return };
+    let Ok((pe, ptf, _)) = players.single() else {
+        return;
+    };
     let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
     libs.0.ensure_initialized();
     if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
@@ -364,8 +386,18 @@ fn left_click_interact_system(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     windows: Query<&Window>,
-    camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
-    mut players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera2d>,
+            Without<UiButton>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+        ),
+    >,
+    mut players: Query<
+        (Entity, &Transform, &mut ActorAnim),
+        (With<LocalPlayer>, With<NetObjectId>),
+    >,
     actors: Query<(&NetObjectId, &Transform, Has<Npc>), Without<LocalPlayer>>,
     remote_players: Query<&NetObjectId, (With<crate::actor::Player>, Without<LocalPlayer>)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
@@ -373,15 +405,22 @@ fn left_click_interact_system(
     ui: UiLockState,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.physical_cursor_position() else { return };
-    let Some(cursor_logical) = window.cursor_position() else { return };
+    let Some(cursor) = window.physical_cursor_position() else {
+        return;
+    };
+    let Some(cursor_logical) = window.cursor_position() else {
+        return;
+    };
     let Ok(cam_tf) = camera.single() else { return };
     let over_ui = buttons.iter().any(|(b, inherited)| {
         if !inherited.get() {
             return false;
         }
         let (x, y, w, h) = b.rect;
-        cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
+        cursor_logical.x >= x
+            && cursor_logical.x <= x + w
+            && cursor_logical.y >= y
+            && cursor_logical.y <= y + h
     });
     let world = screen_to_world(cursor, cam_tf, window);
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
@@ -398,8 +437,16 @@ fn left_click_interact_system(
     {
         return;
     }
-    tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
-    let Ok((pe, ptf, mut anim)) = players.single_mut() else { return };
+    tracing::debug!(
+        "🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})",
+        cursor.x,
+        cursor.y,
+        world.x,
+        world.y
+    );
+    let Ok((pe, ptf, mut anim)) = players.single_mut() else {
+        return;
+    };
     let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
     // C# OnMouseDown：Alt+左键 → Harvest（采集/挖矿，方向 = 玩家→鼠标方向）
     if is_alt_down(&keys) {
@@ -411,7 +458,12 @@ fn left_click_interact_system(
                 .unwrap_or(mir2_shared::enums::MirDirection::Up),
         );
         net.send_packet(&mir2_shared::packets::client::combat::Harvest { direction });
-        tracing::info!("⛏️ Alt+左键采集 dir={:?} target=({},{})", direction, target_tile.0, target_tile.1);
+        tracing::info!(
+            "⛏️ Alt+左键采集 dir={:?} target=({},{})",
+            direction,
+            target_tile.0,
+            target_tile.1
+        );
         return;
     }
     let mut best: Option<(u32, f32)> = None;
@@ -428,7 +480,11 @@ fn left_click_interact_system(
     let mut best_item: Option<(u32, f32)> = None;
     for (id, tf) in &items {
         let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
-        let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+        let d2 = Vec2::new(
+            tf.translation.x - world_logical.x,
+            tf.translation.y - world_logical.y,
+        )
+        .length();
         let dist = d1.min(d2);
         if dist < 45.0 && best_item.map(|(_, d)| dist < d).unwrap_or(true) {
             best_item = Some((id.0, dist));
@@ -511,7 +567,7 @@ fn left_click_interact_system(
         } else {
             control.attack_target = Some(object_id);
             control.last_attack = 0.0; // 立即攻击
-            // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
+                                       // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
             commands.entity(pe).remove::<LocalMove>();
             anim.action = mir2_shared::enums::MirAction::Standing;
             anim.frame_index = 0;
@@ -528,13 +584,17 @@ fn pickup_arrival_system(
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     players: Query<(&Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
 ) {
-    let Some(target) = control.pickup_target else { return };
+    let Some(target) = control.pickup_target else {
+        return;
+    };
     // 物品已消失（被拾取/过期）→ 清除目标
     let Some((_, item_tf)) = items.iter().find(|(id, _)| id.0 == target) else {
         control.pickup_target = None;
         return;
     };
-    let Ok((player_tf, lm)) = players.single() else { return };
+    let Ok((player_tf, lm)) = players.single() else {
+        return;
+    };
     // 仍在移动中（路径未走完）
     if let Some(lm) = lm {
         if !lm.path.is_empty() {
@@ -578,9 +638,15 @@ pub fn build_ranged_attack(
 ) -> mir2_shared::packets::client::combat::RangeAttack {
     mir2_shared::packets::client::combat::RangeAttack {
         direction,
-        location: mir2_shared::map::Point { x: player_tile.0, y: player_tile.1 },
+        location: mir2_shared::map::Point {
+            x: player_tile.0,
+            y: player_tile.1,
+        },
         target_id,
-        target_location: mir2_shared::map::Point { x: target_tile.0, y: target_tile.1 },
+        target_location: mir2_shared::map::Point {
+            x: target_tile.0,
+            y: target_tile.1,
+        },
     }
 }
 
@@ -605,7 +671,10 @@ fn auto_attack_system(
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
     game_data: Res<GameData>,
-    players: Query<(Entity, &Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
+    players: Query<
+        (Entity, &Transform, Option<&LocalMove>),
+        (With<LocalPlayer>, With<NetObjectId>),
+    >,
     actors: Query<(&NetObjectId, &Transform)>,
     // #2633 批次4 步6/7/8：class/riding/mount_type 改读 `ActorAppearance`/`MountState`、
     // 武器 shape 读 `Loadout`、攻速/等级读 `CombatStats`/`Progression`（CharacterState 已删）；
@@ -626,24 +695,32 @@ fn auto_attack_system(
     mut too_far_timer: Local<f32>,
 ) {
     control.last_attack += time.delta_secs();
-    let Some(target_id) = control.attack_target else { return };
+    let Some(target_id) = control.attack_target else {
+        return;
+    };
 
     // 目标已消失 → 停止攻击
     let Some((_, target_tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
         control.attack_target = None;
         return;
     };
-    let Ok((pe, player_tf, lm_opt)) = players.single() else { return };
+    let Ok((pe, player_tf, lm_opt)) = players.single() else {
+        return;
+    };
 
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
     // 武器槽/职业/骑乘读 `Loadout`/`ActorAppearance`/`MountState`（#2633 批次4 步6/步7）
     let player_state = player_q.single().ok();
-    let class = player_state.map(|(_, a, _, _, _)| a.class as u8).unwrap_or(0);
+    let class = player_state
+        .map(|(_, a, _, _, _)| a.class as u8)
+        .unwrap_or(0);
     let weapon_equipped = player_state
         .and_then(|(l, _, _, _, _)| l.slots.get(0))
         .and_then(|s| s.as_ref())
         .is_some();
-    let riding = player_state.map(|(_, _, m, _, _)| m.is_some()).unwrap_or(false);
+    let riding = player_state
+        .map(|(_, _, m, _, _)| m.is_some())
+        .unwrap_or(false);
     let mount_type = player_state
         .and_then(|(_, _, m, _, _)| m)
         .map(|m| m.mount_type)
@@ -660,12 +737,12 @@ fn auto_attack_system(
     let (attack_speed, level) = player_state
         .map(|(_, _, _, c, p)| (c.attack_speed, p.level))
         .unwrap_or((0, 1));
-    control.attack_interval = attack_interval_secs(attack_speed, level)
-        + if is_archer { 0.2 } else { 0.0 };
+    control.attack_interval =
+        attack_interval_secs(attack_speed, level) + if is_archer { 0.2 } else { 0.0 };
     let p_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
     let t_tile = world_to_tile(target_tf.translation.x, target_tf.translation.y);
-    let in_range = (t_tile.0 - p_tile.0).abs() <= max_range
-        && (t_tile.1 - p_tile.1).abs() <= max_range;
+    let in_range =
+        (t_tile.0 - p_tile.0).abs() <= max_range && (t_tile.1 - p_tile.1).abs() <= max_range;
 
     if !in_range {
         // #1817：C# 点击目标后自动追击——目标离开攻击范围时寻路到其相邻格。
@@ -675,14 +752,26 @@ fn auto_attack_system(
         if !pathing {
             if let Some(map) = &game_data.map {
                 let mut best_path: Option<Vec<(i32, i32)>> = None;
-                for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                for (ox, oy) in [
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (1, -1),
+                    (-1, 1),
+                    (1, 1),
+                ] {
                     let t2 = (t_tile.0 + ox, t_tile.1 + oy);
                     if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
                         continue;
                     }
                     if let Some(p) = crate::game::pathfinding::find_path(map, p_tile, t2) {
                         if !p.is_empty()
-                            && best_path.as_ref().map(|bp| p.len() < bp.len()).unwrap_or(true)
+                            && best_path
+                                .as_ref()
+                                .map(|bp| p.len() < bp.len())
+                                .unwrap_or(true)
                         {
                             best_path = Some(p);
                         }
@@ -713,7 +802,12 @@ fn auto_attack_system(
                     crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
                     crate::game::chat::ChatChannel::System,
                 );
-                tracing::debug!("🚫 目标太远: target={} range={} 需 <= {}", target_id, max_range, max_range);
+                tracing::debug!(
+                    "🚫 目标太远: target={} range={} 需 <= {}",
+                    target_id,
+                    max_range,
+                    max_range
+                );
             }
         }
         return;
@@ -736,7 +830,12 @@ fn auto_attack_system(
         //   远程弹道由服务端回 S.RangeAttack 渲染（PendingEffect::Projectile），
         //   C# PlayAttackSound 弓手直接 return（不播近战挥击音）。
         net.send_packet(&build_ranged_attack(dir, p_tile, target_id, t_tile));
-        tracing::debug!("🏹 RangeAttack target={} dir={:?} range={}", target_id, dir, max_range);
+        tracing::debug!(
+            "🏹 RangeAttack target={} dir={:?} range={}",
+            target_id,
+            dir,
+            max_range
+        );
     } else {
         // #1610：C# Attack1 动作——开关技能（半月/十字斩/双斩）随 C.Attack 发送
         let attack_spell = crate::game::skills::toggled_attack_spell(&magics.spell_toggles);
@@ -754,10 +853,16 @@ fn auto_attack_system(
     // 诊断（#57）：攻击时打印玩家/目标瓦片与方向（debug 级）
     tracing::debug!(
         "⚔️ Attack target={} dir={:?} p_tile=({},{}) t_tile=({},{}) range={} in_range={}",
-        target_id, dir, p_tile.0, p_tile.1, t_tile.0, t_tile.1, max_range, in_range
+        target_id,
+        dir,
+        p_tile.0,
+        p_tile.1,
+        t_tile.0,
+        t_tile.1,
+        max_range,
+        in_range
     );
 }
-
 
 /// 按住鼠标持续移动（对齐原版 C# GameScene）：
 /// - 右键按住 = 跑、左键按住 = 走，方向持续跟随鼠标
@@ -773,7 +878,11 @@ fn hold_move_system(
     windows: Query<&Window>,
     camera: Query<
         &Transform,
-        (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>),
+        (
+            With<Camera2d>,
+            Without<UiButton>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+        ),
     >,
     mut players: Query<
         (Entity, &Transform, &mut LocalMove, &mut ActorAnim),
@@ -800,7 +909,9 @@ fn hold_move_system(
     }
     let Some(map) = &game_data.map else { return };
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.physical_cursor_position() else { return };
+    let Some(cursor) = window.physical_cursor_position() else {
+        return;
+    };
     let Ok(cam_tf) = camera.single() else { return };
     let world = screen_to_world(cursor, cam_tf, window);
 
@@ -811,9 +922,9 @@ fn hold_move_system(
         let near_actor = actors
             .iter()
             .any(|(tf, _, _)| actor_hit_area(Vec2::new(tf.translation.x, tf.translation.y), world))
-            || items
-                .iter()
-                .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 40.0);
+            || items.iter().any(|tf| {
+                Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 40.0
+            });
         if near_actor {
             None
         } else {
@@ -843,12 +954,14 @@ fn hold_move_system(
             //     CanRun（2/3 格）→ Run；否则 CanWalk 退避 → Walk 1 格；不可走原地转向
             //   左键按住：CanWalk 退避 → Walk 1 格；不可走原地转向
             //   陷阱/负重：InTrapRock 不可走/跑；背包或穿戴超重不可跑（C# CanRun 12139）
-            let Ok((pe, ptf, mut lm, mut anim)) = players.single_mut() else { return };
+            let Ok((pe, ptf, mut lm, mut anim)) = players.single_mut() else {
+                return;
+            };
             let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
             let dir = mouse_direction(Vec2::new(ptf.translation.x, ptf.translation.y), world);
             let new_dir = dir as u8;
-            let direction_changed = control.hold_target != Some((new_dir as i32, 0))
-                || control.hold_run != Some(run);
+            let direction_changed =
+                control.hold_target != Some((new_dir as i32, 0)) || control.hold_run != Some(run);
 
             // 跟随路径中：鼠标目标格变化 → 重算 A* 路径（绕障且响应新目标）
             if !lm.path.is_empty() {
@@ -856,7 +969,9 @@ fn hold_move_system(
                     let mouse_tile = world_to_tile(world.x, world.y);
                     let last_node = *lm.path.back().unwrap_or(&from_tile);
                     if mouse_tile != last_node && mouse_tile != from_tile {
-                        if let Some(p) = crate::game::pathfinding::find_path(map, from_tile, mouse_tile) {
+                        if let Some(p) =
+                            crate::game::pathfinding::find_path(map, from_tile, mouse_tile)
+                        {
                             if let Some(&first) = p.first() {
                                 if map.is_walkable(first.0, first.1) {
                                     lm.path = p.into();
@@ -871,7 +986,10 @@ fn hold_move_system(
             }
 
             // 右键按住且鼠标距玩家 <= 2 格 → 只转向（C# GameScene.cs:11614）
-            if run && (world - Vec2::new(ptf.translation.x, ptf.translation.y)).length() <= TILE_WIDTH * 2.0 {
+            if run
+                && (world - Vec2::new(ptf.translation.x, ptf.translation.y)).length()
+                    <= TILE_WIDTH * 2.0
+            {
                 if direction_changed {
                     anim.direction = new_dir;
                     anim.action = mir2_shared::enums::MirAction::Standing;
@@ -879,7 +997,9 @@ fn hold_move_system(
                     control.hold_target = Some((new_dir as i32, 0));
                     control.hold_run = Some(true);
                     // #1626：站立转向同步（C# PlayerObject.cs:1439 SetAction(Standing) → C.Turn）
-                    net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
+                    net.send_packet(&mir2_shared::packets::client::movement::Turn {
+                        direction: dir,
+                    });
                 }
                 lm.path.clear();
                 lm.last = None;
@@ -899,7 +1019,11 @@ fn hold_move_system(
                         f.sneaking,
                         inv.weight,
                         inv.max_weight,
-                        lo.slots.iter().flatten().map(|i| i.weight as u32).sum::<u32>(),
+                        lo.slots
+                            .iter()
+                            .flatten()
+                            .map(|i| i.weight as u32)
+                            .sum::<u32>(),
                         m.is_some(),
                     )
                 })
@@ -908,7 +1032,11 @@ fn hold_move_system(
             // 门检查（C# CanWalk → EmptyCell）：任何非可走格都不可走；
             // 门格（door_index != 0）且门关（walkable=false）→ 发 Opendoor 请求开门。
             // 注意：不能对非门格直接放行——否则墙/河等障碍全被跳过（#1550 回归）。
-            fn check_door(map: &crate::map_renderer::LoadedMap, net: &NetConnection, p: (i32, i32)) -> bool {
+            fn check_door(
+                map: &crate::map_renderer::LoadedMap,
+                net: &NetConnection,
+                p: (i32, i32),
+            ) -> bool {
                 if !map.in_bounds(p.0, p.1) {
                     return false;
                 }
@@ -936,15 +1064,12 @@ fn hold_move_system(
                     return false;
                 }
                 // C# EmptyCell：目标格有 Blocking 对象（NPC/怪物）→ 不可走（玩家不阻挡）
-                !actors
-                    .iter()
-                    .any(|(tf, mon, npc)| {
-                        (mon.is_some() || npc.is_some())
-                            && {
-                                let (tx, ty) = world_to_tile(tf.translation.x, tf.translation.y);
-                                tx == p.0 && ty == p.1
-                            }
-                    })
+                !actors.iter().any(|(tf, mon, npc)| {
+                    (mon.is_some() || npc.is_some()) && {
+                        let (tx, ty) = world_to_tile(tf.translation.x, tf.translation.y);
+                        tx == p.0 && ty == p.1
+                    }
+                })
             };
             if run {
                 // C# CanRun：负重不超限 && CanWalk(dir) && EmptyCell(2 格)；
@@ -953,7 +1078,11 @@ fn hold_move_system(
                 let bag_ok = bag_weight <= bag_max;
                 let wear_ok = wear_weight <= bag_max;
                 let can_run_base = !in_trap && bag_ok && wear_ok && !(sneaking && !sprint);
-                let run_dist = if riding || (sprint && !sneaking) { 3 } else { 2 };
+                let run_dist = if riding || (sprint && !sneaking) {
+                    3
+                } else {
+                    2
+                };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {
                     if !can_run_base {
                         break;
@@ -1032,7 +1161,9 @@ fn hold_move_system(
                     if let Some(map) = &game_data.map {
                         let mouse_tile = world_to_tile(world.x, world.y);
                         if mouse_tile != from_tile {
-                            if let Some(p) = crate::game::pathfinding::find_path(map, from_tile, mouse_tile) {
+                            if let Some(p) =
+                                crate::game::pathfinding::find_path(map, from_tile, mouse_tile)
+                            {
                                 if let Some(&first) = p.first() {
                                     if map.is_walkable(first.0, first.1) {
                                         lm.path = p.into();
@@ -1060,7 +1191,9 @@ fn hold_move_system(
                             control.hold_target = Some((new_dir as i32, 0));
                             control.hold_run = Some(run);
                             // #1626：原地转向同步（C# PlayerObject.cs:1439 → C.Turn）
-                            net.send_packet(&mir2_shared::packets::client::movement::Turn { direction: dir });
+                            net.send_packet(&mir2_shared::packets::client::movement::Turn {
+                                direction: dir,
+                            });
                         }
                         // 清空旧路径避免卡住
                         lm.path.clear();
@@ -1117,11 +1250,17 @@ fn key_pickup_system(
     if !keys.just_pressed(b.key) {
         return;
     }
-    let Ok((pe, ptf)) = players.single() else { return };
+    let Ok((pe, ptf)) = players.single() else {
+        return;
+    };
     // 找最近地面物品
     let mut best: Option<(u32, f32)> = None;
     for (id, tf) in &items {
-        let d = Vec2::new(tf.translation.x - ptf.translation.x, tf.translation.y - ptf.translation.y).length();
+        let d = Vec2::new(
+            tf.translation.x - ptf.translation.x,
+            tf.translation.y - ptf.translation.y,
+        )
+        .length();
         if d < 800.0 && best.map(|(_, bd)| d < bd).unwrap_or(true) {
             best = Some((id.0, d));
         }
@@ -1167,7 +1306,10 @@ pub fn build_pet_pickup(
 ) -> mir2_shared::packets::client::misc::IntelligentCreaturePickup {
     mir2_shared::packets::client::misc::IntelligentCreaturePickup {
         mouse_mode,
-        location: mir2_shared::map::Point { x: tile.0, y: tile.1 },
+        location: mir2_shared::map::Point {
+            x: tile.0,
+            y: tile.1,
+        },
     }
 }
 
@@ -1182,7 +1324,11 @@ fn pet_pickup_system(
     windows: Query<&Window>,
     camera: Query<
         &Transform,
-        (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>),
+        (
+            With<Camera2d>,
+            Without<UiButton>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+        ),
     >,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
 ) {
@@ -1192,7 +1338,9 @@ fn pet_pickup_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.physical_cursor_position() else { return };
+    let Some(cursor) = window.physical_cursor_position() else {
+        return;
+    };
     let Ok(cam_tf) = camera.single() else { return };
     let world = screen_to_world(cursor, cam_tf, window);
     let mouse_tile = world_to_tile(world.x, world.y);
@@ -1227,7 +1375,9 @@ pub fn next_pet_mode(current: mir2_shared::enums::PetMode) -> mir2_shared::enums
 }
 
 /// #1562：构造 C.ChangePMode（SharedRust packets/client/misc.rs）
-pub fn build_change_pmode(mode: mir2_shared::enums::PetMode) -> mir2_shared::packets::client::misc::ChangePMode {
+pub fn build_change_pmode(
+    mode: mir2_shared::enums::PetMode,
+) -> mir2_shared::packets::client::misc::ChangePMode {
     mir2_shared::packets::client::misc::ChangePMode { mode }
 }
 
@@ -1260,7 +1410,10 @@ fn pet_mode_system(
         return;
     }
     *last_toggle = time.elapsed_secs();
-    let cur = pet_q.single().map(|p| p.0).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let cur = pet_q
+        .single()
+        .map(|p| p.0)
+        .unwrap_or(mir2_shared::enums::PetMode::Both);
     let next = next_pet_mode(cur);
     net.send_packet(&build_change_pmode(next));
     tracing::info!("🐾 宠物模式切换 {:?} -> {:?}", cur, next);
@@ -1282,7 +1435,9 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
 
         fn enabled(world: &mut World) -> bool {
-            world.run_system_once(player_input_enabled).expect("门控应成功运行")
+            world
+                .run_system_once(player_input_enabled)
+                .expect("门控应成功运行")
         }
 
         // 实体未生成 → 默认放行（未死亡/可输入）
@@ -1296,9 +1451,27 @@ mod tests {
 
         // dead / fishing / paralysis 任一置位 → 锁定输入
         for (name, flags) in [
-            ("dead", StatusFlags { dead: true, ..Default::default() }),
-            ("fishing", StatusFlags { fishing: true, ..Default::default() }),
-            ("paralysis", StatusFlags { paralysis: true, ..Default::default() }),
+            (
+                "dead",
+                StatusFlags {
+                    dead: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "fishing",
+                StatusFlags {
+                    fishing: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "paralysis",
+                StatusFlags {
+                    paralysis: true,
+                    ..Default::default()
+                },
+            ),
         ] {
             let mut world = World::new();
             world.spawn((LocalPlayer, flags));
@@ -1408,27 +1581,29 @@ mod tests {
     #[test]
     fn test_attack_range_chebyshev() {
         // #1554：C# Functions.InRange = Chebyshev（max(|dx|,|dy|) <= i）
-        let in_range = |p: (i32,i32), t: (i32,i32), r: i32| {
-            (t.0 - p.0).abs() <= r && (t.1 - p.1).abs() <= r
-        };
+        let in_range =
+            |p: (i32, i32), t: (i32, i32), r: i32| (t.0 - p.0).abs() <= r && (t.1 - p.1).abs() <= r;
         // 近战范围 1：对角也算 1（C# InRange 1）
-        assert!(in_range((0,0), (1,1), 1));
-        assert!(in_range((0,0), (1,0), 1));
-        assert!(!in_range((0,0), (2,0), 1));
-        assert!(!in_range((0,0), (2,2), 1));
+        assert!(in_range((0, 0), (1, 1), 1));
+        assert!(in_range((0, 0), (1, 0), 1));
+        assert!(!in_range((0, 0), (2, 0), 1));
+        assert!(!in_range((0, 0), (2, 2), 1));
         // 弓手范围 9：C# MaxAttackRange=9
-        assert!(in_range((0,0), (9,0), 9));
-        assert!(in_range((0,0), (5,5), 9));
-        assert!(!in_range((0,0), (10,0), 9));
+        assert!(in_range((0, 0), (9, 0), 9));
+        assert!(in_range((0, 0), (5, 5), 9));
+        assert!(!in_range((0, 0), (10, 0), 9));
     }
 
     #[test]
     fn test_toggled_attack_spell_mapping() {
         // #1610：C# Attack1 开关技能映射（HalfMoon > CrossHalfMoon > DoubleSlash > None）
-        use mir2_shared::enums::Spell;
         use crate::game::skills::toggled_attack_spell;
+        use mir2_shared::enums::Spell;
         // 未开启 → None
-        assert_eq!(toggled_attack_spell(&[(Spell::HalfMoon, false)]), Spell::None);
+        assert_eq!(
+            toggled_attack_spell(&[(Spell::HalfMoon, false)]),
+            Spell::None
+        );
         // 半月开启 → HalfMoon
         assert_eq!(
             toggled_attack_spell(&[(Spell::HalfMoon, true), (Spell::CrossHalfMoon, true)]),
@@ -1543,7 +1718,11 @@ mod tests {
         };
         // 无武器 → 非弓手
         let is_archer = appearance.class == mir2_shared::enums::MirClass::Archer
-            && Loadout::default().slots.get(0).and_then(|s| s.as_ref()).is_some();
+            && Loadout::default()
+                .slots
+                .get(0)
+                .and_then(|s| s.as_ref())
+                .is_some();
         assert!(!is_archer);
         // 装备武器 → 弓手（远程范围 9）
         let mut bow = crate::game::dialogs::inventory::InvItem::default();
@@ -1583,14 +1762,35 @@ mod tests {
     fn test_actor_hit_area_body_rect() {
         // 精灵身体矩形：点击身体上部/左右应命中（原 60 距离圆在脚底，上部常 miss）
         let anchor = Vec2::new(100.0, 200.0);
-        assert!(actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 80.0)), "身体上部");
-        assert!(actor_hit_area(anchor, Vec2::new(100.0 - 40.0, 200.0 + 40.0)), "身体左侧");
-        assert!(actor_hit_area(anchor, Vec2::new(100.0 + 40.0, 200.0 + 40.0)), "身体右侧");
-        assert!(actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 120.0)), "头顶附近");
+        assert!(
+            actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 80.0)),
+            "身体上部"
+        );
+        assert!(
+            actor_hit_area(anchor, Vec2::new(100.0 - 40.0, 200.0 + 40.0)),
+            "身体左侧"
+        );
+        assert!(
+            actor_hit_area(anchor, Vec2::new(100.0 + 40.0, 200.0 + 40.0)),
+            "身体右侧"
+        );
+        assert!(
+            actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 120.0)),
+            "头顶附近"
+        );
         // 远处/过高/过深 miss
-        assert!(!actor_hit_area(anchor, Vec2::new(100.0 + 80.0, 200.0 + 40.0)), "侧向过远");
-        assert!(!actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 160.0)), "头顶过远");
-        assert!(!actor_hit_area(anchor, Vec2::new(100.0, 200.0 - 80.0)), "脚下过深");
+        assert!(
+            !actor_hit_area(anchor, Vec2::new(100.0 + 80.0, 200.0 + 40.0)),
+            "侧向过远"
+        );
+        assert!(
+            !actor_hit_area(anchor, Vec2::new(100.0, 200.0 + 160.0)),
+            "头顶过远"
+        );
+        assert!(
+            !actor_hit_area(anchor, Vec2::new(100.0, 200.0 - 80.0)),
+            "脚下过深"
+        );
     }
 
     #[test]
@@ -1598,10 +1798,15 @@ mod tests {
         // 原距离圆覆盖的点仍命中（严格不缩小原命中区）
         let anchor = Vec2::new(100.0, 200.0);
         assert!(actor_hit_area(anchor, Vec2::new(100.0 + 50.0, 200.0)));
-        assert!(actor_hit_area(anchor, Vec2::new(100.0 - 55.0, 200.0 - 10.0)));
+        assert!(actor_hit_area(
+            anchor,
+            Vec2::new(100.0 - 55.0, 200.0 - 10.0)
+        ));
         assert!(actor_hit_area(anchor, Vec2::new(100.0, 200.0 - 55.0)));
         // 圆+矩形外 → miss
-        assert!(!actor_hit_area(anchor, Vec2::new(100.0 + 200.0, 200.0 + 200.0)));
+        assert!(!actor_hit_area(
+            anchor,
+            Vec2::new(100.0 + 200.0, 200.0 + 200.0)
+        ));
     }
 }
-

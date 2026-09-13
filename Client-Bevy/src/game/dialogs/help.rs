@@ -17,7 +17,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::game::dialogs::keyboard_layout::{KeyboardState, key_name};
+use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -192,9 +192,7 @@ impl Plugin for HelpPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_help);
         app.add_systems(
             Update,
-            (help_ui_system,)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            (help_ui_system,).chain().run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -226,7 +224,9 @@ fn spawn_help(
         return;
     };
     let panel = spawn_panel(&mut commands, bg, ox, oy, 536.0, 509.0, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Help), HelpWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Help), HelpWidget));
 
     commands.entity(panel).with_children(|p| {
         // 标题图 Title[57] @(18,9)
@@ -245,8 +245,7 @@ fn spawn_help(
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, h),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, pr),
             ) {
-                spawn_icon_button(p, nh, hh, ph, rx, ry, 16.0, 16.0, 10)
-                    .insert(HelpBtn(kind));
+                spawn_icon_button(p, nh, hh, ph, rx, ry, 16.0, 16.0, 10).insert(HelpBtn(kind));
             }
         }
         // 页标题（居中 @(268,54) 242x30）
@@ -283,8 +282,7 @@ fn spawn_help(
             let y = 142.0 + i as f32 * 20.0;
             spawn_label(p, &cjk, "", 30.0, y, 9.0, Color::srgb(1.0, 1.0, 0.0), 9)
                 .insert(HelpShortcutKey(i));
-            spawn_label(p, &cjk, "", 131.0, y, 9.0, Color::WHITE, 9)
-                .insert(HelpShortcutInfo(i));
+            spawn_label(p, &cjk, "", 131.0, y, 9.0, Color::WHITE, 9).insert(HelpShortcutInfo(i));
         }
     });
 }

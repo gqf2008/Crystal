@@ -10,16 +10,18 @@
 
 use bevy::asset::Asset;
 use bevy::image::ImageSampler;
+use bevy::mesh::Mesh2d;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{
-    AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState,
-    RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, RenderPipelineDescriptor,
+    SpecializedMeshPipelineError,
 };
 use bevy::shader::ShaderRef;
-use bevy::mesh::Mesh2d;
-use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, Material2dPlugin, MeshMaterial2d};
+use bevy::sprite_render::{
+    AlphaMode2d, Material2d, Material2dKey, Material2dPlugin, MeshMaterial2d,
+};
 
 use crate::map_renderer::{make_image, GameLibraries};
 use crate::resources::libraries::Libraries;
@@ -156,10 +158,17 @@ pub fn map_tile_anim_system(
     mut cache: ResMut<TileImageCache>,
     mut sprites: Query<
         (&mut Sprite, &mut Transform, &mut MapTileAnim),
-        (Without<BlendTile>, Without<MeshMaterial2d<MapBlendMaterial>>),
+        (
+            Without<BlendTile>,
+            Without<MeshMaterial2d<MapBlendMaterial>>,
+        ),
     >,
     mut blends: Query<
-        (&MeshMaterial2d<MapBlendMaterial>, &mut Transform, &mut MapTileAnim),
+        (
+            &MeshMaterial2d<MapBlendMaterial>,
+            &mut Transform,
+            &mut MapTileAnim,
+        ),
         (With<BlendTile>, With<Mesh2d>),
     >,
     mut materials: ResMut<Assets<MapBlendMaterial>>,
@@ -241,8 +250,16 @@ pub fn spawn_anim_tile(
                 Transform::from_xyz(cx, cy, z),
                 Visibility::default(),
                 MapTileAnim {
-                    kind, lib, base_index, frame_count, tick, blend,
-                    left, anchor_y, top_anchored, last_index: base_index,
+                    kind,
+                    lib,
+                    base_index,
+                    frame_count,
+                    tick,
+                    blend,
+                    left,
+                    anchor_y,
+                    top_anchored,
+                    last_index: base_index,
                 },
             ))
             .id(),
@@ -288,8 +305,16 @@ pub fn spawn_blend_tile(
                 Transform::from_xyz(cx, cy, z).with_scale(Vec3::new(w as f32, h as f32, 1.0)),
                 Visibility::default(),
                 MapTileAnim {
-                    kind, lib, base_index, frame_count, tick, blend: true,
-                    left, anchor_y, top_anchored, last_index: base_index,
+                    kind,
+                    lib,
+                    base_index,
+                    frame_count,
+                    tick,
+                    blend: true,
+                    left,
+                    anchor_y,
+                    top_anchored,
+                    last_index: base_index,
                 },
             ))
             .id(),

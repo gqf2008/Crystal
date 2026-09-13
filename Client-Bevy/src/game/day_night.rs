@@ -115,7 +115,10 @@ fn day_night_system(
     time: Res<Time>,
     overlay: Query<&MeshMaterial2d<NightMaterial>>,
     mut materials: ResMut<Assets<NightMaterial>>,
-    lights: Query<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>, With<crate::map_renderer::MapLight>>,
+    lights: Query<
+        &MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>,
+        With<crate::map_renderer::MapLight>,
+    >,
     mut blend_materials: ResMut<Assets<crate::map_tile_anim::MapBlendMaterial>>,
 ) {
     if !dn.enabled {
@@ -129,7 +132,7 @@ fn day_night_system(
 
     // 亮度曲线：6:00 日出 → 18:00 日落 → 24:00 最深
     let t = dn.time_minutes / 1440.0; // 0..1
-    // 用正弦近似白天亮夜晚暗
+                                      // 用正弦近似白天亮夜晚暗
     let daylight = ((t * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2).sin() + 1.0) / 2.0;
     let darkness = (1.0 - daylight).clamp(0.0, 0.55);
     dn.darkness = darkness;

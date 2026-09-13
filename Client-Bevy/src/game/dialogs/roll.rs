@@ -10,11 +10,11 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
-use crate::game::dialogs::npc::NpcDialogState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{load_lib_image, spawn_container, spawn_label, spawn_panel};
@@ -53,14 +53,8 @@ impl Plugin for RollPlugin {
         app.init_resource::<RollState>();
         app.add_systems(OnEnter(AppState::Game), spawn_roll);
         app.add_systems(OnExit(AppState::Game), cleanup_roll);
-        app.add_systems(
-            Update,
-            roll_server_events.run_if(in_state(AppState::Game)),
-        );
-        app.add_systems(
-            Update,
-            roll_ui_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, roll_server_events.run_if(in_state(AppState::Game)));
+        app.add_systems(Update, roll_ui_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -84,7 +78,11 @@ fn spawn_roll(
     let font = ui_font.0.clone();
 
     // bevy_ui 结果图（骰子默认图，白 1x1 占位；roll_ui_system 换图 + 尺寸）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     commands
         .spawn((
             Node {
@@ -159,9 +157,19 @@ fn roll_ui_system(
     }
     if !*logged {
         let (lib, idx, w, ih) = if state.r#type == 1 {
-            (LibraryName::Items, 2587 + state.result.clamp(1, 6), 180.0, 130.0)
+            (
+                LibraryName::Items,
+                2587 + state.result.clamp(1, 6),
+                180.0,
+                130.0,
+            )
         } else {
-            (LibraryName::Prguse, 281 + state.result.clamp(1, 6), 65.0, 65.0)
+            (
+                LibraryName::Prguse,
+                281 + state.result.clamp(1, 6),
+                65.0,
+                65.0,
+            )
         };
         if let Some(h) = load_lib_image(&mut libs, &mut images, lib, idx as usize) {
             for (mut node, mut n, _) in &mut img {

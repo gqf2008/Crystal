@@ -50,10 +50,7 @@ impl Plugin for ReportPlugin {
         app.init_resource::<ReportState>();
         app.add_systems(OnEnter(AppState::Game), spawn_report);
         app.add_systems(OnExit(AppState::Game), cleanup_report);
-        app.add_systems(
-            Update,
-            report_ui_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, report_ui_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -83,13 +80,10 @@ fn spawn_report(
     const REPORT_W: f32 = 360.0;
     const REPORT_H: f32 = 244.0;
     let (px, py) = crate::game::dialogs::center_origin(REPORT_W, REPORT_H);
-    let bg = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1633).unwrap_or_else(|| {
-        images.add(crate::map_renderer::make_image(
-            vec![22, 23, 30, 255],
-            1,
-            1,
-        ))
-    });
+    let bg =
+        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1633).unwrap_or_else(|| {
+            images.add(crate::map_renderer::make_image(vec![22, 23, 30, 255], 1, 1))
+        });
     let panel = spawn_panel(&mut commands, bg, px, py, REPORT_W, REPORT_H, 30);
     commands
         .entity(panel)
@@ -98,22 +92,34 @@ fn spawn_report(
     commands.entity(panel).with_children(|p| {
         // 标题/状态文本。
         spawn_label(p, &cjk, "", 12.0, 8.0, 12.0, Color::WHITE, 9).insert(ReportLine(0));
-        spawn_label(p, &cjk, "", 12.0, 220.0, 11.0, Color::srgb(1.0, 0.8, 0.4), 9)
-            .insert(ReportLine(1));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            12.0,
+            220.0,
+            11.0,
+            Color::srgb(1.0, 0.8, 0.4),
+            9,
+        )
+        .insert(ReportLine(1));
         // 关闭 Prguse2[360/361/362] @(336,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 336.0, 3.0, 20.0, 20.0, 10)
-                .insert(ReportClose);
+            spawn_icon_button(p, n, h, pr, 336.0, 3.0, 20.0, 20.0, 10).insert(ReportClose);
         }
         // 类型下拉（C# ReportType @(12,35)，170x14）
         spawn_dropdown_ui(
             p,
             &font,
-            vec!["请选择类型".to_string(), "提交BUG".to_string(), "举报玩家".to_string()],
+            vec![
+                "请选择类型".to_string(),
+                "提交BUG".to_string(),
+                "举报玩家".to_string(),
+            ],
             None,
             (px, py),
             12.0,
@@ -156,8 +162,7 @@ fn spawn_report(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 608),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 609),
         ) {
-            spawn_icon_button(p, n, h, pr, 260.0, 219.0, 76.0, 25.0, 11)
-                .insert(ReportSubmit);
+            spawn_icon_button(p, n, h, pr, 260.0, 219.0, 76.0, 25.0, 11).insert(ReportSubmit);
         }
     });
 }
@@ -186,7 +191,11 @@ fn report_ui_system(
     }
     let open = mgr.is_open(DialogKind::Report);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -206,7 +215,11 @@ fn report_ui_system(
     for (e, inter) in &submit_btn {
         if edge(e, inter, &mut prev_inter) {
             // #90 类型来自下拉（0=未选择）
-            let rtype = type_dd.single().ok().and_then(|dd| dd.selected).unwrap_or(0) as u32;
+            let rtype = type_dd
+                .single()
+                .ok()
+                .and_then(|dd| dd.selected)
+                .unwrap_or(0) as u32;
             let desc = input.texts.get(12).cloned().unwrap_or_default();
             let desc = desc.trim().to_string();
             if rtype == 0 {
@@ -233,6 +246,9 @@ fn report_ui_system(
 mod tests {
     #[test]
     fn report_layout_matches_csharp() {
-        assert_eq!(crate::game::dialogs::center_origin(360.0, 244.0), (332.0, 262.0));
+        assert_eq!(
+            crate::game::dialogs::center_origin(360.0, 244.0),
+            (332.0, 262.0)
+        );
     }
 }
