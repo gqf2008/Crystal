@@ -55,6 +55,10 @@ pub struct GuildTerritoryBuy;
 #[derive(Component)]
 pub struct GuildTerritoryWar;
 
+/// #2786：发送邮件给公会会长（C# `GuildTerritoryDialog .cs:150-168`）
+#[derive(Component)]
+pub struct GuildTerritoryMail;
+
 #[derive(Component)]
 pub struct GuildTerritoryPrev;
 
@@ -70,6 +74,58 @@ pub struct GuildTerritoryWarField;
 
 pub struct GuildTerritoryPlugin;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    /// #2786：点「发送邮件给公会会长」→ 给选中领地会长写 `ComposeMail`
+    ///（C# `GuildTerritoryDialog .cs:162-168`）
+    #[test]
+    fn mail_button_composes_mail_to_territory_owner() {
+        let mut world = World::new();
+        let mut st = GuildTerritoryState::default();
+        st.rows = vec![
+            TerritoryRow {
+                id: 7,
+                map_index: 0,
+                owner: "行会甲".to_string(),
+                state: 0,
+            },
+            TerritoryRow {
+                id: 8,
+                map_index: 1,
+                owner: String::new(),
+                state: 0,
+            },
+        ];
+        st.selected = Some(0);
+        world.insert_resource(st);
+        world.insert_resource(Messages::<crate::game::dialogs::mail::ComposeMail>::default());
+        world.spawn((GuildTerritoryMail, Interaction::Pressed));
+        world
+            .run_system_once(guild_territory_mail_system)
+            .expect("邮件系统应成功");
+        let mut msgs = world.resource_mut::<Messages<crate::game::dialogs::mail::ComposeMail>>();
+        let drained: Vec<_> = msgs.drain().collect();
+        assert_eq!(drained.len(), 1, "应写出一条 ComposeMail");
+        assert_eq!(drained[0].to, "行会甲");
+        assert_eq!(drained[0].message, None, "C# ComposeMail(Owner1) 不带正文");
+
+        // 负控：选中无主领地（owner 空）→ 不写信，只提示
+        world.resource_mut::<GuildTerritoryState>().selected = Some(1);
+        world
+            .run_system_once(guild_territory_mail_system)
+            .expect("邮件系统应成功");
+        let mut msgs = world.resource_mut::<Messages<crate::game::dialogs::mail::ComposeMail>>();
+        assert_eq!(msgs.drain().count(), 0, "无会长时不得写信");
+        assert_eq!(
+            world.resource::<GuildTerritoryState>().message,
+            "请先选中一个已有会长的领地"
+        );
+    }
+}
+
 impl Plugin for GuildTerritoryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GuildTerritoryState>();
@@ -82,6 +138,11 @@ app.add_systems(OnEnter(AppState::Game), spawn_guild_territory);
         app.add_systems(
             Update,
             guild_territory_ui_system.run_if(in_state(AppState::Game)),
+        );
+        // #2786：邮件会长钮（独立系统——`guild_territory_ui_system` 参数已到上限）
+        app.add_systems(
+            Update,
+            guild_territory_mail_system.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -198,8 +259,26 @@ fn spawn_guild_territory(
                 },
             ));
             // 宣战按钮（同图）@(210,308)
-            spawn_icon_button(p, n, h, pr, 210.0, 308.0, 60.0, 25.0, 10)
-                .insert(GuildTerritoryWar);
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                210.0,
+                308.0,
+                60.0,
+                25.0,
+                10,
+            )
+            .insert(GuildTerritoryWar);
+            // #2786：发送邮件给公会会长（C# `GuildTerritoryDialog .cs:150-168` mailButton
+            // `Prguse[437/438/439]` @(262,208)，点击 `ComposeMail(GT.Owner1)`）
+            spawn_icon_button(p, n, h, pr, 262.0, 208.0, 60.0, 25.0, 10).insert((
+                GuildTerritoryMail,
+                crate::ui::tooltip::UiHint {
+                    text: "发送邮件给公会会长".to_string(),
+                },
+            ));
         }
         // 宣战目标行会输入框（TextInput 7）@(18,310)，命中矩形 (298,390,180,20)
         spawn_container(p, 18.0, 310.0, 180.0, 20.0, 10)
@@ -232,6 +311,37 @@ fn spawn_guild_territory(
 
 /// 显隐 + 渲染 + 请求/翻页/购买/宣战
 #[allow(clippy::too_many_arguments)]
+/// #2786：发送邮件给公会会长（C# `GuildTerritoryDialog .cs:162-168`：
+/// 取选中行 → 会长名非空且非「无」→ `ComposeMail(GT.Owner1)`）。
+/// 独立系统：`guild_territory_ui_system` 的参数已到 Bevy 上限（16）。
+fn guild_territory_mail_system(
+    mut state: ResMut<GuildTerritoryState>,
+    mail_btn: Query<(Entity, &Interaction), With<GuildTerritoryMail>>,
+    mut compose: MessageWriter<crate::game::dialogs::mail::ComposeMail>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    for (e, inter) in &mail_btn {
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        let owner = state
+            .selected
+            .and_then(|idx| state.rows.get(idx))
+            .map(|r| r.owner.clone())
+            .unwrap_or_default();
+        if owner.is_empty() || owner == "无" {
+            state.message = "请先选中一个已有会长的领地".to_string();
+            continue;
+        }
+        compose.write(crate::game::dialogs::mail::ComposeMail {
+            to: owner.clone(),
+            message: None,
+        });
+        tracing::info!("🏯 写信给领地会长 {}", owner);
+    }
+}
+
 fn guild_territory_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<GuildTerritoryState>,
