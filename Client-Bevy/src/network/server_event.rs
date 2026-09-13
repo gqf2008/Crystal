@@ -98,6 +98,9 @@ pub enum ServerEvent {
     HeroManageReceived {
         heroes: Vec<mir2_shared::data::client_data::ClientHeroInformation>,
         current: Option<mir2_shared::data::client_data::ClientHeroInformation>,
+        /// C# `S.ManageHeroes.MaximumCount`：**含主角色**的总名额（`PlayerObject.cs:14664`），
+        /// 客户端可用头像槽 = `max_count - 1`（`HeroDialogs.cs:840`）
+        max_count: i32,
     },
     /// NewHero：创建英雄结果（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success）
     NewHeroResult { result: u8 },

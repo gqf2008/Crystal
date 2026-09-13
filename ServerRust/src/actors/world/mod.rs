@@ -11153,13 +11153,21 @@ fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, amo
         .try_send();
 }
 
-/// 下发 S.ManageHeroes（C# ManageHeroes：max_count + current_hero + heroes，#188）
-pub(crate) fn send_manage_heroes_packet(
-    gate_ref: &ActorRef<GateActor>,
-    session_id: u64,
-    state: &PlayerState,
+/// C# `S.ManageHeroes.MaximumCount` 语义（`PlayerObject.cs:14664`）：它是**含主角色在内**的
+/// 总名额（`CharacterInfo.MaximumHeroCount` 默认 1、上限 `Settings.MaximumHeroCount = 9`），
+/// 客户端据此判定可用头像槽 `i <= MaximumCount - 2`（`HeroDialogs.cs:840`、
+/// `HeroManageDialog.RefreshInterface`）。Rust 的 `maximum_hero_count` 只数英雄格
+/// （`npcs` 里英雄 index = 1..=count），故下发时必须 +1，否则客户端一个头像槽都点不到。
+pub(crate) fn manage_heroes_max_count(maximum_hero_count: u8) -> i32 {
+    maximum_hero_count as i32 + 1
+}
+
+/// 组装 `S.ManageHeroes`（纯函数，便于单测；下发见 `send_manage_heroes_packet`）
+pub(crate) fn build_manage_heroes_packet(
+    maximum_hero_count: u8,
+    hero_index: u8,
     heroes: &[HeroInfo],
-) {
+) -> mir2_shared::packets::server::hero::ManageHeroes {
     let to_info = |h: &HeroInfo| mir2_shared::data::client_data::ClientHeroInformation {
         index: h.index,
         name: h.name.clone(),
@@ -11167,17 +11175,24 @@ pub(crate) fn send_manage_heroes_packet(
         class: h.class,
         gender: h.gender,
     };
-    let current_hero = heroes
-        .iter()
-        .find(|h| h.index as u8 == state.hero_index)
-        .map(to_info);
-    let list: Vec<mir2_shared::data::client_data::ClientHeroInformation> =
-        heroes.iter().map(to_info).collect();
-    let packet = mir2_shared::packets::server::hero::ManageHeroes {
-        max_count: 1,
-        current_hero,
-        heroes: list,
-    };
+    mir2_shared::packets::server::hero::ManageHeroes {
+        max_count: manage_heroes_max_count(maximum_hero_count),
+        current_hero: heroes
+            .iter()
+            .find(|h| h.index as u8 == hero_index)
+            .map(to_info),
+        heroes: heroes.iter().map(to_info).collect(),
+    }
+}
+
+/// 下发 S.ManageHeroes（C# ManageHeroes：max_count + current_hero + heroes，#188）
+pub(crate) fn send_manage_heroes_packet(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    state: &PlayerState,
+    heroes: &[HeroInfo],
+) {
+    let packet = build_manage_heroes_packet(state.maximum_hero_count, state.hero_index, heroes);
     let mut body = Vec::new();
     if packet.write_body(&mut body).is_err() {
         warn!("Failed to serialize ManageHeroes");
@@ -14713,6 +14728,54 @@ mod e2e;
 #[cfg(test)]
 mod hero_tests {
     use super::*;
+
+    /// #2791 单元①：`max_count` 是「含主角色的总名额」（C# `Info.MaximumHeroCount`），
+    /// 客户端可用头像槽 = `max_count - 1`；Rust 侧 `maximum_hero_count` 只数英雄格。
+    #[test]
+    fn manage_heroes_max_count_includes_main_character() {
+        assert_eq!(manage_heroes_max_count(1), 2);
+        assert_eq!(manage_heroes_max_count(2), 3);
+        assert_eq!(manage_heroes_max_count(9), 10);
+    }
+
+    /// #2791 单元①：下发字节里 `max_count` / `current_hero` / 列表能被客户端解析回来
+    #[test]
+    fn manage_heroes_packet_roundtrip_has_slot_capacity_and_current() {
+        use mir2_shared::packets::base::Packet;
+
+        let hero = HeroInfo {
+            index: 1,
+            name: "示范英雄".to_string(),
+            level: 20,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+            dead: false,
+            sealed: false,
+            autopot: false,
+            experience: 0,
+            max_experience: 100,
+            hp: -1,
+            mp: -1,
+        };
+        let packet = build_manage_heroes_packet(2, 1, std::slice::from_ref(&hero));
+        // 2 个英雄格 → 总名额 3（客户端可用槽 0..=1）
+        assert_eq!(packet.max_count, 3);
+        assert_eq!(packet.heroes.len(), 1);
+
+        let mut body = Vec::new();
+        packet.write_body(&mut body).expect("serialize ManageHeroes");
+        let parsed = mir2_shared::packets::server::hero::ManageHeroes::read_body(
+            &mut std::io::Cursor::new(&body),
+        )
+        .expect("parse ManageHeroes");
+        assert_eq!(parsed.max_count, 3);
+        assert_eq!(parsed.heroes, packet.heroes);
+        assert_eq!(parsed.current_hero.map(|h| h.index), Some(1));
+
+        // 主角色出战（hero_index = 0）→ 无 current_hero
+        let main_active = build_manage_heroes_packet(2, 0, std::slice::from_ref(&hero));
+        assert!(main_active.current_hero.is_none());
+    }
 
     #[test]
     fn hero_create_result_codes() {

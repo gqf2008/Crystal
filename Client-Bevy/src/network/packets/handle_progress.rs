@@ -684,8 +684,13 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 server_events.write(ServerEvent::HeroManageReceived {
                     heroes: p.heroes.clone(),
                     current: p.current_hero.clone(),
+                    max_count: p.max_count,
                 });
-                tracing::info!("🦸 英雄列表: {} 个", p.heroes.len());
+                tracing::info!(
+                    "🦸 英雄列表: {} 个（总名额 {}）",
+                    p.heroes.len(),
+                    p.max_count
+                );
             }
         }
         x if x == ServerPacketIds::NewHero as i16 => {

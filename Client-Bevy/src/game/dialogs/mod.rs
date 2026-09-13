@@ -119,6 +119,10 @@ pub enum DialogKind {
     Skills,
     /// #2720：C# `ItemRentalDialog`（浏览已租出物品列表；与出租流程 `ItemRental` 分开）
     ItemRentalBrowse,
+    /// #2791：C# `HeroManageDialog`（`Prguse[1688]` 独立窗、独立拖动；随 `S.ManageHeroes`
+    /// 弹出，关闭键/ESC 隐藏）。不复用 `Hero`——拖动与置顶按 kind 聚合，
+    /// 复用会让拖英雄窗连带移动它（C# 两窗各自 `Movable`）
+    HeroManage,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
