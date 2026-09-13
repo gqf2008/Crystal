@@ -186,6 +186,46 @@ pub fn refine_material_aggregates(
     agg
 }
 
+/// #2827：C# `RefineItem` 的「目标属性 + refineStat」选择（`PlayerObject.cs:12753-12806`），
+/// 含两条**前置归零**规则（都要求成功率 0 且 `RefinedValue` 保持 None）：
+///
+/// - 三条属性材料全为 0（`:12753-12769`）→ 无 RefinedValue 可用；
+/// - **无矿**（`oreAmount == 0`，`:12771-12785`）→ 必碎（C# 不设 RefinedValue）。
+///
+/// 其余情况按**严格大于**选 DC/MC/SC（`:12790-12806`）——平局不设 RefinedValue，同样必碎。
+pub(crate) fn refine_target_value(
+    ore_amount: i32,
+    total_dc: i32,
+    total_mc: i32,
+    total_sc: i32,
+) -> (mir2_shared::enums::RefinedValue, i32) {
+    use mir2_shared::enums::RefinedValue;
+    if ore_amount <= 0 || (total_dc <= 0 && total_mc <= 0 && total_sc <= 0) {
+        return (RefinedValue::None, 0);
+    }
+    if total_dc > total_mc && total_dc > total_sc {
+        (RefinedValue::Dc, total_dc)
+    } else if total_mc > total_dc && total_mc > total_sc {
+        (RefinedValue::Mc, total_mc)
+    } else if total_sc > total_dc && total_sc > total_mc {
+        (RefinedValue::Sc, total_sc)
+    } else {
+        (RefinedValue::None, 0)
+    }
+}
+
+/// #2827：C# `S.DepositRefineItem` / `S.RetrieveRefineItem` 包体（两者同布局）
+/// 布局 = `[from i32 LE][to i32 LE][success u8]`，与
+/// `SharedRust::packets::server::item_operations::{DepositRefineItem, RetrieveRefineItem}`
+/// 的 `read_body` 同源（单测对拍钉住）。
+pub(crate) fn refine_slot_ack_body(from: i32, to: i32, success: bool) -> Vec<u8> {
+    let mut body = Vec::with_capacity(9);
+    body.extend_from_slice(&from.to_le_bytes());
+    body.extend_from_slice(&to.to_le_bytes());
+    body.push(u8::from(success));
+    body
+}
+
 /// CheckRefine 结算结果（C# PlayerObject.cs:12925-12971）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefineCheckResult {
@@ -641,5 +681,54 @@ mod tests {
         assert_eq!(item.refined_value, RefinedValue::None);
         assert_eq!(item.refine_added, 0);
         assert!(log.active_refine.is_none());
+    }
+
+    /// #2827：`refine_target_value` 对齐 C# `RefineItem` 的 RefinedValue/refineStat 选择
+    /// （`:12753` 三属性全 0 / `:12771` 无矿 / `:12790-12806` 严格大于选值）
+    #[test]
+    fn refine_target_value_matches_csharp_no_ore_and_pick() {
+        use mir2_shared::enums::RefinedValue;
+        // 无矿（oreAmount == 0）→ None + 0（C# :12771，必碎）——有属性材料也不救
+        assert_eq!(refine_target_value(0, 30, 0, 0), (RefinedValue::None, 0));
+        assert_eq!(refine_target_value(0, 30, 20, 10), (RefinedValue::None, 0));
+        // 三属性全 0（C# :12753）→ None + 0
+        assert_eq!(refine_target_value(3, 0, 0, 0), (RefinedValue::None, 0));
+        // 严格最大者胜出
+        assert_eq!(refine_target_value(1, 10, 5, 0), (RefinedValue::Dc, 10));
+        assert_eq!(refine_target_value(1, 3, 7, 1), (RefinedValue::Mc, 7));
+        assert_eq!(refine_target_value(1, 8, 2, 9), (RefinedValue::Sc, 9));
+        // 平局（DC == MC > SC）→ C# 无分支命中 → RefinedValue 保持 None（必碎）
+        assert_eq!(refine_target_value(1, 10, 10, 0), (RefinedValue::None, 0));
+        assert_eq!(refine_target_value(1, 10, 10, 10), (RefinedValue::None, 0));
+    }
+
+    /// #2827：确认包 body 与服务端包结构同源（`[from i32][to i32][success u8]`）
+    #[test]
+    fn refine_slot_ack_body_matches_shared_server_packet() {
+        use mir2_shared::packets::base::Packet;
+
+        assert_eq!(
+            refine_slot_ack_body(3, 0, true),
+            vec![3, 0, 0, 0, 0, 0, 0, 0, 1]
+        );
+        assert_eq!(
+            refine_slot_ack_body(-1, 5, false),
+            vec![0xff, 0xff, 0xff, 0xff, 5, 0, 0, 0, 0]
+        );
+
+        // 与 SharedRust 服务端包 read_body 对拍（Deposit/Retrieve 同布局）
+        let body = refine_slot_ack_body(7, 12, true);
+        let mut cur = std::io::Cursor::new(body.as_slice());
+        let p =
+            mir2_shared::packets::server::item_operations::DepositRefineItem::read_body(&mut cur)
+                .expect("deposit ack body");
+        assert_eq!((p.from, p.to, p.success), (7, 12, true));
+
+        let body = refine_slot_ack_body(4, 33, false);
+        let mut cur = std::io::Cursor::new(body.as_slice());
+        let p =
+            mir2_shared::packets::server::item_operations::RetrieveRefineItem::read_body(&mut cur)
+                .expect("retrieve ack body");
+        assert_eq!((p.from, p.to, p.success), (4, 33, false));
     }
 }

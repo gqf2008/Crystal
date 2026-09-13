@@ -106,6 +106,9 @@ pub struct RefineConfig {
     /// 精炼矿石名（C# RefineOreName = "BlackIronOre"）
     #[serde(default = "default_refine_ore_name")]
     pub ore_name: String,
+    /// 仅武器可精炼（C# Settings.OnlyRefineWeapon = true；RefineSystem.ini `[Config] OnlyRefineWeapon`）
+    #[serde(default = "default_refine_only_weapon")]
+    pub only_refine_weapon: bool,
 }
 
 fn default_refine_base_chance() -> u8 {
@@ -144,6 +147,10 @@ fn default_refine_ore_name() -> String {
     "BlackIronOre".to_string()
 }
 
+fn default_refine_only_weapon() -> bool {
+    true
+}
+
 impl Default for RefineConfig {
     fn default() -> Self {
         Self {
@@ -156,6 +163,7 @@ impl Default for RefineConfig {
             item_stat_reduce: default_refine_item_stat_reduce(),
             cost: default_refine_cost(),
             ore_name: default_refine_ore_name(),
+            only_refine_weapon: default_refine_only_weapon(),
         }
     }
 }
@@ -936,6 +944,8 @@ mod tests {
         assert_eq!(c.item_stat_reduce, 15);
         assert_eq!(c.cost, 125);
         assert_eq!(c.ore_name, "BlackIronOre");
+        // C# Settings.OnlyRefineWeapon（RefineSystem.ini [Config] OnlyRefineWeapon）
+        assert!(c.only_refine_weapon);
     }
 
     /// #2394：婚姻/配偶配置默认值（C# Settings.Marriage*/ReplaceWedRingCost/LoverEXPBonus）
