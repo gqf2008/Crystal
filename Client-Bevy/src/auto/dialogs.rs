@@ -649,7 +649,8 @@ pub(crate) fn auto_upgrade_test(
                 let removed = !magics
                     .magics
                     .iter()
-                    .any(|m| m.spell == mir2_shared::enums::Spell::Fencing);
+                    // #2775：mock 移除的是「刺杀剑术 = Thrusting」（此前误记为 Fencing）
+                    .any(|m| m.spell == mir2_shared::enums::Spell::Thrusting);
                 let msg = chat
                     .lines
                     .iter()

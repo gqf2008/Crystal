@@ -239,7 +239,9 @@ pub(crate) fn send_user_information(
                 },
                 ClientMagic {
                     name: "刺杀剑术".to_string(),
-                    spell: Spell::Fencing,
+                    // #2775：名称与 Spell 必须一致（C# `Spell.Thrusting` = 刺杀剑术）；
+                    // 此前这里写成 `Spell::Fencing`（基本剑术），技能页 Hint 会显示成另一技能
+                    spell: Spell::Thrusting,
                     base_cost: 3,
                     level_cost: 1,
                     icon: 0,

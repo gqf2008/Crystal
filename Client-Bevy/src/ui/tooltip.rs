@@ -329,13 +329,19 @@ pub fn tooltip_panel_system(
     // 描边副本（outlined_text 的兄弟层级副本）随父节点 bg 显隐自动跟随：
     // bevy_ui 里子实体恒画在父之后且 `Inherited` 继承父可见性，无需单独同步；
     // 正文内容变化由 `sync_outline_ui_system` 复制到 4 个副本（见插件注册顺序）。
-    // 估算尺寸：CJK 约 1 字符 = 字号 px
-    let mut max_chars = state.title.chars().count().max(1);
-    for l in &state.lines {
-        max_chars = max_chars.max(l.chars().count());
+    // 估算尺寸：CJK 约 1 字符 = 字号 px；正文里的 `\n` 也计入行数
+    //（#2775：技能页 Hint 是多段描述，按单行估高会把框画得太小）
+    let mut max_chars = 0usize;
+    let mut text_lines = 0usize;
+    for s in std::iter::once(&state.title).chain(state.lines.iter()) {
+        for seg in s.split('\n') {
+            max_chars = max_chars.max(seg.chars().count());
+            text_lines += 1;
+        }
     }
-    let w = (max_chars as f32 * 13.0 + 20.0).clamp(40.0, 500.0);
-    let h = 24.0 + state.lines.len() as f32 * 16.0 + 8.0;
+    let w = (max_chars.max(1) as f32 * 13.0 + 20.0).clamp(40.0, 500.0);
+    let h =
+        (text_lines.max(1) as f32 * 16.0 + 24.0).max(24.0 + state.lines.len() as f32 * 16.0 + 8.0);
     let (px, py) = tooltip_origin(state.x, state.y, w, h);
 
     if let Ok((mut node, mut vis)) = bg.single_mut() {

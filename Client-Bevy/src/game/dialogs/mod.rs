@@ -55,6 +55,7 @@ pub mod report;
 pub mod roll;
 pub mod sell_panel;
 pub mod settings_file;
+pub mod skill_desc;
 pub mod socket;
 pub mod storage;
 pub mod text_input;

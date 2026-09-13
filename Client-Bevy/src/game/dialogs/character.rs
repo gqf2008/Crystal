@@ -373,7 +373,15 @@ fn spawn_character_dialog(
                                 // 技能页：7 行技能按钮（C# MagicButton (8,8+i*33) 231x33）
                                 for i in 0..SKILL_ROW_COUNT {
                                     spawn_container(pg, 8.0, 8.0 + i as f32 * 33.0, 231.0, 33.0, 9)
-                                        .insert((Button, CharSkillRow(i)))
+                                        .insert((
+                                            Button,
+                                            CharSkillRow(i),
+                                            // #2775：C# `MainDialogs.cs:3430+` `SkillButton.Hint`
+                                            // （技能描述，逐行随当前技能刷新）
+                                            crate::ui::tooltip::UiHint {
+                                                text: String::new(),
+                                            },
+                                        ))
                                         .with_children(|rc| {
                                             spawn_container(rc, 36.0, 0.0, 36.0, 36.0, 10)
                                                 .insert((
@@ -665,6 +673,25 @@ fn char_equip_system(
 
 /// 技能页：行可见性/内容/翻页 + 点击打开快捷键面板
 /// （C# CharacterDialog.RefreshInterface + MagicButton.Click → AssignKeyPanel）
+/// #2775：技能页行 Hint 文案（C# `MainDialogs.cs:3430+` `SkillButton.Hint`）：
+/// `{0}`=当前等级、`{1}`=该等级数值（C# `Magic.Level == 0 ? Level1 : Level == 1 ? Level2 :
+/// Level == 2 ? Level3 : 0`）、`{2}`=基础法力消耗；C# 无 case 的技能不弹提示。
+fn skill_row_hint(m: &mir2_shared::data::client_data::ClientMagic) -> String {
+    let level_value = match m.level {
+        0 => m.level1,
+        1 => m.level2,
+        2 => m.level3,
+        _ => 0,
+    };
+    crate::game::dialogs::skill_desc::skill_hint(
+        m.spell,
+        m.level,
+        level_value as u32,
+        m.base_cost as u32,
+    )
+    .unwrap_or_default()
+}
+
 fn char_skill_system(
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
@@ -682,6 +709,7 @@ fn char_skill_system(
             Option<&CharSkillRow>,
             Option<&CharSkillNext>,
             Option<&CharSkillBack>,
+            Option<&mut crate::ui::tooltip::UiHint>,
         ),
         (Without<CharSkillRowChild>, Without<CharSkillText>, Without<CharSkillIcon>),
     >,
@@ -704,7 +732,7 @@ fn char_skill_system(
     }
     let open = mgr.is_open(DialogKind::Character) && page.0 == 3;
 
-    for (e, mut vis, inter, row, next, back) in &mut rows {
+    for (e, mut vis, inter, row, next, back, mut hint) in &mut rows {
         let (show, magic) = if let Some(row) = row {
             let magic = magics.magics.get(start.0 + row.0);
             (open && magic.is_some(), magic)
@@ -716,6 +744,13 @@ fn char_skill_system(
             continue;
         }
         if let Some(row) = row {
+            // #2775：行 Hint = 当前技能描述（C# `MainDialogs.cs:3430+` SkillButton.Hint）
+            if let (Some(m), Some(hint)) = (magic, hint.as_mut()) {
+                let text = skill_row_hint(m);
+                if hint.text != text {
+                    hint.text = text;
+                }
+            }
             if edge(e, inter, &mut prev_inter) {
                 if let Some(m) = magic {
                     assign_key.open(m.spell, m.key);
@@ -808,6 +843,45 @@ fn exp_label(m: &mir2_shared::data::client_data::ClientMagic) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2775：技能页行 Hint 的等级数值取法与 C# 一致
+    ///（`Magic.Level == 0 ? Level1 : Level == 1 ? Level2 : Level == 2 ? Level3 : 0`）
+    #[test]
+    fn skill_row_hint_uses_csharp_level_value() {
+        let mut m = mir2_shared::data::client_data::ClientMagic {
+            name: "攻杀剑术".to_string(),
+            spell: mir2_shared::enums::Spell::Slaying,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 4,
+            level2: 8,
+            level3: 12,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            level: 0,
+            key: 0,
+            experience: 0,
+            delay: 0,
+            range: 0,
+            cast_time: 0,
+        };
+        assert!(skill_row_hint(&m).contains("当前技能等级 0"));
+        assert!(skill_row_hint(&m).contains("下一等级 4"), "0 级取 Level1");
+        m.level = 1;
+        assert!(skill_row_hint(&m).contains("下一等级 8"), "1 级取 Level2");
+        m.level = 2;
+        assert!(skill_row_hint(&m).contains("下一等级 12"), "2 级取 Level3");
+        m.level = 3;
+        assert!(
+            skill_row_hint(&m).contains("下一等级 0"),
+            "3 级（满级）固定 0"
+        );
+        // C# 无 case 的技能 → 空串（不弹提示）
+        m.spell = mir2_shared::enums::Spell::None;
+        assert_eq!(skill_row_hint(&m), "");
+    }
 
     #[test]
     fn equip_slot_screen_rect_weapon() {
