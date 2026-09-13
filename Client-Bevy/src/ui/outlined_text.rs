@@ -6,10 +6,17 @@
 //! 再画正文前景色。相对前景 (1,1)：上 (0,-1)/左 (-1,0)/右 (+1,0)/下 (0,+1)。
 //!
 //! 注意 MirLabel 构造器默认 `_outLine = true`（MirLabel.cs:181-182）——C# 中
-//! 「未设 OutLine」意味着描边**开启**。显式无描边仅聊天标签
-//! （MainDialogs.cs:962/1040 `OutLine=false`）。Bevy 现状：聊天文本无描边
-//! ✓ 一致；按钮文本/模式标签/按钮 Hint 在 C# 中有描边而 Bevy 尚未实现
-//! → 后续批次补齐。
+//! 「未设 OutLine」意味着描边**开启**；全仓 `TextRenderer.DrawText` 只命中
+//! `MirLabel.cs` 自身，即 C# 文本默认全部带描边。显式无描边只有 4 处：
+//! 物品格/奖励格数量黄字（MirItemCell.cs:2615、QuestDialogs.cs:1726）与聊天标签
+//! （MainDialogs.cs:962/1040）；此外 `MirTextBox` 是原生 WinForms `TextBox`
+//! （MirTextBox.cs:143），同样不带描边。
+//!
+//! Bevy 现状（#2817 批26 已对齐）：UI 侧 `theme::spawn_label` / `spawn_label_center`
+//! **默认带描边**（转调本模块的 UI 版），无描边位置显式走 `spawn_label_plain` /
+//! `spawn_label_center_plain`（数量框文本、奖励格数量黄字）；世界空间（actor 头顶名、
+//! 伤害数字、输出行、HUD 标签、模式标签）走 [`outline_on`]；聊天文本走
+//! `sprite_ui::spawn_ui_text`，保持无描边。
 //!
 //! Bevy 无等价的 4 方向描边内建组件（`TextShadow` 仅单方向），故为每个描边
 //! 文本挂 4 个黑色副本，sync 系统在主文本变化时同步内容。
