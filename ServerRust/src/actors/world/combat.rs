@@ -3708,7 +3708,32 @@ impl Message<MagicRequest> for WorldActor {
         let spell_damage = spell_db
             .map(|info| crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat))
             .unwrap_or_else(|| magic_stat.max(10) * 2);
-        let persistent_spell = if is_persistent {
+        // #2851：Portal 的 C# 前置约束（`HumanObject.cs:5790-5806`）——同施法者最多 2 个门 + 落点必须 `CanFly`
+        let portal_blocked = spell_enum == mir2_shared::enums::Spell::Portal && {
+            let existing = self
+                .spell_objects
+                .values()
+                .filter(|so| {
+                    so.spell == mir2_shared::enums::Spell::Portal
+                        && so.caster_session == msg.session_id
+                })
+                .count();
+            if existing >= 2 {
+                true
+            } else {
+                let (fx, fy) = if target_x == 0 && target_y == 0 {
+                    (state.x, state.y)
+                } else {
+                    (target_x, target_y)
+                };
+                !self
+                    .maps
+                    .get(&state.map_index)
+                    .map(|m| crate::combat::attack::can_fly_line(m, (state.x, state.y), (fx, fy)))
+                    .unwrap_or(false)
+            }
+        };
+        let persistent_spell = if is_persistent && !portal_blocked {
             spell_oid.map(|oid| {
                 spell::create_persistent_spell(
                     oid,
@@ -3734,6 +3759,13 @@ impl Message<MagicRequest> for WorldActor {
                 (target_x, target_y)
             };
             spell_obj.cells = spell::spell_cells_for(spell_enum, fx, fy);
+            // #2851：C# `HumanObject.Portal`（:5802-5806）——时长 = 30 + Level*30 秒；Value = 通行次数
+            // = Level*2 - 1（用尽即消失，见 `tick_spells` 的 Portal 分支）
+            if spell_obj.spell == mir2_shared::enums::Spell::Portal {
+                spell_obj.tick_value = crate::combat::attack::portal_passthrough_count(spell_level);
+                spell_obj.expires_at_ms =
+                    crate::combat::attack::portal_duration_secs(spell_level) * 1000;
+            }
             // DelayedExplosion（C# HumanObject.DelayedExplosion）：施法后按距离延迟
             // `距离*50 + 500ms` 才触发；且要挂到目标身上（target_id 用于引爆命中）。
             if spell_obj.spell == mir2_shared::enums::Spell::DelayedExplosion {

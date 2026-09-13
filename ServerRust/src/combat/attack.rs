@@ -233,6 +233,59 @@ pub(crate) fn boss_ground_spell_profile(
     }
 }
 
+/// C# `MapObject.CanFly`（`Server/MirObjects/MapObject.cs:321-337`）：从 `from` 逐格朝 `to` 走 1 步，
+/// 途经每格必须"可用"（本端对应 `MapData::is_walkable`）；用于传送门落点校验。
+pub(crate) fn can_fly_line(
+    map: &crate::maps::loader::MapData,
+    from: (i32, i32),
+    to: (i32, i32),
+) -> bool {
+    if !map.is_valid(to.0, to.1) {
+        return false;
+    }
+    let (mut x, mut y) = from;
+    // C# 用 `Functions.DirectionFromPoint` 逐格逼近；直接走切比雪夫步长等价且更直观。
+    let dx = (to.0 - x).signum();
+    let dy = (to.1 - y).signum();
+    let mut guard = 0;
+    while (x, y) != to {
+        x += dx;
+        y += dy;
+        if !map.is_valid(x, y) || !map.is_walkable(x, y) {
+            return false;
+        }
+        guard += 1;
+        if guard > 4096 {
+            return false; // 防御：目标不可达时不至于死循环
+        }
+    }
+    true
+}
+
+/// C# `HumanObject.Portal`（`:5804`）：`passthroughCount = magic.Level * 2 - 1`
+pub(crate) fn portal_passthrough_count(level: u8) -> i32 {
+    (level as i32 * 2 - 1).max(1)
+}
+
+/// C# `HumanObject.Portal`（`:5802`）：`duration = 30 + magic.Level * 30`（秒）
+pub(crate) fn portal_duration_secs(level: u8) -> u64 {
+    (30 + level as u64 * 30).max(1)
+}
+
+/// C# `SpellObject.ProcessSpell` 的 `case Spell.Portal`（`SpellObject.cs:304-329`）逐步结算：
+/// 施法者本人/同组玩家踩在门上时，若**配对门存在但落点无效**，C# 直接 `return`——既不传送，
+/// 也不扣通行次数；否则本步照常扣 1 次（`Value -= 1` 写在 `if (portal != null)` 之外，
+/// 故"无配对门"这一异常态也会扣次数）。
+///
+/// 返回 `(是否传送, 是否扣 1 次通行次数)`。
+pub(crate) fn portal_step_outcome(has_partner: bool, exit_valid: bool) -> (bool, bool) {
+    if has_partner && !exit_valid {
+        (false, false)
+    } else {
+        (has_partner, true)
+    }
+}
+
 // ============================================================
 // 命中+护甲判定 GetArmour（MapObject.cs:460）
 // ============================================================
@@ -927,5 +980,50 @@ mod tests {
         assert_eq!(boss_ground_spell_profile(Spell::FireWall), None);
         assert_eq!(boss_ground_spell_profile(Spell::HealingCircle), None);
         assert_eq!(boss_ground_spell_profile(Spell::None), None);
+    }
+
+    /// #2851：传送门（Portal）对齐 C# `HumanObject.Portal`（`:5802-5806`）+ `MapObject.CanFly`（`:321-337`）
+    #[test]
+    fn portal_rules_match_csharp() {
+        use crate::maps::loader::{CellInfo, MapData};
+
+        // passthrough = Level*2 - 1；duration = 30 + Level*30 秒
+        assert_eq!(portal_passthrough_count(1), 1);
+        assert_eq!(portal_passthrough_count(3), 5);
+        assert_eq!(portal_duration_secs(1), 60);
+        assert_eq!(portal_duration_secs(3), 120);
+
+        // CanFly：直线途径格必须可走（中间一列挡墙 → false）
+        let cell = |walkable: bool| CellInfo {
+            back_image: 0,
+            walkable,
+            fishing_attribute: -1,
+        };
+        let build = |wall_x: i32| MapData {
+            file_name: String::new(),
+            title: String::new(),
+            width: 10,
+            height: 10,
+            cells: (0..10)
+                .map(|y| {
+                    (0..10)
+                        .map(|x| cell(!(x == wall_x && (1..9).contains(&y))))
+                        .collect()
+                })
+                .collect(),
+            no_experience: false,
+            safe_zone_rects: Vec::new(),
+        };
+        let clear = build(-1); // 无墙
+        assert!(can_fly_line(&clear, (0, 0), (5, 5)));
+        let walled = build(3); // x=3 有墙
+        assert!(!can_fly_line(&walled, (0, 0), (5, 5)));
+        // 越界目标 → false
+        assert!(!can_fly_line(&clear, (0, 0), (99, 99)));
+
+        // 逐步结算：配对门落点无效 → 不传送不扣次数；无配对门 → 不传送但照扣次数
+        assert_eq!(portal_step_outcome(true, true), (true, true));
+        assert_eq!(portal_step_outcome(true, false), (false, false));
+        assert_eq!(portal_step_outcome(false, false), (false, true));
     }
 }
