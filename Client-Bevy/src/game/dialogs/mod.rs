@@ -123,6 +123,10 @@ pub enum DialogKind {
     /// 弹出，关闭键/ESC 隐藏）。不复用 `Hero`——拖动与置顶按 kind 聚合，
     /// 复用会让拖英雄窗连带移动它（C# 两窗各自 `Movable`）
     HeroManage,
+    /// #2801：C# `QuestDetailDialog`（任务详情窗，`Prguse[960]` 316x466 @(532,60)，
+    /// `QuestDialogs.cs:463-628`）。由任务日记行左键打开（`QuestSingleQuestItem._questLabel.Click`，
+    /// `QuestDialogs.cs:1928-1935`）；`Movable = true` 独立拖动，故独立 kind 不复用 `QuestLog`
+    QuestDetail,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）

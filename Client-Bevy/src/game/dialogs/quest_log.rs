@@ -11,10 +11,11 @@
 //        接受/完成按钮状态机 + 可选奖励多选一（C# _acceptButton/_finishButton/UpdateRewards）
 // ============================================================================
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, UI_SCREEN_W};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -65,6 +66,16 @@ pub struct QuestCatalog {
     pub completed: HashSet<i32>,
     /// 物品名（UserInformation 随包下发；奖励物品不在背包时显示 物品#索引）
     pub item_names: HashMap<i32, String>,
+}
+
+/// #2801 单元①：任务详情窗状态（C# `QuestDetailDialog.Quest`，`QuestDialogs.cs:469`）。
+///
+/// 窗口内容（消息区/奖励区）在单元②③补；本单元只承载"展示哪个任务"这一事实源，
+/// 与 `DialogManager.open(QuestDetail)` 一起决定窗口显隐。
+#[derive(Resource, Default)]
+pub struct QuestDetailState {
+    /// 当前展示的任务 id（None=未展示过）
+    pub quest_id: Option<i32>,
 }
 
 /// #2535 C# QuestListDialog.ReDisplayButtons 按钮状态机（纯函数）
@@ -270,21 +281,43 @@ pub struct QuestLogLine(usize);
 #[derive(Component)]
 pub struct QuestLogTrack(usize);
 
+/// #2801 单元①：任务详情窗根面板（C# `QuestDetailDialog`，`Prguse[960]`）
+#[derive(Component)]
+pub struct QuestDetailWidget;
+
+/// #2801 单元①：任务详情窗关闭键（C# `QuestDetailDialog.closeButton`，`Prguse2[360..362]`）
+#[derive(Component)]
+pub struct QuestDetailClose;
+
+/// #2801 单元①：任务日志 UI 的对话框状态打包。
+/// `quest_log_ui_system` 原本已是 16 个系统参数（Bevy `SystemParam` 上限，
+/// 同 `<control.rs>` 的 `ControlQueries`），新增「详情窗状态」必须与 `DialogManager` 打包，
+/// 否则参数变 17 个直接编译失败。
+#[derive(SystemParam)]
+pub struct QuestDialogAccess<'w> {
+    /// 打开栈（本函数读 QuestLog 开关、写 QuestDetail 开关）
+    pub mgr: ResMut<'w, DialogManager>,
+    /// 详情窗当前任务（单元②渲染用；本单元承载"展示哪个任务"的事实源）
+    pub detail: ResMut<'w, QuestDetailState>,
+}
+
 pub struct QuestLogPlugin;
 
 impl Plugin for QuestLogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<QuestLogState>();
         app.init_resource::<QuestCatalog>();
+        app.init_resource::<QuestDetailState>();
         app.add_systems(
             Update,
             quest_log_server_events.run_if(in_state(AppState::Game)),
         );
         app.add_systems(OnEnter(AppState::Game), spawn_quest_log);
+        app.add_systems(OnEnter(AppState::Game), spawn_quest_detail);
         app.add_systems(OnExit(AppState::Game), cleanup_quest_log);
         app.add_systems(
             Update,
-            (quest_log_ui_system)
+            (quest_log_ui_system, quest_detail_ui_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -387,6 +420,87 @@ fn spawn_quest_log(
     });
 }
 
+// ============================================================================
+// #2801 任务详情窗（C# `QuestDetailDialog`，`Client/MirScenes/Dialogs/QuestDialogs.cs:463-628`）
+// 坐标/精灵逐条对 C#：
+//   面板 `Prguse[960]` 316x466 @(ScreenWidth/2+20, 60) = (532,60)（`QuestDialogs.cs:471-479`）
+//   标题 `Title[16]` @(18,9)（`:481-487`）
+//   关闭键 `Prguse2[360/361/362]` @(289,3)（`:600-611`）
+// 打开入口：任务日记行左键（`QuestSingleQuestItem._questLabel.Click` → `DisplayQuestDetails`，
+// `QuestDialogs.cs:1928-1935`）。`Movable = true`（`:475`）→ 独立 `DialogKind::QuestDetail`
+// 独立拖动，不复用 `QuestLog`（复用会被 kind 级拖动/置顶连带）。
+// 单元②补消息区（上 `Prguse2[197..199]` @(293,33)、下 `Prguse2[207..209]` @(293,280)、
+// 位置条 `Prguse2[205/206]` @(293,48)），单元③补分享/取消按钮与奖励区。
+// ============================================================================
+/// #2801 单元①：详情窗面板原点（C# `QuestDialogs.cs:476`
+/// `Location = new Point(Settings.ScreenWidth / 2 + 20, 60)`；1024/2+20 = 532）
+pub fn quest_detail_origin() -> (f32, f32) {
+    (UI_SCREEN_W / 2.0 + 20.0, 60.0)
+}
+
+fn spawn_quest_detail(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    libs.0.ensure_initialized();
+    // 面板 Prguse[960]（316x466）@(532,60)
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 960) else {
+        return;
+    };
+    let (px, py) = quest_detail_origin();
+    let panel = spawn_panel(&mut commands, bg, px, py, 316.0, 466.0, 31);
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::QuestDetail), QuestDetailWidget));
+    commands.entity(panel).with_children(|p| {
+        // 标题 Title[16] @(18,9)（55x17；按 .Lib 真实尺寸落，避免拉伸）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 16) {
+            let (iw, ih) = match libs.0.get_image(LibraryName::Title, 16) {
+                Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                None => (55.0, 17.0),
+            };
+            spawn_image(p, h, 18.0, 9.0, iw, ih, 8);
+        }
+        // 关闭键 Prguse2[360/361/362] @(289,3)（24x21）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+        ) {
+            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 24.0, 21.0, 10).insert(QuestDetailClose);
+        }
+    });
+}
+
+/// #2801 单元①：任务详情窗显隐 + 关闭键（C# `closeButton.Click += Hide()`，`QuestDialogs.cs:611`）。
+/// 显隐真值只看 `DialogManager`（同 QuestLog）；任务数据在单元②接入。
+fn quest_detail_ui_system(
+    mut mgr: ResMut<DialogManager>,
+    mut widgets: Query<&mut Visibility, With<QuestDetailWidget>>,
+    close: Query<(Entity, &Interaction), With<QuestDetailClose>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    let open = mgr.is_open(DialogKind::QuestDetail);
+    for mut vis in widgets.iter_mut() {
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    if !open {
+        return;
+    }
+    for (e, inter) in &close {
+        let was = prev_inter.insert(e, *inter);
+        if *inter == Interaction::Pressed && was != Some(Interaction::Pressed) {
+            mgr.close(DialogKind::QuestDetail);
+            tracing::info!("📜 关闭任务详情窗");
+        }
+    }
+}
+
 /// 奖励物品显示名（目录无 ItemLibrary 全量名，未知名回退 物品#索引）
 fn reward_item_display(catalog: &QuestCatalog, r: &QuestItemReward) -> String {
     catalog
@@ -406,7 +520,8 @@ fn quest_log_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
 }
 
 fn quest_log_ui_system(
-    mut mgr: ResMut<DialogManager>,
+    // #2801：mgr + detail 打包（见 `QuestDialogAccess`；参数已达 Bevy 上限 16）
+    dialogs: QuestDialogAccess,
     mut state: ResMut<QuestLogState>,
     catalog: Res<QuestCatalog>,
     // #2633 批次4 步7：level→`Progression`、class→`ActorAppearance`（HudState 已于步9 删除）；
@@ -422,7 +537,19 @@ fn quest_log_ui_system(
     tracking: Res<crate::game::dialogs::quest_tracking::QuestTrackingState>,
     mut toggle_tracking: MessageWriter<crate::game::dialogs::quest_tracking::ToggleQuestTracking>,
     net: Res<NetConnection>,
-    close: Query<(Entity, &Interaction, Option<&QuestLogClose>, Option<&QuestLogAbandon>)>,
+    // 必须限定 `Or<(…)>`：`Option<&Marker>` 不是过滤条件，裸查询会匹配「全部带
+    // Interaction 的实体」（含接受/完成/追踪按钮），下面第一段循环就会替它们消费
+    // `prev_inter` 的按下边沿 → 后续循环里 `edge()` 恒为 false，接受/完成键永不触发。
+    // （同 LESSON_Option-Marker分派须配Or过滤 / b22 商城付款复选框踩坑）
+    close: Query<
+        (
+            Entity,
+            &Interaction,
+            Option<&QuestLogClose>,
+            Option<&QuestLogAbandon>,
+        ),
+        Or<(With<QuestLogClose>, With<QuestLogAbandon>)>,
+    >,
     mouse: Res<ButtonInput<MouseButton>>,
     ui: (
         Query<&Window>,
@@ -449,6 +576,11 @@ fn quest_log_ui_system(
     >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
+    // #2801：打包参数解到局部名，函数体其余部分保持原样
+    let QuestDialogAccess {
+        mut mgr,
+        mut detail,
+    } = dialogs;
     fn edge(
         e: Entity,
         inter: &Interaction,
@@ -682,7 +814,17 @@ fn quest_log_ui_system(
                                 state.selected = Some(*qi);
                                 state.selected_avail = None;
                                 state.selected_reward = None;
-                                tracing::info!("📜 选中任务: {}", state.quests[*qi].name);
+                                // #2801 单元①：C# 任务日记行左键 = 打开任务详情窗
+                                // （`QuestSingleQuestItem._questLabel.Click` → `DisplayQuestDetails`，
+                                //  `QuestDialogs.cs:1928-1935`；右键才是追踪开关 `:1936-1952`）
+                                let qid = state.quests[*qi].id;
+                                detail.quest_id = Some(qid);
+                                mgr.open(DialogKind::QuestDetail);
+                                tracing::info!(
+                                    "📜 打开任务详情: {}（任务 {}）",
+                                    state.quests[*qi].name,
+                                    qid
+                                );
                             }
                             Some(DiaryRow::Avail(k)) => {
                                 state.selected = None;
@@ -890,6 +1032,135 @@ fn quest_log_server_events(
 
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+
+    /// #2801 单元①：详情窗面板原点 = C# `Settings.ScreenWidth / 2 + 20, 60`
+    /// （`QuestDialogs.cs:476`；1024/2+20 = 532，与任务日记窗 961 @(200,60) 同 y）
+    #[test]
+    fn quest_detail_origin_matches_csharp_anchor() {
+        assert_eq!(quest_detail_origin(), (532.0, 60.0));
+    }
+
+    /// #2801 单元①：详情窗显隐只由 `DialogManager` 决定；关闭键把窗口移出管理栈
+    /// （C# `closeButton.Click += Hide()`，`QuestDialogs.cs:611`）
+    #[test]
+    fn quest_detail_visibility_follows_manager_and_close_button() {
+        let mut world = World::new();
+        world.insert_resource(DialogManager::default());
+        let root = world
+            .spawn((
+                QuestDetailWidget,
+                DialogRoot(DialogKind::QuestDetail),
+                Visibility::Visible,
+            ))
+            .id();
+        let close = world.spawn((QuestDetailClose, Interaction::None)).id();
+
+        // 未 open → 根隐藏（开窗前不得渲染；由 enforce 兜底前的同帧门控保证）
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("详情窗 UI 系统应运行");
+        assert_eq!(
+            world.get::<Visibility>(root),
+            Some(&Visibility::Hidden),
+            "未打开时详情窗根必须隐藏"
+        );
+
+        // open → 显示（打开入口：日记行左键 / RPC）
+        world
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::QuestDetail);
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("详情窗 UI 系统应可重复运行");
+        assert_eq!(
+            world.get::<Visibility>(root),
+            Some(&Visibility::Visible),
+            "打开后详情窗根必须可见"
+        );
+
+        // 关闭键按下 → 移出管理栈，下一帧隐藏
+        *world.get_mut::<Interaction>(close).unwrap() = Interaction::Pressed;
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("关闭键分支应可运行");
+        assert!(
+            !world
+                .resource::<DialogManager>()
+                .is_open(DialogKind::QuestDetail),
+            "关闭键必须把详情窗移出管理栈"
+        );
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("详情窗 UI 系统应可重复运行");
+        assert_eq!(
+            world.get::<Visibility>(root),
+            Some(&Visibility::Hidden),
+            "关闭后详情窗根必须隐藏"
+        );
+    }
+
+    /// #2801 单元①附带修复：`close` 宽查询会替其它按钮消费按下边沿，导致
+    /// 「接受」/「完成」键永不触发（实机表现：按下态精灵切换，但无 AcceptQuest 包）。
+    /// 修复 = 该查询加 `Or<(With<QuestLogClose>, With<QuestLogAbandon>)>` 过滤。
+    #[test]
+    fn accept_button_fires_despite_close_query() {
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::QuestLog);
+        world.insert_resource(mgr);
+        world.insert_resource(QuestDetailState::default());
+        world.insert_resource(QuestCatalog {
+            infos: vec![info(
+                1,
+                1,
+                mir2_shared::enums::RequiredClass::from_bits_truncate(0),
+            )],
+            ..Default::default()
+        });
+        world.insert_resource(QuestLogState {
+            selected_avail: Some(0),
+            ..Default::default()
+        });
+        world.insert_resource(crate::network::NetConnection::default());
+        world.init_resource::<crate::game::dialogs::quest_tracking::QuestTrackingState>();
+        world.init_resource::<
+            bevy::ecs::message::Messages<
+                crate::game::dialogs::quest_tracking::ToggleQuestTracking,
+            >,
+        >();
+        world.insert_resource(ButtonInput::<MouseButton>::default());
+
+        // 接受键：本帧刚被按下（Interaction=Pressed）
+        world.spawn((
+            Button,
+            QuestLogAccept,
+            Interaction::Pressed,
+            Node::default(),
+            ImageNode::default(),
+            Visibility::Visible,
+        ));
+        // 任务日记关闭键（同帧 Hovered）：修复前它会替接受键消费边沿
+        world.spawn((
+            Button,
+            QuestLogClose,
+            Interaction::Hovered,
+            Node::default(),
+            ImageNode::default(),
+        ));
+
+        world
+            .run_system_once(quest_log_ui_system)
+            .expect("任务日志 UI 系统应运行");
+
+        assert_eq!(
+            world.resource::<QuestLogState>().message,
+            "已请求接受任务 任务1",
+            "接受键按下必须发出 AcceptQuest（修复前边沿被 close 宽查询吞掉）"
+        );
+        assert_eq!(world.resource::<QuestLogState>().selected_avail, None);
+    }
+
     /// 任务行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn row_rect_origin_and_drag() {
