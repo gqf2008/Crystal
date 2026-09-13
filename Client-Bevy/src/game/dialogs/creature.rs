@@ -21,7 +21,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
+    spawn_label_center, spawn_panel,
 };
 
 /// 宠物条目
@@ -179,6 +180,30 @@ struct CreatureBlackStoneFg;
 #[derive(Component)]
 struct CreatureHover;
 
+/// C# `CreatureButton.PetButton` 图标（`Prguse2[pet.Icon]` 36x32 @44+81i, 259/299）；
+/// `loaded` 记住已加载的图标索引（0 = 无），避免每帧重建 Image 资产
+#[derive(Component)]
+struct CreatureSlotIcon {
+    slot: usize,
+    loaded: u16,
+}
+
+/// C# `CreatureButton.SelectionImage`（`Prguse2[535]` 40x34 @-2,-2）
+#[derive(Component)]
+struct CreatureSlotSelection(usize);
+
+/// C# `CreatureName`（@170,50 166x21 居中）
+#[derive(Component)]
+struct CreatureNameLabel;
+
+/// C# `CreatureDeadline`（@140,85 350x21）
+#[derive(Component)]
+struct CreatureDeadlineLabel;
+
+/// C# `CreaturePearls`（@53,348，显示玩家珍珠数）
+#[derive(Component)]
+struct CreaturePearlsLabel;
+
 pub struct CreaturePlugin;
 
 impl Plugin for CreaturePlugin {
@@ -197,6 +222,8 @@ app.add_systems(OnEnter(AppState::Game), spawn_creature);
                 creature_action_system,
                 creature_options_system,
                 creature_bars_system,
+                creature_slots_system,
+                creature_labels_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -240,6 +267,12 @@ const CREATURE_BLACKSTONE_FG_W: f32 = 172.0;
 const CREATURE_BLACKSTONE_FG_H: f32 = 7.0;
 /// C# `IntelligentCreatureDialogs.blackstoneProduceTime = 10800`（3 小时，秒）
 const BLACKSTONE_PRODUCE_TIME: f32 = 10800.0;
+/// C# `CreatureName`（@170,50，166x21 居中）
+const CREATURE_NAME_X: f32 = 170.0;
+const CREATURE_NAME_Y: f32 = 50.0;
+const CREATURE_NAME_W: f32 = 166.0;
+/// C# `CreatureButton.NameLabel`（80x15，位于 `PetButton` 的 (-22,-12)）
+const CREATURE_NAME_LABEL_W: f32 = 80.0;
 
 fn creature_slot_rect(index: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     let col = (index % 5) as f32;
@@ -385,6 +418,28 @@ fn creature_hover_label(
     None
 }
 
+/// C# `CreatureName.Text = CustomName`（空名即空串）。
+fn creature_name_text(selected: Option<&CreatureEntry>) -> String {
+    selected.map(|c| c.name.clone()).unwrap_or_default()
+}
+
+/// C# `CreatureDeadline` 文案（`:738-747`）：`Expire == DateTime.MinValue` → `过期: 永不过期`，
+/// 否则 `过期: {PrintTimeSpanFromSeconds(剩余秒)}`；未选中宠物为空串。
+fn creature_deadline_text(selected: Option<&CreatureEntry>) -> String {
+    match selected {
+        Some(c) if c.expire_secs > 0 => {
+            format!("过期: {}", format_time_span(c.expire_secs as f64))
+        }
+        Some(_) => "过期: 永不过期".to_string(),
+        None => String::new(),
+    }
+}
+
+/// 槽位图标索引（C# `PetButton.Index = pet.Icon`；无宠物或本端无对应图标 → 0 = 不绘制）。
+fn creature_slot_icon_index(entry: Option<&CreatureEntry>) -> u16 {
+    entry.map(|c| c.icon.max(0) as u16).unwrap_or(0)
+}
+
 /// 槽位文字宽度估算（对话框 12px 字体：CJK 按 12px、半角按 6px）。
 fn creature_text_width(text: &str) -> f32 {
     text.chars()
@@ -405,7 +460,7 @@ fn creature_slot_label(creature: &CreatureEntry, selected: bool) -> String {
     for ch in name.chars() {
         let mut candidate = out.clone();
         candidate.push(ch);
-        if creature_text_width(&candidate) > CREATURE_SLOT_W - 4.0 {
+        if creature_text_width(&candidate) > CREATURE_NAME_LABEL_W {
             break;
         }
         out = candidate;
@@ -607,15 +662,62 @@ fn spawn_creature(
             TextLayout::justify(Justify::Center),
             Visibility::Hidden,
         ));
+        // #2761 C# `CreatureName`(170,50 166x21 居中) / `CreatureDeadline`(140,85 350x21)
+        spawn_label_center(
+            p,
+            &cjk,
+            "",
+            CREATURE_NAME_X + CREATURE_NAME_W / 2.0,
+            CREATURE_NAME_Y,
+            CREATURE_NAME_W,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(CreatureNameLabel);
+        spawn_label(p, &cjk, "", 140.0, 85.0, 12.0, Color::WHITE, 9).insert(CreatureDeadlineLabel);
+        // #2761 C# `PearlImage`(`Prguse2[427]` @29,348 144x17) + `CreaturePearls`(@53,348)
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 427) {
+            spawn_image(p, img, 29.0, 348.0, 144.0, 17.0, 10);
+        }
+        spawn_label(p, &cjk, "0", 53.0, 348.0, 12.0, Color::WHITE, 11).insert(CreaturePearlsLabel);
         // Bevy 扩展行（C# 无对应控件）：紧随 C# 三行信息之后的同间距第四行（191+15=206）放数量
-        // 摘要；操作反馈放按钮行与宠物槽之间的空档（DISMISS/RELEASE 底 242，宠物槽顶 259）。
+        // 摘要；操作反馈放宠物槽底与面板底纹之间的空档（第二行图标底 331、黑石条顶 348）。
+        // （#2761 起槽位名字标签移到 C# `NameLabel` 位置 @(sx-22, sy-12)，占用了原 243 行。）
         spawn_label(p, &cjk, "", 19.0, 206.0, 12.0, Color::WHITE, 9).insert(CreatureSummary);
-        spawn_label(p, &cjk, "", 19.0, 243.0, 12.0, Color::WHITE, 9).insert(CreatureMessage);
+        spawn_label(p, &cjk, "", 19.0, 333.0, 12.0, Color::WHITE, 9).insert(CreatureMessage);
         // C# CreatureButton 5x2 网格：x=44+81*col，y=259/299。
         for i in 0..10usize {
             let (sx, sy, _, _) = creature_slot_rect(i, 0.0, 0.0);
-            spawn_label(p, &cjk, "", sx + 4.0, sy + 10.0, 12.0, Color::WHITE, 9)
-                .insert(CreatureLine(i));
+            // #2761 C# `PetButton` 图标（36x32，`Prguse2[pet.Icon]`）+ `SelectionImage`（40x34 @-2,-2）
+            // 占位图（1x1 全透明）：有图标时由系统换成 `Prguse2[pet.Icon]`
+            spawn_image(
+                p,
+                images.add(crate::map_renderer::make_image(vec![0, 0, 0, 0], 1, 1)),
+                sx,
+                sy,
+                36.0,
+                32.0,
+                9,
+            )
+            .insert((CreatureSlotIcon { slot: i, loaded: 0 }, Visibility::Hidden));
+            if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 535) {
+                spawn_image(p, img, sx - 2.0, sy - 2.0, 40.0, 34.0, 12)
+                    .insert((CreatureSlotSelection(i), Visibility::Hidden));
+            }
+            // C# `NameLabel`（@-22,-12 80x15 居中；C# 仅悬停显示，Bevy 常显作扩展）
+            spawn_label_center(
+                p,
+                &cjk,
+                "",
+                sx + 18.0,
+                sy - 12.0,
+                80.0,
+                12.0,
+                Color::WHITE,
+                12,
+            )
+            .insert(CreatureLine(i));
         }
         // Bevy 扩展：刷新按钮（C# 无此控件）放右侧操作列，不覆盖 5x2 宠物槽。
         // 用中文文本按钮而非通用 Title[206..208]（该精灵在原版是 MessageBox 的「YES」）。
@@ -1039,6 +1141,103 @@ fn creature_bars_system(
                 *vis = Visibility::Hidden;
             }
         }
+    }
+}
+
+/// #2761：槽位图标（`Prguse2[pet.Icon]`）+ 选中框（`Prguse2[535]`）刷新。
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn creature_slots_system(
+    mgr: Res<DialogManager>,
+    state: Res<CreatureState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut icons: Query<
+        (&mut CreatureSlotIcon, &mut ImageNode, &mut Visibility),
+        (Without<CreatureSlotSelection>, Without<CreatureHover>),
+    >,
+    mut selections: Query<
+        (&CreatureSlotSelection, &mut Visibility),
+        (Without<CreatureSlotIcon>, Without<CreatureHover>),
+    >,
+) {
+    if !mgr.is_open(DialogKind::Creature) {
+        return;
+    }
+    for (mut slot_icon, mut image, mut vis) in &mut icons {
+        let entry = state.creatures.get(slot_icon.slot);
+        // #2761：图标索引随列表下发（C# `IntelligentCreatureInfo.Icon`，0 = 无对应）
+        let icon = creature_slot_icon_index(entry);
+        if icon != slot_icon.loaded {
+            slot_icon.loaded = icon;
+            if icon > 0 {
+                if let Some(handle) =
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, icon as usize)
+                {
+                    image.image = handle;
+                }
+            }
+        }
+        *vis = if entry.is_some() && icon > 0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // C# `SelectButton(bool)`：选中槽显示 `SelectionImage`
+    for (slot, mut vis) in &mut selections {
+        *vis = if state.creatures.get(slot.0).is_some() && state.selected == slot.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// #2761：C# `CreatureName`(170,50) / `CreatureDeadline`(140,85) / `CreaturePearls`(53,348) 文案
+/// （`DrawCreatureAnimation`:732-746 与 `RefreshDialog`:569）。
+fn creature_labels_system(
+    mgr: Res<DialogManager>,
+    state: Res<CreatureState>,
+    mut name: Query<
+        &mut Text,
+        (
+            With<CreatureNameLabel>,
+            Without<CreatureDeadlineLabel>,
+            Without<CreaturePearlsLabel>,
+        ),
+    >,
+    mut deadline: Query<
+        &mut Text,
+        (
+            With<CreatureDeadlineLabel>,
+            Without<CreatureNameLabel>,
+            Without<CreaturePearlsLabel>,
+        ),
+    >,
+    mut pearls: Query<
+        &mut Text,
+        (
+            With<CreaturePearlsLabel>,
+            Without<CreatureNameLabel>,
+            Without<CreatureDeadlineLabel>,
+        ),
+    >,
+) {
+    if !mgr.is_open(DialogKind::Creature) {
+        return;
+    }
+    let selected = state.creatures.get(state.selected);
+    if let Ok(mut text) = name.single_mut() {
+        // C# `CreatureName.Text = CustomName`（空名即空）
+        text.0 = creature_name_text(selected);
+    }
+    if let Ok(mut text) = deadline.single_mut() {
+        // C# `CreatureDeadline`：`Expire == DateTime.MinValue` → `过期: 永不过期`，否则剩余时间
+        text.0 = creature_deadline_text(selected);
+    }
+    if let Ok(mut text) = pearls.single_mut() {
+        // C# `CreaturePearls.Text = User.PearlCount.ToString()`
+        text.0 = state.pearl_count.to_string();
     }
 }
 
@@ -1695,9 +1894,10 @@ mod layout_tests {
         let label = creature_slot_label(&creature, true);
         assert!(label.starts_with('>'), "选中前缀保留：{label}");
         let width = creature_text_width(&label);
-        assert!(width <= CREATURE_SLOT_W - 4.0, "标签宽度 {width} 超出列宽");
-        // 自 sx+4 起不越过下一列起点 sx+CREATURE_SLOT_DX
-        assert!(4.0 + width <= CREATURE_SLOT_DX);
+        // C# `CreatureButton.NameLabel` 80x15（@PetButton 的 -22,-12）
+        assert!(width <= CREATURE_NAME_LABEL_W, "标签宽度 {width} 超出 80px");
+        // 标签自 sx-22 起、宽 80 → 止于 sx+58，不越过下一槽图标起点 sx+81
+        assert!(-22.0 + CREATURE_NAME_LABEL_W <= CREATURE_SLOT_DX);
 
         creature.name = "小狗".to_string();
         assert_eq!(creature_slot_label(&creature, false), "小狗");
@@ -1858,5 +2058,26 @@ mod layout_tests {
 
         // 未命中
         assert!(creature_hover_label(&c, min_left, (10.0, 300.0)).is_none());
+    }
+
+    /// #2761：`CreatureName`/`CreatureDeadline`/槽位图标索引（C# `:732`/`:738-747`/`SetButtonInfo`）。
+    #[test]
+    fn creature_name_deadline_and_slot_icon_match_csharp() {
+        let mut c = CreatureEntry::default();
+        c.name = "小鸡".to_string();
+        c.icon = 501;
+
+        assert_eq!(creature_name_text(Some(&c)), "小鸡");
+        assert_eq!(creature_name_text(None), "");
+        assert_eq!(creature_slot_icon_index(Some(&c)), 501);
+        assert_eq!(creature_slot_icon_index(None), 0);
+
+        // 永久（0）→ `过期: 永不过期`；否则 `过期: {PrintTimeSpanFromSeconds}`
+        assert_eq!(creature_deadline_text(Some(&c)), "过期: 永不过期");
+        c.expire_secs = 604_800;
+        assert_eq!(creature_deadline_text(Some(&c)), "过期: 7d 00h 00m 00s");
+        c.expire_secs = 3661;
+        assert_eq!(creature_deadline_text(Some(&c)), "过期: 1h 01m 01s");
+        assert_eq!(creature_deadline_text(None), "");
     }
 }
