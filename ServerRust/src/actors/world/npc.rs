@@ -3052,11 +3052,11 @@ pub(crate) struct FishingGearBonuses {
     pub failed_add_min: i32,
     /// C# failedAddSuccessMax（byte）：Finder 槽 MaxAC（补偿上限，C# Random.Next 上界开区间）
     pub failed_add_max: i32,
-    /// C# nibbleMin（byte）：Float 槽 MinAC（咬钩窗口下限；Rust 未实现咬钩阶段，仅记录）
+    /// C# nibbleMin（byte）：Float 槽 MinAC（咬钩窗口下限；由 `tick_fishing_phase` 消费，C# UpdateFish）
     pub nibble_min: i32,
     /// C# nibbleMax（byte）：Float 槽 MaxAC（咬钩窗口上限；FishingNibbleChance = 5 + Random(nibbleMin, nibbleMax)）
     pub nibble_max: i32,
-    /// C# FishingAutoReelChance（sbyte）：Reel 槽 MaxMAC（自动收竿概率；Rust 未实现 FishFound 阶段，仅记录）
+    /// C# FishingAutoReelChance（sbyte）：Reel 槽 MaxMAC（自动收竿概率；由 `tick_fishing_phase` 消费，C# UpdateFish）
     pub auto_reel_chance: i32,
 }
 

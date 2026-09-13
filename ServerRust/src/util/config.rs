@@ -273,7 +273,9 @@ pub struct SocialConfig {
     /// 邮件寄物品保险百分比（C# Settings.MailItemInsurancePercentage = 5）
     #[serde(default = "default_mail_item_insurance_percentage")]
     pub mail_item_insurance_percentage: u32,
-    /// 邮票免费寄信（C# Settings.MailFreeWithStamp = true；Rust 暂无邮票，默认按收费处理）
+    /// 邮票免费寄信（C# Settings.MailFreeWithStamp = true）——邮票体系已实现（#2538）：
+    /// `compute_mail_cost`（`actors/world/mail.rs:42-60`）在 `stamped && 本开关` 时免费，
+    /// 与 C# `PlayerObject.GetMailCost`（:11926-11957）一致。
     #[serde(default = "default_true")]
     pub mail_free_with_stamp: bool,
     /// 收件箱容量上限（C# Settings.MailCapacity = 100；登录时清理已读已收取无附件的旧邮件）
