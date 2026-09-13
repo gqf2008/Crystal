@@ -756,6 +756,16 @@ fn spawn_hud(
         commands
             .entity(e)
             .insert((HeroPanelText(i), Visibility::Hidden));
+        // #2817：C# `HeroInfoPanel` 的三行也是 `MirLabel` → 带描边
+        crate::ui::outlined_text::outline_on(
+            &mut commands,
+            e,
+            "",
+            font.clone(),
+            11.0,
+            Anchor::TOP_LEFT,
+            false,
+        );
     }
 
     // 死亡弹窗（对齐 C# GameScene.ShowReviveMessage → MirMessageBox(YesNo)）：
@@ -797,6 +807,16 @@ fn spawn_hud(
     commands
         .entity(death_txt)
         .insert((DeathText, DeathOverlay, Visibility::Hidden));
+    // #2817：死亡提示是 C# `MirMessageBox` 的 `MessageLabel`（`MirLabel`）→ 带描边
+    crate::ui::outlined_text::outline_on(
+        &mut commands,
+        death_txt,
+        "你已经死亡，是否要在城镇复活？",
+        font.clone(),
+        16.0,
+        Anchor::TOP_LEFT,
+        false,
+    );
     // 是（TownRevive / 轮回术接受）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands,
@@ -886,6 +906,16 @@ fn spawn_hud(
         4.0,
     );
     commands.entity(wt).insert(HudWeightText);
+    // #2817：C# `WeightLabel`/`SpaceLabel` 都是 `MirLabel` → 带描边
+    crate::ui::outlined_text::outline_on(
+        &mut commands,
+        wt,
+        "0/0",
+        font.clone(),
+        11.0,
+        Anchor::TOP_LEFT,
+        false,
+    );
     let sp = spawn_ui_text(
         &mut commands,
         &font,
@@ -897,6 +927,15 @@ fn spawn_hud(
         4.0,
     );
     commands.entity(sp).insert(HudSpaceText);
+    crate::ui::outlined_text::outline_on(
+        &mut commands,
+        sp,
+        "0",
+        font.clone(),
+        11.0,
+        Anchor::TOP_LEFT,
+        false,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -912,6 +951,18 @@ fn spawn_text(
 ) {
     let e = spawn_ui_text(commands, font, text, x, y, 12.0, Color::WHITE, 4.0);
     commands.entity(e).insert(_marker);
+    // #2817：C# HUD 标签都是 `MirLabel`（`MainDialogs.cs:24` 的
+    // HealthLabel/…/ExperienceLabel/GoldLabel/WeightLabel/SpaceLabel），
+    // 构造器默认 `_outLine = true`（`MirLabel.cs:181-182`）→ 需要 4 向黑描边
+    crate::ui::outlined_text::outline_on(
+        commands,
+        e,
+        text,
+        font.clone(),
+        12.0,
+        Anchor::TOP_LEFT,
+        false,
+    );
 }
 
 /// 居中标签（内容变化自动重居中，复刻 C# 居中语义）。`anchor` 决定居中方式、`(x,y)` 传锚点：
@@ -943,6 +994,8 @@ fn spawn_centered_text(
         ))
         .id();
     commands.entity(e).insert(_marker);
+    // #2817：同上（HP/MP 球标签、双行标签、角色名都是 C# `MirLabel`）
+    crate::ui::outlined_text::outline_on(commands, e, text, font.clone(), 12.0, anchor, false);
 }
 
 /// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
@@ -1433,6 +1486,98 @@ mod tests {
     fn mode_visibility_maps_mode_view() {
         assert_eq!(mode_visibility(false), Visibility::Hidden);
         assert_eq!(mode_visibility(true), Visibility::Visible);
+    }
+
+    /// #2817 单元③：HUD 标签全部按 C# `MirLabel`（默认 `_outLine = true`）带 4 向黑描边。
+    /// 逐标签断言「有 `OutlinedText` + 4 个 `OutlineShadow` 子实体」，防以后漏挂。
+    #[test]
+    fn hud_labels_are_outlined() {
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(UiImageCache::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
+        world.insert_resource(OptionState::default());
+        world.insert_resource(MiniMapMode::default());
+        world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
+
+        fn assert_outlined<M: Component>(world: &mut World, name: &str) {
+            let mut q = world.query_filtered::<(Entity, &Children), With<M>>();
+            let (e, children) = q
+                .iter(world)
+                .next()
+                .unwrap_or_else(|| panic!("应有 {name}"));
+            let children: Vec<Entity> = children.iter().collect();
+            assert!(
+                world
+                    .entity(e)
+                    .contains::<crate::ui::outlined_text::OutlinedText>(),
+                "{name} 应带描边主体标记"
+            );
+            let shadows = children
+                .into_iter()
+                .filter(|c| {
+                    world
+                        .entity(*c)
+                        .contains::<crate::ui::outlined_text::OutlineShadow>()
+                })
+                .count();
+            assert_eq!(shadows, 4, "{name} 应有 4 个描边副本");
+        }
+
+        assert_outlined::<HpHpText>(&mut world, "HealthLabel");
+        assert_outlined::<MpMpText>(&mut world, "ManaLabel");
+        assert_outlined::<TopHudText>(&mut world, "TopLabel");
+        assert_outlined::<BottomHudText>(&mut world, "BottomLabel");
+        assert_outlined::<ExpText>(&mut world, "ExperienceLabel");
+        assert_outlined::<LevelText>(&mut world, "LevelLabel");
+        assert_outlined::<GoldText>(&mut world, "GoldLabel");
+        assert_outlined::<NameText>(&mut world, "CharacterName");
+        assert_outlined::<HudWeightText>(&mut world, "WeightLabel");
+        assert_outlined::<HudSpaceText>(&mut world, "SpaceLabel");
+        assert_outlined::<AttackModeText>(&mut world, "AModeLabel");
+        assert_outlined::<DeathText>(&mut world, "死亡提示");
+    }
+
+    /// #2817 单元③ 负向断言：聊天文本在 C# 里是**唯一**显式 `OutLine = false` 的标签
+    /// （`MainDialogs.cs:962/1040`）→ Bevy 侧 `spawn_ui_text` 路径不得带描边。
+    #[test]
+    fn chat_text_path_stays_unoutlined() {
+        use crate::ui::sprite_ui::spawn_ui_text;
+
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let e = spawn_ui_text(
+            &mut commands,
+            &Handle::default(),
+            "聊天行",
+            0.0,
+            0.0,
+            12.0,
+            Color::WHITE,
+            4.0,
+        );
+        queue.apply(&mut world);
+        assert!(
+            !world
+                .entity(e)
+                .contains::<crate::ui::outlined_text::OutlinedText>(),
+            "聊天文本（C# OutLine=false）不应带描边"
+        );
+        assert!(
+            world
+                .query_filtered::<Entity, With<crate::ui::outlined_text::OutlineShadow>>()
+                .iter(&world)
+                .count()
+                == 0,
+            "聊天文本不应生成描边副本"
+        );
     }
 
     /// 模式标签可见性门控：C# 构造 `Visible=Settings.ModeView`（仅 INI，默认 false）。
