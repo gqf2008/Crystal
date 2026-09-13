@@ -214,9 +214,9 @@ pub(crate) fn auto_buff_test(
             }
             if let Some(b) = buff.buffs.first() {
                 tracing::info!(
-                    "[BUFFTEST] ✅ 获得状态: {}（剩余 {} tick）",
+                    "[BUFFTEST] ✅ 获得状态: {}（剩余 {}ms）",
                     client_bevy::game::dialogs::buff::buff_name(b.tag),
-                    b.remaining_ticks
+                    b.remaining_ms
                 );
                 *stage = 2;
                 *t = 0.0;

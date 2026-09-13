@@ -306,7 +306,16 @@ pub enum ServerEvent {
     /// CompleteQuest：任务完成（从日志移除）
     QuestCompleted { id: i32 },
     /// AddBuff：获得/刷新状态
-    BuffAdded { tag: u8, ticks: u32 },
+    /// （#2791 单元④：wire 补 `ClientBuff` 渲染所需的 `paused`/`values`，剩余量改 ms）
+    BuffAdded {
+        tag: u8,
+        /// 剩余时长（ms；服务端下发的是时长，C# `ClientBuff.ExpireTime` 同理）
+        remaining_ms: u32,
+        /// C# `Buff.Paused`
+        paused: bool,
+        /// 数字参数（C# `ClientBuff.Values`）
+        values: Vec<i32>,
+    },
     /// RemoveBuff：状态消失
     BuffRemoved { tag: u8 },
     /// PlayerInspect：查看玩家

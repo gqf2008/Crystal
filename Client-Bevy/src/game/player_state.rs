@@ -1326,11 +1326,15 @@ mod tests {
         // 缺失窗口：冲刺(12) + 潜行(10) 挂上 → 入队
         app.world_mut().write_message(ServerEvent::BuffAdded {
             tag: 12,
-            ticks: 60,
+            remaining_ms: 6_000,
+            paused: false,
+            values: vec![],
         });
         app.world_mut().write_message(ServerEvent::BuffAdded {
             tag: 10,
-            ticks: 60,
+            remaining_ms: 6_000,
+            paused: false,
+            values: vec![],
         });
         app.update();
         assert_eq!(

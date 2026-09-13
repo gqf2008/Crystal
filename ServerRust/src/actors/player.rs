@@ -762,6 +762,66 @@ pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
     }
 }
 
+/// #2791 单元④：AddBuff 载荷里的「buff 数值」（C# `ClientBuff.Values` 等价物）。
+/// C# 客户端用它渲染 `BuffString` 的数值片段；本端客户端按 tag 还原属性行（见 `Client-Bevy`
+/// `dialogs/buff.rs::buff_display`）。`ShieldKind` 一并带上，供客户端挑 `DamageReduction` 的图标
+/// （C# `BuffImage`：MagicShield=30、ProtectionField=50、ElementalBarrier 无 case → 0）。
+pub(crate) fn buff_values(t: &crate::combat::buff::BuffType) -> Vec<i32> {
+    use crate::combat::buff::BuffType as B;
+    match t {
+        B::HpRegen { amount_per_tick } => vec![*amount_per_tick],
+        B::MpRegen { amount_per_tick } => vec![*amount_per_tick],
+        B::AttackBoost { bonus } => vec![*bonus],
+        B::DefenseBoost { bonus } => vec![*bonus],
+        B::AcDefenseBoost { bonus } => vec![*bonus],
+        B::MacDefenseBoost { bonus } => vec![*bonus],
+        B::BagWeightBoost { bonus } => vec![*bonus],
+        B::DamageReduction { percent, kind } => vec![*percent, *kind as i32],
+        B::Poison { damage_per_tick } => vec![*damage_per_tick],
+        B::AttackSpeedBoost { percent } => vec![*percent],
+        B::MoveSpeedBoost { percent } => vec![*percent],
+        B::AgilityBoost { bonus } => vec![*bonus],
+        B::CriticalRateBoost { bonus } => vec![*bonus],
+        B::MpRegenBoost { bonus } => vec![*bonus],
+        B::MaxMpBoost { bonus } => vec![*bonus],
+        B::MaxHpBoost { bonus } => vec![*bonus],
+        B::McBoost { bonus } => vec![*bonus],
+        B::ScBoost { bonus } => vec![*bonus],
+        B::Reflect { percent } => vec![*percent],
+        B::Slow { percent } => vec![*percent],
+        B::Transform { shape } => vec![*shape as i32],
+        B::TeleportManaPenalty { percent } => vec![*percent],
+        // C# `Map.cs:1876-1879`：Curse 的 Stat 是**负数**（`value2 * -1`），提示里就印
+        // 「降低 最大攻击 ：-3」这种双负（C# `BuffEffect` 直接印原值）
+        B::Curse { percent } => vec![-*percent],
+        B::RhinoPriestDebuff {
+            max_dc,
+            max_mc,
+            max_sc,
+        // C# `RhinoPriest.cs:91-93`：`damage * -1`
+        } => vec![-*max_dc, -*max_mc, -*max_sc],
+        // 无数值的标记型 buff
+        B::Silence | B::Stun | B::Invisibility | B::Taunt | B::Frozen => Vec::new(),
+    }
+}
+
+/// #2791 单元④：`S.AddBuff` 包体。在 M44 简化格式上补 C# `ClientBuff` 里客户端渲染所需的字段：
+/// `[tag u8][remaining_ms u32][paused u8][value_count u8][values i32…]`。
+/// 文案/图标表仍留在客户端（C# 的 `BuffImage`/`BuffString` 本来也是客户端表）；
+/// `remaining_ms` 为**剩余时长**（C# `ClientBuff.ExpireTime` 同样是时长，客户端再叠加本机时钟）。
+pub(crate) fn build_add_buff_body(b: &crate::combat::buff::BuffInstance) -> Vec<u8> {
+    let values = buff_values(&b.buff_type);
+    let mut body = Vec::with_capacity(7 + values.len() * 4);
+    body.push(buff_tag(&b.buff_type));
+    body.extend_from_slice(&(b.remaining_ticks.saturating_mul(100)).to_le_bytes());
+    body.push(u8::from(b.paused));
+    body.push(values.len().min(u8::MAX as usize) as u8);
+    for v in values.iter().take(u8::MAX as usize) {
+        body.extend_from_slice(&v.to_le_bytes());
+    }
+    body
+}
+
 /// serde 默认：MentorSkillBoost 默认 true（C# Settings.MentorSkillBoost）。
 fn default_true() -> bool {
     true
@@ -2533,10 +2593,8 @@ impl Message<ApplyBuff> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         crate::combat::buff::apply_buff(&mut self.state.buffs, msg.buff.clone());
-        // M44：推送 AddBuff 给客户端（简化 wire：[tag u8][remaining_ticks u32]）
-        let mut body = Vec::new();
-        body.push(buff_tag(&msg.buff.buff_type));
-        body.extend_from_slice(&msg.buff.remaining_ticks.to_le_bytes());
+        // #2791 单元④：推送 AddBuff 给客户端（[tag u8][remaining_ms u32][paused u8][values…]）
+        let body = build_add_buff_body(&msg.buff);
         let _ = self
             .gate_ref
             .tell(SendToClient {
@@ -7864,6 +7922,59 @@ fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    /// #2791 单元④：`AddBuff` 载荷 = `[tag u8][remaining_ms u32][paused u8][value_count u8][values…]`
+    #[test]
+    fn add_buff_body_matches_display_wire() {
+        use crate::combat::buff::{BuffInstance, BuffType, ShieldKind};
+
+        // 数值型：AttackSpeedBoost{percent} → tag 11 + 25s + 未暂停 + 1 个值
+        let b = BuffInstance::new(BuffType::AttackSpeedBoost { percent: 22 }, 250, 5);
+        let body = super::build_add_buff_body(&b);
+        assert_eq!(body[0], 11, "tag = buff_tag(AttackSpeedBoost)");
+        assert_eq!(i32::from_le_bytes(body[1..5].try_into().unwrap()), 25_000);
+        assert_eq!(body[5], 0, "paused = false");
+        assert_eq!(body[6], 1, "1 个数值");
+        assert_eq!(i32::from_le_bytes(body[7..11].try_into().unwrap()), 22);
+        assert_eq!(body.len(), 11);
+
+        // 变体多值：RhinoPriestDebuff = 3 个值（C# 也是三字段固定降值）
+        let b = BuffInstance::new(
+            BuffType::RhinoPriestDebuff {
+                max_dc: 3,
+                max_mc: 4,
+                max_sc: 5,
+            },
+            50,
+            5,
+        );
+        let body = super::build_add_buff_body(&b);
+        assert_eq!(body[0], 26);
+        assert_eq!(body[6], 3);
+        let vals: Vec<i32> = body[7..19]
+            .chunks(4)
+            .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        // C# `RhinoPriest.cs:91-93` 的 Stat 是负值（`damage * -1`）
+        assert_eq!(vals, vec![-3, -4, -5]);
+
+        // 标记型无值；ShieldKind 进第二值（MagicShield=0 / ElementalBarrier=1 / Other=2）
+        let b = BuffInstance::new(BuffType::Stun, 30, 5);
+        assert_eq!(super::build_add_buff_body(&b)[6], 0);
+        let b = BuffInstance::new(
+            BuffType::DamageReduction {
+                percent: 12,
+                kind: ShieldKind::ElementalBarrier,
+            },
+            30,
+            5,
+        );
+        let body = super::build_add_buff_body(&b);
+        assert_eq!(body[0], 6);
+        assert_eq!(i32::from_le_bytes(body[7..11].try_into().unwrap()), 12);
+        assert_eq!(i32::from_le_bytes(body[11..15].try_into().unwrap()), 1);
+    }
+
     #[test]
     fn buff_removed_on_death_matches_csharp_die() {
         use crate::combat::buff::{BuffType, ShieldKind};

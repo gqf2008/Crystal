@@ -8,6 +8,21 @@ use crate::game::dialogs::creature::CreatureEntry;
 use crate::game::dialogs::inspect::InspectItem;
 use crate::game::dialogs::quest_log::QuestEntry;
 
+/// #2791 单元④：`S.AddBuff` 解析（与 `ServerRust::actors::player::build_add_buff_body` 同序）：
+/// `[tag u8][remaining_ms u32][paused u8][value_count u8][values i32…]`
+pub(crate) fn parse_add_buff_body(body: &[u8]) -> Option<(u8, u32, bool, Vec<i32>)> {
+    let tag = *body.first()?;
+    let remaining_ms = u32::from_le_bytes(body.get(1..5)?.try_into().ok()?);
+    let paused = *body.get(5)? != 0;
+    let count = *body.get(6)? as usize;
+    let mut values = Vec::with_capacity(count);
+    for i in 0..count {
+        let s = 7 + i * 4;
+        values.push(i32::from_le_bytes(body.get(s..s + 4)?.try_into().ok()?));
+    }
+    Some((tag, remaining_ms, paused, values))
+}
+
 // 网络包解码分派（#72 拆分）：handle_progress 处理 arms_progress.rs 的服务端包分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
@@ -485,13 +500,22 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         // ---- M44: 状态/Buff ----
         x if x == ServerPacketIds::AddBuff as i16 => {
-            // [tag u8][remaining_ticks u32]
+            // #2791 单元④：[tag u8][remaining_ms u32][paused u8][value_count u8][values i32…]
             let body = &payload[PacketHeader::HEADER_SIZE..];
-            if body.len() >= 5 {
-                let tag = body[0];
-                let ticks = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
-                server_events.write(ServerEvent::BuffAdded { tag, ticks });
-                tracing::info!("✨ AddBuff: tag={} ticks={}", tag, ticks);
+            if let Some((tag, remaining_ms, paused, values)) = parse_add_buff_body(body) {
+                server_events.write(ServerEvent::BuffAdded {
+                    tag,
+                    remaining_ms,
+                    paused,
+                    values: values.clone(),
+                });
+                tracing::info!(
+                    "✨ AddBuff: tag={} {}ms paused={} values={:?}",
+                    tag,
+                    remaining_ms,
+                    paused,
+                    values
+                );
             }
         }
         x if x == ServerPacketIds::RemoveBuff as i16 => {

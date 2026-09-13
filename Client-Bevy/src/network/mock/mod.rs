@@ -1698,9 +1698,24 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     if let Ok(p) = client::combat::Magic::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 魔法 spell={:?}", p.spell);
                                         // #619：Mirroring → AddBuff（--buff-test）
+                                        // #2791 单元④：回发 3 条（不同图标/数值），供 Buff 窗口
+                                        // 图标行 + Hint 实机核对（攻击加成 12 / 生命增益 5 / 魔法盾 15%）
                                         if p.spell == Spell::Mirroring {
-                                            send(&to_client, &MockAddBuff);
-                                            tracing::info!("✨ [MOCK] 回发 AddBuff（Mirroring）");
+                                            for (tag, ms, values) in [
+                                                (2u8, 30_000u32, vec![12]),
+                                                (0, 60_000, vec![5]),
+                                                (6, 20_000, vec![15]),
+                                            ] {
+                                                send(
+                                                    &to_client,
+                                                    &MockAddBuff {
+                                                        tag,
+                                                        remaining_ms: ms,
+                                                        values,
+                                                    },
+                                                );
+                                            }
+                                            tracing::info!("✨ [MOCK] 回发 AddBuff ×3（Mirroring）");
                                         }
                                         // 耗蓝：施法扣 5 MP，不足拒绝（#51）
                                         const MAGIC_COST: u32 = 5;
