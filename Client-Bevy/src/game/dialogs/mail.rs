@@ -680,13 +680,31 @@ fn spawn_mail(
                 let mut e = spawn_icon_button(p, n, h, pr, x, MAIL_BUTTON_Y, 24.0, 24.0, 10);
                 match normal {
                     563 => {
-                        e.insert(MailWrite);
+                        // #2771：C# `MailDialogs.cs:163` `SendButton` Hint（发送；同位置同三帧 563..565）
+                        e.insert((
+                            MailWrite,
+                            crate::ui::tooltip::UiHint {
+                                text: "发送".to_string(),
+                            },
+                        ));
                     }
                     572 => {
-                        e.insert(MailReadBtn);
+                        // #2771：C# `MailDialogs.cs:207` `ReadButton` Hint（读取）
+                        e.insert((
+                            MailReadBtn,
+                            crate::ui::tooltip::UiHint {
+                                text: "读取".to_string(),
+                            },
+                        ));
                     }
                     _ => {
-                        e.insert(MailDelete);
+                        // #2771：C# `MailDialogs.cs:232` `DeleteButton` Hint（删除）
+                        e.insert((
+                            MailDelete,
+                            crate::ui::tooltip::UiHint {
+                                text: "删除".to_string(),
+                            },
+                        ));
                     }
                 }
             }

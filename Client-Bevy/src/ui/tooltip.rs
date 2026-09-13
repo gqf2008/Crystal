@@ -8,6 +8,7 @@
 // 写入约定：每个写入方用独立 source id；无目标时只清除自己归属的提示，避免互相覆盖。
 // ============================================================================
 
+use bevy::ecs::hierarchy::ChildOf;
 use bevy::prelude::*;
 
 use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity};
@@ -59,6 +60,18 @@ impl TooltipState {
 /// 静态文本提示（挂在 UiButton 上自动生效）
 #[derive(Component)]
 pub struct TooltipHint(pub String);
+
+/// #2771 通用按钮 Hint：挂在 **bevy UI `Button`**（`theme::spawn_icon_button` 那一类）上，
+/// 与 `TooltipHint`（sprite-UI `UiButton` + `rect`）区分——后者靠 `UiButton.rect` 命中，
+/// 前者靠「沿 `ChildOf` 链累加各级 `Node.left/top` 得到的绝对矩形」命中，因此**光标探针可驱动**
+/// （无焦点环境可实机验证），且不受面板拖动/嵌套容器影响。
+#[derive(Component)]
+pub struct UiHint {
+    pub text: String,
+}
+
+/// 通用按钮 Hint 的归属方（`TooltipState.source`，与其它写入方隔离）：#2771
+pub const UI_HINT_SOURCE: u16 = 8;
 
 /// 面板背景
 #[derive(Component)]
@@ -134,6 +147,104 @@ pub fn spawn_tooltip_panel(
         }
     }
     bg
+}
+
+/// #2771 通用按钮 Hint 检测（source=8）：悬停带 UiHint 的 bevy UI 按钮显示其文案。
+///
+/// 命中 = 光标（探针优先）落在「沿 ChildOf 链累加各级 Node.left/top 得到的绝对矩形」内；
+/// 同帧多个命中取 ZIndex 最大者。沿父链累加而非查「同 kind 的对话框根」，因为同一
+/// DialogKind 可能同时存在多个根面板（如 Group 的邀请确认框与主面板）。
+pub fn ui_hint_system(
+    windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
+    nodes: Query<&Node>,
+    parents: Query<&ChildOf>,
+    hints: Query<(Entity, &UiHint, &Node, &InheritedVisibility, &ZIndex)>,
+    mut state: ResMut<TooltipState>,
+) {
+    let clear = |state: &mut TooltipState| {
+        state.update(UI_HINT_SOURCE, false, String::new(), Vec::new(), 0.0, 0.0);
+    };
+    let Some(raw) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
+        clear(&mut state);
+        return;
+    };
+    let cursor = match ui_cameras.single() {
+        Ok((cam, gtf)) => match cam.viewport_to_world_2d(gtf, raw) {
+            Ok(w) => Vec2::new(w.x, -w.y),
+            Err(_) => {
+                clear(&mut state);
+                return;
+            }
+        },
+        Err(_) => {
+            clear(&mut state);
+            return;
+        }
+    };
+    let mut topmost: Option<(&str, i32)> = None;
+    for (entity, hint, node, vis, z) in &hints {
+        if !vis.get() {
+            continue;
+        }
+        let (w, h) = match (node.width, node.height) {
+            (Val::Px(w), Val::Px(h)) => (w, h),
+            _ => continue,
+        };
+        let (x, y) = match abs_ui_origin(&nodes, &parents, entity) {
+            Some(p) => p,
+            None => continue,
+        };
+        if ui_hint_hit((x, y, w, h), cursor) {
+            let z = z.0;
+            if topmost.map(|(_, top_z)| z > top_z).unwrap_or(true) {
+                topmost = Some((hint.text.as_str(), z));
+            }
+        }
+    }
+    match topmost {
+        Some((text, _)) => state.update(
+            UI_HINT_SOURCE,
+            true,
+            String::new(),
+            vec![text.to_string()],
+            cursor.x,
+            cursor.y,
+        ),
+        None => clear(&mut state),
+    }
+}
+
+/// UiHint 按钮自身的绝对左上角（沿 ChildOf 链累加各级 Node 的 Px left/top）。
+fn abs_ui_origin(
+    nodes: &Query<&Node>,
+    parents: &Query<&ChildOf>,
+    entity: Entity,
+) -> Option<(f32, f32)> {
+    let (mut x, mut y) = (0.0f32, 0.0f32);
+    let mut cur = entity;
+    loop {
+        let node = nodes.get(cur).ok()?;
+        if let (Val::Px(l), Val::Px(t)) = (node.left, node.top) {
+            x += l;
+            y += t;
+        }
+        match parents.get(cur).ok() {
+            Some(parent) => cur = parent.parent(),
+            None => break,
+        }
+    }
+    Some((x, y))
+}
+
+/// 通用按钮 Hint 命中（绝对 UI 矩形 + 光标；边界含等号）
+fn ui_hint_hit(rect: (f32, f32, f32, f32), cursor: Vec2) -> bool {
+    let (x, y, w, h) = rect;
+    cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
 }
 
 /// 按钮 Hint 检测（source=1）：悬停 UiButton+TooltipHint 显示
@@ -299,6 +410,17 @@ mod tests {
         // 归属来源清除生效
         s.update(3, false, String::new(), Vec::new(), 0.0, 0.0);
         assert!(!s.visible);
+    }
+
+    /// #2771：通用按钮 Hint 的命中（绝对 UI 矩形 + 光标；边界含等号）
+    #[test]
+    fn ui_hint_hit_covers_rect_and_borders() {
+        let rect = (100.0, 200.0, 24.0, 24.0);
+        assert!(ui_hint_hit(rect, Vec2::new(112.0, 212.0)), "中心命中");
+        assert!(ui_hint_hit(rect, Vec2::new(100.0, 200.0)), "左上角含边界");
+        assert!(ui_hint_hit(rect, Vec2::new(124.0, 224.0)), "右下角含边界");
+        assert!(!ui_hint_hit(rect, Vec2::new(99.0, 212.0)), "左外侧不命中");
+        assert!(!ui_hint_hit(rect, Vec2::new(112.0, 225.0)), "下外侧不命中");
     }
 
     /// C# MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 按钮 Hint

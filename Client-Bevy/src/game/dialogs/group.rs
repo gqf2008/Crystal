@@ -189,7 +189,13 @@ fn spawn_group(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 115),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
         ) {
-            spawn_icon_button(p, n, h, pr, 25.0, 219.0, 60.0, 23.0, 10).insert(GroupSwitch);
+            spawn_icon_button(p, n, h, pr, 25.0, 219.0, 60.0, 23.0, 10).insert((
+                GroupSwitch,
+                // #2771：C# `GroupDialog.cs:78` `GroupSwitch` Hint（允许/拒绝队伍请求）
+                crate::ui::tooltip::UiHint {
+                    text: "允许/拒绝队伍请求".to_string(),
+                },
+            ));
         }
         // 按名邀请 Title[133/134/135] @(70,219)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -197,7 +203,13 @@ fn spawn_group(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 134),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 135),
         ) {
-            spawn_icon_button(p, n, h, pr, 70.0, 219.0, 60.0, 23.0, 10).insert(GroupAddBtn);
+            spawn_icon_button(p, n, h, pr, 70.0, 219.0, 60.0, 23.0, 10).insert((
+                GroupAddBtn,
+                // #2771：C# `GroupDialog.cs:91` `GroupAdd` Hint（添加）
+                crate::ui::tooltip::UiHint {
+                    text: "添加".to_string(),
+                },
+            ));
         }
         // 移除成员按钮 Title[136/137/138] @(140,219)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -205,7 +217,13 @@ fn spawn_group(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 137),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 138),
         ) {
-            spawn_icon_button(p, n, h, pr, 140.0, 219.0, 44.0, 22.0, 10).insert(GroupDelBtn);
+            spawn_icon_button(p, n, h, pr, 140.0, 219.0, 44.0, 22.0, 10).insert((
+                GroupDelBtn,
+                // #2771：C# `GroupDialog.cs:104` `GroupRemove` Hint（移除）
+                crate::ui::tooltip::UiHint {
+                    text: "移除".to_string(),
+                },
+            ));
         }
         // 成员列表（C# GroupMembers 2 列布局，TextInput 行可点击 Button + 文本）
         for i in 0..8usize {
