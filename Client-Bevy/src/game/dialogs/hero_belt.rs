@@ -121,7 +121,11 @@ impl Plugin for HeroBeltPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero_belt);
         app.add_systems(
             Update,
-            (hero_belt_ui_system, hero_belt_icon_system, hero_belt_refill_system)
+            (
+                hero_belt_ui_system,
+                hero_belt_icon_system,
+                hero_belt_refill_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -183,22 +187,49 @@ fn spawn_hero_belt(
         ));
         // 2 格（C# :302-315：ItemSlot=x 即英雄背包 0/1）+ 键标 7/8
         for i in 0..BELT_SLOTS {
-            spawn_container(p, 12.0 + i as f32 * CELL_SPACING, 3.0, CELL_SIZE, CELL_SIZE, 2)
-                .insert((
+            spawn_container(
+                p,
+                12.0 + i as f32 * CELL_SPACING,
+                3.0,
+                CELL_SIZE,
+                CELL_SIZE,
+                2,
+            )
+            .insert((
+                HeroBeltWidget,
+                HeroBeltSlotCell(i),
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            ))
+            .with_children(|c| {
+                spawn_image(
+                    c,
+                    white.clone(),
+                    2.0,
+                    2.0,
+                    CELL_SIZE - 4.0,
+                    CELL_SIZE - 4.0,
+                    3,
+                )
+                .insert((HeroBeltWidget, HeroBeltIcon(i), Visibility::Hidden));
+                spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3).insert((
                     HeroBeltWidget,
-                    HeroBeltSlotCell(i),
-                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
-                ))
-                .with_children(|c| {
-                    spawn_image(c, white.clone(), 2.0, 2.0, CELL_SIZE - 4.0, CELL_SIZE - 4.0, 3)
-                        .insert((HeroBeltWidget, HeroBeltIcon(i), Visibility::Hidden));
-                    spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3)
-                        .insert((HeroBeltWidget, HeroBeltCount(i), Visibility::Hidden));
-                });
+                    HeroBeltCount(i),
+                    Visibility::Hidden,
+                ));
+            });
         }
         for i in 0..BELT_SLOTS {
-            spawn_label(p, &font, &(i + 7).to_string(), 8.0 + i as f32 * CELL_SPACING, 2.0, 10.0, Color::WHITE, 3)
-                .insert((HeroBeltWidget, HeroBeltNumber(i)));
+            spawn_label(
+                p,
+                &font,
+                &(i + 7).to_string(),
+                8.0 + i as f32 * CELL_SPACING,
+                2.0,
+                10.0,
+                Color::WHITE,
+                3,
+            )
+            .insert((HeroBeltWidget, HeroBeltNumber(i)));
         }
         // 旋转钮 1926-1928 @(82,3)（横向）/ 1938-1940 @(19,82)（纵向，Flip 换帧）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -250,20 +281,23 @@ fn hero_belt_ui_system(
     mut images: ResMut<Assets<Image>>,
     // With<HeroBeltWidget> 限定，避免误碰全屏其它实体（#1362 同坑）——
     // 漏过滤时下面的 Visibility 循环会把全游戏实体强制 Visible，白色占位全显形 = 白屏
-    mut items: Query<(
-        Entity,
-        &mut Node,
-        &mut Visibility,
-        Option<&mut ImageNode>,
-        Option<&Interaction>,
-        Option<&mut ImageButton>,
-        Option<&HeroBeltBg>,
-        Option<&HeroBeltBgOverlay>,
-        Option<&HeroBeltSlotCell>,
-        Option<&HeroBeltNumber>,
-        Option<&HeroBeltRotate>,
-        Option<&HeroBeltClose>,
-    ), With<HeroBeltWidget>>,
+    mut items: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut Visibility,
+            Option<&mut ImageNode>,
+            Option<&Interaction>,
+            Option<&mut ImageButton>,
+            Option<&HeroBeltBg>,
+            Option<&HeroBeltBgOverlay>,
+            Option<&HeroBeltSlotCell>,
+            Option<&HeroBeltNumber>,
+            Option<&HeroBeltRotate>,
+            Option<&HeroBeltClose>,
+        ),
+        With<HeroBeltWidget>,
+    >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -300,7 +334,12 @@ fn hero_belt_ui_system(
 
     for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1943 } else { 1921 }) {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                if vert { 1943 } else { 1921 },
+            ) {
                 if let Some(img) = img.as_mut() {
                     if img.image != h {
                         img.image = h;
@@ -312,7 +351,12 @@ fn hero_belt_ui_system(
             node.width = Val::Px(pw);
             node.height = Val::Px(ph);
         } else if overlay.is_some() {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1946 } else { 1934 }) {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                if vert { 1946 } else { 1934 },
+            ) {
                 if let Some(img) = img.as_mut() {
                     if img.image != h {
                         img.image = h;
@@ -458,7 +502,12 @@ pub struct HeroBeltUseArmed(pub bool);
 /// 「有 prev_index 物品」变为空 → 英雄背包区（2..）找第一件**同 item_index**
 /// → 返回 (from, to)（落点=触发格，C# To=ItemSlot）；无匹配返回 None
 pub fn belt_refill_move(prev_index: i32, to_slot: usize, hero: &HeroState) -> Option<(i32, i32)> {
-    if hero.inventory.get(to_slot).and_then(|s| s.as_ref()).is_some() {
+    if hero
+        .inventory
+        .get(to_slot)
+        .and_then(|s| s.as_ref())
+        .is_some()
+    {
         return None; // 触发格未空
     }
     for from in BELT_SLOTS..hero.inventory.len() {

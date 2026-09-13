@@ -122,10 +122,18 @@ fn hero_panel_system(
 ) {
     let show = hero.current.is_some();
     for mut v in &mut widgets {
-        *v = if show { Visibility::Visible } else { Visibility::Hidden };
+        *v = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut v in &mut text_vis {
-        *v = if show { Visibility::Visible } else { Visibility::Hidden };
+        *v = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !show {
         return;
@@ -142,10 +150,17 @@ fn hero_panel_system(
 }
 
 /// #1331：英雄按钮显隐（C# HeroMenuButton.Visible = 有英雄）
-fn hero_btn_system(hero: Res<crate::game::dialogs::hero::HeroState>, mut btns: Query<&mut Visibility, With<HeroBtn>>) {
+fn hero_btn_system(
+    hero: Res<crate::game::dialogs::hero::HeroState>,
+    mut btns: Query<&mut Visibility, With<HeroBtn>>,
+) {
     let show = hero.current.is_some();
     for mut v in &mut btns {
-        *v = if show { Visibility::Visible } else { Visibility::Hidden };
+        *v = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -158,9 +173,15 @@ fn hud_tooltip_system(
     buttons: Query<(&UiButton, &HudButton)>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok((cam, gtf)) = ui_cameras.single() else { return };
-    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let Ok((cam, gtf)) = ui_cameras.single() else {
+        return;
+    };
+    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else {
+        return;
+    };
     let cursor = Vec2::new(world.x, -world.y);
 
     let mut hit: Option<(String, String)> = None;
@@ -204,7 +225,11 @@ fn hud_button_hint(kind: HudButtonKind, kb: &KeyboardState) -> Option<(String, S
 }
 
 /// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
-fn hud_button_system(mut mgr: ResMut<DialogManager>, mut page: ResMut<CharPage>, buttons: Query<(&UiButton, &HudButton)>) {
+fn hud_button_system(
+    mut mgr: ResMut<DialogManager>,
+    mut page: ResMut<CharPage>,
+    buttons: Query<(&UiButton, &HudButton)>,
+) {
     for (btn, kind) in &buttons {
         if btn.clicked {
             tracing::info!("🎛️ HUD 按钮点击: {:?}", kind.0);
@@ -430,9 +455,9 @@ fn spawn_hud(
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
 ) {
-if !crate::ui::sprite_ui::ui_enabled("hud") {
-    return;
-}
+    if !crate::ui::sprite_ui::ui_enabled("hud") {
+        return;
+    }
 
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -719,17 +744,28 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     ];
     for (i, (_, dx, dy)) in panel_texts.iter().enumerate() {
         let e = spawn_ui_text(
-            &mut commands, &font, "",
-            main_x + 95.0 + dx, main_y + 48.0 + dy,
-            11.0, Color::WHITE, 3.2,
+            &mut commands,
+            &font,
+            "",
+            main_x + 95.0 + dx,
+            main_y + 48.0 + dy,
+            11.0,
+            Color::WHITE,
+            3.2,
         );
-        commands.entity(e).insert((HeroPanelText(i), Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((HeroPanelText(i), Visibility::Hidden));
     }
 
     // 死亡弹窗（对齐 C# GameScene.ShowReviveMessage → MirMessageBox(YesNo)）：
     // Prguse[360] 居中 (284,289)，文案 DiedTip，是/否按钮 Title[206-208]/[210-212]
     // （按钮纹理自带“是/否”文字，不再额外绘制文字）；轮回术请求时复用同一弹窗。
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     commands.spawn((
         UiEntity,
         DeathOverlay,
@@ -744,7 +780,9 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     ));
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
         let e = spawn_ui_sprite(&mut commands, h, 284.0, 289.0, 10.5, 1.0);
-        commands.entity(e).insert((DeathOverlay, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((DeathOverlay, Visibility::Hidden));
     }
     let death_txt = spawn_ui_text(
         &mut commands,
@@ -756,22 +794,48 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         Color::WHITE,
         11.0,
     );
-    commands.entity(death_txt).insert((DeathText, DeathOverlay, Visibility::Hidden));
+    commands
+        .entity(death_txt)
+        .insert((DeathText, DeathOverlay, Visibility::Hidden));
     // 是（TownRevive / 轮回术接受）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        544.0, 446.0, 11.0, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        544.0,
+        446.0,
+        11.0,
+        76.0,
+        25.0,
     ) {
-        commands.entity(e).insert((DeathReviveBtn, DeathOverlay, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((DeathReviveBtn, DeathOverlay, Visibility::Hidden));
     }
     // 否（关闭弹窗 / 轮回术拒绝）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        644.0, 446.0, 11.0, 76.0, 25.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
+        644.0,
+        446.0,
+        11.0,
+        76.0,
+        25.0,
     ) {
-        commands.entity(e).insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
     }
 
     // 模式标签（C# AMode/PMode/SModeLabel）：右上小地图正下方，顶→底 S/A/P。
@@ -780,13 +844,58 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
     // 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 Visible=Settings.ModeView）。
     let mode_vis = mode_visibility(opt.mode_view);
     let big = mmap.big;
-    spawn_mode_label(&mut commands, &cjk, "技能:Ctrl", big, S_MODE_DY, Color::srgb(0.196, 0.804, 0.196), mode_vis, SModeText);
-    spawn_mode_label(&mut commands, &cjk, "模式:和平", big, A_MODE_DY, Color::srgb(1.0, 1.0, 0.0), mode_vis, AttackModeText);
-    spawn_mode_label(&mut commands, &cjk, "宠物:跟随", big, P_MODE_DY, Color::srgb(1.0, 0.647, 0.0), mode_vis, PModeText);
+    spawn_mode_label(
+        &mut commands,
+        &cjk,
+        "技能:Ctrl",
+        big,
+        S_MODE_DY,
+        Color::srgb(0.196, 0.804, 0.196),
+        mode_vis,
+        SModeText,
+    );
+    spawn_mode_label(
+        &mut commands,
+        &cjk,
+        "模式:和平",
+        big,
+        A_MODE_DY,
+        Color::srgb(1.0, 1.0, 0.0),
+        mode_vis,
+        AttackModeText,
+    );
+    spawn_mode_label(
+        &mut commands,
+        &cjk,
+        "宠物:跟随",
+        big,
+        P_MODE_DY,
+        Color::srgb(1.0, 0.647, 0.0),
+        mode_vis,
+        PModeText,
+    );
     // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
-    let wt = spawn_ui_text(&mut commands, &font, "0/0", main_x + bg_w - 105.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
+    let wt = spawn_ui_text(
+        &mut commands,
+        &font,
+        "0/0",
+        main_x + bg_w - 105.0,
+        main_y + 101.0,
+        11.0,
+        Color::WHITE,
+        4.0,
+    );
     commands.entity(wt).insert(HudWeightText);
-    let sp = spawn_ui_text(&mut commands, &font, "0", main_x + bg_w - 30.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
+    let sp = spawn_ui_text(
+        &mut commands,
+        &font,
+        "0",
+        main_x + bg_w - 30.0,
+        main_y + 101.0,
+        11.0,
+        Color::WHITE,
+        4.0,
+    );
     commands.entity(sp).insert(HudSpaceText);
 }
 
@@ -856,9 +965,8 @@ fn auto_potion_system(
     let pct = vitals.hp as f32 / vitals.max_hp.max(1) as f32;
     if pct < 0.35 {
         // #1592：优先 HP 药（shape==0），无则退化为任意药水（避免喝蓝药不回复 HP）
-        let potion = crate::game::dialogs::inventory::pick_auto_hp_potion(
-            inventory.items.iter().flatten(),
-        );
+        let potion =
+            crate::game::dialogs::inventory::pick_auto_hp_potion(inventory.items.iter().flatten());
         if let Some(potion) = potion {
             net.send_packet(&mir2_shared::packets::client::item::UseItem {
                 unique_id: potion.unique_id,
@@ -944,7 +1052,10 @@ fn attack_mode_text_system(
     for (mut t, mut tf, children) in &mut am {
         update_mode_label(&mut t, &mut tf, children, &mut shadows, &a, ay);
     }
-    let pet_mode = pet.single().map(|p| p.0).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let pet_mode = pet
+        .single()
+        .map(|p| p.0)
+        .unwrap_or(mir2_shared::enums::PetMode::Both);
     let p = match pet_mode {
         mir2_shared::enums::PetMode::Both => "宠物:攻击和跟随".to_string(),
         mir2_shared::enums::PetMode::MoveOnly => "宠物:仅跟随".to_string(),
@@ -957,7 +1068,11 @@ fn attack_mode_text_system(
     for (mut t, mut tf, children) in &mut pm {
         update_mode_label(&mut t, &mut tf, children, &mut shadows, &p, py);
     }
-    let s = if opt.skill_mode_ctrl { "技能:Ctrl".to_string() } else { "技能:~".to_string() };
+    let s = if opt.skill_mode_ctrl {
+        "技能:Ctrl".to_string()
+    } else {
+        "技能:~".to_string()
+    };
     let sy = -mode_label_y(mmap.big, S_MODE_DY);
     for (mut t, mut tf, children) in &mut sm {
         update_mode_label(&mut t, &mut tf, children, &mut shadows, &s, sy);
@@ -973,8 +1088,12 @@ fn sync_hud_data(
     mut roots: Query<&mut HudData>,
     player: Query<(&Vitals, &Progression, &Gold, &PlayerName), With<LocalPlayer>>,
 ) {
-    let Ok(mut data) = roots.single_mut() else { return };
-    let Ok((vitals, progression, gold, player_name)) = player.single() else { return };
+    let Ok(mut data) = roots.single_mut() else {
+        return;
+    };
+    let Ok((vitals, progression, gold, player_name)) = player.single() else {
+        return;
+    };
     let new = HudData {
         hp: vitals.hp,
         max_hp: vitals.max_hp,
@@ -1022,7 +1141,9 @@ fn hud_update_system(
     if hud_datas.single().is_err() {
         return;
     }
-    let Ok((vitals, progression, player_gold, player_name)) = player.single() else { return };
+    let Ok((vitals, progression, player_gold, player_name)) = player.single() else {
+        return;
+    };
     let hp_pct = (vitals.hp as f32 / vitals.max_hp.max(1) as f32).clamp(0.0, 1.0);
     let mp_pct = (vitals.mp as f32 / vitals.max_mp.max(1) as f32).clamp(0.0, 1.0);
     let exp_pct = (progression.exp as f32 / progression.max_exp.max(1) as f32).clamp(0.0, 1.0);
@@ -1145,7 +1266,14 @@ fn death_overlay_system(
     mut flags_q: Query<&mut StatusFlags, With<LocalPlayer>>,
     // 背景/遮罩/文字/是/否按钮全部带 DeathOverlay，统一随死亡显隐
     mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
-    mut death_texts: Query<&mut Text2d, (With<DeathText>, Without<DeathReviveBtn>, Without<DeathReincDeclineBtn>)>,
+    mut death_texts: Query<
+        &mut Text2d,
+        (
+            With<DeathText>,
+            Without<DeathReviveBtn>,
+            Without<DeathReincDeclineBtn>,
+        ),
+    >,
     yes_btns: Query<&UiButton, (With<DeathReviveBtn>, Without<DeathReincDeclineBtn>)>,
     no_btns: Query<&UiButton, (With<DeathReincDeclineBtn>, Without<DeathReviveBtn>)>,
 ) {
@@ -1265,7 +1393,12 @@ mod tests {
             // HudState 已删；spawn 本地玩家实体并写组件驱动显示（R9 预演）。
             world.spawn((
                 LocalPlayer,
-                Vitals { hp: 100, max_hp: 200, mp: 50, max_mp: 100 },
+                Vitals {
+                    hp: 100,
+                    max_hp: 200,
+                    mp: 50,
+                    max_mp: 100,
+                },
                 Progression::default(),
                 Gold(0),
                 PlayerName(String::new()),

@@ -12,17 +12,17 @@ mod reconnect;
 mod wire;
 mod wire2;
 
-pub use reconnect::NetServerAddr;
 use reconnect::setup_network;
+pub use reconnect::NetServerAddr;
 pub use wire::*;
 pub use wire2::*;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
-use mir2_shared::SelectInfo;
 use mir2_shared::enums::ServerPacketIds;
 use mir2_shared::packets::base::{Packet, PacketHeader};
+use mir2_shared::SelectInfo;
 use server_event::ServerEvent;
 use std::path::Path;
 

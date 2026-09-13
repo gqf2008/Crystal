@@ -1,6 +1,5 @@
 use mir2_shared::packets::base::Packet;
 
-
 /// 商城购买（对齐 SharedRust GameshopBuy / C# C.GameshopBuy：[g_index i32][quantity u8][p_type i32]）
 #[derive(Debug, Clone, Copy)]
 pub struct GameshopBuyWire {
@@ -12,9 +11,7 @@ pub struct GameshopBuyWire {
 impl Packet for GameshopBuyWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::GameshopBuy as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             g_index: reader.read_i32::<LittleEndian>()?,
@@ -44,9 +41,7 @@ pub struct GuildTerritoryPageWire {
 impl Packet for GuildTerritoryPageWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::GuildTerritoryPage as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             page: reader.read_u32::<LittleEndian>()?,
@@ -72,9 +67,7 @@ pub struct PurchaseGuildTerritoryWire {
 impl Packet for PurchaseGuildTerritoryWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::PurchaseGuildTerritory as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             territory_id: reader.read_u32::<LittleEndian>()?,
@@ -100,9 +93,7 @@ pub struct FishingCastWire {
 impl Packet for FishingCastWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::FishingCast as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::ReadBytesExt;
         Ok(Self {
             fishing_type: reader.read_u8()?,
@@ -128,9 +119,7 @@ pub struct FishingChangeAutocastWire {
 impl Packet for FishingChangeAutocastWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::FishingChangeAutocast as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::ReadBytesExt;
         Ok(Self {
             enabled: reader.read_u8()? != 0,
@@ -157,9 +146,7 @@ pub struct RefineDepositWire {
 impl Packet for RefineDepositWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::DepositRefineItem as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             from: reader.read_i32::<LittleEndian>()?,
@@ -190,9 +177,7 @@ pub struct CraftItemWire {
 impl Packet for CraftItemWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::CraftItem as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
@@ -232,9 +217,7 @@ pub struct RentalRequestWire {
 impl Packet for RentalRequestWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::ItemRentalRequest as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         Ok(Self {
             target_name: mir2_shared::binary::read_dotnet_string(reader)?,
         })
@@ -257,9 +240,7 @@ pub struct RentalDepositWire {
 impl Packet for RentalDepositWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::DepositRentalItem as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             unique_id: reader.read_u64::<LittleEndian>()?,
@@ -284,9 +265,7 @@ pub struct RentalRetrieveWire {
 impl Packet for RentalRetrieveWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RetrieveRentalItem as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             unique_id: reader.read_u64::<LittleEndian>()?,
@@ -313,9 +292,7 @@ pub struct RefineRetrieveWire {
 impl Packet for RefineRetrieveWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RetrieveRefineItem as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             from: reader.read_i32::<LittleEndian>()?,
@@ -342,9 +319,7 @@ pub struct RefineItemWire {
 impl Packet for RefineItemWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RefineItem as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             unique_id: reader.read_u64::<LittleEndian>()?,
@@ -369,9 +344,7 @@ pub struct RefineCheckWire {
 impl Packet for RefineCheckWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::CheckRefine as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
             unique_id: reader.read_u64::<LittleEndian>()?,
@@ -386,7 +359,6 @@ impl Packet for RefineCheckWire {
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         Ok(())
     }
-
 }
 /// 观察玩家（gate 解析 [name DotNetString]，对齐 SharedRust Observe / C# C.Observe）
 #[derive(Debug, Clone, Default)]
@@ -397,9 +369,7 @@ pub struct ObserveWire {
 impl Packet for ObserveWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::Observe as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         Ok(Self {
             name: mir2_shared::binary::read_dotnet_string(reader)?,
         })
@@ -419,7 +389,9 @@ mod tests {
 
     #[test]
     fn observe_wire_roundtrip() {
-        let w = ObserveWire { name: "测试玩家".to_string() };
+        let w = ObserveWire {
+            name: "测试玩家".to_string(),
+        };
         let mut buf = Vec::new();
         w.write_body(&mut buf).unwrap();
         // gate 解析 [name DotNetString]（对齐 SharedRust Observe / C# C.Observe）
@@ -462,9 +434,7 @@ pub struct SearchMapWire {
 impl Packet for SearchMapWire {
     const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::SearchMap as i16;
 
-    fn read_body<R: std::io::Read>(
-        reader: &mut R,
-    ) -> mir2_shared::data::stats::SharedResult<Self> {
+    fn read_body<R: std::io::Read>(reader: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
         use byteorder::ReadBytesExt;
         let len = reader.read_u16::<byteorder::LittleEndian>()? as usize;
         let mut buf = vec![0u8; len];
@@ -491,7 +461,9 @@ mod search_tests {
 
     #[test]
     fn search_map_wire_roundtrip() {
-        let w = SearchMapWire { keyword: "比奇".to_string() };
+        let w = SearchMapWire {
+            keyword: "比奇".to_string(),
+        };
         let mut buf = Vec::new();
         w.write_body(&mut buf).unwrap();
         // gate 解析 [keyword: u16 len + bytes]

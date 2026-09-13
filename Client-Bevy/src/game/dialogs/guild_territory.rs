@@ -129,11 +129,11 @@ mod tests {
 impl Plugin for GuildTerritoryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GuildTerritoryState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             territory_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_guild_territory);
+        app.add_systems(OnEnter(AppState::Game), spawn_guild_territory);
         app.add_systems(OnExit(AppState::Game), cleanup_guild_territory);
         app.add_systems(
             Update,
@@ -199,13 +199,31 @@ fn spawn_guild_territory(
         }
         // 领地列表 7 行 @(18,45+22i)
         for i in 0..7usize {
-            spawn_label(p, &cjk, "", 18.0, 45.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
-                .insert(GuildTerritoryLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                45.0 + i as f32 * 22.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(GuildTerritoryLine(i));
         }
         // 状态/页签/宣战结果行 @(18,205+18i)
         for i in 7..=9usize {
-            spawn_label(p, &cjk, "", 18.0, 205.0 + (i - 7) as f32 * 18.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
-                .insert(GuildTerritoryLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                205.0 + (i - 7) as f32 * 18.0,
+                12.0,
+                Color::srgb(1.0, 0.9, 0.5),
+                9,
+            )
+            .insert(GuildTerritoryLine(i));
         }
         // 上一页/下一页（C# Prguse2 240/241/242, 243/244/245）@(20/60,270)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -370,7 +388,11 @@ fn guild_territory_ui_system(
     }
     let open = mgr.is_open(DialogKind::GuildTerritory);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *requested = false;
@@ -408,14 +430,22 @@ fn guild_territory_ui_system(
                     format!(
                         "GT#{} {}（{}）状态:{}",
                         r.id,
-                        if r.owner.is_empty() { "无主" } else { &r.owner },
+                        if r.owner.is_empty() {
+                            "无主"
+                        } else {
+                            &r.owner
+                        },
                         r.map_index,
                         status
                     )
                 }
                 None => String::new(),
             },
-            7 => format!("第 {}/{} 页", state.page + 1, ((state.rows.len() + 6) / 7).max(1)),
+            7 => format!(
+                "第 {}/{} 页",
+                state.page + 1,
+                ((state.rows.len() + 6) / 7).max(1)
+            ),
             8 => state.message.clone(),
             9 => state.war_message.clone(),
             _ => String::new(),
@@ -431,7 +461,11 @@ fn guild_territory_ui_system(
                     .unwrap_or((280.0, 80.0));
                 for i in 0..7usize {
                     let y = oy + 45.0 + i as f32 * 22.0;
-                    if cursor.x >= ox + 18.0 && cursor.x <= ox + 360.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                    if cursor.x >= ox + 18.0
+                        && cursor.x <= ox + 360.0
+                        && cursor.y >= y
+                        && cursor.y <= y + 20.0
+                    {
                         let idx = state.page * 7 + i;
                         if idx < state.rows.len() {
                             state.selected = Some(idx);
@@ -496,7 +530,6 @@ fn guild_territory_ui_system(
         }
     }
 }
-
 
 /// 消费服务端领地事件（网络层只广播 ServerEvent；文案在此构造）
 fn territory_server_events(

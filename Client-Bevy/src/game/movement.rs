@@ -19,9 +19,24 @@ use crate::scenes::AppState;
 /// 服务器对象移动事件（网络 handler 发送，移动系统消费）
 #[derive(Message, Debug, Clone)]
 pub enum NetMotion {
-    Walk { object_id: u32, x: i32, y: i32, dir: u8 },
-    Run { object_id: u32, x: i32, y: i32, dir: u8 },
-    Turn { object_id: u32, x: i32, y: i32, dir: u8 },
+    Walk {
+        object_id: u32,
+        x: i32,
+        y: i32,
+        dir: u8,
+    },
+    Run {
+        object_id: u32,
+        x: i32,
+        y: i32,
+        dir: u8,
+    },
+    Turn {
+        object_id: u32,
+        x: i32,
+        y: i32,
+        dir: u8,
+    },
 }
 
 impl NetMotion {
@@ -94,7 +109,10 @@ pub fn direction_from_delta(dx: i32, dy: i32) -> Option<MirDirection> {
 
 /// 向前看最多 2 个路径节点，返回整体前进方向（若 2 格共线则用 2 格方向，
 /// 否则用第 1 格方向）——减少短锯齿路径引起的方向乱跳
-fn lookahead_direction(last: (i32, i32), path: &VecDeque<(i32, i32)>) -> Option<mir2_shared::enums::MirDirection> {
+fn lookahead_direction(
+    last: (i32, i32),
+    path: &VecDeque<(i32, i32)>,
+) -> Option<mir2_shared::enums::MirDirection> {
     let p0 = *path.front()?;
     let d0 = (p0.0 - last.0, p0.1 - last.1);
     if path.len() >= 2 {
@@ -163,9 +181,11 @@ pub fn mouse_direction(player_world: Vec2, mouse_world: Vec2) -> MirDirection {
         return MirDirection::Up;
     }
     let angle = dy.atan2(dx).to_degrees(); // [-180, 180]，0°=正右、逆时针正
-    // C# MouseDirection：0°=正上（Up）、顺时针 45°/扇区；数学角转 C# 角 = 90° - angle
+                                           // C# MouseDirection：0°=正上（Up）、顺时针 45°/扇区；数学角转 C# 角 = 90° - angle
     let mut deg = 90.0 - angle + 22.5;
-    if deg < 0.0 { deg += 360.0; }
+    if deg < 0.0 {
+        deg += 360.0;
+    }
     let sector = ((deg / 45.0) as i32).rem_euclid(8);
     match sector {
         0 => MirDirection::Up,
@@ -235,14 +255,23 @@ fn apply_self_position(
         return;
     };
     let Ok(mut tf) = players.single_mut() else {
-        tracing::debug!("📍 位置校正：玩家 Query 未匹配（self_position 丢弃 ({},{})）", tx, ty);
+        tracing::debug!(
+            "📍 位置校正：玩家 Query 未匹配（self_position 丢弃 ({},{})）",
+            tx,
+            ty
+        );
         return;
     };
     let cur = world_to_tile(tf.translation.x, tf.translation.y);
-    tracing::debug!("📍 位置校正检查：server=({},{}) cur=({},{})", tx, ty, cur.0, cur.1);
-    let dist = ((tx - cur.0).abs() + (ty - cur.1).abs()).max(
-        ((tx - cur.0).abs()).max((ty - cur.1).abs()),
+    tracing::debug!(
+        "📍 位置校正检查：server=({},{}) cur=({},{})",
+        tx,
+        ty,
+        cur.0,
+        cur.1
     );
+    let dist =
+        ((tx - cur.0).abs() + (ty - cur.1).abs()).max(((tx - cur.0).abs()).max((ty - cur.1).abs()));
     if dist > 2 {
         let p = tile_to_world(tx, ty);
         tf.translation.x = p.x;
@@ -256,7 +285,13 @@ fn apply_self_position(
 fn apply_net_motions(
     mut commands: Commands,
     mut motions: MessageReader<NetMotion>,
-    mut actors: Query<(Entity, &NetObjectId, &mut ActorAnim, &Transform, Option<&LocalPlayer>)>,
+    mut actors: Query<(
+        Entity,
+        &NetObjectId,
+        &mut ActorAnim,
+        &Transform,
+        Option<&LocalPlayer>,
+    )>,
 ) {
     let pending: Vec<NetMotion> = motions.read().cloned().collect();
     for motion in pending {
@@ -314,9 +349,13 @@ fn apply_net_motions(
 fn advance_move_tweens(
     mut commands: Commands,
     time: Res<Time>,
-    mut actors: Query<
-        (Entity, &mut MoveTween, &mut Transform, &mut ActorAnim, Option<&LocalMove>),
-    >,
+    mut actors: Query<(
+        Entity,
+        &mut MoveTween,
+        &mut Transform,
+        &mut ActorAnim,
+        Option<&LocalMove>,
+    )>,
 ) {
     for (e, mut tween, mut tf, mut anim, lm) in &mut actors {
         tween.t += time.delta_secs();
@@ -393,8 +432,18 @@ fn advance_local_move(
         let d2 = (second.0 - first.0, second.1 - first.1);
         use_run = d1 == d2; // 仅同向直线
     }
-    let target = if use_run { *lm.path.get(1).unwrap() } else { first };
-    tracing::debug!("🚶 move: use_run={} path_len={} target=({},{})", use_run, lm.path.len(), target.0, target.1);
+    let target = if use_run {
+        *lm.path.get(1).unwrap()
+    } else {
+        first
+    };
+    tracing::debug!(
+        "🚶 move: use_run={} path_len={} target=({},{})",
+        use_run,
+        lm.path.len(),
+        target.0,
+        target.1
+    );
     let target_world = tile_to_world(target.0, target.1);
     let dx = target_world.x - tf.translation.x;
     let dy = target_world.y - tf.translation.y;
@@ -452,22 +501,48 @@ fn advance_local_move(
                             mount_q.single().is_ok(),
                             anim.frame_index.clamp(0, 255) as u8,
                         ) {
-                            crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
-                            tracing::debug!("👣 步声 #{} @ ({},{}) run={}", sound_id, target.0, target.1, use_run);
+                            crate::game::sound::play_sound(
+                                &mut commands,
+                                &mut audio_assets,
+                                &sound_bank,
+                                sound_id,
+                            );
+                            tracing::debug!(
+                                "👣 步声 #{} @ ({},{}) run={}",
+                                sound_id,
+                                target.0,
+                                target.1,
+                                use_run
+                            );
                         }
                     }
                 }
             }
         }
         if let Some(d) = seg_dir {
-            tracing::debug!("🚶 到达发包: from=({},{}) target=({},{}) dir={:?} run={}", from.0, from.1, target.0, target.1, d, use_run);
+            tracing::debug!(
+                "🚶 到达发包: from=({},{}) target=({},{}) dir={:?} run={}",
+                from.0,
+                from.1,
+                target.0,
+                target.1,
+                d,
+                use_run
+            );
             if use_run {
                 net.send_packet(&mir2_shared::packets::client::movement::Run { direction: d });
             } else {
                 net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: d });
             }
         } else {
-            tracing::debug!("🚶 到达跳过发包: from=({},{}) target=({},{}) seg_dir=None run={}", from.0, from.1, target.0, target.1, use_run);
+            tracing::debug!(
+                "🚶 到达跳过发包: from=({},{}) target=({},{}) seg_dir=None run={}",
+                from.0,
+                from.1,
+                target.0,
+                target.1,
+                use_run
+            );
         }
     } else {
         // 平滑滑向目标
@@ -477,7 +552,6 @@ fn advance_local_move(
     // z 深度跟随脚底
     tf.translation.z = depth_z(-tf.translation.y);
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -533,204 +607,237 @@ mod tests {
     }
 }
 
-    /// 诊断：模拟对角直线 + 转弯路径的逐段方向序列（验证方向是否抖动）
-    #[test]
-    fn diag_diagonal_direction_sequence() {
-        use std::collections::VecDeque;
-        // 场景：玩家 (0,0)，点击对角远处 (5,3) → 3 对角 + 2 直线
-        let path: VecDeque<(i32, i32)> =
-            [(1, 1), (2, 2), (3, 3), (4, 3), (5, 3)].into_iter().collect();
-        let mut last: Option<(i32, i32)> = None;
-        let mut dir: u8 = 0; // 初始 Up
-        let mut seq: Vec<u8> = Vec::new();
-        let mut p = path.clone();
-        // 模拟"到达"序列：每到达一格记录稳定后的方向
-        while let Some(&first) = p.front() {
-            let from = last.unwrap_or((0, 0));
-            let desired = if let Some(l) = last {
-                lookahead_direction(l, &p)
-                    .or_else(|| direction_from_delta(first.0 - l.0, first.1 - l.1))
-                    .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8
-            } else {
-                direction_from_delta(first.0 - from.0, first.1 - from.1)
-                    .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8
-            };
-            // 逐步转向到 desired（最多 8 步，模拟足够时间转到位）
-            for _ in 0..8 {
-                dir = step_towards_direction(dir, desired, 1);
-            }
-            seq.push(dir);
-            last = Some(first);
-            p.pop_front();
-        }
-        // 期望：对角段稳定 DownRight(3)，直线段稳定 Right(1)，无来回跳
-        eprintln!("方向序列: {:?}", seq);
-        // 抖动检查：相邻方向差 <= 1（不允许来回大幅摆动）
-        for w in seq.windows(2) {
-            let diff = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-            assert!(diff <= 2 || diff >= 6, "方向抖动: {} -> {}", w[0], w[1]);
-        }
-    }
-
-    /// 集成实测：advance_local_move 对角路径移动，检查 anim.direction 是否抖动
-    #[test]
-    fn diag_advance_local_move_direction_stability() {
-        use std::time::Duration;
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(crate::network::NetConnection::default());
-        // #1572：advance_local_move 新增步声依赖
-        app.insert_resource(crate::map_renderer::GameData {
-            map: None,
-            map_reader: None,
-            desired_map: None,
-            player_spawn: None,
-        });
-        app.insert_resource(crate::game::sound::SoundBank::default());
-        app.insert_resource(bevy::asset::Assets::<bevy::audio::AudioSource>::default());
-        app.add_systems(Update, advance_local_move);
-
-        // 对角路径（3 对角 + 2 直线）
-        let path: std::collections::VecDeque<(i32, i32)> =
-            [(1, 1), (2, 2), (3, 3), (4, 3), (5, 3)].into_iter().collect();
-        app.world_mut().spawn((
-            crate::actor::LocalPlayer,
-            LocalMove {
-                path,
-                step_timer_ms: 0.0,
-                run: false,
-                last: None,
-                step_origin: None,
-                turn_acc: 0.0,
-            },
-            Transform::from_translation(tile_to_world(0, 0).extend(0.0)),
-            crate::actor::ActorAnim::default(),
-        ));
-
-        let mut dirs: Vec<u8> = Vec::new();
-        let mut prev_tf: Option<f32> = None;
-        let mut moved = false;
-        for _ in 0..240 {
-            app.world_mut().resource_mut::<Time>().advance_by(Duration::from_millis(16));
-            app.update();
-            let world = app.world_mut();
-            let mut q = world.query::<(&crate::actor::ActorAnim, &Transform)>();
-            let (anim, tf) = q.single(&*world).unwrap();
-            dirs.push(anim.direction);
-            if prev_tf.map(|p| (tf.translation.x - p).abs() > 0.01).unwrap_or(false) {
-                moved = true;
-            }
-            prev_tf = Some(tf.translation.x);
-        }
-        eprintln!("移动发生: {}", moved);
-        eprintln!("方向序列(前 40): {:?}", &dirs[..40.min(dirs.len())]);
-        eprintln!("方向集合: {:?}", dirs.iter().collect::<std::collections::HashSet<_>>());
-        // 抖动检查：连续帧方向差（环形）>1 的次数应很少（转向期间允许短暂过渡）
-        let mut flips = 0;
-        for w in dirs.windows(2) {
-            let diff = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-            if diff != 0 && diff != 1 && diff != 7 {
-                flips += 1;
-            }
-        }
-        eprintln!("大跳变帧数: {}", flips);
-        assert!(flips <= 4, "方向抖动过大: flips={}", flips);
-    }
-
-    /// 诊断：find_path 对角目标是否产生平滑直线（无锯齿 = 路线不偏离）
-    #[test]
-    fn diag_find_path_diagonal_smooth() {
-        let map = crate::map_renderer::LoadedMap {
-            name: "test".into(),
-            width: 20,
-            height: 20,
-            walkable: vec![vec![true; 20]; 20],
-            doors: vec![vec![0u8; 20]; 20],
+/// 诊断：模拟对角直线 + 转弯路径的逐段方向序列（验证方向是否抖动）
+#[test]
+fn diag_diagonal_direction_sequence() {
+    use std::collections::VecDeque;
+    // 场景：玩家 (0,0)，点击对角远处 (5,3) → 3 对角 + 2 直线
+    let path: VecDeque<(i32, i32)> = [(1, 1), (2, 2), (3, 3), (4, 3), (5, 3)]
+        .into_iter()
+        .collect();
+    let mut last: Option<(i32, i32)> = None;
+    let mut dir: u8 = 0; // 初始 Up
+    let mut seq: Vec<u8> = Vec::new();
+    let mut p = path.clone();
+    // 模拟"到达"序列：每到达一格记录稳定后的方向
+    while let Some(&first) = p.front() {
+        let from = last.unwrap_or((0, 0));
+        let desired = if let Some(l) = last {
+            lookahead_direction(l, &p)
+                .or_else(|| direction_from_delta(first.0 - l.0, first.1 - l.1))
+                .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8
+        } else {
+            direction_from_delta(first.0 - from.0, first.1 - from.1)
+                .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8
         };
-        let path = crate::game::pathfinding::find_path(&map, (0, 0), (5, 3)).unwrap();
-        let mut deltas = Vec::new();
-        let mut prev = (0, 0);
-        for &n in &path {
-            deltas.push((n.0 - prev.0, n.1 - prev.1));
-            prev = n;
+        // 逐步转向到 desired（最多 8 步，模拟足够时间转到位）
+        for _ in 0..8 {
+            dir = step_towards_direction(dir, desired, 1);
         }
-        eprintln!("path: {:?}", path);
-        eprintln!("deltas: {:?}", deltas);
-        // 理论最短：max(|dx|,|dy|)=5 步（3 对角 + 2 直）
-        assert!(path.len() <= 6, "路径过长(锯齿/绕路): {:?}", path);
-        // 无锯齿：delta 不应出现 "横→竖→横" 交替（如 (1,0),(0,1),(1,0)）
-        for w in deltas.windows(3) {
-            let a = (w[0].0.abs(), w[0].1.abs());
-            let b = (w[1].0.abs(), w[1].1.abs());
-            let c = (w[2].0.abs(), w[2].1.abs());
-            let zigzag = a == (1, 0) && b == (0, 1) && c == (1, 0)
-                || a == (0, 1) && b == (1, 0) && c == (0, 1);
-            assert!(!zigzag, "锯齿路径: {:?}", deltas);
-        }
-    
+        seq.push(dir);
+        last = Some(first);
+        p.pop_front();
     }
-    #[test]
-    fn test_mouse_direction_sectors_stable() {
-        let player = Vec2::new(0.0, 0.0);
-        assert_eq!(mouse_direction(player, Vec2::new(100.0, 0.0)), MirDirection::Right);
-        assert_eq!(mouse_direction(player, Vec2::new(100.0, 100.0)), MirDirection::UpRight);
-        assert_eq!(mouse_direction(player, Vec2::new(0.0, 100.0)), MirDirection::Up);
-        assert_eq!(mouse_direction(player, Vec2::new(0.0, -100.0)), MirDirection::Down);
-        assert_eq!(mouse_direction(player, Vec2::new(-100.0, -100.0)), MirDirection::DownLeft);
-        // 玩家脚下 → 防抖 Up
-        assert_eq!(mouse_direction(player, Vec2::new(3.0, -3.0)), MirDirection::Up);
-        // 扇区内稳定：角度 20° 与 10° 都应是 Right（0°~22.5° 边界容差内）
-        assert_eq!(mouse_direction(player, Vec2::new(100.0, 18.0)), MirDirection::Right);
-        assert_eq!(mouse_direction(player, Vec2::new(100.0, 10.0)), MirDirection::Right);
+    // 期望：对角段稳定 DownRight(3)，直线段稳定 Right(1)，无来回跳
+    eprintln!("方向序列: {:?}", seq);
+    // 抖动检查：相邻方向差 <= 1（不允许来回大幅摆动）
+    for w in seq.windows(2) {
+        let diff = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+        assert!(diff <= 2 || diff >= 6, "方向抖动: {} -> {}", w[0], w[1]);
     }
+}
 
-    #[test]
-    fn test_next_previous_direction_roundtrip() {
-        for d in [
-            MirDirection::Up,
-            MirDirection::UpRight,
-            MirDirection::Right,
-            MirDirection::DownRight,
-            MirDirection::Down,
-            MirDirection::DownLeft,
-            MirDirection::Left,
-            MirDirection::UpLeft,
-        ] {
-            let n = next_direction(d);
-            assert_eq!(previous_direction(n), d, "next+previous 应还原 {}", d as u8);
-        }
-        assert_eq!(next_direction(MirDirection::UpLeft), MirDirection::Up);
-        assert_eq!(previous_direction(MirDirection::Up), MirDirection::UpLeft);
-    }
+/// 集成实测：advance_local_move 对角路径移动，检查 anim.direction 是否抖动
+#[test]
+fn diag_advance_local_move_direction_stability() {
+    use std::time::Duration;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(crate::network::NetConnection::default());
+    // #1572：advance_local_move 新增步声依赖
+    app.insert_resource(crate::map_renderer::GameData {
+        map: None,
+        map_reader: None,
+        desired_map: None,
+        player_spawn: None,
+    });
+    app.insert_resource(crate::game::sound::SoundBank::default());
+    app.insert_resource(bevy::asset::Assets::<bevy::audio::AudioSource>::default());
+    app.add_systems(Update, advance_local_move);
 
-    #[test]
-    fn test_point_move_distances() {
-        assert_eq!(point_move(5, 5, MirDirection::Up, 1), (5, 4));
-        assert_eq!(point_move(5, 5, MirDirection::Right, 2), (7, 5));
-        assert_eq!(point_move(5, 5, MirDirection::DownLeft, 1), (4, 6));
-    }
+    // 对角路径（3 对角 + 2 直线）
+    let path: std::collections::VecDeque<(i32, i32)> = [(1, 1), (2, 2), (3, 3), (4, 3), (5, 3)]
+        .into_iter()
+        .collect();
+    app.world_mut().spawn((
+        crate::actor::LocalPlayer,
+        LocalMove {
+            path,
+            step_timer_ms: 0.0,
+            run: false,
+            last: None,
+            step_origin: None,
+            turn_acc: 0.0,
+        },
+        Transform::from_translation(tile_to_world(0, 0).extend(0.0)),
+        crate::actor::ActorAnim::default(),
+    ));
 
-    #[test]
-    fn test_walk_fallback_tries_next_then_previous() {
-        // #1548：C# CanWalk(dir, out dir)：原方向不可走 → NextDir → PreviousDir
-        let mut walkable = vec![vec![true; 3]; 3];
-        walkable[1][0] = false; // 北墙
-        let map = crate::map_renderer::LoadedMap {
-            name: String::new(),
-            width: 3,
-            height: 3,
-            walkable,
-            doors: vec![vec![0u8; 3]; 3],
-        };
-        let from = (1, 1);
-        let dir = MirDirection::Up;
-        let mut chosen = None;
-        for d in [dir, next_direction(dir), previous_direction(dir)] {
-            let pp = point_move(from.0, from.1, d, 1);
-            if map.is_walkable(pp.0, pp.1) {
-                chosen = Some(d);
-                break;
-            }
+    let mut dirs: Vec<u8> = Vec::new();
+    let mut prev_tf: Option<f32> = None;
+    let mut moved = false;
+    for _ in 0..240 {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_millis(16));
+        app.update();
+        let world = app.world_mut();
+        let mut q = world.query::<(&crate::actor::ActorAnim, &Transform)>();
+        let (anim, tf) = q.single(&*world).unwrap();
+        dirs.push(anim.direction);
+        if prev_tf
+            .map(|p| (tf.translation.x - p).abs() > 0.01)
+            .unwrap_or(false)
+        {
+            moved = true;
         }
-        assert_eq!(chosen, Some(MirDirection::UpRight), "北墙时应回退北东");
+        prev_tf = Some(tf.translation.x);
     }
+    eprintln!("移动发生: {}", moved);
+    eprintln!("方向序列(前 40): {:?}", &dirs[..40.min(dirs.len())]);
+    eprintln!(
+        "方向集合: {:?}",
+        dirs.iter().collect::<std::collections::HashSet<_>>()
+    );
+    // 抖动检查：连续帧方向差（环形）>1 的次数应很少（转向期间允许短暂过渡）
+    let mut flips = 0;
+    for w in dirs.windows(2) {
+        let diff = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+        if diff != 0 && diff != 1 && diff != 7 {
+            flips += 1;
+        }
+    }
+    eprintln!("大跳变帧数: {}", flips);
+    assert!(flips <= 4, "方向抖动过大: flips={}", flips);
+}
+
+/// 诊断：find_path 对角目标是否产生平滑直线（无锯齿 = 路线不偏离）
+#[test]
+fn diag_find_path_diagonal_smooth() {
+    let map = crate::map_renderer::LoadedMap {
+        name: "test".into(),
+        width: 20,
+        height: 20,
+        walkable: vec![vec![true; 20]; 20],
+        doors: vec![vec![0u8; 20]; 20],
+    };
+    let path = crate::game::pathfinding::find_path(&map, (0, 0), (5, 3)).unwrap();
+    let mut deltas = Vec::new();
+    let mut prev = (0, 0);
+    for &n in &path {
+        deltas.push((n.0 - prev.0, n.1 - prev.1));
+        prev = n;
+    }
+    eprintln!("path: {:?}", path);
+    eprintln!("deltas: {:?}", deltas);
+    // 理论最短：max(|dx|,|dy|)=5 步（3 对角 + 2 直）
+    assert!(path.len() <= 6, "路径过长(锯齿/绕路): {:?}", path);
+    // 无锯齿：delta 不应出现 "横→竖→横" 交替（如 (1,0),(0,1),(1,0)）
+    for w in deltas.windows(3) {
+        let a = (w[0].0.abs(), w[0].1.abs());
+        let b = (w[1].0.abs(), w[1].1.abs());
+        let c = (w[2].0.abs(), w[2].1.abs());
+        let zigzag =
+            a == (1, 0) && b == (0, 1) && c == (1, 0) || a == (0, 1) && b == (1, 0) && c == (0, 1);
+        assert!(!zigzag, "锯齿路径: {:?}", deltas);
+    }
+}
+#[test]
+fn test_mouse_direction_sectors_stable() {
+    let player = Vec2::new(0.0, 0.0);
+    assert_eq!(
+        mouse_direction(player, Vec2::new(100.0, 0.0)),
+        MirDirection::Right
+    );
+    assert_eq!(
+        mouse_direction(player, Vec2::new(100.0, 100.0)),
+        MirDirection::UpRight
+    );
+    assert_eq!(
+        mouse_direction(player, Vec2::new(0.0, 100.0)),
+        MirDirection::Up
+    );
+    assert_eq!(
+        mouse_direction(player, Vec2::new(0.0, -100.0)),
+        MirDirection::Down
+    );
+    assert_eq!(
+        mouse_direction(player, Vec2::new(-100.0, -100.0)),
+        MirDirection::DownLeft
+    );
+    // 玩家脚下 → 防抖 Up
+    assert_eq!(
+        mouse_direction(player, Vec2::new(3.0, -3.0)),
+        MirDirection::Up
+    );
+    // 扇区内稳定：角度 20° 与 10° 都应是 Right（0°~22.5° 边界容差内）
+    assert_eq!(
+        mouse_direction(player, Vec2::new(100.0, 18.0)),
+        MirDirection::Right
+    );
+    assert_eq!(
+        mouse_direction(player, Vec2::new(100.0, 10.0)),
+        MirDirection::Right
+    );
+}
+
+#[test]
+fn test_next_previous_direction_roundtrip() {
+    for d in [
+        MirDirection::Up,
+        MirDirection::UpRight,
+        MirDirection::Right,
+        MirDirection::DownRight,
+        MirDirection::Down,
+        MirDirection::DownLeft,
+        MirDirection::Left,
+        MirDirection::UpLeft,
+    ] {
+        let n = next_direction(d);
+        assert_eq!(previous_direction(n), d, "next+previous 应还原 {}", d as u8);
+    }
+    assert_eq!(next_direction(MirDirection::UpLeft), MirDirection::Up);
+    assert_eq!(previous_direction(MirDirection::Up), MirDirection::UpLeft);
+}
+
+#[test]
+fn test_point_move_distances() {
+    assert_eq!(point_move(5, 5, MirDirection::Up, 1), (5, 4));
+    assert_eq!(point_move(5, 5, MirDirection::Right, 2), (7, 5));
+    assert_eq!(point_move(5, 5, MirDirection::DownLeft, 1), (4, 6));
+}
+
+#[test]
+fn test_walk_fallback_tries_next_then_previous() {
+    // #1548：C# CanWalk(dir, out dir)：原方向不可走 → NextDir → PreviousDir
+    let mut walkable = vec![vec![true; 3]; 3];
+    walkable[1][0] = false; // 北墙
+    let map = crate::map_renderer::LoadedMap {
+        name: String::new(),
+        width: 3,
+        height: 3,
+        walkable,
+        doors: vec![vec![0u8; 3]; 3],
+    };
+    let from = (1, 1);
+    let dir = MirDirection::Up;
+    let mut chosen = None;
+    for d in [dir, next_direction(dir), previous_direction(dir)] {
+        let pp = point_move(from.0, from.1, d, 1);
+        if map.is_walkable(pp.0, pp.1) {
+            chosen = Some(d);
+            break;
+        }
+    }
+    assert_eq!(chosen, Some(MirDirection::UpRight), "北墙时应回退北东");
+}

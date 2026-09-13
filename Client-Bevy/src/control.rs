@@ -285,7 +285,10 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             }
             "dialogs" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::GetDialogs { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::GetDialogs { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -296,7 +299,10 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             }
             "visible" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::GetVisible { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::GetVisible { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -952,10 +958,7 @@ fn apply_control_commands(
             }
             ControlCommand::NpcCall { object_id, key } => {
                 tracing::info!("🎮 control npc_call: {object_id} {key}");
-                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
-                    object_id,
-                    key,
-                });
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC { object_id, key });
             }
             ControlCommand::Pickup { object_id } => {
                 let Ok((pe, ptf, _)) = q.players.single() else {

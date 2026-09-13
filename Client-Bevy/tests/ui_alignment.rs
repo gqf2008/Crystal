@@ -64,11 +64,24 @@ fn assert_centered(name: &str, ox: f32, oy: f32, lib: LibraryName, idx: usize, l
         "[居中] {name}: 原点({ox},{oy}) 应为({ex},{ey})（精灵 {:?}[{idx}] {w}x{h}）",
         lib
     );
-    println!("  ✓ 居中 {} @({},{}) {:?}[{}] {}x{}", name, ox, oy, lib, idx, w, h);
+    println!(
+        "  ✓ 居中 {} @({},{}) {:?}[{}] {}x{}",
+        name, ox, oy, lib, idx, w, h
+    );
 }
 
 /// 断言子控件 bbox 完全在父 bbox 内。
-fn assert_inside(child: &str, cx: f32, cy: f32, cw: f32, ch: f32, px: f32, py: f32, pw: f32, ph: f32) {
+fn assert_inside(
+    child: &str,
+    cx: f32,
+    cy: f32,
+    cw: f32,
+    ch: f32,
+    px: f32,
+    py: f32,
+    pw: f32,
+    ph: f32,
+) {
     assert!(
         cx >= px - EPS && cy >= py - EPS && cx + cw <= px + pw + EPS && cy + ch <= py + ph + EPS,
         "[包含] {child}: bbox({cx},{cy},{cw}x{ch}) 戳出父框({px},{py},{pw}x{ph})"
@@ -86,7 +99,14 @@ fn assert_in_canvas(name: &str, x: f32, y: f32, w: f32, h: f32) {
 #[test]
 fn login_dialog_aligned() {
     let mut libs = Libs::new();
-    assert_centered("登录框", lg::DX, lg::DY, LibraryName::Prguse, 1084, &mut libs);
+    assert_centered(
+        "登录框",
+        lg::DX,
+        lg::DY,
+        LibraryName::Prguse,
+        1084,
+        &mut libs,
+    );
     let (dw, dh) = libs.size(LibraryName::Prguse, 1084);
     // 子控件（相对对话框原点）—— 全部来自 C# LoginScene.LoginDialog
     // 精灵类：(lib, idx, rel_x, rel_y)
@@ -103,34 +123,77 @@ fn login_dialog_aligned() {
     for (lib, idx, rx, ry) in sprites {
         let (w, h) = libs.size(*lib, *idx);
         let (ax, ay) = (lg::DX + rx, lg::DY + ry);
-        assert_inside(&format!("{:?}[{}]", lib, idx), ax, ay, w, h, lg::DX, lg::DY, dw, dh);
+        assert_inside(
+            &format!("{:?}[{}]", lib, idx),
+            ax,
+            ay,
+            w,
+            h,
+            lg::DX,
+            lg::DY,
+            dw,
+            dh,
+        );
         assert_in_canvas(&format!("登录 {:?}", lib), ax, ay, w, h);
     }
     // 输入框矩形（C# 显式 Size）：账号 (85,85) 136x15 / 密码 (85,108) 136x15
-    for (rx, ry, w, h, n) in [(85.0f32, 85.0f32, 136.0f32, 15.0f32, "账号"), (85.0, 108.0, 136.0, 15.0, "密码")] {
+    for (rx, ry, w, h, n) in [
+        (85.0f32, 85.0f32, 136.0f32, 15.0f32, "账号"),
+        (85.0, 108.0, 136.0, 15.0, "密码"),
+    ] {
         assert_inside(n, lg::DX + rx, lg::DY + ry, w, h, lg::DX, lg::DY, dw, dh);
     }
     // 同行按钮不重叠（y=163 行：新建账号/修改密码；y=189 行：查看密钥/关闭）
     let row163 = [(lg::DX + 60.0, 100.0), (lg::DX + 166.0, 100.0)];
-    assert!(!overlap(row163[0].0, row163[0].1, row163[1].0, row163[1].0), "[重叠] y=163 行按钮重叠");
+    assert!(
+        !overlap(row163[0].0, row163[0].1, row163[1].0, row163[1].0),
+        "[重叠] y=163 行按钮重叠"
+    );
     println!("  ✓ 登录框 {} 个子控件全部在框内", sprites.len() + 2);
 }
 
 #[test]
 fn new_account_dialog_aligned() {
     let mut libs = Libs::new();
-    assert_centered("新建账号框", lg::NA_X, lg::NA_Y, LibraryName::Prguse, 63, &mut libs);
+    assert_centered(
+        "新建账号框",
+        lg::NA_X,
+        lg::NA_Y,
+        LibraryName::Prguse,
+        63,
+        &mut libs,
+    );
     let (dw, dh) = libs.size(LibraryName::Prguse, 63);
     // 8 输入框：C# NewAccountDialog，x=226，ys/widths 如下
     let ys = [103.0f32, 129.0, 155.0, 189.0, 215.0, 250.0, 276.0, 311.0];
     let widths = [136.0f32, 136.0, 136.0, 136.0, 136.0, 190.0, 190.0, 136.0];
     for (i, (y, w)) in ys.iter().zip(widths.iter()).enumerate() {
-        assert_inside(&format!("输入框{i}"), lg::NA_X + 226.0, lg::NA_Y + y, *w, 18.0, lg::NA_X, lg::NA_Y, dw, dh);
+        assert_inside(
+            &format!("输入框{i}"),
+            lg::NA_X + 226.0,
+            lg::NA_Y + y,
+            *w,
+            18.0,
+            lg::NA_X,
+            lg::NA_Y,
+            dw,
+            dh,
+        );
     }
     // OK Title[200](135,425) / Cancel Title[203](409,425)
     for (idx, rx) in [(200usize, 135.0f32), (203, 409.0)] {
         let (w, h) = libs.size(LibraryName::Title, idx);
-        assert_inside(&format!("Title[{idx}]"), lg::NA_X + rx, lg::NA_Y + 425.0, w, h, lg::NA_X, lg::NA_Y, dw, dh);
+        assert_inside(
+            &format!("Title[{idx}]"),
+            lg::NA_X + rx,
+            lg::NA_Y + 425.0,
+            w,
+            h,
+            lg::NA_X,
+            lg::NA_Y,
+            dw,
+            dh,
+        );
     }
     println!("  ✓ 新建账号框 10 个子控件全部在框内");
 }
@@ -138,16 +201,43 @@ fn new_account_dialog_aligned() {
 #[test]
 fn change_password_dialog_aligned() {
     let mut libs = Libs::new();
-    assert_centered("修改密码框", lg::CP_X, lg::CP_Y, LibraryName::Prguse, 50, &mut libs);
+    assert_centered(
+        "修改密码框",
+        lg::CP_X,
+        lg::CP_Y,
+        LibraryName::Prguse,
+        50,
+        &mut libs,
+    );
     let (dw, dh) = libs.size(LibraryName::Prguse, 50);
     for y in [75.0f32, 113.0, 151.0, 188.0] {
-        assert_inside("输入框", lg::CP_X + 178.0, lg::CP_Y + y, 136.0, 18.0, lg::CP_X, lg::CP_Y, dw, dh);
+        assert_inside(
+            "输入框",
+            lg::CP_X + 178.0,
+            lg::CP_Y + y,
+            136.0,
+            18.0,
+            lg::CP_X,
+            lg::CP_Y,
+            dw,
+            dh,
+        );
     }
     // OK Title[107](80,236) 90x25 / Cancel Title[110](222,236) 68x25
     for (idx, rx, w) in [(107usize, 80.0f32, 90.0f32), (110, 222.0, 68.0)] {
         let (rw, h) = libs.size(LibraryName::Title, idx);
         assert_eq!(rw, w, "[尺寸] Title[{}] 宽应为 {}", idx, w);
-        assert_inside(&format!("Title[{idx}]"), lg::CP_X + rx, lg::CP_Y + 236.0, rw, h, lg::CP_X, lg::CP_Y, dw, dh);
+        assert_inside(
+            &format!("Title[{idx}]"),
+            lg::CP_X + rx,
+            lg::CP_Y + 236.0,
+            rw,
+            h,
+            lg::CP_X,
+            lg::CP_Y,
+            dw,
+            dh,
+        );
     }
     println!("  ✓ 修改密码框 6 个子控件全部在框内");
 }
@@ -155,44 +245,143 @@ fn change_password_dialog_aligned() {
 #[test]
 fn new_character_dialog_aligned() {
     let mut libs = Libs::new();
-    assert_centered("新建角色框", nc::DLG_X, nc::DLG_Y, LibraryName::Prguse, 73, &mut libs);
+    assert_centered(
+        "新建角色框",
+        nc::DLG_X,
+        nc::DLG_Y,
+        LibraryName::Prguse,
+        73,
+        &mut libs,
+    );
     let (dw, dh) = libs.size(LibraryName::Prguse, 73);
     // 标题 Title[20](206,11)
     let (tw, th) = libs.size(LibraryName::Title, 20);
-    assert_inside("Title[20]", nc::DLG_X + 206.0, nc::DLG_Y + 11.0, tw, th, nc::DLG_X, nc::DLG_Y, dw, dh);
+    assert_inside(
+        "Title[20]",
+        nc::DLG_X + 206.0,
+        nc::DLG_Y + 11.0,
+        tw,
+        th,
+        nc::DLG_X,
+        nc::DLG_Y,
+        dw,
+        dh,
+    );
     // 预览 ChrSel[20] UseOffSet=true：绘制 = Location(120,250) + offset，必须在框内
     let (pw, ph, pox, poy) = libs.size_off(LibraryName::ChrSel, 20);
     let (pvx, pvy) = (nc::DLG_X + 120.0 + pox, nc::DLG_Y + 250.0 + poy);
-    assert_inside("预览 ChrSel[20]", pvx, pvy, pw, ph, nc::DLG_X, nc::DLG_Y, dw, dh);
+    assert_inside(
+        "预览 ChrSel[20]",
+        pvx,
+        pvy,
+        pw,
+        ph,
+        nc::DLG_X,
+        nc::DLG_Y,
+        dw,
+        dh,
+    );
     // 法师 blend 叠加层 ChrSel[600]（Wizard 男 base40 +0+560）：DrawBlend 在同 Location + 自身 offset
     let (bw, bh, box_, boy) = libs.size_off(LibraryName::ChrSel, 600);
-    assert!(bw > 4.0 && bh > 4.0, "[blend] ChrSel[600] 法师男 blend 应有实质内容，实际 {bw}x{bh}");
+    assert!(
+        bw > 4.0 && bh > 4.0,
+        "[blend] ChrSel[600] 法师男 blend 应有实质内容，实际 {bw}x{bh}"
+    );
     let (blx, bly) = (nc::DLG_X + 120.0 + box_, nc::DLG_Y + 250.0 + boy);
-    assert_inside("法师 blend ChrSel[600]", blx, bly, bw, bh, nc::DLG_X, nc::DLG_Y, dw, dh);
+    assert_inside(
+        "法师 blend ChrSel[600]",
+        blx,
+        bly,
+        bw,
+        bh,
+        nc::DLG_X,
+        nc::DLG_Y,
+        dw,
+        dh,
+    );
     // 描述边框 (279,70) 278x170 / 名字输入 (325,268) 240x20
-    assert_inside("描述边框", nc::DLG_X + 279.0, nc::DLG_Y + 70.0, 278.0, 170.0, nc::DLG_X, nc::DLG_Y, dw, dh);
-    assert_inside("名字输入", nc::DLG_X + 325.0, nc::DLG_Y + 268.0, 240.0, 20.0, nc::DLG_X, nc::DLG_Y, dw, dh);
+    assert_inside(
+        "描述边框",
+        nc::DLG_X + 279.0,
+        nc::DLG_Y + 70.0,
+        278.0,
+        170.0,
+        nc::DLG_X,
+        nc::DLG_Y,
+        dw,
+        dh,
+    );
+    assert_inside(
+        "名字输入",
+        nc::DLG_X + 325.0,
+        nc::DLG_Y + 268.0,
+        240.0,
+        20.0,
+        nc::DLG_X,
+        nc::DLG_Y,
+        dw,
+        dh,
+    );
     // 职业按钮 Prguse[2426/2429/2432/2435/2438] x=[323,373,423,473,523] y=296
-    let class: &[(usize, f32)] = &[(2426, 323.0), (2429, 373.0), (2432, 423.0), (2435, 473.0), (2438, 523.0)];
+    let class: &[(usize, f32)] = &[
+        (2426, 323.0),
+        (2429, 373.0),
+        (2432, 423.0),
+        (2435, 473.0),
+        (2438, 523.0),
+    ];
     for (idx, x) in class {
         let (w, h) = libs.size(LibraryName::Prguse, *idx);
         assert_eq!((w, h), (44.0, 42.0), "[尺寸] Prguse[{}] 应为 44x42", idx);
-        assert_inside(&format!("职业[{idx}]"), nc::DLG_X + x, nc::DLG_Y + 296.0, w, h, nc::DLG_X, nc::DLG_Y, dw, dh);
+        assert_inside(
+            &format!("职业[{idx}]"),
+            nc::DLG_X + x,
+            nc::DLG_Y + 296.0,
+            w,
+            h,
+            nc::DLG_X,
+            nc::DLG_Y,
+            dw,
+            dh,
+        );
     }
     // 性别按钮 Prguse[2420/2423] x=[323,373] y=343
     for (idx, x) in [(2420usize, 323.0f32), (2423, 373.0)] {
         let (w, h) = libs.size(LibraryName::Prguse, idx);
         assert_eq!((w, h), (44.0, 42.0), "[尺寸] Prguse[{}] 应为 44x42", idx);
-        assert_inside(&format!("性别[{idx}]"), nc::DLG_X + x, nc::DLG_Y + 343.0, w, h, nc::DLG_X, nc::DLG_Y, dw, dh);
+        assert_inside(
+            &format!("性别[{idx}]"),
+            nc::DLG_X + x,
+            nc::DLG_Y + 343.0,
+            w,
+            h,
+            nc::DLG_X,
+            nc::DLG_Y,
+            dw,
+            dh,
+        );
     }
     // 职业行不重叠（44 宽，间距 50）
     for w in [323.0f32, 373.0, 423.0, 473.0, 523.0].windows(2) {
-        assert!(!overlap(nc::DLG_X + w[0], 44.0, nc::DLG_X + w[1], 44.0), "[重叠] 职业按钮行重叠");
+        assert!(
+            !overlap(nc::DLG_X + w[0], 44.0, nc::DLG_X + w[1], 44.0),
+            "[重叠] 职业按钮行重叠"
+        );
     }
     // OK Title[360](160,425) / Cancel Title[280](425,425)
     for (idx, rx) in [(360usize, 160.0f32), (280, 425.0)] {
         let (w, h) = libs.size(LibraryName::Title, idx);
-        assert_inside(&format!("Title[{idx}]"), nc::DLG_X + rx, nc::DLG_Y + 425.0, w, h, nc::DLG_X, nc::DLG_Y, dw, dh);
+        assert_inside(
+            &format!("Title[{idx}]"),
+            nc::DLG_X + rx,
+            nc::DLG_Y + 425.0,
+            w,
+            h,
+            nc::DLG_X,
+            nc::DLG_Y,
+            dw,
+            dh,
+        );
     }
     println!("  ✓ 新建角色框 全部子控件在框内（预览 @({},{})）", pvx, pvy);
 }
@@ -201,21 +390,85 @@ fn new_character_dialog_aligned() {
 fn delete_dialogs_aligned() {
     let mut libs = Libs::new();
     // MirInputBox Prguse[660]
-    assert_centered("删除输入框", mb::DLG_X, mb::DLG_Y, LibraryName::Prguse, 660, &mut libs);
+    assert_centered(
+        "删除输入框",
+        mb::DLG_X,
+        mb::DLG_Y,
+        LibraryName::Prguse,
+        660,
+        &mut libs,
+    );
     let (idw, idh) = libs.size(LibraryName::Prguse, 660);
-    assert_inside("提示区", mb::DLG_X + 25.0, mb::DLG_Y + 25.0, 235.0, 40.0, mb::DLG_X, mb::DLG_Y, idw, idh);
-    assert_inside("输入框", mb::DLG_X + 23.0, mb::DLG_Y + 86.0, 240.0, 19.0, mb::DLG_X, mb::DLG_Y, idw, idh);
+    assert_inside(
+        "提示区",
+        mb::DLG_X + 25.0,
+        mb::DLG_Y + 25.0,
+        235.0,
+        40.0,
+        mb::DLG_X,
+        mb::DLG_Y,
+        idw,
+        idh,
+    );
+    assert_inside(
+        "输入框",
+        mb::DLG_X + 23.0,
+        mb::DLG_Y + 86.0,
+        240.0,
+        19.0,
+        mb::DLG_X,
+        mb::DLG_Y,
+        idw,
+        idh,
+    );
     for (idx, rx) in [(200usize, 60.0f32), (203, 160.0)] {
         let (w, h) = libs.size(LibraryName::Title, idx);
-        assert_inside(&format!("Title[{idx}]"), mb::DLG_X + rx, mb::DLG_Y + 123.0, w, h, mb::DLG_X, mb::DLG_Y, idw, idh);
+        assert_inside(
+            &format!("Title[{idx}]"),
+            mb::DLG_X + rx,
+            mb::DLG_Y + 123.0,
+            w,
+            h,
+            mb::DLG_X,
+            mb::DLG_Y,
+            idw,
+            idh,
+        );
     }
     // MirMessageBox Prguse[360]
-    assert_centered("删除询问框", mb::MSG_X, mb::MSG_Y, LibraryName::Prguse, 360, &mut libs);
+    assert_centered(
+        "删除询问框",
+        mb::MSG_X,
+        mb::MSG_Y,
+        LibraryName::Prguse,
+        360,
+        &mut libs,
+    );
     let (mw, mh) = libs.size(LibraryName::Prguse, 360);
-    assert_inside("文字区", mb::MSG_X + 35.0, mb::MSG_Y + 35.0, 390.0, 110.0, mb::MSG_X, mb::MSG_Y, mw, mh);
+    assert_inside(
+        "文字区",
+        mb::MSG_X + 35.0,
+        mb::MSG_Y + 35.0,
+        390.0,
+        110.0,
+        mb::MSG_X,
+        mb::MSG_Y,
+        mw,
+        mh,
+    );
     for (idx, rx) in [(206usize, 260.0f32), (210, 360.0)] {
         let (w, h) = libs.size(LibraryName::Title, idx);
-        assert_inside(&format!("Title[{idx}]"), mb::MSG_X + rx, mb::MSG_Y + 157.0, w, h, mb::MSG_X, mb::MSG_Y, mw, mh);
+        assert_inside(
+            &format!("Title[{idx}]"),
+            mb::MSG_X + rx,
+            mb::MSG_Y + 157.0,
+            w,
+            h,
+            mb::MSG_X,
+            mb::MSG_Y,
+            mw,
+            mh,
+        );
     }
     println!("  ✓ 删除输入框 + 删除询问框 全部子控件在框内");
 }
@@ -229,7 +482,12 @@ fn select_screen_aligned() {
     // 角色槽 Title[660..663] @ (637, [194,298,402,506])，尺寸应 288x56
     for (slot, y) in [194.0f32, 298.0, 402.0, 506.0].iter().enumerate() {
         let (w, h) = libs.size(LibraryName::Title, 660 + slot);
-        assert_eq!((w, h), (288.0, 56.0), "[尺寸] Title[{}] 角色槽应为 288x56", 660 + slot);
+        assert_eq!(
+            (w, h),
+            (288.0, 56.0),
+            "[尺寸] Title[{}] 角色槽应为 288x56",
+            660 + slot
+        );
         assert_in_canvas(&format!("角色槽[{slot}]"), 637.0, *y, w, h);
     }
     // 预览 ChrSel[20] @(260,420)+offset，必须在画布内
@@ -238,14 +496,23 @@ fn select_screen_aligned() {
     assert_in_canvas("预览 ChrSel[20]", pvx, pvy, pw, ph);
     // 法师 blend 叠加层 ChrSel[600] @(260,420)+自身 offset（仅 Wizard 有内容；SelectScene 总是 DrawBlend）
     let (bw, bh, box_, boy) = libs.size_off(LibraryName::ChrSel, 600);
-    assert!(bw > 4.0 && bh > 4.0, "[blend] ChrSel[600] 法师男 blend 应有实质内容，实际 {bw}x{bh}");
+    assert!(
+        bw > 4.0 && bh > 4.0,
+        "[blend] ChrSel[600] 法师男 blend 应有实质内容，实际 {bw}x{bh}"
+    );
     assert_in_canvas("法师 blend ChrSel[600]", 260.0 + box_, 420.0 + boy, bw, bh);
     // 底部按钮：C# xPoint=(1024-200)/5=164，btnX(N)=100+164*N-82-50=164*N-32 → 132/296/460/624/788 @ y=736
     let ys = 768.0 - 32.0;
     let bottom = [132.0f32, 296.0, 460.0, 624.0, 788.0];
     for (n, x) in bottom.iter().enumerate() {
         let expected = 164.0 * (n as f32 + 1.0) - 32.0;
-        assert!((x - expected).abs() < EPS, "[公式] 底部按钮[{}] x={} 应为 {}", n, x, expected);
+        assert!(
+            (x - expected).abs() < EPS,
+            "[公式] 底部按钮[{}] x={} 应为 {}",
+            n,
+            x,
+            expected
+        );
         let (w, h) = libs.size(LibraryName::Title, 340 + 3 * n); // 340/343/346/349/352
         assert_eq!((w, h), (100.0, 25.0), "[尺寸] 底部按钮应为 100x25");
         assert_in_canvas(&format!("底部按钮[{n}]"), *x, ys, w, h);
@@ -254,7 +521,10 @@ fn select_screen_aligned() {
     for w in bottom.windows(2) {
         assert!(!overlap(w[0], 100.0, w[1], 100.0), "[重叠] 底部按钮行重叠");
     }
-    println!("  ✓ 选角界面 标题/4 角色槽/预览/5 底部按钮 全部对齐（预览 @({},{})）", pvx, pvy);
+    println!(
+        "  ✓ 选角界面 标题/4 角色槽/预览/5 底部按钮 全部对齐（预览 @({},{})）",
+        pvx, pvy
+    );
 }
 
 #[test]
@@ -269,24 +539,63 @@ fn game_chat_death_aligned() {
     // 输入行 C# ChatTextBox @(1,54)，即绝对 (231,725)，627x13
     assert_inside(
         "聊天输入背景",
-        231.0, 725.0, 627.0, 13.0,
-        230.0, 671.0, cw, ch,
+        231.0,
+        725.0,
+        627.0,
+        13.0,
+        230.0,
+        671.0,
+        cw,
+        ch,
     );
 
     // 滚动按钮 C# @x=618, y=1/9/39/45，必须在面板内
     for (y, h) in [(1.0f32, 8.0f32), (9.0, 6.0), (39.0, 6.0), (45.0, 8.0)] {
         assert_inside(
             "聊天滚动按钮",
-            230.0 + 618.0, 671.0 + y, 12.0, h,
-            230.0, 671.0, cw, ch,
+            230.0 + 618.0,
+            671.0 + y,
+            12.0,
+            h,
+            230.0,
+            671.0,
+            cw,
+            ch,
         );
     }
 
     // C# ShowReviveMessage → MirMessageBox(YesNo)：背景 Prguse[360] 居中
-    assert_centered("死亡弹窗", 284.0, 289.0, LibraryName::Prguse, 360, &mut libs);
+    assert_centered(
+        "死亡弹窗",
+        284.0,
+        289.0,
+        LibraryName::Prguse,
+        360,
+        &mut libs,
+    );
     let (dw, dh) = libs.size(LibraryName::Prguse, 360);
-    assert_inside("死亡弹窗-是", 544.0, 446.0, 76.0, 25.0, 284.0, 289.0, dw, dh);
-    assert_inside("死亡弹窗-否", 644.0, 446.0, 76.0, 25.0, 284.0, 289.0, dw, dh);
+    assert_inside(
+        "死亡弹窗-是",
+        544.0,
+        446.0,
+        76.0,
+        25.0,
+        284.0,
+        289.0,
+        dw,
+        dh,
+    );
+    assert_inside(
+        "死亡弹窗-否",
+        644.0,
+        446.0,
+        76.0,
+        25.0,
+        284.0,
+        289.0,
+        dw,
+        dh,
+    );
 
     println!("  ✓ 游戏内聊天面板 + 死亡弹窗 布局对齐");
 }
@@ -303,38 +612,82 @@ fn skill_bar_aligned() {
     // 代码常量漂移任意一个都会在这里变红：
     assert_eq!(sk::SKILL_BAR_W, 216.0, "栏宽 = Prguse[2190] 宽（实测 216）");
     assert_eq!(sk::SKILL_BAR_H, 28.0, "栏高 = Prguse[2190] 高（实测 28）");
-    assert_eq!(sk::SKILL_GRID_OFFSET_X, 12.0, "格网偏移 = C# BeforeDraw DisplayLocation.X+12（L1659）");
+    assert_eq!(
+        sk::SKILL_GRID_OFFSET_X,
+        12.0,
+        "格网偏移 = C# BeforeDraw DisplayLocation.X+12（L1659）"
+    );
     assert_eq!(sk::SKILL_SLOT_X, 15.0, "首格 x = C# i*25+15（L1565）");
     assert_eq!(sk::SKILL_SLOT_Y, 3.0, "格 y = C# L1565");
     assert_eq!(sk::SKILL_SLOT_STEP, 25.0, "格步进 = C# i*25（L1565）");
     assert_eq!(sk::SKILL_SLOT_W, 24.0, "格宽 = MagIcon 实测 24");
     assert_eq!(sk::SKILL_SLOT_H, 22.0, "格高 = MagIcon 实测 22");
     assert_eq!(sk::SKILL_KEY_X, 13.0, "键名标签 x = C# i*25+13（L1603）");
-    assert_eq!(sk::SKILL_COOLDOWN_BASE, 1260, "冷却帧基址 = C# Index=1260+startFrame（L1741）");
-    assert_eq!(sk::SKILL_COOLDOWN_FRAMES, 22, "冷却帧数 = C# totalFrames=22（L1721）");
+    assert_eq!(
+        sk::SKILL_COOLDOWN_BASE,
+        1260,
+        "冷却帧基址 = C# Index=1260+startFrame（L1741）"
+    );
+    assert_eq!(
+        sk::SKILL_COOLDOWN_FRAMES,
+        22,
+        "冷却帧数 = C# totalFrames=22（L1721）"
+    );
 
     // 底图 Prguse[2190]：栏 bbox（默认 @(0,0)，C# Settings.SkillbarLocation 默认 {0,0}）
     let (bw, bh) = libs.size(LibraryName::Prguse, 2190);
-    assert_eq!((bw, bh), (sk::SKILL_BAR_W, sk::SKILL_BAR_H), "[尺寸] 栏常量应等于底图实测");
+    assert_eq!(
+        (bw, bh),
+        (sk::SKILL_BAR_W, sk::SKILL_BAR_H),
+        "[尺寸] 栏常量应等于底图实测"
+    );
     assert_in_canvas("技能栏底图", 0.0, 0.0, bw, bh);
 
     // 格网 Prguse[2193] @(+12,0)（BeforeDraw）：必须完整落在底图内
     let (gw, gh) = libs.size(LibraryName::Prguse, 2193);
-    assert_inside("技能栏格网", sk::SKILL_GRID_OFFSET_X, 0.0, gw, gh, 0.0, 0.0, bw, bh);
+    assert_inside(
+        "技能栏格网",
+        sk::SKILL_GRID_OFFSET_X,
+        0.0,
+        gw,
+        gh,
+        0.0,
+        0.0,
+        bw,
+        bh,
+    );
 
     // 切换绑定按钮 Prguse[2247] @(0,0)：C# Size(16,28)
     let (sw, sh) = libs.size(LibraryName::Prguse, 2247);
-    assert_eq!((sw, sh), (16.0, 28.0), "[尺寸] 切换绑定按钮应为 16x28（C# Size + 实测）");
+    assert_eq!(
+        (sw, sh),
+        (16.0, 28.0),
+        "[尺寸] 切换绑定按钮应为 16x28（C# Size + 实测）"
+    );
     assert_inside("切换绑定按钮", 0.0, 0.0, sw, sh, 0.0, 0.0, bw, bh);
 
     // 8 技能格 @(i*25+15, 3) 24x22（C# Cells Location + MagIcon 自然尺寸）：全部落在底图内且互不重叠
     let (iw, ih) = libs.size(LibraryName::MagIcon, 0);
-    assert_eq!((iw, ih), (sk::SKILL_SLOT_W, sk::SKILL_SLOT_H), "[尺寸] 格常量应等于 MagIcon 实测");
+    assert_eq!(
+        (iw, ih),
+        (sk::SKILL_SLOT_W, sk::SKILL_SLOT_H),
+        "[尺寸] 格常量应等于 MagIcon 实测"
+    );
     for i in 0..8usize {
         let x = sk::SKILL_SLOT_X + i as f32 * sk::SKILL_SLOT_STEP;
         assert_inside("技能格", x, sk::SKILL_SLOT_Y, iw, ih, 0.0, 0.0, bw, bh);
         // 键名标签 @(i*25+13, 0)（C# Size 25x25）：落在底图内
-        assert_inside("键名标签", sk::SKILL_KEY_X + i as f32 * sk::SKILL_SLOT_STEP, 0.0, 25.0, 25.0, 0.0, 0.0, bw, bh);
+        assert_inside(
+            "键名标签",
+            sk::SKILL_KEY_X + i as f32 * sk::SKILL_SLOT_STEP,
+            0.0,
+            25.0,
+            25.0,
+            0.0,
+            0.0,
+            bw,
+            bh,
+        );
     }
     // 冷却帧 Prguse2[1260..=1282]（C# Index=1260+startFrame，startFrame∈[0,22] 共 23 帧）全部存在且为格尺寸
     for f in 0..=sk::SKILL_COOLDOWN_FRAMES {
@@ -664,7 +1017,10 @@ fn login_select_meta_aligned() {
 
     // LoginScene.TestLabel：Prguse[79] @(ScreenWidth-116, 10)，仅测试配置可见
     let (tw, th) = libs.size(LibraryName::Prguse, 79);
-    assert!(tw > 0.0 && th > 0.0, "[尺寸] Prguse[79] 登录 TestLabel 应存在");
+    assert!(
+        tw > 0.0 && th > 0.0,
+        "[尺寸] Prguse[79] 登录 TestLabel 应存在"
+    );
     assert_in_canvas("登录 TestLabel", 908.0, 10.0, tw, th);
 
     // SelectScene.ServerLabel：@(432,60)，宽约 155
@@ -918,18 +1274,37 @@ fn craft_refine_sprites_aligned() {
     );
     let (tw, th) = libs.size(LibraryName::Title, 18);
     assert!(tw > 0.0 && th > 0.0, "[精灵] Craft 标题 Title[18] 应存在");
-    for idx in [cf::CRAFT_AUTOFILL_INDEX, cf::CRAFT_AUTOFILL_INDEX + 1, cf::CRAFT_AUTOFILL_INDEX + 2]
-    {
+    for idx in [
+        cf::CRAFT_AUTOFILL_INDEX,
+        cf::CRAFT_AUTOFILL_INDEX + 1,
+        cf::CRAFT_AUTOFILL_INDEX + 2,
+    ] {
         let (w, h) = libs.size(LibraryName::Title, idx);
-        assert_eq!((w, h), (48.0, 25.0), "[尺寸] Title[{idx}] 应为 AUTO 键 48x25");
+        assert_eq!(
+            (w, h),
+            (48.0, 25.0),
+            "[尺寸] Title[{idx}] 应为 AUTO 键 48x25"
+        );
     }
-    for idx in [cf::CRAFT_CONFIRM_INDEX, cf::CRAFT_CONFIRM_INDEX + 1, cf::CRAFT_CONFIRM_INDEX + 2] {
+    for idx in [
+        cf::CRAFT_CONFIRM_INDEX,
+        cf::CRAFT_CONFIRM_INDEX + 1,
+        cf::CRAFT_CONFIRM_INDEX + 2,
+    ] {
         let (w, h) = libs.size(LibraryName::Title, idx);
-        assert_eq!((w, h), (80.0, 25.0), "[尺寸] Title[{idx}] 应为 CRAFT 键 80x25");
+        assert_eq!(
+            (w, h),
+            (80.0, 25.0),
+            "[尺寸] Title[{idx}] 应为 CRAFT 键 80x25"
+        );
     }
     for idx in [360usize, 361, 362] {
         let (w, h) = libs.size(LibraryName::Prguse2, idx);
-        assert_eq!((w, h), (24.0, 21.0), "[尺寸] Prguse2[{idx}] 应为关闭键 24x21");
+        assert_eq!(
+            (w, h),
+            (24.0, 21.0),
+            "[尺寸] Prguse2[{idx}] 应为关闭键 24x21"
+        );
     }
     assert_in_canvas("Craft 面板", 0.0, 0.0, cw, ch);
     assert!(cf::CRAFT_AUTOFILL_POS.0 + 48.0 <= cw, "AUTO 键越出面板");

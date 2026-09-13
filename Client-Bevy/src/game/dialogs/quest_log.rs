@@ -476,13 +476,31 @@ fn spawn_quest_log(
         spawn_label(p, &cjk, "", 18.0, 20.0, 12.0, Color::WHITE, 9).insert(QuestLogLine(14));
         // 任务行 8 + 详情 6 @(18,40+20i)
         for i in 0..14usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
-                .insert(QuestLogLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                40.0 + i as f32 * 20.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(QuestLogLine(i));
         }
         // 每行追踪按钮（Text 节点本身作为 Button，C# QuestRow Track）
         for i in 0..8usize {
-            spawn_label(p, &cjk, "追踪", 250.0, 40.0 + i as f32 * 20.0, 11.0, Color::srgb(0.6, 0.9, 1.0), 10)
-                .insert((Button, QuestLogTrack(i)));
+            spawn_label(
+                p,
+                &cjk,
+                "追踪",
+                250.0,
+                40.0 + i as f32 * 20.0,
+                11.0,
+                Color::srgb(0.6, 0.9, 1.0),
+                10,
+            )
+            .insert((Button, QuestLogTrack(i)));
         }
         // 放弃 @(200,285)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1592,10 +1610,7 @@ fn quest_log_ui_system(
         Or<(With<QuestLogClose>, With<QuestLogAbandon>)>,
     >,
     mouse: Res<ButtonInput<MouseButton>>,
-    ui: (
-        Query<&Window>,
-        Query<&Node, With<QuestLogWidget>>,
-    ),
+    ui: (Query<&Window>, Query<&Node, With<QuestLogWidget>>),
     // #1290：Bevy B0001——多个 &mut Text/Visibility Query 需用 Without 隔离
     mut widgets: Query<
         &mut Visibility,
@@ -1824,11 +1839,10 @@ fn quest_log_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = ui.0.single() {
             if let Some(cursor) = window.cursor_position() {
-                let (ox, oy) = ui
-                    .1
-                    .single()
-                    .map(|n| crate::ui::theme::node_origin(n, (200.0, 60.0)))
-                    .unwrap_or((200.0, 60.0));
+                let (ox, oy) =
+                    ui.1.single()
+                        .map(|n| crate::ui::theme::node_origin(n, (200.0, 60.0)))
+                        .unwrap_or((200.0, 60.0));
                 for i in 0..8usize {
                     let (rx, ry, rw, rh) = quest_log_row_rect(i, ox, oy);
                     if cursor.x >= rx
@@ -2935,7 +2949,6 @@ mod tests {
         let (rx2, ry2, _, _) = quest_log_row_rect(0, 250.0, 100.0);
         assert_eq!((rx2, ry2), (268.0, 140.0));
     }
-
 
     use super::*;
     use mir2_shared::enums::{QuestType, RequiredClass};

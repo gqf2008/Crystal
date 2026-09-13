@@ -328,8 +328,22 @@ fn modal_ui_system(
     mut delete_ask_dlg: Query<&mut Visibility, (With<ModalDeleteAskDlg>, Without<ModalDeleteDlg>)>,
     // 4 个 Text2d 查询互斥（不同 With/Without），并入 ParamSet 以腾出参数位给内置 IME
     mut texts: ParamSet<(
-        Query<&mut Text2d, (With<ModalDeleteAskDlg>, With<ModalText>, Without<ModalDeleteDlg>)>,
-        Query<&mut Text2d, (With<ModalDeleteDlg>, With<ModalText>, Without<ModalDeleteAskDlg>)>,
+        Query<
+            &mut Text2d,
+            (
+                With<ModalDeleteAskDlg>,
+                With<ModalText>,
+                Without<ModalDeleteDlg>,
+            ),
+        >,
+        Query<
+            &mut Text2d,
+            (
+                With<ModalDeleteDlg>,
+                With<ModalText>,
+                Without<ModalDeleteAskDlg>,
+            ),
+        >,
         Query<&mut Text2d, (With<ModalError>, Without<ModalText>, Without<ModalInput>)>,
         Query<&mut Text2d, (With<ModalInput>, Without<ModalText>, Without<ModalError>)>,
     )>,

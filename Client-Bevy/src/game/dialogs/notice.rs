@@ -20,14 +20,19 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel};
 use crate::ui::text_markup::{est_text_width, known_color, wrap_text};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel,
+};
 
 // —— 布局常量（NoticeDialog.cs；Prguse[961] 实测 316x466）——
 pub const BG_W: f32 = 316.0;
 pub const BG_H: f32 = 466.0;
 /// Location = ((SW-W)/2, (SH-H)/3)（C# 整除）= (354, 100)——用整数除再转 f32
-pub const ORIGIN: (f32, f32) = (((1024.0 - BG_W) / 2.0).trunc(), ((768.0 - BG_H) / 3.0).trunc());
+pub const ORIGIN: (f32, f32) = (
+    ((1024.0 - BG_W) / 2.0).trunc(),
+    ((768.0 - BG_H) / 3.0).trunc(),
+);
 pub const MAX_LINES: usize = 19;
 pub const LINE_X: f32 = 25.0;
 pub const LINE_Y0: f32 = 50.0;
@@ -183,18 +188,61 @@ fn spawn_notice(
         return;
     };
     let panel = spawn_panel(&mut commands, bg, ox, oy, 316.0, 466.0, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Notice), NoticeWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Notice), NoticeWidget));
 
     commands.entity(panel).with_children(|p| {
         // 标题（CJK 字体）
-        spawn_label(p, &font, "", TITLE_REL.0, TITLE_REL.1, LINE_FONT_PX, TITLE_COLOR, 9)
-            .insert(NoticeTitle);
+        spawn_label(
+            p,
+            &font,
+            "",
+            TITLE_REL.0,
+            TITLE_REL.1,
+            LINE_FONT_PX,
+            TITLE_COLOR,
+            9,
+        )
+        .insert(NoticeTitle);
         // Close / Ok / Up / Down（图标按钮）
         let buttons: [(NoticeBtnKind, LibraryName, usize, usize, usize, f32, f32); 4] = [
-            (NoticeBtnKind::Close, LibraryName::Prguse2, 360, 361, 362, CLOSE_REL.0, CLOSE_REL.1),
-            (NoticeBtnKind::Ok, LibraryName::Title, 193, 194, 195, OK_REL.0, OK_REL.1),
-            (NoticeBtnKind::Up, LibraryName::Prguse2, 470, 471, 472, UP_REL.0, UP_REL.1),
-            (NoticeBtnKind::Down, LibraryName::Prguse2, 473, 474, 475, DOWN_REL.0, DOWN_REL.1),
+            (
+                NoticeBtnKind::Close,
+                LibraryName::Prguse2,
+                360,
+                361,
+                362,
+                CLOSE_REL.0,
+                CLOSE_REL.1,
+            ),
+            (
+                NoticeBtnKind::Ok,
+                LibraryName::Title,
+                193,
+                194,
+                195,
+                OK_REL.0,
+                OK_REL.1,
+            ),
+            (
+                NoticeBtnKind::Up,
+                LibraryName::Prguse2,
+                470,
+                471,
+                472,
+                UP_REL.0,
+                UP_REL.1,
+            ),
+            (
+                NoticeBtnKind::Down,
+                LibraryName::Prguse2,
+                473,
+                474,
+                475,
+                DOWN_REL.0,
+                DOWN_REL.1,
+            ),
         ];
         for (kind, lib, n, h, pr, rx, ry) in buttons {
             if let (Some(nh), Some(hh), Some(ph)) = (
@@ -217,7 +265,11 @@ fn spawn_notice(
                 Color::WHITE,
                 9,
             )
-            .insert((NoticeLine(i), NoticeLineSrc::default(), FontHinting::Enabled));
+            .insert((
+                NoticeLine(i),
+                NoticeLineSrc::default(),
+                FontHinting::Enabled,
+            ));
         }
     });
 }
@@ -231,7 +283,11 @@ fn notice_ui_system(
     buttons: Query<(Entity, &Interaction, &NoticeBtn)>,
     mut widgets: Query<
         &mut Visibility,
-        (With<NoticeWidget>, Without<NoticeTitle>, Without<NoticeLine>),
+        (
+            With<NoticeWidget>,
+            Without<NoticeTitle>,
+            Without<NoticeLine>,
+        ),
     >,
     mut title: Query<&mut Text, (With<NoticeTitle>, Without<NoticeLine>)>,
     mut lines: Query<(&mut Text, &NoticeLine), Without<NoticeTitle>>,

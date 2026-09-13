@@ -118,11 +118,11 @@ pub struct NpcGoodsPlugin;
 impl Plugin for NpcGoodsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NpcGoodsState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             npc_goods_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_npc_goods);
+        app.add_systems(OnEnter(AppState::Game), spawn_npc_goods);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_goods);
         app.add_systems(
             Update,
@@ -198,8 +198,7 @@ fn spawn_npc_goods(
             let y = 16.0 + i as f32 * 22.0;
             spawn_item_cell_ui(p, &mut images, &font, 10.0, y, 32.0, 20.0, 9, i)
                 .insert(NpcGoodsCell(i));
-            spawn_label(p, &cjk, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9)
-                .insert(NpcGoodsLine(i));
+            spawn_label(p, &cjk, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9).insert(NpcGoodsLine(i));
         }
     });
 }
@@ -212,10 +211,7 @@ fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     (ox + 12.0, oy + 16.0 + i as f32 * 22.0, 468.0, 18.0)
 }
 
-fn npc_goods_dialog_sync_system(
-    state: Res<NpcGoodsState>,
-    mut mgr: ResMut<DialogManager>,
-) {
+fn npc_goods_dialog_sync_system(state: Res<NpcGoodsState>, mut mgr: ResMut<DialogManager>) {
     crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::NpcGoods, state.visible);
 }
 
@@ -225,12 +221,12 @@ fn npc_goods_ui_system(
     mut result: MessageReader<AmountBoxResult>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
-    ui: (
-        Query<&Window>,
-        Query<&Node, With<NpcGoodsWidget>>,
-    ),
+    ui: (Query<&Window>, Query<&Node, With<NpcGoodsWidget>>),
     close: Query<(Entity, &Interaction), (With<NpcGoodsClose>, Without<NpcGoodsBuy>)>,
-    mut buy: Query<(Entity, &Interaction, &mut Visibility), (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
+    mut buy: Query<
+        (Entity, &Interaction, &mut Visibility),
+        (With<NpcGoodsBuy>, Without<NpcGoodsClose>),
+    >,
     mut widgets: Query<&mut Visibility, (With<NpcGoodsWidget>, Without<NpcGoodsBuy>)>,
     mut lines: Query<(&mut Text, &NpcGoodsLine)>,
     mut cells: Query<(&mut UiItemCellData, &NpcGoodsCell)>,
@@ -269,7 +265,9 @@ fn npc_goods_ui_system(
     }
     // 数量框结果：OK → 按数量发送购买/回购（C# BuyItem Count=amountBox.Amount）
     for r in result.read() {
-        let Some(pending) = state.pending_buy.take() else { continue };
+        let Some(pending) = state.pending_buy.take() else {
+            continue;
+        };
         let Some(n) = r.0 else { continue };
         if n == 0 {
             continue;
@@ -319,12 +317,7 @@ fn npc_goods_ui_system(
     for (mut data, cell) in &mut cells {
         let g = state.goods.get(off + cell.0);
         let icon = g.and_then(|g| {
-            load_lib_image(
-                &mut libs,
-                &mut images,
-                LibraryName::Items,
-                g.image as usize,
-            )
+            load_lib_image(&mut libs, &mut images, LibraryName::Items, g.image as usize)
         });
         let count = g.map(|g| g.count.max(1) as u32);
         // 性能（#112）：无变化不写
@@ -338,13 +331,14 @@ fn npc_goods_ui_system(
 
     // 悬停商品行 → 通用 Tooltip（#110）
     let Ok(window) = ui.0.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let mut hovered: Option<&GoodsEntry> = None;
-    let (ox, oy) = ui
-        .1
-        .single()
-        .map(|n| crate::ui::theme::node_origin(n, (0.0, 224.0)))
-        .unwrap_or((0.0, 224.0));
+    let (ox, oy) =
+        ui.1.single()
+            .map(|n| crate::ui::theme::node_origin(n, (0.0, 224.0)))
+            .unwrap_or((0.0, 224.0));
     for i in 0..8usize {
         let (rx, ry, rw, rh) = npc_goods_row_rect(i, ox, oy);
         if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
@@ -358,7 +352,10 @@ fn npc_goods_ui_system(
         } else {
             format!("价格: {} 金", g.price)
         }];
-        lines.push(format!("类型: {}", crate::game::dialogs::inventory::item_type_name(g.item_type)));
+        lines.push(format!(
+            "类型: {}",
+            crate::game::dialogs::inventory::item_type_name(g.item_type)
+        ));
         if let Some(t) = &g.tool_tip {
             if !t.is_empty() {
                 lines.push(t.clone());
@@ -371,7 +368,9 @@ fn npc_goods_ui_system(
 
     // 点击行选中
     let Ok(window) = ui.0.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     if mouse.just_pressed(MouseButton::Left) {
         for i in 0..8usize {
             let (rx, ry, rw, rh) = npc_goods_row_rect(i, ox, oy);
@@ -427,7 +426,10 @@ fn npc_goods_ui_system(
                                 unique_id: g.unique_id,
                                 is_buyback: true,
                             });
-                            amount.ask(format!("回购 {} 数量", g.name), buy_max_quantity(g.stack_size, g.count));
+                            amount.ask(
+                                format!("回购 {} 数量", g.name),
+                                buy_max_quantity(g.stack_size, g.count),
+                            );
                         } else {
                             net.send_packet(&mir2_shared::packets::client::npc::BuyItemBack {
                                 unique_id: g.unique_id,
@@ -442,8 +444,15 @@ fn npc_goods_ui_system(
                             unique_id: g.unique_id,
                             is_buyback: false,
                         });
-                        amount.ask(format!("购买 {} 数量", g.name), buy_max_quantity(g.stack_size, g.count));
-                        tracing::info!("🏪 购买 {}: 弹数量框 max={}", g.name, buy_max_quantity(g.stack_size, g.count));
+                        amount.ask(
+                            format!("购买 {} 数量", g.name),
+                            buy_max_quantity(g.stack_size, g.count),
+                        );
+                        tracing::info!(
+                            "🏪 购买 {}: 弹数量框 max={}",
+                            g.name,
+                            buy_max_quantity(g.stack_size, g.count)
+                        );
                     } else {
                         // #2376：发 UniqueID（见上）
                         net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
@@ -458,7 +467,6 @@ fn npc_goods_ui_system(
         }
     }
 }
-
 
 /// 消费服务端 NPC 商品事件（网络层只广播 ServerEvent）
 fn npc_goods_server_events(
@@ -504,7 +512,6 @@ mod tests {
         assert_eq!((rx2, ry2), (62.0, 266.0));
     }
 
-
     use super::*;
 
     #[test]
@@ -540,4 +547,3 @@ mod tests {
         );
     }
 }
-

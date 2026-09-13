@@ -40,11 +40,11 @@ pub struct WeatherPlugin;
 impl Plugin for WeatherPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeatherState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             weather_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(
+        app.add_systems(
             Update,
             (weather_update_system, advance_particles).run_if(in_state(AppState::Game)),
         );
@@ -158,7 +158,6 @@ fn advance_particles(
         }
     }
 }
-
 
 /// 消费服务端天气事件（网络层只广播 ServerEvent）
 fn weather_server_events(

@@ -1,8 +1,8 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 // #2630：显式引入本处理器构造的 UI 载荷类型（原经 super::* 隐私链隐式传入，见 handle_guild 注）。
 use crate::game::dialogs::friend::FriendEntry;
 use crate::game::dialogs::ranking::RankEntry;
@@ -11,7 +11,8 @@ use crate::game::dialogs::ranking::RankEntry;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_social(    net: &mut NetConnection,
+pub(crate) fn handle_social(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -23,7 +24,8 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) -> bool {
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -31,7 +33,56 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::TradeAccept as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::MailLockedItem as i16, ServerPacketIds::MailSendRequest as i16, ServerPacketIds::MailSent as i16, ServerPacketIds::MailCost as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::SendMemberLocation as i16, ServerPacketIds::UpdateNotice as i16, ServerPacketIds::OpenBrowser as i16, ServerPacketIds::Opendoor as i16, ServerPacketIds::RemoveMagic as i16, ServerPacketIds::ObjectSpell as i16, ServerPacketIds::SendOutputMessage as i16, ServerPacketIds::RemoveDelayedExplosion as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::MapEffect as i16, ServerPacketIds::PlaySound as i16, ServerPacketIds::SetTimer as i16, ServerPacketIds::ExpireTimer as i16, ServerPacketIds::SetCompass as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::FishingUpdate as i16,
+        ServerPacketIds::MentorRequest as i16,
+        ServerPacketIds::MentorUpdate as i16,
+        ServerPacketIds::GuildNoticeChange as i16,
+        ServerPacketIds::GuildMemberChange as i16,
+        ServerPacketIds::Rankings as i16,
+        ServerPacketIds::GuildInvite as i16,
+        ServerPacketIds::FriendUpdate as i16,
+        ServerPacketIds::TradeRequest as i16,
+        ServerPacketIds::TradeGold as i16,
+        ServerPacketIds::TradeConfirm as i16,
+        ServerPacketIds::TradeCancel as i16,
+        ServerPacketIds::TradeItem as i16,
+        ServerPacketIds::DepositTradeItem as i16,
+        ServerPacketIds::TradeAccept as i16,
+        ServerPacketIds::ReceiveMail as i16,
+        ServerPacketIds::MailLockedItem as i16,
+        ServerPacketIds::MailSendRequest as i16,
+        ServerPacketIds::MailSent as i16,
+        ServerPacketIds::MailCost as i16,
+        ServerPacketIds::GroupMembersMap as i16,
+        ServerPacketIds::GroupInvite as i16,
+        ServerPacketIds::DeleteGroup as i16,
+        ServerPacketIds::DeleteMember as i16,
+        ServerPacketIds::SendMemberLocation as i16,
+        ServerPacketIds::UpdateNotice as i16,
+        ServerPacketIds::OpenBrowser as i16,
+        ServerPacketIds::Opendoor as i16,
+        ServerPacketIds::RemoveMagic as i16,
+        ServerPacketIds::ObjectSpell as i16,
+        ServerPacketIds::SendOutputMessage as i16,
+        ServerPacketIds::RemoveDelayedExplosion as i16,
+        ServerPacketIds::NewMagic as i16,
+        ServerPacketIds::MagicDelay as i16,
+        ServerPacketIds::MagicCast as i16,
+        ServerPacketIds::MagicLeveled as i16,
+        ServerPacketIds::ObjectMagic as i16,
+        ServerPacketIds::ObjectEffect as i16,
+        ServerPacketIds::ObjectProjectile as i16,
+        ServerPacketIds::SpellToggle as i16,
+        ServerPacketIds::MapEffect as i16,
+        ServerPacketIds::PlaySound as i16,
+        ServerPacketIds::SetTimer as i16,
+        ServerPacketIds::ExpireTimer as i16,
+        ServerPacketIds::SetCompass as i16,
+        ServerPacketIds::KeepAlive as i16,
+        ServerPacketIds::ParcelCollected as i16,
+        ServerPacketIds::RequestReincarnation as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M39: 钓鱼 ----
@@ -113,7 +164,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     Err(_) => break,
                 }
             }
-            server_events.write(ServerEvent::GuildNotice { notice: notice.clone() });
+            server_events.write(ServerEvent::GuildNotice {
+                notice: notice.clone(),
+            });
             tracing::info!("🏰 行会公告更新: {:?}", notice);
         }
         x if x == ServerPacketIds::GuildMemberChange as i16 => {
@@ -126,7 +179,11 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                 if let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) {
                     if cur.position() as usize == body.len() - 1 {
                         let joined = body[0] != 0;
-                        tracing::info!("🏰 行会成员{}: {}", if joined { "加入" } else { "离开" }, name);
+                        tracing::info!(
+                            "🏰 行会成员{}: {}",
+                            if joined { "加入" } else { "离开" },
+                            name
+                        );
                         if joined {
                             server_events.write(ServerEvent::GuildMemberChanged {
                                 name: name.clone(),
@@ -193,23 +250,45 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                 let mut ok = true;
                 for _ in 0..count {
                     let mut rb = [0u8; 4];
-                    if std::io::Read::read_exact(&mut cur, &mut rb).is_err() { ok = false; break; }
+                    if std::io::Read::read_exact(&mut cur, &mut rb).is_err() {
+                        ok = false;
+                        break;
+                    }
                     let rank = i32::from_le_bytes(rb);
                     let mut pb = [0u8; 4];
-                    if std::io::Read::read_exact(&mut cur, &mut pb).is_err() { ok = false; break; }
+                    if std::io::Read::read_exact(&mut cur, &mut pb).is_err() {
+                        ok = false;
+                        break;
+                    }
                     let player_id = u32::from_le_bytes(pb);
                     let player_name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
                         Ok(n) => n,
-                        Err(_) => { ok = false; break; }
+                        Err(_) => {
+                            ok = false;
+                            break;
+                        }
                     };
                     let class = cur.read_u8().unwrap_or(0);
                     let mut lb = [0u8; 4];
-                    if std::io::Read::read_exact(&mut cur, &mut lb).is_err() { ok = false; break; }
+                    if std::io::Read::read_exact(&mut cur, &mut lb).is_err() {
+                        ok = false;
+                        break;
+                    }
                     let level = i32::from_le_bytes(lb);
                     let mut eb = [0u8; 8];
-                    if std::io::Read::read_exact(&mut cur, &mut eb).is_err() { ok = false; break; }
+                    if std::io::Read::read_exact(&mut cur, &mut eb).is_err() {
+                        ok = false;
+                        break;
+                    }
                     let experience = i64::from_le_bytes(eb);
-                    entries.push(RankEntry { rank, player_id, player_name, class, level, experience });
+                    entries.push(RankEntry {
+                        rank,
+                        player_id,
+                        player_name,
+                        class,
+                        level,
+                        experience,
+                    });
                 }
                 if ok {
                     let count = entries.len();
@@ -247,21 +326,42 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     let mut ok = true;
                     for _ in 0..count {
                         let mut oid_buf = [0u8; 4];
-                        if std::io::Read::read_exact(&mut cur, &mut oid_buf).is_err() { ok = false; break; }
+                        if std::io::Read::read_exact(&mut cur, &mut oid_buf).is_err() {
+                            ok = false;
+                            break;
+                        }
                         let object_id = u32::from_le_bytes(oid_buf);
                         let name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
                             Ok(n) => n,
-                            Err(_) => { ok = false; break; }
+                            Err(_) => {
+                                ok = false;
+                                break;
+                            }
                         };
                         let memo = match mir2_shared::binary::read_dotnet_string(&mut cur) {
                             Ok(m) => m,
-                            Err(_) => { ok = false; break; }
+                            Err(_) => {
+                                ok = false;
+                                break;
+                            }
                         };
                         let mut blocked_buf = [0u8; 1];
-                        if std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_err() { ok = false; break; }
+                        if std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_err() {
+                            ok = false;
+                            break;
+                        }
                         let mut online_buf = [0u8; 1];
-                        if std::io::Read::read_exact(&mut cur, &mut online_buf).is_err() { ok = false; break; }
-                        entries.push(FriendEntry { object_id, name, memo, blocked: blocked_buf[0] != 0, online: online_buf[0] != 0 });
+                        if std::io::Read::read_exact(&mut cur, &mut online_buf).is_err() {
+                            ok = false;
+                            break;
+                        }
+                        entries.push(FriendEntry {
+                            object_id,
+                            name,
+                            memo,
+                            blocked: blocked_buf[0] != 0,
+                            online: online_buf[0] != 0,
+                        });
                     }
                     if ok && count as usize == entries.len() {
                         parsed = Some(entries);
@@ -279,16 +379,26 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                         mir2_shared::binary::read_dotnet_string(&mut cur),
                     ) {
                         let mut blocked_buf = [0u8; 1];
-                        let blocked = std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_ok() && blocked_buf[0] != 0;
+                        let blocked = std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_ok()
+                            && blocked_buf[0] != 0;
                         let mut online_buf = [0u8; 1];
-                        let online = std::io::Read::read_exact(&mut cur, &mut online_buf).is_ok() && online_buf[0] != 0;
-                        parsed = Some(vec![FriendEntry { object_id, name, memo, blocked, online }]);
+                        let online = std::io::Read::read_exact(&mut cur, &mut online_buf).is_ok()
+                            && online_buf[0] != 0;
+                        parsed = Some(vec![FriendEntry {
+                            object_id,
+                            name,
+                            memo,
+                            blocked,
+                            online,
+                        }]);
                     }
                 }
             }
             match parsed {
                 Some(entries) => {
-                    server_events.write(ServerEvent::FriendUpdated { entries: entries.clone() });
+                    server_events.write(ServerEvent::FriendUpdated {
+                        entries: entries.clone(),
+                    });
                     tracing::info!(
                         "👥 好友列表: {}",
                         entries
@@ -326,7 +436,10 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             if payload.len() >= 6 {
                 let a = payload[4] != 0;
                 let b = payload[5] != 0;
-                server_events.write(ServerEvent::TradeConfirm { a_locked: a, b_locked: b });
+                server_events.write(ServerEvent::TradeConfirm {
+                    a_locked: a,
+                    b_locked: b,
+                });
                 tracing::info!("🔒 交易锁定状态: 我={} 对方={}", a, b);
                 if a && b {
                     tracing::info!("🎉 交易完成！");
@@ -362,7 +475,11 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             if payload.len() >= 9 {
                 let success = payload[8] != 0;
                 let from = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-                server_events.write(ServerEvent::TradeDeposit { from, to: 0, success });
+                server_events.write(ServerEvent::TradeDeposit {
+                    from,
+                    to: 0,
+                    success,
+                });
                 if success {
                     tracing::info!("✅ 物品已放入交易槽");
                 } else {
@@ -392,7 +509,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             // C# S.ParcelCollected.Result (sbyte)：-1=无可收取 0=已全部收取 1=成功
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if let Some(&result) = body.first() {
-                server_events.write(ServerEvent::ParcelCollected { result: result as i8 });
+                server_events.write(ServerEvent::ParcelCollected {
+                    result: result as i8,
+                });
                 tracing::info!("📦 ParcelCollected: result={}", result as i8);
             }
         }
@@ -402,9 +521,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             match group::GroupMembersMap::read_body(&mut cur) {
                 Ok(p) => {
                     let member_count = p.members.len();
-                    server_events.write(ServerEvent::GroupMembers {
-                        members: p.members,
-                    });
+                    server_events.write(ServerEvent::GroupMembers { members: p.members });
                     tracing::info!("👥 组队成员已广播: {} 人", member_count);
                 }
                 Err(e) => {
@@ -432,7 +549,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::DeleteMember as i16 => {
             if let Ok(p) = group::DeleteMember::read_body(&mut cur) {
-                server_events.write(ServerEvent::GroupMemberLeft { name: p.name.clone() });
+                server_events.write(ServerEvent::GroupMemberLeft {
+                    name: p.name.clone(),
+                });
                 tracing::info!("👥 成员离开: {}", p.name);
             }
         }
@@ -440,7 +559,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             if let Ok(p) = magic::NewMagic::read_body(&mut cur) {
                 if p.hero {
                     // #1128：英雄技能（C# S.NewMagic hero=true）→ HeroState.magics
-                    server_events.write(ServerEvent::HeroMagicLearned { magic: p.magic.clone() });
+                    server_events.write(ServerEvent::HeroMagicLearned {
+                        magic: p.magic.clone(),
+                    });
                     tracing::info!(
                         "🦸 英雄学会技能: {} ({:?}) key={}",
                         p.magic.name,
@@ -448,7 +569,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                         p.magic.key
                     );
                 } else {
-                    server_events.write(ServerEvent::MagicLearned { magic: p.magic.clone() });
+                    server_events.write(ServerEvent::MagicLearned {
+                        magic: p.magic.clone(),
+                    });
                     tracing::info!(
                         "📖 学会技能: {} ({:?}) key={}",
                         p.magic.name,
@@ -461,8 +584,16 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         x if x == ServerPacketIds::MagicDelay as i16 => {
             // #1376：C# S.MagicDelay → User.GetMagic(spell).Delay
             if let Ok(p) = MagicDelay::read_body(&mut cur) {
-                server_events.write(ServerEvent::MagicCooldown { spell: p.spell, delay_ms: p.delay });
-                tracing::debug!("⏳ 技能冷却: object={} spell={:?} delay={}ms", p.object_id, p.spell, p.delay);
+                server_events.write(ServerEvent::MagicCooldown {
+                    spell: p.spell,
+                    delay_ms: p.delay,
+                });
+                tracing::debug!(
+                    "⏳ 技能冷却: object={} spell={:?} delay={}ms",
+                    p.object_id,
+                    p.spell,
+                    p.delay
+                );
             }
         }
         x if x == ServerPacketIds::MagicLeveled as i16 => {
@@ -732,5 +863,3 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
     }
     handled
 }
-
-

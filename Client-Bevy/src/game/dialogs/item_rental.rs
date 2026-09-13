@@ -531,11 +531,7 @@ fn spawn_item_rental(
 }
 
 /// 自有窗关闭键（`Prguse2[360..362]` @(180,3)）
-fn spawn_close(
-    p: &mut ChildSpawnerCommands,
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-) {
+fn spawn_close(p: &mut ChildSpawnerCommands, libs: &mut GameLibraries, images: &mut Assets<Image>) {
     if let (Some(n), Some(h), Some(pr)) = (
         load_lib_image(libs, images, LibraryName::Prguse2, 360),
         load_lib_image(libs, images, LibraryName::Prguse2, 361),
@@ -638,7 +634,10 @@ fn item_rental_ui_system(
         if !edge(e, inter, &mut prev_inter) || state.role != RentalRole::Owner {
             continue;
         }
-        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+        let items = inv_q
+            .single()
+            .map(|inv| inv.items.as_slice())
+            .unwrap_or(&[]);
         if state.deposit_item.is_some() {
             match items.iter().position(|s| s.is_none()) {
                 Some(to) => {
@@ -727,13 +726,7 @@ fn apply_cell(
     match item {
         Some(item) => {
             data.icon = if item.image > 0 {
-                ui_image(
-                    libs,
-                    images,
-                    cache,
-                    LibraryName::Items,
-                    item.image as usize,
-                )
+                ui_image(libs, images, cache, LibraryName::Items, item.image as usize)
             } else {
                 None
             };
@@ -897,9 +890,7 @@ fn item_rental_action_system(
     }
     // 设置期限 → 数量输入（C# `InputRentalPeroid()` → MirInputBox，物主侧）
     for (e, inter) in &period_btn {
-        if !edge(e, inter, &mut prev_inter)
-            || state.role != RentalRole::Owner
-            || state.item_locked
+        if !edge(e, inter, &mut prev_inter) || state.role != RentalRole::Owner || state.item_locked
         {
             continue;
         }
@@ -916,7 +907,10 @@ fn item_rental_action_system(
             continue;
         }
         if !rental_period_valid(state.period.max(0) as u32) {
-            state.message = format!("请先设置 {}-{} 天期限", RENTAL_PERIOD_MIN, RENTAL_PERIOD_MAX);
+            state.message = format!(
+                "请先设置 {}-{} 天期限",
+                RENTAL_PERIOD_MIN, RENTAL_PERIOD_MAX
+            );
             continue;
         }
         net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockItem);
@@ -1090,7 +1084,7 @@ mod tests {
         assert_eq!(ITEM_CONFIRM_POS, (130.0, 76.0));
         assert_eq!(LOCKED_FRAME, 253); // C# `Lock()` 换帧
         assert_eq!(RENTAL_PRICE_FRAME, 28); // C# 价格按钮 Prguse[28]
-        // 控件落在 204x109 面板内
+                                            // 控件落在 204x109 面板内
         let inside = |(x, y): (f32, f32), w: f32, h: f32| {
             x >= 0.0 && y >= 0.0 && x + w <= RENT_W && y + h <= RENT_H
         };

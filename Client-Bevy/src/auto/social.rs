@@ -1,7 +1,7 @@
 //! auto::social 自动化验证系统（从 auto.rs 拆分，#1146）
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 /// --group-test：自动组队邀请链路（登录后向 bevy2char 发 AddMember，等成员列表）
 #[allow(clippy::too_many_arguments)]
@@ -41,7 +41,12 @@ pub(crate) fn auto_group_test(
             if group.members.len() >= 2 {
                 tracing::info!(
                     "[GROUPTEST] ✅ 组队成功: {}",
-                    group.members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")
+                    group
+                        .members
+                        .iter()
+                        .map(|m| m.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             } else {
                 tracing::warn!("[GROUPTEST] ❌ 组队成员不足: {:?}", group.members);
@@ -207,9 +212,7 @@ pub(crate) fn auto_mail_read(
     }
     for m in mail.mails.iter() {
         if m.unread && !read_ids.contains(&m.mail_id) {
-            net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
-                mail_id: m.mail_id,
-            });
+            net.send_packet(&mir2_shared::packets::client::mail::ReadMail { mail_id: m.mail_id });
             tracing::info!("[MAILREAD] 请求读取: {} ({})", m.subject, m.mail_id);
             read_ids.insert(m.mail_id);
         }
@@ -223,7 +226,10 @@ pub(crate) fn auto_trade_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut trade: ResMut<client_bevy::game::dialogs::trade::TradeState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -283,8 +289,13 @@ pub(crate) fn auto_trade_test(
                 return;
             }
             if trade.my_items[0].is_some() {
-                tracing::info!("[TRADETEST] ✅ 物品已入槽: {}", trade.my_items[0].as_ref().unwrap().name);
-                net.send_packet(&mir2_shared::packets::client::trade::TradeConfirm { locked: true });
+                tracing::info!(
+                    "[TRADETEST] ✅ 物品已入槽: {}",
+                    trade.my_items[0].as_ref().unwrap().name
+                );
+                net.send_packet(&mir2_shared::packets::client::trade::TradeConfirm {
+                    locked: true,
+                });
                 tracing::info!("[TRADETEST] 锁定交易");
                 *stage = 4;
                 *t = 0.0;
@@ -297,7 +308,11 @@ pub(crate) fn auto_trade_test(
             if !trade.visible {
                 tracing::info!("[TRADETEST] 🎉 交易完成（窗口已关闭）");
             } else {
-                tracing::warn!("[TRADETEST] ❌ 交易未完成，locked=({},{})", trade.my_locked, trade.their_locked);
+                tracing::warn!(
+                    "[TRADETEST] ❌ 交易未完成，locked=({},{})",
+                    trade.my_locked,
+                    trade.their_locked
+                );
             }
             *stage = 5;
         }
@@ -350,7 +365,9 @@ pub(crate) fn auto_trade_accept(
                 return;
             }
             if trade.their_locked && !trade.my_locked {
-                net.send_packet(&mir2_shared::packets::client::trade::TradeConfirm { locked: true });
+                net.send_packet(&mir2_shared::packets::client::trade::TradeConfirm {
+                    locked: true,
+                });
                 tracing::info!("[TRADEACCEPT] 对方已锁定，我方锁定");
                 *stage = 3;
                 *t = 0.0;
@@ -404,10 +421,18 @@ pub(crate) fn auto_friend_test(
             if friend.friends.iter().any(|f| f.name == "bevy2char") {
                 tracing::info!(
                     "[FRIENDTEST] ✅ 好友列表包含 bevy2char (在线={})",
-                    friend.friends.iter().find(|f| f.name == "bevy2char").map(|f| f.online).unwrap_or(false)
+                    friend
+                        .friends
+                        .iter()
+                        .find(|f| f.name == "bevy2char")
+                        .map(|f| f.online)
+                        .unwrap_or(false)
                 );
             } else {
-                tracing::warn!("[FRIENDTEST] ❌ 好友列表为空或未包含 bevy2char: {:?}", friend.friends);
+                tracing::warn!(
+                    "[FRIENDTEST] ❌ 好友列表为空或未包含 bevy2char: {:?}",
+                    friend.friends
+                );
             }
             *stage = 9;
         }
@@ -588,10 +613,7 @@ pub(crate) fn auto_guild_invite_test(
                 return;
             }
             if guild.members.iter().any(|m| m.name == "bevy2char") {
-                tracing::info!(
-                    "[GUILDINV] ✅ 成员加入: {} 人",
-                    guild.members.len()
-                );
+                tracing::info!("[GUILDINV] ✅ 成员加入: {} 人", guild.members.len());
             } else {
                 tracing::warn!("[GUILDINV] ❌ 成员未加入: {:?}", guild.members);
             }
@@ -633,10 +655,7 @@ pub(crate) fn auto_guild_accept(
                 return;
             }
             if guild.in_guild {
-                tracing::info!(
-                    "[GUILDACCEPT] ✅ 已加入行会: {}",
-                    guild.name
-                );
+                tracing::info!("[GUILDACCEPT] ✅ 已加入行会: {}", guild.name);
             } else {
                 tracing::warn!("[GUILDACCEPT] ❌ 未加入行会");
             }
@@ -733,10 +752,12 @@ pub(crate) fn auto_guild_gold_test(
                 return;
             }
             if guild.in_guild && guild.name == "TestGuild4" {
-                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
-                    change_type: 0,
-                    amount: 100,
-                });
+                net.send_packet(
+                    &mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                        change_type: 0,
+                        amount: 100,
+                    },
+                );
                 tracing::info!("[GUILDGOLD] 存入 100 金币");
                 *stage = 2;
                 *t = 0.0;
@@ -748,10 +769,12 @@ pub(crate) fn auto_guild_gold_test(
             }
             if guild.gold >= 100 {
                 tracing::info!("[GUILDGOLD] ✅ 仓库金币: {}", guild.gold);
-                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
-                    change_type: 1,
-                    amount: 50,
-                });
+                net.send_packet(
+                    &mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                        change_type: 1,
+                        amount: 50,
+                    },
+                );
                 tracing::info!("[GUILDGOLD] 取出 50 金币");
                 *stage = 3;
                 *t = 0.0;
@@ -829,7 +852,10 @@ pub(crate) fn auto_guild_item_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -892,10 +918,7 @@ pub(crate) fn auto_guild_item_test(
                 return;
             }
             if guild.storage_received {
-                tracing::info!(
-                    "[GUILDITEM] ✅ 仓库列表 {} 格",
-                    guild.storage_items.len()
-                );
+                tracing::info!("[GUILDITEM] ✅ 仓库列表 {} 格", guild.storage_items.len());
             } else {
                 tracing::warn!("[GUILDITEM] ❌ 仓库列表未收到");
                 *stage = 9;
@@ -903,13 +926,10 @@ pub(crate) fn auto_guild_item_test(
             }
             // 选第一个背包物品存入
             let first = inv_q.single().ok().and_then(|inv| {
-                inv.items
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, s)| {
-                        s.as_ref()
-                            .map(|it| (i, it.unique_id, it.count as u32, it.name.clone()))
-                    })
+                inv.items.iter().enumerate().find_map(|(i, s)| {
+                    s.as_ref()
+                        .map(|it| (i, it.unique_id, it.count as u32, it.name.clone()))
+                })
             });
             match first {
                 Some((i, item_uid, count, item_name)) => {
@@ -968,12 +988,21 @@ pub(crate) fn auto_guild_item_test(
             if *t < 3.0 {
                 return;
             }
-            let slot0_empty = guild.storage_items.get(0).and_then(|s| s.as_ref()).is_none();
+            let slot0_empty = guild
+                .storage_items
+                .get(0)
+                .and_then(|s| s.as_ref())
+                .is_none();
             let uid_back = match *deposited_uid {
                 Some(uid) => inv_q
                     .single()
                     .ok()
-                    .map(|inv| inv.items.iter().filter_map(|s| s.as_ref()).any(|it| it.unique_id == uid))
+                    .map(|inv| {
+                        inv.items
+                            .iter()
+                            .filter_map(|s| s.as_ref())
+                            .any(|it| it.unique_id == uid)
+                    })
                     .unwrap_or(false),
                 None => false,
             };
@@ -1146,7 +1175,10 @@ pub(crate) fn auto_market_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     market: Res<client_bevy::game::dialogs::market::MarketState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -1154,7 +1186,10 @@ pub(crate) fn auto_market_test(
 ) {
     // 第一个背包物品 (slot, uid, name)；实体缺失/空背包 → None（同原空背包）
     fn first_inv_item(
-        inv_q: &Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+        inv_q: &Query<
+            &client_bevy::game::player_state::Inventory,
+            With<client_bevy::actor::LocalPlayer>,
+        >,
     ) -> Option<(usize, u64, String)> {
         inv_q.single().ok().and_then(|inv| {
             inv.items
@@ -1226,11 +1261,7 @@ pub(crate) fn auto_market_test(
                         price: 600,
                         panel_type: mir2_shared::enums::MarketPanelType::Consign,
                     });
-                    tracing::info!(
-                        "[MARKETTEST] 寄售第二件 [{}] uid={} 价格600",
-                        name,
-                        uid
-                    );
+                    tracing::info!("[MARKETTEST] 寄售第二件 [{}] uid={} 价格600", name, uid);
                     consigned.push(uid as u32);
                     *stage = 3;
                     *t = 0.0;
@@ -1268,7 +1299,11 @@ pub(crate) fn auto_market_test(
                         mode: 0,
                         auction_id: it.auction_id as u64,
                     });
-                    tracing::info!("[MARKETTEST] 取回商品 {} uid={}", it.auction_id, it.unique_id);
+                    tracing::info!(
+                        "[MARKETTEST] 取回商品 {} uid={}",
+                        it.auction_id,
+                        it.unique_id
+                    );
                     *stage = 5;
                     *t = 0.0;
                 }
@@ -1324,7 +1359,10 @@ pub(crate) fn auto_market_buy(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     market: Res<client_bevy::game::dialogs::market::MarketState>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -1402,7 +1440,12 @@ pub(crate) fn auto_market_buy(
             let has = inv_q
                 .single()
                 .ok()
-                .map(|inv| inv.items.iter().filter_map(|s| s.as_ref()).any(|it| it.item_index == 853))
+                .map(|inv| {
+                    inv.items
+                        .iter()
+                        .filter_map(|s| s.as_ref())
+                        .any(|it| it.item_index == 853)
+                })
                 .unwrap_or(false);
             if has {
                 tracing::info!("[MARKETBUY] ✅ 购买的物品已进入背包");
@@ -1505,10 +1548,7 @@ pub(crate) fn auto_gameshop_test(
             if *t < 3.0 {
                 return;
             }
-            tracing::info!(
-                "[SHOPTEST] ✅ 完成（购买 #{}）",
-                bought_item.unwrap_or(-1)
-            );
+            tracing::info!("[SHOPTEST] ✅ 完成（购买 #{}）", bought_item.unwrap_or(-1));
             *stage = 9;
         }
         _ => {}
@@ -1551,15 +1591,8 @@ pub(crate) fn auto_territory_test(
                 return;
             }
             if !territory.rows.is_empty() {
-                tracing::info!(
-                    "[TERRTEST] ✅ 领地列表 {} 个",
-                    territory.rows.len()
-                );
-                let free = territory
-                    .rows
-                    .iter()
-                    .find(|r| r.owner.is_empty())
-                    .cloned();
+                tracing::info!("[TERRTEST] ✅ 领地列表 {} 个", territory.rows.len());
+                let free = territory.rows.iter().find(|r| r.owner.is_empty()).cloned();
                 match free {
                     Some(r) => {
                         *bought_id = Some(r.id);
@@ -1595,20 +1628,12 @@ pub(crate) fn auto_territory_test(
             let row = territory.rows.iter().find(|r| r.id == id);
             match row {
                 Some(r) if r.owner == "TestGuild4" => {
-                    tracing::info!(
-                        "[TERRTEST] ✅ 购买成功：领地 #{} 归属 {}",
-                        r.id,
-                        r.owner
-                    );
+                    tracing::info!("[TERRTEST] ✅ 购买成功：领地 #{} 归属 {}", r.id, r.owner);
                     *stage = 4;
                     *t = 0.0;
                 }
                 Some(r) => {
-                    tracing::warn!(
-                        "[TERRTEST] ❌ 领地 #{} 归属异常: {}",
-                        r.id,
-                        r.owner
-                    );
+                    tracing::warn!("[TERRTEST] ❌ 领地 #{} 归属异常: {}", r.id, r.owner);
                     *stage = 9;
                 }
                 None => {
@@ -2079,7 +2104,11 @@ pub(crate) fn auto_guild_storage_realtime_test(
                 return;
             }
             let gold_ok = guild.gold == 500;
-            let item_ok = guild.storage_items.get(0).and_then(|s| s.as_ref()).is_some();
+            let item_ok = guild
+                .storage_items
+                .get(0)
+                .and_then(|s| s.as_ref())
+                .is_some();
             tracing::info!("[GSTORE] 金币={} 仓库槽0={}", guild.gold, item_ok);
             if gold_ok && item_ok {
                 tracing::info!("[GSTORE] ✅ PASS 行会仓库实时同步");
@@ -2091,5 +2120,3 @@ pub(crate) fn auto_guild_storage_realtime_test(
         _ => {}
     }
 }
-
-

@@ -1,9 +1,9 @@
 // 网络包解码分派（#72 拆分）
 
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
 use super::*;
 use crate::ui::login::AuthFeedback;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 // #2630：显式引入本模块构造的 UI 载荷类型（原经 super::* 隐私链隐式传入，见 handle_guild 注）。
 use crate::game::dialogs::mail::{MailDetail, MailEntry};
 
@@ -16,18 +16,19 @@ mod handle_login;
 mod handle_player;
 mod handle_world;
 
-use handle_login::handle_login;
-use handle_player::handle_player;
-use handle_world::handle_world;
 use handle_guild::handle_guild;
+use handle_login::handle_login;
 use handle_npc_items::handle_npc_items;
+use handle_player::handle_player;
 use handle_progress::handle_progress;
 use handle_social::handle_social;
+use handle_world::handle_world;
 
 // 网络包解码分派（#72 拆分）：handle_packet 调度器按 opcode 分发到类别处理函数。
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn handle_packet(    net: &mut NetConnection,
+pub(crate) fn handle_packet(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -39,7 +40,8 @@ pub(crate) fn handle_packet(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) {
+    payload: &[u8],
+) {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -47,25 +49,109 @@ pub(crate) fn handle_packet(    net: &mut NetConnection,
         return;
     };
     let opcode = header.opcode;
-    if handle_login(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_login(
+        net,
+        session,
+        auth,
+        game_data,
+        net_objects,
+        net_removals,
+        motions,
+        combat_evt,
+        effects,
+        server_events,
+        control,
+        next,
+        payload,
+    ) {
         return;
     }
-    if handle_world(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_world(
+        net,
+        session,
+        auth,
+        game_data,
+        net_objects,
+        net_removals,
+        motions,
+        combat_evt,
+        effects,
+        server_events,
+        control,
+        next,
+        payload,
+    ) {
         return;
     }
-    if handle_player(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_player(
+        net,
+        session,
+        auth,
+        game_data,
+        net_objects,
+        net_removals,
+        motions,
+        combat_evt,
+        effects,
+        server_events,
+        control,
+        next,
+        payload,
+    ) {
         return;
     }
-    if handle_npc_items(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_npc_items(
+        net,
+        session,
+        auth,
+        game_data,
+        net_objects,
+        net_removals,
+        motions,
+        combat_evt,
+        effects,
+        server_events,
+        control,
+        next,
+        payload,
+    ) {
         return;
     }
-    if handle_guild(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_guild(
+        net,
+        session,
+        auth,
+        game_data,
+        net_objects,
+        net_removals,
+        motions,
+        combat_evt,
+        effects,
+        server_events,
+        control,
+        next,
+        payload,
+    ) {
         return;
     }
     if handle_progress(server_events, payload) {
         return;
     }
-    if handle_social(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_social(
+        net,
+        session,
+        auth,
+        game_data,
+        net_objects,
+        net_removals,
+        motions,
+        combat_evt,
+        effects,
+        server_events,
+        control,
+        next,
+        payload,
+    ) {
         return;
     }
     tracing::debug!("未处理服务器包 opcode {:04X}", opcode);
@@ -88,16 +174,32 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         shape: item.info.as_ref().map(|i| i.shape).unwrap_or(0),
         current_dura: item.current_dura,
         max_dura: item.max_dura,
-        slots: item.slots.iter().map(|s| s.as_ref().map(to_inv_item)).collect(),
+        slots: item
+            .slots
+            .iter()
+            .map(|s| s.as_ref().map(to_inv_item))
+            .collect(),
         stats: item
             .info
             .as_ref()
             .map(|i| i.stats.iter().map(|(s, v)| (s as u8, v)).collect())
             .unwrap_or_default(),
-        required_type: item.info.as_ref().map(|i| i.required_type as u8).unwrap_or(0),
+        required_type: item
+            .info
+            .as_ref()
+            .map(|i| i.required_type as u8)
+            .unwrap_or(0),
         required_amount: item.info.as_ref().map(|i| i.required_amount).unwrap_or(0),
-        required_class: item.info.as_ref().map(|i| i.required_class.bits()).unwrap_or(0),
-        required_gender: item.info.as_ref().map(|i| i.required_gender.bits()).unwrap_or(0),
+        required_class: item
+            .info
+            .as_ref()
+            .map(|i| i.required_class.bits())
+            .unwrap_or(0),
+        required_gender: item
+            .info
+            .as_ref()
+            .map(|i| i.required_gender.bits())
+            .unwrap_or(0),
         soul_bound_id: item.soul_bound_id,
         weight: item.info.as_ref().map(|i| i.weight as u16).unwrap_or(0),
         price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
@@ -109,12 +211,10 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
 /// - 全文包：mail_id, sender, subject, body, timestamp, read, collected, gold, item_count, items...
 /// 先尝试全文格式，失败再按条目格式（条目包按全文解析时 timestamp 首字节必然导致 7-bit 长度越界）
 fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)> {
-    use mir2_shared::binary::read_dotnet_string;
     use byteorder::{LittleEndian, ReadBytesExt};
+    use mir2_shared::binary::read_dotnet_string;
 
-    fn parse_content(
-        payload: &[u8],
-    ) -> Option<(MailEntry, Option<MailDetail>)> {
+    fn parse_content(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)> {
         let mut cur = std::io::Cursor::new(payload);
         let mail_id = cur.read_u64::<LittleEndian>().ok()?;
         let sender = read_dotnet_string(&mut cur).ok()?;
@@ -187,9 +287,3 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
 
     parse_content(payload).or_else(|| parse_entry(payload))
 }
-
-
-
-
-
-

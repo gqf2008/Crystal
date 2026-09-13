@@ -139,7 +139,6 @@ pub fn buff_page_count(catalog_len: usize) -> usize {
 #[derive(Component)]
 pub struct GuildWidget;
 
-
 /// 创建行会输入框（TextInputState id 0）
 #[derive(Component)]
 pub struct GuildNameField;
@@ -150,7 +149,6 @@ pub struct GuildCreateBtn;
 /// 邀请玩家输入框（TextInput id 1）
 #[derive(Component)]
 pub struct GuildInviteField;
-
 
 /// #1362：职务改名下拉（C# RanksSelectBox）
 #[derive(Component)]
@@ -197,9 +195,6 @@ pub struct GuildBuffUp;
 
 #[derive(Component)]
 pub struct GuildBuffDown;
-
-
-
 
 #[derive(Component)]
 pub struct GuildItemDeposit;
@@ -352,8 +347,17 @@ fn spawn_guild(
             .insert(GuildLine(0));
         // 成员列表（10 行，1..=10）@(18,60+20i)
         for i in 1..=10usize {
-            spawn_label(p, &cjk, "", 18.0, 60.0 + (i - 1) as f32 * 20.0, 12.0, Color::WHITE, 8)
-                .insert(GuildLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                60.0 + (i - 1) as f32 * 20.0,
+                12.0,
+                Color::WHITE,
+                8,
+            )
+            .insert(GuildLine(i));
         }
         // #1348：显示离线成员切换（C# MembersShowOfflineButton）@(265,310) 70x20
         spawn_container(p, 265.0, 310.0, 70.0, 20.0, 8)
@@ -463,15 +467,27 @@ fn spawn_guild(
             });
         // #1395 子批2：权限位（C# RanksOptionsButtons[8]：改/招/踢/存/取/盟/告/益）
         spawn_label(p, &cjk, "权限", 18.0, 392.0, 11.0, Color::WHITE, 8);
-        for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"].iter().enumerate() {
+        for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"]
+            .iter()
+            .enumerate()
+        {
             spawn_container(p, 50.0 + i as f32 * 30.0, 392.0, 24.0, 16.0, 8)
                 .insert((Button, GuildRankPermBtn(i as u8)))
                 .with_children(|b| {
                     spawn_label(b, &font, label, 0.0, 0.0, 11.0, Color::WHITE, 1);
                 });
         }
-        spawn_label(p, &cjk, "权限:00000000", 18.0, 412.0, 10.0, Color::srgb(0.8, 0.9, 0.6), 8)
-            .insert(GuildRankPermText);
+        spawn_label(
+            p,
+            &cjk,
+            "权限:00000000",
+            18.0,
+            412.0,
+            10.0,
+            Color::srgb(0.8, 0.9, 0.6),
+            8,
+        )
+        .insert(GuildRankPermText);
         spawn_container(p, 160.0, 412.0, 100.0, 18.0, 8)
             .insert((Button, GuildPromoteBtn))
             .with_children(|b| {
@@ -640,11 +656,29 @@ fn spawn_guild(
 
         // 仓库物品（M32）：8 行列表 + 页签 + 存入/取出/翻页 @(18,515+18i)
         for i in 0..8usize {
-            spawn_label(p, &cjk, "", 18.0, 515.0 + i as f32 * 18.0, 12.0, Color::WHITE, 8)
-                .insert(GuildLine(11 + i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                515.0 + i as f32 * 18.0,
+                12.0,
+                Color::WHITE,
+                8,
+            )
+            .insert(GuildLine(11 + i));
         }
-        spawn_label(p, &cjk, "", 18.0, 665.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
-            .insert(GuildLine(19));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            18.0,
+            665.0,
+            12.0,
+            Color::srgb(1.0, 0.9, 0.5),
+            8,
+        )
+        .insert(GuildLine(19));
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
@@ -680,16 +714,14 @@ fn spawn_guild(
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         let popup = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
-        commands
-            .entity(popup)
-            .insert((
-                DialogRoot(DialogKind::Guild),
-                // 独立弹窗不随 Guild 开关门控；挂 DialogRoot 仅为 OnExit 时随行会窗口一起清理
-                // （否则重进 Game 会重复生成弹窗）
-                AlwaysVisible,
-                GuildInviteWidget,
-                Visibility::Hidden,
-            ));
+        commands.entity(popup).insert((
+            DialogRoot(DialogKind::Guild),
+            // 独立弹窗不随 Guild 开关门控；挂 DialogRoot 仅为 OnExit 时随行会窗口一起清理
+            // （否则重进 Game 会重复生成弹窗）
+            AlwaysVisible,
+            GuildInviteWidget,
+            Visibility::Hidden,
+        ));
         commands.entity(popup).with_children(|p| {
             spawn_label(p, &cjk, "", 35.0, 40.0, 12.0, Color::WHITE, 9).insert(GuildInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
@@ -697,16 +729,14 @@ fn spawn_guild(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
             ) {
-                spawn_icon_button(p, n, h, pr, 240.0, 150.0, 76.0, 25.0, 10)
-                    .insert(GuildInviteYes);
+                spawn_icon_button(p, n, h, pr, 240.0, 150.0, 76.0, 25.0, 10).insert(GuildInviteYes);
             }
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
-                spawn_icon_button(p, n, h, pr, 340.0, 150.0, 76.0, 25.0, 10)
-                    .insert(GuildInviteNo);
+                spawn_icon_button(p, n, h, pr, 340.0, 150.0, 76.0, 25.0, 10).insert(GuildInviteNo);
             }
         });
     }
@@ -723,17 +753,16 @@ fn guild_ui_system(
     btns: Query<(Entity, &Interaction, &GuildBtn)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut widgets: Query<(&mut Visibility, Option<&mut UiScrollList>), (With<GuildWidget>, Without<GuildCreateBtn>)>,
+    mut widgets: Query<
+        (&mut Visibility, Option<&mut UiScrollList>),
+        (With<GuildWidget>, Without<GuildCreateBtn>),
+    >,
     mut lines: Query<(&mut Text, &mut TextColor, &GuildLine)>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
     panel_origin: Query<&Node, With<GuildWidget>>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -808,12 +837,14 @@ fn guild_ui_system(
                     let visible = guild.visible_member_indices();
                     if let Some(&mi) = visible.get(idx) {
                         if let Some(m) = guild.members.get(mi) {
-                            net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
-                                change_type: 1,
-                                rank_index: 0,
-                                name: m.name.clone(),
-                                rank_name: String::new(),
-                            });
+                            net.send_packet(
+                                &mir2_shared::packets::client::guild::EditGuildMember {
+                                    change_type: 1,
+                                    rank_index: 0,
+                                    name: m.name.clone(),
+                                    rank_name: String::new(),
+                                },
+                            );
                             tracing::info!("🏰 踢出行会成员: {}", m.name);
                             guild.selected_member = None;
                         }
@@ -845,10 +876,12 @@ fn guild_ui_system(
                         .parse::<u32>()
                         .unwrap_or(0);
                     if amount > 0 {
-                        net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
-                            change_type: 0,
-                            amount,
-                        });
+                        net.send_packet(
+                            &mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                                change_type: 0,
+                                amount,
+                            },
+                        );
                         tracing::info!("🏰 存入行会仓库 {} 金币", amount);
                         input.texts[3].clear();
                         input.active = None;
@@ -866,10 +899,12 @@ fn guild_ui_system(
                         .parse::<u32>()
                         .unwrap_or(0);
                     if amount > 0 {
-                        net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
-                            change_type: 1,
-                            amount,
-                        });
+                        net.send_packet(
+                            &mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                                change_type: 1,
+                                amount,
+                            },
+                        );
                         tracing::info!("🏰 取出行会仓库 {} 金币", amount);
                         input.texts[3].clear();
                         input.active = None;
@@ -902,10 +937,7 @@ fn guild_ui_system(
                     } else {
                         format!(
                             "{}（{}）金币:{} 公告:{}",
-                            guild.name,
-                            guild.leader,
-                            guild.gold,
-                            notice
+                            guild.name, guild.leader, guild.gold, notice
                         )
                     }
                 } else {
@@ -1082,11 +1114,7 @@ fn guild_buff_system(
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<GuildWidget>>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -1156,11 +1184,7 @@ fn guild_rank_rename_system(
     save_btn: Query<(Entity, &Interaction), With<GuildRankSaveBtn>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -1208,11 +1232,7 @@ fn guild_rank_manage_system(
     mut perm_text: Query<&mut Text, With<GuildRankPermText>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -1256,7 +1276,11 @@ fn guild_rank_manage_system(
             net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
                 change_type: 5,
                 rank_index: idx as u8,
-                name: if on { "true".to_string() } else { "false".to_string() },
+                name: if on {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                },
                 rank_name: bit.to_string(),
             });
             tracing::info!("🏰 职务 #{} 权限位 {} -> {}", idx, bit, on);
@@ -1286,11 +1310,7 @@ fn guild_show_offline_system(
     mut texts: Query<&mut Text, With<GuildShowOfflineText>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -1328,11 +1348,7 @@ fn guild_storage_system(
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -1365,7 +1381,10 @@ fn guild_storage_system(
     for (e, inter) in &deposit_btn {
         if edge(e, inter, &mut prev_inter) && guild.in_guild {
             // 选中背包物品 → 存入（原版 C#：选中物品 → GuildStorageItemChange type=0）
-            let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+            let items = inv_q
+                .single()
+                .map(|inv| inv.items.as_slice())
+                .unwrap_or(&[]);
             let idx = inv_click
                 .selected
                 .filter(|i| items.get(*i).and_then(|s| s.as_ref()).is_some())
@@ -1419,11 +1438,7 @@ fn guild_invite_system(
     mut texts: Query<&mut Text, With<GuildInviteText>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut HashMap<Entity, Interaction>,
-    ) -> bool {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
@@ -1456,14 +1471,11 @@ fn guild_invite_system(
         }
     }
     if let Some(a) = accept {
-        net.send_packet(&mir2_shared::packets::client::guild::GuildInvite {
-            accept_invite: a,
-        });
+        net.send_packet(&mir2_shared::packets::client::guild::GuildInvite { accept_invite: a });
         tracing::info!("🏰 行会邀请回复: accept={}", a);
         guild.invite = None;
     }
 }
-
 
 /// 消费服务端行会事件（网络层只广播 ServerEvent）
 fn guild_server_events(
@@ -1485,7 +1497,14 @@ fn guild_server_events(
                     guild.storage_received = false;
                 }
             }
-            ServerEvent::GuildData { name, leader, rank_defs, notice, members, gold } => {
+            ServerEvent::GuildData {
+                name,
+                leader,
+                rank_defs,
+                notice,
+                members,
+                gold,
+            } => {
                 guild.in_guild = true;
                 guild.name = name.clone();
                 guild.leader = leader.clone();
@@ -1507,7 +1526,11 @@ fn guild_server_events(
                 }
                 tracing::info!(
                     "💰 行会仓库金币 {} {}（by {}）",
-                    if *change_type == 0 { "存入" } else { "取出" },
+                    if *change_type == 0 {
+                        "存入"
+                    } else {
+                        "取出"
+                    },
                     amount,
                     name
                 );
@@ -1563,7 +1586,12 @@ fn guild_server_events(
                     }
                     _ => {}
                 }
-                tracing::info!("📦 行会仓库物品变化 type={} to={} from={}", change_type, to, from);
+                tracing::info!(
+                    "📦 行会仓库物品变化 type={} to={} from={}",
+                    change_type,
+                    to,
+                    from
+                );
             }
             ServerEvent::GuildStorage { items } => {
                 guild.storage_items = items
@@ -1591,7 +1619,13 @@ fn guild_server_events(
             ServerEvent::GuildNotice { notice } => {
                 guild.notice = notice.clone();
             }
-            ServerEvent::GuildMemberChanged { name, rank, online, joined, removed } => {
+            ServerEvent::GuildMemberChanged {
+                name,
+                rank,
+                online,
+                joined,
+                removed,
+            } => {
                 if *removed {
                     guild.members.retain(|m| m.name != *name);
                 } else if *joined {
@@ -1645,7 +1679,10 @@ mod tests {
         // 初始扩展根居中 (217,14)：首行 y=74，x 起 235（=217+18）
         let (rx, ry, rw, rh) = guild_member_row_rect(1, GUILD_X, GUILD_Y);
         assert_eq!((rx, ry, rw, rh), (235.0, 74.0, 302.0, 18.0));
-        assert_eq!(guild_member_row_rect(10, GUILD_X, GUILD_Y).1, 74.0 + 9.0 * 20.0);
+        assert_eq!(
+            guild_member_row_rect(10, GUILD_X, GUILD_Y).1,
+            74.0 + 9.0 * 20.0
+        );
         // 拖动到 (330,100)：同一相对位置命中跟随（原始坐标 + delta(50,20)）
         let (rx2, ry2, _, _) = guild_member_row_rect(1, 330.0, 100.0);
         assert_eq!((rx2, ry2), (348.0, 160.0));
@@ -1668,7 +1705,6 @@ mod tests {
         let (rx2, ry2, _, _) = guild_buff_row_rect(1, 330.0, 100.0);
         assert_eq!((rx2, ry2), (348.0, 160.0));
     }
-
 
     use super::*;
 
@@ -1737,6 +1773,9 @@ mod tests {
     }
     #[test]
     fn guild_origin_is_centered() {
-        assert_eq!(crate::game::dialogs::center_origin(GUILD_W, GUILD_H), (GUILD_X, GUILD_Y));
+        assert_eq!(
+            crate::game::dialogs::center_origin(GUILD_W, GUILD_H),
+            (GUILD_X, GUILD_Y)
+        );
     }
 }

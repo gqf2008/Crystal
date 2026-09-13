@@ -133,11 +133,11 @@ pub struct RelationshipPlugin;
 impl Plugin for RelationshipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RelationshipState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             relationship_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_relationship);
+        app.add_systems(OnEnter(AppState::Game), spawn_relationship);
         app.add_systems(OnExit(AppState::Game), cleanup_relationship);
         app.add_systems(
             Update,
@@ -191,13 +191,11 @@ fn spawn_relationship(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 260.0, 3.0, 20.0, 20.0, 10)
-                .insert(RelationshipClose);
+            spawn_icon_button(p, n, h, pr, 260.0, 3.0, 20.0, 20.0, 10).insert(RelationshipClose);
         }
         // C# 信息行 4 @(30,40/65/90/115)
         for (i, y) in [40.0, 65.0, 90.0, 115.0].into_iter().enumerate() {
-            spawn_label(p, &cjk, "", 30.0, y, 12.0, Color::WHITE, 9)
-                .insert(RelationshipLine(i));
+            spawn_label(p, &cjk, "", 30.0, y, 12.0, Color::WHITE, 9).insert(RelationshipLine(i));
         }
         // 目标名输入框（TextInput id 13）@(30,140)，保留简化版求婚目标输入。
         spawn_container(p, 30.0, 140.0, 160.0, 20.0, 10)
@@ -229,7 +227,13 @@ fn spawn_relationship(
         // C# 五个操作按钮：切换/求婚/离婚/邮件/私聊 @ x=50/85/120/155/190, y=164。
         // #2775：Hint 取 C# `RelationshipDialog.cs:59/72/94/116/138`（精灵号与坐标一一对应）
         let buttons = [
-            (50.0, 610usize, 611usize, 612usize, RelationshipAction::Allow),
+            (
+                50.0,
+                610usize,
+                611usize,
+                612usize,
+                RelationshipAction::Allow,
+            ),
             (85.0, 600, 601, 602, RelationshipAction::Propose),
             (120.0, 616, 617, 618, RelationshipAction::Divorce),
             (155.0, 437, 438, 439, RelationshipAction::Mail),
@@ -326,7 +330,11 @@ fn relationship_ui_system(
     }
     let open = mgr.is_open(DialogKind::Relationship);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -341,7 +349,10 @@ fn relationship_ui_system(
             0 => "关系（婚姻）".to_string(),
             1 => {
                 if state.married {
-                    format!("婚姻状态: 已婚（{}，{} 天）", state.lover_name, state.married_days)
+                    format!(
+                        "婚姻状态: 已婚（{}，{} 天）",
+                        state.lover_name, state.married_days
+                    )
                 } else {
                     "婚姻状态: 未婚".to_string()
                 }
@@ -349,7 +360,14 @@ fn relationship_ui_system(
             2 => state.message.clone(),
             3 => {
                 if state.married {
-                    format!("配偶位置: {}", if state.map_name.is_empty() { "未知" } else { state.map_name.as_str() })
+                    format!(
+                        "配偶位置: {}",
+                        if state.map_name.is_empty() {
+                            "未知"
+                        } else {
+                            state.map_name.as_str()
+                        }
+                    )
                 } else {
                     "输入目标名 → 求婚；已婚可离婚".to_string()
                 }
@@ -456,14 +474,11 @@ fn marriage_invite_system(
         }
     }
     if let Some(a) = accept {
-        net.send_packet(&mir2_shared::packets::client::misc::MarriageReply {
-            accept_invite: a,
-        });
+        net.send_packet(&mir2_shared::packets::client::misc::MarriageReply { accept_invite: a });
         tracing::info!("💍 婚姻邀请回复: accept={}", a);
         state.invite = None;
     }
 }
-
 
 /// 消费服务端婚姻/关系事件（网络层只广播 ServerEvent）
 fn relationship_server_events(
@@ -477,7 +492,12 @@ fn relationship_server_events(
                 relationship.invite = Some(name.clone());
                 relationship.message = format!("收到 {} 的求婚", name);
             }
-            ServerEvent::LoverUpdate { lover_name, date, map_name, married_days } => {
+            ServerEvent::LoverUpdate {
+                lover_name,
+                date,
+                map_name,
+                married_days,
+            } => {
                 relationship.lover_name = lover_name.clone();
                 relationship.date = *date;
                 relationship.map_name = map_name.clone();
@@ -523,6 +543,9 @@ mod tests {
 
     #[test]
     fn relationship_layout_matches_csharp() {
-        assert_eq!(crate::game::dialogs::center_origin(284.0, 194.0), (370.0, 287.0));
+        assert_eq!(
+            crate::game::dialogs::center_origin(284.0, 194.0),
+            (370.0, 287.0)
+        );
     }
 }

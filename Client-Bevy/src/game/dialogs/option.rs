@@ -65,22 +65,48 @@ impl Default for OptionState {
     }
 }
 
-
 impl OptionState {
     /// 从 INI 文本解析（C# InIReader；音量按 0-100 存储 ↔ 0.0-1.0）
     pub fn from_ini(content: &str) -> Self {
         let mut s = Self::default();
-        s.sound_volume = crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Volume", s.sound_volume);
-        s.music_volume = crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Music", s.music_volume);
-        s.skill_mode_ctrl = crate::game::dialogs::settings_file::ini_bool(content, "Game", "SkillMode", s.skill_mode_ctrl);
-        s.skill_bar = crate::game::dialogs::settings_file::ini_bool(content, "Game", "SkillBar", s.skill_bar);
-        s.effect = crate::game::dialogs::settings_file::ini_bool(content, "Game", "Effect", s.effect);
-        s.drop_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "DropView", s.drop_view);
-        s.name_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "NameView", s.name_view);
-        s.hp_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "HPMPView", s.hp_view);
-        s.allow_observe = crate::game::dialogs::settings_file::ini_bool(content, "Game", "AllowObserve", s.allow_observe);
-        s.new_move = crate::game::dialogs::settings_file::ini_bool(content, "Game", "NewMove", s.new_move);
-        s.mode_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "ModeView", s.mode_view);
+        s.sound_volume = crate::game::dialogs::settings_file::ini_percent(
+            content,
+            "Sound",
+            "Volume",
+            s.sound_volume,
+        );
+        s.music_volume = crate::game::dialogs::settings_file::ini_percent(
+            content,
+            "Sound",
+            "Music",
+            s.music_volume,
+        );
+        s.skill_mode_ctrl = crate::game::dialogs::settings_file::ini_bool(
+            content,
+            "Game",
+            "SkillMode",
+            s.skill_mode_ctrl,
+        );
+        s.skill_bar =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "SkillBar", s.skill_bar);
+        s.effect =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "Effect", s.effect);
+        s.drop_view =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "DropView", s.drop_view);
+        s.name_view =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "NameView", s.name_view);
+        s.hp_view =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "HPMPView", s.hp_view);
+        s.allow_observe = crate::game::dialogs::settings_file::ini_bool(
+            content,
+            "Game",
+            "AllowObserve",
+            s.allow_observe,
+        );
+        s.new_move =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "NewMove", s.new_move);
+        s.mode_view =
+            crate::game::dialogs::settings_file::ini_bool(content, "Game", "ModeView", s.mode_view);
         s
     }
 
@@ -137,8 +163,6 @@ impl OptionState {
         tracing::debug!("⚙️ 设置已保存到 Mir2Config.ini");
     }
 }
-
-
 
 /// 设置行类型（与 C# 各按钮组一一对应）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -252,7 +276,10 @@ fn option_view_system(
     mut hp_bars: Query<
         &mut Visibility,
         (
-            Or<(With<crate::game::combat::HpBarBg>, With<crate::game::combat::HpBarFill>)>,
+            Or<(
+                With<crate::game::combat::HpBarBg>,
+                With<crate::game::combat::HpBarFill>,
+            )>,
             Without<crate::game::skills::SkillBarRoot>,
             Without<crate::actor::GroundItem>,
             Without<crate::actor::ActorNameLabel>,
@@ -264,7 +291,13 @@ fn option_view_system(
         (opt.sound_volume * 100.0).round() as u32,
         std::sync::atomic::Ordering::Relaxed,
     );
-    let target = |show: bool| if show { Visibility::Visible } else { Visibility::Hidden };
+    let target = |show: bool| {
+        if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        }
+    };
     // C# GameScene.DialogProcess：SkillBar 开关显隐整个 SkillBarDialog（根实体隐藏，子控件随层级联动）
     let sb = target(view_should_show(OptionViewKind::SkillBar, &opt));
     for mut vis in &mut skill_slots {
@@ -339,7 +372,9 @@ fn spawn_option(
         return;
     };
     let panel = spawn_panel(&mut commands, bg, px, py, pw, ph, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Settings), OptionWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Settings), OptionWidget));
 
     commands.entity(panel).with_children(|p| {
         // 关闭按钮（Prguse2[360/361/362] @(pw-26,5)）
@@ -352,22 +387,100 @@ fn spawn_option(
         }
         // 8 组开/关按钮（On at (159,y)，Off at (201,y)，36x17）
         let rows: [(OptionToggleKind, LibraryName, f32, [usize; 3], [usize; 3]); 8] = [
-            (OptionToggleKind::SkillMode, LibraryName::Prguse2, 68.0, [452, 450, 451], [453, 455, 454]),
-            (OptionToggleKind::SkillBar, LibraryName::Prguse2, 93.0, [458, 456, 457], [459, 461, 460]),
-            (OptionToggleKind::Effect, LibraryName::Prguse2, 118.0, [458, 456, 457], [459, 461, 460]),
-            (OptionToggleKind::DropView, LibraryName::Prguse2, 143.0, [458, 456, 457], [459, 461, 460]),
-            (OptionToggleKind::NameView, LibraryName::Prguse2, 168.0, [458, 456, 457], [459, 461, 460]),
-            (OptionToggleKind::HpView, LibraryName::Prguse2, 193.0, [464, 462, 463], [465, 467, 466]),
-            (OptionToggleKind::Observe, LibraryName::Prguse2, 271.0, [458, 456, 457], [459, 461, 460]),
-            (OptionToggleKind::NewMove, LibraryName::Title, 296.0, [853, 851, 853], [848, 850, 850]),
+            (
+                OptionToggleKind::SkillMode,
+                LibraryName::Prguse2,
+                68.0,
+                [452, 450, 451],
+                [453, 455, 454],
+            ),
+            (
+                OptionToggleKind::SkillBar,
+                LibraryName::Prguse2,
+                93.0,
+                [458, 456, 457],
+                [459, 461, 460],
+            ),
+            (
+                OptionToggleKind::Effect,
+                LibraryName::Prguse2,
+                118.0,
+                [458, 456, 457],
+                [459, 461, 460],
+            ),
+            (
+                OptionToggleKind::DropView,
+                LibraryName::Prguse2,
+                143.0,
+                [458, 456, 457],
+                [459, 461, 460],
+            ),
+            (
+                OptionToggleKind::NameView,
+                LibraryName::Prguse2,
+                168.0,
+                [458, 456, 457],
+                [459, 461, 460],
+            ),
+            (
+                OptionToggleKind::HpView,
+                LibraryName::Prguse2,
+                193.0,
+                [464, 462, 463],
+                [465, 467, 466],
+            ),
+            (
+                OptionToggleKind::Observe,
+                LibraryName::Prguse2,
+                271.0,
+                [458, 456, 457],
+                [459, 461, 460],
+            ),
+            (
+                OptionToggleKind::NewMove,
+                LibraryName::Title,
+                296.0,
+                [853, 851, 853],
+                [848, 850, 850],
+            ),
         ];
         for (kind, lib, y, on_btn, off_btn) in rows {
             let (on, off) = load_frames(&mut libs, &mut images, lib, on_btn, off_btn);
             if let (Some(on), Some(off)) = (on, off) {
-                spawn_icon_button(p, on[0].clone(), on[1].clone(), on[2].clone(), 159.0, y, 36.0, 17.0, 10)
-                    .insert(OptionToggleBtn { kind, is_on: true, frames_on: on.clone(), frames_off: off.clone() });
-                spawn_icon_button(p, off[0].clone(), off[1].clone(), off[2].clone(), 201.0, y, 36.0, 17.0, 10)
-                    .insert(OptionToggleBtn { kind, is_on: false, frames_on: on, frames_off: off });
+                spawn_icon_button(
+                    p,
+                    on[0].clone(),
+                    on[1].clone(),
+                    on[2].clone(),
+                    159.0,
+                    y,
+                    36.0,
+                    17.0,
+                    10,
+                )
+                .insert(OptionToggleBtn {
+                    kind,
+                    is_on: true,
+                    frames_on: on.clone(),
+                    frames_off: off.clone(),
+                });
+                spawn_icon_button(
+                    p,
+                    off[0].clone(),
+                    off[1].clone(),
+                    off[2].clone(),
+                    201.0,
+                    y,
+                    36.0,
+                    17.0,
+                    10,
+                )
+                .insert(OptionToggleBtn {
+                    kind,
+                    is_on: false,
+                    frames_on: on,
+                    frames_off: off,
+                });
             }
         }
         // 音量滑条（Sound @(159,225)，Music @(159,251)；滑块 y=218/244）
@@ -391,12 +504,20 @@ fn load_frames(
         off[i] = load_lib_image(libs, images, lib, off_idx[i]);
     }
     let on = if on.iter().all(|h| h.is_some()) {
-        Some([on[0].clone().unwrap(), on[1].clone().unwrap(), on[2].clone().unwrap()])
+        Some([
+            on[0].clone().unwrap(),
+            on[1].clone().unwrap(),
+            on[2].clone().unwrap(),
+        ])
     } else {
         None
     };
     let off = if off.iter().all(|h| h.is_some()) {
-        Some([off[0].clone().unwrap(), off[1].clone().unwrap(), off[2].clone().unwrap()])
+        Some([
+            off[0].clone().unwrap(),
+            off[1].clone().unwrap(),
+            off[2].clone().unwrap(),
+        ])
     } else {
         None
     };
@@ -429,8 +550,7 @@ fn spawn_volume_bar(
             text: String::new(),
         })
         .with_children(|bc| {
-            spawn_image(bc, bar_tex, 0.0, 0.0, 0.0, 19.0, 11)
-                .insert(OptionVolumeFill(is_music));
+            spawn_image(bc, bar_tex, 0.0, 0.0, 0.0, 19.0, 11).insert(OptionVolumeFill(is_music));
         });
     spawn_container(p, bar_x, knob_y, 8.0, 22.0, 10)
         .insert((ImageNode::new(knob_tex), OptionVolumeKnob(is_music)));
@@ -455,12 +575,28 @@ fn option_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<OptionState>,
     close: Query<(Entity, &Interaction), With<OptionClose>>,
-    mut toggles: Query<(Entity, &mut ImageButton, &Interaction, &OptionToggleBtn), Without<OptionClose>>,
-    mut widgets: Query<&mut Visibility, (With<OptionWidget>, Without<OptionVolumeFill>, Without<OptionVolumeKnob>)>,
+    mut toggles: Query<
+        (Entity, &mut ImageButton, &Interaction, &OptionToggleBtn),
+        Without<OptionClose>,
+    >,
+    mut widgets: Query<
+        &mut Visibility,
+        (
+            With<OptionWidget>,
+            Without<OptionVolumeFill>,
+            Without<OptionVolumeKnob>,
+        ),
+    >,
     // B0001 互斥：fills/knobs 同写 Node——对称补 Without（Fill/Knob 实体互斥；
     // 再与下方只读 panel(Node) 互斥，写×读同样计入冲突）
-    mut fills: Query<(&mut Node, &OptionVolumeFill), (Without<OptionVolumeKnob>, Without<OptionWidget>)>,
-    mut knobs: Query<(&mut Node, &OptionVolumeKnob), (Without<OptionVolumeFill>, Without<OptionWidget>)>,
+    mut fills: Query<
+        (&mut Node, &OptionVolumeFill),
+        (Without<OptionVolumeKnob>, Without<OptionWidget>),
+    >,
+    mut knobs: Query<
+        (&mut Node, &OptionVolumeKnob),
+        (Without<OptionVolumeFill>, Without<OptionWidget>),
+    >,
     mut bars: Query<(&OptionBar, &mut crate::ui::tooltip::UiHint)>,
     panel: Query<&Node, With<OptionWidget>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -477,7 +613,11 @@ fn option_ui_system(
     }
     let open = mgr.is_open(DialogKind::Settings);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -501,7 +641,11 @@ fn option_ui_system(
                 OptionToggleKind::Observe => state.allow_observe = tg.is_on,
                 OptionToggleKind::NewMove => state.new_move = tg.is_on,
             }
-            tracing::info!("⚙️ 设置切换: {:?} -> {}", tg.kind, state_value(&state, tg.kind));
+            tracing::info!(
+                "⚙️ 设置切换: {:?} -> {}",
+                tg.kind,
+                state_value(&state, tg.kind)
+            );
             changed = true;
         }
         let sel = state_value(&state, tg.kind);
@@ -533,7 +677,9 @@ fn option_ui_system(
     // 音量滑条：点击设置音量（rect 为面板内相对坐标，命中前取面板原点——
     // 设置面板可拖动，生成期绝对坐标在拖后即成死区）
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let (ox, oy) = panel
         .single()
         .map(|n| crate::ui::theme::node_origin(n, OPTION_ORIGIN))
@@ -542,8 +688,10 @@ fn option_ui_system(
         let (rx, ry, rw, rh) = bar.rect;
         let (bx, by) = (ox + rx, oy + ry);
         if mouse.just_pressed(MouseButton::Left)
-            && cursor.x >= bx && cursor.x <= bx + rw
-            && cursor.y >= by && cursor.y <= by + rh
+            && cursor.x >= bx
+            && cursor.x <= bx + rw
+            && cursor.y >= by
+            && cursor.y <= by + rh
         {
             let vol = ((cursor.x - bx) / rw).clamp(0.0, 1.0);
             if bar.is_music {
@@ -655,10 +803,22 @@ mod tests {
     #[test]
     fn test_ini_helpers() {
         let content = "[Sound]\nVolume=50\nMusic=100\n";
-        assert_eq!(crate::game::dialogs::settings_file::ini_bool(content, "Sound", "Missing", true), true);
-        assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Volume", 0.0), 0.5);
-        assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Music", 0.0), 1.0);
-        assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Missing", 0.2), 0.2);
+        assert_eq!(
+            crate::game::dialogs::settings_file::ini_bool(content, "Sound", "Missing", true),
+            true
+        );
+        assert_eq!(
+            crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Volume", 0.0),
+            0.5
+        );
+        assert_eq!(
+            crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Music", 0.0),
+            1.0
+        );
+        assert_eq!(
+            crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Missing", 0.2),
+            0.2
+        );
     }
 }
 #[cfg(test)]
@@ -682,6 +842,3 @@ mod view_tests {
         assert!(!view_should_show(OptionViewKind::HpView, &opt));
     }
 }
-
-
-

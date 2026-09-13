@@ -19,8 +19,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::map_tile_anim::{
-    map_tile_anim_system, register_blend_material, spawn_anim_tile, spawn_blend_tile,
-    MapAnimClock, MapBlendMaterial, TileAnimKind, TileImageCache,
+    map_tile_anim_system, register_blend_material, spawn_anim_tile, spawn_blend_tile, MapAnimClock,
+    MapBlendMaterial, TileAnimKind, TileImageCache,
 };
 use crate::resources::libraries::Libraries;
 use crate::resources::map_reader::{resolve_map_path, CellInfo, MapReader};
@@ -31,10 +31,10 @@ mod camera;
 mod chunks;
 mod chunks_build;
 
-pub use chunks_build::{build_chunk_rgba, make_image};
 use camera::{camera_control, camera_follow_system, map_layer_toggle_system, spawn_camera};
 use chunks::{chunk_stream_system, spawn_front_chunk};
 use chunks_build::setup_world;
+pub use chunks_build::{build_chunk_rgba, make_image};
 
 /// 瓦片尺寸（与 macroquad 版一致）
 pub const TILE_WIDTH: f32 = 48.0;
@@ -73,7 +73,12 @@ pub struct MapLayerShow {
 }
 impl Default for MapLayerShow {
     fn default() -> Self {
-        Self { back: true, middle: true, front: true, anim: true }
+        Self {
+            back: true,
+            middle: true,
+            front: true,
+            anim: true,
+        }
     }
 }
 #[derive(Component)]
@@ -122,7 +127,14 @@ pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image
             let t = d.clamp(0.0, 1.0);
             // C# ColorBlend: 1.0, 210/255, 160/255, 70/255, 40/255, 0 at 0,.2,.4,.6,.8,1.0
             let stops = [0.0f32, 0.2, 0.4, 0.6, 0.8, 1.0];
-            let vals = [1.0f32, 210.0 / 255.0, 160.0 / 255.0, 70.0 / 255.0, 40.0 / 255.0, 0.0];
+            let vals = [
+                1.0f32,
+                210.0 / 255.0,
+                160.0 / 255.0,
+                70.0 / 255.0,
+                40.0 / 255.0,
+                0.0,
+            ];
             let mut a = 0.0f32;
             for i in 0..5 {
                 if t >= stops[i] && t <= stops[i + 1] {
@@ -271,7 +283,6 @@ impl Plugin for MapRenderPlugin {
             Update,
             chunk_stream_system.run_if(in_state(crate::scenes::AppState::Game)),
         );
-
     }
 }
 

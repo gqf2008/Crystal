@@ -142,7 +142,11 @@ pub fn tab_focus_system(
         })
         .map(|(e, b, _, _)| (e, b.rect))
         .collect();
-    cands.sort_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap_or(std::cmp::Ordering::Equal));
+    cands.sort_by(|a, b| {
+        a.1 .1
+            .partial_cmp(&b.1 .1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     if cands.is_empty() {
         nav.focused = None;
@@ -152,7 +156,9 @@ pub fn tab_focus_system(
     // Tab/Shift+Tab 移动焦点
     if keys.just_pressed(KeyCode::Tab) {
         let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-        let cur = nav.focused.and_then(|f| cands.iter().position(|(e, _)| *e == f));
+        let cur = nav
+            .focused
+            .and_then(|f| cands.iter().position(|(e, _)| *e == f));
         let next = match cur {
             Some(i) if shift => (i + cands.len() - 1) % cands.len(),
             Some(i) => (i + 1) % cands.len(),
@@ -190,7 +196,11 @@ pub fn tab_focus_system(
     };
     let (x, y, w, h) = b.rect;
     if nav.highlight.is_none() {
-        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
         let e = commands
             .spawn((
                 UiEntity,

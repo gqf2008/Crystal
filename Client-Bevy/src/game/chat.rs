@@ -13,11 +13,13 @@ use bevy::sprite::Anchor;
 
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
-use crate::scenes::AppState;
-use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::resources::libraries::LibraryName;
+use crate::scenes::AppState;
 use crate::ui::controls::spawn_checkbox;
-use crate::ui::sprite_ui::{spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
+use crate::ui::sprite_ui::{
+    spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
+};
 
 /// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -153,7 +155,12 @@ impl ChatFilter {
         ] {
             content = set_ini_value(&content, "Filter", k, &v.to_string());
         }
-        content = set_ini_value(&content, "Game", "TransparentChat", &self.transparent.to_string());
+        content = set_ini_value(
+            &content,
+            "Game",
+            "TransparentChat",
+            &self.transparent.to_string(),
+        );
         content = set_ini_value(&content, "Chat", "Tab", chat_tab_key(self.tab));
         write_ini(&content);
         tracing::debug!("💬 聊天设置已保存到 Mir2Config.ini");
@@ -558,9 +565,9 @@ fn spawn_chat(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
-if !crate::ui::sprite_ui::ui_enabled("chat") {
-    return;
-}
+    if !crate::ui::sprite_ui::ui_enabled("chat") {
+        return;
+    }
 
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -573,7 +580,11 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
     let panel_y = 671.0;
 
     // 面板背景：C# 白色纹理 Prguse[2221]（632x68 自然尺寸，不拉伸）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     // #2781：三档底图（C# `ChangeSize` 换 `Index`；尺寸取图源自然尺寸）
     let size_imgs: Vec<Handle<Image>> = CHAT_PANEL_IMAGES
         .iter()
@@ -641,9 +652,19 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
     ];
     for (kind, normal, hover, pressed, by, bw, bh) in scroll_btns {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            LibraryName::Prguse, normal, hover, pressed,
-            panel_x + 618.0, panel_y + by, 2.3, bw, bh,
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            normal,
+            hover,
+            pressed,
+            panel_x + 618.0,
+            panel_y + by,
+            2.3,
+            bw,
+            bh,
         ) {
             commands.entity(e).insert(ChatScrollBtn(kind));
         }
@@ -675,7 +696,13 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
         track_imgs[1].clone(),
         track_imgs[2].clone(),
     ]));
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2015) {
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        2015,
+    ) {
         let knob = spawn_ui_sprite(
             &mut commands,
             h,
@@ -688,11 +715,18 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
     }
     // 输入行（C# ChatTextBox @ (1,54) 627x13，ForeColour Black）
     let e = spawn_ui_text(
-        &mut commands, &font, "",
-        CHAT_INPUT_X, CHAT_INPUT_Y,
-        11.0, Color::srgb(0.1, 0.1, 0.1), 2.25,
+        &mut commands,
+        &font,
+        "",
+        CHAT_INPUT_X,
+        CHAT_INPUT_Y,
+        11.0,
+        Color::srgb(0.1, 0.1, 0.1),
+        2.25,
     );
-    commands.entity(e).insert((ChatInputText, Visibility::Hidden));
+    commands
+        .entity(e)
+        .insert((ChatInputText, Visibility::Hidden));
     // 输入框背景（C# BackColour=DarkGray）+ 闪烁光标
     commands.spawn((
         UiEntity,
@@ -723,7 +757,6 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
         Visibility::Hidden,
     ));
 }
-
 
 /// #2781：聊天控制栏（C# `ChatControlBar` `Prguse[2034]` @ (MainDialog.X+230, ScreenHeight-112)）。
 ///
@@ -1015,7 +1048,11 @@ fn spawn_chat_option_panel(
     let (dx, dy) = (400.0f32, 300.0f32);
 
     // 面板背景（半透明深色 + 边框感）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     commands.spawn((
         UiEntity,
         ChatOptionWidget,
@@ -1030,68 +1067,218 @@ fn spawn_chat_option_panel(
         Visibility::Hidden,
     ));
     // 标题
-    let title = spawn_ui_text(&mut commands, &font, "聊天设置", dx + 70.0, dy + 8.0, 13.0, Color::srgb(1.0, 0.9, 0.3), 12.2);
+    let title = spawn_ui_text(
+        &mut commands,
+        &font,
+        "聊天设置",
+        dx + 70.0,
+        dy + 8.0,
+        13.0,
+        Color::srgb(1.0, 0.9, 0.3),
+        12.2,
+    );
     commands.entity(title).insert(ChatOptionWidget);
     // 关闭
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse2, 360, 361, 362,
-        dx + 198.0, dy + 3.0, 12.3, 20.0, 20.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse2,
+        360,
+        361,
+        362,
+        dx + 198.0,
+        dy + 3.0,
+        12.3,
+        20.0,
+        20.0,
     ) {
         commands.entity(e).insert(ChatOptionWidget);
     }
     // 过滤勾选框（C# Prguse 2070/2071 等：偶数=勾选，奇数=未勾选）
     let items: [(ChatFilterKind, &str, [usize; 3], [usize; 3], f32, f32); 9] = [
-        (ChatFilterKind::All, "全部", [2087, 2087, 2087], [2086, 2086, 2086], 74.0, 47.0),
-        (ChatFilterKind::Normal, "普通", [2071, 2071, 2071], [2070, 2070, 2070], 40.0, 69.0),
-        (ChatFilterKind::Whisper, "私聊", [2075, 2075, 2075], [2074, 2074, 2074], 40.0, 92.0),
-        (ChatFilterKind::Shout, "喊话", [2073, 2073, 2073], [2072, 2072, 2072], 40.0, 115.0),
-        (ChatFilterKind::System, "系统", [2085, 2085, 2085], [2084, 2084, 2084], 40.0, 138.0),
-        (ChatFilterKind::Lover, "情侣", [2077, 2077, 2077], [2076, 2076, 2076], 135.0, 69.0),
-        (ChatFilterKind::Mentor, "师徒", [2079, 2079, 2079], [2078, 2078, 2078], 135.0, 92.0),
-        (ChatFilterKind::Group, "队伍", [2081, 2081, 2081], [2080, 2080, 2080], 135.0, 115.0),
-        (ChatFilterKind::Guild, "行会", [2083, 2083, 2083], [2082, 2082, 2082], 135.0, 138.0),
+        (
+            ChatFilterKind::All,
+            "全部",
+            [2087, 2087, 2087],
+            [2086, 2086, 2086],
+            74.0,
+            47.0,
+        ),
+        (
+            ChatFilterKind::Normal,
+            "普通",
+            [2071, 2071, 2071],
+            [2070, 2070, 2070],
+            40.0,
+            69.0,
+        ),
+        (
+            ChatFilterKind::Whisper,
+            "私聊",
+            [2075, 2075, 2075],
+            [2074, 2074, 2074],
+            40.0,
+            92.0,
+        ),
+        (
+            ChatFilterKind::Shout,
+            "喊话",
+            [2073, 2073, 2073],
+            [2072, 2072, 2072],
+            40.0,
+            115.0,
+        ),
+        (
+            ChatFilterKind::System,
+            "系统",
+            [2085, 2085, 2085],
+            [2084, 2084, 2084],
+            40.0,
+            138.0,
+        ),
+        (
+            ChatFilterKind::Lover,
+            "情侣",
+            [2077, 2077, 2077],
+            [2076, 2076, 2076],
+            135.0,
+            69.0,
+        ),
+        (
+            ChatFilterKind::Mentor,
+            "师徒",
+            [2079, 2079, 2079],
+            [2078, 2078, 2078],
+            135.0,
+            92.0,
+        ),
+        (
+            ChatFilterKind::Group,
+            "队伍",
+            [2081, 2081, 2081],
+            [2080, 2080, 2080],
+            135.0,
+            115.0,
+        ),
+        (
+            ChatFilterKind::Guild,
+            "行会",
+            [2083, 2083, 2083],
+            [2082, 2082, 2082],
+            135.0,
+            138.0,
+        ),
     ];
     for (kind, label, off, on, rx, ry) in items {
         if let Some(e) = spawn_checkbox(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            LibraryName::Prguse, off, on,
-            dx + rx, dy + ry, 12.4, 16.0, 12.0,
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            off,
+            on,
+            dx + rx,
+            dy + ry,
+            12.4,
+            16.0,
+            12.0,
             false,
         ) {
-            commands.entity(e).insert((ChatFilterBox(kind), ChatOptionWidget));
+            commands
+                .entity(e)
+                .insert((ChatFilterBox(kind), ChatOptionWidget));
         }
-        let t = spawn_ui_text(&mut commands, &font, label, dx + rx + 20.0, dy + ry, 12.0, Color::WHITE, 12.4);
+        let t = spawn_ui_text(
+            &mut commands,
+            &font,
+            label,
+            dx + rx + 20.0,
+            dy + ry,
+            12.0,
+            Color::WHITE,
+            12.4,
+        );
         commands.entity(t).insert(ChatOptionWidget);
     }
     // 透明开关（C# Title 471-475）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 471, 472, 470,
-        dx + 45.0, dy + 90.0, 12.4, 40.0, 16.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        471,
+        472,
+        470,
+        dx + 45.0,
+        dy + 90.0,
+        12.4,
+        40.0,
+        16.0,
     ) {
-        commands.entity(e).insert((ChatTranspBtn(false), ChatOptionWidget));
+        commands
+            .entity(e)
+            .insert((ChatTranspBtn(false), ChatOptionWidget));
     }
-    let t = spawn_ui_text(&mut commands, &font, "不透明", dx + 48.0, dy + 91.0, 11.0, Color::WHITE, 12.5);
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "不透明",
+        dx + 48.0,
+        dy + 91.0,
+        11.0,
+        Color::WHITE,
+        12.5,
+    );
     commands.entity(t).insert(ChatOptionWidget);
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 474, 475, 473,
-        dx + 115.0, dy + 90.0, 12.4, 40.0, 16.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        474,
+        475,
+        473,
+        dx + 115.0,
+        dy + 90.0,
+        12.4,
+        40.0,
+        16.0,
     ) {
-        commands.entity(e).insert((ChatTranspBtn(true), ChatOptionWidget));
+        commands
+            .entity(e)
+            .insert((ChatTranspBtn(true), ChatOptionWidget));
     }
-    let t = spawn_ui_text(&mut commands, &font, "透明", dx + 122.0, dy + 91.0, 11.0, Color::WHITE, 12.5);
+    let t = spawn_ui_text(
+        &mut commands,
+        &font,
+        "透明",
+        dx + 122.0,
+        dy + 91.0,
+        11.0,
+        Color::WHITE,
+        12.5,
+    );
     commands.entity(t).insert(ChatOptionWidget);
 }
-
 
 /// 聊天设置面板（#116 C# ChatOptionDialog）：打开/关闭、过滤同步、透明开关
 #[allow(clippy::too_many_arguments)]
 fn chat_option_system(
     mut filter: ResMut<ChatFilter>,
     settings: Query<&UiButton, With<ChatSettingsBtn>>,
-    close: Query<&UiButton, (With<ChatOptionWidget>, Without<ChatFilterBox>, Without<ChatTranspBtn>)>,
+    close: Query<
+        &UiButton,
+        (
+            With<ChatOptionWidget>,
+            Without<ChatFilterBox>,
+            Without<ChatTranspBtn>,
+        ),
+    >,
     mut boxes: Query<
         (
             &UiButton,
@@ -1112,7 +1299,10 @@ fn chat_option_system(
     for btn in &settings {
         if btn.clicked {
             filter.visible = !filter.visible;
-            tracing::info!("💬 聊天设置: {}", if filter.visible { "打开" } else { "关闭" });
+            tracing::info!(
+                "💬 聊天设置: {}",
+                if filter.visible { "打开" } else { "关闭" }
+            );
         }
     }
     for btn in &close {
@@ -1122,7 +1312,11 @@ fn chat_option_system(
     }
     // 面板显隐
     for mut vis in &mut widgets {
-        *vis = if filter.visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if filter.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // 勾选框 ↔ 过滤状态（checked = 屏蔽该频道，C# Filter*Chat 语义）
     // C# ChatOptionDialog：AllFiltersOff 默认 true（全部未过滤）；All 点击 = 全开/全关切换
@@ -1159,7 +1353,11 @@ fn chat_option_system(
     }
     // 同步勾选框显示：All = 任一频道被屏蔽（C# AllButton.Index = AllFiltersOff ? 2087 : 2086）
     for (_, mut cb, mut frames, mut sprite, kind) in &mut boxes {
-        let v = if kind.0 == ChatFilterKind::All { any_on } else { filter.get(kind.0) };
+        let v = if kind.0 == ChatFilterKind::All {
+            any_on
+        } else {
+            filter.get(kind.0)
+        };
         cb.checked = v;
         let f = if v { &cb.on } else { &cb.off };
         if frames.normal != f[0] {
@@ -1286,9 +1484,12 @@ pub(crate) fn chat_input_system(
                 Key::Space => Some(String::new()),
                 Key::Character(c) if c.as_str() == "@" => Some("@".to_string()),
                 Key::Character(c) if c.as_str() == "!" => Some("!".to_string()),
-                Key::Character(c) if c.as_str() == "/" => {
-                    Some(chat.last_pm.clone().map(|p| format!("{} ", p)).unwrap_or_default())
-                }
+                Key::Character(c) if c.as_str() == "/" => Some(
+                    chat.last_pm
+                        .clone()
+                        .map(|p| format!("{} ", p))
+                        .unwrap_or_default(),
+                ),
                 _ => None,
             };
             if let Some(mut prefix) = prefix {
@@ -1346,7 +1547,9 @@ fn chat_wheel_system(
     windows: Query<&Window>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     const PANEL: (f32, f32, f32, f32) = (230.0, 671.0, 632.0, 68.0); // C# ChatDialog 区域
     if cursor.x < PANEL.0
         || cursor.x > PANEL.0 + PANEL.2
@@ -1366,8 +1569,8 @@ fn chat_wheel_system(
         return;
     }
     let max_scroll = chat.lines.len().saturating_sub(chat.visible_lines);
-    chat.scroll_up = (chat.scroll_up as i32 + delta.round() as i32)
-        .clamp(0, max_scroll as i32) as usize;
+    chat.scroll_up =
+        (chat.scroll_up as i32 + delta.round() as i32).clamp(0, max_scroll as i32) as usize;
 }
 
 /// 键盘滚动聊天历史（#802，对齐 C# ChatPanel_KeyDown）：
@@ -1383,7 +1586,9 @@ fn chat_key_scroll_system(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     const PANEL: (f32, f32, f32, f32) = (230.0, 671.0, 632.0, 68.0); // C# ChatDialog 区域
     if cursor.x < PANEL.0
         || cursor.x > PANEL.0 + PANEL.2
@@ -1530,15 +1735,37 @@ fn chat_input_ui_system(
     chat: Res<ChatState>,
     time: Res<Time>,
     mut cursors: Query<(&mut Visibility, &mut Transform), With<ChatInputCursor>>,
-    mut bgs: Query<&mut Visibility, (With<ChatInputBg>, Without<ChatInputText>, Without<ChatInputCursor>)>,
-    mut texts: Query<&mut Visibility, (With<ChatInputText>, Without<ChatInputBg>, Without<ChatInputCursor>)>,
+    mut bgs: Query<
+        &mut Visibility,
+        (
+            With<ChatInputBg>,
+            Without<ChatInputText>,
+            Without<ChatInputCursor>,
+        ),
+    >,
+    mut texts: Query<
+        &mut Visibility,
+        (
+            With<ChatInputText>,
+            Without<ChatInputBg>,
+            Without<ChatInputCursor>,
+        ),
+    >,
 ) {
     let active = chat.input_active;
     for mut v in &mut bgs {
-        *v = if active { Visibility::Visible } else { Visibility::Hidden };
+        *v = if active {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut v in &mut texts {
-        *v = if active { Visibility::Visible } else { Visibility::Hidden };
+        *v = if active {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (mut v, mut tf) in &mut cursors {
         // 光标闪烁（约 2Hz）
@@ -1583,7 +1810,6 @@ fn chat_tab_system(
     }
 }
 
-
 /// 聊天颜色映射（从网络层移入：展示逻辑归 UI 模块，网络只发 ServerEvent）
 pub fn chat_color(t: mir2_shared::enums::ChatType) -> Color {
     use mir2_shared::enums::ChatType;
@@ -1598,9 +1824,7 @@ pub fn chat_color(t: mir2_shared::enums::ChatType) -> Color {
         ChatType::WhisperIn | ChatType::WhisperOut => Color::srgb(1.0, 0.5, 1.0),
         ChatType::Guild => Color::srgb(0.8, 0.6, 1.0),
         ChatType::LevelUp => Color::srgb(1.0, 0.9, 0.2),
-        ChatType::Mentor | ChatType::Trainer | ChatType::Relationship => {
-            Color::srgb(0.6, 1.0, 0.8)
-        }
+        ChatType::Mentor | ChatType::Trainer | ChatType::Relationship => Color::srgb(0.6, 1.0, 0.8),
         _ => Color::WHITE,
     }
 }
@@ -1649,14 +1873,17 @@ fn chat_server_events(
                     uid,
                 );
             } else {
-                chat.add_line(text.clone(), chat_color(*chat_type), chat_channel(*chat_type));
+                chat.add_line(
+                    text.clone(),
+                    chat_color(*chat_type),
+                    chat_channel(*chat_type),
+                );
             }
         }
         // #2563：SendOutputMessage 不再进聊天——C# GameScene.cs:5621 只路由到顶部
         // 浮动 OutputLines（game/output_lines.rs 消费 ServerEvent::OutputMessage）
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1707,9 +1934,7 @@ mod tests {
             ..Default::default()
         });
         app.init_resource::<crate::network::NetConnection>();
-        app.insert_resource(crate::network::NetMode(
-            crate::network::NetworkMode::Mock,
-        ));
+        app.insert_resource(crate::network::NetMode(crate::network::NetworkMode::Mock));
         app.init_resource::<ChatFilter>();
         app.add_systems(Update, chat_input_system);
         app.world_mut()
@@ -1769,9 +1994,15 @@ mod tests {
         assert_eq!(chat_filter_kind(ChatType::System), ChatFilterKind::System);
         assert_eq!(chat_filter_kind(ChatType::Guild), ChatFilterKind::Guild);
         assert_eq!(chat_filter_kind(ChatType::Group), ChatFilterKind::Group);
-        assert_eq!(chat_filter_kind(ChatType::WhisperIn), ChatFilterKind::Whisper);
+        assert_eq!(
+            chat_filter_kind(ChatType::WhisperIn),
+            ChatFilterKind::Whisper
+        );
         assert_eq!(chat_filter_kind(ChatType::Mentor), ChatFilterKind::Mentor);
-        assert_eq!(chat_filter_kind(ChatType::Relationship), ChatFilterKind::Lover);
+        assert_eq!(
+            chat_filter_kind(ChatType::Relationship),
+            ChatFilterKind::Lover
+        );
     }
 
     #[test]
@@ -1948,9 +2179,7 @@ fn chat_item_click_system(
         tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
         tracing::info!("💬 点击聊天物品: {} (uid={})", item.name, uid);
     } else {
-        net.send_packet(&mir2_shared::packets::client::misc::RequestChatItem {
-            chat_item_id: uid,
-        });
+        net.send_packet(&mir2_shared::packets::client::misc::RequestChatItem { chat_item_id: uid });
         tracing::info!("💬 聊天物品 uid={} 未缓存，已请求", uid);
     }
 }
@@ -2258,8 +2487,3 @@ mod whisper_partner_tests {
         );
     }
 }
-
-
-
-
-

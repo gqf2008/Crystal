@@ -1,7 +1,7 @@
 //! auto::combat 自动化验证系统（从 auto.rs 拆分，#1146）
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 /// --auto-attack：自动攻击（验证 攻击→受击→飘字 链路）
 pub(crate) fn auto_attack_debug(
@@ -78,7 +78,10 @@ pub(crate) fn auto_pet_pickup_test(
     match *sent {
         0 => {
             *sent = 1;
-            net.send_packet(&client_bevy::game::player_control::build_pet_pickup(true, (353, 352)));
+            net.send_packet(&client_bevy::game::player_control::build_pet_pickup(
+                true,
+                (353, 352),
+            ));
             tracing::info!("🐾 [PETTEST] 发送宠物拾取（鼠标）@ (353,352)");
         }
         1 => {
@@ -86,7 +89,10 @@ pub(crate) fn auto_pet_pickup_test(
                 return;
             }
             *sent = 2;
-            net.send_packet(&client_bevy::game::player_control::build_pet_pickup(false, (353, 352)));
+            net.send_packet(&client_bevy::game::player_control::build_pet_pickup(
+                false,
+                (353, 352),
+            ));
             tracing::info!("🐾 [PETTEST] 发送宠物半自动拾取 @ (353,352)");
         }
         _ => {}
@@ -128,7 +134,10 @@ pub(crate) fn auto_drop_pick_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     ground: Query<&client_bevy::actor::NetObjectId, With<client_bevy::actor::GroundItem>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -181,7 +190,10 @@ pub(crate) fn auto_drop_pick_test(
             if *t < 1.0 {
                 return;
             }
-            *before = inv_q.single().map(|inv| inv.items.iter().flatten().count()).unwrap_or(0);
+            *before = inv_q
+                .single()
+                .map(|inv| inv.items.iter().flatten().count())
+                .unwrap_or(0);
             net.send_packet(&mir2_shared::packets::client::item::PickUp {});
             tracing::info!("[DROPTEST] 发送 PickUp（拾取前背包 {} 件）", *before);
             *stage = 2;
@@ -191,7 +203,10 @@ pub(crate) fn auto_drop_pick_test(
             if *t < 3.0 {
                 return;
             }
-            let now = inv_q.single().map(|inv| inv.items.iter().flatten().count()).unwrap_or(0);
+            let now = inv_q
+                .single()
+                .map(|inv| inv.items.iter().flatten().count())
+                .unwrap_or(0);
             if now > *before {
                 tracing::info!("[DROPTEST] ✅ 拾取成功：背包 {} -> {} 件", *before, now);
             } else {
@@ -223,7 +238,10 @@ pub(crate) fn auto_combat_test(
         &Transform,
         Has<client_bevy::actor::Monster>,
     )>,
-    items: Query<(&client_bevy::actor::NetObjectId, &client_bevy::actor::GroundItem)>,
+    items: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::GroundItem,
+    )>,
     players: Query<
         &Transform,
         (
@@ -267,8 +285,10 @@ pub(crate) fn auto_combat_test(
                         continue;
                     }
                     total += 1;
-                    let (mx, my) =
-                        client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                    let (mx, my) = client_bevy::game::movement::world_to_tile(
+                        tf.translation.x,
+                        tf.translation.y,
+                    );
                     let d = (mx - px).abs() + (my - py).abs();
                     if d < nearest {
                         nearest = d;
@@ -325,10 +345,7 @@ pub(crate) fn auto_combat_test(
             // M38：魔法特效验证（MagicCast → 弹道，ObjectStruck → 爆炸）
             if !*effect_seen && effects.spawned > 0 {
                 *effect_seen = true;
-                tracing::info!(
-                    "[COMBAT] ✅ 魔法特效已生成（计数 {}）",
-                    effects.spawned
-                );
+                tracing::info!("[COMBAT] ✅ 魔法特效已生成（计数 {}）", effects.spawned);
             }
             // 每 1.3 秒施放一次 FireBall（目标位置）
             *cast_timer += time.delta_secs();
@@ -414,19 +431,29 @@ pub(crate) fn auto_equip_system(
     mut fired: Local<bool>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
-    inv_q: Query<(&client_bevy::game::player_state::Inventory, &client_bevy::game::player_state::Loadout), With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        (
+            &client_bevy::game::player_state::Inventory,
+            &client_bevy::game::player_state::Loadout,
+        ),
+        With<client_bevy::actor::LocalPlayer>,
+    >,
 ) {
     if *fired {
         return;
     }
     *timer += time.delta_secs();
-    let Ok((inv, loadout)) = inv_q.single() else { return };
+    let Ok((inv, loadout)) = inv_q.single() else {
+        return;
+    };
     if *timer < 6.0 || inv.items.iter().flatten().count() == 0 {
         return;
     }
     *fired = true;
     if let Some(item) = inv.items.iter().flatten().find(|i| i.is_equipment()) {
-        if let Some(to) = item.equip_slot_occupied(|s| loadout.slots.get(s).and_then(|x| x.as_ref()).is_some()) {
+        if let Some(to) =
+            item.equip_slot_occupied(|s| loadout.slots.get(s).and_then(|x| x.as_ref()).is_some())
+        {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 grid: mir2_shared::enums::MirGridType::Inventory,
                 unique_id: item.unique_id,
@@ -443,7 +470,10 @@ pub(crate) fn auto_life_system(
     mut phase: Local<u8>,
     time: Res<Time>,
     net: Res<client_bevy::network::NetConnection>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
 ) {
     *timer += time.delta_secs();
     let t = *timer;
@@ -491,7 +521,10 @@ pub(crate) fn auto_revive_system(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     // #2633 批次4 步4：dead 读改 StatusFlags（本系统不再用 HudState）；实体缺失视同未死亡
-    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
+    flags: Query<
+        &client_bevy::game::player_state::StatusFlags,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut t: Local<f32>,
 ) {
     use client_bevy::scenes::AppState;
@@ -591,7 +624,10 @@ pub(crate) fn auto_spell_verify(
     )>,
     players: Query<
         (Entity, &Transform),
-        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
     >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -602,8 +638,8 @@ pub(crate) fn auto_spell_verify(
     mut arrived_wait: Local<f32>,
     mut hits_at_stage: Local<u32>,
 ) {
+    use client_bevy::game::movement::{direction_from_delta, world_to_tile, LocalMove};
     use client_bevy::scenes::AppState;
-    use client_bevy::game::movement::{world_to_tile, direction_from_delta, LocalMove};
     if *state != AppState::Game {
         return;
     }
@@ -622,7 +658,9 @@ pub(crate) fn auto_spell_verify(
     if *stage > 29 {
         return;
     }
-    let Ok((pe, pf)) = players.single() else { return };
+    let Ok((pe, pf)) = players.single() else {
+        return;
+    };
     let (px, py) = world_to_tile(pf.translation.x, pf.translation.y);
 
     // 找最近存活怪物
@@ -638,7 +676,11 @@ pub(crate) fn auto_spell_verify(
         }
     }
     let Some((oid, mx, my, d)) = best else {
-        tracing::warn!("[SPELL] ❌ 无可施法目标（stage={} casts={}）", *stage, *casts);
+        tracing::warn!(
+            "[SPELL] ❌ 无可施法目标（stage={} casts={}）",
+            *stage,
+            *casts
+        );
         *stage = 99;
         return;
     };
@@ -648,7 +690,16 @@ pub(crate) fn auto_spell_verify(
         if !*moving {
             if let Some(map) = &game_data.map {
                 let mut best_path: Option<(Vec<(i32, i32)>, (i32, i32))> = None;
-                for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                for (ox, oy) in [
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (1, -1),
+                    (-1, 1),
+                    (1, 1),
+                ] {
                     let t2 = (mx + ox, my + oy);
                     if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
                         continue;
@@ -749,7 +800,15 @@ pub(crate) fn auto_spell_verify(
     });
     tracing::info!(
         "[SPELL] 🧙 stage={} 施放 {:?} → 怪物 {} @ ({},{}) dir={:?} casts={}（玩家 @ {},{})",
-        *stage, spell, oid, mx, my, dir, *casts, px, py
+        *stage,
+        spell,
+        oid,
+        mx,
+        my,
+        dir,
+        *casts,
+        px,
+        py
     );
 
     // HellFire/IceThrust：目标死亡（实体移除）→ 阶段通过
@@ -758,7 +817,11 @@ pub(crate) fn auto_spell_verify(
         if !alive || probe.hits > *hits_at_stage {
             tracing::info!(
                 "[SPELL] ✅ {:?} 命中/击杀怪物 {}（hits={} 基线={} casts={}）",
-                spell, oid, probe.hits, *hits_at_stage, *casts
+                spell,
+                oid,
+                probe.hits,
+                *hits_at_stage,
+                *casts
             );
             *stage += 1;
             *casts = 0;
@@ -766,7 +829,10 @@ pub(crate) fn auto_spell_verify(
             return;
         }
         if *casts >= 10 {
-            tracing::warn!("[SPELL] ⚠️ {:?} 10 次未命中（位置漂移/怪物逃跑），进入下一阶段", spell);
+            tracing::warn!(
+                "[SPELL] ⚠️ {:?} 10 次未命中（位置漂移/怪物逃跑），进入下一阶段",
+                spell
+            );
             *stage += 1;
             *casts = 0;
             *hits_at_stage = probe.hits;
@@ -800,7 +866,10 @@ pub(crate) fn auto_book_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    inv_q: Query<&client_bevy::game::player_state::Inventory, With<client_bevy::actor::LocalPlayer>>,
+    inv_q: Query<
+        &client_bevy::game::player_state::Inventory,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     magics: Res<client_bevy::game::skills::MagicsState>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -823,7 +892,9 @@ pub(crate) fn auto_book_test(
                 .map(|i| i.unique_id);
             match uid {
                 Some(uid) => {
-                    net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
+                    net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                        unique_id: uid,
+                    });
                     tracing::info!("[BOOKTEST] 使用技能书 uid={}", uid);
                     *stage = 1;
                     *t = 0.0;
@@ -1092,10 +1163,7 @@ pub(crate) fn auto_action_test(
                 let attack = *flags & 1 != 0;
                 let dash = *flags & 2 != 0;
                 let backstep = *flags & 4 != 0;
-                let struck_count = actors_st
-                    .iter()
-                    .filter(|(_, struck, _)| *struck)
-                    .count();
+                let struck_count = actors_st.iter().filter(|(_, struck, _)| *struck).count();
                 tracing::info!(
                     "[ACTION] 攻击={} 冲刺={} 后跳={}（当前带StruckTimer怪物数={}）",
                     attack,
@@ -1228,9 +1296,7 @@ pub(crate) fn auto_poison_test(
         3 => {
             // mock t+4s 解毒；t+6s 汇总
             if *t >= 6.0 {
-                let cured = !poisons
-                    .iter()
-                    .any(|(id, tint)| id.0 == 100 && tint);
+                let cured = !poisons.iter().any(|(id, tint)| id.0 == 100 && tint);
                 if cured {
                     *flags |= 2;
                 }

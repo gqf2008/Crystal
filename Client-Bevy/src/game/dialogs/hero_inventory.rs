@@ -14,10 +14,10 @@
 use bevy::prelude::*;
 
 use crate::actor::{LocalPlayer, MountState};
-use crate::game::dialogs::hero::{HeroState, STAT_HP, STAT_MP, next_autopot};
+use crate::game::dialogs::hero::{next_autopot, HeroState, STAT_HP, STAT_MP};
 use crate::game::dialogs::inventory::{
-    InvClickState, InvDropConfirm, InvUiState, ItemUseFeedback, UseItemCtx, UseOutcome, inv_slot_at,
-    item_use_sound_id, use_item_core,
+    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, InvUiState,
+    ItemUseFeedback, UseItemCtx, UseOutcome,
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::{Inventory, Loadout};
@@ -104,7 +104,11 @@ impl Plugin for HeroInventoryPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero_inventory);
         app.add_systems(
             Update,
-            (hero_inv_visibility_system, hero_inv_data_system, hero_inv_click_system)
+            (
+                hero_inv_visibility_system,
+                hero_inv_data_system,
+                hero_inv_click_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -475,8 +479,11 @@ fn hero_inv_click_system(
         cursor.x,
         cursor.y,
         inv_res.0.page,
-        player_q.single().map(|(inv, _, _)| inv.items.len()).unwrap_or(0),
-        (inv_res.1.0, inv_res.1.1),
+        player_q
+            .single()
+            .map(|(inv, _, _)| inv.items.len())
+            .unwrap_or(0),
+        (inv_res.1 .0, inv_res.1 .1),
     )
     .is_some()
     {
@@ -562,8 +569,7 @@ fn hero_inv_click_system(
                     &mut confirm,
                     // 英雄背包格不属于玩家背包锁范围（C# 锁的是英雄格）
                     &mut None,
-                )
-                    == UseOutcome::Sent
+                ) == UseOutcome::Sent
                 {
                     // #2611：腰带格（0/1）使用时武装补货（C# :574 Item.Count==1
                     // 才发——只有用最后一瓶时武装）
@@ -617,6 +623,9 @@ mod tests {
         assert_eq!(hero_slot_at(0.0, 0.0, 0.0, 0.0), None);
         assert_eq!(hero_slot_at(14.0 + 8.0 * 37.0, 23.0, 0.0, 0.0), None);
         // 拖动到 (400,200) 后命中跟随
-        assert_eq!(hero_slot_at(400.0 + 14.0, 200.0 + 23.0, 400.0, 200.0), Some(0));
+        assert_eq!(
+            hero_slot_at(400.0 + 14.0, 200.0 + 23.0, 400.0, 200.0),
+            Some(0)
+        );
     }
 }

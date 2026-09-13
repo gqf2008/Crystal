@@ -1,5 +1,8 @@
 //! mock 服务端包结构体（从 mock.rs 拆分，#1147）
 
+use super::send::*;
+use super::state::*;
+use crate::network::codec;
 use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::data::client_data::{ClientMagic, ClientQuestProgress, SelectInfo};
 use mir2_shared::data::item::ItemInfo;
@@ -7,14 +10,10 @@ use mir2_shared::enums::{
     ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
     MirGender, PoisonType, Spell, SpellEffect, Stat,
 };
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
-use crate::network::codec;
-use super::send::*;
-use super::state::*;
-
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) struct MockGameshopMail;
 
@@ -25,7 +24,10 @@ impl Packet for MockGameshopMail {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u64::<LittleEndian>(9001)?;
         mir2_shared::binary::write_dotnet_string(writer, "GameShop")?;
@@ -60,7 +62,10 @@ impl Packet for MockAddBuff {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u8(self.tag)?;
         writer.write_u32::<LittleEndian>(self.remaining_ms)?;
@@ -83,7 +88,10 @@ impl Packet for MockCreatureList {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         // #2757：两条样本覆盖 C# 规则表两种形态（默认选中第 1 条 = 三行信息全非空）：
         // ① `Chick` 行（Mouse 11 / Auto 7 / Semi 7 + 产黑石）② `BabyPig` 行（只开 Semi 3 / 满 4000）。
@@ -100,7 +108,7 @@ impl Packet for MockCreatureList {
             writer.write_u8(0)?;
         } // filter（默认全部关闭）
         writer.write_u8(0)?; // grade
-        // 与 ServerRust 共用 `IntelligentCreatureRules::write_to`，不手写字段布局。
+                             // 与 ServerRust 共用 `IntelligentCreatureRules::write_to`，不手写字段布局。
         mir2_shared::data::client_data::IntelligentCreatureRules {
             // C# `IntelligentCreatureInfo.MinimalFullness` 字段默认 1000（Chick 行未显式给）
             minimal_fullness: 1000,
@@ -164,7 +172,10 @@ impl Packet for MockPlayerInspect {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u32::<LittleEndian>(self.object_id)?;
         mir2_shared::binary::write_dotnet_string(writer, "bevy2char")?;
@@ -203,7 +214,10 @@ impl Packet for MockGuildStatus {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.leader)?;
@@ -241,7 +255,10 @@ impl Packet for MockGuildNoticeChange {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(self.lines.len() as u8)?;
         for line in &self.lines {
@@ -263,7 +280,10 @@ impl Packet for MockGuildMemberJoined {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(1)?; // joined
         mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
@@ -283,7 +303,10 @@ impl Packet for MockTerritoryPage {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_i32::<LittleEndian>(self.rows.len() as i32)?;
         for (id, map_index, owner, state) in &self.rows {
@@ -308,7 +331,10 @@ impl Packet for MockGuildRequestWar {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         mir2_shared::binary::write_dotnet_string(writer, &self.guild_name)?;
         Ok(())
     }
@@ -322,10 +348,11 @@ pub(crate) fn send_guild_storage_list(
     let items: Vec<Option<mir2_shared::data::client_data::GuildStorageItem>> = storage
         .iter()
         .map(|s| {
-            s.as_ref().map(|it| mir2_shared::data::client_data::GuildStorageItem {
-                item: it.clone(),
-                user_id: 100,
-            })
+            s.as_ref()
+                .map(|it| mir2_shared::data::client_data::GuildStorageItem {
+                    item: it.clone(),
+                    user_id: 100,
+                })
         })
         .collect();
     send(to_client, &server::guild::GuildStorageList { items });
@@ -341,7 +368,10 @@ impl Packet for MockFriendList {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_i32::<LittleEndian>(1)?; // count
         writer.write_u32::<LittleEndian>(120)?; // oid bevy2char
@@ -365,17 +395,17 @@ impl Packet for MockLoverUpdate {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         mir2_shared::binary::write_dotnet_string(
             writer,
             if self.married { "bevy2char" } else { "" },
         )?;
         writer.write_i64::<LittleEndian>(if self.married { 1_700_000_000 } else { 0 })?;
-        mir2_shared::binary::write_dotnet_string(
-            writer,
-            if self.married { "盟重省" } else { "" },
-        )?;
+        mir2_shared::binary::write_dotnet_string(writer, if self.married { "盟重省" } else { "" })?;
         writer.write_i16::<LittleEndian>(if self.married { 3 } else { 0 })?;
         Ok(())
     }
@@ -393,7 +423,10 @@ impl Packet for MockGuildInvitePush {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         mir2_shared::binary::write_dotnet_string(writer, &self.guild_name)?;
         Ok(())
     }
@@ -412,7 +445,10 @@ impl Packet for MockNPCMarket {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         let pages = self.pages.max(1);
         writer.write_i32::<LittleEndian>(pages as i32)?;
@@ -435,7 +471,10 @@ impl Packet for MockNPCMarketPage {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_i32::<LittleEndian>(self.listings.len() as i32)?;
         for (auction_id, item, seller, price, item_type, current_bid) in &self.listings {
@@ -466,7 +505,10 @@ impl Packet for MockConsignResult {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u64::<LittleEndian>(self.uid)?;
         writer.write_u8(if self.success { 1 } else { 0 })?;
@@ -484,7 +526,10 @@ impl Packet for MockTradeRequest {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         mir2_shared::binary::write_dotnet_string(writer, "bevy2char")?;
         Ok(())
     }
@@ -502,7 +547,10 @@ impl Packet for MockTradeGold {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u64::<LittleEndian>(self.amount as u64)?;
         Ok(())
@@ -521,7 +569,10 @@ impl Packet for MockTradeDeposit {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_i32::<LittleEndian>(self.from)?;
         writer.write_u8(1)?;
@@ -539,7 +590,10 @@ impl Packet for MockTradeConfirm {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(1)?; // a 锁定
         writer.write_u8(1)?; // b 锁定
@@ -562,7 +616,10 @@ impl Packet for MockMentorUpdate {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
         writer.write_i32::<LittleEndian>(self.level)?;
@@ -585,7 +642,10 @@ impl Packet for MockItemRentalRequest {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
         writer.write_u8(if self.renting { 1 } else { 0 })?;
@@ -603,7 +663,10 @@ impl Packet for MockRentalCanConfirm {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(1)?;
         Ok(())
@@ -620,7 +683,10 @@ impl Packet for MockRentalConfirm {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(1)?;
         Ok(())
@@ -639,7 +705,10 @@ impl Packet for MockMarketSuccess {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         mir2_shared::binary::write_dotnet_string(writer, &self.message)?;
         Ok(())
     }
@@ -659,7 +728,10 @@ impl Packet for MockMailEntry {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u64::<LittleEndian>(9100)?; // mail_id
         mir2_shared::binary::write_dotnet_string(writer, &self.sender)?;
@@ -690,7 +762,10 @@ impl Packet for MockMentorRequest {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         mir2_shared::binary::write_dotnet_string(writer, "bevychar")?;
         writer.write_u16::<LittleEndian>(30)?;
@@ -708,7 +783,10 @@ impl Packet for MockMarriageRequest {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         mir2_shared::binary::write_dotnet_string(writer, "bevychar")?;
         Ok(())
     }
@@ -724,10 +802,10 @@ impl Packet for MockDivorceRequest {
         unreachable!("mock 只发送不解析")
     }
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+    fn write_body<W: std::io::Write>(
+        &self,
+        _writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
         Ok(())
     }
 }
-
-
-

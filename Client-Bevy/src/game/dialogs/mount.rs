@@ -56,9 +56,7 @@ impl Plugin for MountPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_mount);
         app.add_systems(
             Update,
-            (mount_ui_system,)
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            (mount_ui_system,).chain().run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -83,22 +81,30 @@ fn spawn_mount(
     }
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
 
     // 面板（默认 5 孔 167；ui_system 按孔数换 Prguse[160/167]）
-    let panel = spawn_panel(&mut commands, white.clone(), PANEL_X, PANEL_Y, 324.0, 377.0, 30);
-    commands.entity(panel).insert((
-        MountPanel,
-        DialogRoot(DialogKind::Mount),
-        MountWidget,
-    ));
+    let panel = spawn_panel(
+        &mut commands,
+        white.clone(),
+        PANEL_X,
+        PANEL_Y,
+        324.0,
+        377.0,
+        30,
+    );
+    commands
+        .entity(panel)
+        .insert((MountPanel, DialogRoot(DialogKind::Mount), MountWidget));
 
     commands.entity(panel).with_children(|p| {
         // 名称/忠诚度
-        spawn_label(p, &cjk, "", 30.0, 40.0, 15.0, Color::WHITE, 9)
-            .insert(MountNameText);
-        spawn_label(p, &cjk, "", 30.0, 60.0, 12.0, Color::WHITE, 9)
-            .insert(MountLoyaltyText);
+        spawn_label(p, &cjk, "", 30.0, 40.0, 15.0, Color::WHITE, 9).insert(MountNameText);
+        spawn_label(p, &cjk, "", 30.0, 60.0, 12.0, Color::WHITE, 9).insert(MountLoyaltyText);
         // 骑乘按钮 Prguse[155/156/157] @(262,70)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 155),
@@ -161,7 +167,11 @@ fn mount_ui_system(
     ride: Query<(Entity, &Interaction), With<MountRide>>,
     mut widgets: Query<
         &mut Visibility,
-        (With<MountWidget>, Without<MountGearCell>, Without<MountGearIcon>),
+        (
+            With<MountWidget>,
+            Without<MountGearCell>,
+            Without<MountGearIcon>,
+        ),
     >,
     mut panel: Query<(&mut ImageNode, &MountPanel), Without<MountGearIcon>>,
     mut names: Query<(&mut Text, Option<&MountNameText>, Option<&MountLoyaltyText>)>,
@@ -181,7 +191,11 @@ fn mount_ui_system(
 
     let open = mgr.is_open(DialogKind::Mount);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *logged = false;
@@ -238,17 +252,18 @@ fn mount_ui_system(
             .and_then(|s| s.as_ref());
         let mut show = false;
         if let Some(g) = gem {
-            if let Some(h) = load_lib_image(
-                &mut libs,
-                &mut images,
-                LibraryName::Items,
-                g.image as usize,
-            ) {
+            if let Some(h) =
+                load_lib_image(&mut libs, &mut images, LibraryName::Items, g.image as usize)
+            {
                 node.image = h;
                 show = true;
             }
         }
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     if !*logged {
@@ -266,4 +281,3 @@ fn mount_ui_system(
         *logged = true;
     }
 }
-

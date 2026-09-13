@@ -57,7 +57,10 @@ fn setup_intro(
                     if w > 0 && h > 0 {
                         let handle = images.add(make_image(rgba, w, h));
                         root.spawn((
-                            ImageNode { image: handle, ..default() },
+                            ImageNode {
+                                image: handle,
+                                ..default()
+                            },
                             Node {
                                 width: Val::Px(w as f32),
                                 height: Val::Px(h as f32),
@@ -98,11 +101,7 @@ fn cleanup_intro(mut commands: Commands, root: Query<Entity, With<IntroRoot>>) {
     }
 }
 
-fn intro_timer(
-    mut next: ResMut<NextState<AppState>>,
-    time: Res<Time>,
-    mut elapsed: Local<f32>,
-) {
+fn intro_timer(mut next: ResMut<NextState<AppState>>, time: Res<Time>, mut elapsed: Local<f32>) {
     *elapsed += time.delta_secs();
     if *elapsed > 2.5 {
         next.set(AppState::Login);

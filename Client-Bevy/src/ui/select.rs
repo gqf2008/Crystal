@@ -147,11 +147,7 @@ fn preview_pos(anim: &SelectAnim, frame: usize) -> (f32, f32) {
 
 /// blend 叠加层屏幕坐标（= Location + blend 精灵自身 offset，与主帧同 Location、各自 offset）
 fn blend_pos(anim: &SelectAnim, frame: usize) -> (f32, f32) {
-    let (ox, oy) = anim
-        .blend_offsets
-        .get(frame)
-        .copied()
-        .unwrap_or((0.0, 0.0));
+    let (ox, oy) = anim.blend_offsets.get(frame).copied().unwrap_or((0.0, 0.0));
     (
         PREVIEW_X + ox * PREVIEW_SCALE,
         PREVIEW_Y + oy * PREVIEW_SCALE,
@@ -246,7 +242,7 @@ fn build_select_ui(
     libs.0.ensure_initialized();
     ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
     let font = ui_font.0.clone();
-    
+
     // 背景 Prguse[65]（1024x768）
     if let Some(h) = ui_image(
         &mut *libs,
@@ -500,7 +496,9 @@ fn spawn_bottom_btn(
         commands.entity(e).insert(BottomButton(kind));
         // #91 开始游戏按钮悬停音效
         if let BottomBtn::Start = kind {
-            commands.entity(e).insert(crate::ui::sprite_ui::ButtonHoverSound(10104));
+            commands
+                .entity(e)
+                .insert(crate::ui::sprite_ui::ButtonHoverSound(10104));
         }
     }
 }
@@ -530,7 +528,10 @@ fn select_reload_system(
         return;
     }
     session.select_reload = false;
-    tracing::info!("[SELECT] 重建选角 UI（角色数={}）", session.characters.len());
+    tracing::info!(
+        "[SELECT] 重建选角 UI（角色数={}）",
+        session.characters.len()
+    );
     for e in ui_entities.iter() {
         commands.entity(e).despawn();
     }

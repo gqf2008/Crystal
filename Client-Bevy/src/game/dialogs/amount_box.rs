@@ -16,9 +16,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::PinyinIme;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_label, spawn_panel,
-};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
 
 /// 数量输入结果事件（OK 时携带数量）
 #[derive(Message, Debug)]
@@ -77,10 +75,7 @@ impl Plugin for AmountBoxPlugin {
         app.add_message::<AmountBoxResult>();
         app.add_systems(OnEnter(AppState::Game), spawn_amount_box);
         app.add_systems(OnExit(AppState::Game), cleanup_amount_box);
-        app.add_systems(
-            Update,
-            amount_box_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, amount_box_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -210,8 +205,7 @@ fn spawn_amount_box(
         ))
         .with_children(|ib| {
             // 数量值（C# 文本框内文字；相对输入框 (3,2) = 绝对 (60,44)）
-            spawn_label(ib, &cjk, "", 3.0, 2.0, 14.0, Color::WHITE, 10)
-                .insert(AmountValueText);
+            spawn_label(ib, &cjk, "", 3.0, 2.0, 14.0, Color::WHITE, 10).insert(AmountValueText);
         });
         // 物品图标（C# `ItemImage` @(15,34) 38x34；无图标时隐藏）
         p.spawn((
@@ -282,8 +276,14 @@ pub(crate) fn amount_box_system(
         (Entity, &Interaction, &mut Visibility),
         (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>),
     >,
-    cancel: Query<(Entity, &Interaction), (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
-    close: Query<(Entity, &Interaction), (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
+    cancel: Query<
+        (Entity, &Interaction),
+        (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>),
+    >,
+    close: Query<
+        (Entity, &Interaction),
+        (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>),
+    >,
     mut widgets: Query<
         &mut Visibility,
         (
@@ -369,7 +369,6 @@ pub(crate) fn amount_box_system(
     // 数字键盘输入 + Esc/Enter（C# MirAmountBox：Esc=Cancel、Enter=OK；
     // #2604——Esc 由此消费，esc_close_dialogs_system 检查 amount.visible 让路）
     for key in keys.read() {
-
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
@@ -393,7 +392,8 @@ pub(crate) fn amount_box_system(
         }
         // 预填未编辑时首个数字整体替换（C# :92-93 预填全选，输入即覆盖）
         let digit = if let Some(text) = &key.text {
-            text.chars().all(|c| c.is_ascii_digit())
+            text.chars()
+                .all(|c| c.is_ascii_digit())
                 .then(|| text.clone())
         } else if let Key::Character(c) = &key.logical_key {
             // winit 注入/部分键盘事件 text=None，用 logical_key 兜底（原版 C# 任意可打印字符）

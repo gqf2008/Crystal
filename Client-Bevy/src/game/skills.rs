@@ -14,8 +14,7 @@ use crate::resources::libraries::LibraryName;
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiEntity, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_scroll_bar_ui,
-    UiScrollList,
+    load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_scroll_bar_ui, UiScrollList,
 };
 use mir2_shared::enums::Spell;
 
@@ -396,7 +395,10 @@ fn skill_bar_system(
     let pending = bar.pending_cast.take();
     // #1600/#1616：C# GameScene.CheckInput——钓鱼/麻痹/冰冻锁定施法输入
     // #2633 步4：读改 StatusFlags；实体缺失视同未锁（同原 hud 默认 false，放行施法）
-    let cast_locked = flags.single().map(|f| f.fishing || f.paralysis).unwrap_or(false);
+    let cast_locked = flags
+        .single()
+        .map(|f| f.fishing || f.paralysis)
+        .unwrap_or(false);
     if cast_locked {
         return;
     }
@@ -916,7 +918,11 @@ fn spawn_skills_window(
         p
     } else {
         // 兜底：纹理缺失时退回半透明深色面板
-        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
         let p = spawn_panel(&mut commands, white, SKILLS_DX, SKILLS_DY, 300.0, 360.0, 30);
         commands.entity(p).insert((
             DialogRoot(DialogKind::Skills),
@@ -940,7 +946,16 @@ fn spawn_skills_window(
         // 滚动条（面板子节点）
         spawn_scroll_bar_ui(p, (288.0, 36.0, 4.0, 200.0), 9);
         // 标题
-        spawn_label(p, &cjk, "技能", 12.0, 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 9);
+        spawn_label(
+            p,
+            &cjk,
+            "技能",
+            12.0,
+            8.0,
+            15.0,
+            Color::srgb(1.0, 0.9, 0.3),
+            9,
+        );
         // 关闭
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
@@ -951,8 +966,17 @@ fn spawn_skills_window(
         }
         // 列表（10 行 × 20px）@(12,36+20i)
         for i in 0..10usize {
-            spawn_label(p, &cjk, "", 12.0, 36.0 + i as f32 * 20.0, 12.0, Color::WHITE, 9)
-                .insert(SkillsLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                12.0,
+                36.0 + i as f32 * 20.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(SkillsLine(i));
         }
     });
 }
@@ -1177,42 +1201,94 @@ fn spawn_one_skill_bar(
         .id();
     commands.entity(root).with_children(|p| {
         // C# BeforeDraw（L1659）：格网 Prguse[2193] @(+12,0) 50% 透明，画在底图之下
-        if let Some(h) = load_lib_image(libs, images, crate::resources::libraries::LibraryName::Prguse, 2193) {
+        if let Some(h) = load_lib_image(
+            libs,
+            images,
+            crate::resources::libraries::LibraryName::Prguse,
+            2193,
+        ) {
             crate::ui::theme::spawn_container(p, SKILL_GRID_OFFSET_X, 0.0, 204.0, 28.0, 0)
                 .insert(ImageNode::new(h).with_color(Color::srgba(1.0, 1.0, 1.0, 0.5)));
         }
         // 底图 Prguse[2190] @(0,0)
-        if let Some(h) = load_lib_image(libs, images, crate::resources::libraries::LibraryName::Prguse, 2190) {
+        if let Some(h) = load_lib_image(
+            libs,
+            images,
+            crate::resources::libraries::LibraryName::Prguse,
+            2190,
+        ) {
             crate::ui::theme::spawn_image(p, h, 0.0, 0.0, SKILL_BAR_W, SKILL_BAR_H, 1);
         }
         // 切换绑定按钮 Prguse[2247]=16x28 @(0,0)
-        if let Some(h) = load_lib_image(libs, images, crate::resources::libraries::LibraryName::Prguse, 2247) {
+        if let Some(h) = load_lib_image(
+            libs,
+            images,
+            crate::resources::libraries::LibraryName::Prguse,
+            2247,
+        ) {
             crate::ui::theme::spawn_image(p, h, 0.0, 0.0, 16.0, 28.0, 2);
         }
         // 栏位数字 @(0,1)
-        crate::ui::theme::spawn_label(p, font, &(bar_idx + 1).to_string(), 0.0, 1.0, 11.0, Color::WHITE, 3);
+        crate::ui::theme::spawn_label(
+            p,
+            font,
+            &(bar_idx + 1).to_string(),
+            0.0,
+            1.0,
+            11.0,
+            Color::WHITE,
+            3,
+        );
         for i in 0..8usize {
             // 绝对格号 = bar*8 + i（键位 = +1）
             let abs = bar_idx * 8 + i;
             // 技能格锚点 @(i*25+15, 3)
-            crate::ui::theme::spawn_container(p, skill_slot_x(i), SKILL_SLOT_Y, SKILL_SLOT_W, SKILL_SLOT_H, 4)
-                .insert(SkillBarSlot(abs))
-                .with_children(|c| {
-                    // 技能图标（由 skill_bar_icon_system 填图）
-                    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-                    crate::ui::theme::spawn_image(c, white.clone(), 0.0, 0.0, SKILL_SLOT_W, SKILL_SLOT_H, 1)
-                        .insert((SkillBarIcon(abs), Visibility::Hidden));
-                    // 冷却遮罩（由 skill_bar_cooldown_system 驱动）
-                    crate::ui::theme::spawn_container(c, 0.0, 0.0, SKILL_SLOT_W, SKILL_SLOT_H, 2)
-                        .insert((
-                            SkillBarCooldown(abs),
-                            ImageNode::new(white).with_color(Color::srgba(1.0, 1.0, 1.0, 0.6)),
-                            Visibility::Hidden,
-                        ));
-                    // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)
-                    crate::ui::theme::spawn_label(c, font, &skill_key_label(bar_idx, i), SKILL_KEY_X - SKILL_SLOT_X, SKILL_SLOT_Y, 8.0, Color::WHITE, 3)
-                        .insert(SkillBarKey(abs));
-                });
+            crate::ui::theme::spawn_container(
+                p,
+                skill_slot_x(i),
+                SKILL_SLOT_Y,
+                SKILL_SLOT_W,
+                SKILL_SLOT_H,
+                4,
+            )
+            .insert(SkillBarSlot(abs))
+            .with_children(|c| {
+                // 技能图标（由 skill_bar_icon_system 填图）
+                let white = images.add(crate::map_renderer::make_image(
+                    vec![255, 255, 255, 255],
+                    1,
+                    1,
+                ));
+                crate::ui::theme::spawn_image(
+                    c,
+                    white.clone(),
+                    0.0,
+                    0.0,
+                    SKILL_SLOT_W,
+                    SKILL_SLOT_H,
+                    1,
+                )
+                .insert((SkillBarIcon(abs), Visibility::Hidden));
+                // 冷却遮罩（由 skill_bar_cooldown_system 驱动）
+                crate::ui::theme::spawn_container(c, 0.0, 0.0, SKILL_SLOT_W, SKILL_SLOT_H, 2)
+                    .insert((
+                        SkillBarCooldown(abs),
+                        ImageNode::new(white).with_color(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+                        Visibility::Hidden,
+                    ));
+                // 键名标签 @(i*25+13, 0) → 相对格 (-2, +3)
+                crate::ui::theme::spawn_label(
+                    c,
+                    font,
+                    &skill_key_label(bar_idx, i),
+                    SKILL_KEY_X - SKILL_SLOT_X,
+                    SKILL_SLOT_Y,
+                    8.0,
+                    Color::WHITE,
+                    3,
+                )
+                .insert(SkillBarKey(abs));
+            });
         }
     });
 }
@@ -1488,12 +1564,7 @@ fn skill_bar_cooldown_system(
             Some((Some(r), Some(_))) if r < 0.1 => *vis = Visibility::Hidden,
             Some((Some(r), Some(t))) if r > 0.0 => {
                 let idx = SKILL_COOLDOWN_BASE + cooldown_frame(r, t);
-                match load_lib_image(
-                    &mut libs,
-                    &mut images,
-                    LibraryName::Prguse2,
-                    idx,
-                ) {
+                match load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, idx) {
                     Some(h) => {
                         if node.image != h {
                             node.image = h;

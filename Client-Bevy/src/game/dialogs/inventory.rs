@@ -16,7 +16,7 @@ use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::{Gold, Inventory, Loadout, StatusFlags};
 use crate::game::sets::GameSet;
-use crate::game::sound::{SoundBank, SoundCache, play_sound_cached};
+use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -326,11 +326,7 @@ pub(crate) fn quest_inventory_events(
     for ev in events.read() {
         match ev {
             ServerEvent::QuestItemGained { item } => {
-                if let Some(slot) = inv
-                    .quest_inventory
-                    .iter_mut()
-                    .find(|s| s.is_none())
-                {
+                if let Some(slot) = inv.quest_inventory.iter_mut().find(|s| s.is_none()) {
                     *slot = Some(item.clone());
                 } else {
                     inv.quest_inventory.push(Some(item.clone()));
@@ -406,9 +402,7 @@ pub(crate) fn inventory_events(
                             let old = loadout.slots[*to].take();
                             loadout.slots[*to] = Some(item);
                             if let Some(old) = old {
-                                if let Some(empty) =
-                                    inv.items.iter_mut().find(|s| s.is_none())
-                                {
+                                if let Some(empty) = inv.items.iter_mut().find(|s| s.is_none()) {
                                     *empty = Some(old);
                                 }
                             }
@@ -455,10 +449,7 @@ pub(crate) fn inventory_events(
                     .iter()
                     .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
                 if let Some(idx) = idx {
-                    let count = inv.items[idx]
-                        .as_ref()
-                        .map(|it| it.count)
-                        .unwrap_or(0);
+                    let count = inv.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
                     if count > 1 {
                         if let Some(it) = inv.items[idx].as_mut() {
                             it.count -= 1;
@@ -466,7 +457,11 @@ pub(crate) fn inventory_events(
                     } else {
                         inv.items[idx] = None;
                     }
-                    tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
+                    tracing::info!(
+                        "💊 使用物品 uid={} 剩余 {}",
+                        unique_id,
+                        count.saturating_sub(1)
+                    );
                     inv.refresh_weight();
                 }
             }
@@ -648,10 +643,28 @@ fn spawn_inventory_dialog(
                 .insert((InvCloseBtn, DialogWidget));
         }
         // 金币/负重文本
-        spawn_label(p, &cjk, "0", GOLD_TEXT_X, GOLD_TEXT_Y, 12.0, Color::WHITE, 8)
-            .insert((InvGoldText, DialogWidget));
-        spawn_label(p, &cjk, "0/0", WEIGHT_TEXT_X, WEIGHT_TEXT_Y, 12.0, Color::WHITE, 8)
-            .insert((InvWeightText, DialogWidget));
+        spawn_label(
+            p,
+            &cjk,
+            "0",
+            GOLD_TEXT_X,
+            GOLD_TEXT_Y,
+            12.0,
+            Color::WHITE,
+            8,
+        )
+        .insert((InvGoldText, DialogWidget));
+        spawn_label(
+            p,
+            &cjk,
+            "0/0",
+            WEIGHT_TEXT_X,
+            WEIGHT_TEXT_Y,
+            12.0,
+            Color::WHITE,
+            8,
+        )
+        .insert((InvWeightText, DialogWidget));
         // 负重条（C# WeightBar：Prguse[24] 实测 84x6 @(182,217)，按填充度裁宽）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 24) {
             spawn_image(p, h, 182.0, 217.0, 84.0, 6.0, 7).insert(InvWeightBar);
@@ -898,7 +911,10 @@ fn inventory_ui_system(
     let player = player_q.single().ok();
     let inv = player.map(|(inv, _)| inv);
     let open = mgr.is_open(DialogKind::Inventory);
-    let size = inv.map(|inv| inv.items.len()).unwrap_or(0).min(MAX_INV_SLOTS);
+    let size = inv
+        .map(|inv| inv.items.len())
+        .unwrap_or(0)
+        .min(MAX_INV_SLOTS);
     // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页=0..40（QuestGrid）
     for (mut vis, slot) in &mut all_vis {
         let visible = if !open {
@@ -1243,11 +1259,9 @@ fn inv_grid_sync_system(
         commands.entity(panel).with_children(|p| {
             cell = spawn_item_cell_ui(p, &mut images, &font, sx, sy, CELL_W, CELL_H, 6, i).id();
         });
-        commands.entity(cell).insert((
-            DialogRoot(DialogKind::Inventory),
-            DialogWidget,
-            InvSlot(i),
-        ));
+        commands
+            .entity(cell)
+            .insert((DialogRoot(DialogKind::Inventory), DialogWidget, InvSlot(i)));
     }
 }
 
@@ -1610,10 +1624,7 @@ fn slot_item_ready(equipment: &[Option<InvItem>], grid_to: MirGridType) -> bool 
     match grid_to {
         MirGridType::Mount => equipment.get(10).and_then(|s| s.as_ref()).is_some(),
         MirGridType::Fishing => matches!(
-            equipment
-                .get(0)
-                .and_then(|s| s.as_ref())
-                .map(|w| w.shape),
+            equipment.get(0).and_then(|s| s.as_ref()).map(|w| w.shape),
             Some(49) | Some(50),
         ),
         _ => false,
@@ -1814,9 +1825,9 @@ pub(crate) fn use_item_core(
             );
             feedback.last_use = now + 0.3;
             // C# `MirItemCell.UseItem` 装备分支：发包后锁来源格（:422-528 `Locked = true`）
-        if ctx.grid == MirGridType::Inventory {
-            *lock_reason = Some(InvLockReason::Equip);
-        }
+            if ctx.grid == MirGridType::Inventory {
+                *lock_reason = Some(InvLockReason::Equip);
+            }
             return UseOutcome::Sent;
         }
         return UseOutcome::Blocked;
@@ -1951,7 +1962,9 @@ fn spawn_inv_confirm(
         return;
     };
     let panel = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
-    commands.entity(panel).insert((InvConfirmWidget, Visibility::Hidden));
+    commands
+        .entity(panel)
+        .insert((InvConfirmWidget, Visibility::Hidden));
     commands.entity(panel).with_children(|p| {
         spawn_label(p, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
             .insert((InvConfirmWidget, InvConfirmText));
@@ -2238,14 +2251,16 @@ fn inv_item_action_system(
     }
 
     // 光标下的背包格（按当前页与格数，#276；原点取 InventoryOrigin——推位/拖动后仍准确）
-    let Ok((inv, flags, loadout, appearance, progression, mount)) = player_q.single() else { return };
+    let Ok((inv, flags, loadout, appearance, progression, mount)) = player_q.single() else {
+        return;
+    };
     let my_gender = appearance.gender as u8;
     let my_class = appearance.class as u8;
     let my_level = progression.level;
     let riding = mount.is_some();
     let page = inv_ui.page;
     let size = inv.items.len().min(MAX_INV_SLOTS);
-    let (ox, oy) = (misc.2.0, misc.2.1);
+    let (ox, oy) = (misc.2 .0, misc.2 .1);
     // 锁定集合由调用方显式传入（不在闭包里捕获 `misc.4`：本系统后面还要写它加锁）
     let slot_at = |cx: f32, cy: f32, locked: &InvLockedSlots| -> Option<usize> {
         // 命中复用 [`inv_slot_at`]（几何与仓库/交易/英雄对话框同一真源），
@@ -2660,25 +2675,31 @@ mod tests {
             locks.lock(InvLockReason::Consign, 5);
         };
         seed(&mut app);
-        app.world_mut()
-            .write_message(crate::network::server_event::ServerEvent::EquipSlotItemResult {
+        app.world_mut().write_message(
+            crate::network::server_event::ServerEvent::EquipSlotItemResult {
                 unique_id: 3,
                 success: true,
-            });
+            },
+        );
         app.update();
         {
             let locks = app.world().resource::<InvLockedSlots>();
-            assert!(!locks.is_locked(3), "S.EquipSlotItem 回包应解锁 Socket 来源");
             assert!(
-                locks.is_locked(1) && locks.is_locked(2) && locks.is_locked(4) && locks.is_locked(5),
+                !locks.is_locked(3),
+                "S.EquipSlotItem 回包应解锁 Socket 来源"
+            );
+            assert!(
+                locks.is_locked(1)
+                    && locks.is_locked(2)
+                    && locks.is_locked(4)
+                    && locks.is_locked(5),
                 "其它来源的锁不受影响"
             );
         }
 
-        app.world_mut()
-            .write_message(crate::network::server_event::ServerEvent::SplitItem1Result {
-                unique_id: 2,
-            });
+        app.world_mut().write_message(
+            crate::network::server_event::ServerEvent::SplitItem1Result { unique_id: 2 },
+        );
         app.update();
         {
             let locks = app.world().resource::<InvLockedSlots>();
@@ -2923,7 +2944,10 @@ mod tests {
         };
         assert_eq!(panel_x, 0.0, "InventoryPlaceAt(0) 应把背包复位到 x=0");
         assert_eq!(
-            (world.resource::<InventoryOrigin>().0, world.resource::<InventoryOrigin>().1),
+            (
+                world.resource::<InventoryOrigin>().0,
+                world.resource::<InventoryOrigin>().1
+            ),
             (0.0, 0.0)
         );
         assert_eq!(
@@ -3233,10 +3257,21 @@ mod tests {
             check_fishing: false,
             allow_consumable: true,
         };
-        assert!(use_item_guard(&potion, false, true, &loadout.slots, ctx_hero, 0.0, &mut fb).is_some());
+        assert!(
+            use_item_guard(&potion, false, true, &loadout.slots, ctx_hero, 0.0, &mut fb).is_some()
+        );
         // 主背包 check_fishing=true → 钓鱼拦截
         let ctx_player = UseItemCtx::player(&loadout.slots, 0, 0, 1);
-        assert!(use_item_guard(&potion, false, true, &loadout.slots, ctx_player, 0.0, &mut fb).is_none());
+        assert!(use_item_guard(
+            &potion,
+            false,
+            true,
+            &loadout.slots,
+            ctx_player,
+            0.0,
+            &mut fb
+        )
+        .is_none());
     }
 
     #[test]
@@ -3255,10 +3290,28 @@ mod tests {
         };
         // 守卫本身通过（消耗品拦截在 use_item_core 第 8 步）
         let potion = item_with_type(ItemType::Potion);
-        assert!(use_item_guard(&potion, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(
+            &potion,
+            false,
+            false,
+            &loadout.slots,
+            ctx_storage,
+            0.0,
+            &mut fb
+        )
+        .is_some());
         // 装备放行
         let sword = item_with_type(ItemType::Weapon);
-        assert!(use_item_guard(&sword, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb).is_some());
+        assert!(use_item_guard(
+            &sword,
+            false,
+            false,
+            &loadout.slots,
+            ctx_storage,
+            0.0,
+            &mut fb
+        )
+        .is_some());
     }
 
     #[test]

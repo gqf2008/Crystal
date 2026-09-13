@@ -321,7 +321,11 @@ pub(crate) fn apply_user_info_stats(
 ///
 /// `inventory_events` 与 `apply_pending_events` 共用此一份字段映射，避免双份漂移
 /// （#2633 R1）。非 UserInformation 事件为 no-op。
-pub(crate) fn apply_user_info_items(ev: &ServerEvent, inventory: &mut Inventory, loadout: &mut Loadout) {
+pub(crate) fn apply_user_info_items(
+    ev: &ServerEvent,
+    inventory: &mut Inventory,
+    loadout: &mut Loadout,
+) {
     let ServerEvent::UserInformation {
         inventory: items,
         equipment,
@@ -404,7 +408,12 @@ fn apply_vitals_event(
         }
         ServerEvent::ExperienceGained { amount } => {
             progression.exp += *amount;
-            tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, progression.exp, progression.max_exp);
+            tracing::info!(
+                "✨ 获得经验 +{}（当前 {}/{}）",
+                amount,
+                progression.exp,
+                progression.max_exp
+            );
             true
         }
         ServerEvent::LevelChanged {
@@ -418,7 +427,9 @@ fn apply_vitals_event(
             tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             true
         }
-        ServerEvent::UserInformation { name: user_name, .. } => {
+        ServerEvent::UserInformation {
+            name: user_name, ..
+        } => {
             // —— 玩家组件：实体已生成就地写入（共享映射），未生成则由调用方缓冲待回放（R1/M1）——
             // PlayerName 单独写：它由 spawn 路径插入（非 Bundle 成员），不参与"实体有无"判定，
             // 缺失时静默跳过（同其他写系统 R1 语义）。
@@ -435,13 +446,20 @@ fn apply_vitals_event(
 
 /// 判别 `apply_vitals_event` 的命中集——两侧新增分支须同步（评审 M1；分支测试兜底）。
 fn is_vitals_event(ev: &ServerEvent) -> bool {
-    matches!(ev,
-        ServerEvent::PetModeChanged { .. } | ServerEvent::HealthChanged { .. }
-        | ServerEvent::GoldGained { .. } | ServerEvent::BaseStats { .. }
-        | ServerEvent::PlayerNameUpdated { .. } | ServerEvent::CreditGained { .. }
-        | ServerEvent::CreditLost { .. } | ServerEvent::GoldLost { .. }
-        | ServerEvent::ExperienceGained { .. } | ServerEvent::LevelChanged { .. }
-        | ServerEvent::UserInformation { .. })
+    matches!(
+        ev,
+        ServerEvent::PetModeChanged { .. }
+            | ServerEvent::HealthChanged { .. }
+            | ServerEvent::GoldGained { .. }
+            | ServerEvent::BaseStats { .. }
+            | ServerEvent::PlayerNameUpdated { .. }
+            | ServerEvent::CreditGained { .. }
+            | ServerEvent::CreditLost { .. }
+            | ServerEvent::GoldLost { .. }
+            | ServerEvent::ExperienceGained { .. }
+            | ServerEvent::LevelChanged { .. }
+            | ServerEvent::UserInformation { .. }
+    )
 }
 
 pub struct PlayerStatePlugin;
@@ -490,8 +508,13 @@ fn player_vitals_events(
     mut pending: ResMut<PendingPlayerEvents>,
     mut q: Query<
         (
-            &mut Vitals, &mut Progression, &mut Gold, &mut Credit,
-            &mut BaseStats, &mut PetModeState, &mut CombatStats,
+            &mut Vitals,
+            &mut Progression,
+            &mut Gold,
+            &mut Credit,
+            &mut BaseStats,
+            &mut PetModeState,
+            &mut CombatStats,
         ),
         With<LocalPlayer>,
     >,
@@ -506,10 +529,15 @@ fn player_vitals_events(
         //（修复评审 M1：此前只缓冲 UserInformation、其余被丢弃）。正常窗口仅登录数帧。
         // 另：若实际是"多个 LocalPlayer 实体"（异常，理论已由登出清理修复消除），给一次告警便于定位。
         if !*warned
-            && matches!(q.single_mut(), Err(bevy_ecs::query::QuerySingleError::MultipleEntities(_)))
+            && matches!(
+                q.single_mut(),
+                Err(bevy_ecs::query::QuerySingleError::MultipleEntities(_))
+            )
         {
             *warned = true;
-            tracing::warn!("⚠️ 多个 LocalPlayer 实体（登出未清理？CRITICAL-1）——本帧跳过组件写，事件按序缓冲");
+            tracing::warn!(
+                "⚠️ 多个 LocalPlayer 实体（登出未清理？CRITICAL-1）——本帧跳过组件写，事件按序缓冲"
+            );
         }
         // 命中集仅 is_vitals_event：QuestItemGained/Deleted **不入 pending**——
         // 由 quest_inventory_events 迟读递延处理（与 inventory_events/belt_restock_events
@@ -525,7 +553,17 @@ fn player_vitals_events(
     };
     let mut n = name_q.single_mut().ok();
     for ev in events.read() {
-        apply_vitals_event(ev, &mut v, &mut p, &mut g, &mut c, &mut b, &mut pm, &mut cb, n.as_deref_mut());
+        apply_vitals_event(
+            ev,
+            &mut v,
+            &mut p,
+            &mut g,
+            &mut c,
+            &mut b,
+            &mut pm,
+            &mut cb,
+            n.as_deref_mut(),
+        );
     }
 }
 
@@ -605,11 +643,17 @@ fn apply_status_event(
 /// 判别 `apply_status_event` 的命中集（MountUpdated 为 no-op 不含在内；
 /// 两侧新增分支须同步（评审 M1；分支测试兜底））。
 fn is_status_event(ev: &ServerEvent) -> bool {
-    matches!(ev,
-        ServerEvent::FishingUpdate { .. } | ServerEvent::TrapRockChanged { .. }
-        | ServerEvent::LocalPoisonChanged { .. } | ServerEvent::BuffAdded { .. }
-        | ServerEvent::BuffRemoved { .. } | ServerEvent::PlayerDied
-        | ServerEvent::ReincarnationRequested | ServerEvent::PlayerRevived)
+    matches!(
+        ev,
+        ServerEvent::FishingUpdate { .. }
+            | ServerEvent::TrapRockChanged { .. }
+            | ServerEvent::LocalPoisonChanged { .. }
+            | ServerEvent::BuffAdded { .. }
+            | ServerEvent::BuffRemoved { .. }
+            | ServerEvent::PlayerDied
+            | ServerEvent::ReincarnationRequested
+            | ServerEvent::PlayerRevived
+    )
 }
 
 /// 任务格增量（QuestItemGained/Deleted）**不入 pending**：由 quest_inventory_events
@@ -658,8 +702,15 @@ fn apply_pending_events(
     mut pending: ResMut<PendingPlayerEvents>,
     mut q: Query<
         (
-            &mut Vitals, &mut Progression, &mut Gold, &mut Credit, &mut BaseStats,
-            &mut PetModeState, &mut CombatStats, &mut Inventory, &mut Loadout,
+            &mut Vitals,
+            &mut Progression,
+            &mut Gold,
+            &mut Credit,
+            &mut BaseStats,
+            &mut PetModeState,
+            &mut CombatStats,
+            &mut Inventory,
+            &mut Loadout,
             &mut StatusFlags,
         ),
         With<LocalPlayer>,
@@ -670,14 +721,25 @@ fn apply_pending_events(
     if pending.0.is_empty() {
         return;
     }
-    let Ok((mut v, mut p, mut g, mut c, mut b, mut pm, mut cb, mut inv, mut lo, mut f)) = q.single_mut()
+    let Ok((mut v, mut p, mut g, mut c, mut b, mut pm, mut cb, mut inv, mut lo, mut f)) =
+        q.single_mut()
     else {
         return; // 实体仍未生成：保留 pending 下一帧再试
     };
     let mut n = name_q.single_mut().ok();
     let buffered = std::mem::take(&mut pending.0);
     for ev in &buffered {
-        apply_vitals_event(ev, &mut v, &mut p, &mut g, &mut c, &mut b, &mut pm, &mut cb, n.as_deref_mut());
+        apply_vitals_event(
+            ev,
+            &mut v,
+            &mut p,
+            &mut g,
+            &mut c,
+            &mut b,
+            &mut pm,
+            &mut cb,
+            n.as_deref_mut(),
+        );
         apply_user_info_items(ev, &mut inv, &mut lo);
         apply_status_event(ev, &mut f, &mut death_ui);
     }
@@ -693,7 +755,9 @@ fn push_pending(pending: &mut Vec<ServerEvent>, ev: ServerEvent, warned: &mut bo
     if pending.len() >= MAX_PENDING_EVENTS {
         if !*warned {
             *warned = true;
-            tracing::warn!("⚠️ 登录缓冲超 {MAX_PENDING_EVENTS} 条，丢弃后续状态事件（实体长期未生成？）");
+            tracing::warn!(
+                "⚠️ 登录缓冲超 {MAX_PENDING_EVENTS} 条，丢弃后续状态事件（实体长期未生成？）"
+            );
         }
         return;
     }
@@ -872,10 +936,7 @@ mod tests {
         app.update();
         let inv: crate::game::player_state::Inventory = get(&mut app);
         assert!(
-            inv.items
-                .iter()
-                .flatten()
-                .any(|it| it.unique_id == 7),
+            inv.items.iter().flatten().any(|it| it.unique_id == 7),
             "新物品应入包并镜像到组件"
         );
     }
@@ -898,7 +959,10 @@ mod tests {
     #[test]
     fn inventory_move_delete_updates_component() {
         fn ids(items: &[Option<InvItem>]) -> Vec<Option<u64>> {
-            items.iter().map(|s| s.as_ref().map(|i| i.unique_id)).collect()
+            items
+                .iter()
+                .map(|s| s.as_ref().map(|i| i.unique_id))
+                .collect()
         }
         let mut app = test_app();
         spawn_local(&mut app);
@@ -912,7 +976,11 @@ mod tests {
             .write_message(ServerEvent::InventoryMoved { from: 0, to: 1 });
         app.update();
         let inv: Inventory = get(&mut app);
-        assert_eq!(ids(&inv.items), [Some(2), Some(1), None, None], "移动后应交换");
+        assert_eq!(
+            ids(&inv.items),
+            [Some(2), Some(1), None, None],
+            "移动后应交换"
+        );
 
         // 删除当前 0 格物品（uid=2，移动后位于 0）
         let uid = inv.items[0].as_ref().unwrap().unique_id;
@@ -1026,9 +1094,12 @@ mod tests {
         app.world_mut().write_message(user_info(60, 800, 400));
         app.world_mut()
             .write_message(ServerEvent::HealthChanged { hp: 500, mp: 100 });
-        app.world_mut().write_message(ServerEvent::GoldGained { gold: 100 });
         app.world_mut()
-            .write_message(ServerEvent::PlayerNameUpdated { name: "先改名后".to_string() });
+            .write_message(ServerEvent::GoldGained { gold: 100 });
+        app.world_mut()
+            .write_message(ServerEvent::PlayerNameUpdated {
+                name: "先改名后".to_string(),
+            });
         app.update(); // 不应 panic
 
         // 4 个可处理事件已按到达顺序入队
@@ -1036,7 +1107,9 @@ mod tests {
 
         // 生成 LocalPlayer（挂默认组件 + PlayerName，后者由 spawn 路径插入）→ 按序回放
         let e = spawn_local(&mut app);
-        app.world_mut().entity_mut(e).insert(PlayerName(String::new()));
+        app.world_mut()
+            .entity_mut(e)
+            .insert(PlayerName(String::new()));
         app.update();
 
         let v: Vitals = get(&mut app);
@@ -1046,7 +1119,10 @@ mod tests {
             "HealthChanged 后到覆盖 UserInfo（M1：此前被丢弃→旧值 800 胜）"
         );
         let g: Gold = get(&mut app);
-        assert_eq!(g.0, 4342, "GoldGained 在 UserInformation gold=4242 基础上 +100");
+        assert_eq!(
+            g.0, 4342,
+            "GoldGained 在 UserInformation gold=4242 基础上 +100"
+        );
         let p: Progression = get(&mut app);
         assert_eq!(p.level, 60);
         let pn = app
@@ -1089,7 +1165,10 @@ mod tests {
             !f.paralysis,
             "生成帧新值应覆盖缓冲旧值（LocalPoisonChanged false 胜）"
         );
-        assert!(!f.dead, "生成帧 PlayerRevived 应覆盖缓冲 PlayerDied（新值胜）");
+        assert!(
+            !f.dead,
+            "生成帧 PlayerRevived 应覆盖缓冲 PlayerDied（新值胜）"
+        );
     }
 
     /// 评审 MINOR：登出（OnExit Game）清空登录缓冲——防跨会话残留把上个角色的事件
@@ -1170,7 +1249,9 @@ mod tests {
         assert!(!app.world().resource::<PendingPlayerEvents>().0.is_empty());
 
         let e = spawn_local(&mut app);
-        app.world_mut().entity_mut(e).insert(PlayerName(String::new()));
+        app.world_mut()
+            .entity_mut(e)
+            .insert(PlayerName(String::new()));
         app.update();
         let pn = app
             .world_mut()
@@ -1209,13 +1290,15 @@ mod tests {
         spawn_local(&mut app);
         enter_game(&mut app);
 
-        app.world_mut().write_message(ServerEvent::ReincarnationRequested);
+        app.world_mut()
+            .write_message(ServerEvent::ReincarnationRequested);
         app.update();
         let f: StatusFlags = get(&mut app);
         assert!(!f.reincarnation_offered, "未死亡时不应弹轮回");
 
         app.world_mut().write_message(ServerEvent::PlayerDied);
-        app.world_mut().write_message(ServerEvent::ReincarnationRequested);
+        app.world_mut()
+            .write_message(ServerEvent::ReincarnationRequested);
         app.update();
         let f: StatusFlags = get(&mut app);
         assert!(f.dead, "PlayerDied 应置 dead");
@@ -1230,7 +1313,8 @@ mod tests {
         enter_game(&mut app);
 
         app.world_mut().write_message(ServerEvent::PlayerDied);
-        app.world_mut().write_message(ServerEvent::ReincarnationRequested);
+        app.world_mut()
+            .write_message(ServerEvent::ReincarnationRequested);
         app.update();
         let f: StatusFlags = get(&mut app);
         assert!(f.dead && f.reincarnation_offered);
@@ -1288,10 +1372,11 @@ mod tests {
         app.world_mut().write_message(ServerEvent::QuestItemGained {
             item: item(7, 70, 1),
         });
-        app.world_mut().write_message(ServerEvent::QuestItemDeleted {
-            unique_id: 999,
-            count: 1,
-        });
+        app.world_mut()
+            .write_message(ServerEvent::QuestItemDeleted {
+                unique_id: 999,
+                count: 1,
+            });
         app.update();
 
         assert!(

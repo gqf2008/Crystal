@@ -1,5 +1,6 @@
 //! mock 状态与物品构造（从 mock.rs 拆分，#1147）
 
+use crate::network::codec;
 use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::data::client_data::{ClientMagic, ClientQuestProgress, SelectInfo};
 use mir2_shared::data::item::ItemInfo;
@@ -7,11 +8,10 @@ use mir2_shared::enums::{
     ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
     MirGender, PoisonType, Spell, SpellEffect, Stat,
 };
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
-use crate::network::codec;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy)]
 pub(crate) struct MockPlayerStats {
@@ -29,7 +29,13 @@ impl MockPlayerStats {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(420);
-        Self { level: 30, exp: 12000, max_exp: Self::max_exp_for(30), hp: 850, mp }
+        Self {
+            level: 30,
+            exp: 12000,
+            max_exp: Self::max_exp_for(30),
+            hp: 850,
+            mp,
+        }
     }
     /// 经验上限（C# Globals.Experience 近似：level^2*100/3，30 级 = 30000）
     pub(crate) fn max_exp_for(level: u16) -> i64 {
@@ -59,11 +65,26 @@ pub(crate) struct MonsterDef {
 pub(crate) fn monster_def(id: u32) -> MonsterDef {
     match id {
         // 稻草人：被动挨打（首个练手怪）
-        101 => MonsterDef { hp_max: 100, damage: 0, exp: 2000, aggressive: false },
+        101 => MonsterDef {
+            hp_max: 100,
+            damage: 0,
+            exp: 2000,
+            aggressive: false,
+        },
         // 多钩猫：追击 + 邻接攻击
-        102 => MonsterDef { hp_max: 120, damage: 40, exp: 2500, aggressive: true },
+        102 => MonsterDef {
+            hp_max: 120,
+            damage: 40,
+            exp: 2500,
+            aggressive: true,
+        },
         // 半兽人：追击 + 邻接攻击（更强）
-        _ => MonsterDef { hp_max: 150, damage: 60, exp: 3000, aggressive: true },
+        _ => MonsterDef {
+            hp_max: 150,
+            damage: 60,
+            exp: 3000,
+            aggressive: true,
+        },
     }
 }
 
@@ -136,15 +157,14 @@ pub(crate) fn socketed_sword_item() -> mir2_shared::data::item::UserItem {
 pub(crate) fn mock_recipe_info() -> mir2_shared::data::client_data::ClientRecipeInfo {
     use mir2_shared::data::client_data::RecipeRequirement;
 
-    let req = |item_index: i32, count: u16, image: u16, name: &str, min_dura: u16| {
-        RecipeRequirement {
+    let req =
+        |item_index: i32, count: u16, image: u16, name: &str, min_dura: u16| RecipeRequirement {
             item_index,
             count,
             image,
             name: name.to_string(),
             min_dura,
-        }
-    };
+        };
 
     mir2_shared::data::client_data::ClientRecipeInfo {
         gold: 100,
@@ -252,6 +272,3 @@ pub(crate) fn book_item(spell: u8) -> mir2_shared::data::item::UserItem {
         ..Default::default()
     }
 }
-
-
-

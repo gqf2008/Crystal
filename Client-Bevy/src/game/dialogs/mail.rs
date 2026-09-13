@@ -82,7 +82,11 @@ impl Default for MailState {
 
 /// #2538：可用附件格数（C# SendMail hasStamp?5:1；客户端按 Stamped 估计）
 pub fn stamp_slots(stamped: bool) -> usize {
-    if stamped { 5 } else { 1 }
+    if stamped {
+        5
+    } else {
+        1
+    }
 }
 
 // C# MailListDialog（MailDialogs.cs:32-35）布局锚点。
@@ -305,7 +309,10 @@ fn mail_compose_system(
     }
 
     if open {
-        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+        let items = inv_q
+            .single()
+            .map(|inv| inv.items.as_slice())
+            .unwrap_or(&[]);
         // 附件槽图标（按 unique_id 在背包中查找）
         for (mut data, slot) in &mut attach_cells {
             let uid = mail.attach.get(slot.0).and_then(|s| *s);
@@ -344,28 +351,26 @@ fn mail_compose_system(
         }
         for (mut data, pick) in &mut pick_cells {
             match pick_slots.get(pick.0).and_then(|s| *s) {
-                Some(slot_idx) => {
-                    match items.get(slot_idx).and_then(|s| s.as_ref()) {
-                        Some(it) => {
-                            let icon = load_lib_image(
-                                &mut libs,
-                                &mut images,
-                                LibraryName::Items,
-                                it.image as usize,
-                            );
-                            data.icon = icon;
-                            data.count = if it.count > 1 {
-                                Some(it.count as u32)
-                            } else {
-                                None
-                            };
-                        }
-                        None => {
-                            data.icon = None;
-                            data.count = None;
-                        }
+                Some(slot_idx) => match items.get(slot_idx).and_then(|s| s.as_ref()) {
+                    Some(it) => {
+                        let icon = load_lib_image(
+                            &mut libs,
+                            &mut images,
+                            LibraryName::Items,
+                            it.image as usize,
+                        );
+                        data.icon = icon;
+                        data.count = if it.count > 1 {
+                            Some(it.count as u32)
+                        } else {
+                            None
+                        };
                     }
-                }
+                    None => {
+                        data.icon = None;
+                        data.count = None;
+                    }
+                },
                 None => {
                     data.icon = None;
                     data.count = None;
@@ -419,9 +424,7 @@ fn mail_compose_system(
                         && cursor.y >= y
                         && cursor.y <= y + 40.0
                     {
-                        if let Some(it) =
-                            items.get(*slot_idx).and_then(|s| s.as_ref())
-                        {
+                        if let Some(it) = items.get(*slot_idx).and_then(|s| s.as_ref()) {
                             // #2538：未贴票仅第 1 格可用（C# UpdateParcel Cells[1..] Enabled=false）
                             let slots = stamp_slots(mail.stamped);
                             if let Some(empty) =
@@ -609,26 +612,28 @@ fn spawn_mail(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 670) else {
         return;
     };
-    let list = spawn_panel(
-        &mut commands,
-        bg,
-        panel_x,
-        panel_y,
-        MAIL_W,
-        MAIL_H,
-        30,
-    );
+    let list = spawn_panel(&mut commands, bg, panel_x, panel_y, MAIL_W, MAIL_H, 30);
     commands.entity(list).insert((
         DialogRoot(DialogKind::Mail),
         MailWidget,
         UiScrollList {
-            rect_rel: (10.0, mail_row_y(0), 290.0, MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32),
+            rect_rel: (
+                10.0,
+                mail_row_y(0),
+                290.0,
+                MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32,
+            ),
             row_h: MAIL_ROW_H,
             visible: MAIL_VISIBLE_ROWS,
             total: 0,
             offset: 0,
             step: 3,
-            track_rel: (300.0, mail_row_y(0), 8.0, MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32),
+            track_rel: (
+                300.0,
+                mail_row_y(0),
+                8.0,
+                MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32,
+            ),
             thumb: None,
             z: 9,
         },
@@ -637,7 +642,12 @@ fn spawn_mail(
     commands.entity(list).with_children(|p| {
         spawn_scroll_bar_ui(
             p,
-            (300.0, mail_row_y(0), 8.0, MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32),
+            (
+                300.0,
+                mail_row_y(0),
+                8.0,
+                MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32,
+            ),
             9,
         );
         // C# TitleLabel = Title[7]，不是 NEW CHARACTER（Title[20]）。
@@ -659,8 +669,7 @@ fn spawn_mail(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, MAIL_W - 24.0, 3.0, 20.0, 20.0, 10)
-                .insert(MailClose);
+            spawn_icon_button(p, n, h, pr, MAIL_W - 24.0, 3.0, 20.0, 20.0, 10).insert(MailClose);
         }
         // C# 10 行 @ 55 + 33*i；行点击由 mail_ui_system 按同一常量命中。
         for i in 0..MAIL_VISIBLE_ROWS {
@@ -677,8 +686,17 @@ fn spawn_mail(
             .insert(MailLine(i));
         }
         // 阅读内容复用同一面板；有 detail 时隐藏行并显示正文。
-        spawn_label(p, &cjk, "", 10.0, 58.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 12)
-            .insert((MailDetailText, Visibility::Hidden));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            10.0,
+            58.0,
+            12.0,
+            Color::srgb(0.95, 0.95, 0.8),
+            12,
+        )
+        .insert((MailDetailText, Visibility::Hidden));
 
         // C# 列表操作按钮 y=414：写邮件 @75 / 回复 @102 / 阅读 @129 / 删除 @156
         let actions = [
@@ -740,8 +758,7 @@ fn spawn_mail(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 681),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 682),
         ) {
-            spawn_icon_button(p, n, h, pr, 100.0, 390.0, 32.0, 24.0, 10)
-                .insert(MailCollect);
+            spawn_icon_button(p, n, h, pr, 100.0, 390.0, 32.0, 24.0, 10).insert(MailCollect);
         }
         // C# `MailDialogs.cs:257-283`：`BlockListButton`/`BugReportButton` 是构造即
         // `GrayScale = true, Enabled = false` 的禁用占位键（`Prguse[520]` @(183,414)、
@@ -813,13 +830,26 @@ fn spawn_mail(
         // 附件 5 格（C# MailComposeParcelDialog）@(10+46i,146)
         spawn_label(p, &cjk, "附件:", 10.0, 138.0, 12.0, Color::WHITE, 10);
         for i in 0..5usize {
-            spawn_item_cell_ui(p, &mut images, &font, 10.0 + i as f32 * 46.0, 146.0, 40.0, 40.0, 10, i)
-                .insert(MailAttachSlot(i));
+            spawn_item_cell_ui(
+                p,
+                &mut images,
+                &font,
+                10.0 + i as f32 * 46.0,
+                146.0,
+                40.0,
+                40.0,
+                10,
+                i,
+            )
+            .insert(MailAttachSlot(i));
         }
         // #2538：邮票按钮（C# StampButton Prguse2[203] 20x20）+ 贴票覆层 [204]
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 203) {
-            spawn_container(p, 250.0, 144.0, 20.0, 20.0, 10)
-                .insert((Button, ImageNode::new(h.clone()), MailStampBtn));
+            spawn_container(p, 250.0, 144.0, 20.0, 20.0, 10).insert((
+                Button,
+                ImageNode::new(h.clone()),
+                MailStampBtn,
+            ));
             crate::ui::theme::spawn_image(p, h, 250.0, 144.0, 20.0, 20.0, 11)
                 .insert((MailStampOn, Visibility::Hidden));
         }
@@ -831,8 +861,18 @@ fn spawn_mail(
         for i in 0..20usize {
             let col = (i % 5) as f32;
             let row = (i / 5) as f32;
-            spawn_item_cell_ui(p, &mut images, &font, 10.0 + col * 46.0, 202.0 + row * 46.0, 40.0, 40.0, 10, i)
-                .insert(MailInvPick(i));
+            spawn_item_cell_ui(
+                p,
+                &mut images,
+                &font,
+                10.0 + col * 46.0,
+                202.0 + row * 46.0,
+                40.0,
+                40.0,
+                10,
+                i,
+            )
+            .insert(MailInvPick(i));
         }
         // 发送 / 取消 @(10/100,390)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -863,7 +903,11 @@ fn mail_ui_system(
     read_btn: Query<(Entity, &Interaction), With<MailReadBtn>>,
     mut collect_btn: Query<
         (Entity, &Interaction, &mut Visibility),
-        (With<MailCollect>, Without<MailLine>, Without<MailDetailText>),
+        (
+            With<MailCollect>,
+            Without<MailLine>,
+            Without<MailDetailText>,
+        ),
     >,
     mut widgets: Query<
         (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),

@@ -115,10 +115,7 @@ impl Plugin for NpcAwakePlugin {
         app.init_resource::<NpcAwakeState>();
         app.add_systems(OnEnter(AppState::Game), spawn_npc_awake);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_awake);
-        app.add_systems(
-            Update,
-            awake_server_events.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, awake_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
             (npc_awake_ui_system, npc_awake_render_system)
@@ -173,12 +170,11 @@ fn spawn_npc_awake(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 713),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 714),
         ) {
-            spawn_icon_button(p, n, h, pr, 115.0, 391.0, 80.0, 25.0, 10)
-                .insert((
-                    NpcAwakeUpgrade,
-                    // #93 通用 Tooltip：C# 升级按钮 Hint
-                    crate::ui::tooltip::TooltipHint("消耗材料执行觉醒".to_string()),
-                ));
+            spawn_icon_button(p, n, h, pr, 115.0, 391.0, 80.0, 25.0, 10).insert((
+                NpcAwakeUpgrade,
+                // #93 通用 Tooltip：C# 升级按钮 Hint
+                crate::ui::tooltip::TooltipHint("消耗材料执行觉醒".to_string()),
+            ));
         }
         // 觉醒类型下拉（C# SelectAwakeType (35,141)）
         spawn_dropdown_ui(
@@ -226,17 +222,29 @@ fn spawn_npc_awake(
         spawn_label(p, &cjk, "觉醒", 118.0, 396.0, 12.0, Color::WHITE, 10)
             .insert(NpcAwakeActionLabel);
         // 主物品格（C# (202,91)）：图标 + 名字（白图占位，render 系统换物品图）
-        let empty = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        let empty = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
         spawn_image(p, empty, 202.0, 91.0, 36.0, 28.0, 9).insert(NpcAwakeMainIcon);
         spawn_label(p, &cjk, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
         // 材料需求标签（C# (67,317)/(192,317)）
         for x in [67.0, 192.0] {
-            spawn_label(p, &cjk, "", x, 317.0, 11.0, Color::WHITE, 9)
-                .insert(NpcAwakeMaterialText);
+            spawn_label(p, &cjk, "", x, 317.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMaterialText);
         }
         // 结果标签（C# GoldLabel (112,354)）
-        spawn_label(p, &cjk, "", 112.0, 354.0, 11.0, Color::srgb(1.0, 0.9, 0.1), 9)
-            .insert(NpcAwakeResultText);
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            112.0,
+            354.0,
+            11.0,
+            Color::srgb(1.0, 0.9, 0.1),
+            9,
+        )
+        .insert(NpcAwakeResultText);
     });
 }
 
@@ -263,12 +271,16 @@ fn npc_awake_ui_system(
     service_btns: Query<(Entity, &Interaction, &NpcAwakeServiceBtn)>,
     mut action: Query<(&mut Text, &mut Visibility), With<NpcAwakeActionLabel>>,
     mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
-    mut mat_vis: Query<&mut Visibility, (With<NpcAwakeMaterialText>, Without<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
+    mut mat_vis: Query<
+        &mut Visibility,
+        (
+            With<NpcAwakeMaterialText>,
+            Without<NpcAwakeTypeDrop>,
+            Without<NpcAwakeActionLabel>,
+        ),
+    >,
     mouse: Res<ButtonInput<MouseButton>>,
-    ui: (
-        Query<&Window>,
-        Query<&Node, With<NpcAwakeWidget>>,
-    ),
+    ui: (Query<&Window>, Query<&Node, With<NpcAwakeWidget>>),
     mut last_uid: Local<Option<u64>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -284,7 +296,11 @@ fn npc_awake_ui_system(
 
     let open = mgr.is_open(DialogKind::NpcAwake);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         // 关闭时也要隐藏下拉/材料/操作文字：它们不在 widgets 查询里，
@@ -306,10 +322,18 @@ fn npc_awake_ui_system(
         *vis = Visibility::Visible;
     }
     for mut vis in &mut type_vis {
-        *vis = if state.service == NpcAwakeService::Awaken { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if state.service == NpcAwakeService::Awaken {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut vis in &mut mat_vis {
-        *vis = if state.service == NpcAwakeService::Awaken { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if state.service == NpcAwakeService::Awaken {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // #1356：服务模式切换（C# PanelType）
     for (e, inter, svc) in &service_btns {
@@ -368,11 +392,10 @@ fn npc_awake_ui_system(
     // 主物品格点击：循环选择背包武器（C# 从背包拖入）
     if let Ok(window) = ui.0.single() {
         if let Some(cursor) = window.cursor_position() {
-            let (ox, oy) = ui
-                .1
-                .single()
-                .map(|n| crate::ui::theme::node_origin(n, (0.0, 0.0)))
-                .unwrap_or((0.0, 0.0));
+            let (ox, oy) =
+                ui.1.single()
+                    .map(|n| crate::ui::theme::node_origin(n, (0.0, 0.0)))
+                    .unwrap_or((0.0, 0.0));
             if mouse.just_pressed(MouseButton::Left)
                 && cursor.x >= ox + 202.0
                 && cursor.x <= ox + 238.0
@@ -380,9 +403,17 @@ fn npc_awake_ui_system(
                 && cursor.y <= oy + 119.0
             {
                 // #1356：觉醒模式循环武器；分解/降级/重置循环全部物品
-                let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+                let items = inv_q
+                    .single()
+                    .map(|inv| inv.items.as_slice())
+                    .unwrap_or(&[]);
                 let pool: Vec<InvItem> = if state.service == NpcAwakeService::Awaken {
-                    items.iter().flatten().filter(|it| it.item_type == 1).cloned().collect()
+                    items
+                        .iter()
+                        .flatten()
+                        .filter(|it| it.item_type == 1)
+                        .cloned()
+                        .collect()
                 } else {
                     items.iter().flatten().cloned().collect()
                 };
@@ -420,19 +451,25 @@ fn npc_awake_ui_system(
                 }
                 NpcAwakeService::Disassemble => {
                     if let Some(uid) = state.selected_uid {
-                        net.send_packet(&mir2_shared::packets::client::misc::DisassembleItem { unique_id: uid });
+                        net.send_packet(&mir2_shared::packets::client::misc::DisassembleItem {
+                            unique_id: uid,
+                        });
                         tracing::info!("🔧 分解物品 uid={}", uid);
                     }
                 }
                 NpcAwakeService::Downgrade => {
                     if let Some(uid) = state.selected_uid {
-                        net.send_packet(&mir2_shared::packets::client::misc::DowngradeAwakening { unique_id: uid });
+                        net.send_packet(&mir2_shared::packets::client::misc::DowngradeAwakening {
+                            unique_id: uid,
+                        });
                         tracing::info!("⬇️ 觉醒降级 uid={}", uid);
                     }
                 }
                 NpcAwakeService::Reset => {
                     if let Some(uid) = state.selected_uid {
-                        net.send_packet(&mir2_shared::packets::client::misc::ResetAddedItem { unique_id: uid });
+                        net.send_packet(&mir2_shared::packets::client::misc::ResetAddedItem {
+                            unique_id: uid,
+                        });
                         tracing::info!("🔄 重置附加属性 uid={}", uid);
                     }
                 }
@@ -449,16 +486,45 @@ fn npc_awake_render_system(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut icon: Query<(&mut ImageNode, &NpcAwakeMainIcon), Without<NpcAwakeMainName>>,
-    mut name: Query<&mut Text, (With<NpcAwakeMainName>, Without<NpcAwakeMainIcon>, Without<NpcAwakeMaterialText>, Without<NpcAwakeResultText>)>,
-    mut mats: Query<&mut Text, (With<NpcAwakeMaterialText>, Without<NpcAwakeResultText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
-    mut res: Query<&mut Text, (With<NpcAwakeResultText>, Without<NpcAwakeMaterialText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
+    mut name: Query<
+        &mut Text,
+        (
+            With<NpcAwakeMainName>,
+            Without<NpcAwakeMainIcon>,
+            Without<NpcAwakeMaterialText>,
+            Without<NpcAwakeResultText>,
+        ),
+    >,
+    mut mats: Query<
+        &mut Text,
+        (
+            With<NpcAwakeMaterialText>,
+            Without<NpcAwakeResultText>,
+            Without<NpcAwakeMainName>,
+            Without<NpcAwakeMainIcon>,
+        ),
+    >,
+    mut res: Query<
+        &mut Text,
+        (
+            With<NpcAwakeResultText>,
+            Without<NpcAwakeMaterialText>,
+            Without<NpcAwakeMainName>,
+            Without<NpcAwakeMainIcon>,
+        ),
+    >,
 ) {
     if !mgr.is_open(crate::game::dialogs::DialogKind::NpcAwake) {
         return;
     }
     for (mut node, _) in &mut icon {
         if let Some(item) = &state.selected_item {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Items, item.image as usize) {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Items,
+                item.image as usize,
+            ) {
                 node.image = h;
             }
         }
@@ -483,7 +549,6 @@ fn npc_awake_render_system(
     }
 }
 
-
 /// 消费服务端觉醒事件（网络层只广播 ServerEvent）
 fn awake_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -502,7 +567,10 @@ fn awake_server_events(
                     })
                     .collect();
             }
-            ServerEvent::AwakeningResult { result, result_text } => {
+            ServerEvent::AwakeningResult {
+                result,
+                result_text,
+            } => {
                 awake.result = *result;
                 awake.result_text = result_text.clone();
             }

@@ -1,8 +1,8 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 // #2630：显式引入本处理器构造的 UI 载荷类型（原经 super::* 隐私链隐式传入，见 handle_guild 注）。
 use crate::game::dialogs::creature::CreatureEntry;
 use crate::game::dialogs::inspect::InspectItem;
@@ -27,8 +27,10 @@ pub(crate) fn parse_add_buff_body(body: &[u8]) -> Option<(u8, u32, bool, Vec<i32
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>,
-    payload: &[u8],) -> bool {
+pub(crate) fn handle_progress(
+    server_events: &mut MessageWriter<ServerEvent>,
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -36,7 +38,106 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::GetRentedItems as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::NPCAwakening as i16, ServerPacketIds::NewQuestInfo as i16, ServerPacketIds::ShareQuest as i16, ServerPacketIds::GainedQuestItem as i16, ServerPacketIds::DeleteQuestItem as i16, ServerPacketIds::NewRecipeInfo as i16, ServerPacketIds::PauseBuff as i16, ServerPacketIds::RefreshItem as i16, ServerPacketIds::SetBindingShot as i16, ServerPacketIds::BaseStatsInfo as i16, ServerPacketIds::HeroBaseStatsInfo as i16, ServerPacketIds::NPCDisassemble as i16, ServerPacketIds::NPCDowngrade as i16, ServerPacketIds::NPCReset as i16, ServerPacketIds::GuildBuffList as i16, ServerPacketIds::NPCPearlGoods as i16, ServerPacketIds::NPCRequestInput as i16, ServerPacketIds::NewChatItem as i16, ServerPacketIds::HeroHealthChanged as i16, ServerPacketIds::GainHeroExperience as i16, ServerPacketIds::HeroLevelChanged as i16, ServerPacketIds::NewIntelligentCreature as i16, ServerPacketIds::IntelligentCreatureEnableRename as i16, ServerPacketIds::IntelligentCreaturePickup as i16, ServerPacketIds::ResizeInventory as i16, ServerPacketIds::ResizeStorage as i16, ServerPacketIds::PlayerUpdate as i16, ServerPacketIds::NewMonsterInfo as i16, ServerPacketIds::NewNPCInfo as i16, ServerPacketIds::StoreItem as i16, ServerPacketIds::TakeBackItem as i16, ServerPacketIds::RemoveSlotItem as i16, ServerPacketIds::RetrieveTradeItem as i16, ServerPacketIds::AllowObserve as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16, ServerPacketIds::AddMember as i16, ServerPacketIds::SwitchGroup as i16, ServerPacketIds::CancelReincarnation as i16, ServerPacketIds::GuildStorageGoldChange as i16, ServerPacketIds::GuildStorageItemChange as i16, ServerPacketIds::NewHeroInfo as i16, ServerPacketIds::TakeBackHeroItem as i16, ServerPacketIds::TransferHeroItem as i16, ServerPacketIds::UnlockHeroAutoPot as i16, ServerPacketIds::ChangePasswordBanned as i16, ServerPacketIds::DefaultNPC as i16, ServerPacketIds::DepositRefineItem as i16, ServerPacketIds::RefineCancel as i16, ServerPacketIds::RefineItem as i16, ServerPacketIds::RetrieveRefineItem as i16, ServerPacketIds::HeroCreateRequest as i16, ServerPacketIds::UpdateHeroSpawnState as i16, ServerPacketIds::Magic as i16, ServerPacketIds::MapInformation as i16, ServerPacketIds::SearchMapResult as i16, ServerPacketIds::WorldMapSetup as i16, ServerPacketIds::NPCCheckRefine as i16, ServerPacketIds::NPCCollectRefine as i16, ServerPacketIds::NPCRefine as i16, ServerPacketIds::NPCRepair as i16, ServerPacketIds::NPCReplaceWedRing as i16, ServerPacketIds::NPCSRepair as i16, ServerPacketIds::NPCSell as i16, ServerPacketIds::NewItemInfo as i16, ServerPacketIds::RepairItem as i16, ServerPacketIds::SplitItem1 as i16, ServerPacketIds::ObjectHero as i16, ServerPacketIds::ObjectHidden as i16, ServerPacketIds::UserSlotsRefresh as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::CraftItem as i16,
+        ServerPacketIds::ItemRentalRequest as i16,
+        ServerPacketIds::UpdateRentalItem as i16,
+        ServerPacketIds::ItemRentalFee as i16,
+        ServerPacketIds::ItemRentalPeriod as i16,
+        ServerPacketIds::DepositRentalItem as i16,
+        ServerPacketIds::RetrieveRentalItem as i16,
+        ServerPacketIds::ItemRentalLock as i16,
+        ServerPacketIds::ItemRentalPartnerLock as i16,
+        ServerPacketIds::CanConfirmItemRental as i16,
+        ServerPacketIds::ConfirmItemRental as i16,
+        ServerPacketIds::CancelItemRental as i16,
+        ServerPacketIds::GetRentedItems as i16,
+        ServerPacketIds::ChangeQuest as i16,
+        ServerPacketIds::CompleteQuest as i16,
+        ServerPacketIds::NPCAwakening as i16,
+        ServerPacketIds::NewQuestInfo as i16,
+        ServerPacketIds::ShareQuest as i16,
+        ServerPacketIds::GainedQuestItem as i16,
+        ServerPacketIds::DeleteQuestItem as i16,
+        ServerPacketIds::NewRecipeInfo as i16,
+        ServerPacketIds::PauseBuff as i16,
+        ServerPacketIds::RefreshItem as i16,
+        ServerPacketIds::SetBindingShot as i16,
+        ServerPacketIds::BaseStatsInfo as i16,
+        ServerPacketIds::HeroBaseStatsInfo as i16,
+        ServerPacketIds::NPCDisassemble as i16,
+        ServerPacketIds::NPCDowngrade as i16,
+        ServerPacketIds::NPCReset as i16,
+        ServerPacketIds::GuildBuffList as i16,
+        ServerPacketIds::NPCPearlGoods as i16,
+        ServerPacketIds::NPCRequestInput as i16,
+        ServerPacketIds::NewChatItem as i16,
+        ServerPacketIds::HeroHealthChanged as i16,
+        ServerPacketIds::GainHeroExperience as i16,
+        ServerPacketIds::HeroLevelChanged as i16,
+        ServerPacketIds::NewIntelligentCreature as i16,
+        ServerPacketIds::IntelligentCreatureEnableRename as i16,
+        ServerPacketIds::IntelligentCreaturePickup as i16,
+        ServerPacketIds::ResizeInventory as i16,
+        ServerPacketIds::ResizeStorage as i16,
+        ServerPacketIds::PlayerUpdate as i16,
+        ServerPacketIds::NewMonsterInfo as i16,
+        ServerPacketIds::NewNPCInfo as i16,
+        ServerPacketIds::StoreItem as i16,
+        ServerPacketIds::TakeBackItem as i16,
+        ServerPacketIds::RemoveSlotItem as i16,
+        ServerPacketIds::RetrieveTradeItem as i16,
+        ServerPacketIds::AllowObserve as i16,
+        ServerPacketIds::AddBuff as i16,
+        ServerPacketIds::RemoveBuff as i16,
+        ServerPacketIds::PlayerInspect as i16,
+        ServerPacketIds::UpdateIntelligentCreatureList as i16,
+        ServerPacketIds::ChangeHero as i16,
+        ServerPacketIds::MarriageRequest as i16,
+        ServerPacketIds::LoverUpdate as i16,
+        ServerPacketIds::DivorceRequest as i16,
+        ServerPacketIds::ObjectColourChanged as i16,
+        ServerPacketIds::ManageHeroes as i16,
+        ServerPacketIds::NewHero as i16,
+        ServerPacketIds::SetHeroBehaviour as i16,
+        ServerPacketIds::SetAutoPotValue as i16,
+        ServerPacketIds::SetAutoPotItem as i16,
+        ServerPacketIds::HeroInformation as i16,
+        ServerPacketIds::AddMember as i16,
+        ServerPacketIds::SwitchGroup as i16,
+        ServerPacketIds::CancelReincarnation as i16,
+        ServerPacketIds::GuildStorageGoldChange as i16,
+        ServerPacketIds::GuildStorageItemChange as i16,
+        ServerPacketIds::NewHeroInfo as i16,
+        ServerPacketIds::TakeBackHeroItem as i16,
+        ServerPacketIds::TransferHeroItem as i16,
+        ServerPacketIds::UnlockHeroAutoPot as i16,
+        ServerPacketIds::ChangePasswordBanned as i16,
+        ServerPacketIds::DefaultNPC as i16,
+        ServerPacketIds::DepositRefineItem as i16,
+        ServerPacketIds::RefineCancel as i16,
+        ServerPacketIds::RefineItem as i16,
+        ServerPacketIds::RetrieveRefineItem as i16,
+        ServerPacketIds::HeroCreateRequest as i16,
+        ServerPacketIds::UpdateHeroSpawnState as i16,
+        ServerPacketIds::Magic as i16,
+        ServerPacketIds::MapInformation as i16,
+        ServerPacketIds::SearchMapResult as i16,
+        ServerPacketIds::WorldMapSetup as i16,
+        ServerPacketIds::NPCCheckRefine as i16,
+        ServerPacketIds::NPCCollectRefine as i16,
+        ServerPacketIds::NPCRefine as i16,
+        ServerPacketIds::NPCRepair as i16,
+        ServerPacketIds::NPCReplaceWedRing as i16,
+        ServerPacketIds::NPCSRepair as i16,
+        ServerPacketIds::NPCSell as i16,
+        ServerPacketIds::NewItemInfo as i16,
+        ServerPacketIds::RepairItem as i16,
+        ServerPacketIds::SplitItem1 as i16,
+        ServerPacketIds::ObjectHero as i16,
+        ServerPacketIds::ObjectHidden as i16,
+        ServerPacketIds::UserSlotsRefresh as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -48,8 +149,17 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 let count = u16::from_le_bytes(body[8..10].try_into().unwrap_or([0; 2]));
                 let success = body[10] != 0;
                 let recipe_id = unique_id as u32;
-                server_events.write(ServerEvent::CraftResult { recipe_id, count, success });
-                tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
+                server_events.write(ServerEvent::CraftResult {
+                    recipe_id,
+                    count,
+                    success,
+                });
+                tracing::info!(
+                    "🔧 CraftItem: recipe={} count={} success={}",
+                    recipe_id,
+                    count,
+                    success
+                );
             }
         }
         // ---- M42: 物品租赁 ----
@@ -225,7 +335,12 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     armor: p.armor,
                     wings_effect: p.wings_effect,
                 });
-                tracing::info!("🧍 PlayerUpdate id={} weapon={} armor={}", p.object_id, p.weapon, p.armor);
+                tracing::info!(
+                    "🧍 PlayerUpdate id={} weapon={} armor={}",
+                    p.object_id,
+                    p.weapon,
+                    p.armor
+                );
             }
         }
         // #279：怪物/NPC 信息缓存
@@ -242,14 +357,27 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // #279：仓库存取/槽位移除/交易取回/观察许可 回执
         x if x == ServerPacketIds::StoreItem as i16 => {
             if let Ok(p) = item_operations::StoreItem::read_body(&mut cur) {
-                server_events.write(ServerEvent::ItemStored { from: p.from, to: p.to, success: p.success });
+                server_events.write(ServerEvent::ItemStored {
+                    from: p.from,
+                    to: p.to,
+                    success: p.success,
+                });
                 tracing::info!("📦 StoreItem {} -> {} success={}", p.from, p.to, p.success);
             }
         }
         x if x == ServerPacketIds::TakeBackItem as i16 => {
             if let Ok(p) = item_operations::TakeBackItem::read_body(&mut cur) {
-                server_events.write(ServerEvent::ItemTakenBack { from: p.from, to: p.to, success: p.success });
-                tracing::info!("📦 TakeBackItem {} -> {} success={}", p.from, p.to, p.success);
+                server_events.write(ServerEvent::ItemTakenBack {
+                    from: p.from,
+                    to: p.to,
+                    success: p.success,
+                });
+                tracing::info!(
+                    "📦 TakeBackItem {} -> {} success={}",
+                    p.from,
+                    p.to,
+                    p.success
+                );
             }
         }
         x if x == ServerPacketIds::RemoveSlotItem as i16 => {
@@ -261,13 +389,25 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     to: p.to,
                     success: p.success,
                 });
-                tracing::info!("🗑️ RemoveSlotItem uid={} -> {} success={}", p.unique_id, p.to, p.success);
+                tracing::info!(
+                    "🗑️ RemoveSlotItem uid={} -> {} success={}",
+                    p.unique_id,
+                    p.to,
+                    p.success
+                );
             }
         }
         x if x == ServerPacketIds::RetrieveTradeItem as i16 => {
             if let Ok(p) = miscellaneous::RetrieveTradeItem::read_body(&mut cur) {
-                server_events.write(ServerEvent::TradeItemRetrieved { from_slot: p.from_slot, success: p.success });
-                tracing::info!("🔄 RetrieveTradeItem slot={} success={}", p.from_slot, p.success);
+                server_events.write(ServerEvent::TradeItemRetrieved {
+                    from_slot: p.from_slot,
+                    success: p.success,
+                });
+                tracing::info!(
+                    "🔄 RetrieveTradeItem slot={} success={}",
+                    p.from_slot,
+                    p.success
+                );
             }
         }
         x if x == ServerPacketIds::AllowObserve as i16 => {
@@ -430,7 +570,12 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         x if x == ServerPacketIds::SetBindingShot as i16 => {
             if let Ok(p) = ui_events::SetBindingShot::read_body(&mut cur) {
-                tracing::debug!("🎯 定身射击 id={} enabled={} value={}", p.object_id, p.enabled, p.value);
+                tracing::debug!(
+                    "🎯 定身射击 id={} enabled={} value={}",
+                    p.object_id,
+                    p.enabled,
+                    p.value
+                );
             }
         }
 
@@ -452,14 +597,19 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         x if x == ServerPacketIds::GainedQuestItem as i16 => {
             // #1342：C# S.GainedQuestItem 携带完整 UserItem
             if let Ok(p) = miscellaneous::GainedQuestItem::read_body(&mut cur) {
-                server_events.write(ServerEvent::QuestItemGained { item: to_inv_item(&p.item) });
+                server_events.write(ServerEvent::QuestItemGained {
+                    item: to_inv_item(&p.item),
+                });
                 tracing::info!("🎁 任务物品获得 #{}", p.item.item_index);
             }
         }
         x if x == ServerPacketIds::DeleteQuestItem as i16 => {
             // #1342：C# S.DeleteQuestItem UniqueID u64 + Count u16
             if let Ok(p) = miscellaneous::DeleteQuestItem::read_body(&mut cur) {
-                server_events.write(ServerEvent::QuestItemDeleted { unique_id: p.unique_id, count: p.count });
+                server_events.write(ServerEvent::QuestItemDeleted {
+                    unique_id: p.unique_id,
+                    count: p.count,
+                });
                 tracing::info!("🗑️ 任务物品删除 uid={} x{}", p.unique_id, p.count);
             }
         }
@@ -470,22 +620,41 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
-            let id = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ ChangeQuest 解析失败"); return true; } };
+            let id = match cur.read_i32::<LittleEndian>() {
+                Ok(v) => v,
+                Err(_) => {
+                    tracing::warn!("⚠️ ChangeQuest 解析失败");
+                    return true;
+                }
+            };
             let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
             let mut tasks = Vec::with_capacity(count);
             let mut ok = true;
             for _ in 0..count {
                 match mir2_shared::binary::read_dotnet_string(&mut cur) {
                     Ok(t) => tasks.push(t),
-                    Err(_) => { ok = false; break; }
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
                 }
             }
-            if !ok { tracing::warn!("⚠️ ChangeQuest 任务解析失败"); return true; }
+            if !ok {
+                tracing::warn!("⚠️ ChangeQuest 任务解析失败");
+                return true;
+            }
             let taken = cur.read_u8().unwrap_or(0) != 0;
             let completed = cur.read_u8().unwrap_or(0) != 0;
             let is_new = cur.read_u8().unwrap_or(0) != 0;
             let name = tasks.first().cloned().unwrap_or_else(|| format!("#{}", id));
-            let entry = QuestEntry { id, name, tasks, taken, completed, is_new };
+            let entry = QuestEntry {
+                id,
+                name,
+                tasks,
+                taken,
+                completed,
+                is_new,
+            };
             server_events.write(ServerEvent::QuestChanged { entry });
             tracing::info!("📜 ChangeQuest: id={} completed={}", id, completed);
         }
@@ -553,13 +722,56 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             let mut items = Vec::with_capacity(count);
             let mut ok = true;
             for _ in 0..count {
-                let slot = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let unique_id = match cur.read_u64::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let item_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let image = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let current_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let max_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                items.push(InspectItem { slot, unique_id, item_index, image, current_dura, max_dura });
+                let slot = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let unique_id = match cur.read_u64::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let item_index = match cur.read_i32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let image = match cur.read_i32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let current_dura = match cur.read_i32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let max_dura = match cur.read_i32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                items.push(InspectItem {
+                    slot,
+                    unique_id,
+                    item_index,
+                    image,
+                    current_dura,
+                    max_dura,
+                });
             }
             if ok {
                 let item_count = items.len();
@@ -597,22 +809,69 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             let mut creatures = Vec::with_capacity(count);
             let mut ok = true;
             for _ in 0..count {
-                let creature_type = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let pickup_mode = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let enabled = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } } != 0;
-                let hunger = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let name = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let active = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } } != 0;
+                let creature_type = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let pickup_mode = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let enabled = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                } != 0;
+                let hunger = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let active = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                } != 0;
                 let mut filter = [0u8; 9];
                 for b in filter.iter_mut() {
-                    *b = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                    *b = match cur.read_u8() {
+                        Ok(v) => v,
+                        Err(_) => {
+                            ok = false;
+                            break;
+                        }
+                    };
                 }
-                let grade = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let grade = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
                 // #2757：宠物规则（C# `IntelligentCreatureRules`）——字段不足（旧服务端）即全禁用默认
-                let rules = mir2_shared::data::client_data::IntelligentCreatureRules::read_from(
-                    &mut cur,
-                )
-                .unwrap_or_default();
+                let rules =
+                    mir2_shared::data::client_data::IntelligentCreatureRules::read_from(&mut cur)
+                        .unwrap_or_default();
                 // #2761：图标/完整度/到期剩余秒/黑石计时——字段不足（旧服务端）即取 0
                 let icon = cur.read_i32::<LittleEndian>().unwrap_or(0);
                 let fullness = cur.read_i32::<LittleEndian>().unwrap_or(0);
@@ -699,7 +958,11 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     object_id: p.object_id,
                     name_colour_argb: p.name_colour_argb,
                 });
-                tracing::debug!("🎨 名字染色: obj={} argb={}", p.object_id, p.name_colour_argb);
+                tracing::debug!(
+                    "🎨 名字染色: obj={} argb={}",
+                    p.object_id,
+                    p.name_colour_argb
+                );
             }
         }
         x if x == ServerPacketIds::ManageHeroes as i16 => {
@@ -727,19 +990,27 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         x if x == ServerPacketIds::SetHeroBehaviour as i16 => {
             // C# S.SetHeroBehaviour：1 字节 behaviour
             if let Ok(p) = hero::SetHeroBehaviour::read_body(&mut cur) {
-                server_events.write(ServerEvent::HeroBehaviourSet { behaviour: p.behaviour as u8 });
+                server_events.write(ServerEvent::HeroBehaviourSet {
+                    behaviour: p.behaviour as u8,
+                });
                 tracing::info!("🦸 英雄行为确认: {:?}", p.behaviour);
             }
         }
         x if x == ServerPacketIds::SetAutoPotValue as i16 => {
             if let Ok(p) = hero::SetAutoPotValue::read_body(&mut cur) {
-                server_events.write(ServerEvent::HeroAutoPotSet { stat: p.stat, value: p.value });
+                server_events.write(ServerEvent::HeroAutoPotSet {
+                    stat: p.stat,
+                    value: p.value,
+                });
                 tracing::debug!("🦸 自动药阈值: stat={} value={}", p.stat, p.value);
             }
         }
         x if x == ServerPacketIds::SetAutoPotItem as i16 => {
             if let Ok(p) = miscellaneous::SetAutoPotItem::read_body(&mut cur) {
-                server_events.write(ServerEvent::HeroAutoPotItemSet { grid: p.grid, item_index: p.item_index });
+                server_events.write(ServerEvent::HeroAutoPotItemSet {
+                    grid: p.grid,
+                    item_index: p.item_index,
+                });
                 tracing::debug!("🦸 自动药物品: grid={} item={}", p.grid, p.item_index);
             }
         }
@@ -818,14 +1089,22 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     text: format!(
                         "{} 向行会仓库{}了 {} 金币",
                         p.name,
-                        if p.change_type == 0 { "存入" } else { "取出" },
+                        if p.change_type == 0 {
+                            "存入"
+                        } else {
+                            "取出"
+                        },
                         p.amount
                     ),
                     chat_type: mir2_shared::enums::ChatType::Guild,
                 });
                 tracing::info!(
                     "💰 行会仓库金币 {} {} 金币（by {}）",
-                    if p.change_type == 0 { "存入" } else { "取出" },
+                    if p.change_type == 0 {
+                        "存入"
+                    } else {
+                        "取出"
+                    },
                     p.amount,
                     p.name
                 );
@@ -894,7 +1173,12 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     to: p.to,
                     success: p.success,
                 });
-                tracing::info!("🔨 精炼材料存入 from={} to={} ok={}", p.from, p.to, p.success);
+                tracing::info!(
+                    "🔨 精炼材料存入 from={} to={} ok={}",
+                    p.from,
+                    p.to,
+                    p.success
+                );
             }
         }
         // #2720：精炼取消/重置（C# GameScene.RefineCancel → RefineDialog.RefineReset）
@@ -921,7 +1205,12 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     to: p.to,
                     success: p.success,
                 });
-                tracing::info!("🔨 精炼材料取回 from={} to={} ok={}", p.from, p.to, p.success);
+                tracing::info!(
+                    "🔨 精炼材料取回 from={} to={} ok={}",
+                    p.from,
+                    p.to,
+                    p.success
+                );
             }
         }
         // #291：C# 服务端包面收尾（HeroCreateRequest）
@@ -963,7 +1252,11 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     icons: p.world_maps,
                     teleport_cost: p.teleport_cost,
                 });
-                tracing::info!("📦 WorldMapSetup 解码（{} 个世界地图点, cost={}）", n, p.teleport_cost);
+                tracing::info!(
+                    "📦 WorldMapSetup 解码（{} 个世界地图点, cost={}）",
+                    n,
+                    p.teleport_cost
+                );
             }
         }
         // #2720：精炼入口/查看/收取（C# GameScene.NPCRefine / NPCCheckRefine / NPCCollectRefine）
@@ -1278,7 +1571,10 @@ mod tests {
         payload
     }
 
-    fn decode_creature_list(mut events: MessageWriter<ServerEvent>, mut payload: Local<Option<Vec<u8>>>) {
+    fn decode_creature_list(
+        mut events: MessageWriter<ServerEvent>,
+        mut payload: Local<Option<Vec<u8>>>,
+    ) {
         let payload = payload.get_or_insert_with(|| build_creature_list_payload(true, true));
         let _ = handle_progress(&mut events, payload);
     }

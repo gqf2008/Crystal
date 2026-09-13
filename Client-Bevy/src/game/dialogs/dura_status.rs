@@ -71,21 +71,91 @@ struct PieceDef {
 }
 
 const PIECES: [PieceDef; 14] = [
-    PieceDef { kind: DuraPieceKind::Weapon, server_slot: 0, rel: (4.0, 5.0), idx: [2125, 2126, 2127] },
-    PieceDef { kind: DuraPieceKind::Armour, server_slot: 1, rel: (16.0, 11.0), idx: [2149, 2150, 2151] },
-    PieceDef { kind: DuraPieceKind::Helmet, server_slot: 2, rel: (24.0, 3.0), idx: [2155, 2156, 2157] },
-    PieceDef { kind: DuraPieceKind::Necklace, server_slot: 3, rel: (3.0, 67.0), idx: [2122, 2123, 2124] },
-    PieceDef { kind: DuraPieceKind::BraceletL, server_slot: 4, rel: (3.0, 43.0), idx: [2143, 2144, 2145] },
-    PieceDef { kind: DuraPieceKind::BraceletR, server_slot: 5, rel: (43.0, 43.0), idx: [2143, 2144, 2145] },
-    PieceDef { kind: DuraPieceKind::RingL, server_slot: 6, rel: (3.0, 54.0), idx: [2131, 2132, 2133] },
-    PieceDef { kind: DuraPieceKind::RingR, server_slot: 7, rel: (43.0, 54.0), idx: [2131, 2132, 2133] },
-    PieceDef { kind: DuraPieceKind::Boots, server_slot: 8, rel: (17.0, 43.0), idx: [2152, 2153, 2154] },
-    PieceDef { kind: DuraPieceKind::Amulet, server_slot: 9, rel: (16.0, 54.0), idx: [2134, 2135, 2136] },
-    PieceDef { kind: DuraPieceKind::Mount, server_slot: 10, rel: (43.0, 68.0), idx: [2140, 2141, 2142] },
+    PieceDef {
+        kind: DuraPieceKind::Weapon,
+        server_slot: 0,
+        rel: (4.0, 5.0),
+        idx: [2125, 2126, 2127],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Armour,
+        server_slot: 1,
+        rel: (16.0, 11.0),
+        idx: [2149, 2150, 2151],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Helmet,
+        server_slot: 2,
+        rel: (24.0, 3.0),
+        idx: [2155, 2156, 2157],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Necklace,
+        server_slot: 3,
+        rel: (3.0, 67.0),
+        idx: [2122, 2123, 2124],
+    },
+    PieceDef {
+        kind: DuraPieceKind::BraceletL,
+        server_slot: 4,
+        rel: (3.0, 43.0),
+        idx: [2143, 2144, 2145],
+    },
+    PieceDef {
+        kind: DuraPieceKind::BraceletR,
+        server_slot: 5,
+        rel: (43.0, 43.0),
+        idx: [2143, 2144, 2145],
+    },
+    PieceDef {
+        kind: DuraPieceKind::RingL,
+        server_slot: 6,
+        rel: (3.0, 54.0),
+        idx: [2131, 2132, 2133],
+    },
+    PieceDef {
+        kind: DuraPieceKind::RingR,
+        server_slot: 7,
+        rel: (43.0, 54.0),
+        idx: [2131, 2132, 2133],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Boots,
+        server_slot: 8,
+        rel: (17.0, 43.0),
+        idx: [2152, 2153, 2154],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Amulet,
+        server_slot: 9,
+        rel: (16.0, 54.0),
+        idx: [2134, 2135, 2136],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Mount,
+        server_slot: 10,
+        rel: (43.0, 68.0),
+        idx: [2140, 2141, 2142],
+    },
     // #1136：C# CharacterDuraPanel Torch/Belt/Stone（C# 位置：Torch(44,5) Belt(23,23) Stone(30,54)）
-    PieceDef { kind: DuraPieceKind::Torch, server_slot: 11, rel: (44.0, 5.0), idx: [2146, 2147, 2148] },
-    PieceDef { kind: DuraPieceKind::Belt, server_slot: 12, rel: (23.0, 23.0), idx: [2158, 2159, 2160] },
-    PieceDef { kind: DuraPieceKind::Stone, server_slot: 13, rel: (30.0, 54.0), idx: [2137, 2137, 2137] },
+    PieceDef {
+        kind: DuraPieceKind::Torch,
+        server_slot: 11,
+        rel: (44.0, 5.0),
+        idx: [2146, 2147, 2148],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Belt,
+        server_slot: 12,
+        rel: (23.0, 23.0),
+        idx: [2158, 2159, 2160],
+    },
+    PieceDef {
+        kind: DuraPieceKind::Stone,
+        server_slot: 13,
+        rel: (30.0, 54.0),
+        idx: [2137, 2137, 2137],
+    },
 ];
 
 #[derive(Component)]
@@ -143,7 +213,11 @@ fn spawn_dura_status(
                 ..default()
             },
             ImageNode::new(n.clone()),
-            ImageButton { normal: n, hover: h, pressed: pr },
+            ImageButton {
+                normal: n,
+                hover: h,
+                pressed: pr,
+            },
             DuraToggleBtn,
             // #2775：C# `MainDialogs.cs:3923` DuraPanel.Character.Hint（中文「耐久面板」）
             crate::ui::tooltip::UiHint {
@@ -170,7 +244,8 @@ fn spawn_dura_status(
     // 部位图（C# Background @ (3,3) 内相对坐标；面板子节点，随面板显隐）
     commands.entity(panel).with_children(|p| {
         for def in &PIECES {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, def.idx[0]) {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, def.idx[0])
+            {
                 // 部位图用帧原生尺寸（C# 不缩放）
                 let (iw, ih) = match libs.0.get_image(LibraryName::Prguse, def.idx[0]) {
                     Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
@@ -259,7 +334,11 @@ fn dura_status_ui_system(
 
     // 面板显隐
     for mut vis in &mut widgets {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // 切换按钮点击（C# Character.Click）
@@ -272,7 +351,12 @@ fn dura_status_ui_system(
             }
         }
         // 打开时换 2110 图标（image_button_system 按 normal 帧切换）
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if open { 2110 } else { 2113 }) {
+        if let Some(h) = load_lib_image(
+            &mut libs,
+            &mut images,
+            LibraryName::Prguse,
+            if open { 2110 } else { 2113 },
+        ) {
             if btn.normal != h {
                 btn.normal = h.clone();
             }
@@ -293,20 +377,23 @@ fn dura_status_ui_system(
     for (mut vis, mut node, piece) in &mut pieces {
         let mut show = false;
         if let Some(def) = PIECES.iter().find(|d| d.kind == piece.0) {
-            if let Some(item) = equipment
-                .get(def.server_slot)
-                .and_then(|s| s.as_ref())
-            {
+            if let Some(item) = equipment.get(def.server_slot).and_then(|s| s.as_ref()) {
                 let idx = dura_index(item, piece.0);
                 if idx > 0 {
-                    if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx as usize) {
+                    if let Some(h) =
+                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx as usize)
+                    {
                         node.image = h;
                         show = true;
                     }
                 }
             }
         }
-        *vis = if open && show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open && show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -315,7 +402,11 @@ mod tests {
     use super::*;
 
     fn item(cur: u16, max: u16) -> InvItem {
-        InvItem { current_dura: cur, max_dura: max, ..Default::default() }
+        InvItem {
+            current_dura: cur,
+            max_dura: max,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -353,7 +444,10 @@ mod tests {
         // 依赖真实 .Lib 数据：本地无数据（CI/新检出）时跳过，避免假红
         let data_path = resolve_data_path();
         if !data_path.join("Items.Lib").exists() {
-            eprintln!("跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源", data_path.display());
+            eprintln!(
+                "跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源",
+                data_path.display()
+            );
             return;
         }
         let mut world = World::new();

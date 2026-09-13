@@ -441,7 +441,11 @@ fn game_shop_ui_system(
     }
     let open = mgr.is_open(DialogKind::GameShop);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *requested = false;
@@ -501,8 +505,16 @@ fn game_shop_ui_system(
         let idx = shop.category_page * 10 + row.0;
         text.0 = match shop.categories.get(idx) {
             Some(c) => {
-                let label = if c.is_empty() { "全部".to_string() } else { c.clone() };
-                if *c == shop.category { format!("▶ {}", label) } else { label }
+                let label = if c.is_empty() {
+                    "全部".to_string()
+                } else {
+                    c.clone()
+                };
+                if *c == shop.category {
+                    format!("▶ {}", label)
+                } else {
+                    label
+                }
             }
             None => String::new(),
         };
@@ -528,7 +540,11 @@ fn game_shop_ui_system(
                     .unwrap_or((164.0, 146.0));
                 for i in 0..10usize {
                     let y = oy + 90.0 + i as f32 * 20.0;
-                    if cursor.x >= ox + 135.0 && cursor.x <= ox + 540.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                    if cursor.x >= ox + 135.0
+                        && cursor.x <= ox + 540.0
+                        && cursor.y >= y
+                        && cursor.y <= y + 18.0
+                    {
                         if let Some(&idx) = filtered.get(i) {
                             shop.selected = Some(idx);
                             let it = &shop.items[idx];
@@ -555,7 +571,11 @@ fn game_shop_ui_system(
                     .unwrap_or((164.0, 146.0));
                 for i in 0..10usize {
                     let y = oy + 105.0 + i as f32 * 20.0;
-                    if cursor.x >= ox + 11.0 && cursor.x <= ox + 120.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                    if cursor.x >= ox + 11.0
+                        && cursor.x <= ox + 120.0
+                        && cursor.y >= y
+                        && cursor.y <= y + 18.0
+                    {
                         let idx = shop.category_page * 10 + i;
                         if let Some(c) = shop.categories.get(idx).cloned() {
                             shop.category = c;

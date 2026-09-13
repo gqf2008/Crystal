@@ -196,11 +196,19 @@ fn spawn_inspect(
             .insert(InspectGuildText);
         // 纸娃娃层（C# :2166-2206 锚点=对话框原点+(0,-20)，z 层叠）
         for (slot, z) in [(1u8, 9u8), (0u8, 10u8), (2u8, 11u8)] {
-            let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+            let white = images.add(crate::map_renderer::make_image(
+                vec![255, 255, 255, 255],
+                1,
+                1,
+            ));
             spawn_image(p, white, 0.0, -20.0, 1.0, 1.0, z as i32).insert(InspectDoll(slot));
         }
         // 职业图标 Prguse[100]@(15,33)（按 class 换帧在 icon_system）
-        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
         spawn_image(p, white, 15.0, 33.0, 1.0, 1.0, 9).insert(InspectClassImage);
         // #2786：伴侣钮（C# `InspectDialog.LoverButton` `Prguse[604]` @(17,17)，单帧无三态；
         // 非空配偶名才显示，Hint 就是配偶名本身——C# `:2499-2505`）
@@ -220,11 +228,46 @@ fn spawn_inspect(
         // 五动作按钮（C# :2223-2315；Group Prguse[431-433]@(55,357)、Friend [434-436]@(85,357)、
         // Mail [437-439]@(115,357)、Trade [523-525]@(145,357)、Observe Title[854-856]@(175,357)）
         let buttons: [(InspectBtnKind, LibraryName, usize, usize, usize, f32); 5] = [
-            (InspectBtnKind::Group, LibraryName::Prguse, 431, 432, 433, 55.0),
-            (InspectBtnKind::Friend, LibraryName::Prguse, 434, 435, 436, 85.0),
-            (InspectBtnKind::Mail, LibraryName::Prguse, 437, 438, 439, 115.0),
-            (InspectBtnKind::Trade, LibraryName::Prguse, 523, 524, 525, 145.0),
-            (InspectBtnKind::Observe, LibraryName::Title, 854, 855, 856, 175.0),
+            (
+                InspectBtnKind::Group,
+                LibraryName::Prguse,
+                431,
+                432,
+                433,
+                55.0,
+            ),
+            (
+                InspectBtnKind::Friend,
+                LibraryName::Prguse,
+                434,
+                435,
+                436,
+                85.0,
+            ),
+            (
+                InspectBtnKind::Mail,
+                LibraryName::Prguse,
+                437,
+                438,
+                439,
+                115.0,
+            ),
+            (
+                InspectBtnKind::Trade,
+                LibraryName::Prguse,
+                523,
+                524,
+                525,
+                145.0,
+            ),
+            (
+                InspectBtnKind::Observe,
+                LibraryName::Title,
+                854,
+                855,
+                856,
+                175.0,
+            ),
         ];
         for (kind, lib, n, h, pidx, rx) in buttons {
             if let (Some(n), Some(h), Some(pr)) = (
@@ -232,8 +275,7 @@ fn spawn_inspect(
                 load_lib_image(&mut libs, &mut images, lib, h),
                 load_lib_image(&mut libs, &mut images, lib, pidx),
             ) {
-                spawn_icon_button(p, n, h, pr, rx, 357.0, 28.0, 24.0, 10)
-                    .insert(InspectBtn(kind));
+                spawn_icon_button(p, n, h, pr, rx, 357.0, 28.0, 24.0, 10).insert(InspectBtn(kind));
             }
         }
         // 14 格装备图标（格位坐标 = character::EQUIP_SLOTS，页内 @(8,70) 偏移；
@@ -268,14 +310,8 @@ fn inspect_ui_system(
     // 单查询分发（多 With<marker> 查询有 B0001 风险）；接线同 player_menu 既有实现
     btns: Query<(Entity, &Interaction, &InspectBtn)>,
     mut widgets: Query<&mut Visibility, (With<InspectWidget>, Without<InspectCellIcon>)>,
-    mut names: Query<
-        &mut Text,
-        (With<InspectNameText>, Without<InspectGuildText>),
-    >,
-    mut guilds: Query<
-        &mut Text,
-        (With<InspectGuildText>, Without<InspectNameText>),
-    >,
+    mut names: Query<&mut Text, (With<InspectNameText>, Without<InspectGuildText>)>,
+    mut guilds: Query<&mut Text, (With<InspectGuildText>, Without<InspectNameText>)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -288,7 +324,11 @@ fn inspect_ui_system(
     }
     let open = mgr.is_open(DialogKind::Inspect);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -378,7 +418,15 @@ fn inspect_icon_system(
     mut images: ResMut<Assets<Image>>,
     mut cells: Query<(&InspectCellIcon, &mut UiItemCellData)>,
     // 角色页性别换帧（C# RefreshInferface :2474-2476：340 男 / 341 女）
-    mut page: Query<&mut ImageNode, (With<InspectPage>, Without<InspectCellIcon>, Without<InspectClassImage>, Without<InspectDoll>)>,
+    mut page: Query<
+        &mut ImageNode,
+        (
+            With<InspectPage>,
+            Without<InspectCellIcon>,
+            Without<InspectClassImage>,
+            Without<InspectDoll>,
+        ),
+    >,
     // 职业图标
     mut class_img: Query<
         &mut ImageNode,

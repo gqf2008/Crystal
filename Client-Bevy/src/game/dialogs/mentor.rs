@@ -79,18 +79,15 @@ pub struct MentorPlugin;
 impl Plugin for MentorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MentorState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             mentor_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_mentor);
+        app.add_systems(OnEnter(AppState::Game), spawn_mentor);
         app.add_systems(OnExit(AppState::Game), cleanup_mentor);
         app.add_systems(
             Update,
-            (
-                mentor_ui_system,
-                mentor_invite_system,
-            )
+            (mentor_ui_system, mentor_invite_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -124,7 +121,9 @@ fn spawn_mentor(
     };
     let (px, py) = crate::game::dialogs::center_origin(244.0, 207.0);
     let panel = spawn_panel(&mut commands, bg, px, py, 244.0, 207.0, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Mentor), MentorWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Mentor), MentorWidget));
 
     commands.entity(panel).with_children(|p| {
         // 标题 Title[51] @(18,8)
@@ -140,9 +139,15 @@ fn spawn_mentor(
             spawn_icon_button(p, n, h, pr, 219.0, 3.0, 20.0, 20.0, 10).insert(MentorClose);
         }
         // 信息行（标题 + 师父 + 徒弟 + 经验/允许状态）@ C# 区块。
-        for (i, (x, y)) in [(10.0, 10.0), (15.0, 41.0), (15.0, 83.0), (15.0, 112.0), (15.0, 130.0)]
-            .into_iter()
-            .enumerate()
+        for (i, (x, y)) in [
+            (10.0, 10.0),
+            (15.0, 41.0),
+            (15.0, 83.0),
+            (15.0, 112.0),
+            (15.0, 130.0),
+        ]
+        .into_iter()
+        .enumerate()
         {
             spawn_label(p, &cjk, "", x, y, 12.0, Color::WHITE, 9).insert(MentorLine(i));
         }
@@ -224,8 +229,7 @@ fn spawn_mentor(
         let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
         commands.entity(inv).insert(MentorInviteWidget);
         commands.entity(inv).with_children(|ip| {
-            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
-                .insert(MentorInviteText);
+            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(MentorInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
@@ -280,7 +284,11 @@ fn mentor_ui_system(
     }
     let open = mgr.is_open(DialogKind::Mentor);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         return;
@@ -309,7 +317,11 @@ fn mentor_ui_system(
                         "师父: {} Lv.{}{}",
                         state.mentor_name,
                         state.mentor_level,
-                        if state.mentor_online { "（在线）" } else { "（离线）" }
+                        if state.mentor_online {
+                            "（在线）"
+                        } else {
+                            "（离线）"
+                        }
                     )
                 }
             }
@@ -321,7 +333,11 @@ fn mentor_ui_system(
                         "徒弟: {} Lv.{}{}",
                         state.mentor_name,
                         state.mentor_level,
-                        if state.mentor_online { "（在线）" } else { "（离线）" }
+                        if state.mentor_online {
+                            "（在线）"
+                        } else {
+                            "（离线）"
+                        }
                     )
                 } else {
                     format!("徒弟: {} Lv.{}", me_name, me_level)
@@ -421,9 +437,7 @@ fn mentor_invite_system(
         }
     }
     if let Some(a) = accept {
-        net.send_packet(&mir2_shared::packets::client::misc::MentorReply {
-            accept_invite: a,
-        });
+        net.send_packet(&mir2_shared::packets::client::misc::MentorReply { accept_invite: a });
         tracing::info!("🧑‍🏫 拜师邀请回复: accept={}", a);
         state.invite = None;
     }
@@ -440,7 +454,12 @@ fn mentor_server_events(
             ServerEvent::MentorInvite { name, level } => {
                 mentor.invite = Some((name.clone(), *level));
             }
-            ServerEvent::MentorUpdate { name, level, online, mentee_exp } => {
+            ServerEvent::MentorUpdate {
+                name,
+                level,
+                online,
+                mentee_exp,
+            } => {
                 mentor.mentor_name = name.clone();
                 mentor.mentor_level = *level;
                 mentor.mentor_online = *online;
@@ -455,6 +474,9 @@ fn mentor_server_events(
 mod tests {
     #[test]
     fn mentor_origin_is_csharp_center() {
-        assert_eq!(crate::game::dialogs::center_origin(244.0, 207.0), (390.0, 280.0));
+        assert_eq!(
+            crate::game::dialogs::center_origin(244.0, 207.0),
+            (390.0, 280.0)
+        );
     }
 }

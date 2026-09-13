@@ -26,13 +26,16 @@ mod spawn_helpers;
 mod systems;
 
 pub use components::*;
-pub(crate) use spawn_helpers::attach_mount_layer;
 pub(crate) use render::ActorNameLabel;
 pub use spawn::depth_z;
+pub(crate) use spawn_helpers::attach_mount_layer;
 
 use render::{actor_sprite_render, apply_poison_tint};
 use spawn::{despawn_removed_objects, spawn_demo_actors_when_ready, spawn_net_objects_when_ready};
-use systems::{actor_hover_tooltip_system, advance_actor_animations, demo_drive, dump_depth_debug, log_player_walk, sync_actor_depth, sync_player_equipment, update_local_ghost};
+use systems::{
+    actor_hover_tooltip_system, advance_actor_animations, demo_drive, dump_depth_debug,
+    log_player_walk, sync_actor_depth, sync_player_equipment, update_local_ghost,
+};
 
 use bevy::prelude::*;
 
@@ -59,7 +62,12 @@ impl Plugin for ActorPlugin {
         );
         app.add_systems(
             Update,
-            (demo_drive, sync_actor_depth, sync_player_equipment, log_player_walk)
+            (
+                demo_drive,
+                sync_actor_depth,
+                sync_player_equipment,
+                log_player_walk,
+            )
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
         // #152 头顶名字（新角色生成时挂载，跟随移动）
@@ -85,7 +93,10 @@ impl Plugin for ActorPlugin {
         // #178 PK 名字染色（ObjectColourChanged）
         app.add_systems(
             Update,
-            (render::object_colour_server_events, render::actor_name_colour_system)
+            (
+                render::object_colour_server_events,
+                render::actor_name_colour_system,
+            )
                 .after(crate::network::network_system)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );

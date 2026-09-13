@@ -13,8 +13,8 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::actor::{LocalPlayer, Monster, Npc};
-use crate::game::movement::world_to_tile;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -163,9 +163,9 @@ fn spawn_minimap(
     mut ui_font: ResMut<UiFont>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
 ) {
-if !crate::ui::sprite_ui::ui_enabled("map") {
-    return;
-}
+    if !crate::ui::sprite_ui::ui_enabled("map") {
+        return;
+    }
 
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -179,24 +179,38 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
         return;
     };
     let small = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, BG_SMALL);
-    let panel = spawn_panel(&mut commands, big.clone(), MINIMAP_X, MINIMAP_Y, 128.0, 154.0, 20);
+    let panel = spawn_panel(
+        &mut commands,
+        big.clone(),
+        MINIMAP_X,
+        MINIMAP_Y,
+        128.0,
+        154.0,
+        20,
+    );
     commands.entity(panel).insert((
         DialogRoot(DialogKind::Minimap),
         MiniMapWidget,
-        MiniMapBg { big: big.clone(), small: small.clone().unwrap_or_else(|| big.clone()) },
+        MiniMapBg {
+            big: big.clone(),
+            small: small.clone().unwrap_or_else(|| big.clone()),
+        },
         Visibility::Hidden,
     ));
 
     commands.entity(panel).with_children(|p| {
         // 地图区域底色（深绿矩形，仅大模式显示）
-        spawn_container(p, MAP_RECT.0, MAP_RECT.1, MAP_RECT.2, MAP_RECT.3, 1)
-            .insert((
-                MiniMapMapArea,
-                BackgroundColor(Color::srgb(0.12, 0.16, 0.12)),
-                Visibility::Hidden,
-            ));
+        spawn_container(p, MAP_RECT.0, MAP_RECT.1, MAP_RECT.2, MAP_RECT.3, 1).insert((
+            MiniMapMapArea,
+            BackgroundColor(Color::srgb(0.12, 0.16, 0.12)),
+            Visibility::Hidden,
+        ));
         // 玩家位置点（C# 玩家为白点 4x4）
-        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
         spawn_image(p, white.clone(), MAP_RECT.0, MAP_RECT.1, 4.0, 4.0, 2)
             .insert((MiniMapPlayerDot, Visibility::Hidden));
         // 对象光点（最多 24 个，#120 C# MiniMap RadarTexture 2x2）
@@ -212,8 +226,7 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
         // 地图名（C# MapNameLabel (2,2) 120x18）
         spawn_label(p, &cjk, "", 12.0, 2.0, 12.0, Color::WHITE, 3).insert(MiniMapNameText);
         // 坐标（C# LocationLabel (46, Height-23)）
-        spawn_label(p, &cjk, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3)
-            .insert(MiniMapPosText);
+        spawn_label(p, &cjk, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3).insert(MiniMapPosText);
         // 大小切换按钮（C# ToggleButton Prguse[2102/2103/2104] (109,3)）
         // #2775：Hint 取 C# `MainDialogs.cs:1849`（MiniMapKey =「小地图 ({Minimap})」）
         spawn_minimap_button(p, &mut libs, &mut images, 2102, 2103, 2104, 109.0, 3.0, 4).insert((
@@ -275,8 +288,14 @@ if !crate::ui::sprite_ui::ui_enabled("map") {
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2094),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2092),
         ) {
-            spawn_image(p, normal.clone(), 102.0, BOTTOM_Y_BIG, 14.0, 14.0, 4)
-                .insert(MiniMapLightSetting { normal, dawn, evening, night });
+            spawn_image(p, normal.clone(), 102.0, BOTTOM_Y_BIG, 14.0, 14.0, 4).insert(
+                MiniMapLightSetting {
+                    normal,
+                    dawn,
+                    evening,
+                    night,
+                },
+            );
         }
     });
 }
@@ -304,7 +323,6 @@ fn spawn_minimap_button<'a>(
     );
     spawn_icon_button(parent, n, hov, pr, x, y, w, h, z)
 }
-
 
 /// 按钮点击：大小切换 / 打开邮件 / 打开大地图（C# Click 处理）
 fn minimap_toggle_system(
@@ -444,12 +462,20 @@ fn minimap_ui_system(
     let bottom_y = if big { BOTTOM_Y_BIG } else { BOTTOM_Y_SMALL };
 
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // 背景换图 + 尺寸（2090 大 128x154 / 2091 小 128x45）
     for (mut node, mut img, bg) in &mut bg {
-        let want = if big { bg.big.clone() } else { bg.small.clone() };
+        let want = if big {
+            bg.big.clone()
+        } else {
+            bg.small.clone()
+        };
         if img.image != want {
             img.image = want;
         }
@@ -464,7 +490,11 @@ fn minimap_ui_system(
 
     // 地图区域：仅大模式显示（C# Index != 2090 时不绘制地图）
     for mut vis in &mut map_area {
-        *vis = if open && big { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open && big {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     if let Ok((mut dot_node, mut dot_vis)) = dot.single_mut() {
@@ -529,7 +559,11 @@ fn minimap_ui_system(
     }
 
     if let Ok(mut t) = name_texts.single_mut() {
-        let name = game_data.map.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let name = game_data
+            .map
+            .as_ref()
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
         if t.0 != name {
             t.0 = name;
         }
@@ -602,24 +636,47 @@ mod tests {
         // 依赖真实 .Lib 数据：本地无数据（CI/新检出）时跳过，避免假红
         let data_path = resolve_data_path();
         if !data_path.join("Items.Lib").exists() {
-            eprintln!("跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源", data_path.display());
+            eprintln!(
+                "跳过：无本地游戏数据（{}），本测试依赖真实 .Lib 资源",
+                data_path.display()
+            );
             return;
         }
         let mut libs = Libraries::new(data_path);
         libs.ensure_initialized();
 
-        let big = libs.get_image(LibraryName::Prguse, BG_BIG).expect("Prguse[2090] 缺失");
-        assert_eq!((big.width, big.height), (128, 154), "Prguse[2090] 应为 128x154（大模式）");
-        let small = libs.get_image(LibraryName::Prguse, BG_SMALL).expect("Prguse[2091] 缺失");
-        assert_eq!((small.width, small.height), (128, 45), "Prguse[2091] 应为 128x45（小模式）");
+        let big = libs
+            .get_image(LibraryName::Prguse, BG_BIG)
+            .expect("Prguse[2090] 缺失");
+        assert_eq!(
+            (big.width, big.height),
+            (128, 154),
+            "Prguse[2090] 应为 128x154（大模式）"
+        );
+        let small = libs
+            .get_image(LibraryName::Prguse, BG_SMALL)
+            .expect("Prguse[2091] 缺失");
+        assert_eq!(
+            (small.width, small.height),
+            (128, 45),
+            "Prguse[2091] 应为 128x45（小模式）"
+        );
 
-        assert_eq!(MAP_RECT, (3.0, 22.0, 120.0, 108.0), "地图区应对齐 C# viewRect+drawLocation");
+        assert_eq!(
+            MAP_RECT,
+            (3.0, 22.0, 120.0, 108.0),
+            "地图区应对齐 C# viewRect+drawLocation"
+        );
         assert_eq!(BOTTOM_Y_BIG, 131.0, "大模式底部 y = 154-23");
         assert_eq!(BOTTOM_Y_SMALL, 22.0, "小模式底部 y = 45-23");
 
         // 三态按钮/指示图均存在且尺寸 > 0
-        for idx in [2102usize, 2103, 2104, 2099, 2100, 2101, 2096, 2097, 2098, 2093] {
-            let i = libs.get_image(LibraryName::Prguse, idx).unwrap_or_else(|| panic!("Prguse[{idx}] 缺失"));
+        for idx in [
+            2102usize, 2103, 2104, 2099, 2100, 2101, 2096, 2097, 2098, 2093,
+        ] {
+            let i = libs
+                .get_image(LibraryName::Prguse, idx)
+                .unwrap_or_else(|| panic!("Prguse[{idx}] 缺失"));
             assert!(i.width > 0 && i.height > 0, "Prguse[{idx}] 尺寸应为正");
         }
         // 默认大模式（C# _bigMode = true）
@@ -627,8 +684,6 @@ mod tests {
         println!("  ✓ 小地图 大/小模式布局与 C# 对齐（2090=128x154 / 2091=128x45）");
     }
 }
-
-
 
 /// #1309：ServerEvent::MapInfo → CurrentMapIndex（当前地图，供队友点跨图过滤）
 fn current_map_index_events(
@@ -648,7 +703,13 @@ fn minimap_member_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
 ) {
     for ev in events.read() {
-        if let crate::network::server_event::ServerEvent::MemberLocation { name, map_index, x, y } = ev {
+        if let crate::network::server_event::ServerEvent::MemberLocation {
+            name,
+            map_index,
+            x,
+            y,
+        } = ev
+        {
             locs.upsert(name.clone(), *map_index, *x, *y);
         }
     }

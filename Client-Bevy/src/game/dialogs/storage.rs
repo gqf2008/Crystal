@@ -167,7 +167,15 @@ fn spawn_storage_dialog(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 586) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, STORAGE_W, 346.0, STORAGE_PANEL_Z);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        DIALOG_X,
+        DIALOG_Y,
+        STORAGE_W,
+        346.0,
+        STORAGE_PANEL_Z,
+    );
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Storage), StorageWidget));
@@ -220,7 +228,12 @@ fn spawn_storage_dialog(
                         crate::game::dialogs::text_input::TextInputField(id),
                         // 屏幕系命中框：容器是密码面板（根 @ x+18）的子实体，
                         // 相对 x=100 → 绝对 x+18+100=118（旧值漏加面板 18 偏移）
-                        crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 18.0 + 100.0, y, 200.0, 20.0),
+                        crate::game::dialogs::text_input::TextInputRect(
+                            DIALOG_X + 18.0 + 100.0,
+                            y,
+                            200.0,
+                            20.0,
+                        ),
                     ))
                     .with_children(|ic| {
                         ic.spawn((
@@ -242,18 +255,38 @@ fn spawn_storage_dialog(
                         ));
                     });
             }
-            spawn_label(p, &cjk, "", 28.0, 70.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 11)
-                .insert(StoragePwdMsg);
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                28.0,
+                70.0,
+                12.0,
+                Color::srgb(1.0, 0.9, 0.4),
+                11,
+            )
+            .insert(StoragePwdMsg);
             // 设置 / 移除 / 关闭
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
             ) {
-                spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 28.0, 95.0, 70.0, 23.0, 10)
-                    .insert(StoragePwdSet);
+                spawn_icon_button(
+                    p,
+                    n.clone(),
+                    h.clone(),
+                    pr.clone(),
+                    28.0,
+                    95.0,
+                    70.0,
+                    23.0,
+                    10,
+                )
+                .insert(StoragePwdSet);
                 spawn_label(p, &cjk, "设置", 43.0, 99.0, 12.0, Color::WHITE, 11);
-                spawn_icon_button(p, n, h, pr, 108.0, 95.0, 70.0, 23.0, 10).insert(StoragePwdRemove);
+                spawn_icon_button(p, n, h, pr, 108.0, 95.0, 70.0, 23.0, 10)
+                    .insert(StoragePwdRemove);
                 spawn_label(p, &cjk, "移除", 123.0, 99.0, 12.0, Color::WHITE, 11);
             }
             if let (Some(n), Some(h), Some(pr)) = (
@@ -284,13 +317,27 @@ fn spawn_storage_dialog(
             Visibility::Hidden,
         ))
         .with_children(|p| {
-            spawn_label(p, &cjk, "请输入仓库密码", 28.0, 10.0, 12.0, Color::WHITE, 10);
+            spawn_label(
+                p,
+                &cjk,
+                "请输入仓库密码",
+                28.0,
+                10.0,
+                12.0,
+                Color::WHITE,
+                10,
+            );
             spawn_container(p, 100.0, 15.0, 200.0, 20.0, 10)
                 .insert((
                     BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                     crate::game::dialogs::text_input::TextInputField(2),
                     // 同上：解锁面板根 @ x+18，容器相对 x=100 → 绝对 118
-                    crate::game::dialogs::text_input::TextInputRect(DIALOG_X + 18.0 + 100.0, DIALOG_Y + 195.0, 200.0, 20.0),
+                    crate::game::dialogs::text_input::TextInputRect(
+                        DIALOG_X + 18.0 + 100.0,
+                        DIALOG_Y + 195.0,
+                        200.0,
+                        20.0,
+                    ),
                 ))
                 .with_children(|ic| {
                     ic.spawn((
@@ -311,15 +358,34 @@ fn spawn_storage_dialog(
                         crate::game::dialogs::text_input::TextInputDisplay(2),
                     ));
                 });
-            spawn_label(p, &cjk, "", 28.0, 45.0, 12.0, Color::srgb(1.0, 0.6, 0.4), 11)
-                .insert(StorageUnlockMsg);
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                28.0,
+                45.0,
+                12.0,
+                Color::srgb(1.0, 0.6, 0.4),
+                11,
+            )
+            .insert(StorageUnlockMsg);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
             ) {
-                spawn_icon_button(p, n.clone(), h.clone(), pr.clone(), 100.0, 75.0, 70.0, 23.0, 10)
-                    .insert(StorageUnlockOk);
+                spawn_icon_button(
+                    p,
+                    n.clone(),
+                    h.clone(),
+                    pr.clone(),
+                    100.0,
+                    75.0,
+                    70.0,
+                    23.0,
+                    10,
+                )
+                .insert(StorageUnlockOk);
                 spawn_label(p, &cjk, "确定", 115.0, 79.0, 12.0, Color::WHITE, 11);
             }
             if let (Some(n), Some(h), Some(pr)) = (
@@ -327,7 +393,8 @@ fn spawn_storage_dialog(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
-                spawn_icon_button(p, n, h, pr, 188.0, 75.0, 70.0, 23.0, 10).insert(StorageUnlockCancel);
+                spawn_icon_button(p, n, h, pr, 188.0, 75.0, 70.0, 23.0, 10)
+                    .insert(StorageUnlockCancel);
                 spawn_label(p, &cjk, "取消", 203.0, 79.0, 12.0, Color::WHITE, 11);
             }
         });
@@ -657,7 +724,10 @@ fn storage_server_events(
     mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
     // 只推背包面板根（同 inventory_shift_right_system：子实体随根平移，
     // 根+格双重 +dx 会把背包推出屏幕——评审 P0）
-    mut inv_entities: Query<(&mut Node, &DialogRoot), With<crate::game::dialogs::inventory::InventoryPanel>>,
+    mut inv_entities: Query<
+        (&mut Node, &DialogRoot),
+        With<crate::game::dialogs::inventory::InventoryPanel>,
+    >,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
     mut locked: ResMut<InvLockedSlots>,
 ) {
@@ -1046,7 +1116,6 @@ mod tests {
         // 初始位不再命中（面板已移走）
         assert_eq!(storage_slot_at(10.0, 61.0, 80, 393.0, 50.0), None);
     }
-
 
     use super::*;
 

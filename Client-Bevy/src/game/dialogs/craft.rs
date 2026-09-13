@@ -19,11 +19,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::gray::UiGray;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel, UiItemCellData,
-    UiItemCellIcon,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel,
+    UiItemCellData, UiItemCellIcon,
 };
 
 /// #2536：当前选中的合成配方（产物；recipe_id 由服务端随合成商品 unique_id 下发）
@@ -84,7 +84,11 @@ pub fn recipe_label(selected: &Option<SelectedRecipe>) -> String {
 
 /// 合成对话框是否应随商品面板关闭（C# NPCDialogs.cs:1413 Hide → CraftDialog.Hide()；
 /// 仅 Craft 面板联动——挂机脚本直开场景不受影响）
-pub fn craft_should_close(npc_panel: mir2_shared::enums::PanelType, goods_visible: bool, craft_open: bool) -> bool {
+pub fn craft_should_close(
+    npc_panel: mir2_shared::enums::PanelType,
+    goods_visible: bool,
+    craft_open: bool,
+) -> bool {
     craft_open && npc_panel == mir2_shared::enums::PanelType::Craft && !goods_visible
 }
 
@@ -194,16 +198,19 @@ pub fn craft_autofill_slots(
     requirements
         .iter()
         .map(|req| {
-            let found = inventory.iter().enumerate().position(|(i, (index, count, dura))| {
-                if taken.contains(&i) || *index != req.item_index {
-                    return false;
-                }
-                if req.min_dura > 0 {
-                    *dura >= req.min_dura
-                } else {
-                    *count >= req.count
-                }
-            });
+            let found = inventory
+                .iter()
+                .enumerate()
+                .position(|(i, (index, count, dura))| {
+                    if taken.contains(&i) || *index != req.item_index {
+                        return false;
+                    }
+                    if req.min_dura > 0 {
+                        *dura >= req.min_dura
+                    } else {
+                        *count >= req.count
+                    }
+                });
             if let Some(i) = found {
                 taken.push(i);
             }
@@ -237,10 +244,7 @@ pub struct CraftPlugin;
 impl Plugin for CraftPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CraftState>();
-        app.add_systems(
-            Update,
-            craft_server_events.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, craft_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(OnEnter(AppState::Game), spawn_craft);
         app.add_systems(OnExit(AppState::Game), cleanup_craft);
         app.add_systems(
@@ -302,35 +306,131 @@ fn spawn_craft(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, CRAFT_CLOSE_POS.0, CRAFT_CLOSE_POS.1, 24.0, 21.0, 10)
-                .insert(CraftClose);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                CRAFT_CLOSE_POS.0,
+                CRAFT_CLOSE_POS.1,
+                24.0,
+                21.0,
+                10,
+            )
+            .insert(CraftClose);
         }
         // C# RecipeLabel(22,5) / PossibilityLabel(10,135) / GoldLabel(30,190)；
         // CraftLine(3) 是 Bevy 扩展（已学会配方数），放在标题下方空位。
-        spawn_label(p, &cjk, "", CRAFT_RECIPE_LABEL.0, CRAFT_RECIPE_LABEL.1, 12.0, Color::WHITE, 9)
-            .insert(CraftLine(0));
-        spawn_label(p, &cjk, "", CRAFT_MESSAGE_LABEL.0, CRAFT_MESSAGE_LABEL.1, 12.0, Color::WHITE, 9)
-            .insert(CraftLine(1));
-        spawn_label(p, &cjk, "", CRAFT_GOLD_LABEL.0, CRAFT_GOLD_LABEL.1, 12.0, Color::WHITE, 9)
-            .insert(CraftLine(2));
-        spawn_label(p, &cjk, "", CRAFT_RECIPE_LABEL.0, CRAFT_RECIPE_LABEL.1 + 16.0, 12.0, Color::WHITE, 9)
-            .insert(CraftLine(3));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            CRAFT_RECIPE_LABEL.0,
+            CRAFT_RECIPE_LABEL.1,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(CraftLine(0));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            CRAFT_MESSAGE_LABEL.0,
+            CRAFT_MESSAGE_LABEL.1,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(CraftLine(1));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            CRAFT_GOLD_LABEL.0,
+            CRAFT_GOLD_LABEL.1,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(CraftLine(2));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            CRAFT_RECIPE_LABEL.0,
+            CRAFT_RECIPE_LABEL.1 + 16.0,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(CraftLine(3));
         // 自动填充 C# AutoFillButton Title[180..182] @(165,185)、合成 C# CraftButton Title[336..338] @(215,185)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_AUTOFILL_INDEX),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_AUTOFILL_INDEX + 1),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_AUTOFILL_INDEX + 2),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Title,
+                CRAFT_AUTOFILL_INDEX,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Title,
+                CRAFT_AUTOFILL_INDEX + 1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Title,
+                CRAFT_AUTOFILL_INDEX + 2,
+            ),
         ) {
-            spawn_icon_button(p, n, h, pr, CRAFT_AUTOFILL_POS.0, CRAFT_AUTOFILL_POS.1, 48.0, 25.0, 10)
-                .insert(CraftAutoFill);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                CRAFT_AUTOFILL_POS.0,
+                CRAFT_AUTOFILL_POS.1,
+                48.0,
+                25.0,
+                10,
+            )
+            .insert(CraftAutoFill);
         }
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX + 1),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX + 2),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Title,
+                CRAFT_CONFIRM_INDEX,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Title,
+                CRAFT_CONFIRM_INDEX + 1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Title,
+                CRAFT_CONFIRM_INDEX + 2,
+            ),
         ) {
-            spawn_icon_button(p, n, h, pr, CRAFT_CONFIRM_POS.0, CRAFT_CONFIRM_POS.1, 80.0, 25.0, 10)
-                .insert((CraftBtn, UiGray::default()));
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                CRAFT_CONFIRM_POS.0,
+                CRAFT_CONFIRM_POS.1,
+                80.0,
+                25.0,
+                10,
+            )
+            .insert((CraftBtn, UiGray::default()));
         }
         // C# Grid：3 工具格 + 6 材料格（影子格由 ui_system 按配方刷新）
         for i in 0..CRAFT_SLOT_COUNT {
@@ -379,12 +479,20 @@ fn craft_ui_system(
         mgr.open(DialogKind::Craft);
     }
     // #2536：商品面板关闭 → 联动关闭（C# NPCDialogs.cs:1413）
-    if craft_should_close(npc_goods.panel, npc_goods.visible, mgr.is_open(DialogKind::Craft)) {
+    if craft_should_close(
+        npc_goods.panel,
+        npc_goods.visible,
+        mgr.is_open(DialogKind::Craft),
+    ) {
         mgr.close(DialogKind::Craft);
     }
     let open = mgr.is_open(DialogKind::Craft);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // C# Show()：每次打开按背包窗当前位置定位（InventoryDialog.X-12, Y+236）
     if open && !*was_open {
@@ -466,8 +574,10 @@ fn craft_slots_system(
         state.slots = Default::default();
         sync_craft_locks(&mut locked, &state.slots); // C# `ResetCells()`：换配方即解锁
     }
-    let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> =
-        inv_q.single().map(|inv| inv.items.clone()).unwrap_or_default();
+    let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> = inv_q
+        .single()
+        .map(|inv| inv.items.clone())
+        .unwrap_or_default();
     let requirement = |i: usize| -> Option<mir2_shared::data::client_data::RecipeRequirement> {
         info.as_ref().and_then(|recipe| {
             if i < CRAFT_TOOL_COUNT {
@@ -613,7 +723,6 @@ fn craft_slots_system(
     }
 }
 
-
 /// 消费服务端合成事件（网络层只广播 ServerEvent；文案在此构造）
 fn craft_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -630,7 +739,12 @@ fn craft_server_events(
             craft.recipes.insert(*recipe_id, info.clone());
             craft.message = format!("学会配方 #{}", recipe_id);
         }
-        if let ServerEvent::CraftResult { recipe_id, count, success } = ev {
+        if let ServerEvent::CraftResult {
+            recipe_id,
+            count,
+            success,
+        } = ev
+        {
             craft.last_result = Some((*recipe_id, *count, *success));
             craft.message = if *success {
                 format!("合成成功！配方 {} ×{}", recipe_id, count)
@@ -790,7 +904,11 @@ mod tests {
     /// #2720：AutoFill 按配方顺序（工具→材料）挑未占用且满足条件的背包物品
     #[test]
     fn craft_autofill_picks_matching_items() {
-        let requirements = vec![req(1001, 1, 33, 1000), req(2001, 2, 55, 0), req(2002, 1, 56, 0)];
+        let requirements = vec![
+            req(1001, 1, 33, 1000),
+            req(2001, 2, 55, 0),
+            req(2002, 1, 56, 0),
+        ];
         let inventory = vec![(1001, 1, 1200), (2001, 5, 0), (2002, 1, 0)];
         assert_eq!(
             craft_autofill_slots(&requirements, &inventory, &[]),

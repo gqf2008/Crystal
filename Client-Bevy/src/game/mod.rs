@@ -7,16 +7,16 @@
 pub mod chat;
 pub mod combat;
 pub mod day_night;
-pub mod effects;
 pub mod dialogs;
+pub mod effects;
 pub mod hud;
 pub mod input_gate;
 pub mod movement;
 pub mod object_state;
 pub mod output_lines;
-pub mod player_menu;
 pub mod pathfinding;
 pub mod player_control;
+pub mod player_menu;
 pub mod player_state;
 pub mod sets;
 pub mod skills;
@@ -41,7 +41,10 @@ impl Plugin for GamePlugin {
         // 游戏场景 UI 相机（#71：回归多相机方案——UI 走独立相机 order=1 + RenderLayers layer 1，
         // 地图相机只画 layer 0，UI 实体画 layer 1，删除原先 UiRoot 反平移 workaround）
         app.add_systems(OnEnter(AppState::Game), open_minimap_default);
-        app.add_systems(OnEnter(AppState::Game), crate::ui::sprite_ui::spawn_ui_camera);
+        app.add_systems(
+            OnEnter(AppState::Game),
+            crate::ui::sprite_ui::spawn_ui_camera,
+        );
 
         // #2595：文本输入聚焦门（C# WinForms 焦点路由等价）——PreUpdate 先于
         // 各 Update 键位系统汇总，消费者见 input_gate 模块注释

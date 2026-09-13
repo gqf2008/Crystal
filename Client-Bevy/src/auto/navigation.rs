@@ -1,7 +1,7 @@
 //! auto::navigation 自动化验证系统（从 auto.rs 拆分，#1146）
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 /// --reconnect-test：进入游戏 → 等服务器断开 → 自动重连 → 自动登录并重新进游戏
 #[allow(clippy::too_many_arguments)]
@@ -14,8 +14,8 @@ pub(crate) fn auto_reconnect_test(
     mut phase: Local<f32>,
     mut saw_disconnect: Local<bool>,
 ) {
-    use client_bevy::scenes::AppState;
     use client_bevy::network::NetState;
+    use client_bevy::scenes::AppState;
     *t += time.delta_secs();
     if *stage == 0 {
         if *state == AppState::Game {
@@ -45,7 +45,11 @@ pub(crate) fn auto_reconnect_test(
             tracing::info!("[RECON] ✅ 自动重连成功并重新进入游戏");
             *stage = 9;
         } else if *t - *phase >= 90.0 {
-            tracing::warn!("[RECON] ❌ 重连超时（state={:?} reconnecting={}）", net.state, net.reconnecting);
+            tracing::warn!(
+                "[RECON] ❌ 重连超时（state={:?} reconnecting={}）",
+                net.state,
+                net.reconnecting
+            );
             *stage = 9;
         }
         return;
@@ -71,19 +75,19 @@ pub(crate) fn auto_enter(
         net.state = client_bevy::network::NetState::LoggingIn;
         net.send_packet(&Login {
             account_id: {
-            let user = std::env::args()
-                .skip_while(|a| a != "--e2e-user")
-                .nth(1)
-                .unwrap_or_else(|| "test".to_string());
-            user
-        },
-        password: {
-            let pass = std::env::args()
-                .skip_while(|a| a != "--e2e-pass")
-                .nth(1)
-                .unwrap_or_else(|| "123456".to_string());
-            pass
-        },
+                let user = std::env::args()
+                    .skip_while(|a| a != "--e2e-user")
+                    .nth(1)
+                    .unwrap_or_else(|| "test".to_string());
+                user
+            },
+            password: {
+                let pass = std::env::args()
+                    .skip_while(|a| a != "--e2e-pass")
+                    .nth(1)
+                    .unwrap_or_else(|| "123456".to_string());
+                pass
+            },
         });
     }
     // 在选角界面停留 3 秒再进游戏（便于 live 截屏验证选角界面）
@@ -129,7 +133,10 @@ pub(crate) fn demo_delete_flow(
                 session.selected_index = session.characters.first().map(|c| c.index);
             }
             modal.kind = client_bevy::ui::modal_box::ModalKind::DeleteAsk;
-            tracing::info!("[DEMO] 打开删除询问框, selected={:?}", session.selected_index);
+            tracing::info!(
+                "[DEMO] 打开删除询问框, selected={:?}",
+                session.selected_index
+            );
         }
     }
 }
@@ -143,27 +150,39 @@ pub(crate) fn auto_pickup_system(
     mut control: ResMut<client_bevy::game::player_control::ControlState>,
     game_data: Res<client_bevy::map_renderer::GameData>,
     players: Query<(Entity, &Transform), With<client_bevy::actor::LocalPlayer>>,
-    items: Query<(&client_bevy::actor::NetObjectId, &Transform), (With<client_bevy::actor::GroundItem>, Without<client_bevy::actor::LocalPlayer>)>,
+    items: Query<
+        (&client_bevy::actor::NetObjectId, &Transform),
+        (
+            With<client_bevy::actor::GroundItem>,
+            Without<client_bevy::actor::LocalPlayer>,
+        ),
+    >,
 ) {
     *timer += time.delta_secs();
     if *timer < 2.5 {
         return;
     }
     *timer = 0.0;
-    let Ok((pe, ptf)) = players.single() else { return };
-    let from_tile = client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+    let Ok((pe, ptf)) = players.single() else {
+        return;
+    };
+    let from_tile =
+        client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
     let mut best: Option<(u32, f32)> = None;
     for (id, tf) in &items {
-        let d = Vec2::new(tf.translation.x - ptf.translation.x, tf.translation.y - ptf.translation.y).length();
+        let d = Vec2::new(
+            tf.translation.x - ptf.translation.x,
+            tf.translation.y - ptf.translation.y,
+        )
+        .length();
         if best.map(|(_, bd)| d < bd).unwrap_or(true) {
             best = Some((id.0, d));
         }
     }
     let Some((item_id, _)) = best else { return };
-    let item_tile = items
-        .iter()
-        .find(|(id, _)| id.0 == item_id)
-        .map(|(_, tf)| client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y));
+    let item_tile = items.iter().find(|(id, _)| id.0 == item_id).map(|(_, tf)| {
+        client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y)
+    });
     let Some(item_tile) = item_tile else { return };
     let adjacent = (item_tile.0 - from_tile.0).abs() <= 1 && (item_tile.1 - from_tile.1).abs() <= 1;
     if adjacent {
@@ -174,14 +193,16 @@ pub(crate) fn auto_pickup_system(
         if let Some(p) = client_bevy::game::pathfinding::find_path(map, from_tile, item_tile) {
             if !p.is_empty() {
                 let len = p.len();
-                commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
-                    path: p.into(),
-                    step_timer_ms: 0.0,
-                    run: false,
-                    last: None,
-                    step_origin: None,
-                    turn_acc: 0.0,
-                });
+                commands
+                    .entity(pe)
+                    .insert(client_bevy::game::movement::LocalMove {
+                        path: p.into(),
+                        step_timer_ms: 0.0,
+                        run: false,
+                        last: None,
+                        step_origin: None,
+                        turn_acc: 0.0,
+                    });
                 control.pickup_target = Some(item_id);
                 tracing::info!("🚶 [AUTO] 走向物品 id={}（{} 格）", item_id, len);
             }
@@ -211,13 +232,22 @@ pub(crate) fn real_verify_system(
         Has<client_bevy::actor::Monster>,
         Has<client_bevy::actor::Npc>,
     )>,
-    monster_names: Query<(&client_bevy::actor::NetObjectId, &client_bevy::actor::MonsterName)>,
+    monster_names: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::MonsterName,
+    )>,
     players: Query<
         (Entity, &Transform),
-        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
     >,
     // #2633 批次4 步4：dead 读改 StatusFlags；hud 仍留（hud.name 批6 才迁）
-    flags: Query<&client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
+    flags: Query<
+        &client_bevy::game::player_state::StatusFlags,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
     mut s: Local<RealVerifyState>,
 ) {
     use client_bevy::scenes::AppState;
@@ -235,7 +265,10 @@ pub(crate) fn real_verify_system(
             s.revive_sent = true;
             s.revive_count += 1;
             net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
-            tracing::warn!("[REAL] 💀 玩家死亡（第 {} 次），发送城镇复活", s.revive_count);
+            tracing::warn!(
+                "[REAL] 💀 玩家死亡（第 {} 次），发送城镇复活",
+                s.revive_count
+            );
         }
         if s.stage < 9 && s.revive_count >= 3 {
             tracing::warn!("[REAL] ❌ 连续死亡 {} 次，冒烟失败", s.revive_count);
@@ -268,13 +301,21 @@ pub(crate) fn real_verify_system(
                 // 真实服务器不回发给自己（设计）；本地回显由 chat_input_system 负责（C# 行为），
                 // 这里模拟用户路径 add_line，验证显示链路；实体缺失默认空串（同原 hud.name 默认）
                 chat.add_line(
-                    format!("[{}]: 真实服务器验证：你好！", name_q.single().map(|n| n.0.as_str()).unwrap_or("")),
+                    format!(
+                        "[{}]: 真实服务器验证：你好！",
+                        name_q.single().map(|n| n.0.as_str()).unwrap_or("")
+                    ),
                     Color::WHITE,
                     client_bevy::game::chat::ChatChannel::Nearby,
                 );
                 tracing::info!("[REAL] 💬 发送聊天（服务器不回显自己属设计，本地回显已修复）");
             }
-            if chat.lines.iter().any(|(l, _, _, _)| l.contains("真实服务器验证")) && !s.chat_echo {
+            if chat
+                .lines
+                .iter()
+                .any(|(l, _, _, _)| l.contains("真实服务器验证"))
+                && !s.chat_echo
+            {
                 s.chat_echo = true;
                 tracing::info!("[REAL] ✅ 聊天本地回显收到（显示链路通过）");
             }
@@ -292,7 +333,9 @@ pub(crate) fn real_verify_system(
             if s.t < 1.0 {
                 return;
             }
-            let Ok((_, pf)) = players.single() else { return };
+            let Ok((_, pf)) = players.single() else {
+                return;
+            };
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
             // #304：优先选被动弱怪（Deer/Doe/Chicken 等，一次可击杀），其次最近非 guard 怪
@@ -348,7 +391,10 @@ pub(crate) fn real_verify_system(
                 } else if s.tried.is_empty() {
                     tracing::warn!("[REAL] ❌ 全图无怪物");
                 } else {
-                    tracing::warn!("[REAL] ❌ 已尝试 {} 个目标后无剩余怪物（近战命中验证不通过）", s.tried.len());
+                    tracing::warn!(
+                        "[REAL] ❌ 已尝试 {} 个目标后无剩余怪物（近战命中验证不通过）",
+                        s.tried.len()
+                    );
                 }
                 s.stage = 9;
                 return;
@@ -360,7 +406,12 @@ pub(crate) fn real_verify_system(
                 .unwrap_or_default();
             tracing::info!(
                 "[REAL] 🎯 最近怪物 id={} {} @ ({},{}) 距离={}（已试 {} 个）",
-                oid, mon_name, mx, my, d, s.tried.len()
+                oid,
+                mon_name,
+                mx,
+                my,
+                d,
+                s.tried.len()
             );
             s.target = Some(oid);
             s.target_tile = Some((mx, my));
@@ -380,10 +431,21 @@ pub(crate) fn real_verify_system(
                 s.stage = 9;
                 return;
             };
-            let Ok((pe, _)) = players.single() else { return };
+            let Ok((pe, _)) = players.single() else {
+                return;
+            };
             // 近战需在怪物相邻格（而非重叠）：寻路目标选怪物 8 邻中可达且路径最短的格
             let mut best_path: Option<(Vec<(i32, i32)>, (i32, i32))> = None;
-            for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            for (ox, oy) in [
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                (-1, -1),
+                (1, -1),
+                (-1, 1),
+                (1, 1),
+            ] {
                 let t2 = (mx + ox, my + oy);
                 if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
                     continue;
@@ -408,35 +470,54 @@ pub(crate) fn real_verify_system(
                     let len = p.len();
                     s.target_tile = Some(t2);
                     // run 模式（客户端跨 2 格发一个 Run，#59 已修）
-                    commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
-                        path: p.into(),
-                        step_timer_ms: 0.0,
-                        run: true,
-                        last: None,
-                        step_origin: None,
-                        turn_acc: 0.0,
-                    });
-                    tracing::info!("[REAL] 🚶 寻路到怪物旁（{} 格，run，目标 {},{}）", len, t2.0, t2.1);
+                    commands
+                        .entity(pe)
+                        .insert(client_bevy::game::movement::LocalMove {
+                            path: p.into(),
+                            step_timer_ms: 0.0,
+                            run: true,
+                            last: None,
+                            step_origin: None,
+                            turn_acc: 0.0,
+                        });
+                    tracing::info!(
+                        "[REAL] 🚶 寻路到怪物旁（{} 格，run，目标 {},{}）",
+                        len,
+                        t2.0,
+                        t2.1
+                    );
                     s.stage = 2;
                     s.t = 0.0;
                 }
                 _ => {
                     tracing::warn!(
                         "[REAL] ❌ 无法寻路到怪物 ({},{}) 旁（from=({},{}) from_walkable={}）",
-                        mx, my, px, py, map.is_walkable(px, py)
+                        mx,
+                        my,
+                        px,
+                        py,
+                        map.is_walkable(px, py)
                     );
                     s.stage = 9;
                 }
             }
         }
         2 => {
-            let Ok((_, pf)) = players.single() else { return };
+            let Ok((_, pf)) = players.single() else {
+                return;
+            };
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
-            let Some(tid) = s.target else { s.stage = 9; return };
+            let Some(tid) = s.target else {
+                s.stage = 9;
+                return;
+            };
             let alive = actors.iter().any(|(id, _, _, _)| id.0 == tid);
             if !alive {
-                tracing::info!("[REAL] ✅ 目标怪物已死亡（实体移除）——战斗闭环通过（命中 {} 次）", probe.hits);
+                tracing::info!(
+                    "[REAL] ✅ 目标怪物已死亡（实体移除）——战斗闭环通过（命中 {} 次）",
+                    probe.hits
+                );
                 s.stage = 3;
                 s.t = 0.0;
                 return;
@@ -461,13 +542,21 @@ pub(crate) fn real_verify_system(
                 // 命中基线：从开始攻击时记录
                 s.hits_at_start = probe.hits;
                 s.attack_elapsed = 0.0;
-                tracing::info!("[REAL] ⚔️ 服务器位置已同步，开始自动攻击 {}（命中基线 {}）", tid, s.hits_at_start);
+                tracing::info!(
+                    "[REAL] ⚔️ 服务器位置已同步，开始自动攻击 {}（命中基线 {}）",
+                    tid,
+                    s.hits_at_start
+                );
             }
             if control.attack_target == Some(tid) {
                 s.attack_elapsed += time.delta_secs();
                 // 20s 攻击零命中 → 目标够不着（远程怪/位置漂移），换下一个最近怪物
                 if s.attack_elapsed >= 20.0 && probe.hits == s.hits_at_start {
-                    tracing::warn!("[REAL] ⚠️ 攻击 {} 20s 零命中（共命中 {}），换目标", tid, probe.hits);
+                    tracing::warn!(
+                        "[REAL] ⚠️ 攻击 {} 20s 零命中（共命中 {}），换目标",
+                        tid,
+                        probe.hits
+                    );
                     s.tried.push(tid);
                     control.attack_target = None;
                     s.target = None;
@@ -480,7 +569,11 @@ pub(crate) fn real_verify_system(
             }
             // #304：30s 未击杀（有命中但打不动/怪物回血）→ 换目标，不卡死
             if s.attack_elapsed >= 30.0 {
-                tracing::warn!("[REAL] ⚠️ 30s 内未击杀目标 {}（命中 {}），换目标", tid, probe.hits);
+                tracing::warn!(
+                    "[REAL] ⚠️ 30s 内未击杀目标 {}（命中 {}），换目标",
+                    tid,
+                    probe.hits
+                );
                 s.tried.push(tid);
                 control.attack_target = None;
                 s.target = None;
@@ -494,7 +587,9 @@ pub(crate) fn real_verify_system(
             if s.t < 3.0 {
                 return;
             }
-            let Ok((_, pf)) = players.single() else { return };
+            let Ok((_, pf)) = players.single() else {
+                return;
+            };
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
             let mut best: Option<(u32, i32, i32, i32)> = None;
@@ -535,10 +630,21 @@ pub(crate) fn real_verify_system(
                 s.stage = 9;
                 return;
             };
-            let Ok((pe, _)) = players.single() else { return };
+            let Ok((pe, _)) = players.single() else {
+                return;
+            };
             let path = client_bevy::game::pathfinding::find_path(map, (px, py), (nx, ny));
             let path = path.or_else(|| {
-                for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                for (ox, oy) in [
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (1, -1),
+                    (-1, 1),
+                    (1, 1),
+                ] {
                     let t2 = (nx + ox, ny + oy);
                     if let Some(p) = client_bevy::game::pathfinding::find_path(map, (px, py), t2) {
                         if !p.is_empty() {
@@ -552,14 +658,16 @@ pub(crate) fn real_verify_system(
                 Some(p) if !p.is_empty() => {
                     let len = p.len();
                     s.target_tile = Some((nx, ny));
-                    commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
-                        path: p.into(),
-                        step_timer_ms: 0.0,
-                        run: true,
-                        last: None,
-                        step_origin: None,
-                        turn_acc: 0.0,
-                    });
+                    commands
+                        .entity(pe)
+                        .insert(client_bevy::game::movement::LocalMove {
+                            path: p.into(),
+                            step_timer_ms: 0.0,
+                            run: true,
+                            last: None,
+                            step_origin: None,
+                            turn_acc: 0.0,
+                        });
                     tracing::info!("[REAL] 🚶 寻路到 NPC（{} 格，run）", len);
                     s.stage = 4;
                     s.t = 0.0;
@@ -579,7 +687,9 @@ pub(crate) fn real_verify_system(
             // 到达 NPC 旁且服务器位置同步后发送 CallNPC（本地移动超前，需等校正）
             if !s.npc_sent {
                 let nid = s.npc_id.unwrap_or(0);
-                let Ok((_, pf)) = players.single() else { return };
+                let Ok((_, pf)) = players.single() else {
+                    return;
+                };
                 let (px, py) =
                     client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
                 let (mx, my) = s.target_tile.unwrap_or((0, 0));
@@ -604,5 +714,3 @@ pub(crate) fn real_verify_system(
         _ => {}
     }
 }
-
-

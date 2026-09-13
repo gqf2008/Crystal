@@ -134,7 +134,11 @@ pub fn scroll_list_system(
             let (tx, ty, tw, th) = list.track_rel;
             let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
             let max_off = list.max_offset();
-            let ratio = if max_off == 0 { 0.0 } else { list.offset as f32 / max_off as f32 };
+            let ratio = if max_off == 0 {
+                0.0
+            } else {
+                list.offset as f32 / max_off as f32
+            };
             let thumb_y = -tf.translation.y + ty + ratio * (th - thumb_h);
             if cursor.x >= -tf.translation.x + tx
                 && cursor.x <= -tf.translation.x + tx + tw
@@ -165,8 +169,8 @@ pub fn scroll_list_system(
                     list.offset = 0;
                     break;
                 }
-                let ty_clamped = (cursor.y - drag.grab_offset)
-                    .clamp(track_top, track_top + th - thumb_h);
+                let ty_clamped =
+                    (cursor.y - drag.grab_offset).clamp(track_top, track_top + th - thumb_h);
                 let ratio = ((ty_clamped - track_top) / (th - thumb_h)).clamp(0.0, 1.0);
                 list.offset = (ratio * max_off as f32).round() as usize;
                 break;
@@ -230,7 +234,6 @@ pub fn scroll_list_system(
         ts.custom_size = Some(Vec2::new(tw, thumb_h));
     }
 }
-
 
 #[cfg(test)]
 mod tests {

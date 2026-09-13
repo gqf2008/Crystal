@@ -383,7 +383,7 @@ pub fn tooltip_panel_system(
         (Without<TooltipBg>, Without<TooltipTitle>),
     >,
 ) {
-        // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
+    // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
     if !state.is_changed() {
         return;
     }
@@ -409,7 +409,11 @@ pub fn tooltip_panel_system(
     let (px, py) = tooltip_origin(state.x, state.y, w, h);
 
     if let Ok((mut node, mut vis)) = bg.single_mut() {
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if show {
             node.left = Val::Px(px);
             node.top = Val::Px(py);
@@ -418,9 +422,15 @@ pub fn tooltip_panel_system(
         }
     }
     if let Ok((mut t, mut vis)) = title.single_mut() {
-        *vis = if show && !state.title.is_empty() { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show && !state.title.is_empty() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if show && !state.title.is_empty() {
-            if t.0 != state.title { t.0 = state.title.clone(); }
+            if t.0 != state.title {
+                t.0 = state.title.clone();
+            }
         } else if !t.0.is_empty() {
             // 隐藏时必须清空正文：描边副本由 `sync_outline_ui_system` 按正文内容同步，
             // 只隐藏正文会让 4 个黑副本留在屏幕上（实机复现：切换提示对象后残留暗字）
@@ -430,9 +440,15 @@ pub fn tooltip_panel_system(
     for (mut t, mut vis, line) in &mut lines {
         let s = state.lines.get(line.0).cloned().unwrap_or_default();
         let visible = show && !s.is_empty();
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         if visible {
-            if t.0 != s { t.0 = s; }
+            if t.0 != s {
+                t.0 = s;
+            }
         } else if !t.0.is_empty() {
             t.0.clear();
         }

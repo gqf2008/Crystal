@@ -2,15 +2,15 @@
 // actor 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
-use bevy::sprite::Anchor;
-use crate::map_renderer::{make_image, GameData, GameLibraries};
+use super::components::*;
 use crate::actor::{LocalPlayer, MonsterName, NpcName, PlayerName};
+use crate::map_renderer::{make_image, GameData, GameLibraries};
 use crate::resources::libraries::{ArrayLibType, LibraryName};
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::load_ui_font;
 use crate::ui::sprite_ui::{UiFont, UiImageCache};
-use super::components::*;
+use bevy::prelude::*;
+use bevy::sprite::Anchor;
 
 pub(crate) fn actor_sprite_render(
     mut libs: ResMut<GameLibraries>,
@@ -91,8 +91,6 @@ pub(crate) fn actor_sprite_render(
         }
     }
 }
-
-
 
 /// 头顶名字标签（#152 C# 玩家/NPC/怪物名字显示）
 #[derive(Component)]
@@ -214,7 +212,13 @@ pub fn actor_guild_label_system(
     players: Query<(Entity, Option<&PlayerGuildName>), (With<ActorNamed>, Without<LocalPlayer>)>,
     guild_labels: Query<(Entity, &ChildOf), With<ActorGuildLabel>>,
     mut texts: Query<&mut Text2d, With<ActorGuildLabel>>,
-    mut shadows: Query<(&ChildOf, &mut Text2d), (With<crate::ui::outlined_text::OutlineShadow>, Without<ActorGuildLabel>)>,
+    mut shadows: Query<
+        (&ChildOf, &mut Text2d),
+        (
+            With<crate::ui::outlined_text::OutlineShadow>,
+            Without<ActorGuildLabel>,
+        ),
+    >,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -311,7 +315,11 @@ pub fn object_colour_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::ObjectColourChanged { object_id, name_colour_argb } = ev {
+        if let ServerEvent::ObjectColourChanged {
+            object_id,
+            name_colour_argb,
+        } = ev
+        {
             let color = if *name_colour_argb != 0 {
                 let argb = *name_colour_argb as u32;
                 Some(Color::srgb(

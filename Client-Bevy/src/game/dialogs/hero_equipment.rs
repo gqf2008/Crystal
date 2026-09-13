@@ -126,7 +126,10 @@ fn hero_equip_ui_system(
     windows: Query<&Window>,
     close: Query<(Entity, &Interaction), With<HeroEquipClose>>,
     mut widgets: Query<&mut Visibility, With<HeroEquipWidget>>,
-    mut cells: Query<(&HeroEquipSlot, &mut UiItemCellData), Without<crate::ui::theme::UiItemCellIcon>>,
+    mut cells: Query<
+        (&HeroEquipSlot, &mut UiItemCellData),
+        Without<crate::ui::theme::UiItemCellIcon>,
+    >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<HeroEquipWidget>>,
 ) {

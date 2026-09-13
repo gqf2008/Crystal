@@ -1,14 +1,15 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 
 // 网络包解码分派（#72 拆分；#1148 再按域拆分）：handle_player 处理服务端包 玩家属性/觉醒/信用 分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_player(    net: &mut NetConnection,
+pub(crate) fn handle_player(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -20,7 +21,8 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) -> bool {
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -28,13 +30,33 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::ChatItemStats as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::ObjectLeveled as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::MountUpdate as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::AwakeningNeedMaterials as i16,
+        ServerPacketIds::AwakeningLockedItem as i16,
+        ServerPacketIds::Awakening as i16,
+        ServerPacketIds::ChatItemStats as i16,
+        ServerPacketIds::GainedCredit as i16,
+        ServerPacketIds::LoseCredit as i16,
+        ServerPacketIds::UserInformation as i16,
+        ServerPacketIds::HealthChanged as i16,
+        ServerPacketIds::UserLocation as i16,
+        ServerPacketIds::GainedGold as i16,
+        ServerPacketIds::GainExperience as i16,
+        ServerPacketIds::LoseGold as i16,
+        ServerPacketIds::ChangeAMode as i16,
+        ServerPacketIds::ChangePMode as i16,
+        ServerPacketIds::ObjectLeveled as i16,
+        ServerPacketIds::LevelChanged as i16,
+        ServerPacketIds::MountUpdate as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         x if x == ServerPacketIds::AwakeningNeedMaterials as i16 => {
-            if let Ok(p) = mir2_shared::packets::server::awakening_system::AwakeningNeedMaterials::read_body(
-                &mut cur
-            ) {
+            if let Ok(p) =
+                mir2_shared::packets::server::awakening_system::AwakeningNeedMaterials::read_body(
+                    &mut cur,
+                )
+            {
                 tracing::info!(
                     "⚒️ 觉醒材料: item={} materials={:?}",
                     p.item_id,
@@ -54,13 +76,17 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::AwakeningLockedItem as i16 => {
             if let Ok(p) =
-                mir2_shared::packets::server::awakening_system::AwakeningLockedItem::read_body(&mut cur)
+                mir2_shared::packets::server::awakening_system::AwakeningLockedItem::read_body(
+                    &mut cur,
+                )
             {
                 tracing::info!("⚒️ 觉醒锁定: uid={} locked={}", p.unique_id, p.locked);
             }
         }
         x if x == ServerPacketIds::Awakening as i16 => {
-            if let Ok(p) = mir2_shared::packets::server::awakening_system::Awakening::read_body(&mut cur) {
+            if let Ok(p) =
+                mir2_shared::packets::server::awakening_system::Awakening::read_body(&mut cur)
+            {
                 let msg = match p.result {
                     1 => "觉醒成功".to_string(),
                     0 => format!("觉醒失败，物品已损毁 (uid={})", p.remove_id),
@@ -126,7 +152,11 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
                     let equipment: Vec<Option<InvItem>> = p
                         .equipment
                         .as_ref()
-                        .map(|eq| eq.iter().map(|slot| slot.as_ref().map(to_inv_item)).collect())
+                        .map(|eq| {
+                            eq.iter()
+                                .map(|slot| slot.as_ref().map(to_inv_item))
+                                .collect()
+                        })
                         .unwrap_or_default();
                     // #1342：任务物品格（C# QuestInventory 40 格）
                     let quest_inventory: Vec<Option<InvItem>> = p
@@ -207,7 +237,12 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
         x if x == ServerPacketIds::UserLocation as i16 => {
             match user::UserLocation::read_body(&mut cur) {
                 Ok(p) => {
-                    tracing::info!("📍 UserLocation: ({},{}) dir={:?}", p.location_x, p.location_y, p.direction);
+                    tracing::info!(
+                        "📍 UserLocation: ({},{}) dir={:?}",
+                        p.location_x,
+                        p.location_y,
+                        p.direction
+                    );
                     session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
                 }
                 Err(e) => {
@@ -279,7 +314,12 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
         x if x == ServerPacketIds::LevelChanged as i16 => {
             if let Ok(p) = experience::LevelChanged::read_body(&mut cur) {
                 server_events.write(server_event::from_packet::level_changed(&p));
-                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", p.level, p.experience, p.max_experience);
+                tracing::info!(
+                    "⬆️ 升级 Lv.{} exp={}/{}",
+                    p.level,
+                    p.experience,
+                    p.max_experience
+                );
             }
         }
         x if x == ServerPacketIds::MountUpdate as i16 => {

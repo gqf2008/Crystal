@@ -52,7 +52,10 @@ fn main() {
 }
 
 fn emit_links(install: &Path) {
-    println!("cargo:rustc-link-search=native={}", install.join("lib").display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        install.join("lib").display()
+    );
     println!("cargo:rustc-link-lib=static=pinyin");
     // glib-2.0（pkg-config）
     for (k, v) in pkg_config_libs("glib-2.0") {
@@ -93,7 +96,13 @@ fn build_libpinyin(root: &Path, install: &Path) {
                 fs::copy(&local, &tar).unwrap_or_else(|e| panic!("copy fork tarball: {}", e));
             }
         } else {
-            download(&tar, &format!("https://github.com/etorth/libpinyin/archive/{}.tar.gz", FORK_REF));
+            download(
+                &tar,
+                &format!(
+                    "https://github.com/etorth/libpinyin/archive/{}.tar.gz",
+                    FORK_REF
+                ),
+            );
         }
         verify_sha512(&tar, FORK_SHA512);
         extract(&tar, root);
@@ -101,7 +110,8 @@ fn build_libpinyin(root: &Path, install: &Path) {
         if !extracted.exists() {
             panic!("fork 解压目录不存在: {}", extracted.display());
         }
-        fs::rename(&extracted, &src).unwrap_or_else(|e| panic!("rename {} -> src: {}", extracted.display(), e));
+        fs::rename(&extracted, &src)
+            .unwrap_or_else(|e| panic!("rename {} -> src: {}", extracted.display(), e));
     }
     // 2) model20 数据（可用 LIBPINYIN_MODEL_TARBALL 指定本地 tarball，跳过下载）。
     //    无论是否复用缓存包，都做 SHA512 校验，防止上次残留损坏包在解压/构建时出错。
@@ -109,7 +119,8 @@ fn build_libpinyin(root: &Path, install: &Path) {
     if !model_tar.exists() {
         if let Ok(local) = env::var("LIBPINYIN_MODEL_TARBALL") {
             if Path::new(&local).exists() {
-                fs::copy(&local, &model_tar).unwrap_or_else(|e| panic!("copy model tarball: {}", e));
+                fs::copy(&local, &model_tar)
+                    .unwrap_or_else(|e| panic!("copy model tarball: {}", e));
             } else {
                 download_with_fallback(&model_tar, MODEL_URLS);
             }
@@ -125,14 +136,22 @@ fn build_libpinyin(root: &Path, install: &Path) {
     run_script("autoreconf -f -i", &src, &[], "autoreconf");
     let configure = src.join("configure");
     let db_cpp = db_include_flag();
-    let db_ld = db_libdir().map(|d| format!("-L{}", d.display())).unwrap_or_default();
+    let db_ld = db_libdir()
+        .map(|d| format!("-L{}", d.display()))
+        .unwrap_or_default();
     let mut configure_env: Vec<(String, String)> = Vec::new();
     let pkgcfg = pkg_config_path();
     if !pkgcfg.is_empty() {
         configure_env.push(("PKG_CONFIG_PATH".into(), pkgcfg));
     }
-    configure_env.push(("CPPFLAGS".into(), format!("{} {}", db_cpp, env_opt("CPPFLAGS"))));
-    configure_env.push(("LDFLAGS".into(), format!("{} {}", db_ld, env_opt("LDFLAGS"))));
+    configure_env.push((
+        "CPPFLAGS".into(),
+        format!("{} {}", db_cpp, env_opt("CPPFLAGS")),
+    ));
+    configure_env.push((
+        "LDFLAGS".into(),
+        format!("{} {}", db_ld, env_opt("LDFLAGS")),
+    ));
     // 路径转正斜杠：Windows 下传给 msys bash 避免反斜杠被吞。
     let configure_cmd = format!(
         "'{}' --prefix='{}' --with-dbm=BerkeleyDB --disable-libzhuyin --disable-dependency-tracking",
@@ -145,10 +164,19 @@ fn build_libpinyin(root: &Path, install: &Path) {
         &configure_env,
         "configure（依赖：glib-2.0、berkeley-db、autoconf/automake/libtool 需已安装）",
     );
-    run(Command::new("make").args(["-j", "4"]).current_dir(&src), "make");
-    run(Command::new("make").args(["install"]).current_dir(&src), "make install");
+    run(
+        Command::new("make").args(["-j", "4"]).current_dir(&src),
+        "make",
+    );
+    run(
+        Command::new("make").args(["install"]).current_dir(&src),
+        "make install",
+    );
     if !install.join("lib/libpinyin.a").exists() {
-        panic!("libpinyin 构建后缺少 lib/libpinyin.a: {}", install.display());
+        panic!(
+            "libpinyin 构建后缺少 lib/libpinyin.a: {}",
+            install.display()
+        );
     }
 }
 
@@ -225,10 +253,7 @@ fn download_with_fallback(target: &Path, urls: &[&str]) {
 
 fn verify_sha512(path: &Path, want: &str) {
     // macOS: shasum -a 512；Linux: sha512sum。两命令都试，兼容 CI(ubuntu) 与本地(mac)。
-    let tries: &[(&str, &[&str])] = &[
-        ("shasum", &["-a", "512"]),
-        ("sha512sum", &[]),
-    ];
+    let tries: &[(&str, &[&str])] = &[("shasum", &["-a", "512"]), ("sha512sum", &[])];
     let mut got = String::new();
     for (cmd, args) in tries {
         let out = Command::new(cmd).args(*args).arg(path).output();
@@ -241,7 +266,9 @@ fn verify_sha512(path: &Path, want: &str) {
                     .next()
                     .unwrap_or_default()
                     .to_lowercase();
-                got = token.trim_start_matches(|c: char| !c.is_ascii_hexdigit()).to_string();
+                got = token
+                    .trim_start_matches(|c: char| !c.is_ascii_hexdigit())
+                    .to_string();
                 if !got.is_empty() {
                     break;
                 }
@@ -294,7 +321,10 @@ fn pkg_config_libs(pkg: &str) -> Vec<(String, String)> {
         .output()
         .unwrap_or_else(|e| panic!("spawn pkg-config: {}", e));
     if !out.status.success() {
-        panic!("pkg-config --libs {} 失败：需先安装 {}（如 brew install glib）", pkg, pkg);
+        panic!(
+            "pkg-config --libs {} 失败：需先安装 {}（如 brew install glib）",
+            pkg, pkg
+        );
     }
     let mut v = Vec::new();
     for tok in String::from_utf8_lossy(&out.stdout).split_whitespace() {
@@ -341,7 +371,10 @@ fn db_libdir() -> Option<PathBuf> {
         "/usr/lib",
     ] {
         let pb = PathBuf::from(p);
-        if pb.join("libdb.dylib").exists() || pb.join("libdb.so").exists() || pb.join("libdb.a").exists() {
+        if pb.join("libdb.dylib").exists()
+            || pb.join("libdb.so").exists()
+            || pb.join("libdb.a").exists()
+        {
             return Some(pb);
         }
     }

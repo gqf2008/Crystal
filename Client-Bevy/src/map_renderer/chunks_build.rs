@@ -2,8 +2,8 @@
 // map_renderer 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
 use super::*;
+use bevy::prelude::*;
 
 pub(crate) fn setup_world(
     mut commands: Commands,
@@ -15,10 +15,7 @@ pub(crate) fn setup_world(
     mut meshes: ResMut<Assets<Mesh>>,
     mut blend_materials: ResMut<Assets<MapBlendMaterial>>,
     // 只取地图相机（排除 UI 相机：UiEntity + Camera2d；否则两个相机 single_mut 失败 → 相机停在 (0,0) 显示左上角）
-    mut camera: Query<
-        &mut Transform,
-        (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
-    >,
+    mut camera: Query<&mut Transform, (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>)>,
 ) {
     // 1. 加载图像库（MapLibs）
     game_libs.0.ensure_initialized();
@@ -30,10 +27,7 @@ pub(crate) fn setup_world(
     );
 
     // 2. 加载地图（网络 MapChanged 优先，其次命令行 --map）
-    let map_name = game_data
-        .desired_map
-        .clone()
-        .unwrap_or_else(map_arg);
+    let map_name = game_data.desired_map.clone().unwrap_or_else(map_arg);
     let map_path = resolve_map_path(&map_name);
     let map = match MapReader::new(&map_path) {
         Ok(m) => m,
@@ -67,9 +61,7 @@ pub(crate) fn setup_world(
                 if cx < 0 || cy < 0 || cx >= chunks_x || cy >= chunks_y {
                     continue;
                 }
-                if let Some(handle) =
-                    build_chunk(libraries, &map, layer, cx, cy, &mut assets)
-                {
+                if let Some(handle) = build_chunk(libraries, &map, layer, cx, cy, &mut assets) {
                     let rect_x = (cx * CHUNK_TILES as i32) as f32 * TILE_WIDTH;
                     let rect_y = (cy * CHUNK_TILES as i32) as f32 * TILE_HEIGHT;
                     let px = rect_x + CHUNK_PIXEL_W as f32 / 2.0;
@@ -97,8 +89,16 @@ pub(crate) fn setup_world(
                 continue;
             }
             front_spawned += spawn_front_chunk(
-                &mut commands, libraries, &mut assets, &mut tile_cache,
-                &mut blend_materials, &blend_quad, &mut front_images, &map, cx, cy,
+                &mut commands,
+                libraries,
+                &mut assets,
+                &mut tile_cache,
+                &mut blend_materials,
+                &blend_quad,
+                &mut front_images,
+                &map,
+                cx,
+                cy,
             );
         }
     }
@@ -159,16 +159,23 @@ pub(crate) fn setup_world(
             // C# 灯光乘在 darkness 压暗后的背景上（柔和）；Bevy 直接 ADD 全强度会过曝。
             // 强度取 0.4：夜晚温和提亮、白天隐藏（day_night_system 按 darkness 控制 alpha）
             let mat = blend_materials.add(crate::map_tile_anim::MapBlendMaterial {
-                color: bevy::prelude::LinearRgba::new(cr * 0.4 / 255.0, cg * 0.4 / 255.0, cb * 0.4 / 255.0, 1.0),
+                color: bevy::prelude::LinearRgba::new(
+                    cr * 0.4 / 255.0,
+                    cg * 0.4 / 255.0,
+                    cb * 0.4 / 255.0,
+                    1.0,
+                ),
                 texture: light_tex.clone(),
             });
             commands.spawn((
                 MapLight,
-                LightChunkKey((x / CHUNK_TILES as usize) as i32, (y / CHUNK_TILES as usize) as i32),
+                LightChunkKey(
+                    (x / CHUNK_TILES as usize) as i32,
+                    (y / CHUNK_TILES as usize) as i32,
+                ),
                 bevy::prelude::Mesh2d(blend_quad.clone()),
                 bevy::prelude::MeshMaterial2d(mat),
-                Transform::from_xyz(cx, cy, 0.9)
-                    .with_scale(Vec3::new(lw, lh, 1.0)),
+                Transform::from_xyz(cx, cy, 0.9).with_scale(Vec3::new(lw, lh, 1.0)),
                 Visibility::default(),
             ));
             light_spawned += 1;
@@ -225,7 +232,10 @@ pub(crate) fn setup_world(
         cam_tf.translation = Vec3::new(cam_x, cam_y, 10.0);
         tracing::info!("[DIAG] 相机定位: ({:.0},{:.0})", cam_x, cam_y);
     } else {
-        tracing::warn!("[DIAG] 相机定位失败！Camera2d 数量={}", camera.iter().count());
+        tracing::warn!(
+            "[DIAG] 相机定位失败！Camera2d 数量={}",
+            camera.iter().count()
+        );
     }
 
     // 构建可行走网格（M8 寻路）+ 门索引网格（#1550）
@@ -246,18 +256,23 @@ pub(crate) fn setup_world(
     {
         let total = map.width as usize * map.height as usize;
         let walkable_count = walkable.iter().flatten().filter(|w| **w).count();
-        tracing::info!("🚶 可行走网格: {}/{} 格可走（{:.1}%）", walkable_count, total, walkable_count as f64 * 100.0 / total.max(1) as f64);
+        tracing::info!(
+            "🚶 可行走网格: {}/{} 格可走（{:.1}%）",
+            walkable_count,
+            total,
+            walkable_count as f64 * 100.0 / total.max(1) as f64
+        );
     }
 
-pub struct GameData {
-    pub map: Option<LoadedMap>,
-    /// 地图解析器（供 chunk 流式按需加载）
-    pub map_reader: Option<std::sync::Arc<MapReader>>,
-    /// 网络 MapChanged 指定的地图名（优先于命令行 --map）
-    pub desired_map: Option<String>,
-    /// 玩家出生位置（瓦片坐标 + 朝向），来自 MapChanged
-    pub player_spawn: Option<(f32, f32, u8)>,
-}
+    pub struct GameData {
+        pub map: Option<LoadedMap>,
+        /// 地图解析器（供 chunk 流式按需加载）
+        pub map_reader: Option<std::sync::Arc<MapReader>>,
+        /// 网络 MapChanged 指定的地图名（优先于命令行 --map）
+        pub desired_map: Option<String>,
+        /// 玩家出生位置（瓦片坐标 + 朝向），来自 MapChanged
+        pub player_spawn: Option<(f32, f32, u8)>,
+    }
     game_data.map = Some(LoadedMap {
         name: map_name.clone(),
         width: map.width,
@@ -266,7 +281,6 @@ pub struct GameData {
         doors,
     });
     game_data.map_reader = Some(std::sync::Arc::new(map));
-
 }
 
 /// Startup：创建唯一的 2D 相机（登录界面需要相机渲染 egui；进入游戏后重定位）
@@ -293,9 +307,24 @@ pub fn build_chunk_rgba(
     // - Middle：双向各留 1 格（覆盖稍高的中景瓦片）
     // - Front：高物件从格子底部向上延伸，向上留 16 行、向右留 8 列
     let (x_lo, x_hi, y_lo, y_hi) = match layer {
-        Layer::Back => ((start_x - 1).max(0), (end_x + 1).min(map.width), start_y, (end_y + 1).min(map.height)),
-        Layer::Middle => ((start_x - 1).max(0), (end_x + 1).min(map.width), (start_y - 1).max(0), (end_y + 1).min(map.height)),
-        Layer::Front => ((start_x - 1).max(0), (end_x + 8).min(map.width), (start_y - 1).max(0), (end_y + 16).min(map.height)),
+        Layer::Back => (
+            (start_x - 1).max(0),
+            (end_x + 1).min(map.width),
+            start_y,
+            (end_y + 1).min(map.height),
+        ),
+        Layer::Middle => (
+            (start_x - 1).max(0),
+            (end_x + 1).min(map.width),
+            (start_y - 1).max(0),
+            (end_y + 1).min(map.height),
+        ),
+        Layer::Front => (
+            (start_x - 1).max(0),
+            (end_x + 8).min(map.width),
+            (start_y - 1).max(0),
+            (end_y + 16).min(map.height),
+        ),
     };
 
     for x in x_lo..x_hi {
@@ -357,13 +386,7 @@ pub(crate) fn build_chunk(
 }
 
 /// 把图像 RGBA 拷贝到画布，返回是否有像素被写入
-pub(crate) fn blit(
-    canvas: &mut [u8],
-    dx: i32,
-    dy: i32,
-    img: &ImageInfo,
-    rgba: &[u8],
-) -> bool {
+pub(crate) fn blit(canvas: &mut [u8], dx: i32, dy: i32, img: &ImageInfo, rgba: &[u8]) -> bool {
     let w = img.width as i32;
     let h = img.height as i32;
     if w <= 0 || h <= 0 {
@@ -406,5 +429,3 @@ pub fn make_image(rgba: Vec<u8>, width: u32, height: u32) -> Image {
         RenderAssetUsages::default(),
     )
 }
-
-

@@ -15,10 +15,8 @@ use bevy::prelude::*;
 use mir2_shared::enums::{ItemType, MarketPanelType};
 
 use crate::actor::LocalPlayer;
-use crate::game::dialogs::market_filter::{
-    self, MarketFilterSprites,
-};
 use crate::game::dialogs::inventory::{InvClickState, InvItem, InvLockReason, InvLockedSlots};
+use crate::game::dialogs::market_filter::{self, MarketFilterSprites};
 use crate::game::dialogs::text_input::TextInputState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::Inventory;
@@ -26,8 +24,8 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{shared_cjk_font, ui_image, UiCjkFont, UiFont, UiImageCache};
 use crate::ui::gray::UiGray;
+use crate::ui::sprite_ui::{shared_cjk_font, ui_image, UiCjkFont, UiFont, UiImageCache};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui, spawn_label,
     spawn_label_center, spawn_panel, spawn_scroll_bar_ui, ImageButton, UiItemCellData,
@@ -720,7 +718,11 @@ pub fn row_expire_text(consignment_date: i64) -> String {
     }
     let expire = consignment_date + TM_CONSIGNMENT_LENGTH_DAYS * 86_400;
     chrono::DateTime::from_timestamp(expire, 0)
-        .map(|t| t.with_timezone(&chrono::Local).format("%d/%m/%y %H:%M:%S").to_string())
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%d/%m/%y %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -807,11 +809,11 @@ impl Plugin for MarketPlugin {
         app.init_resource::<MarketState>();
         app.init_resource::<MarketConfirm>();
         app.init_resource::<MarketBidPending>();
-                app.add_systems(
+        app.add_systems(
             Update,
             market_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_market);
+        app.add_systems(OnEnter(AppState::Game), spawn_market);
         app.add_systems(OnExit(AppState::Game), cleanup_market);
         app.add_systems(
             Update,
@@ -821,9 +823,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_market);
         );
         app.add_systems(
             Update,
-            market_tab_system
-                .chain()
-                .run_if(in_state(AppState::Game)),
+            market_tab_system.chain().run_if(in_state(AppState::Game)),
         );
         app.add_systems(
             Update,
@@ -978,11 +978,29 @@ fn spawn_market(
             });
         }
         // C# `PageLabel` @(260,419) 70x18：行 10 承载「第 x/y 页」
-        spawn_label(p, &cjk, "", TM_PAGE_POS.0, TM_PAGE_POS.1, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
-            .insert(MarketLine(10));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            TM_PAGE_POS.0,
+            TM_PAGE_POS.1,
+            12.0,
+            Color::srgb(1.0, 0.9, 0.5),
+            9,
+        )
+        .insert(MarketLine(10));
         // 消息行（Bevy 扩展，放在列表下方）
-        spawn_label(p, &cjk, "", TM_LIST_X, TM_LIST_Y + 190.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 9)
-            .insert(MarketLine(11));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            TM_LIST_X,
+            TM_LIST_Y + 190.0,
+            12.0,
+            Color::srgb(1.0, 0.9, 0.5),
+            9,
+        )
+        .insert(MarketLine(11));
         // C# 底部操作栏：Find Title[480..482] @(124,448)、Refresh Prguse[663..665] @(320,448)、
         // Buy Title[703..705] @(380,448)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -998,18 +1016,27 @@ fn spawn_market(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 664),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 665),
         ) {
-            spawn_icon_button(p, n, h, pr, TM_REFRESH_POS.0, TM_REFRESH_POS.1, 28.0, 25.0, 10)
-                .insert(MarketRefreshBtn);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                TM_REFRESH_POS.0,
+                TM_REFRESH_POS.1,
+                28.0,
+                25.0,
+                10,
+            )
+            .insert(MarketRefreshBtn);
         }
         // Buy `Title[703..705]` @(380,448)：寄售/拍卖页签换成 `Title[706..708]`（运行时切换）
         {
             let (n, h, pr) = buy_market.clone();
-            spawn_icon_button(p, n, h, pr, TM_BUY_POS.0, TM_BUY_POS.1, 84.0, 25.0, 10)
-                .insert((
-                    MarketBuyBtn,
-                    MarketBottomBtn::Buy,
-                    UiGray::default(),
-                ));
+            spawn_icon_button(p, n, h, pr, TM_BUY_POS.0, TM_BUY_POS.1, 84.0, 25.0, 10).insert((
+                MarketBuyBtn,
+                MarketBottomBtn::Buy,
+                UiGray::default(),
+            ));
         }
         // 表头标签（C# 5 个 Title*Label，居中；文案随页签变化）
         for (kind, x, y, w) in TM_HEADERS {
@@ -1366,10 +1393,7 @@ fn market_ui_system(
         Query<(Entity, &Interaction), With<MarketNextBtn>>,
     ),
     mouse: Res<ButtonInput<MouseButton>>,
-    ui: (
-        Query<&Window>,
-        Query<&Node, With<MarketWidget>>,
-    ),
+    ui: (Query<&Window>, Query<&Node, With<MarketWidget>>),
     mut widgets: Query<&mut Visibility, With<MarketWidget>>,
     mut lines: Query<(&mut Text, &MarketLine)>,
     mut scroll: Query<&mut UiScrollList, With<MarketWidget>>,
@@ -1387,7 +1411,11 @@ fn market_ui_system(
     }
     let open = mgr.is_open(DialogKind::Market);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *requested = false;
@@ -1454,14 +1482,17 @@ fn market_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = ui.0.single() {
             if let Some(cursor) = window.cursor_position() {
-                let (ox, oy) = ui
-                    .1
-                    .single()
-                    .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
-                    .unwrap_or((280.0, 80.0));
+                let (ox, oy) =
+                    ui.1.single()
+                        .map(|n| crate::ui::theme::node_origin(n, (280.0, 80.0)))
+                        .unwrap_or((280.0, 80.0));
                 for i in 0..10usize {
                     let (rx, ry, rw, rh) = market_row_rect(i, ox, oy);
-                    if cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh {
+                    if cursor.x >= rx
+                        && cursor.x <= rx + rw
+                        && cursor.y >= ry
+                        && cursor.y <= ry + rh
+                    {
                         // 按价格排序映射到 `listings` 下标（Bevy 服务端按页下发，见 `row_listing_index`）
                         if let Some(idx) = row_listing_index(&market, i) {
                             market.selected = Some(idx);
@@ -1495,7 +1526,13 @@ fn market_ui_system(
     // 搜索（C# `FindButton.Click` → `C.MarketSearch{Match, MarketType}`，Type 默认 Nothing 不过滤）
     for (e, inter) in &btns.2 {
         if edge(e, inter, &mut prev_inter) {
-            let kw = input.texts.get(5).cloned().unwrap_or_default().trim().to_string();
+            let kw = input
+                .texts
+                .get(5)
+                .cloned()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             if kw.is_empty() {
                 continue;
             }
@@ -1839,7 +1876,10 @@ fn market_consign_system(
             market.message = "已取消选择物品".to_string();
             continue;
         }
-        let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
+        let items = inv_q
+            .single()
+            .map(|inv| inv.items.as_slice())
+            .unwrap_or(&[]);
         let Some(sel) = inv_click.selected else {
             market.message = "请先在背包里点选一件物品".to_string();
             continue;
@@ -1976,13 +2016,13 @@ fn market_row_system(
                     row_price_text(item.price, item.item_type),
                     row_price_color(item.price),
                 )),
-                MarketRowTextKind::Seller => {
-                    Some((item.seller.clone(), row_seller_color(&item.seller, user_mode)))
-                }
-                MarketRowTextKind::Expire => Some((
-                    row_expire_text(item.consignment_date),
-                    Color::WHITE,
+                MarketRowTextKind::Seller => Some((
+                    item.seller.clone(),
+                    row_seller_color(&item.seller, user_mode),
                 )),
+                MarketRowTextKind::Expire => {
+                    Some((row_expire_text(item.consignment_date), Color::WHITE))
+                }
             },
             None => None,
         };
@@ -2356,7 +2396,6 @@ fn market_bid_amount_system(
     }
 }
 
-
 /// 消费服务端市场事件（网络层只广播 ServerEvent；文案在此构造）
 /// #2633 批次4 步9：寄售移除背包格直接写 `Inventory` 组件（HudState 已删）；实体未生成跳过（R1）。
 fn market_server_events(
@@ -2453,10 +2492,7 @@ mod tests {
         // C# 布局：面板 @(0,0)，首行 (127,82)、行高 33、354x32
         let (rx, ry, rw, rh) = market_row_rect(0, TM_POS.0, TM_POS.1);
         assert_eq!((rx, ry, rw, rh), (127.0, 82.0, 354.0, 32.0));
-        assert_eq!(
-            market_row_rect(9, TM_POS.0, TM_POS.1).1,
-            82.0 + 9.0 * 33.0
-        );
+        assert_eq!(market_row_rect(9, TM_POS.0, TM_POS.1).1, 82.0 + 9.0 * 33.0);
         // 拖动到 (330,100)：同一相对位置命中跟随（+delta 330,100）
         let (rx2, ry2, _, _) = market_row_rect(0, 330.0, 100.0);
         assert_eq!((rx2, ry2), (457.0, 182.0));
@@ -2480,7 +2516,8 @@ mod tests {
         assert_eq!(TM_NEXT_POS, (320.0, 419.0));
         assert_eq!(TM_PAGE_POS, (260.0, 419.0));
         // 控件必须落在 492x478 面板内
-        let inside = |(x, y): (f32, f32)| x >= 0.0 && y >= 0.0 && x <= TM_PANEL_W && y <= TM_PANEL_H;
+        let inside =
+            |(x, y): (f32, f32)| x >= 0.0 && y >= 0.0 && x <= TM_PANEL_W && y <= TM_PANEL_H;
         for (_, x, y, _, _) in TM_TABS {
             assert!(inside((x, y)));
         }
@@ -2865,7 +2902,7 @@ mod tests {
         assert_eq!(TM_ROW_EXPIRE_POS, (256.0, 14.0));
         assert_eq!(TM_ROW_PLACEHOLDER_FRAME, 540); // C# 空数量占位 Prguse[540]
         assert_eq!(TM_ROW_BORDER_COLOR, Color::srgb_u8(200, 100, 0)); // BorderColour
-        // 行内元素都在行框内（图标区 + 4 标签；标签用 C# 声明尺寸）
+                                                                      // 行内元素都在行框内（图标区 + 4 标签；标签用 C# 声明尺寸）
         let inside = |(x, y): (f32, f32), w: f32, h: f32| {
             x >= 0.0 && y >= 0.0 && x + w <= TM_ROW_W && y + h <= TM_ROW_H
         };
@@ -2912,7 +2949,10 @@ mod tests {
         // 卖家列：非 UserMode 一律白；UserMode 状态串着色
         assert_eq!(row_seller_color("张三", false), Color::WHITE);
         assert_eq!(row_seller_color("Sold", true), Color::srgb(1.0, 0.843, 0.0));
-        assert_eq!(row_seller_color("Expired", true), Color::srgb(1.0, 0.0, 0.0));
+        assert_eq!(
+            row_seller_color("Expired", true),
+            Color::srgb(1.0, 0.0, 0.0)
+        );
         assert_eq!(
             row_seller_color("Bid Met", true),
             Color::srgb(0.486, 0.988, 0.0)
@@ -3047,7 +3087,6 @@ mod tests {
         assert!(auction.contains("最长可登记拍卖7天"), "{auction}");
     }
 
-
     use super::*;
     use crate::game::dialogs::inventory::InvItem;
     use crate::network::server_event::ServerEvent;
@@ -3079,8 +3118,10 @@ mod tests {
         app.update(); // 初始化消息缓冲/系统状态
 
         // 寄售 uid=22（idx=1）成功 → Inventory 组件同格清空
-        app.world_mut()
-            .write_message(ServerEvent::MarketConsign { uid: 22, success: true });
+        app.world_mut().write_message(ServerEvent::MarketConsign {
+            uid: 22,
+            success: true,
+        });
         app.update();
         let inv = app
             .world_mut()
@@ -3112,8 +3153,10 @@ mod tests {
         ));
         app.update();
 
-        app.world_mut()
-            .write_message(ServerEvent::MarketConsign { uid: 11, success: false });
+        app.world_mut().write_message(ServerEvent::MarketConsign {
+            uid: 11,
+            success: false,
+        });
         app.update();
         let inv = app
             .world_mut()

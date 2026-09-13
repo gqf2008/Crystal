@@ -18,7 +18,9 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, ImageButton};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, ImageButton,
+};
 
 /// AssignKeyPanel 目标：玩家 1..16；英雄 17..24（C# KeyOffset 1/17）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -127,10 +129,7 @@ impl Plugin for AssignKeyPlugin {
         app.init_resource::<AssignKeyState>();
         app.add_systems(OnEnter(AppState::Game), spawn_assign_key_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_assign_key_panel);
-        app.add_systems(
-            Update,
-            assign_key_system.run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, assign_key_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -225,26 +224,26 @@ fn spawn_assign_key_panel(
                     },
                     ZIndex(10),
                 ))
-                    .with_children(|c| {
-                        // 键名文本：F1..F8 / "Ctrl\nF1" 双行（#2584）
-                        c.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(4.0),
-                                top: Val::Px(11.0),
-                                ..default()
-                            },
-                            Text::new(assign_key_label(i as u8 + 1)),
-                            AssignKeyFKeyText(i),
-                            TextFont {
-                                font: FontSource::Handle(font.clone()),
-                                font_size: FontSize::Px(9.0),
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            ZIndex(11),
-                        ));
-                    });
+                .with_children(|c| {
+                    // 键名文本：F1..F8 / "Ctrl\nF1" 双行（#2584）
+                    c.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(4.0),
+                            top: Val::Px(11.0),
+                            ..default()
+                        },
+                        Text::new(assign_key_label(i as u8 + 1)),
+                        AssignKeyFKeyText(i),
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(9.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(11),
+                    ));
+                });
             }
         }
     });
@@ -268,7 +267,12 @@ fn assign_key_system(
         (Without<AssignKeyIcon>, Without<AssignKeyFKeyText>),
     >,
     mut actions: Query<
-        (Entity, &Interaction, Option<&AssignKeyNone>, Option<&AssignKeySave>),
+        (
+            Entity,
+            &Interaction,
+            Option<&AssignKeyNone>,
+            Option<&AssignKeySave>,
+        ),
         Without<AssignKeyFKey>,
     >,
     mut fkeys: Query<

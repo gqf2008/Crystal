@@ -1,14 +1,15 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 
 // 网络包解码分派（#72 拆分；#1148 再按域拆分）：handle_world 处理服务端包 地图/对象/移动/战斗/聊天 分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_world(    net: &mut NetConnection,
+pub(crate) fn handle_world(
+    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
@@ -20,7 +21,8 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) -> bool {
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -28,7 +30,58 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::UserDashAttack as i16, ServerPacketIds::ObjectDashAttack as i16, ServerPacketIds::TeleportIn as i16, ServerPacketIds::SetConcentration as i16, ServerPacketIds::SetElemental as i16, ServerPacketIds::ColourChanged as i16, ServerPacketIds::ObjectGuildNameChanged as i16, ServerPacketIds::ObjectName as i16, ServerPacketIds::UserName as i16, ServerPacketIds::InTrapRock as i16, ServerPacketIds::TransformUpdate as i16, ServerPacketIds::ObjectSneaking as i16, ServerPacketIds::ObjectLevelEffects as i16, ServerPacketIds::ObjectDeco as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::MapChanged as i16,
+        ServerPacketIds::NewMapInfo as i16,
+        ServerPacketIds::Roll as i16,
+        ServerPacketIds::ObjectPlayer as i16,
+        ServerPacketIds::ObjectMonster as i16,
+        ServerPacketIds::ObjectNpc as i16,
+        ServerPacketIds::ObjectRemove as i16,
+        ServerPacketIds::ObjectItem as i16,
+        ServerPacketIds::ObjectGold as i16,
+        ServerPacketIds::UserDashAttack as i16,
+        ServerPacketIds::ObjectDashAttack as i16,
+        ServerPacketIds::TeleportIn as i16,
+        ServerPacketIds::SetConcentration as i16,
+        ServerPacketIds::SetElemental as i16,
+        ServerPacketIds::ColourChanged as i16,
+        ServerPacketIds::ObjectGuildNameChanged as i16,
+        ServerPacketIds::ObjectName as i16,
+        ServerPacketIds::UserName as i16,
+        ServerPacketIds::InTrapRock as i16,
+        ServerPacketIds::TransformUpdate as i16,
+        ServerPacketIds::ObjectSneaking as i16,
+        ServerPacketIds::ObjectLevelEffects as i16,
+        ServerPacketIds::ObjectDeco as i16,
+        ServerPacketIds::NPCUpdate as i16,
+        ServerPacketIds::NPCImageUpdate as i16,
+        ServerPacketIds::ObjectHarvest as i16,
+        ServerPacketIds::ObjectHarvested as i16,
+        ServerPacketIds::TimeOfDay as i16,
+        ServerPacketIds::ObjectTurn as i16,
+        ServerPacketIds::ObjectWalk as i16,
+        ServerPacketIds::ObjectRun as i16,
+        ServerPacketIds::ObjectHide as i16,
+        ServerPacketIds::ObjectShow as i16,
+        ServerPacketIds::ObjectSitDown as i16,
+        ServerPacketIds::Pushed as i16,
+        ServerPacketIds::ObjectPushed as i16,
+        ServerPacketIds::ObjectTeleportOut as i16,
+        ServerPacketIds::ObjectTeleportIn as i16,
+        ServerPacketIds::ObjectAttack as i16,
+        ServerPacketIds::UserDash as i16,
+        ServerPacketIds::ObjectDash as i16,
+        ServerPacketIds::UserDashFail as i16,
+        ServerPacketIds::ObjectDashFail as i16,
+        ServerPacketIds::UserBackStep as i16,
+        ServerPacketIds::ObjectBackStep as i16,
+        ServerPacketIds::UserAttackMove as i16,
+        ServerPacketIds::Poisoned as i16,
+        ServerPacketIds::ObjectPoisoned as i16,
+        ServerPacketIds::Chat as i16,
+        ServerPacketIds::ObjectChat as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         x if x == ServerPacketIds::MapChanged as i16 => {
@@ -95,29 +148,29 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {
             match objects::ObjectPlayer::read_body(&mut cur) {
-            Ok(p) => {
-                net_objects.write(NetObject::Player {
-                    object_id: p.object_id,
-                    name: p.name,
-                    guild_name: p.guild_name,
-                    guild_rank_name: p.guild_rank_name,
-                    class: p.class,
-                    gender: p.gender,
-                    location_x: p.location_x,
-                    location_y: p.location_y,
-                    direction: p.direction as u8,
-                    hair: p.hair,
-                    weapon: p.weapon,
-                    weapon_effect: p.weapon_effect,
-                    armour: p.armour,
-                    wing_effect: p.wing_effect,
-                    mount_type: p.mount_type,
-                    is_mounted: p.riding_mount,
-                });
-            }
-            Err(e) => {
-                tracing::warn!("⚠️ ObjectPlayer 解析失败: {} (len={})", e, payload.len());
-            }
+                Ok(p) => {
+                    net_objects.write(NetObject::Player {
+                        object_id: p.object_id,
+                        name: p.name,
+                        guild_name: p.guild_name,
+                        guild_rank_name: p.guild_rank_name,
+                        class: p.class,
+                        gender: p.gender,
+                        location_x: p.location_x,
+                        location_y: p.location_y,
+                        direction: p.direction as u8,
+                        hair: p.hair,
+                        weapon: p.weapon,
+                        weapon_effect: p.weapon_effect,
+                        armour: p.armour,
+                        wing_effect: p.wing_effect,
+                        mount_type: p.mount_type,
+                        is_mounted: p.riding_mount,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ ObjectPlayer 解析失败: {} (len={})", e, payload.len());
+                }
             }
         }
         x if x == ServerPacketIds::ObjectMonster as i16 => {
@@ -152,28 +205,28 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::ObjectItem as i16 => {
             match drops::ObjectItem::read_body(&mut cur) {
-            Ok(p) => {
-                let name = p
-                    .item
-                    .info
-                    .as_ref()
-                    .map(|i| i.name.clone())
-                    .unwrap_or_else(|| format!("#{}", p.item.item_index));
-                tracing::info!(
-                    "📦 地面物品: {} (uid={}) @ ({},{})",
-                    name,
-                    p.item.unique_id,
-                    p.location_x,
-                    p.location_y
-                );
-                net_objects.write(NetObject::GroundItem {
-                    object_id: p.object_id,
-                    item: to_inv_item(&p.item),
-                    location_x: p.location_x,
-                    location_y: p.location_y,
-                });
-            }
-            Err(e) => tracing::warn!("⚠️ ObjectItem 解析失败: {} (len={})", e, payload.len()),
+                Ok(p) => {
+                    let name = p
+                        .item
+                        .info
+                        .as_ref()
+                        .map(|i| i.name.clone())
+                        .unwrap_or_else(|| format!("#{}", p.item.item_index));
+                    tracing::info!(
+                        "📦 地面物品: {} (uid={}) @ ({},{})",
+                        name,
+                        p.item.unique_id,
+                        p.location_x,
+                        p.location_y
+                    );
+                    net_objects.write(NetObject::GroundItem {
+                        object_id: p.object_id,
+                        item: to_inv_item(&p.item),
+                        location_x: p.location_x,
+                        location_y: p.location_y,
+                    });
+                }
+                Err(e) => tracing::warn!("⚠️ ObjectItem 解析失败: {} (len={})", e, payload.len()),
             }
         }
         x if x == ServerPacketIds::ObjectGold as i16 => {
@@ -397,7 +450,12 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::ObjectWalk as i16 => {
             if let Ok(p) = objects::ObjectWalk::read_body(&mut cur) {
-                tracing::debug!("🚶 ObjectWalk id={} -> ({},{})", p.object_id, p.location_x, p.location_y);
+                tracing::debug!(
+                    "🚶 ObjectWalk id={} -> ({},{})",
+                    p.object_id,
+                    p.location_x,
+                    p.location_y
+                );
                 motions.write(NetMotion::Walk {
                     object_id: p.object_id,
                     x: p.location_x,
@@ -587,8 +645,11 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 });
                 // #1616：本地玩家麻痹/冰冻毒 → 输入锁定（C# CheckInput）
                 server_events.write(ServerEvent::LocalPoisonChanged {
-                    paralysis: p.poison.intersects(mir2_shared::enums::PoisonType::PARALYSIS)
-                        || p.poison.intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
+                    paralysis: p
+                        .poison
+                        .intersects(mir2_shared::enums::PoisonType::PARALYSIS)
+                        || p.poison
+                            .intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
                         || p.poison.intersects(mir2_shared::enums::PoisonType::FROZEN),
                 });
                 tracing::debug!("☠️ 玩家中毒: {:?}", p.poison);
@@ -603,8 +664,11 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 // #1616：本地玩家毒状态变化（对象毒只影响本地玩家输入）
                 if Some(p.object_id) == session.local_player_id {
                     server_events.write(ServerEvent::LocalPoisonChanged {
-                        paralysis: p.poison.intersects(mir2_shared::enums::PoisonType::PARALYSIS)
-                            || p.poison.intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
+                        paralysis: p
+                            .poison
+                            .intersects(mir2_shared::enums::PoisonType::PARALYSIS)
+                            || p.poison
+                                .intersects(mir2_shared::enums::PoisonType::LR_PARALYSIS)
                             || p.poison.intersects(mir2_shared::enums::PoisonType::FROZEN),
                     });
                 }

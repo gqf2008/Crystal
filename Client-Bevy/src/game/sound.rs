@@ -32,7 +32,9 @@ impl SoundBank {
         self.root = candidate
             .into_iter()
             .find(|p| p.join("SoundList.lst").exists())
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Crystal/Sound"));
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Crystal/Sound")
+            });
         let lst = self.root.join("SoundList.lst");
         let Ok(text) = std::fs::read_to_string(&lst) else {
             tracing::warn!("🔊 SoundList.lst 未找到: {}", lst.display());
@@ -97,11 +99,11 @@ pub fn attack_swing_sound(
         0 | 23 | 28 | 40 => 10051, // SwingWood
         1 | 12 => 10050,           // SwingShort
         2 | 8 | 11 | 15 | 18 | 20 | 25 | 31 | 33 | 34 | 37 | 41 => 10052, // SwingSword
-        3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10053,       // SwingSword2
-        4 | 14 | 16 | 38 => 10054,                                        // SwingAxe
-        6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => 10056,                    // SwingLong
-        21 => 10055,                                                       // SwingClub
-        _ => 10056,                                                        // SwingFist
+        3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10053, // SwingSword2
+        4 | 14 | 16 | 38 => 10054, // SwingAxe
+        6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => 10056, // SwingLong
+        21 => 10055,               // SwingClub
+        _ => 10056,                // SwingFist
     })
 }
 
@@ -336,26 +338,49 @@ fn wemade_step_sound(cell: &crate::resources::map_reader::CellInfo) -> u32 {
     let index = (cell.back_image & 0x1FFFF) - 1;
     let mut sound = 10001; // WalkGroundL
     if (0..=10000).contains(&index) {
-        if ((330..=349).contains(&index) || (450..=454).contains(&index) || (550..=554).contains(&index)
-            || (750..=754).contains(&index) || (950..=954).contains(&index) || (1250..=1254).contains(&index)
-            || (1400..=1424).contains(&index) || (1455..=1474).contains(&index) || (1500..=1524).contains(&index)
+        if ((330..=349).contains(&index)
+            || (450..=454).contains(&index)
+            || (550..=554).contains(&index)
+            || (750..=754).contains(&index)
+            || (950..=954).contains(&index)
+            || (1250..=1254).contains(&index)
+            || (1400..=1424).contains(&index)
+            || (1455..=1474).contains(&index)
+            || (1500..=1524).contains(&index)
             || (1550..=1574).contains(&index))
         {
             sound = 10009; // WalkLawnL
-        } else if ((250..=254).contains(&index) || (1005..=1009).contains(&index) || (1050..=1054).contains(&index)
-            || (1060..=1064).contains(&index) || (1450..=1454).contains(&index) || (1650..=1654).contains(&index))
+        } else if ((250..=254).contains(&index)
+            || (1005..=1009).contains(&index)
+            || (1050..=1054).contains(&index)
+            || (1060..=1064).contains(&index)
+            || (1450..=1454).contains(&index)
+            || (1650..=1654).contains(&index))
         {
             sound = 10013; // WalkRoughL
-        } else if ((605..=609).contains(&index) || (650..=654).contains(&index) || (660..=664).contains(&index)
-            || (2000..=2049).contains(&index) || (3025..=3049).contains(&index) || (2400..=2424).contains(&index)
-            || (4625..=4649).contains(&index) || (4675..=4678).contains(&index))
+        } else if ((605..=609).contains(&index)
+            || (650..=654).contains(&index)
+            || (660..=664).contains(&index)
+            || (2000..=2049).contains(&index)
+            || (3025..=3049).contains(&index)
+            || (2400..=2424).contains(&index)
+            || (4625..=4649).contains(&index)
+            || (4675..=4678).contains(&index))
         {
             sound = 10005; // WalkStoneL
-        } else if ((1825..=1924).contains(&index) || (2150..=2174).contains(&index) || (3075..=3099).contains(&index)
-            || (3325..=3349).contains(&index) || (3375..=3399).contains(&index))
+        } else if ((1825..=1924).contains(&index)
+            || (2150..=2174).contains(&index)
+            || (3075..=3099).contains(&index)
+            || (3325..=3349).contains(&index)
+            || (3375..=3399).contains(&index))
         {
             sound = 10021; // WalkCaveL
-        } else if index == 3230 || index == 3231 || index == 3246 || index == 3277 || (3780..=3799).contains(&index) {
+        } else if index == 3230
+            || index == 3231
+            || index == 3246
+            || index == 3277
+            || (3780..=3799).contains(&index)
+        {
             sound = 10017; // WalkWoodL
         } else if (3825..=4434).contains(&index) {
             sound = if index % 25 == 0 { 10017 } else { 10001 };
@@ -383,11 +408,17 @@ fn wemade_step_sound(cell: &crate::resources::map_reader::CellInfo) -> u32 {
         }
         // Front 覆盖
         let f_index = (cell.front_image & 0x7FFF) - 1;
-        if (221..=289).contains(&f_index) || (583..=658).contains(&f_index) || (1183..=1206).contains(&f_index)
-            || (7163..=7295).contains(&f_index) || (7404..=7414).contains(&f_index)
+        if (221..=289).contains(&f_index)
+            || (583..=658).contains(&f_index)
+            || (1183..=1206).contains(&f_index)
+            || (7163..=7295).contains(&f_index)
+            || (7404..=7414).contains(&f_index)
         {
             sound = 10005;
-        } else if (3125..=3267).contains(&f_index) || (3757..=3948).contains(&f_index) || (6030..=6999).contains(&f_index) {
+        } else if (3125..=3267).contains(&f_index)
+            || (3757..=3948).contains(&f_index)
+            || (6030..=6999).contains(&f_index)
+        {
             sound = 10017;
         }
         if (3316..=3589).contains(&f_index) {
@@ -405,10 +436,10 @@ pub fn monster_struck_sound(weapon_shape: i16) -> Option<u32> {
         0 | 23 | 28 | 40 => 10061, // StruckWooden
         1 | 12 => 10060,           // StruckShort
         2 | 8 | 11 | 15 | 18 | 20 | 25 | 31 | 33 | 34 | 37 | 41 => 10062, // StruckSword
-        3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10063,       // StruckSword2
-        4 | 14 | 16 | 38 => 10064,                                        // StruckAxe
-        6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => 10060,                    // StruckShort
-        21 => 10065,                                                       // StruckClub
+        3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10063, // StruckSword2
+        4 | 14 | 16 | 38 => 10064, // StruckAxe
+        6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => 10060, // StruckShort
+        21 => 10065,               // StruckClub
         _ => return None,
     })
 }
@@ -448,10 +479,7 @@ pub fn play_sound(
         bytes: Arc::from(bytes),
     };
     let handle = assets.add(source);
-    commands.spawn((
-        AudioPlayer(handle),
-        volume_settings(),
-    ));
+    commands.spawn((AudioPlayer(handle), volume_settings()));
 }
 
 /// 音效缓存（#91：UI 高频点击音效复用 AudioSource，避免每次读盘）
@@ -484,10 +512,7 @@ pub fn play_sound_cached(
         cache.map.insert(id, h.clone());
         h
     };
-    commands.spawn((
-        AudioPlayer(handle),
-        volume_settings(),
-    ));
+    commands.spawn((AudioPlayer(handle), volume_settings()));
 }
 
 /// #1608：背景音乐状态（按场景播放循环 BGM；切换场景只重启一次）
@@ -657,8 +682,14 @@ mod tests {
             "弓手不播近战挥击音（C# return）"
         );
         // 骑乘：mount_type<7 → TigerAttack1(10181)；>=7 → WolfAttack1(10190)
-        assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 0, 5), Some(10181));
-        assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 7, 5), Some(10190));
+        assert_eq!(
+            attack_swing_sound(MirClass::Warrior as u8, true, 0, 5),
+            Some(10181)
+        );
+        assert_eq!(
+            attack_swing_sound(MirClass::Warrior as u8, true, 7, 5),
+            Some(10190)
+        );
     }
 
     #[test]
@@ -700,7 +731,7 @@ mod tests {
         // 跑步 +2 / 第4帧 +1
         assert_eq!(step_sound_for_cell(&cell, true, false, 0), Some(10003)); // RunGroundL
         assert_eq!(step_sound_for_cell(&cell, false, false, 4), Some(10002)); // WalkGroundR
-        // 骑乘 → MountWalkL(10176)
+                                                                              // 骑乘 → MountWalkL(10176)
         assert_eq!(step_sound_for_cell(&cell, false, true, 0), Some(10176));
     }
 
@@ -746,13 +777,18 @@ mod tests {
         // #1629：C# PlayRangeSound 分组
         // +5 组代表性怪物
         for t in [67u16, 211, 75, 77, 93, 100, 102, 184, 334, 900, 902] {
-            assert_eq!(monster_range_sound(t), Some(monster_base_sound(t) + 5), "type {}", t);
+            assert_eq!(
+                monster_range_sound(t),
+                Some(monster_base_sound(t) + 5),
+                "type {}",
+                t
+            );
         }
         // +7 / +8
         assert_eq!(monster_range_sound(272), Some(2727)); // AncientBringer
         assert_eq!(monster_range_sound(282), Some(2827)); // SeedingsGeneral
         assert_eq!(monster_range_sound(283), Some(2838)); // RestlessJar
-        // TucsonGeneral 不播
+                                                          // TucsonGeneral 不播
         assert_eq!(monster_range_sound(296), None);
         // default → +1（PlayAttackSound）
         assert_eq!(monster_range_sound(1), Some(11));
@@ -773,7 +809,7 @@ mod tests {
         assert_eq!(monster_appear_sound(64, true), None);
         assert_eq!(monster_appear_sound(64, false), Some(640));
         assert_eq!(monster_appear_sound(1, false), Some(10)); // 默认 +0
-        // 召唤音
+                                                              // 召唤音
         assert_eq!(monster_summon_sound(243), Some(2430));
         assert_eq!(monster_summon_sound(319), Some(3190));
         assert_eq!(monster_summon_sound(78), Some(785));
@@ -828,7 +864,7 @@ mod tests {
         assert_eq!(monster_struck_sound(3), Some(10063)); // StruckSword2
         assert_eq!(monster_struck_sound(4), Some(10064)); // StruckAxe
         assert_eq!(monster_struck_sound(21), Some(10065)); // StruckClub
-        // 无武器（C# 无 default）→ 不发音
+                                                           // 无武器（C# 无 default）→ 不发音
         assert_eq!(monster_struck_sound(-1), None);
     }
 

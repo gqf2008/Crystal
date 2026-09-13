@@ -166,15 +166,22 @@ fn spawn_group(
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let (dx, dy) = group_dialog_origin(&mut libs);
 
     // 面板 Prguse[120]（232x249 @ 居中）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, GROUP_BG_INDEX) else {
+    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, GROUP_BG_INDEX)
+    else {
         return;
     };
     let panel = spawn_panel(&mut commands, bg, dx, dy, 232.0, 249.0, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Group), GroupWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Group), GroupWidget));
 
     commands.entity(panel).with_children(|p| {
         // 标题 Title[5] @(18,8)
@@ -335,10 +342,11 @@ fn spawn_group(
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
-        commands.entity(inv).insert((DialogRoot(DialogKind::Group), GroupInviteWidget));
+        commands
+            .entity(inv)
+            .insert((DialogRoot(DialogKind::Group), GroupInviteWidget));
         commands.entity(inv).with_children(|ip| {
-            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
-                .insert(GroupInviteText);
+            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(GroupInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
@@ -352,8 +360,7 @@ fn spawn_group(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
-                spawn_icon_button(ip, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10)
-                    .insert(GroupInviteNo);
+                spawn_icon_button(ip, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10).insert(GroupInviteNo);
             }
         });
     }
@@ -367,7 +374,11 @@ fn group_ui_system(
     close: Query<(Entity, &Interaction), With<GroupClose>>,
     mut widgets: Query<
         &mut Visibility,
-        (With<GroupWidget>, Without<GroupInviteWidget>, Without<GroupMemberText>),
+        (
+            With<GroupWidget>,
+            Without<GroupInviteWidget>,
+            Without<GroupMemberText>,
+        ),
     >,
     mut lines: Query<(&mut Text, &GroupMemberText), Without<GroupInviteText>>,
     // #2775：成员行 Hint（C# `GroupDialog.cs:161`）

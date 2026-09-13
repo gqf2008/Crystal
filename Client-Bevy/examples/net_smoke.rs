@@ -9,7 +9,9 @@ use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 
 fn opcode_of(payload: &[u8]) -> i16 {
     let mut cur = std::io::Cursor::new(payload);
-    PacketHeader::read_from(&mut cur).map(|h| h.opcode).unwrap_or(-1)
+    PacketHeader::read_from(&mut cur)
+        .map(|h| h.opcode)
+        .unwrap_or(-1)
 }
 
 fn main() {
@@ -18,7 +20,10 @@ fn main() {
         .init();
 
     let args: Vec<String> = std::env::args().collect();
-    let addr = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:7000".to_string());
+    let addr = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "127.0.0.1:7000".to_string());
 
     let conn = tcp::connect(&addr, [0u8; 16]).expect("connect failed");
     println!("✅ 已连接 {addr}");
@@ -42,42 +47,57 @@ fn main() {
                         println!("🔑 ClientVersion 校验");
                     }
                     x if x == mir2_shared::enums::ServerPacketIds::LoginSuccess as i16 => {
-                        let p = mir2_shared::packets::server::login::LoginSuccess::read_body(&mut cur).unwrap();
+                        let p =
+                            mir2_shared::packets::server::login::LoginSuccess::read_body(&mut cur)
+                                .unwrap();
                         println!("✅ 登录成功，角色 {} 个", p.characters.len());
                         received.push("login".into());
                         // 建角色（如果列表空）
                         if p.characters.is_empty() && !sent_newchar {
                             let mut inner = Vec::new();
-                            serialize_packet(&mut inner, &mir2_shared::packets::client::NewCharacter {
-                                name: format!("smoke{}", std::process::id() % 10000),
-                                class: mir2_shared::enums::MirClass::Warrior,
-                                gender: mir2_shared::enums::MirGender::Male,
-                            }).unwrap();
+                            serialize_packet(
+                                &mut inner,
+                                &mir2_shared::packets::client::NewCharacter {
+                                    name: format!("smoke{}", std::process::id() % 10000),
+                                    class: mir2_shared::enums::MirClass::Warrior,
+                                    gender: mir2_shared::enums::MirGender::Male,
+                                },
+                            )
+                            .unwrap();
                             conn.to_server.send(inner).unwrap();
                             sent_newchar = true;
                             println!("📤 新建角色");
                         } else if !p.characters.is_empty() && !sent_start {
                             let mut inner = Vec::new();
-                            serialize_packet(&mut inner, &mir2_shared::packets::client::account::StartGame {
-                                character_index: p.characters[0].index,
-                            }).unwrap();
+                            serialize_packet(
+                                &mut inner,
+                                &mir2_shared::packets::client::account::StartGame {
+                                    character_index: p.characters[0].index,
+                                },
+                            )
+                            .unwrap();
                             conn.to_server.send(inner).unwrap();
                             sent_start = true;
                             println!("📤 StartGame");
                         }
                     }
                     x if x == mir2_shared::enums::ServerPacketIds::Login as i16 => {
-                        let p = mir2_shared::packets::server::login::Login::read_body(&mut cur).unwrap();
+                        let p = mir2_shared::packets::server::login::Login::read_body(&mut cur)
+                            .unwrap();
                         println!("⛔ 登录失败 result={}", p.result);
                     }
                     x if x == mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16 => {
                         println!("✅ 角色创建成功");
                         // 重新登录获取角色列表
                         let mut inner = Vec::new();
-                        serialize_packet(&mut inner, &mir2_shared::packets::client::account::Login {
-                            account_id: format!("smoke{}", std::process::id() % 10000),
-                            password: "smokepass".into(),
-                        }).unwrap();
+                        serialize_packet(
+                            &mut inner,
+                            &mir2_shared::packets::client::account::Login {
+                                account_id: format!("smoke{}", std::process::id() % 10000),
+                                password: "smokepass".into(),
+                            },
+                        )
+                        .unwrap();
                         conn.to_server.send(inner).unwrap();
                     }
                     x if x == mir2_shared::enums::ServerPacketIds::NewCharacter as i16 => {
@@ -101,7 +121,8 @@ fn main() {
                     }
                     x if x == mir2_shared::enums::ServerPacketIds::ObjectPlayer as i16
                         || x == mir2_shared::enums::ServerPacketIds::ObjectMonster as i16
-                        || x == mir2_shared::enums::ServerPacketIds::ObjectNpc as i16 => {
+                        || x == mir2_shared::enums::ServerPacketIds::ObjectNpc as i16 =>
+                    {
                         println!("👾 Object 包");
                     }
                     _ => {}
@@ -109,10 +130,14 @@ fn main() {
                 if !sent_login && op != -1 {
                     // 首次连接后发登录（服务器 auto-register）
                     let mut inner = Vec::new();
-                    serialize_packet(&mut inner, &mir2_shared::packets::client::account::Login {
-                        account_id: format!("smoke{}", std::process::id() % 10000),
-                        password: "smokepass".into(),
-                    }).unwrap();
+                    serialize_packet(
+                        &mut inner,
+                        &mir2_shared::packets::client::account::Login {
+                            account_id: format!("smoke{}", std::process::id() % 10000),
+                            password: "smokepass".into(),
+                        },
+                    )
+                    .unwrap();
                     conn.to_server.send(inner).unwrap();
                     sent_login = true;
                     println!("📤 Login");

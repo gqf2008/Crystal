@@ -129,8 +129,17 @@ fn spawn_fishing(
         }
         // 状态行 4 @(18,40+22i)
         for i in 0..4usize {
-            spawn_label(p, &cjk, "", 18.0, 40.0 + i as f32 * 22.0, 12.0, Color::WHITE, 9)
-                .insert(FishingLine(i));
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                18.0,
+                40.0 + i as f32 * 22.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(FishingLine(i));
         }
         // 抛竿按钮（#90 续：MirAnimatedButton，C# FishingDialog FishButton
         // Title[170..179] 10 帧 130ms 循环 + 按下帧 142）@(20,140)
@@ -256,7 +265,9 @@ fn fishing_gear_system(
 ) {
     let open = mgr.is_open(DialogKind::Fishing);
     let player = inv_q.single().ok();
-    let rod = player.and_then(|(_, l)| l.slots.get(0)).and_then(|e| e.as_ref());
+    let rod = player
+        .and_then(|(_, l)| l.slots.get(0))
+        .and_then(|e| e.as_ref());
     for (mut text, slot) in &mut slots {
         let name = rod
             .and_then(|r| r.slots.get(slot.0))
@@ -348,7 +359,10 @@ mod tests {
 
     #[test]
     fn fishing_origin_is_csharp_center() {
-        assert_eq!(crate::game::dialogs::center_origin(200.0, 287.0), (412.0, 240.0));
+        assert_eq!(
+            crate::game::dialogs::center_origin(200.0, 287.0),
+            (412.0, 240.0)
+        );
     }
 
     #[test]

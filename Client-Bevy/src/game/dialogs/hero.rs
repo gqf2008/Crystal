@@ -779,7 +779,11 @@ fn hero_ui_system(
 ) {
     let open = mgr.is_open(DialogKind::Hero);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         // 创建面板（HeroCreatePanel）不在 widgets 里，且只在 open 分支管理显隐；
@@ -790,7 +794,11 @@ fn hero_ui_system(
         return;
     }
     for mut vis in &mut panel {
-        *vis = if state.creating { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if state.creating {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     // 列表
     let current_name = state
@@ -814,7 +822,10 @@ fn hero_ui_system(
                 if state.hero_index > 0 {
                     format!(
                         "状态: HP {}  MP {}  经验 {}/{}",
-                        state.hero_hp, state.hero_mp, state.hero_exp, state.hero_max_exp.max(1)
+                        state.hero_hp,
+                        state.hero_mp,
+                        state.hero_exp,
+                        state.hero_max_exp.max(1)
                     )
                 } else {
                     String::new()

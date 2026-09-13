@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 
 use crate::actor::LocalPlayer;
-use crate::game::dialogs::inventory::{InvClickState, InvItem, ItemUseFeedback, try_use_belt_item};
+use crate::game::dialogs::inventory::{try_use_belt_item, InvClickState, InvItem, ItemUseFeedback};
 use crate::game::player_state::{Inventory, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
@@ -246,23 +246,50 @@ fn spawn_potion_belt(
         ));
         for i in 0..BELT_SLOTS {
             // 格（相对面板：横 (12+35i,3) / 纵 (3,12+35i)，由 ui_system 按布局更新）
-            spawn_container(p, 12.0 + i as f32 * CELL_SPACING, 3.0, CELL_SIZE, CELL_SIZE, 2)
-                .insert((
+            spawn_container(
+                p,
+                12.0 + i as f32 * CELL_SPACING,
+                3.0,
+                CELL_SIZE,
+                CELL_SIZE,
+                2,
+            )
+            .insert((
+                PotionBeltWidget,
+                PotionBeltSlot(i),
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            ))
+            .with_children(|c| {
+                spawn_image(
+                    c,
+                    white.clone(),
+                    2.0,
+                    2.0,
+                    CELL_SIZE - 4.0,
+                    CELL_SIZE - 4.0,
+                    3,
+                )
+                .insert((PotionBeltWidget, PotionBeltIcon(i), Visibility::Hidden));
+                spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3).insert((
                     PotionBeltWidget,
-                    PotionBeltSlot(i),
-                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
-                ))
-                .with_children(|c| {
-                    spawn_image(c, white.clone(), 2.0, 2.0, CELL_SIZE - 4.0, CELL_SIZE - 4.0, 3)
-                        .insert((PotionBeltWidget, PotionBeltIcon(i), Visibility::Hidden));
-                    spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3)
-                        .insert((PotionBeltWidget, PotionBeltCount(i), Visibility::Hidden));
-                });
+                    PotionBeltCount(i),
+                    Visibility::Hidden,
+                ));
+            });
         }
         // 数字标签 1-6（C# Key[i]；相对面板：横 (8+35i,2) / 纵 (3,10+35i)）
         for i in 0..BELT_SLOTS {
-            spawn_label(p, &font, &(i + 1).to_string(), 8.0 + i as f32 * CELL_SPACING, 2.0, 10.0, Color::WHITE, 3)
-                .insert((PotionBeltWidget, PotionBeltNumber(i)));
+            spawn_label(
+                p,
+                &font,
+                &(i + 1).to_string(),
+                8.0 + i as f32 * CELL_SPACING,
+                2.0,
+                10.0,
+                Color::WHITE,
+                3,
+            )
+            .insert((PotionBeltWidget, PotionBeltNumber(i)));
         }
         // 旋转按钮（C# RotateButton Prguse[1926-1928] @(222,3)）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -371,7 +398,12 @@ fn potion_belt_ui_system(
 
     for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1944 } else { 1932 }) {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                if vert { 1944 } else { 1932 },
+            ) {
                 if let Some(img) = img.as_mut() {
                     if img.image != h {
                         img.image = h;
@@ -383,7 +415,12 @@ fn potion_belt_ui_system(
             node.width = Val::Px(pw);
             node.height = Val::Px(ph);
         } else if overlay.is_some() {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, if vert { 1945 } else { 1933 }) {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                if vert { 1945 } else { 1933 },
+            ) {
                 if let Some(img) = img.as_mut() {
                     if img.image != h {
                         img.image = h;
@@ -447,7 +484,11 @@ fn potion_belt_ui_system(
     for (_, _, _, _, _, _, _, slot, _, _, _) in &items {
         if let Some(s) = slot {
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
-            if cursor.x >= x && cursor.x <= x + CELL_SIZE && cursor.y >= y && cursor.y <= y + CELL_SIZE {
+            if cursor.x >= x
+                && cursor.x <= x + CELL_SIZE
+                && cursor.y >= y
+                && cursor.y <= y + CELL_SIZE
+            {
                 hit = Some(s.0);
                 break;
             }
@@ -502,10 +543,7 @@ fn potion_belt_icon_system(
     let inv = inv_q.single().ok();
     let find = |i: usize| -> Option<&InvItem> {
         let uid = belt.slots.get(i).and_then(|u| u.as_ref())?;
-        inv?.items
-            .iter()
-            .flatten()
-            .find(|it| it.unique_id == *uid)
+        inv?.items.iter().flatten().find(|it| it.unique_id == *uid)
     };
     for (mut node, mut vis, icon) in &mut icons {
         if let Some(item) = find(icon.0) {

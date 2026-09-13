@@ -443,7 +443,9 @@ mod tests {
         let pig = creature_rules(CreatureType::BabyPig);
         assert_eq!(pig.minimal_fullness, 4000);
         assert!(pig.semi_auto_pickup_enabled && pig.semi_auto_pickup_range == 3);
-        assert!(!pig.mouse_pickup_enabled && !pig.auto_pickup_enabled && !pig.can_produce_black_stone);
+        assert!(
+            !pig.mouse_pickup_enabled && !pig.auto_pickup_enabled && !pig.can_produce_black_stone
+        );
 
         let chick = creature_rules(CreatureType::BabyChicken);
         assert_eq!(
@@ -457,7 +459,10 @@ mod tests {
         );
 
         let kitten = creature_rules(CreatureType::BabyKitten);
-        assert_eq!((kitten.minimal_fullness, kitten.semi_auto_pickup_range), (6000, 3));
+        assert_eq!(
+            (kitten.minimal_fullness, kitten.semi_auto_pickup_range),
+            (6000, 3)
+        );
 
         let skeleton = creature_rules(CreatureType::BabySkeleton);
         assert!(skeleton.can_produce_black_stone && skeleton.mouse_pickup_range == 11);

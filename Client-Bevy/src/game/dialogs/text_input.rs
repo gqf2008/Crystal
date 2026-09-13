@@ -7,12 +7,12 @@
 // 用法：spawn 实体挂 TextInputField(id) + TextInputRect(x,y,w,h)，子实体 TextInputDisplay(id) 显示文本
 // ============================================================================
 
-use bevy::prelude::*;
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::scenes::AppState;
+use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 
 /// 输入框状态（texts[id] = 输入框内容；active = 聚焦的输入框）
 #[derive(Resource, Default)]
@@ -85,14 +85,21 @@ fn text_input_system(
             if let Some(cursor) = window.cursor_position() {
                 let mut clicked: Option<usize> = None;
                 for (_e, f, r) in &fields {
-                    if cursor.x >= r.0 && cursor.x <= r.0 + r.2 && cursor.y >= r.1 && cursor.y <= r.1 + r.3 {
+                    if cursor.x >= r.0
+                        && cursor.x <= r.0 + r.2
+                        && cursor.y >= r.1
+                        && cursor.y <= r.1 + r.3
+                    {
                         clicked = Some(f.0);
                     }
                 }
                 // 点击输入框外 → 取消聚焦
                 if clicked.is_none() && state.active.is_some() {
                     let outside = fields.iter().all(|(_, _, r)| {
-                        !(cursor.x >= r.0 && cursor.x <= r.0 + r.2 && cursor.y >= r.1 && cursor.y <= r.1 + r.3)
+                        !(cursor.x >= r.0
+                            && cursor.x <= r.0 + r.2
+                            && cursor.y >= r.1
+                            && cursor.y <= r.1 + r.3)
                     });
                     if outside {
                         state.active = None;
@@ -179,11 +186,11 @@ fn text_input_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenes::AppState;
+    use crate::ui::pinyin_ime::{PinyinIme, PinyinImePlugin};
     use bevy::ecs::message::Messages;
     use bevy::input::keyboard::KeyCode;
     use bevy::input::{ButtonInput, ButtonState};
-    use crate::scenes::AppState;
-    use crate::ui::pinyin_ime::{PinyinIme, PinyinImePlugin};
 
     fn char_key(ch: &str) -> KeyboardInput {
         KeyboardInput {

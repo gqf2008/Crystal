@@ -127,7 +127,9 @@ fn read_loop(
                     if payload.len() >= PacketHeader::HEADER_SIZE {
                         let mut cur = std::io::Cursor::new(&payload[..]);
                         if let Ok(header) = PacketHeader::read_from(&mut cur) {
-                            if header.opcode == mir2_shared::enums::ServerPacketIds::Connected as i16 {
+                            if header.opcode
+                                == mir2_shared::enums::ServerPacketIds::Connected as i16
+                            {
                                 let mut inner = Vec::new();
                                 if serialize_packet(
                                     &mut inner,
@@ -286,12 +288,19 @@ mod tests {
         let conn = connect(&addr, [0u8; 16]).unwrap();
 
         // 游戏侧应收到 Connected 事件
-        match conn.from_server.recv_timeout(Duration::from_secs(5)).unwrap() {
+        match conn
+            .from_server
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+        {
             TcpEvent::Packet(p) => assert_eq!(
                 header_opcode(&p),
                 mir2_shared::enums::ServerPacketIds::Connected as i16
             ),
-            other => panic!("预期 Connected 包，实际 {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "预期 Connected 包，实际 {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
 
         // 游戏侧发送 Login
@@ -307,7 +316,10 @@ mod tests {
         conn.to_server.send(inner).unwrap();
 
         let (h1, h2) = server.join().unwrap();
-        assert_eq!(h1, mir2_shared::enums::ClientPacketIds::ClientVersion as i16);
+        assert_eq!(
+            h1,
+            mir2_shared::enums::ClientPacketIds::ClientVersion as i16
+        );
         assert_eq!(h2, mir2_shared::enums::ClientPacketIds::Login as i16);
     }
 
@@ -325,9 +337,16 @@ mod tests {
         let conn = connect(&addr, [0u8; 16]).unwrap();
         server.join().unwrap();
 
-        match conn.from_server.recv_timeout(Duration::from_secs(5)).unwrap() {
+        match conn
+            .from_server
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+        {
             TcpEvent::Disconnected { .. } => {}
-            other => panic!("预期 Disconnected，实际 {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "预期 Disconnected，实际 {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 }

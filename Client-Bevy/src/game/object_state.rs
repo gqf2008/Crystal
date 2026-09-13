@@ -8,8 +8,8 @@
 use bevy::prelude::*;
 
 use crate::actor::{
-    ActorAnim, ActorAppearance, LocalPlayer, MonsterName, MountState, NpcAppearance, NpcName,
-    NetObjectId, Player, PlayerName, Sitting, SpriteLayer,
+    ActorAnim, ActorAppearance, LocalPlayer, MonsterName, MountState, NetObjectId, NpcAppearance,
+    NpcName, Player, PlayerName, Sitting, SpriteLayer,
 };
 use crate::game::movement::tile_to_world;
 use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
@@ -100,7 +100,12 @@ fn apply_object_state_events(
                         break;
                     }
                 }
-                tracing::debug!("[OBJSTATE] 隐藏 id={} local={} found={}", object_id, is_local, vis.iter().any(|(id, _)| id.0 == object_id));
+                tracing::debug!(
+                    "[OBJSTATE] 隐藏 id={} local={} found={}",
+                    object_id,
+                    is_local,
+                    vis.iter().any(|(id, _)| id.0 == object_id)
+                );
             }
             ServerEvent::ObjectShown { object_id } => {
                 for (id, mut v) in &mut vis {
@@ -186,7 +191,11 @@ fn apply_object_state_events(
                     }
                 }
             }
-            ServerEvent::ObjectTeleportIn { object_id, location_x, location_y } => {
+            ServerEvent::ObjectTeleportIn {
+                object_id,
+                location_x,
+                location_y,
+            } => {
                 // 传送出现：瞬移到新位置 + 白紫色爆点 + 显示（C# Teleport 特效+位置）
                 effects.write(crate::game::effects::PendingEffect::Burst {
                     target_id: object_id,
@@ -398,15 +407,33 @@ fn apply_level_up_fx_events(
             ServerEvent::ObjectLeveled { object_id, .. } => {
                 for (id, tf) in &actors {
                     if id.0 == *object_id {
-                        spawn_level_up_fx(&mut commands, &mut libs, &mut images, &mut cache, tf.translation);
-                        play_sound_cached(&mut commands, &mut assets, &bank, &mut sound_cache, 10156);
+                        spawn_level_up_fx(
+                            &mut commands,
+                            &mut libs,
+                            &mut images,
+                            &mut cache,
+                            tf.translation,
+                        );
+                        play_sound_cached(
+                            &mut commands,
+                            &mut assets,
+                            &bank,
+                            &mut sound_cache,
+                            10156,
+                        );
                         tracing::info!("✨ 对象 {} 升级特效", object_id);
                     }
                 }
             }
             ServerEvent::LevelChanged { .. } => {
                 if let Ok(tf) = local.single() {
-                    spawn_level_up_fx(&mut commands, &mut libs, &mut images, &mut cache, tf.translation);
+                    spawn_level_up_fx(
+                        &mut commands,
+                        &mut libs,
+                        &mut images,
+                        &mut cache,
+                        tf.translation,
+                    );
                     play_sound_cached(&mut commands, &mut assets, &bank, &mut sound_cache, 10156);
                     tracing::info!("✨ 本地玩家升级特效");
                 }
@@ -459,7 +486,13 @@ fn advance_level_up_fx(
             continue;
         }
         let idx = (fx.t / fx.dur * fx.frames as f32).floor() as usize;
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Magic2, fx.base + idx) {
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Magic2,
+            fx.base + idx,
+        ) {
             sprite.image = h;
         }
     }

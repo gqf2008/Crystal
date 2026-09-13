@@ -91,17 +91,94 @@ pub const MENU_BTN_DX: f32 = 3.0;
 const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
     (MenuAction::Exit, LibraryName::Title, 633, 634, 635, 12.0),
     (MenuAction::Logout, LibraryName::Title, 636, 637, 638, 31.0),
-    (MenuAction::Help, LibraryName::Prguse, 1970, 1971, 1972, 50.0),
-    (MenuAction::Keyboard, LibraryName::Prguse, 1973, 1974, 1975, 69.0),
-    (MenuAction::Ranking, LibraryName::Prguse, 2000, 2001, 2002, 88.0),
-    (MenuAction::Creature, LibraryName::Prguse2, 431, 432, 433, 126.0),
-    (MenuAction::Mount, LibraryName::Prguse, 1976, 1977, 1978, 145.0),
-    (MenuAction::Fishing, LibraryName::Prguse, 1979, 1980, 1981, 164.0),
-    (MenuAction::Friends, LibraryName::Prguse, 1982, 1983, 1984, 183.0),
-    (MenuAction::Mentor, LibraryName::Prguse, 1985, 1986, 1987, 202.0),
-    (MenuAction::Relationship, LibraryName::Prguse, 1988, 1989, 1990, 221.0),
-    (MenuAction::Group, LibraryName::Prguse, 1991, 1992, 1993, 240.0),
-    (MenuAction::Guild, LibraryName::Prguse, 1994, 1995, 1996, 259.0),
+    (
+        MenuAction::Help,
+        LibraryName::Prguse,
+        1970,
+        1971,
+        1972,
+        50.0,
+    ),
+    (
+        MenuAction::Keyboard,
+        LibraryName::Prguse,
+        1973,
+        1974,
+        1975,
+        69.0,
+    ),
+    (
+        MenuAction::Ranking,
+        LibraryName::Prguse,
+        2000,
+        2001,
+        2002,
+        88.0,
+    ),
+    (
+        MenuAction::Creature,
+        LibraryName::Prguse2,
+        431,
+        432,
+        433,
+        126.0,
+    ),
+    (
+        MenuAction::Mount,
+        LibraryName::Prguse,
+        1976,
+        1977,
+        1978,
+        145.0,
+    ),
+    (
+        MenuAction::Fishing,
+        LibraryName::Prguse,
+        1979,
+        1980,
+        1981,
+        164.0,
+    ),
+    (
+        MenuAction::Friends,
+        LibraryName::Prguse,
+        1982,
+        1983,
+        1984,
+        183.0,
+    ),
+    (
+        MenuAction::Mentor,
+        LibraryName::Prguse,
+        1985,
+        1986,
+        1987,
+        202.0,
+    ),
+    (
+        MenuAction::Relationship,
+        LibraryName::Prguse,
+        1988,
+        1989,
+        1990,
+        221.0,
+    ),
+    (
+        MenuAction::Group,
+        LibraryName::Prguse,
+        1991,
+        1992,
+        1993,
+        240.0,
+    ),
+    (
+        MenuAction::Guild,
+        LibraryName::Prguse,
+        1994,
+        1995,
+        1996,
+        259.0,
+    ),
 ];
 
 pub struct MenuDialogPlugin;
@@ -110,10 +187,7 @@ impl Plugin for MenuDialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Game), spawn_menu_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_menu_dialog);
-        app.add_systems(
-            Update,
-            (menu_ui_system,).run_if(in_state(AppState::Game)),
-        );
+        app.add_systems(Update, (menu_ui_system,).run_if(in_state(AppState::Game)));
     }
 }
 
@@ -142,7 +216,9 @@ fn spawn_menu_dialog(
         return;
     };
     let panel = spawn_panel(&mut commands, bg, MENU_X, MENU_Y, MENU_W, MENU_H, 30);
-    commands.entity(panel).insert((DialogRoot(DialogKind::Menu), MenuWidget));
+    commands
+        .entity(panel)
+        .insert((DialogRoot(DialogKind::Menu), MenuWidget));
 
     commands.entity(panel).with_children(|p| {
         // 菜单按钮（相对面板 (3, y)）
@@ -163,7 +239,11 @@ fn spawn_menu_dialog(
     });
 
     // 退出确认（C# MirMessageBox）：独立根节点（不随菜单面板裁切），半透明底
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
     let confirm = commands
         .spawn((
             Node {
@@ -179,16 +259,26 @@ fn spawn_menu_dialog(
             Visibility::Hidden,
         ))
         .id();
-    commands.entity(confirm).insert((DialogRoot(DialogKind::Menu), MenuExitConfirm));
+    commands
+        .entity(confirm)
+        .insert((DialogRoot(DialogKind::Menu), MenuExitConfirm));
     commands.entity(confirm).with_children(|p| {
-        spawn_label(p, &font, "确定要退出游戏吗？", 18.0, 12.0, 14.0, Color::WHITE, 9);
+        spawn_label(
+            p,
+            &font,
+            "确定要退出游戏吗？",
+            18.0,
+            12.0,
+            14.0,
+            Color::WHITE,
+            9,
+        );
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
         ) {
-            spawn_icon_button(p, n, h, pr, 28.0, 56.0, 76.0, 25.0, 10)
-                .insert(MenuExitYes);
+            spawn_icon_button(p, n, h, pr, 28.0, 56.0, 76.0, 25.0, 10).insert(MenuExitYes);
         }
         spawn_label(p, &font, "确定", 50.0, 60.0, 12.0, Color::WHITE, 11);
         if let (Some(n), Some(h), Some(pr)) = (
@@ -196,8 +286,7 @@ fn spawn_menu_dialog(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
         ) {
-            spawn_icon_button(p, n, h, pr, 118.0, 56.0, 76.0, 25.0, 10)
-                .insert(MenuExitNo);
+            spawn_icon_button(p, n, h, pr, 118.0, 56.0, 76.0, 25.0, 10).insert(MenuExitNo);
         }
         spawn_label(p, &font, "取消", 148.0, 60.0, 12.0, Color::WHITE, 11);
     });
@@ -236,7 +325,11 @@ fn menu_ui_system(
 
     let open = mgr.is_open(DialogKind::Menu);
     for mut vis in widgets.iter_mut() {
-        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         for mut vis in &mut confirm_widgets {
@@ -246,7 +339,11 @@ fn menu_ui_system(
         return;
     }
     for mut vis in &mut confirm_widgets {
-        *vis = if *confirm { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if *confirm {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (e, inter) in &yes {
         if edge(e, inter, &mut prev_inter) {
@@ -279,16 +376,19 @@ fn menu_ui_system(
                 mgr.close(DialogKind::Menu);
             }
             MenuAction::Help => menu_open_toggle(&mut mgr, DialogKind::Help, "帮助"),
-            MenuAction::Keyboard => menu_open_toggle(&mut mgr, DialogKind::KeyboardLayout, "键盘设置"),
+            MenuAction::Keyboard => {
+                menu_open_toggle(&mut mgr, DialogKind::KeyboardLayout, "键盘设置")
+            }
             MenuAction::Ranking => menu_open_toggle(&mut mgr, DialogKind::Ranking, "排行榜"),
             MenuAction::Creature => menu_open_toggle(&mut mgr, DialogKind::Creature, "宠物"),
             MenuAction::Fishing => menu_open_toggle(&mut mgr, DialogKind::Fishing, "钓鱼"),
             MenuAction::Friends => menu_open_toggle(&mut mgr, DialogKind::Friend, "好友"),
             MenuAction::Mentor => menu_open_toggle(&mut mgr, DialogKind::Mentor, "师徒"),
-            MenuAction::Relationship => menu_open_toggle(&mut mgr, DialogKind::Relationship, "夫妻"),
+            MenuAction::Relationship => {
+                menu_open_toggle(&mut mgr, DialogKind::Relationship, "夫妻")
+            }
             MenuAction::Group => menu_open_toggle(&mut mgr, DialogKind::Group, "队伍"),
             MenuAction::Guild => menu_open_toggle(&mut mgr, DialogKind::Guild, "行会"),
         }
     }
 }
-

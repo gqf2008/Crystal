@@ -41,9 +41,19 @@ extern "C" {
     fn pinyin_set_options(context: *mut pinyin_context_t, options: guint);
     fn pinyin_alloc_instance(context: *mut pinyin_context_t) -> *mut pinyin_instance_t;
     fn pinyin_free_instance(instance: *mut pinyin_instance_t);
-    fn pinyin_parse_more_full_pinyins(instance: *mut pinyin_instance_t, pinyins: *const gchar) -> usize;
-    fn pinyin_guess_sentence_with_prefix(instance: *mut pinyin_instance_t, prefix: *const gchar) -> bool;
-    fn pinyin_guess_candidates(instance: *mut pinyin_instance_t, offset: usize, sort_option: guint) -> bool;
+    fn pinyin_parse_more_full_pinyins(
+        instance: *mut pinyin_instance_t,
+        pinyins: *const gchar,
+    ) -> usize;
+    fn pinyin_guess_sentence_with_prefix(
+        instance: *mut pinyin_instance_t,
+        prefix: *const gchar,
+    ) -> bool;
+    fn pinyin_guess_candidates(
+        instance: *mut pinyin_instance_t,
+        offset: usize,
+        sort_option: guint,
+    ) -> bool;
     fn pinyin_get_n_candidate(instance: *mut pinyin_instance_t, num: *mut guint) -> bool;
     fn pinyin_get_candidate(
         instance: *mut pinyin_instance_t,
@@ -104,7 +114,11 @@ impl LibpinyinEngine {
             }
             pinyin_set_options(
                 context,
-                PINYIN_INCOMPLETE | PINYIN_CORRECT_ALL | USE_DIVIDED_TABLE | USE_RESPLIT_TABLE | DYNAMIC_ADJUST,
+                PINYIN_INCOMPLETE
+                    | PINYIN_CORRECT_ALL
+                    | USE_DIVIDED_TABLE
+                    | USE_RESPLIT_TABLE
+                    | DYNAMIC_ADJUST,
             );
             let instance = pinyin_alloc_instance(context);
             if instance.is_null() {
@@ -178,7 +192,9 @@ impl LibpinyinEngine {
                 return None;
             }
             let mut word_ptr: *const gchar = std::ptr::null();
-            if !pinyin_get_candidate_string(self.instance, cand, &mut word_ptr) || word_ptr.is_null() {
+            if !pinyin_get_candidate_string(self.instance, cand, &mut word_ptr)
+                || word_ptr.is_null()
+            {
                 return None;
             }
             let word = CStr::from_ptr(word_ptr).to_string_lossy().into_owned();
@@ -203,7 +219,11 @@ impl LibpinyinEngine {
             pinyin_parse_more_full_pinyins(self.instance, c_input.as_ptr());
             pinyin_guess_sentence_with_prefix(self.instance, c_prefix.as_ptr());
             self.candidates.clear();
-            if pinyin_guess_candidates(self.instance, 0, SORT_BY_PHRASE_LENGTH_AND_PINYIN_LENGTH_AND_FREQUENCY) {
+            if pinyin_guess_candidates(
+                self.instance,
+                0,
+                SORT_BY_PHRASE_LENGTH_AND_PINYIN_LENGTH_AND_FREQUENCY,
+            ) {
                 let mut num: guint = 0;
                 if pinyin_get_n_candidate(self.instance, &mut num) {
                     for i in 0..num {
@@ -212,10 +232,13 @@ impl LibpinyinEngine {
                             continue;
                         }
                         let mut word_ptr: *const gchar = std::ptr::null();
-                        if !pinyin_get_candidate_string(self.instance, cand, &mut word_ptr) || word_ptr.is_null() {
+                        if !pinyin_get_candidate_string(self.instance, cand, &mut word_ptr)
+                            || word_ptr.is_null()
+                        {
                             continue;
                         }
-                        self.candidates.push(CStr::from_ptr(word_ptr).to_string_lossy().into_owned());
+                        self.candidates
+                            .push(CStr::from_ptr(word_ptr).to_string_lossy().into_owned());
                     }
                 }
             }

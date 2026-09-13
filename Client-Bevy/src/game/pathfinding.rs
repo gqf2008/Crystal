@@ -205,10 +205,15 @@ mod tests {
         // 左/右都堵死、下方可走 → 绕行，不斜切
         let map4 = test_map(6, 6, &[(3, 2), (1, 2)]);
         let p = find_path(&map4, (2, 2), (3, 3)).unwrap();
-        assert!(p.windows(2).all(|w| {
-            let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
-            !(dx != 0 && dy != 0) || (map4.is_walkable(w[0].0 + dx, w[0].1) && map4.is_walkable(w[0].0, w[0].1 + dy))
-        }), "路径中不允许斜穿墙角");
+        assert!(
+            p.windows(2).all(|w| {
+                let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
+                !(dx != 0 && dy != 0)
+                    || (map4.is_walkable(w[0].0 + dx, w[0].1)
+                        && map4.is_walkable(w[0].0, w[0].1 + dy))
+            }),
+            "路径中不允许斜穿墙角"
+        );
     }
 
     /// 纯 45° 直线路径应保持单一对角方向（smooth_path 不应合成锯齿）
@@ -255,10 +260,14 @@ mod tests {
             })
             .collect();
         let changes = dirs.windows(2).filter(|w| w[0] != w[1]).count();
-        assert!(changes <= 2, "绕障碍方向变化应稳定，实际 {} 次：{:?}", changes, dirs);
+        assert!(
+            changes <= 2,
+            "绕障碍方向变化应稳定，实际 {} 次：{:?}",
+            changes,
+            dirs
+        );
     }
 }
-
 
 /// 路径平滑：将锯齿状直线对 (1,0)+(0,1) 或 (0,1)+(1,0) 合并为对角步 (1,1)，
 /// 让 45° 斜向移动保持单一方向（消除 A* 等代价路径的任意 tie-break 造成的抖动）。

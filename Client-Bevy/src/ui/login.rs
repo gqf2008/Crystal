@@ -2,8 +2,8 @@
 // LoginPlugin - 登录界面（Sprite 精确坐标版，对齐 macroquad LoginScene）
 // ============================================================================
 
-use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::ecs::system::SystemParam;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 
@@ -271,7 +271,7 @@ fn setup_login_ui(
     libs.0.ensure_initialized();
     ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     let font = ui_font.0.clone();
-    
+
     // ChrSel 动画帧
     anim.handles.clear();
     for i in 0..19usize {
@@ -454,10 +454,7 @@ fn setup_login_ui(
     );
 
     // 左下角版本号（对齐原版 LoginScene.Version：AutoSize、半透明深色底、黑边、(5,748)）
-    let version_text = format!(
-        "Build: Crystal.Debug.{}",
-        env!("CARGO_PKG_VERSION")
-    );
+    let version_text = format!("Build: Crystal.Debug.{}", env!("CARGO_PKG_VERSION"));
     commands.spawn((
         UiEntity,
         Sprite {
@@ -504,11 +501,19 @@ fn valid_password(s: &str) -> bool {
 }
 /// 简易邮箱（近似 C# regex）：含 @ 且 @ 后含 .
 fn valid_email(s: &str) -> bool {
-    s.len() <= 50 && s.contains('@') && s.split('@').last().map(|d| d.contains('.')).unwrap_or(false)
+    s.len() <= 50
+        && s.contains('@')
+        && s.split('@')
+            .last()
+            .map(|d| d.contains('.'))
+            .unwrap_or(false)
 }
 /// 简易日期：长度<=10 且仅含数字/分隔符（近似 C# DateTime.TryParse）
 fn valid_date(s: &str) -> bool {
-    s.len() <= 10 && !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '/' || c == '-')
+    s.len() <= 10
+        && !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_digit() || c == '/' || c == '-')
 }
 
 /// 新建账号字段合法性 → (valid, required)，字段顺序：账号/密码/确认/用户名/生日/问题/答案/邮箱
@@ -538,11 +543,27 @@ fn cp_field_valid(k: u8, v: &str, cp: &[String; 4]) -> (bool, bool) {
 
 /// 登录输入框边框色：空=透明（C# Border=!empty），非空非法=红，合法=绿
 fn login_border_color(valid: bool, empty: bool) -> Color {
-    if empty { Color::NONE } else if valid { GREEN } else { RED }
+    if empty {
+        Color::NONE
+    } else if valid {
+        GREEN
+    } else {
+        RED
+    }
 }
 /// 必填/可选字段边框色：必填空=红；可选空=灰；否则绿/红
 fn field_border_color(valid: bool, required: bool, empty: bool) -> Color {
-    if empty { if required { RED } else { GRAY } } else if valid { GREEN } else { RED }
+    if empty {
+        if required {
+            RED
+        } else {
+            GRAY
+        }
+    } else if valid {
+        GREEN
+    } else {
+        RED
+    }
 }
 
 fn na_desc(k: u8) -> &'static str {
@@ -611,19 +632,30 @@ fn login_input_validation_system(
 
     for (tag, mut sprite) in &mut borders {
         let (color, visible) = match tag.0 {
-            InputKind::LoginAccount => (login_border_color(valid_account(&acc), acc.is_empty()), true),
-            InputKind::LoginPassword => (login_border_color(valid_password(&pw), pw.is_empty()), true),
+            InputKind::LoginAccount => (
+                login_border_color(valid_account(&acc), acc.is_empty()),
+                true,
+            ),
+            InputKind::LoginPassword => {
+                (login_border_color(valid_password(&pw), pw.is_empty()), true)
+            }
             InputKind::Na(k) => match na.get(k as usize) {
                 Some(v) => {
                     let (valid, req) = na_field_valid(k, v, &na);
-                    (field_border_color(valid, req, v.is_empty()), login.show_new_account)
+                    (
+                        field_border_color(valid, req, v.is_empty()),
+                        login.show_new_account,
+                    )
                 }
                 None => (Color::NONE, false),
             },
             InputKind::Cp(k) => match cp.get(k as usize) {
                 Some(v) => {
                     let (valid, req) = cp_field_valid(k, v, &cp);
-                    (field_border_color(valid, req, v.is_empty()), login.show_change_password)
+                    (
+                        field_border_color(valid, req, v.is_empty()),
+                        login.show_change_password,
+                    )
                 }
                 None => (Color::NONE, false),
             },
@@ -634,12 +666,20 @@ fn login_input_validation_system(
     // 新建账号字段说明（聚焦字段的帮助文字）
     let focused_na = inputs.iter().find_map(|i| {
         if i.focused {
-            if let InputKind::Na(k) = i.kind { Some(k) } else { None }
+            if let InputKind::Na(k) = i.kind {
+                Some(k)
+            } else {
+                None
+            }
         } else {
             None
         }
     });
-    let text = if login.show_new_account { focused_na.map(na_desc).unwrap_or("") } else { "" };
+    let text = if login.show_new_account {
+        focused_na.map(na_desc).unwrap_or("")
+    } else {
+        ""
+    };
     if let Ok(mut t) = desc.single_mut() {
         t.0 = text.to_string();
     }
@@ -714,10 +754,7 @@ fn spawn_btn(
 }
 
 /// 登录状态文本（错误/断线/注册结果）
-fn spawn_status_text(
-    commands: &mut Commands,
-    font: &Handle<Font>,
-) {
+fn spawn_status_text(commands: &mut Commands, font: &Handle<Font>) {
     let e = spawn_ui_text(
         commands,
         font,
@@ -950,7 +987,10 @@ fn spawn_view_key_dialog(
             30.0,
         ) {
             commands.entity(e).insert((
-                ViewKeyKey { idx, text_entity: text },
+                ViewKeyKey {
+                    idx,
+                    text_entity: text,
+                },
                 InDialog(DialogKind::ViewKey),
                 Visibility::Hidden,
             ));
@@ -983,8 +1023,8 @@ fn view_key_append(inputs: &mut Query<&mut UiInput>, ch: char) {
         }
     }
     for mut input in inputs.iter_mut() {
-        let target = input.focused
-            || (!any_focused && matches!(input.kind, InputKind::LoginPassword));
+        let target =
+            input.focused || (!any_focused && matches!(input.kind, InputKind::LoginPassword));
         if target {
             if input.value.len() < MAX_ACC_ID {
                 input.value.push(ch);
@@ -1003,8 +1043,8 @@ fn view_key_delete(inputs: &mut Query<&mut UiInput>) {
         }
     }
     for mut input in inputs.iter_mut() {
-        let target = input.focused
-            || (!any_focused && matches!(input.kind, InputKind::LoginPassword));
+        let target =
+            input.focused || (!any_focused && matches!(input.kind, InputKind::LoginPassword));
         if target {
             input.value.pop();
             break;
@@ -1183,8 +1223,7 @@ fn login_ui_system(
     }
 
     // 按钮点击
-    let dialog_open =
-        login.show_new_account || login.show_change_password || login.show_view_key;
+    let dialog_open = login.show_new_account || login.show_change_password || login.show_view_key;
     let mut clicked: Option<ButtonKind> = None;
     for (btn, kind) in buttons.iter() {
         // 对话框按钮：仅在其对话框显示时响应
@@ -1432,11 +1471,19 @@ mod tests {
         let mut libs = Libraries::new("Data");
         libs.ensure_initialized();
         assert!(libs.get_image(LibraryName::Prguse, 1080).is_some());
-        for idx in [300usize, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311] {
-            assert!(libs.get_image(LibraryName::Title, idx).is_some(), "Title[{idx}]");
+        for idx in [
+            300usize, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311,
+        ] {
+            assert!(
+                libs.get_image(LibraryName::Title, idx).is_some(),
+                "Title[{idx}]"
+            );
         }
         for idx in [1081usize, 1082, 1083] {
-            assert!(libs.get_image(LibraryName::Prguse, idx).is_some(), "Prguse[{idx}]");
+            assert!(
+                libs.get_image(LibraryName::Prguse, idx).is_some(),
+                "Prguse[{idx}]"
+            );
         }
     }
 

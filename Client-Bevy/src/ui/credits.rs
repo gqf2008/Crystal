@@ -5,8 +5,8 @@
 // 模态面板（Prguse[360]）+ 居中标题 + 左对齐内容行，ESC / 任意左键点击关闭。
 // 原版 C# SelectScene 的 CreditsButton.Click 为空，但用户要求实现功能。
 
-use bevy::prelude::*;
 use bevy::input::keyboard::KeyboardInput;
+use bevy::prelude::*;
 
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -37,7 +37,12 @@ fn content() -> Vec<(&'static str, f32, bool, bevy::prelude::Color)> {
         ("Original: Crystal Team", 12.0, false, Color::WHITE),
         ("Bevy Port: Community", 12.0, false, Color::WHITE),
         ("", 10.0, false, Color::WHITE),
-        ("Press ESC or Click to Close", 11.0, true, Color::srgb(0.6, 0.6, 0.6)),
+        (
+            "Press ESC or Click to Close",
+            11.0,
+            true,
+            Color::srgb(0.6, 0.6, 0.6),
+        ),
     ]
 }
 
@@ -79,7 +84,8 @@ pub fn credits_update_system(
             let dx = (1024.0 - dw) / 2.0;
             let dy = (768.0 - dh) / 2.0;
 
-            if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
+            if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360)
+            {
                 let e = spawn_ui_sprite(&mut commands, h, dx, dy, 6.0, 1.0);
                 commands.entity(e).insert(CreditsDlg);
             }
@@ -95,16 +101,7 @@ pub fn credits_update_system(
                     continue;
                 }
                 let tx = if is_title { center_x } else { left_x };
-                let e = spawn_ui_text(
-                    &mut commands,
-                    &font,
-                    text,
-                    tx,
-                    y,
-                    size,
-                    color,
-                    7.0,
-                );
+                let e = spawn_ui_text(&mut commands, &font, text, tx, y, size, color, 7.0);
                 commands.entity(e).insert(CreditsDlg);
                 y += size + if is_title { 10.0 } else { 5.0 };
             }

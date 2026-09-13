@@ -522,7 +522,13 @@ fn auto_walk_system(
     mut timer: Local<f32>,
     time: Res<Time>,
     dir: Res<AutoWalkDir>,
-    mut players: Query<&mut Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
+    mut players: Query<
+        &mut Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
 ) {
     if dir.0.is_empty() {
         return;
@@ -588,7 +594,10 @@ fn auto_walk_diag_system(
             &mut client_bevy::actor::ActorAnim,
             Option<&client_bevy::game::movement::LocalMove>,
         ),
-        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
     >,
 ) {
     use client_bevy::game::movement::{world_to_tile, LocalMove as LM};
@@ -604,7 +613,12 @@ fn auto_walk_diag_system(
         let Some(map) = &game_data.map else {
             return; // 地图未就绪时静默等待
         };
-        tracing::info!("[DIAGWALK] 开始（t={} map=true 玩家 @ {},{}）", *t, ptf.translation.x, ptf.translation.y);
+        tracing::info!(
+            "[DIAGWALK] 开始（t={} map=true 玩家 @ {},{}）",
+            *t,
+            ptf.translation.x,
+            ptf.translation.y
+        );
         let from = world_to_tile(ptf.translation.x, ptf.translation.y);
         let to = (from.0 + 20, from.1 + 15); // 纯 45° 对角
         if let Some(p) = client_bevy::game::pathfinding::find_path(map, from, to) {
@@ -613,9 +627,10 @@ fn auto_walk_diag_system(
                 return;
             }
             let first = p[0];
-            if let Some(d) =
-                client_bevy::game::movement::direction_from_delta(first.0 - from.0, first.1 - from.1)
-            {
+            if let Some(d) = client_bevy::game::movement::direction_from_delta(
+                first.0 - from.0,
+                first.1 - from.1,
+            ) {
                 anim.direction = d as u8;
             }
             let path_len = p.len();
@@ -628,22 +643,37 @@ fn auto_walk_diag_system(
                 turn_acc: 0.0,
             });
             state.seq.push(anim.direction);
-            tracing::info!("[DIAGWALK] 对角寻路 {:?} -> {:?} 路径 {} 步", from, to, path_len);
+            tracing::info!(
+                "[DIAGWALK] 对角寻路 {:?} -> {:?} 路径 {} 步",
+                from,
+                to,
+                path_len
+            );
         }
         state.started = true;
         return;
     }
-    let Ok((_, _, anim, lm_opt)) = players.single() else { return };
+    let Ok((_, _, anim, lm_opt)) = players.single() else {
+        return;
+    };
     let Some(lm) = lm_opt else { return };
     if lm.path.is_empty() && anim.action == mir2_shared::enums::MirAction::Standing {
         // 结束：输出方向序列 + 抖动检查（相邻方向差 4 = 反向抖动）
         let seq = std::mem::take(&mut state.seq);
         let verdict = diagwalk_verdict(&seq);
-        let jitter = seq.windows(2).filter(|w| {
-            let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-            d == 4
-        }).count();
-        tracing::info!("[DIAGWALK] {} 方向序列 {:?}（反向抖动 {} 次）", verdict, seq, jitter);
+        let jitter = seq
+            .windows(2)
+            .filter(|w| {
+                let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+                d == 4
+            })
+            .count();
+        tracing::info!(
+            "[DIAGWALK] {} 方向序列 {:?}（反向抖动 {} 次）",
+            verdict,
+            seq,
+            jitter
+        );
         state.started = false;
         return;
     }
@@ -709,11 +739,22 @@ fn hold_move_test_system(
     mut st: ResMut<HoldMoveTest>,
     time: Res<Time>,
     game_data: Res<client_bevy::map_renderer::GameData>,
-    players: Query<&Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
     // #2633 批次4 步9：演示驱动改直写 StatusFlags 组件（hud.* 已删）
-    mut flags_q: Query<&mut client_bevy::game::player_state::StatusFlags, With<client_bevy::actor::LocalPlayer>>,
+    mut flags_q: Query<
+        &mut client_bevy::game::player_state::StatusFlags,
+        With<client_bevy::actor::LocalPlayer>,
+    >,
 ) {
-    use client_bevy::game::movement::{mouse_direction, next_direction, point_move, previous_direction};
+    use client_bevy::game::movement::{
+        mouse_direction, next_direction, point_move, previous_direction,
+    };
     use mir2_shared::enums::MirDirection;
     if !st.started {
         *t += time.delta_secs();
@@ -722,7 +763,12 @@ fn hold_move_test_system(
         }
         let Ok(ptf) = players.single() else { return };
         let Some(map) = &game_data.map else { return };
-        tracing::info!("[HOLDMOVE] 开始：玩家=({},{}) map={}", ptf.translation.x, ptf.translation.y, map.name);
+        tracing::info!(
+            "[HOLDMOVE] 开始：玩家=({},{}) map={}",
+            ptf.translation.x,
+            ptf.translation.y,
+            map.name
+        );
         st.started = true;
         return;
     }
@@ -734,15 +780,22 @@ fn hold_move_test_system(
             0 => {
                 // 阶段0（稳定）结束：输出方向序列
                 let dirs = std::mem::take(&mut st.dirs);
-                let jitter = dirs.windows(2).filter(|w| {
-                    let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-                    d == 4
-                }).count();
+                let jitter = dirs
+                    .windows(2)
+                    .filter(|w| {
+                        let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+                        d == 4
+                    })
+                    .count();
                 let stable = dirs.windows(2).all(|w| {
                     let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
                     d <= 2 || d >= 6
                 });
-                let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
+                let verdict = if jitter == 0 && stable {
+                    "✅ 方向稳定无抖动"
+                } else {
+                    "❌ 方向抖动"
+                };
                 tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
                 // 进入陷阱阶段
                 if let Ok(mut f) = flags_q.single_mut() {
@@ -774,7 +827,11 @@ fn hold_move_test_system(
                 // 阶段2（冲刺）结束：验证可移动（3 格跑）
                 let dirs = std::mem::take(&mut st.dirs);
                 let moving = !dirs.is_empty();
-                let verdict = if moving { "✅ 冲刺可移动（3 格跑）" } else { "❌ 冲刺未移动" };
+                let verdict = if moving {
+                    "✅ 冲刺可移动（3 格跑）"
+                } else {
+                    "❌ 冲刺未移动"
+                };
                 tracing::info!("[HOLDMOVE] {} 冲刺阶段方向 {:?}", verdict, dirs);
                 if let Ok(mut f) = flags_q.single_mut() {
                     f.sprint = false;
@@ -797,10 +854,13 @@ fn hold_move_test_system(
     let chosen = if in_trap {
         None // 陷阱禁止移动（C# CanWalk 12094 直接 false）
     } else {
-        [dir, next_direction(dir), previous_direction(dir)].iter().copied().find(|d| {
-            let p = point_move(from.0, from.1, *d, 1);
-            map.is_walkable(p.0, p.1)
-        })
+        [dir, next_direction(dir), previous_direction(dir)]
+            .iter()
+            .copied()
+            .find(|d| {
+                let p = point_move(from.0, from.1, *d, 1);
+                map.is_walkable(p.0, p.1)
+            })
     };
     let d = chosen.unwrap_or(dir);
     if st.dirs.last() != Some(&(d as u8)) {
@@ -842,7 +902,10 @@ fn ui_dump_system(
         };
         let mut parts: Vec<String> = Vec::new();
         if let Some(b) = btn {
-            parts.push(format!("btn=({:.0},{:.0},{:.0},{:.0})", b.rect.0, b.rect.1, b.rect.2, b.rect.3));
+            parts.push(format!(
+                "btn=({:.0},{:.0},{:.0},{:.0})",
+                b.rect.0, b.rect.1, b.rect.2, b.rect.3
+            ));
         }
         if frames.is_some() {
             parts.push("frames".to_string());
@@ -855,7 +918,10 @@ fn ui_dump_system(
                 parts.push(format!("size=({:.0},{:.0})", cs.x, cs.y));
             }
             if let Some(r) = s.rect {
-                parts.push(format!("rect=({:.0},{:.0},{:.0},{:.0})", r.min.x, r.min.y, r.max.x, r.max.y));
+                parts.push(format!(
+                    "rect=({:.0},{:.0},{:.0},{:.0})",
+                    r.min.x, r.min.y, r.max.x, r.max.y
+                ));
             }
         }
         if let Some(r) = root {
