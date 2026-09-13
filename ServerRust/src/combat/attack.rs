@@ -162,6 +162,32 @@ pub fn get_defence_power(min: i32, max: i32) -> i32 {
     rand_in_range(min, max)
 }
 
+/// C# `HumanObject.Struck(damage, type)`（`Server/MirObjects/HumanObject.cs:7344-7353`）的护甲/伤害数学：
+/// `armour *= ArmourRate`、`damage *= DamageRate` 各自钳 i32 → `DamageReductionPercent` 减伤
+/// → `armour >= damage ? 0 : damage - armour`。
+///
+/// **不含命中判定、不含 MagicResist 抵抗、不含反射**——那三项只属于 `Attacked` 路径；
+/// 地图落雷/岩浆（`SpellObject.ProcessSpell` 的 `MapLightning`/`MapLava` 分支 → `player.Struck(Value, MAC)`）
+/// 走的就是这个必中且只减护甲的语义。
+pub(crate) fn struck_damage(
+    armour: i32,
+    damage: i32,
+    armour_rate: f32,
+    damage_rate: f32,
+    damage_reduction_percent: i32,
+) -> i32 {
+    let armour = clamp_i32((armour as f32 * armour_rate) as i64);
+    let mut damage = clamp_i32((damage as f32 * damage_rate) as i64);
+    if damage_reduction_percent != 0 {
+        damage -= ((damage as i64 * damage_reduction_percent as i64) / 100) as i32;
+    }
+    if armour >= damage {
+        0
+    } else {
+        damage - armour
+    }
+}
+
 // ============================================================
 // 命中+护甲判定 GetArmour（MapObject.cs:460）
 // ============================================================
@@ -781,5 +807,25 @@ mod tests {
         set_combat_weight(CombatWeight::CriticalDamage, 0);
         assert_eq!(combat_weight(CombatWeight::CriticalDamage), 1);
         set_combat_weight(CombatWeight::CriticalDamage, 50); // 还原默认，避免影响并行用例
+    }
+
+    /// #2845：地图落雷/岩浆伤害走 C# `Struck` 数学（必中、仅护甲减免、含减伤与 rates）
+    #[test]
+    fn struck_damage_matches_csharp_struck() {
+        // 护甲 < 伤害 → 伤害 - 护甲
+        assert_eq!(struck_damage(20, 100, 1.0, 1.0, 0), 80);
+        // 护甲 >= 伤害 → 0（C# `if (armour >= damage) return 0`）
+        assert_eq!(struck_damage(100, 100, 1.0, 1.0, 0), 0);
+        assert_eq!(struck_damage(120, 100, 1.0, 1.0, 0), 0);
+        // DamageRate 缩放（0.5 → 50，护甲 0）
+        assert_eq!(struck_damage(0, 100, 1.0, 0.5, 0), 50);
+        // ArmourRate 缩放（护甲 20 * 2 = 40 → 60）
+        assert_eq!(struck_damage(20, 100, 2.0, 1.0, 0), 60);
+        // 减伤百分比（30% → 70）
+        assert_eq!(struck_damage(0, 100, 1.0, 1.0, 30), 70);
+        // 减伤 + 护甲叠加
+        assert_eq!(struck_damage(10, 100, 1.0, 1.0, 50), 40);
+        // 无护甲且无减伤 → 原值
+        assert_eq!(struck_damage(0, 37, 1.0, 1.0, 0), 37);
     }
 }
