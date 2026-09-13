@@ -73,7 +73,7 @@ enum RelationshipAction {
 
 /// #2775：C# `RelationshipDialog.cs:59/72/94/116/138` 五个按钮的 Hint 文案。
 /// （AllowButton 的 Hint 在 C# 里还会随婚配状态改写：已婚=允许/阻止结婚（`:237`）、
-/// 未婚=允许/阻止回忆（`:243`）——本批先落静态默认，动态改写见后续单元。）
+/// 未婚=允许/禁止传送（`:243`）——#2786 已接 `relationship_allow_hint_system` 动态改写。）
 fn relationship_hint(action: RelationshipAction) -> &'static str {
     match action {
         RelationshipAction::Allow => "允许/阻止结婚",
@@ -81,6 +81,30 @@ fn relationship_hint(action: RelationshipAction) -> &'static str {
         RelationshipAction::Divorce => "请求离婚",
         RelationshipAction::Mail => "发送邮件给伴侣",
         RelationshipAction::Whisper => "发送悄悄话给伴侣",
+    }
+}
+
+/// #2786：伴侣钮 `AllowButton` 的**动态** Hint（C# `RelationshipDialog.cs:237/243`）：
+/// 已婚（`LoverName != ""`）→ `SwitchMarriage`「允许/阻止结婚」；
+/// 未婚 → `AllowBlockRecall`「允许/禁止传送」。
+pub fn allow_button_hint(lover_name: &str) -> &'static str {
+    if lover_name.is_empty() {
+        "允许/禁止传送"
+    } else {
+        "允许/阻止结婚"
+    }
+}
+
+/// #2786：伴侣钮 Hint 随婚配状态刷新（独立系统：`relationship_ui_system` 参数已满）。
+fn relationship_allow_hint_system(
+    state: Res<RelationshipState>,
+    mut allow: Query<&mut crate::ui::tooltip::UiHint, With<RelationshipAllow>>,
+) {
+    let text = allow_button_hint(&state.lover_name);
+    for mut hint in &mut allow {
+        if hint.text != text {
+            hint.text = text.to_string();
+        }
     }
 }
 
@@ -120,6 +144,8 @@ app.add_systems(OnEnter(AppState::Game), spawn_relationship);
             (
                 relationship_ui_system,
                 marriage_invite_system,
+                // #2786：伴侣钮动态 Hint（已婚/未婚两态）
+                relationship_allow_hint_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -473,6 +499,28 @@ fn relationship_server_events(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// #2786：伴侣钮两态 Hint（C# `RelationshipDialog.cs:237/243`）
+    #[test]
+    fn allow_button_hint_switches_with_marriage_state() {
+        assert_eq!(
+            allow_button_hint("老婆大人"),
+            "允许/阻止结婚",
+            "已婚（LoverName 非空）→ SwitchMarriage"
+        );
+        assert_eq!(
+            allow_button_hint(""),
+            "允许/禁止传送",
+            "未婚 → AllowBlockRecall"
+        );
+        // 静态默认（关系表里的 Allow 项）保持已婚文案：未收到 LoverUpdate 前与 C# 构造默认一致
+        assert_eq!(
+            relationship_hint(RelationshipAction::Allow),
+            "允许/阻止结婚"
+        );
+    }
+
     #[test]
     fn relationship_layout_matches_csharp() {
         assert_eq!(crate::game::dialogs::center_origin(284.0, 194.0), (370.0, 287.0));
