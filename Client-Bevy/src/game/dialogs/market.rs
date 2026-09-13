@@ -18,7 +18,7 @@ use crate::actor::LocalPlayer;
 use crate::game::dialogs::market_filter::{
     self, MarketFilterSprites,
 };
-use crate::game::dialogs::inventory::{InvClickState, InvItem};
+use crate::game::dialogs::inventory::{InvClickState, InvItem, InvLockReason, InvLockedSlots};
 use crate::game::dialogs::text_input::TextInputState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::Inventory;
@@ -85,6 +85,9 @@ pub struct MarketState {
     pub filter_skip: usize,
     /// 寄售/拍卖目标物品（C# `SellItemSlot`；点 ItemCell 从背包选中物放入）
     pub consign_item: Option<InvItem>,
+    /// #2742：寄售目标物品的背包槽（C# `tempCell`；放入即 `Locked = true`，
+    /// 换物/切页签/关窗/`S.ConsignItem` 回包时解锁）
+    pub consign_slot: Option<usize>,
     /// 价格排序三态（C# `TrustMerchantDialog.PriceFilter`）
     pub price_filter: MarketPriceFilter,
 }
@@ -107,6 +110,7 @@ impl Default for MarketState {
             filter_sub_index: None,
             filter_skip: 0,
             consign_item: None,
+            consign_slot: None,
             price_filter: MarketPriceFilter::Normal,
         }
     }
@@ -1169,7 +1173,11 @@ fn spawn_market(
                 TM_SELL_BTN_H,
                 10,
             )
-            .insert((MarketSellItemBtn, MarketForPanel::ConsignOrAuction));
+            .insert((
+                MarketSellItemBtn,
+                MarketForPanel::ConsignOrAuction,
+                UiGray::default(),
+            ));
         }
         // C# `CollectSoldButton`（仅寄售）/ `SellNowButton`（仅拍卖），都在底栏
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1357,11 +1365,14 @@ fn market_ui_system(
     mut market: ResMut<MarketState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    close: Query<(Entity, &Interaction), With<MarketClose>>,
-    refresh_btn: Query<(Entity, &Interaction), With<MarketRefreshBtn>>,
-    search_btn: Query<(Entity, &Interaction), With<MarketSearchBtn>>,
-    prev_btn: Query<(Entity, &Interaction), With<MarketPrevBtn>>,
-    next_btn: Query<(Entity, &Interaction), With<MarketNextBtn>>,
+    // 五组按钮查询折叠成一个元组参数（系统参数上限 16）
+    btns: (
+        Query<(Entity, &Interaction), With<MarketClose>>,
+        Query<(Entity, &Interaction), With<MarketRefreshBtn>>,
+        Query<(Entity, &Interaction), With<MarketSearchBtn>>,
+        Query<(Entity, &Interaction), With<MarketPrevBtn>>,
+        Query<(Entity, &Interaction), With<MarketNextBtn>>,
+    ),
     mouse: Res<ButtonInput<MouseButton>>,
     ui: (
         Query<&Window>,
@@ -1370,6 +1381,7 @@ fn market_ui_system(
     mut widgets: Query<&mut Visibility, With<MarketWidget>>,
     mut lines: Query<(&mut Text, &MarketLine)>,
     mut scroll: Query<&mut UiScrollList, With<MarketWidget>>,
+    mut place_at: MessageWriter<crate::game::dialogs::inventory::InventoryPlaceAt>,
     mut requested: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -1393,6 +1405,11 @@ fn market_ui_system(
     // `DrawFilters(0, -1)` 复位筛选树 + 发 `C.MarketSearch{Match="", Type=Nothing, Usermode=false}`
     if !*requested {
         *requested = true;
+        // C# `TrustMerchantDialog.Show()`（:1435-1436）：背包推到 `Size.Width + 5` 并打开
+        place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(
+            TM_PANEL_W + 5.0,
+        ));
+        mgr.open(DialogKind::Inventory);
         market.panel = MarketPanelType::Market;
         market.filter_index = 0;
         market.filter_sub_index = None;
@@ -1410,9 +1427,11 @@ fn market_ui_system(
         );
         tracing::info!("🏪 打开市场（C# MarketSearch 复位）");
     }
-    for (e, inter) in &close {
+    for (e, inter) in &btns.0 {
         if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Market);
+            // C# `Hide()`（:1411）：背包复位到 (0,0)
+            place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0));
         }
     }
     // 渲染（#89 滚轮翻页：scroll.offset 行号 ↔ market.page 同步）
@@ -1470,7 +1489,7 @@ fn market_ui_system(
         }
     }
     // 刷新
-    for (e, inter) in &refresh_btn {
+    for (e, inter) in &btns.1 {
         if edge(e, inter, &mut prev_inter) {
             // C# `RefreshButton.Click`：清空搜索框 + `C.MarketRefresh`（保留筛选树选中）
             if let Some(t) = input.texts.get_mut(5) {
@@ -1482,7 +1501,7 @@ fn market_ui_system(
         }
     }
     // 搜索（C# `FindButton.Click` → `C.MarketSearch{Match, MarketType}`，Type 默认 Nothing 不过滤）
-    for (e, inter) in &search_btn {
+    for (e, inter) in &btns.2 {
         if edge(e, inter, &mut prev_inter) {
             let kw = input.texts.get(5).cloned().unwrap_or_default().trim().to_string();
             if kw.is_empty() {
@@ -1493,7 +1512,7 @@ fn market_ui_system(
         }
     }
     // 翻页
-    for (e, inter) in &prev_btn {
+    for (e, inter) in &btns.3 {
         if edge(e, inter, &mut prev_inter) {
             // C# `BackButton.Click`：纯本地翻页（列表已累积）
             if let Some(prev) = back_page_action(market.page) {
@@ -1501,7 +1520,7 @@ fn market_ui_system(
             }
         }
     }
-    for (e, inter) in &next_btn {
+    for (e, inter) in &btns.4 {
         if edge(e, inter, &mut prev_inter) {
             // C# `NextButton.Click`：已累积 → 本地翻页；否则请求下一页
             if let Some((next, need_request)) =
@@ -1708,12 +1727,15 @@ fn market_consign_system(
     net: Res<NetConnection>,
     mut input: ResMut<TextInputState>,
     mut inv_click: ResMut<InvClickState>,
+    mut locked: ResMut<InvLockedSlots>,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut price_box: Query<&mut BackgroundColor, With<MarketPriceField>>,
-    mut sell_btn: Query<(Entity, &Interaction, &mut ImageNode), With<MarketSellItemBtn>>,
+    mut sell_btn: Query<(Entity, &Interaction, &mut UiGray), With<MarketSellItemBtn>>,
     cell: Query<(Entity, &Interaction), With<MarketConsignCell>>,
     collect_btn: Query<(Entity, &Interaction), With<MarketCollectSoldBtn>>,
     sellnow_btn: Query<(Entity, &Interaction), With<MarketSellNowBtn>>,
+    mut place_at: MessageWriter<crate::game::dialogs::inventory::InventoryPlaceAt>,
+    mut was_open: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -1725,14 +1747,28 @@ fn market_consign_system(
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
     if !mgr.is_open(DialogKind::Market) {
+        // C# `Hide()`（TrustMerchantDialog.cs:1398-1411）：关窗解锁 `tempCell`
+        if let Some(slot) = market.consign_slot.take() {
+            locked.unlock(InvLockReason::Consign, slot);
+        }
+        // 任意关闭路径（关闭键/Control API/联动）都复位背包位置
+        if *was_open {
+            *was_open = false;
+            place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0));
+        }
         return;
     }
+    *was_open = true;
     let consign_panel = matches!(
         market.panel,
         MarketPanelType::Consign | MarketPanelType::Auction
     );
     if !consign_panel {
         // 离开寄售/拍卖页签：C# `Hide()`/切页签会清掉 `SellItemSlot` 与售价框
+        // （:104-113 `MarketButton.Click` 同样解锁 `tempCell`）
+        if let Some(slot) = market.consign_slot.take() {
+            locked.unlock(InvLockReason::Consign, slot);
+        }
         if market.consign_item.is_some() {
             market.consign_item = None;
             if let Some(t) = input.texts.get_mut(6) {
@@ -1766,14 +1802,13 @@ fn market_consign_system(
     for mut bg in &mut price_box {
         *bg = BackgroundColor(fill);
     }
-    // C# `SellItemButton.Enabled`：价格合法才可提交（禁用态用暗化近似 GrayScale）
+    // C# `SellItemButton.Enabled`：价格合法才可提交；禁用态按 `GrayScale` 真灰度（批12）
     let allowed = state.allowed() && market.consign_item.is_some();
-    for (e, inter, mut node) in &mut sell_btn {
-        node.color = if allowed {
-            Color::WHITE
-        } else {
-            Color::srgb(0.55, 0.55, 0.55)
-        };
+    for (e, inter, mut gray) in &mut sell_btn {
+        let want_gray = !allowed;
+        if gray.gray != want_gray {
+            gray.gray = want_gray;
+        }
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
@@ -1811,6 +1846,10 @@ fn market_consign_system(
         }
         if market.consign_item.is_some() {
             market.consign_item = None;
+            // 取消选择 → 解锁（C# `ItemCell_Click` 先解旧 `tempCell`）
+            if let Some(slot) = market.consign_slot.take() {
+                locked.unlock(InvLockReason::Consign, slot);
+            }
             market.message = "已取消选择物品".to_string();
             continue;
         }
@@ -1823,6 +1862,9 @@ fn market_consign_system(
             continue;
         };
         market.consign_item = Some(item.clone());
+        // C# `ItemCell_Click`：`tempCell = SelectedCell; tempCell.Locked = true`
+        market.consign_slot = Some(sel);
+        locked.lock(InvLockReason::Consign, sel);
         market.message = format!("已选择：{}", item.name);
         inv_click.selected = None;
         input.active = Some(6);
@@ -2282,6 +2324,7 @@ fn market_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut market: ResMut<MarketState>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
+    mut locked: ResMut<InvLockedSlots>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -2325,6 +2368,10 @@ fn market_server_events(
                 accumulate_market_page(&mut market, page, items);
             }
             ServerEvent::MarketConsign { uid, success } => {
+                // #2742：C# `GameScene.ConsignItem`（:5655-5667）在此解锁 `tempCell`
+                if let Some(slot) = market.consign_slot.take() {
+                    locked.unlock(InvLockReason::Consign, slot);
+                }
                 if *success {
                     // #720：寄售成功从背包移除（C# S.ConsignItem 语义）
                     if let Ok(mut inv) = inv_q.single_mut() {
@@ -2927,6 +2974,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<ServerEvent>();
         app.init_resource::<MarketState>();
+        // #2742：market_server_events 现在按来源解锁背包格锁 → 需该资源
+        app.init_resource::<InvLockedSlots>();
         app.add_systems(Update, market_server_events);
         app.world_mut().spawn((
             LocalPlayer,
@@ -2959,6 +3008,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<ServerEvent>();
         app.init_resource::<MarketState>();
+        // #2742：market_server_events 现在按来源解锁背包格锁 → 需该资源
+        app.init_resource::<InvLockedSlots>();
         app.add_systems(Update, market_server_events);
         app.world_mut().spawn((
             LocalPlayer,

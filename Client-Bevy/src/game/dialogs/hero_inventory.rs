@@ -550,7 +550,19 @@ fn hero_inv_click_system(
                     .unwrap_or(&[]);
                 // 骑乘判定读 `MountState`（实体缺失视同未骑乘，同原 hud.riding=false）
                 let riding = player_state.map(|(_, _, m)| m.is_some()).unwrap_or(false);
-                if use_item_core(item, &net, riding, false, &player_equipment, ctx, now, &mut feedback, &mut confirm)
+                if use_item_core(
+                    item,
+                    &net,
+                    riding,
+                    false,
+                    &player_equipment,
+                    ctx,
+                    now,
+                    &mut feedback,
+                    &mut confirm,
+                    // 英雄背包格不属于玩家背包锁范围（C# 锁的是英雄格）
+                    &mut None,
+                )
                     == UseOutcome::Sent
                 {
                     // #2611：腰带格（0/1）使用时武装补货（C# :574 Item.Count==1

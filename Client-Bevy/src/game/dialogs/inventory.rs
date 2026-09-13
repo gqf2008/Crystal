@@ -269,6 +269,7 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvUiState>();
         // #2631：背包自我右移让位（交易开窗解耦；背包实体/Origin 归本模块所有）
         app.add_message::<InventoryShiftRight>();
+        app.add_message::<InventoryPlaceAt>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
         app.add_systems(OnEnter(AppState::Game), spawn_inv_confirm);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
@@ -377,6 +378,7 @@ pub(crate) fn inventory_events(
         ),
         With<LocalPlayer>,
     >,
+    mut locked: ResMut<InvLockedSlots>,
 ) {
     use crate::network::server_event::ServerEvent;
     let Ok((mut inv, mut loadout)) = inv_q.single_mut() else {
@@ -390,6 +392,8 @@ pub(crate) fn inventory_events(
                 }
             }
             ServerEvent::ItemEquipped { unique_id, to } => {
+                // #2742：C# `GameScene.EquipItem`（:2442-2443）在回包时解锁来源格与目标格
+                locked.unlock_all(InvLockReason::Equip);
                 // 从背包移除并放入装备槽；旧装备放回背包空格
                 let from_idx = inv
                     .items
@@ -431,6 +435,18 @@ pub(crate) fn inventory_events(
                 // 背包/装备部分（玩家属性部分归 player_vitals_events；金币唯一源是 Gold 组件）。
                 // 与 reconcile 共用 apply_user_info_items 同一份映射。
                 crate::game::player_state::apply_user_info_items(ev, &mut inv, &mut loadout);
+                // #2742：权威全量刷新 = 装备/拆分/镶嵌这类「单发等待回包」的锁一律失效
+                //（Craft 的锁由 `sync_craft_locks` 自管，寄售锁由 market 自管，不受影响）
+                locked.unlock_all(InvLockReason::Equip);
+                locked.unlock_all(InvLockReason::Split);
+                locked.unlock_all(InvLockReason::Socket);
+            }
+            // #2742：`S.EquipSlotItem` / `S.SplitItem1` 回包解锁对应来源（C# 同点）
+            ServerEvent::EquipSlotItemResult { .. } => {
+                locked.unlock_all(InvLockReason::Socket);
+            }
+            ServerEvent::SplitItem1Result { .. } => {
+                locked.unlock_all(InvLockReason::Split);
             }
             ServerEvent::ItemUsed { unique_id } => {
                 // 背包扣减段（腰带补货段归 belt_restock_events，须先于此运行）
@@ -691,6 +707,13 @@ impl Default for InventoryOrigin {
 #[derive(Message, Debug)]
 pub struct InventoryShiftRight;
 
+/// C# `InventoryDialog.Location = new Point(x, y)`：把背包面板推到指定屏幕 x。
+///
+/// 交易走 [`InventoryShiftRight`]（`ScreenWidth - inv.W`）；TrustMerchant `Show()`
+/// （TrustMerchantDialog.cs:1435）用 `Size.Width + 5`，`Hide()` 复位到 0。
+#[derive(Message, Debug)]
+pub struct InventoryPlaceAt(pub f32);
+
 /// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
 /// 位置 (i%8, (i/8)%5) 复用同一 8x5 区域（C# Grid Location = y%5）。
@@ -796,6 +819,8 @@ pub struct InvDropConfirm {
 #[derive(Resource, Default)]
 pub struct InvPendingAmount {
     pub split_uid: Option<u64>,
+    /// #2742：拆分确认后要锁定/解锁的来源格（C# `C.SplitItem` 发包时 `Locked = true`）
+    pub split_slot: Option<usize>,
     pub drop_uid: Option<u64>,
     /// #1346：删除数量框待确认物品
     pub delete_uid: Option<u64>,
@@ -1234,6 +1259,7 @@ fn inv_grid_sync_system(
 #[allow(clippy::type_complexity)]
 fn inventory_shift_right_system(
     mut events: MessageReader<InventoryShiftRight>,
+    mut place_at: MessageReader<InventoryPlaceAt>,
     mut libs: ResMut<GameLibraries>,
     // 只平移背包**面板根**：批49 迁移把旧平铺 Sprite 版的逐实体推位直接搬来，
     // 但 bevy_ui 格子已是面板子实体（相对坐标 left）且仍带 DialogRoot(Inventory)
@@ -1242,15 +1268,17 @@ fn inventory_shift_right_system(
     mut inv_entities: Query<(&mut Node, &DialogRoot), With<InventoryPanel>>,
     mut inv_origin: ResMut<InventoryOrigin>,
 ) {
-    let mut shift = false;
-    for _ in events.read() {
-        shift = true;
-    }
-    if !shift {
-        return;
-    }
     let (inv_w, _) = inventory_real_size(&mut libs);
-    let target_x = 1024.0 - inv_w;
+    let mut target: Option<f32> = None;
+    for _ in events.read() {
+        target = Some(1024.0 - inv_w);
+    }
+    for e in place_at.read() {
+        target = Some(e.0);
+    }
+    let Some(target_x) = target else {
+        return;
+    };
     // bevy_ui：背包面板根 Node.left = 屏幕 x；子节点（格/按钮/文本）随根整体平移
     let mut min_x = f32::MAX;
     for (node, root) in inv_entities.iter() {
@@ -1279,7 +1307,24 @@ fn inventory_shift_right_system(
     *inv_origin = InventoryOrigin(target_x, 0.0);
 }
 
-/// 被其它对话框锁定的背包格（C# `MirItemCell.Locked`；如 Craft 放入材料/自动填充后锁定来源格）。
+/// `MirItemCell.Locked` 的锁定来源。C# 里同一个 `Locked` 标志被多处共用（Craft 放材料、
+/// 装备/拆分/镶嵌发包后、TrustMerchant 寄售选物），解锁点各不相同；Bevy 按来源分组存放，
+/// 使某一来源的 `clear`/解锁不会误伤其它来源仍持有的锁。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InvLockReason {
+    /// Craft `Grid_Click`/`AutoFill` 锁定材料来源格（`NPCDialogs.cs:2433/2479/2506`，`ResetCells()` 解锁）
+    Craft,
+    /// `C.EquipItem` 发包后锁来源格（`MirItemCell.cs:423` 等），`S.EquipItem` 解锁（GameScene.cs:2442-2443）
+    Equip,
+    /// `C.SplitItem` 发包后锁来源格（`MirItemCell.cs:294`），`S.SplitItem1` 解锁（GameScene.cs:2911-2962）
+    Split,
+    /// `C.EquipSlotItem`（镶嵌/钓具坐骑槽）发包后锁来源格（`MirItemCell.cs:664`），`S.EquipSlotItem` 解锁
+    Socket,
+    /// TrustMerchant 寄售选物（`tempCell.Locked`，TrustMerchantDialog.cs:1392）；换物/切页签/关窗/寄售回包解锁
+    Consign,
+}
+
+/// 被其它对话框锁定的背包格（C# `MirItemCell.Locked`；按 [`InvLockReason`] 分组）。
 ///
 /// C# 依据：
 /// - `NPCDialogs.cs:2433`（Craft `Grid_Click` 放入后 `SelectedCell.Locked = true`）、
@@ -1287,23 +1332,51 @@ fn inventory_shift_right_system(
 /// - `MirItemCell.DrawControl`：`Locked` 时物品按 `Color.DimGray`（105,105,105）以 0.8 不透明度绘制
 /// - `MirItemCell` 交互：锁定格不可作为 `SelectedCell` 取出/移动（`:2410` `SelectedCell.Locked` 直接 return）
 #[derive(Resource, Default)]
-pub struct InvLockedSlots(pub std::collections::HashSet<usize>);
+pub struct InvLockedSlots {
+    by_reason: std::collections::HashMap<InvLockReason, std::collections::HashSet<usize>>,
+}
 
 /// C# `Color.DimGray`
 pub const LOCKED_ITEM_COLOR: Color = Color::srgb_u8(105, 105, 105);
 
 impl InvLockedSlots {
-    pub fn lock(&mut self, slot: usize) {
-        self.0.insert(slot);
+    pub fn lock(&mut self, reason: InvLockReason, slot: usize) {
+        self.by_reason.entry(reason).or_default().insert(slot);
+    }
+
+    /// 解除某一来源对某格的锁定
+    pub fn unlock(&mut self, reason: InvLockReason, slot: usize) {
+        if let Some(set) = self.by_reason.get_mut(&reason) {
+            set.remove(&slot);
+            if set.is_empty() {
+                self.by_reason.remove(&reason);
+            }
+        }
+    }
+
+    /// 解除某一来源的全部锁定（C# 对应各回包里的 `cell.Locked = false`）
+    pub fn unlock_all(&mut self, reason: InvLockReason) {
+        self.by_reason.remove(&reason);
     }
 
     pub fn is_locked(&self, slot: usize) -> bool {
-        self.0.contains(&slot)
+        self.by_reason.values().any(|set| set.contains(&slot))
     }
 
-    /// C# `ResetCells()`：解除全部锁定
+    /// 解除全部来源的锁定（C# `ResetCells()` 等价；关卡/登出等整体复位用）
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.by_reason.clear();
+    }
+
+    /// 某一来源当前锁定的格（测试用）
+    pub fn locked_slots(&self, reason: InvLockReason) -> Vec<usize> {
+        let mut v: Vec<usize> = self
+            .by_reason
+            .get(&reason)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
+        v.sort_unstable();
+        v
     }
 
     /// 锁定格物品图标色（C# `Color.DimGray`），未锁定为白色（原色）
@@ -1601,6 +1674,8 @@ fn use_item_guard(
 ///   7. Potion Shape 4 → 确认框（mode=3）
 ///   8. 装备/使用 → EquipItem / UseItem（消耗品按 ctx.allow_consumable）
 /// 返回 UseOutcome：Sent=已发包 / Confirm=已弹确认框 / Blocked=拦截或无动作。
+/// `lock_reason`（出参）：本次发包按 C# 需要锁定来源背包格时写入来源
+/// （`C.EquipItem` → [`InvLockReason::Equip`]、`C.EquipSlotItem` → [`InvLockReason::Socket`]）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn use_item_core(
     item: &InvItem,
@@ -1612,6 +1687,7 @@ pub(crate) fn use_item_core(
     now: f64,
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
+    lock_reason: &mut Option<InvLockReason>,
 ) -> UseOutcome {
     // 守卫链（节流/钓鱼/骑乘/SoulBound/CanUseItem/槽物品前置）
     match use_item_guard(item, riding, fishing, equipment, ctx, now, feedback) {
@@ -1647,6 +1723,10 @@ pub(crate) fn use_item_core(
             to_slot
         );
         feedback.last_use = now + 0.3;
+        // C# `MirItemCell.UseSlotItem`：发包后锁来源格（:664 `cell.Locked = true; Locked = true`）
+        if ctx.grid == MirGridType::Inventory {
+            *lock_reason = Some(InvLockReason::Socket);
+        }
         return UseOutcome::Sent;
     }
     // 7. Potion Shape 4 → 确认框（C# AreYouWantUsePotion → MirMessageBox YesNo）
@@ -1680,6 +1760,10 @@ pub(crate) fn use_item_core(
                 ctx.grid
             );
             feedback.last_use = now + 0.3;
+            // C# `MirItemCell.UseItem` 装备分支：发包后锁来源格（:422-528 `Locked = true`）
+        if ctx.grid == MirGridType::Inventory {
+            *lock_reason = Some(InvLockReason::Equip);
+        }
             return UseOutcome::Sent;
         }
         return UseOutcome::Blocked;
@@ -1717,6 +1801,7 @@ fn use_or_equip(
     now: f64,
     feedback: &mut ItemUseFeedback,
     confirm: &mut InvDropConfirm,
+    lock_reason: &mut Option<InvLockReason>,
 ) -> UseOutcome {
     use_item_core(
         item,
@@ -1728,6 +1813,7 @@ fn use_or_equip(
         now,
         feedback,
         confirm,
+        lock_reason,
     )
 }
 /// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
@@ -2041,7 +2127,7 @@ fn inv_item_action_system(
         MessageReader<AmountBoxResult>,
         Res<InventoryOrigin>,
         Query<(&Node, &Visibility), With<DialogRoot>>,
-        Res<InvLockedSlots>,
+        ResMut<InvLockedSlots>,
     ),
     // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
     mut last_modal: Local<bool>,
@@ -2060,6 +2146,7 @@ fn inv_item_action_system(
     for r in misc.1.read() {
         let Some(n) = r.0 else {
             pending.split_uid = None;
+            pending.split_slot = None;
             pending.drop_uid = None;
             continue;
         };
@@ -2072,6 +2159,11 @@ fn inv_item_action_system(
                 unique_id: uid,
                 count: n,
             });
+            // C# `MirItemCell` 拆分发包后锁来源格（`Locked = true`，:294），
+            // 回包 `S.SplitItem1` 解锁（GameScene.cs:2911-2962）
+            if let Some(slot) = pending.split_slot.take() {
+                misc.4.lock(InvLockReason::Split, slot);
+            }
             tracing::info!("🔪 拆分物品 uid={} count={}", uid, n);
         } else if let Some(uid) = pending.drop_uid.take() {
             net.send_packet(&mir2_shared::packets::client::item::DropItem {
@@ -2101,10 +2193,11 @@ fn inv_item_action_system(
     let page = inv_ui.page;
     let size = inv.items.len().min(MAX_INV_SLOTS);
     let (ox, oy) = (misc.2.0, misc.2.1);
-    let slot_at = |cx: f32, cy: f32| -> Option<usize> {
+    // 锁定集合由调用方显式传入（不在闭包里捕获 `misc.4`：本系统后面还要写它加锁）
+    let slot_at = |cx: f32, cy: f32, locked: &InvLockedSlots| -> Option<usize> {
         // 命中复用 [`inv_slot_at`]（几何与仓库/交易/英雄对话框同一真源），
         // 再按 C# `MirItemCell.Locked` 剔除锁定格（Craft 放入材料后来源格不响应点击）。
-        inv_slot_at(cx, cy, page, size, (ox, oy)).filter(|i| !inv_clickable_slot(*i, &misc.4))
+        inv_slot_at(cx, cy, page, size, (ox, oy)).filter(|i| !inv_clickable_slot(*i, locked))
     };
 
     // 弹窗模态门（原版 C# Modal：弹窗打开期间/刚关闭帧不响应格子点击）
@@ -2117,7 +2210,7 @@ fn inv_item_action_system(
 
     // #1346：删除模式左键点物品 → 数量框/确认 → C.DeleteItem（C# PromptDelete）
     if click.delete_mode && mouse.just_pressed(MouseButton::Left) {
-        if let Some(i) = slot_at(cursor.x, cursor.y) {
+        if let Some(i) = slot_at(cursor.x, cursor.y, &misc.4) {
             if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                 if item.count > 1 {
                     pending.delete_uid = Some(item.unique_id);
@@ -2139,7 +2232,7 @@ fn inv_item_action_system(
     let mut dbl: Option<usize> = None;
     let mut single: Option<usize> = None;
     if mouse.just_pressed(MouseButton::Left) {
-        if let Some(i) = slot_at(cursor.x, cursor.y) {
+        if let Some(i) = slot_at(cursor.x, cursor.y, &misc.4) {
             if let Some((last_i, last_t)) = click.last {
                 if last_i == i && now - last_t < 0.4 {
                     dbl = Some(i);
@@ -2223,9 +2316,26 @@ fn inv_item_action_system(
     // 双击：使用/装备
     if let Some(i) = dbl {
         if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
-            if use_or_equip(item, &net, my_gender, my_class, my_level, riding, flags.fishing, &loadout.slots, now, &mut feedback, &mut confirm)
-                == UseOutcome::Sent
-            {
+            let mut lock_reason = None;
+            let outcome = use_or_equip(
+                item,
+                &net,
+                my_gender,
+                my_class,
+                my_level,
+                riding,
+                flags.fishing,
+                &loadout.slots,
+                now,
+                &mut feedback,
+                &mut confirm,
+                &mut lock_reason,
+            );
+            if outcome == UseOutcome::Sent {
+                // C# 装备/镶嵌发包后锁来源格，回包（`S.EquipItem`/`S.EquipSlotItem`）解锁
+                if let Some(reason) = lock_reason {
+                    misc.4.lock(reason, i);
+                }
                 if let Some(sid) = item_use_sound_id(item) {
                     feedback.sounds.push(sid);
                 }
@@ -2240,11 +2350,27 @@ fn inv_item_action_system(
 
     // 右键：使用/装备
     if mouse.just_pressed(MouseButton::Right) {
-        if let Some(i) = slot_at(cursor.x, cursor.y) {
+        if let Some(i) = slot_at(cursor.x, cursor.y, &misc.4) {
             if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
-                if use_or_equip(item, &net, my_gender, my_class, my_level, riding, flags.fishing, &loadout.slots, now, &mut feedback, &mut confirm)
-                    == UseOutcome::Sent
-                {
+                let mut lock_reason = None;
+                let outcome = use_or_equip(
+                    item,
+                    &net,
+                    my_gender,
+                    my_class,
+                    my_level,
+                    riding,
+                    flags.fishing,
+                    &loadout.slots,
+                    now,
+                    &mut feedback,
+                    &mut confirm,
+                    &mut lock_reason,
+                );
+                if outcome == UseOutcome::Sent {
+                    if let Some(reason) = lock_reason {
+                        misc.4.lock(reason, i);
+                    }
                     if let Some(sid) = item_use_sound_id(item) {
                         feedback.sounds.push(sid);
                     }
@@ -2255,7 +2381,7 @@ fn inv_item_action_system(
     // Alt+左键：快速出售（原版 C# "Add support for ALT + click to sell quickly"）
     if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::AltLeft) {
         if npc_goods.visible {
-            if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some(i) = slot_at(cursor.x, cursor.y, &misc.4) {
                 if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                     net.send_packet(&mir2_shared::packets::client::npc::SellItem {
                         unique_id: item.unique_id,
@@ -2270,7 +2396,7 @@ fn inv_item_action_system(
 
     // Shift+左键：拆分堆叠
     if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::ShiftLeft) {
-        if let Some(i) = slot_at(cursor.x, cursor.y) {
+        if let Some(i) = slot_at(cursor.x, cursor.y, &misc.4) {
             if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                 if item.count > 1 {
                     if !inv.items.iter().any(|s| s.is_none()) {
@@ -2279,6 +2405,7 @@ fn inv_item_action_system(
                     }
                     amount.ask("拆分数量", (item.count - 1) as u32);
                     pending.split_uid = Some(item.unique_id);
+                    pending.split_slot = Some(i);
                     tracing::info!(
                         "🔪 拆分 {} (uid={}) 最大 {}",
                         item.name,
@@ -2294,7 +2421,7 @@ fn inv_item_action_system(
     // 选中物品 + 左键点场景（非背包格/非任何对话框/非按钮）→ 丢弃流程
     if mouse.just_pressed(MouseButton::Left) {
         let Some(sel) = click.selected else { return };
-        if slot_at(cursor.x, cursor.y).is_some() {
+        if slot_at(cursor.x, cursor.y, &misc.4).is_some() {
             return;
         }
         // 点在任一可见对话框精灵 bbox 内不触发——C# 控件路由：对话框
@@ -2358,8 +2485,8 @@ mod tests {
         assert!(!locked.is_locked(3));
         assert_eq!(locked.icon_color(3), Color::WHITE);
 
-        locked.lock(3);
-        locked.lock(7);
+        locked.lock(InvLockReason::Craft, 3);
+        locked.lock(InvLockReason::Craft, 7);
         assert!(locked.is_locked(3) && locked.is_locked(7));
         assert_eq!(
             locked.icon_color(3),
@@ -2390,13 +2517,109 @@ mod tests {
 
         let mut locked = InvLockedSlots::default();
         assert!(inv_clickable_slot(4, &locked));
-        locked.lock(4);
+        locked.lock(InvLockReason::Craft, 4);
         assert!(
             !inv_clickable_slot(4, &locked),
             "C# `Locked` 格必须不响应点击"
         );
         // 未锁定邻格不受影响
         assert!(inv_clickable_slot(5, &locked));
+    }
+
+    /// #2742：多来源锁互不干扰——Craft 换配方/关窗只清 Craft 来源
+    /// （C# 各来源各写各的 `cell.Locked`，Bevy 分组存放以免互相解锁）。
+    #[test]
+    fn inv_lock_reasons_are_isolated() {
+        let mut locked = InvLockedSlots::default();
+        locked.lock(InvLockReason::Craft, 1);
+        locked.lock(InvLockReason::Equip, 2);
+        locked.lock(InvLockReason::Split, 3);
+        locked.lock(InvLockReason::Socket, 4);
+        locked.lock(InvLockReason::Consign, 5);
+        assert!(inv_clickable_slot(1, &locked) == false);
+        for s in 1..=5 {
+            assert!(locked.is_locked(s), "格 {s} 应被某一来源锁定");
+        }
+
+        // Craft 来源收敛（换配方/关窗）只清 Craft
+        locked.unlock_all(InvLockReason::Craft);
+        assert!(!locked.is_locked(1) && locked.is_locked(2) && locked.is_locked(5));
+        assert_eq!(locked.locked_slots(InvLockReason::Equip), vec![2]);
+        assert!(locked.locked_slots(InvLockReason::Craft).is_empty());
+
+        // 单格解锁：同格被两个来源锁定时，解锁其中一个仍保持锁定
+        locked.lock(InvLockReason::Craft, 2);
+        locked.unlock(InvLockReason::Equip, 2);
+        assert!(
+            locked.is_locked(2),
+            "同格仍有 Craft 来源锁 → 保持锁定（C# 只有所有来源都解锁才恢复）"
+        );
+        locked.unlock(InvLockReason::Craft, 2);
+        assert!(!locked.is_locked(2));
+    }
+
+    /// #2742：装备/镶嵌/拆分的服务端回包解锁对应来源
+    /// （C# `S.EquipItem`（GameScene.cs:2442-2443）、`S.EquipSlotItem`、`S.SplitItem1`）。
+    #[test]
+    fn inventory_events_release_source_locks() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<crate::network::server_event::ServerEvent>();
+        app.init_resource::<InvLockedSlots>();
+        app.add_systems(Update, inventory_events);
+        app.world_mut()
+            .spawn((LocalPlayer, Inventory::default(), Loadout::default()));
+        app.update(); // 初始化消息缓冲/系统状态
+
+        let mut seed = |app: &mut App| {
+            let mut locks = app.world_mut().resource_mut::<InvLockedSlots>();
+            locks.lock(InvLockReason::Equip, 1);
+            locks.lock(InvLockReason::Split, 2);
+            locks.lock(InvLockReason::Socket, 3);
+            locks.lock(InvLockReason::Craft, 4);
+            locks.lock(InvLockReason::Consign, 5);
+        };
+        seed(&mut app);
+        app.world_mut()
+            .write_message(crate::network::server_event::ServerEvent::EquipSlotItemResult {
+                unique_id: 3,
+                success: true,
+            });
+        app.update();
+        {
+            let locks = app.world().resource::<InvLockedSlots>();
+            assert!(!locks.is_locked(3), "S.EquipSlotItem 回包应解锁 Socket 来源");
+            assert!(
+                locks.is_locked(1) && locks.is_locked(2) && locks.is_locked(4) && locks.is_locked(5),
+                "其它来源的锁不受影响"
+            );
+        }
+
+        app.world_mut()
+            .write_message(crate::network::server_event::ServerEvent::SplitItem1Result {
+                unique_id: 2,
+            });
+        app.update();
+        {
+            let locks = app.world().resource::<InvLockedSlots>();
+            assert!(!locks.is_locked(2), "S.SplitItem1 回包应解锁 Split 来源");
+            assert!(locks.is_locked(1) && locks.is_locked(4) && locks.is_locked(5));
+        }
+
+        app.world_mut()
+            .write_message(crate::network::server_event::ServerEvent::ItemEquipped {
+                unique_id: 1,
+                to: 0,
+            });
+        app.update();
+        {
+            let locks = app.world().resource::<InvLockedSlots>();
+            assert!(!locks.is_locked(1), "S.EquipItem 回包应解锁 Equip 来源");
+            assert!(
+                locks.is_locked(4) && locks.is_locked(5),
+                "Craft/寄售来源的锁不因回包被清（各由自身生命周期管理）"
+            );
+        }
     }
 
     /// 推位/拖动后 inv_slot_at 必须用 InventoryOrigin（PR #2553 审查：仓库开仓把背包
@@ -2532,6 +2755,7 @@ mod tests {
 
         let mut world = World::new();
         world.insert_resource(Messages::<InventoryShiftRight>::default());
+        world.insert_resource(Messages::<InventoryPlaceAt>::default());
         // 未初始化的 GameLibraries → inventory_real_size 走缺省 (316,236)，无磁盘 IO
         world.insert_resource(GameLibraries::default());
         world.insert_resource(InventoryOrigin::default());
@@ -2604,6 +2828,31 @@ mod tests {
         // InventoryOrigin 覆写
         let origin = world.resource::<InventoryOrigin>();
         assert_eq!((origin.0, origin.1), (708.0, 0.0));
+
+        // #2742：`InventoryPlaceAt(x)` 走同一套推位（C# TrustMerchant `Show()` 用
+        // `Size.Width + 5`、`Hide()` 复位 0）；已在 708 处 → 目标 0 时 dx = -708
+        world
+            .resource_mut::<Messages<InventoryPlaceAt>>()
+            .write(InventoryPlaceAt(0.0));
+        world
+            .run_system_once(inventory_shift_right_system)
+            .expect("place at 应成功");
+        let panel_x = match world.get::<Node>(panel).unwrap().left {
+            Val::Px(v) => v,
+            _ => f32::MAX,
+        };
+        assert_eq!(panel_x, 0.0, "InventoryPlaceAt(0) 应把背包复位到 x=0");
+        assert_eq!(
+            (world.resource::<InventoryOrigin>().0, world.resource::<InventoryOrigin>().1),
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            match world.get::<Node>(cell).unwrap().left {
+                Val::Px(v) => v,
+                _ => f32::MAX,
+            },
+            9.0
+        );
     }
 
     fn item_with_type(t: ItemType) -> InvItem {
@@ -2950,12 +3199,34 @@ mod tests {
         };
         let potion = item_with_type(ItemType::Potion);
         assert_eq!(
-            use_item_core(&potion, &net, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(
+                &potion,
+                &net,
+                false,
+                false,
+                &loadout.slots,
+                ctx_storage,
+                0.0,
+                &mut fb,
+                &mut confirm,
+                &mut None
+            ),
             UseOutcome::Blocked
         );
         let sword = item_with_type(ItemType::Weapon);
         assert_eq!(
-            use_item_core(&sword, &net, false, false, &loadout.slots, ctx_storage, 0.0, &mut fb, &mut confirm),
+            use_item_core(
+                &sword,
+                &net,
+                false,
+                false,
+                &loadout.slots,
+                ctx_storage,
+                0.0,
+                &mut fb,
+                &mut confirm,
+                &mut None
+            ),
             UseOutcome::Sent
         );
     }
@@ -2981,7 +3252,18 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, false, false, &loadout.slots, ctx_empty, 0.0, &mut fb, &mut confirm),
+            use_item_core(
+                &bracelet,
+                &net,
+                false,
+                false,
+                &loadout.slots,
+                ctx_empty,
+                0.0,
+                &mut fb,
+                &mut confirm,
+                &mut None
+            ),
             UseOutcome::Sent
         );
         // 左右手镯都占用 → 不装备（C# BraceletR/L 都占用 → 不装备）
@@ -3002,8 +3284,81 @@ mod tests {
             allow_consumable: true,
         };
         assert_eq!(
-            use_item_core(&bracelet, &net, false, false, &loadout.slots, ctx_full, 0.0, &mut fb, &mut confirm),
+            use_item_core(
+                &bracelet,
+                &net,
+                false,
+                false,
+                &loadout.slots,
+                ctx_full,
+                0.0,
+                &mut fb,
+                &mut confirm,
+                &mut None
+            ),
             UseOutcome::Blocked
         );
+    }
+
+    /// #2742：C# `MirItemCell.UseItem`/`UseSlotItem` 在 `grid == Inventory` 发包后按
+    /// 物品类型锁来源格（装备 → `Equip`、坐骑/钓具槽物品 → `Socket`）；仓库/英雄格来源
+    /// 不属于玩家背包锁范围（C# 锁的是各自的格），故不产生锁。
+    #[test]
+    fn use_item_core_reports_source_lock_reason() {
+        let net = NetConnection::default();
+        let loadout = Loadout::default();
+        let mut fb = ItemUseFeedback::default();
+        let mut confirm = InvDropConfirm::default();
+        let ctx_inv = UseItemCtx {
+            grid: MirGridType::Inventory,
+            equipment: &loadout.slots,
+            gender: 0,
+            class: 0,
+            level: 1,
+            check_fishing: false,
+            allow_consumable: true,
+        };
+        // 装备 → Equip
+        let sword = item_with_type(ItemType::Weapon);
+        let mut reason = None;
+        assert_eq!(
+            use_item_core(
+                &sword,
+                &net,
+                false,
+                false,
+                &loadout.slots,
+                ctx_inv,
+                0.0,
+                &mut fb,
+                &mut confirm,
+                &mut reason
+            ),
+            UseOutcome::Sent
+        );
+        assert_eq!(reason, Some(InvLockReason::Equip));
+        // 仓库来源（grid=Storage）→ 不锁玩家背包格
+        // （注意：重设 feedback，否则 0.0 < last_use=0.3 会被节流守卫拦成 Blocked）
+        let mut fb = ItemUseFeedback::default();
+        let mut reason = None;
+        assert_eq!(
+            use_item_core(
+                &sword,
+                &net,
+                false,
+                false,
+                &loadout.slots,
+                UseItemCtx {
+                    grid: MirGridType::Storage,
+                    ..ctx_inv
+                },
+                1.0,
+                &mut fb,
+                &mut confirm,
+                &mut reason
+            ),
+            UseOutcome::Sent
+        );
+        assert_eq!(reason, None);
     }
 }

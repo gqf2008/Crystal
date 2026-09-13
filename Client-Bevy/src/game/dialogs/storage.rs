@@ -535,6 +535,8 @@ fn storage_action_system(
                 now,
                 &mut feedback,
                 &mut confirm,
+                // 仓库格不属于玩家背包锁范围（C# 锁的是仓库格）
+                &mut None,
             ) == UseOutcome::Sent
             {
                 if let Some(sid) = item_use_sound_id(item) {
