@@ -308,3 +308,20 @@
   聊天文本走 `sprite_ui::spawn_ui_text`（无描边，已加负向单测 `chat_text_path_stays_unoutlined` 钉住）。
   副本必须随正文**位置/显隐/字号**同步（UI 版副本是兄弟实体、不继承），见
   `ui/outlined_text.rs::sync_outline_ui_system`。
+
+- 窗口可拖动性（批27 已对齐；规则 = `MirControl.cs:372` `_movable` 是 `private bool` → **默认 false**，
+  只有显式 `Movable = true` 才可拖，拖动分支 `:943`）：
+  - **本批修正的「默认不可拖却被本端拖」**：计时器（`TimerDialog.cs:29`）、掷骰（`RollDialog.cs:24`）、
+    小地图（`MainDialogs.cs:1764` 未设）、耐久面板（`MainDialogs.cs:3949` `false`）、
+    仓库（`NPCDialogs.cs:2798` 未设）、精炼（`NPCDialogs.cs:2726` 未设）、
+    英雄主窗（`HeroDialogs.cs:385/464` 的 `HeroMenuPanel`/`HeroInfoPanel` 未设）——
+    各自根面板挂 `NotDraggable`（`dialogs/mod.rs:146` + `dialog_drag_system` 的 `Without<NotDraggable>`），
+    且**该 kind 的每一个根**都要挂：拖动系统按 kind 聚合包围盒、起拖后平移全部可见根（`mod.rs:699-771`）。
+    `HeroManageDialog`（`HeroDialogs.cs:804`）显式 `Movable = true` → `DialogKind::HeroManage` 保持可拖。
+  - **结构性差异（C# 可拖、本端不拖，按设计记录）**：药水腰带（`BeltDialog`，`InventoryDialog.cs:610`）、
+    聊天窗（`ChatDialog`，`MainDialogs.cs:697`）、英雄腰带（`HeroBeltDialog`，`HeroDialogs.cs:258`）、
+    好友备注（`MemoDialog`，`FriendDialog.cs:492`）、钓鱼状态（`FishingStatusDialog`，`FishingDialog.cs:176`）、
+    下拉框（`MirDropDownBox.cs:196`）——本端这些分别是「跟随 HUD/背包档位的锚定面板」「HUD 常驻 sprite 层」
+    「并入同窗的状态行」「模态输入框」「UI 弹层」，都没有独立的可拖窗口与位置状态；补齐需先引入
+    「窗口拖动偏移 + 持久化」模型（`hero_belt.rs` 头部已单独记录同样理由）。技能栏（`SkillBarDialog`，
+    `MainDialogs.cs:1535`）**已对齐**：本端技能栏有自己的拖动 + 位置持久化（#1235）。
