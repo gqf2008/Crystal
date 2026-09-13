@@ -2076,8 +2076,17 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     group: String::new(),
                                                     // #2801 单元②：描述给足行数，实机才能验证
                                                     // 消息区分页（16 行一页）+ 位置条显隐
+                                                    // #2810 单元①：夹一个 `{文本/颜色}` 段，
+                                                    // 实机验证 `NewColour` 彩色叠加
                                                     description: (1..=8)
-                                                        .map(|i| format!("任务描述第 {i} 行"))
+                                                        .map(|i| {
+                                                            if i == 3 {
+                                                                "任务描述第 3 行含{彩色段/Red}标记"
+                                                                    .to_string()
+                                                            } else {
+                                                                format!("任务描述第 {i} 行")
+                                                            }
+                                                        })
                                                         .collect(),
                                                     task_description: vec![
                                                         "击杀 稻草人 3/3".to_string(),
