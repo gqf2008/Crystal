@@ -889,3 +889,262 @@ fn e2e_attack_flow() {
         assert!(!rx.is_closed(), "Channel should remain open");
     });
 }
+
+// ============================================================
+// #2824：观战镜像回归（C# PlayerObject.BroadcastObservePackets 7 类）
+// ============================================================
+
+/// 等待指定 opcode 的包到达；超时返回 false。用于观察者通道断言。
+async fn wait_opcode(rx: &mut RxChannel, opcode: i16, secs: u64) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    while tokio::time::Instant::now() < deadline {
+        let remaining = deadline - tokio::time::Instant::now();
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(data)) if data.len() >= 4 => {
+                if i16::from_le_bytes([data[2], data[3]]) == opcode {
+                    return true;
+                }
+            }
+            Ok(Some(_)) => continue,
+            // 超时或通道关闭
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// 目标玩家转身后，其观察者应收到 ObjectTurn 镜像（#2573 链路 + #2824 回归防护）。
+///
+/// 红检：删除 `WorldTurnRequest` 里的 `mirror_to_observers` 调用 →
+/// `observer should receive mirrored ObjectTurn` 断言 FAILED。
+#[test]
+fn e2e_observe_mirrors_target_turn() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        // 目标(11) / 观察者(12) 共用一个 gate
+        let gate_ref = GateActor::spawn(());
+        let (tx11, mut rx11) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx12, mut rx12) = mpsc::unbounded_channel::<Vec<u8>>();
+        for (sid, tx) in [(11u64, tx11), (12u64, tx12)] {
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: sid,
+                    sender: tx,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+        }
+
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+        let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+        let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+        async fn login(
+            gate_ref: &GateActorRef,
+            session_id: u64,
+            rx: &mut RxChannel,
+            username: &str,
+        ) {
+            let cv_body = {
+                let mut b = Vec::new();
+                let hash = b"test";
+                b.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+                b.extend_from_slice(hash);
+                b
+            };
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                        &cv_body,
+                    ),
+                })
+                .await;
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::NewAccount as i16,
+                        &[],
+                    ),
+                })
+                .await;
+            let mut lb = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut lb, username);
+            let _ = mir2_shared::binary::write_dotnet_string(&mut lb, "testpass");
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Login as i16,
+                        &lb,
+                    ),
+                })
+                .await;
+            let ok = mir2_shared::enums::ServerPacketIds::LoginSuccess as i16;
+            assert!(wait_opcode(rx, ok, 3).await, "session {session_id} login");
+        }
+
+        async fn start_game(
+            gate_ref: &GateActorRef,
+            session_id: u64,
+            rx: &mut RxChannel,
+            char_name: &str,
+        ) {
+            let mut nc_body = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, char_name);
+            nc_body.push(0u8);
+            nc_body.push(0u8);
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                        &nc_body,
+                    ),
+                })
+                .await;
+            let ncs = mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16;
+            assert!(
+                wait_opcode(rx, ncs, 3).await,
+                "session {session_id} NewCharacterSuccess"
+            );
+
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                        &0i32.to_le_bytes().to_vec(),
+                    ),
+                })
+                .await;
+            let sg = mir2_shared::enums::ServerPacketIds::StartGame as i16;
+            assert!(
+                wait_opcode(rx, sg, 5).await,
+                "session {session_id} StartGame"
+            );
+        }
+
+        login(&gate_ref, 11, &mut rx11, "obstarget").await;
+        // 观察者只登录、不进图：这样它不在 `players` 里，目标的转身**同图广播**不会发给它，
+        // 观察者收到的 ObjectTurn 只可能来自观战镜像链路（C# 跨图观察者的等价场景）。
+        login(&gate_ref, 12, &mut rx12, "obsviewer").await;
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 100,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        start_game(&gate_ref, 11, &mut rx11, "ObsTarget").await;
+
+        // 目标开启 AllowObserve（C# 客户端命令 @ALLOWOBSERVE）
+        let mut cmd_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut cmd_body, "@ALLOWOBSERVE");
+        cmd_body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id: 11,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Chat as i16,
+                    &cmd_body,
+                ),
+            })
+            .await;
+        let allow = mir2_shared::enums::ServerPacketIds::AllowObserve as i16;
+        assert!(
+            wait_opcode(&mut rx11, allow, 3).await,
+            "target AllowObserve ack"
+        );
+
+        // 观察者发起 Observe（目标名）
+        let mut observe_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut observe_body, "ObsTarget");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id: 12,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Observe as i16,
+                    &observe_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode(&mut rx12, allow, 3).await,
+            "observer should get AllowObserve(true) after observing"
+        );
+
+        // 目标转身 → 观察者应收到 ObjectTurn 镜像
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id: 11,
+                data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::Turn as i16, &[2u8]),
+            })
+            .await;
+        let turn = mir2_shared::enums::ServerPacketIds::ObjectTurn as i16;
+        assert!(
+            wait_opcode(&mut rx12, turn, 3).await,
+            "observer should receive mirrored ObjectTurn"
+        );
+    });
+}
