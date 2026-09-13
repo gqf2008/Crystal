@@ -103,6 +103,25 @@ impl SpellObject {
     }
 }
 
+/// #2855：C# 起始延迟（`DelayedAction(DelayedType.Spawn, Envir.Time + start, ob)`）的等价折算——
+/// 对象在 `start_delay_ms` 之后才存在，其寿命从"对象存在"起算（`ExpireTime = Envir.Time + duration + start`），
+/// 且生成后首跳立即结算（`SpellObject.StartTime = 0`）。
+///
+/// 本端对象在创建时即物化，故：
+/// - `expires_ms = start_delay_ms + duration_ms`（相对创建时刻的总寿命）
+/// - `last_tick_shift_ms = start_delay_ms - tick_ms`（把 `last_tick` 前移/后移，使首跳恰好落在 `start_delay_ms`；
+///   为负表示 `last_tick` 落在创建时刻之前）
+pub(crate) fn delayed_spell_timing(
+    start_delay_ms: u64,
+    duration_ms: u64,
+    tick_ms: u64,
+) -> (u64, i64) {
+    (
+        start_delay_ms + duration_ms,
+        start_delay_ms as i64 - tick_ms as i64,
+    )
+}
+
 /// 法术参数配置
 struct SpellConfig {
     spell: mir2_shared::enums::Spell,
@@ -249,6 +268,22 @@ pub fn spell_cells_for(spell: mir2_shared::enums::Spell, x: i32, y: i32) -> Vec<
 mod tests {
     use super::spell_cells_for;
     use mir2_shared::enums::Spell;
+
+    /// #2855：起始延迟折算——总寿命 = start + duration；`last_tick` 偏移 = start - tick
+    #[test]
+    fn delayed_spell_timing_matches_csharp() {
+        // 无延迟：总寿命 = duration，last_tick 前移一个节拍（首跳落在 tick_ms）
+        assert_eq!(super::delayed_spell_timing(0, 2000, 2000), (2000, -2000));
+        assert_eq!(super::delayed_spell_timing(0, 6000, 1000), (6000, -1000));
+        // HellLord 震击：start = Random(5000)、duration 2000、tick 500
+        assert_eq!(super::delayed_spell_timing(0, 2000, 500), (2000, -500));
+        assert_eq!(super::delayed_spell_timing(4999, 2000, 500), (6999, 4499));
+        // HornedCommander 落石：start = 500 + Random(0,200)、duration = loops*500+500、tick 2000
+        assert_eq!(super::delayed_spell_timing(500, 3000, 2000), (3500, -1500));
+        assert_eq!(super::delayed_spell_timing(699, 5500, 2000), (6199, -1301));
+        // start > tick：last_tick 落在创建时刻之后（首跳仍在 start）
+        assert_eq!(super::delayed_spell_timing(5000, 1000, 500), (6000, 4500));
+    }
 
     #[test]
     fn firewall_cells_cross() {

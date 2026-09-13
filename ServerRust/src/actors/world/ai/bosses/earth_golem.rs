@@ -107,6 +107,7 @@ impl MonsterBehavior for EarthGolemBehavior {
                         caster_session: 0,
                         cells: Vec::new(),
                         show: true,
+                        start_delay_ms: 0,
                     });
             }
             return;

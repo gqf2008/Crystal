@@ -125,6 +125,10 @@ pub struct SpellFieldSpawn {
     pub cells: Vec<(i32, i32)>,
     /// #2849：是否广播 `S.ObjectSpell` 视觉（C# `SpellObject.Show`——大面积伤害域里只有"锚点格"可见）
     pub show: bool,
+    /// #2855：起始延迟（ms）——C# 用 `DelayedAction(DelayedType.Spawn, Envir.Time + start, ob)` 让对象
+    /// 在 `start` 之后才存在，其寿命从"对象存在"起算（`ExpireTime = Envir.Time + duration + start`）。
+    /// 本端物化时把首跳推迟到 `start_delay_ms`，并把寿命设为 `start_delay_ms + duration_ms`。0 = 立即生成。
+    pub start_delay_ms: u64,
 }
 
 /// 召唤物生成（Boss 召唤小怪）

@@ -214,6 +214,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
                                     // C# `SpawnRockSpike`：`Show = location.X == x && location.Y == y`
                                     // ——25 格里只有锚点格对客户端可见（其余是纯伤害域）
                                     show: dx == 0 && dy == 0,
+                                    start_delay_ms: 0,
                                 });
                         }
                     }
@@ -262,9 +263,11 @@ impl MonsterBehavior for HornedCommanderBehavior {
                         });
                     // #2849：C# `MassSpawnRockFall(front, rockFallDuration)`（HornedCommander.cs:356-412）——
                     // 以 front 为中心、锚点间距 10 的 3×3 网格，每锚点铺 ±10 格（21×21）落石伤害域：
-                    // 值 = MC（每格独立 roll，C# :391）、500ms 起始延迟、2s 一跳、持续 rockFallDuration。
+                    // 值 = MC（每格独立 roll，C# :391）、2s 一跳、持续 rockFallDuration。
                     // `Show` 只给锚点格（其余为纯伤害域）——本端用「1 个对象 + cells 面积」表示一个锚点，
                     // 与 C# 每格一个对象在伤害与可见性上等价。
+                    // #2855：C# `start = 500 + Random(0,200)`（`:393`）——对象延迟生成，故本端把首跳推迟
+                    // `500 + Random(0,200)`ms，并把寿命按 `duration + start` 延长（见 `SpellFieldSpawn.start_delay_ms`）。
                     for (ax, ay) in ROCK_FALL_ANCHOR_OFFSETS {
                         let sx = fx + ax;
                         let sy = fy + ay;
@@ -286,6 +289,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
                                 caster_session: 0,
                                 cells: rock_fall_area_cells(sx, sy),
                                 show: true,
+                                start_delay_ms: 500 + fastrand::u64(0..200),
                             });
                     }
                     return;

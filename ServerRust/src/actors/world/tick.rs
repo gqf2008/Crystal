@@ -10878,6 +10878,9 @@ impl Message<Tick> for WorldActor {
                     .get(&sf.caster_oid)
                     .map(|m| m.map_index)
                     .unwrap_or(0);
+                // #2855：C# 起始延迟语义（`Map.cs` DelayedType.Spawn）——总寿命 = start + duration
+                let (expires_ms, last_tick_shift_ms) =
+                    spell::delayed_spell_timing(sf.start_delay_ms, sf.duration_ms, sf.tick_ms);
                 let mut spell_obj = spell::SpellObject::new(
                     oid,
                     sf.spell,
@@ -10886,7 +10889,7 @@ impl Message<Tick> for WorldActor {
                     map_index,
                     sf.x,
                     sf.y,
-                    sf.duration_ms,
+                    expires_ms,
                     sf.value,
                     sf.tick_ms,
                     1,
@@ -10894,6 +10897,14 @@ impl Message<Tick> for WorldActor {
                 );
                 // #2849：大面积伤害域（C# 每格一个 SpellObject 的等价聚合）
                 spell_obj.cells = sf.cells.clone();
+                // #2855：起始延迟——把首跳推迟到 `start_delay_ms`（C# 对象在 start 后才存在、生成后首跳立即结算，
+                // `SpellObject.StartTime = 0`），后续仍按 `tick_ms` 节拍
+                let now = std::time::Instant::now();
+                spell_obj.last_tick = if last_tick_shift_ms >= 0 {
+                    now + std::time::Duration::from_millis(last_tick_shift_ms as u64)
+                } else {
+                    now - std::time::Duration::from_millis((-last_tick_shift_ms) as u64)
+                };
                 self.spell_objects.insert(oid, spell_obj);
                 // #2849：可见性（C# `SpellObject.Show`）——只给"锚点格/单格"广播 ObjectSpell 视觉
                 if sf.show {
