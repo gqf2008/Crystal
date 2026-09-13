@@ -178,6 +178,9 @@ struct ControlQueries<'w, 's> {
         (With<GroundItem>, Without<LocalPlayer>),
     >,
     dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Visibility)>,
+    /// #2791：`hero_manage` 是状态驱动窗（不经 `DialogManager.open`，见 dialogs/mod.rs
+    /// 的 `DialogKind::HeroManage`），RPC 直接切 `HeroState.managing`
+    hero: ResMut<'w, crate::game::dialogs::hero::HeroState>,
     map_cameras: Query<
         'w,
         's,
@@ -502,7 +505,7 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
 
 /// snake_case 对话框名 → DialogKind（#2586）。
 ///
-/// 覆盖除 `GuestTrade` 外的全部 44 个变体（`DialogKind` 共 45 个）——
+/// 覆盖除 `GuestTrade` 外的全部 45 个变体（`DialogKind` 共 46 个）——
 /// `GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs），无独立开关语义，
 /// 故不做 RPC 映射（调用会回 unknown dialog kind）。
 /// 另有 2 个历史别名（#2599 移除 M9 占位空壳后保留工具兼容）：
@@ -562,6 +565,9 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "skills" => D::Skills,
         // #2720：C# `ItemRentalDialog`（浏览已租出物品）
         "item_rental_browse" => D::ItemRentalBrowse,
+        // #2791：C# `HeroManageDialog`（`S.ManageHeroes` 弹出的英雄管理窗；RPC 直接切
+        // `HeroState.managing`，见 `apply_control_commands` 的 `ControlCommand::Dialog` 分支）
+        "hero_manage" => D::HeroManage,
         _ => return None,
     })
 }
@@ -617,7 +623,8 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Market
         | D::ItemRentalBrowse
         | D::Storage
-        | D::Skills => true,
+        | D::Skills
+        | D::HeroManage => true,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
         D::GuestTrade => false,
     }
@@ -637,7 +644,7 @@ fn apply_control_commands(
     mut cursor_probe: ResMut<CursorProbe>,
     mut player_menu: ResMut<crate::game::player_menu::PlayerMenuState>,
     mut page_res: ResMut<crate::game::dialogs::character::CharPage>,
-    q: ControlQueries,
+    mut q: ControlQueries,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
@@ -686,10 +693,23 @@ fn apply_control_commands(
                     .observe(save_to_disk(path));
             }
             ControlCommand::Dialog { kind, action } => {
-                match action {
-                    DialogAction::Open => mgr.open(kind),
-                    DialogAction::Close => mgr.close(kind),
-                    DialogAction::Toggle => mgr.toggle(kind),
+                // #2791：英雄管理窗由业务状态驱动（C# `HeroManageDialog.Show()`），
+                // 不进 `DialogManager.open`——RPC 直接切 `HeroState.managing`
+                if kind == DialogKind::HeroManage {
+                    match action {
+                        DialogAction::Open => q.hero.managing = true,
+                        DialogAction::Close => {
+                            q.hero.managing = false;
+                            q.hero.confirm_slot = None;
+                        }
+                        DialogAction::Toggle => q.hero.managing = !q.hero.managing,
+                    }
+                } else {
+                    match action {
+                        DialogAction::Open => mgr.open(kind),
+                        DialogAction::Close => mgr.close(kind),
+                        DialogAction::Toggle => mgr.toggle(kind),
+                    }
                 }
                 tracing::info!("🎮 control dialog: {kind:?} -> open={}", mgr.is_open(kind));
             }
@@ -974,6 +994,7 @@ mod tests {
             "storage",
             "skills",
             "item_rental_browse",
+            "hero_manage",
         ];
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
@@ -986,11 +1007,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 47);
+        assert_eq!(all.len(), 48);
         assert_eq!(
             uniq.len(),
-            45,
-            "47 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 45 个不同变体"
+            46,
+            "48 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 46 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(
