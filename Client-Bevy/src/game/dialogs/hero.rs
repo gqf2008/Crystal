@@ -260,6 +260,7 @@ fn spawn_hero(
     mut fonts: ResMut<Assets<Font>>,
     mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -330,7 +331,17 @@ fn spawn_hero(
                 Visibility::Hidden,
             ))
             .with_children(|c| {
-                spawn_label(c, &font, "英雄已阵亡·点击复活", 0.0, 4.0, 12.0, Color::srgb(1.0, 0.4, 0.4), 11);
+                // #2775：中文标签用共享宋体（Arial 会豆腐，批17 同因）
+                spawn_label(
+                    c,
+                    &cjk,
+                    "英雄已阵亡·点击复活",
+                    0.0,
+                    4.0,
+                    12.0,
+                    Color::srgb(1.0, 0.4, 0.4),
+                    11,
+                );
             });
         // 自动药阈值（C# HeroInventoryDialog HPButton/MPButton，Title 560/563）
         spawn_label(p, &cjk, "自动药:", 20.0, 220.0, 12.0, Color::WHITE, 10);
@@ -351,15 +362,39 @@ fn spawn_hero(
         spawn_label(p, &cjk, "", 84.0, 220.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 10)
             .insert(HeroAutoPotLabel);
         // 英雄背包/装备/技能 文本按钮（打开对应对话框）
-        for (x, y, marker, text) in [
-            (20.0, 250.0, "inv", "英雄背包"),
-            (130.0, 250.0, "eq", "英雄装备"),
-            (20.0, 280.0, "skill", "英雄技能"),
+        // #2775：Hint 取 C# `HeroDialogs.cs:429/445/407`（HeroInventoryButton/HeroEquipmentButton/
+        // HeroMagicsButton），文案模板「背包 ({0})/角色 ({0})/技能 ({0})」带 Hero* 键位
+        let open_key = |action: &str| {
+            crate::game::dialogs::keyboard_layout::binding_text_for(&kb.bindings, action)
+        };
+        for (x, y, marker, text, hint) in [
+            (
+                20.0,
+                250.0,
+                "inv",
+                "英雄背包",
+                format!("背包 ({})", open_key("英雄背包")),
+            ),
+            (
+                130.0,
+                250.0,
+                "eq",
+                "英雄装备",
+                format!("角色 ({})", open_key("英雄装备")),
+            ),
+            (
+                20.0,
+                280.0,
+                "skill",
+                "英雄技能",
+                format!("技能 ({})", open_key("英雄技能")),
+            ),
         ] {
             let mut cmds = spawn_container(p, x, y, 90.0, 18.0, 10);
             cmds.insert((
                 Button,
                 BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                crate::ui::tooltip::UiHint { text: hint },
             ));
             if marker == "inv" {
                 cmds.insert(HeroOpenInventory);
@@ -369,7 +404,17 @@ fn spawn_hero(
                 cmds.insert(HeroOpenSkill);
             }
             cmds.with_children(|c| {
-                spawn_label(c, &font, text, 0.0, 3.0, 12.0, Color::srgb(0.8, 0.9, 1.0), 11);
+                // #2775：同上，按钮文案是中文
+                spawn_label(
+                    c,
+                    &cjk,
+                    text,
+                    0.0,
+                    3.0,
+                    12.0,
+                    Color::srgb(0.8, 0.9, 1.0),
+                    11,
+                );
             });
         }
     });

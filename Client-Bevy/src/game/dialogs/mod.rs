@@ -905,6 +905,9 @@ impl Plugin for DialogsPlugin {
                 // #2771：bevy UI 按钮（`spawn_icon_button`）的通用 Hint 通道
                 crate::ui::tooltip::ui_hint_system,
                 crate::ui::tooltip::tooltip_panel_system,
+                // #2775：面板已改 bevy_ui 节点，描边副本内容需在其写入之后同步
+                crate::ui::outlined_text::sync_outline_ui_system
+                    .after(crate::ui::tooltip::tooltip_panel_system),
             )
                 .run_if(in_state(AppState::Game)),
         );

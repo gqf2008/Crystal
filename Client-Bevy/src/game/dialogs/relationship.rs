@@ -71,6 +71,19 @@ enum RelationshipAction {
     Whisper,
 }
 
+/// #2775：C# `RelationshipDialog.cs:59/72/94/116/138` 五个按钮的 Hint 文案。
+/// （AllowButton 的 Hint 在 C# 里还会随婚配状态改写：已婚=允许/阻止结婚（`:237`）、
+/// 未婚=允许/阻止回忆（`:243`）——本批先落静态默认，动态改写见后续单元。）
+fn relationship_hint(action: RelationshipAction) -> &'static str {
+    match action {
+        RelationshipAction::Allow => "允许/阻止结婚",
+        RelationshipAction::Propose => "请求结婚",
+        RelationshipAction::Divorce => "请求离婚",
+        RelationshipAction::Mail => "发送邮件给伴侣",
+        RelationshipAction::Whisper => "发送悄悄话给伴侣",
+    }
+}
+
 #[derive(Component)]
 pub struct RelationshipLine(usize);
 
@@ -188,6 +201,7 @@ fn spawn_relationship(
                 ));
             });
         // C# 五个操作按钮：切换/求婚/离婚/邮件/私聊 @ x=50/85/120/155/190, y=164。
+        // #2775：Hint 取 C# `RelationshipDialog.cs:59/72/94/116/138`（精灵号与坐标一一对应）
         let buttons = [
             (50.0, 610usize, 611usize, 612usize, RelationshipAction::Allow),
             (85.0, 600, 601, 602, RelationshipAction::Propose),
@@ -202,6 +216,9 @@ fn spawn_relationship(
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, pressed),
             ) {
                 let mut e = spawn_icon_button(p, n, h, pr, x, 164.0, 24.0, 22.0, 10);
+                e.insert(crate::ui::tooltip::UiHint {
+                    text: relationship_hint(action).to_string(),
+                });
                 match action {
                     RelationshipAction::Allow => {
                         e.insert(RelationshipAllow);

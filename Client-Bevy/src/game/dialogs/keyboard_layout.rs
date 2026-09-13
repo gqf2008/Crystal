@@ -106,6 +106,42 @@ pub fn key_name(key: KeyCode) -> String {
 /// KeyBinds.ini 路径（对齐 C# KeyBindSettings：.\KeyBinds.ini）
 const KEYBINDS_PATH: &str = "./KeyBinds.ini";
 
+/// #2775：Hint 里的键位显示串，等价 C# `KeyBindSettings.GetKey`（`KeyBindSettings.cs:383-405`）：
+/// 修饰键按 Alt → Ctrl → Shift → `~` 顺序、`Require*==1`（必须按住）才算，最后接键名，
+/// 全部用 `" + "` 连接（C# 结果是 `Ctrl + S` 这种带空格的写法）。
+pub fn binding_key_text(b: &KeyBinding) -> String {
+    let mut out = String::new();
+    let mut push = |s: &str, out: &mut String| {
+        if !out.is_empty() {
+            out.push_str(" + ");
+        }
+        out.push_str(s);
+    };
+    if b.require_alt == 1 {
+        push("Alt", &mut out);
+    }
+    if b.require_ctrl == 1 {
+        push("Ctrl", &mut out);
+    }
+    if b.require_shift == 1 {
+        push("Shift", &mut out);
+    }
+    if b.require_tilde == 1 {
+        push("~", &mut out);
+    }
+    push(&key_name(b.key), &mut out);
+    out
+}
+
+/// #2775：按动作名查绑定表并渲染键位串（供 Hint 拼接）；找不到返回空串。
+pub fn binding_text_for(bindings: &[KeyBinding], action: &str) -> String {
+    bindings
+        .iter()
+        .find(|b| b.action == action)
+        .map(binding_key_text)
+        .unwrap_or_default()
+}
+
 /// KeyCode Debug 名 → KeyCode（覆盖默认键位 + 常用键；未知返回 None）
 fn key_code_from_name(name: &str) -> Option<KeyCode> {
     use KeyCode::*;
@@ -1047,6 +1083,33 @@ mod tests {
         );
     }
 
+    /// #2775：Hint 键位串按 C# `KeyBindSettings.GetKey`（`KeyBindSettings.cs:383-405`）拼接
+    #[test]
+    fn binding_key_text_matches_csharp_getkey() {
+        let ctrl_s = KeyBinding::new_mod("英雄技能", "界面", KeyCode::KeyS, 1, 2, 2);
+        assert_eq!(binding_key_text(&ctrl_s), "Ctrl + S");
+        let plain = KeyBinding::new("拾取", "交互", KeyCode::Tab);
+        assert_eq!(binding_key_text(&plain), "Tab", "无限定键直接给键名");
+        // C# `RequireCtrl = 0`（禁止按住）不得拼 Ctrl（腰带关闭键即此例）
+        let forbid_ctrl = KeyBinding::new_mod("腰带", "界面", KeyCode::KeyZ, 0, 2, 2);
+        assert_eq!(binding_key_text(&forbid_ctrl), "Z");
+        // 修饰顺序按 C# GetKey：Alt → Ctrl → Shift → 键
+        let combo = KeyBinding::new_mod("退出", "系统", KeyCode::KeyQ, 1, 1, 1);
+        assert_eq!(binding_key_text(&combo), "Alt + Ctrl + Shift + Q");
+    }
+
+    /// #2775：默认表里 Hero 三键与腰带键的实际串（决定 Hint 文案）
+    #[test]
+    fn binding_text_for_hero_and_belt() {
+        let b = default_bindings();
+        assert_eq!(binding_text_for(&b, "英雄技能"), "Ctrl + S");
+        assert_eq!(binding_text_for(&b, "英雄背包"), "Ctrl + I");
+        assert_eq!(binding_text_for(&b, "英雄装备"), "Ctrl + C");
+        assert_eq!(binding_text_for(&b, "腰带"), "Z");
+        assert_eq!(binding_text_for(&b, "没有这个动作"), "");
+    }
+
+    /// #2595：文本输入聚焦时对话框热键让路——字母键（背包2=I）不触发，
     /// #2595：文本输入聚焦时对话框热键让路——字母键（背包2=I）不触发，
     /// F 键（背包=F9）按 C# ChatTextBox_KeyDown 转发表（MainDialogs.cs:1160-1185）仍触发，
     /// 门关时字母键恢复触发。回归：去掉 blocked 守卫则第 1/3 断言变红。

@@ -13,7 +13,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel, ImageButton};
 
 /// 排名条目（服务端 Rankings 包）
@@ -121,14 +121,13 @@ fn spawn_ranking(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut libs: ResMut<GameLibraries>,
     ranking: Res<RankingState>,
 ) {
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // 面板内文案全是中文：#2775 与批17 同因（Arial 无 CJK 且 parley 的 Hani 回退只在
+    // 实体首次排版生效）——本窗原先整屏豆腐，改用共享宋体主字体。
+    let font = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // bevy_ui 面板 Title[728]（324x441 @ 200,150）——bevy_ui 迁移样板
     let Some(bg) = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 728) else {
@@ -159,15 +158,18 @@ fn spawn_ranking(
             9,
         );
         // 页签（C# RankingDialog：All/War/Wiz/Tao/Sin/Arch）
-        let tabs: [(u8, &str); 6] = [
-            (0, "全部"),
-            (1, "战士"),
-            (2, "法师"),
-            (3, "道士"),
-            (4, "刺客"),
-            (5, "弓手"),
+        // #2775：Hint 逐项取 C# `RankingDialog.cs:65/89/101/77/113/125` 的文案
+        //（AllButton=总榜前 20、WarButton=战士前 20、WizButton=法师前 20、TaoButton=道士前 20、
+        // SinButton=刺客前 20、ArchButton=弓箭手前 20；C# `SelectRank(i)` 的 i 即此处 RankingTab 值）
+        let tabs: [(u8, &str, &str); 6] = [
+            (0, "全部", "总榜前 20"),
+            (1, "战士", "战士前 20"),
+            (2, "法师", "法师前 20"),
+            (3, "道士", "道士前 20"),
+            (4, "刺客", "刺客前 20"),
+            (5, "弓手", "弓箭手前 20"),
         ];
-        for (i, (t, label)) in tabs.iter().enumerate() {
+        for (i, (t, label, hint)) in tabs.iter().enumerate() {
             crate::ui::theme::spawn_label(
                 p,
                 &font,
@@ -178,7 +180,13 @@ fn spawn_ranking(
                 Color::srgb(0.8, 0.9, 1.0),
                 9,
             )
-            .insert((RankingTab(*t), Button));
+            .insert((
+                RankingTab(*t),
+                Button,
+                crate::ui::tooltip::UiHint {
+                    text: (*hint).to_string(),
+                },
+            ));
         }
         // 上一页 / 下一页
         crate::ui::theme::spawn_label(
