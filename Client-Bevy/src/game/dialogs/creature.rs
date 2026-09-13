@@ -134,6 +134,11 @@ struct CreatureSummary;
 #[derive(Component)]
 struct CreatureMessage;
 
+/// C# `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行（@(19,161)/(19,176)/(19,191)）：
+/// `0`=拾取能力（`CanPickupItems`）、`1`=产黑石、`2`=产珍珠买召唤兽物品。
+#[derive(Component)]
+struct CreatureInfoLine(u8);
+
 pub struct CreaturePlugin;
 
 impl Plugin for CreaturePlugin {
@@ -256,8 +261,8 @@ fn creature_slot_label(creature: &CreatureEntry, selected: bool) -> String {
     out
 }
 
-/// C# `CreatureInfo`/`CreatureInfo1`（@19,161 / @19,176）承载选中宠物信息的等价物：
-/// Bevy 合并为一行「数量 + 选中宠物名/拾取模式/饥饿度」。
+/// Bevy 扩展行（C# 无对应控件）：宠物数量 + 选中宠物名/拾取模式/饥饿度，
+/// 放在面板底部空档（5x2 宠物槽之下），不占用 C# 的 (19,161)/(19,176)/(19,191) 三行信息位。
 fn creature_summary_text(count: usize, selected: Option<&CreatureEntry>) -> String {
     let mut text = format!("宠物: {} 个", count);
     if let Some(c) = selected {
@@ -273,6 +278,62 @@ fn creature_summary_text(count: usize, selected: Option<&CreatureEntry>) -> Stri
         ));
     }
     text
+}
+
+/// C# `IntelligentCreatureDialogs.cs:729-730` 的两段拼接：`semi`、`mouse`。
+///
+/// 含原版三处怪癖，逐字复刻（`SemiAutoPickupEnabled=false` 时两段皆空）：
+/// - `semi` 的「NxN」用的是 **`AutoPickupRange`**（不是 `SemiAutoPickupRange`）；
+///   后缀依次是 `auto/`（仅 `AutoPickupEnabled`）、`semi-auto`、`, `（仅 `MousePickupEnabled`）。
+/// - `mouse` 段只由 `SemiAutoPickupEnabled` 决定，**与 `MousePickupEnabled` 无关**——
+///   只开 Semi 的宠物（C# `BabyPig`/`Kitten`，`MousePickupRange=0`）会渲染出 `0x0 mouse`。
+/// - 于是未开 `MousePickupEnabled` 时两段直接相接（缺 `, ` 分隔符），如
+///   `可以拾取物品（0x0 semi-auto0x0 mouse）。`。
+fn creature_pickup_parts(rules: &IntelligentCreatureRules) -> (String, String) {
+    if !rules.semi_auto_pickup_enabled {
+        return (String::new(), String::new());
+    }
+    let auto_prefix = if rules.auto_pickup_enabled {
+        "auto/"
+    } else {
+        ""
+    };
+    let separator = if rules.mouse_pickup_enabled { ", " } else { "" };
+    let semi = format!(
+        "{}x{} {}{}{}",
+        rules.auto_pickup_range, rules.auto_pickup_range, auto_prefix, "semi-auto", separator,
+    );
+    let mouse = format!(
+        "{}x{} mouse",
+        rules.mouse_pickup_range, rules.mouse_pickup_range
+    );
+    (semi, mouse)
+}
+
+/// C# `CreatureInfo`(@19,161)/`CreatureInfo1`(@19,176)/`CreatureInfo2`(@19,191) 三行文案
+/// （`IntelligentCreatureDialogs.cs:733-735`）。文案取自 `Client/Localization/Chinese.json`：
+/// `CanPickupItems`（含 `{0}{1}` 两个占位）、`CanProduceBlackStones`、
+/// `CanProducePearlsBuyCreatureItems`（后两行仅在 `CanProduceBlackStone` 时非空）。
+/// 未选中宠物时三行皆空——C# `RefreshUI` 另置 `Visible=false`，Bevy 下空文本同样不绘制。
+fn creature_info_texts(selected: Option<&CreatureEntry>) -> [String; 3] {
+    let Some(c) = selected else {
+        return [String::new(), String::new(), String::new()];
+    };
+    let (semi, mouse) = creature_pickup_parts(&c.rules);
+    let blackstone = c.rules.can_produce_black_stone;
+    [
+        format!("可以拾取物品（{semi}{mouse}）。"),
+        if blackstone {
+            "可以产出黑石。".to_string()
+        } else {
+            String::new()
+        },
+        if blackstone {
+            "可以产出珍珠，用于购买召唤兽物品。".to_string()
+        } else {
+            String::new()
+        },
+    ]
 }
 
 fn spawn_creature(
@@ -309,9 +370,14 @@ fn spawn_creature(
         ) {
             spawn_icon_button(p, n, h, pr, 427.0, 3.0, 24.0, 21.0, 10).insert(CreatureClose);
         }
-        // C# 顶部信息行：摘要 + 操作反馈。
-        spawn_label(p, &cjk, "", 19.0, 161.0, 12.0, Color::WHITE, 9).insert(CreatureSummary);
-        spawn_label(p, &cjk, "", 19.0, 176.0, 12.0, Color::WHITE, 9).insert(CreatureMessage);
+        // C# 三行信息（`CreatureInfo`/`CreatureInfo1`/`CreatureInfo2`，@19,161/176/191）
+        for (i, y) in [(0u8, 161.0), (1, 176.0), (2, 191.0)] {
+            spawn_label(p, &cjk, "", 19.0, y, 12.0, Color::WHITE, 9).insert(CreatureInfoLine(i));
+        }
+        // Bevy 扩展行（C# 无对应控件）：紧随 C# 三行信息之后的同间距第四行（191+15=206）放数量
+        // 摘要；操作反馈放按钮行与宠物槽之间的空档（DISMISS/RELEASE 底 242，宠物槽顶 259）。
+        spawn_label(p, &cjk, "", 19.0, 206.0, 12.0, Color::WHITE, 9).insert(CreatureSummary);
+        spawn_label(p, &cjk, "", 19.0, 243.0, 12.0, Color::WHITE, 9).insert(CreatureMessage);
         // C# CreatureButton 5x2 网格：x=44+81*col，y=259/299。
         for i in 0..10usize {
             let (sx, sy, _, _) = creature_slot_rect(i, 0.0, 0.0);
@@ -480,7 +546,11 @@ fn creature_ui_system(
     mut widgets: Query<&mut Visibility, With<CreatureWidget>>,
     mut lines: Query<
         (&mut Text, &CreatureLine),
-        (Without<CreatureSummary>, Without<CreatureMessage>),
+        (
+            Without<CreatureSummary>,
+            Without<CreatureMessage>,
+            Without<CreatureInfoLine>,
+        ),
     >,
     mut summary: Query<
         &mut Text,
@@ -488,6 +558,7 @@ fn creature_ui_system(
             With<CreatureSummary>,
             Without<CreatureLine>,
             Without<CreatureMessage>,
+            Without<CreatureInfoLine>,
         ),
     >,
     mut messages: Query<
@@ -496,6 +567,16 @@ fn creature_ui_system(
             With<CreatureMessage>,
             Without<CreatureLine>,
             Without<CreatureSummary>,
+            Without<CreatureInfoLine>,
+        ),
+    >,
+    // C# `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行文案（#2757）
+    mut info_lines: Query<
+        (&mut Text, &CreatureInfoLine),
+        (
+            Without<CreatureLine>,
+            Without<CreatureSummary>,
+            Without<CreatureMessage>,
         ),
     >,
     mut requested: Local<bool>,
@@ -567,6 +648,11 @@ fn creature_ui_system(
     }
     if let Ok(mut text) = messages.single_mut() {
         text.0 = state.message.clone();
+    }
+    // C# `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2`（`DrawCreatureAnimation`:733-735）
+    let info = creature_info_texts(selected.as_ref());
+    for (mut text, line) in &mut info_lines {
+        text.0 = info.get(line.0 as usize).cloned().unwrap_or_default();
     }
     for (e, inter) in &refresh_btn {
         if edge(e, inter, &mut prev_inter) {
@@ -1233,7 +1319,7 @@ mod layout_tests {
         assert_eq!(creature_slot_label(&creature, false), "#12");
     }
 
-    /// 选中宠物的模式/饥饿度在信息行（C# CreatureInfo 位），不再塞进槽位。
+    /// Bevy 扩展行：选中宠物的模式/饥饿度摘要（不占用 C# 三行信息位）。
     #[test]
     fn creature_summary_reports_selected_pet() {
         assert_eq!(creature_summary_text(0, None), "宠物: 0 个");
@@ -1242,5 +1328,81 @@ mod layout_tests {
         creature.pickup_mode = 1;
         creature.hunger = 42;
         assert_eq!(creature_summary_text(1, Some(&creature)), "宠物: 1 个 ｜ 小狗 半自动 饥饿:42");
+    }
+
+    fn entry_with_rules(rules: IntelligentCreatureRules) -> CreatureEntry {
+        CreatureEntry {
+            rules,
+            ..Default::default()
+        }
+    }
+
+    /// #2757：C# `CreatureInfo`（`CanPickupItems` 两个占位）逐字复刻——含 semi 串用
+    /// `AutoPickupRange`、mouse 串只在 `SemiAutoPickupEnabled` 时产出的两处原版怪癖。
+    #[test]
+    fn creature_info_pickup_text_matches_csharp() {
+        // C# `Chick` 行：Auto 7 + Mouse 11 → "7x7 auto/semi-auto, " + "11x11 mouse"
+        let chick = entry_with_rules(IntelligentCreatureRules {
+            mouse_pickup_enabled: true,
+            mouse_pickup_range: 11,
+            auto_pickup_enabled: true,
+            auto_pickup_range: 7,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 7,
+            can_produce_black_stone: true,
+            ..Default::default()
+        });
+        let info = creature_info_texts(Some(&chick));
+        assert_eq!(info[0], "可以拾取物品（7x7 auto/semi-auto, 11x11 mouse）。");
+        assert_eq!(info[1], "可以产出黑石。");
+        assert_eq!(info[2], "可以产出珍珠，用于购买召唤兽物品。");
+
+        // C# `BabyPig` 行：只开 Semi 3（Auto 关闭 → 无 `auto/`；Mouse 关闭 → 无 `, ` 分隔符，
+        // 但 `mouse` 段仍按 `SemiAutoPickupEnabled` 产出 → `0x0 semi-auto0x0 mouse`）
+        let pig = entry_with_rules(IntelligentCreatureRules {
+            minimal_fullness: 4000,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 3,
+            ..Default::default()
+        });
+        let info = creature_info_texts(Some(&pig));
+        assert_eq!(info[0], "可以拾取物品（0x0 semi-auto0x0 mouse）。");
+        assert_eq!(info[1], "");
+        assert_eq!(info[2], "");
+    }
+
+    /// #2757：`SemiAutoPickupEnabled=false`（C# 表中无对应的本端独有类型）→ semi/mouse 两段皆空，
+    /// 模板仍渲染「可以拾取物品（）。」；未选中宠物时三行全空。
+    #[test]
+    fn creature_info_empty_cases() {
+        let none = entry_with_rules(IntelligentCreatureRules {
+            minimal_fullness: 1000,
+            ..Default::default()
+        });
+        let info = creature_info_texts(Some(&none));
+        assert_eq!(info[0], "可以拾取物品（）。");
+        assert_eq!((info[1].as_str(), info[2].as_str()), ("", ""));
+
+        let no_selection = creature_info_texts(None);
+        assert_eq!(no_selection, [String::new(), String::new(), String::new()]);
+    }
+
+    /// #2757：mouse 段仅在置位时出现（`BabyDragon` 行 Mouse 7 / Auto 5 / Semi 5）。
+    #[test]
+    fn creature_info_mouse_range_uses_its_own_range() {
+        let dragon = entry_with_rules(IntelligentCreatureRules {
+            minimal_fullness: 7000,
+            mouse_pickup_enabled: true,
+            mouse_pickup_range: 7,
+            auto_pickup_enabled: true,
+            auto_pickup_range: 5,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 5,
+            ..Default::default()
+        });
+        assert_eq!(
+            creature_info_texts(Some(&dragon))[0],
+            "可以拾取物品（5x5 auto/semi-auto, 7x7 mouse）。"
+        );
     }
 }
