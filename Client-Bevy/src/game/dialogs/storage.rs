@@ -15,8 +15,8 @@ use bevy::prelude::*;
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{
-    InvClickState, InvDropConfirm, InvItem, InvUiState, ItemUseFeedback, UseItemCtx, UseOutcome,
-    inv_slot_at, item_use_sound_id, use_item_core,
+    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, InvItem,
+    InvLockReason, InvLockedSlots, InvUiState, ItemUseFeedback, LockGrid, UseItemCtx, UseOutcome,
 };
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -130,6 +130,7 @@ impl Plugin for StoragePlugin {
             (
                 storage_grid_sync_system,
                 storage_ui_system,
+                storage_locked_icon_system,
                 storage_action_system,
                 storage_tooltip_system,
                 storage_pwd_system,
@@ -426,6 +427,17 @@ fn storage_ui_system(
 }
 
 /// 仓库交互：选中+点击 存入/取出（原版 C# MirItemCell 拖放语义）
+///
+/// C# `MirItemCell` 的存入/取出目标选择：点击格为空 → 用它；否则取该网格**首个空格**
+/// （`MirItemCell.cs:1360-1379` 存入、:1069-1090 取出）。返回 `None` = 目标网格已满。
+pub fn store_target_slot<T>(items: &[Option<T>], clicked: usize) -> Option<usize> {
+    if items.get(clicked).map(|s| s.is_none()).unwrap_or(false) {
+        Some(clicked)
+    } else {
+        items.iter().position(|s| s.is_none())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn storage_action_system(
     mut state: ResMut<StorageState>,
@@ -450,6 +462,7 @@ fn storage_action_system(
     inv_origin: Res<crate::game::dialogs::inventory::InventoryOrigin>,
     mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
     mut last_storage_click: Local<Option<(usize, f64)>>,
     panel_origin: Query<&Node, With<StorageWidget>>,
 ) {
@@ -477,7 +490,8 @@ fn storage_action_system(
         })
         .unwrap_or((DIALOG_X, DIALOG_Y));
     let player = player_q.single().ok();
-    let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len(), ox, oy);
+    let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len(), ox, oy)
+        .filter(|i| !locked.is_locked_in(LockGrid::Storage, *i));
     let inv_slot = inv_slot_at(
         cursor.x,
         cursor.y,
@@ -486,7 +500,8 @@ fn storage_action_system(
             .map(|(inv, _, _, _, _, _)| inv.items.len())
             .unwrap_or(0),
         (inv_origin.0, inv_origin.1),
-    );
+    )
+    .filter(|i| !locked.is_locked_in(LockGrid::Inventory, *i));
 
     // #1546：仓库格双击 → 装备（C# MirItemCell.OnMouseDoubleClick → UseItem；消耗品要求 Grid==Inventory/HeroInventory 故仓库拦截）
     let now = time.elapsed_secs_f64();
@@ -552,11 +567,20 @@ fn storage_action_system(
     // #2631：选中态归 inventory 所有，经 selected() 读、clear_selected() 清（存入后不再保留）
     if let Some(from) = inv_click.selected() {
         if let Some(to) = storage_slot {
+            // C# `MirItemCell.cs:1360-1379`：目标格空则用它，否则取仓库首个空格；
+            // 发包后 `StorageDialog.Grid[to].Locked = true` + `SelectedCell.Locked = true`，
+            // `S.StoreItem`（GameScene.cs:2737-2752）回包把两格都解锁。
+            let Some(to) = store_target_slot(&state.items, to) else {
+                tracing::warn!("📦 仓库已满，无法存入");
+                return;
+            };
             inv_click.clear_selected();
             net.send_packet(&mir2_shared::packets::client::item::StoreItem {
                 from: from as i32,
                 to: to as i32,
             });
+            locked.lock_in(InvLockReason::Storage, LockGrid::Storage, to);
+            locked.lock_in(InvLockReason::Storage, LockGrid::Inventory, from);
             tracing::info!("📦 存入仓库 {} -> {}", from, to);
             state.selected = None;
             return;
@@ -566,10 +590,19 @@ fn storage_action_system(
     // 2) 选中了仓库物品 → 点背包格：取出（原版 C# SelectedCell Storage → Inventory 拖放）
     if let Some(from) = state.selected {
         if let Some(to) = inv_slot {
+            // C# `MirItemCell.cs:1069-1090`：目标格空则用它，否则取背包首个空格；
+            // 发包后 `temp.Locked = true`（目标背包格）+ `SelectedCell.Locked = true`（仓库来源格），
+            // `S.TakeBackItem`（GameScene.cs:2720-2735）回包解锁两格。
+            let Some(to) = player.and_then(|(inv, ..)| store_target_slot(&inv.items, to)) else {
+                tracing::warn!("📦 背包已满，无法取出");
+                return;
+            };
             net.send_packet(&mir2_shared::packets::client::item::TakeBackItem {
                 from: from as i32,
                 to: to as i32,
             });
+            locked.lock_in(InvLockReason::Storage, LockGrid::Inventory, to);
+            locked.lock_in(InvLockReason::Storage, LockGrid::Storage, from);
             tracing::info!("📦 取出仓库 {} -> {}", from, to);
             state.selected = None;
             inv_click.clear_selected(); // #2631：经接口清（互斥）
@@ -596,6 +629,25 @@ fn storage_action_system(
     }
 }
 
+/// 锁定仓库格灰化（C# `MirItemCell.DrawControl`：`Locked` → `Color.DimGray` × 0.8；
+/// 与背包 `inv_locked_icon_system` 同一着色规则，`LOCKED_ITEM_COLOR` 单一来源）。
+/// 通过 `ChildOf → StorageSlot` 映射，只作用于仓库格（其它对话框的 UiItemCellIcon 跳过）。
+fn storage_locked_icon_system(
+    locked: Res<InvLockedSlots>,
+    slots: Query<&StorageSlot>,
+    mut icons: Query<(&ChildOf, &mut ImageNode), With<UiItemCellIcon>>,
+) {
+    for (child_of, mut node) in &mut icons {
+        let Ok(slot) = slots.get(child_of.parent()) else {
+            continue;
+        };
+        let want = locked.color_at(LockGrid::Storage, slot.0);
+        if node.color != want {
+            node.color = want;
+        }
+    }
+}
+
 /// 消费服务端仓库事件（网络层只广播 ServerEvent；仓库/背包打开逻辑归本模块）
 /// #2633 批次4 步9：ItemStored/ItemTakenBack 移动背包格直接写 `Inventory` 组件（HudState 已删）。
 fn storage_server_events(
@@ -607,6 +659,7 @@ fn storage_server_events(
     // 根+格双重 +dx 会把背包推出屏幕——评审 P0）
     mut inv_entities: Query<(&mut Node, &DialogRoot), With<crate::game::dialogs::inventory::InventoryPanel>>,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
+    mut locked: ResMut<InvLockedSlots>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -684,6 +737,8 @@ fn storage_server_events(
         }
         if let ServerEvent::ItemStored { from, to, success } = ev {
             // #512：C# S.StoreItem —— 背包 -> 仓库（success 时移动物品）
+            // #2747+：C# `GameScene.StoreItem`（:2737-2752）回包同时解锁 `fromCell`/`toCell`
+            locked.unlock_all(InvLockReason::Storage);
             if *success {
                 let (fi, ti) = (*from as usize, *to as usize);
                 if let Ok(mut inv) = inv_q.single_mut() {
@@ -703,6 +758,8 @@ fn storage_server_events(
         }
         if let ServerEvent::ItemTakenBack { from, to, success } = ev {
             // #512：C# S.TakeBackItem —— 仓库 -> 背包（success 时移动物品）
+            // C# `GameScene.TakeBackItem`（:2720-2735）回包解锁 `fromCell`/`toCell`
+            locked.unlock_all(InvLockReason::Storage);
             if *success {
                 let (fi, ti) = (*from as usize, *to as usize);
                 if let Ok(mut inv) = inv_q.single_mut() {
@@ -1024,6 +1081,51 @@ mod tests {
         }
     }
 
+    /// #2747+：C# `MirItemCell` 存入/取出的目标格选择 —— 点击格空则用它，否则取首个空格；
+    /// 全满返回 None（`MirItemCell.cs:1360-1379` / :1069-1090）。
+    #[test]
+    fn store_target_slot_matches_csharp() {
+        let items = vec![Some(1u8), None, Some(3)];
+        // 点击格为空 → 用它
+        assert_eq!(store_target_slot(&items, 1), Some(1));
+        // 点击格被占用 → 首个空格
+        assert_eq!(store_target_slot(&items, 0), Some(1));
+        // 越界点击视同占用 → 首个空格
+        assert_eq!(store_target_slot(&items, 99), Some(1));
+        // 全满 → None
+        let full = vec![Some(1u8), Some(2)];
+        assert_eq!(store_target_slot(&full, 0), None);
+    }
+
+    /// #2747+：仓库存入回包（`S.StoreItem`）按 C# `GameScene.StoreItem` 解锁来源/目标两格
+    /// —— 覆盖 `InvLockReason::Storage` 在 `LockGrid::Storage` 与 `LockGrid::Inventory` 两侧的锁。
+    #[test]
+    fn store_receipt_releases_grid_locks() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        app.update();
+        {
+            let mut locked = app.world_mut().resource_mut::<InvLockedSlots>();
+            locked.lock_in(InvLockReason::Storage, LockGrid::Storage, 2);
+            locked.lock_in(InvLockReason::Storage, LockGrid::Inventory, 7);
+            // 其它来源不受影响
+            locked.lock_in(InvLockReason::Craft, LockGrid::Inventory, 1);
+        }
+        app.world_mut().write_message(ServerEvent::ItemStored {
+            from: 7,
+            to: 2,
+            success: false,
+        });
+        app.update();
+        let locked = app.world().resource::<InvLockedSlots>();
+        assert!(!locked.is_locked_in(LockGrid::Storage, 2));
+        assert!(!locked.is_locked_in(LockGrid::Inventory, 7));
+        assert!(
+            locked.is_locked_in(LockGrid::Inventory, 1),
+            "Craft 来源的锁不受仓储回包影响"
+        );
+    }
+
     fn storage_test_app() -> App {
         use crate::network::server_event::ServerEvent;
         let mut app = App::new();
@@ -1031,6 +1133,8 @@ mod tests {
         app.add_message::<ServerEvent>();
         app.init_resource::<StorageState>();
         app.init_resource::<DialogManager>();
+        // #2747+：storage_server_events 回包解锁仓储锁 → 需该资源
+        app.init_resource::<InvLockedSlots>();
         app.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
         app.add_systems(Update, storage_server_events);
         app
