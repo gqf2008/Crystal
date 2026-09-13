@@ -48,7 +48,7 @@
 | 物品格 | `ui/theme.rs::UiItemCell` | `MirItemCell.cs` | 左/右键、双击、拖放、tooltip | 批3 |
 | 商品格 | 各商店/市场模块 | `MirGoodsCell.cs` / `MirGameShopCell.cs` | 选择、购买、价格 | 批4 |
 | 滚动列表 | `ui/scroll_list.rs::UiScrollList` | `MirControl` 滚动子控件 | 滚轮、拖动条、翻页 | 批1 |
-| Tooltip | `ui/tooltip.rs` | `MirLabel` / Hint | 悬停、描边、避让屏幕 | 批1 |
+| Tooltip | `ui/tooltip.rs`（sprite-UI `TooltipHint` + bevy-UI `UiHint` 双通道） | `MirLabel` / Hint | 悬停、描边、避让屏幕 | 批1 / 批18 |
 | 消息框 | `ui/modal_box.rs` | `MirMessageBox.cs` / `MirInputBox.cs` | Yes/No/OK、输入、模态 | 批1 |
 | 页签 | 各对话框 `*Tab*` 组件 | 各 C# Dialog 页签按钮 | 切换页、选中态 | 批2-6 |
 | 对话框拖动/置顶 | `game/dialogs/mod.rs` | `MirControl.OnMouseMove` / BringToFront | 拖动、钳制、层级 | 批1 |
@@ -157,11 +157,12 @@
 | 批15 宠物规则 + Creature 信息行 | 服务端移植 C# `IntelligentCreatureInfo` 静态表并随 `UpdateIntelligentCreatureList` 下发规则；客户端 `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行按 C# 文案与 (19,161)/(19,176)/(19,191) 落地 | #2758 #2759 #2760 |
 | 批16 Creature 面板剩余控件 | 列表包补 `icon/fullness/expire/blackstone` + C# 尾部三字段（召唤态/召唤种类/玩家珍珠数）；完整度条 + 黑石条 + 刻度与悬停；槽位图标/选中框；`CreatureName`/`CreatureDeadline`/`CreaturePearls`；面板宠物动画（帧表 + 8 秒交替）与「已召唤其它种类」按钮态 | #2762 #2763 #2764 #2765 |
 | 批17 悬停提示闭环 + Hint 覆盖 | 控制接口加光标探针（`cursor` RPC）+ `nearby` 带视口坐标，把「自动化无光标」的复现障碍做进产品；修提示框 CJK 豆腐字（Arial → 共享宋体主字体）；补技能栏格 `SkillMpCooldownKey` 与大地图（搜索NPC/队友名）Hint，时间格式收进 `game::time_format` | #2768 #2769 #2770 |
+| 批18 悬停提示长尾（一） | 玩家右键菜单 5 项 Hint + 新增 `KeybindOptions.Trade`（按 C# 默认 T，热键发 `C.TradeRequest`；租赁扩展键让位改 `;`）；修菜单字体豆腐与菜单项顺序；新增**通用按钮 Hint 通道**（`UiHint`/`ui_hint_system`，沿 `ChildOf` 累加求绝对原点）并补 Mail/Group/Friend 三窗按钮 Hint | #2772 #2773 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：456 lib + 2 bin + 1 smoke + 24 alignment 通过（批17 单元② 后基线）。
+- `cargo test`（Client-Bevy）：459 lib + 2 bin + 1 smoke + 24 alignment 通过（批18 单元② 后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：673 lib + 6 integration 通过（批16 单元① 后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -204,6 +205,9 @@
 - 批17 光标探针 + 悬停闭环（2026-09-13，`--auto-enter` + Control API，截图转 JPG）：控制接口新增 `cursor {x,y}` / `cursor {clear:true}`，`nearby` 每条实体带 `vp`（世界→逻辑视口）。用探针驱动真实悬停链路：`bevy2char` 视口 `(560,384)`、探针 `(570,354)` 命中 → 头顶显示「bevy2char」（黄标题 + 白行）；负控把探针移到 `(10,10)` → 同区域 65.9% 像素变化、均值亮度 57→92（提示消失）。
 - 批17 提示框字体修正（2026-09-13）：提示框文本原用 `UiFont`(Arial)，parley 的 Hani 回退只在实体首次排版生效 → 悬停换文本后退化成豆腐字（#2599 同类），实机把「怪物5」渲染成「□□5」。改用共享宋体主字体（`shared_cjk_font`，与 NPC/公告等动态文本一致）后正确显示「怪物5」/「bevy2char」。
 - 批17 Hint 补齐实机复验（2026-09-13，同上，截图转 JPG）：技能栏（`Mir2Config.ini` `Skillbar0X=220` → 格 0 中心 UI (247,14)）探针命中后显示「攻杀剑术 / 魔法值: 4 / 冷却时间: 0.0s / 键位: F1」；大地图搜索按钮（面板局部 (39,479)）显示「搜索NPC」；负控移开探针后技能栏提示区 36.9% 像素变化、均值亮度 78.3→91.3（提示消失）。队友名提示因 mock 无队伍数据未实机触发，命中半径与同图过滤由单测覆盖。
+- 批18 玩家菜单 Hint 实机复验（2026-09-13，`--auto-enter` + 新增控制接口 `player_menu {object_id}` 打开右键菜单，截图转 JPG）：探针依次悬停显示「邀请加入队伍 / 添加到好友列表 / 发送邮件 / 交易 (T) / 观战」（末项键位按 C# `MainDialogs.cs:2296` 拼接）；负控移开探针后菜单提示消失。过程中实机发现并修掉两个真 bug：菜单项文案整体豆腐（与批17 同源：Arial 的 Hani 回退只在实体首次排版生效）与菜单项顺序错乱（原先按 ECS `Query` 迭代序自增索引，改为 `PlayerMenuOption{action,index}` 按生成序取值）。
+- 批18 通用按钮 Hint 实机复验（2026-09-13，同上，截图转 JPG）：Mail「读取/发送/删除」、Group「允许/拒绝队伍请求/添加/移除」、Friend「添加/移除/备注/邮件/悄悄话」在真实悬停链路下均正确显示。首个版本「取同 `DialogKind` 的第一个根面板算绝对原点」在 Group 上整体错位（该 kind 同时存在邀请确认框与主面板），改沿 `ChildOf` 链累加各级 `Node.left/top` 后命中正确。
+- 批18 门禁（2026-09-13）：`player_menu_hint`（5 项文案 + 键位拼接）、`ui_hint_hit_covers_rect_and_borders`（绝对矩形命中，边界含等号）、交易键位默认表 + 热键发 `C.TradeRequest`、租赁键位归还分号键；红检：把 `ui_hint_hit` 边界临时改成 `>`/`<` →「左上角含边界」断言如期 FAILED，还原 `>=`/`<=` 后 PASS。
 
 ## 7. 已知有意偏差
 
@@ -219,7 +223,8 @@
 - 背包格锁定（`MirItemCell.Locked`，批12 单元2 + 批13 单元1 + 批14）：Craft `SelectedCell`（`AutoFill` 逐格锁定、`ResetCells()` 解锁）、装备 `C.EquipItem`（`S.EquipItem` 解锁）、拆分 `C.SplitItem`（`S.SplitItem1` 解锁）、镶嵌/钓具坐骑槽 `C.EquipSlotItem`（`S.EquipSlotItem` 解锁）、交易所寄售选物 `tempCell`（换物/切页签/关窗/`S.ConsignItem` 解锁）、仓库存入/取出（`C.StoreItem`/`C.TakeBackItem` → `S.StoreItem`/`S.TakeBackItem` 解锁，含 C# 的「点击格空则用它、否则首个空格」目标选择）、交易存入/取回（`C.DepositTradeItem`/`RetrieveTradeItem` → `S.*` 解锁；取回改为「回包成功才清槽」）七类已对齐；锁按 `(InvLockReason, LockGrid, index)` 三元组存放（`LockGrid::{Inventory,Belt,HeroInventory,HeroBelt,Storage,Trade}`），故「背包格 3」与「仓储格 3」互不影响，图标按 `Color::srgba_u8(105,105,105,204)`（= `Color.DimGray` × 0.8）灰化且锁定格不响应点击。
 - 腰带来源的锁在 Bevy **无对应物**（不是未实现）：C# 治疗品消耗后走 `C.MoveItem` 从背包补入腰带格（`MirItemCell.cs:556-599`）并锁来源背包格；Bevy 的腰带是 `PotionBeltState` 里的 **unique_id 虚拟槽**（`belt_restock_events` 直接换 uid，不发包、不占背包格），既没有在途请求也就无需锁定。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
-- ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `T`）并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。
+- ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `;`（分号））并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。批18 前该扩展键是 `T`，因批18 按 C# `KeyBindSettings.cs:340` 补上 `KeybindOptions.Trade`（默认 `T`）而让位到分号键。
+- 键位：宠物模式——C# `KeybindOptions.PetmodeBoth`/`PetmodeMoveonly`/`PetmodeAttackonly`/`PetmodeNone`/`PetmodeFocusMasterTarget`（`KeyBindSettings.cs:361-369`）默认 `Keys.None`（无键），Bevy 同样未绑定这 5 个；只有 `ChangePetmode`（C# 默认 Ctrl+A，`GameScene.cs:782-784`）在 Bevy 为 Ctrl+T（#1562：A 已用于相机平移）。
 - ItemRent：`Prguse[238]` 面板位图**自带**右上角关闭图样（C# 四窗都画得到），但只有自有窗挂了可点关闭键（`Prguse2[360..362]`）——C# `GuestItemRentDialog`/`GuestItemRentingDialog` 本身没有 `closeButton`，Bevy 同样只在自有窗挂 `ItemRentalClose`，对方窗的 X 是装饰。
 - ItemRent：`S.UpdateRentalItem` 除 C# 的 `HasData`+`LoanItem` 外仍带 `rental_fee`/`rental_period`（Rust 扩展，客户端只在 >0 时用作兜底刷新）；`S.CanConfirmItemRental`/`S.ConfirmItemRental` 在 C# 是空包，Rust 端口带 `can_confirm`/`success` 载荷（自洽偏离，双方均为 Rust 实现）。
 - ItemRent：C# 租客侧的合计费用在服务端 `SetItemRentalFee` 里即时扣金币（`S.LoseGold`）；Rust 服务端到 `ConfirmItemRental` 成交时才扣，客户端费用标签两侧都由本地/对包数值驱动，显示一致。
@@ -237,4 +242,4 @@
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
 - Craft：`CraftButton` 的 `Enabled`/`GrayScale` 已按 C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）对齐：未选配方或任一工具/材料槽未就位 → 按钮灰度且点击不触发（构造默认即 `GrayScale=true, Enabled=false`）；超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略。
 - Mail：C# `BlockListButton`/`BugReportButton`（MailDialogs.cs:257-283，`Prguse[520]` @(183,414) / `Prguse[523]` @(210,414) 28x25）构造即 `GrayScale = true, Enabled = false` 且无 Click 处理（`AllowDisabledMouseOver` 默认 false，连 Hint 都不弹）；批13 单元3 已按原坐标补这两个灰度占位图（不含交互）。
-- 悬停提示（`MirControl.Hint`）覆盖长尾：C# 侧 `Hint = ` 约 190 处，批17 已补**技能栏格**（`SkillMpCooldownKey`）与**大地图**（`SearchButton`「搜索NPC」、队友光点名字）两处；已对齐的还有 HUD 主按钮（8 个，含键位）、物品/商品/角色格（`item_tooltip_lines`）、头顶名字（玩家/怪物/NPC）。**仍未接 Hint 的**：聊天频道/设置按钮（`MainDialogs.cs:1275-1445`）、图标栏与技能页格（`:1695` 附近的技能格已补，但技能页 `CharacterDialog` 的魔法格未接）、玩家右键菜单（`:2232-2303` 邀请入队/加好友/发邮件/交易/观察）、`LoverButton`（`:2502` 显示配偶名）、音量条（`:2844` 显示百分比）、Friend/Group/GuildTerritory/Hero/Mail/Ranking/Relationship/Mentor 各对话框按钮（约 40 处）、`BuffDialog` 增益图标（`BuffString`/`CombinedBuffText`，需移植按 `BuffType` 分派的文案表）。这些属同一机制的长尾，留待后续批次（盘点清单见 #2767）。
+- 悬停提示（`MirControl.Hint`）覆盖长尾：C# 侧 `Hint = ` 约 190 处，批17 已补**技能栏格**（`SkillMpCooldownKey`）与**大地图**（`SearchButton`「搜索NPC」、队友光点名字）两处；已对齐的还有 HUD 主按钮（8 个，含键位）、物品/商品/角色格（`item_tooltip_lines`）、头顶名字（玩家/怪物/NPC）。批18 再补**玩家右键菜单**（`:2232-2303` 五项，末项「交易 (T)」按 C# 拼键位）、**Mail**（发送/读取/删除）、**Group**（允许拒绝队伍请求/添加/移除）、**Friend**（添加/移除/备注/邮件/悄悄话）——这批按钮是 bevy UI `Button` 而不是 sprite-UI `UiButton`，为此新增**通用按钮 Hint 通道**（`UiHint` + `ui_hint_system`，其 source=8；原 `TooltipHint`/source=1 只认 `UiButton.rect`），命中用「沿 `ChildOf` 链累加各级 `Node.left/top` 的绝对矩形」，因此同一 `DialogKind` 有多个根面板（如 Group 邀请确认框）也不会错位。**仍未接 Hint 的**：聊天频道/设置按钮（`MainDialogs.cs:1275-1445`）、图标栏与技能页格（`:1695` 附近的技能格已补，但技能页 `CharacterDialog` 的魔法格未接）、`LoverButton`（`:2502` 显示配偶名）、音量条（`:2844` 显示百分比）、GuildTerritory/Hero/Ranking/Relationship/Mentor 各对话框按钮、`BuffDialog` 增益图标（`BuffString`/`CombinedBuffText`，需移植按 `BuffType` 分派的文案表）。这些属同一机制的长尾，留待后续批次（盘点清单见 #2767）。
