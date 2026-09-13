@@ -6,5 +6,6 @@ pub fn normalized_monster_name(name: &str) -> String {
 }
 pub mod config;
 pub mod ini;
+pub mod tasks;
 pub mod validation;
 pub mod wire;

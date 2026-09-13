@@ -7903,21 +7903,30 @@ impl Actor for WorldActor {
 
         // 启动主循环
         let tick_ref = actor_ref.clone();
-        tokio::spawn(async move {
+        // #2606：tick 循环是 kameo 之外的裸任务 → 登记 + 可被关闭信号唤醒
+        crate::util::tasks::spawn("world.tick_loop", async move {
+            let shutdown = crate::util::tasks::shutdown_signal();
             let mut interval = interval(Duration::from_millis(args.tick_interval_ms));
             loop {
-                interval.tick().await;
-                let _ = tick_ref.ask(Tick).await;
-                let _ = tick_ref.ask(ProcessDelayedActions).await;
-                let _ = tick_ref.ask(ProcessElementalTick).await;
-                let _ = tick_ref.ask(ProcessDeathCallbacks).await;
+                tokio::select! {
+                    _ = shutdown.cancelled() => {
+                        tracing::info!("World tick loop stopped by server shutdown");
+                        return;
+                    }
+                    _ = interval.tick() => {
+                        let _ = tick_ref.ask(Tick).await;
+                        let _ = tick_ref.ask(ProcessDelayedActions).await;
+                        let _ = tick_ref.ask(ProcessElementalTick).await;
+                        let _ = tick_ref.ask(ProcessDeathCallbacks).await;
+                    }
+                }
             }
         });
 
         // #2384：启动时归档长期未登录角色（C# AccountInfo.Load 归档超期角色）
         let archive_ref = actor_ref.clone();
         let archive_months = args.archive_inactive_after_months;
-        tokio::spawn(async move {
+        crate::util::tasks::spawn("world.archive_inactive", async move {
             let _ = archive_ref
                 .ask(crate::actors::world::ArchiveInactiveCharacters {
                     months: archive_months,
@@ -9989,7 +9998,7 @@ pub(crate) fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u6
     body.push(mir2_shared::enums::ChatType::System as u8); // ChatType::System=5（SharedRust 枚举与 C# 差 3）
     let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
     let gate_ref = gate_ref.clone();
-    tokio::spawn(async move {
+    crate::util::tasks::spawn("world.system_message", async move {
         let _ = gate_ref
             .tell(SendToClient {
                 session_id,
@@ -10026,7 +10035,7 @@ fn send_item_via_mail(
     // Fire and forget — we're likely in a tick handler
     let pool = db_pool.clone();
     let receiver = receiver_name.to_string();
-    tokio::spawn(async move {
+    crate::util::tasks::spawn("world.mail_insert", async move {
         if let Err(e) = db::insert_mail(&pool, &receiver, &mail).await {
             warn!("Failed to send item via mail to {}: {}", receiver, e);
         }
@@ -10048,7 +10057,7 @@ fn broadcast_chat(
     let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
     let gate_ref = gate_ref.clone();
     let session_ids: Vec<u64> = players.keys().copied().collect();
-    tokio::spawn(async move {
+    crate::util::tasks::spawn("world.broadcast_chat", async move {
         for session_id in session_ids {
             let _ = gate_ref
                 .tell(SendToClient {
