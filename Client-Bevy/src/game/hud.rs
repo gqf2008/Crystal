@@ -1122,7 +1122,7 @@ pub fn hud_orb_bottom_text(max_hp: i32, max_mp: i32) -> String {
 }
 
 /// C# Gold.ToString("###,###,##0")：三位分节千分位（1234567→"1,234,567"）
-fn format_gold(n: u32) -> String {
+pub(crate) fn format_gold(n: u32) -> String {
     let s = n.to_string();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {

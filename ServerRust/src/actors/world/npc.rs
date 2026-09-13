@@ -3758,6 +3758,9 @@ pub(crate) fn send_game_shop_catalog(
                 stock: s.stock,
                 is_bought: false,
                 deal: false,
+                // #2791 单元②：fallback 目录无开关数据，与购买分支一致视为双币均可
+                can_buy_credit: true,
+                can_buy_gold: true,
             })
             .collect()
     } else {
@@ -3773,6 +3776,9 @@ pub(crate) fn send_game_shop_catalog(
                 stock: s.stock,
                 is_bought: false,
                 deal: s.deal,
+                // #2791 单元②：C# GameShopItem.CanBuyCredit/CanBuyGold（DB 列）
+                can_buy_credit: s.can_buy_credit,
+                can_buy_gold: s.can_buy_gold,
             })
             .collect()
     };

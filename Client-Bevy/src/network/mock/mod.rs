@@ -724,11 +724,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                 }
                                 // #512：仓库存取（C# S.StoreItem/TakeBackItem 回执闭环）
-                                // #557：商城（C# GameshopDialog；wire [item_id u32][quantity u32]）
+                                // #557：商城（C# GameshopDialog）。#2791 单元②：wire 对齐 C#
+                                // `C.GameshopBuy` = `[g_index i32][quantity u8][p_type i32]`
+                                // （此前按 [item_id u32][quantity u32] 读，把 quantity/p_type 读错）
                                 x if x == ClientPacketIds::GameshopBuy as i16 => {
                                     use byteorder::{LittleEndian, ReadBytesExt};
-                                    let item_id = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                                    let quantity = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let item_id = cur.read_i32::<LittleEndian>().unwrap_or(0) as u32;
+                                    let quantity = cur.read_u8().unwrap_or(0) as u32;
+                                    let p_type = cur.read_i32::<LittleEndian>().unwrap_or(-1);
                                     if item_id == 0 {
                                         // 请求目录 → GameShopInfo + GameShopStock
                                         send(
@@ -745,17 +748,23 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                         stock: 99,
                                                         is_bought: false,
                                                         deal: false,
+                                                        // #2791 单元②：仅金币可购（积分价 0）
+                                                        can_buy_credit: false,
+                                                        can_buy_gold: true,
                                                     },
                                                     server::special_systems::GameShopItem {
                                                         item_index: 221,
                                                         gold_price: 100,
-                                                        credit_price: 0,
+                                                        // #2791 单元②：双币可购（积分价 50）
+                                                        credit_price: 50,
                                                         count: 1,
                                                         class: 0,
                                                         category: "武器".to_string(),
                                                         stock: 10,
                                                         is_bought: false,
                                                         deal: false,
+                                                        can_buy_credit: true,
+                                                        can_buy_gold: true,
                                                     },
                                                 ],
                                                 credit: 0,
@@ -774,9 +783,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         // 购买 → 物品邮件送达（sender=GameShop）
                                         send(&to_client, &MockGameshopMail);
                                         tracing::info!(
-                                            "🛒 [MOCK] 商城购买 #{} x{} 邮件送达",
+                                            "🛒 [MOCK] 商城购买 #{} x{}（付款 {}）邮件送达",
                                             item_id,
-                                            quantity
+                                            quantity,
+                                            p_type
                                         );
                                     }
                                 }
