@@ -18,7 +18,8 @@ use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
 use crate::network::codec;
 
-mod packets;
+// #2757：`pub(crate)` 以便 `handle_progress` 的测试直接解码 mock 包（校验 mock 与解析器同一 wire）
+pub(crate) mod packets;
 mod send;
 mod state;
 

@@ -4,9 +4,12 @@
 // 网络（ServerRust 实际 wire）：
 //   C: RequestIntelligentCreatureUpdates[bool u8] / UpdateIntelligentCreature[type u8][pickup u8]
 //   S: UpdateIntelligentCreatureList[count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]
+//     [active u8][filter 9×u8][grade u8][rules: minimal i32][mouse u8][mouseR i32][auto u8]
+//     [autoR i32][semi u8][semiR i32][blackstone u8]（#2757 起，字段顺序见 `IntelligentCreatureRules`）
 // ============================================================================
 
 use bevy::prelude::*;
+use mir2_shared::data::client_data::IntelligentCreatureRules;
 
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -33,6 +36,11 @@ pub struct CreatureEntry {
     pub filter: [u8; 9],
     /// 品质
     pub grade: u8,
+    /// #2757 宠物规则（C# `IntelligentCreatureRules`，随 `UpdateIntelligentCreatureList` 下发）。
+    /// 直接复用 `mir2_shared` 类型与其 `read_from`，与 ServerRust 侧 `write_to` 单一来源，
+    /// 避免两端各写一份字段顺序（用于渲染 `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行，
+    /// C# `DrawCreatureAnimation`:727-735）。
+    pub rules: IntelligentCreatureRules,
 }
 
 /// 宠物状态
