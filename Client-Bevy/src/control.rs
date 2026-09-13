@@ -505,7 +505,7 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
 
 /// snake_case 对话框名 → DialogKind（#2586）。
 ///
-/// 覆盖除 `GuestTrade` 外的全部 45 个变体（`DialogKind` 共 46 个）——
+/// 覆盖除 `GuestTrade` 外的全部 47 个变体（`DialogKind` 共 48 个）——
 /// `GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs），无独立开关语义，
 /// 故不做 RPC 映射（调用会回 unknown dialog kind）。
 /// 另有 2 个历史别名（#2599 移除 M9 占位空壳后保留工具兼容）：
@@ -568,6 +568,9 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         // #2791：C# `HeroManageDialog`（`S.ManageHeroes` 弹出的英雄管理窗；RPC 直接切
         // `HeroState.managing`，见 `apply_control_commands` 的 `ControlCommand::Dialog` 分支）
         "hero_manage" => D::HeroManage,
+        // #2801：C# `QuestDetailDialog`（任务详情窗，`Prguse[960]`；由任务日记行左键打开，
+        // 也可由 RPC 直接开关以便实机取证）
+        "quest_detail" => D::QuestDetail,
         _ => return None,
     })
 }
@@ -624,7 +627,8 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::ItemRentalBrowse
         | D::Storage
         | D::Skills
-        | D::HeroManage => true,
+        | D::HeroManage
+        | D::QuestDetail => true,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
         D::GuestTrade => false,
     }
@@ -995,10 +999,11 @@ mod tests {
             "skills",
             "item_rental_browse",
             "hero_manage",
+            "quest_detail",
         ];
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
-        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 45 个变体，
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 48 个变体，
         // GuestTrade 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
         let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
         let uniq: Vec<&DialogKind> = {
@@ -1007,11 +1012,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 48);
+        assert_eq!(all.len(), 49);
         assert_eq!(
             uniq.len(),
-            46,
-            "48 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 46 个不同变体"
+            47,
+            "49 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 47 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(
