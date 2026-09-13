@@ -151,6 +151,7 @@
 | 批9 Creature 内部 | `Title[468]` 面板 + 5x2 宠物槽 + C# 操作按钮精灵/坐标 + 自动/半自动互斥 | #2718 |
 | 批10 Craft 外壳 | `Prguse[1109]` 面板 + C# 标签/按钮坐标（材料槽待配方协议扩展） | #2720 |
 | 批11 §7 偏差收口 | TrustMerchant 买/取回确认框；Creature 未选中按钮灰化；Craft 放入后锁定来源背包格；TrustMerchant 跨页累积排序 | #2737 #2738 #2739 #2740 |
+| 批12 §7 偏差收口（二） | 禁用态按 `grayscale.ps` 真灰度（含 Creature 自造灰化纠正）；背包格锁定覆盖装备/拆分/镶嵌/寄售 + 交易所推背包；拍卖出价改用 `MirAmountBox` | #2743 #2744 #2745 |
 
 ## 6. 验证基线
 
@@ -180,6 +181,7 @@
 - 批12 背包锁定门禁（2026-09-13）：`inv_lock_reasons_are_isolated`（Craft 收敛不动其它来源、同格多来源需全部解锁）、`inventory_events_release_source_locks`（`ItemEquipped`/`EquipSlotItemResult`/`SplitItem1Result` 分别解锁 Equip/Socket/Split，Craft/寄售不受影响）、`use_item_core_reports_source_lock_reason`（背包来源装备→Equip、仓库来源→不锁）、`inventory_shift_right_repositions_entities_and_origin`（新增 `InventoryPlaceAt` 复位断言）；红检：`unlock_all` 改空实现、`use_item_core` 不登记锁来源，两条断言分别如期失败。
 - 批12 拍卖出价数量框实机复验（2026-09-13，`--skip-login --market-buy` + Control API；选中拍卖行与按 BUY 用临时驱动注入 `Interaction::Pressed`、出价金额用注入 `AmountBoxResult`，验证后已删除）：数量框为 `Prguse[238]` 居中 204x109 + 标题「出价金额」+ 物品图标（`Items[853]`，@(15,34) 38x34）+ 默认值 `151`（= 当前价 150 + 1）+ OKAY/CANCEL；注入 200 后弹确认框「你确定要为#853出价200金币吗？」+ YES/NO，与 C# `MirAmountBox` → `MirMessageBox` 两步一致。
 - 批12 拍卖出价门禁（2026-09-13）：`market_buy_outcome_matches_csharp`（拍卖分支改为 `BidAmount`）、`market_bid_uses_amount_box_like_csharp`（默认/下限 = 当前价+1、金额确定后确认框文案与动作、低于下限钳制、取消不弹确认）；红检：把 `ask_with` 初值改回 `max` 忽略默认值 → 断言如期失败。
+- 批12 收尾三窗复验（2026-09-13，合并后单一进程 `--auto-enter --market-buy` + Control API 依次开 Market/Creature/Craft 截图）：Market = 两行（寄售 100 / 拍卖「100 出价」）+ 无选中时 BUY 仍为真灰度（均值 `(85.3,85.3,85.3)`、色度 0）+ 背包按 C# 推到 x=497 且第 3 格图标为原色 `(73.7,36.6,49.6)`（无残留锁）；Creature = PET STATUS 面板与操作列正常；Craft = `Prguse[1109]` 面板 + `CRAFT` 按钮灰度（AUTO 保持原色）。
 
 ## 7. 已知有意偏差
 
@@ -188,6 +190,7 @@
 - Creature：未选中宠物时按 C# `RefreshUI` 保留按钮但 `Enabled=false`；**禁用态外观与可用态相同**（C# `MirButton` 无 `DisabledIndex` 时 `Index` 回落 `base.Index`，且本对话框从不置 `GrayScale`），Bevy 已按此回退原色（此前用 `ImageNode.color` 暗化属自造视觉，批12 已纠正）。C# 「已召唤**其它种类**宠物」时 `SummonButton` 会切到 `Title[593..595]` 并禁用，Bevy 无该区分（按当前宠物的召唤状态处理）。
 - Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
+- Creature：C# `CreatureInfo`(19,161) = `CanPickupItems`（含 auto/semi-auto/mouse 拾取范围）、`CreatureInfo1`(19,176) = `CanProduceBlackStones`、`CreatureInfo2`(19,191) = `CanProducePearlsBuyCreatureItems`（后两条仅 `CreatureRules.CanProduceBlackStone` 为真时显示），另 `CreatureDeadline`/`CreatureMaintainFoodBuff` 显示到期与食物增益时间（IntelligentCreatureDialogs.cs:293-315 / 727-752）。**Bevy 暂以一行（19,161）承载「数量 + 选中宠物名/模式/饥饿度」**：这三行依赖 `IntelligentCreatureRules`（拾取范围/黑石产出）、到期与食物增益时间，而 Rust 服务端 `UpdateIntelligentCreatureList` 只发 `type/pickup/enabled/hunger/name/active/filter/grade`，`ServerRust::IntelligentCreature` 结构也没有这些字段 —— 需先做服务端宠物规则协议扩展，留待宠物系统批次（C# 文案键已确认：`CanPickupItems`/`CanProduceBlackStones`/`CanProducePearlsBuyCreatureItems`/`Expire`/`ExpireNever`/`FoodBuff`）。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
 - 背包格锁定（`MirItemCell.Locked`，批12 单元2）：Craft `SelectedCell`（`AutoFill` 逐格锁定、`ResetCells()` 解锁）、装备 `C.EquipItem`（`S.EquipItem` 解锁）、拆分 `C.SplitItem`（`S.SplitItem1` 解锁）、镶嵌/钓具坐骑槽 `C.EquipSlotItem`（`S.EquipSlotItem` 解锁）、交易所寄售选物 `tempCell`（换物/切页签/关窗/`S.ConsignItem` 解锁）五类已对齐，Bevy 按 `InvLockReason` 分组存放故互不干扰（`InvLockedSlots` + 图标 `Color.DimGray` + 锁定格不响应点击/选择）。残留偏差：C# 的 `DimGray` 还叠 0.8 不透明度（Bevy 只改图标色）；C# 移入腰带/仓库/交易等 `Grid` 来源的锁未实现（那些格不在玩家背包索引空间）。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
