@@ -2,14 +2,14 @@
 // actor 模块拆分（#72）
 // ============================================================================
 
-use bevy::prelude::*;
-use mir2_shared::MirAction;
-use crate::resources::libraries::ArrayLibType;
-use crate::objects::frames::get_player_frame;
-use crate::map_renderer::{FrontTile, TILE_HEIGHT, TILE_WIDTH};
 use super::components::*;
 use super::frames::{actor_frame, mount_lib_frames, mount_player_action};
 use super::spawn::depth_z;
+use crate::map_renderer::{FrontTile, TILE_HEIGHT, TILE_WIDTH};
+use crate::objects::frames::get_player_frame;
+use crate::resources::libraries::ArrayLibType;
+use bevy::prelude::*;
+use mir2_shared::MirAction;
 
 pub(crate) fn advance_actor_animations(
     time: Res<Time>,
@@ -64,8 +64,15 @@ pub(crate) fn advance_actor_animations(
         };
         if anim.frame_index == swing_frame && prev_frame != swing_frame {
             if let Some(monster) = monster {
-                if let Some(sound_id) = crate::game::sound::monster_swing_sound(monster.monster_type) {
-                    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                if let Some(sound_id) =
+                    crate::game::sound::monster_swing_sound(monster.monster_type)
+                {
+                    crate::game::sound::play_sound(
+                        &mut commands,
+                        &mut audio_assets,
+                        &sound_bank,
+                        sound_id,
+                    );
                 }
             }
         }
@@ -79,8 +86,15 @@ pub(crate) fn advance_actor_animations(
             };
             if let Some(left) = step_left {
                 if let Some(monster) = monster {
-                    if let Some(sound_id) = crate::game::sound::monster_walk_sound(monster.monster_type, left) {
-                        crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                    if let Some(sound_id) =
+                        crate::game::sound::monster_walk_sound(monster.monster_type, left)
+                    {
+                        crate::game::sound::play_sound(
+                            &mut commands,
+                            &mut audio_assets,
+                            &sound_bank,
+                            sound_id,
+                        );
                     }
                 }
             }
@@ -276,10 +290,7 @@ pub(crate) fn log_player_walk(local: Query<&Transform, With<LocalPlayer>>, mut f
 
 /// 角色 z 与脚底世界 Y 保持同步（移动/转向时深度正确）
 pub(crate) fn sync_actor_depth(
-    mut actors: Query<
-        &mut Transform,
-        Or<(With<Player>, With<Monster>, With<Npc>)>,
-    >,
+    mut actors: Query<&mut Transform, Or<(With<Player>, With<Monster>, With<Npc>)>>,
 ) {
     for mut tf in &mut actors {
         // translation.y = -世界Y（Bevy y 向上）
@@ -294,8 +305,13 @@ pub(crate) fn sync_player_equipment(
     players: Query<(Entity, &Children), (With<LocalPlayer>, With<Player>)>,
     mut layers: Query<&mut SpriteLayer>,
 ) {
-    let Ok((_, children)) = players.single() else { return };
-    let equipment = loadout_q.single().map(|l| l.slots.as_slice()).unwrap_or(&[]);
+    let Ok((_, children)) = players.single() else {
+        return;
+    };
+    let equipment = loadout_q
+        .single()
+        .map(|l| l.slots.as_slice())
+        .unwrap_or(&[]);
     let armour_slot = equipment
         .get(1)
         .and_then(|s| s.as_ref())
@@ -451,14 +467,26 @@ pub(crate) fn actor_hover_tooltip_system(
         ),
     >,
     layers: Query<&SpriteLayer>,
+    // #2791 单元③：光标在对话框上时门控头顶提示
+    dialog_roots: Query<(&crate::game::dialogs::DialogRoot, &Visibility, &Node)>,
 ) {
     let Ok(window) = windows.single() else { return };
     // #2767：自动化环境（无焦点/共享桌面）用 `cursor` 探针注入视口坐标；否则用真实光标
     let Some(cursor) = crate::control::resolve_cursor(probe.pos, window.cursor_position()) else {
         return;
     };
-    let Ok((map_cam, map_gtf)) = map_cameras.single() else { return };
-    let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else { return };
+    // #2791 单元③：光标在（可见）对话框根面板内 → 不画世界头顶提示（C# 头顶名字在 MapControl
+    // 图层、被对话框盖住；本端提示面板置顶，需显式门控，否则会盖在对话框上并与控件 Hint 抢面板）
+    if crate::ui::tooltip::cursor_over_dialog_rect(cursor, &dialog_roots) {
+        tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0);
+        return;
+    }
+    let Ok((map_cam, map_gtf)) = map_cameras.single() else {
+        return;
+    };
+    let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else {
+        return;
+    };
 
     let mut hit: Option<(String, Vec3)> = None;
     for (p, m, n, tf, children) in &actors {
@@ -606,7 +634,6 @@ mod hover_geometry_tests {
     }
 }
 
-
 /// MirDirection: 0=Up 1=UpRight 2=Right 3=DownRight 4=Down 5=DownLeft 6=Left 7=UpLeft
 fn dir_vec(d: u8) -> (f32, f32) {
     match d % 8 {
@@ -620,6 +647,3 @@ fn dir_vec(d: u8) -> (f32, f32) {
         _ => (-1.0, -1.0),
     }
 }
-
-
-
