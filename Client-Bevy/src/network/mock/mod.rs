@@ -1994,7 +1994,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::magic::RemoveMagic {
-                                                spell: Spell::Fencing,
+                                                // #2775：与 mock 下发的技能列表一致（刺杀剑术 = Thrusting）
+                                                spell: Spell::Thrusting,
                                                 hero: false,
                                             },
                                         );

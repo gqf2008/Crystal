@@ -97,6 +97,11 @@ enum ControlCommand {
         object_id: u32,
         reply: Sender<String>,
     },
+    /// #2775：切换角色窗页（0=装备 1=状态 2=State 3=技能）——技能页 Hint 的实机验证入口
+    CharPage {
+        page: usize,
+        reply: Sender<String>,
+    },
 }
 
 /// dialog 命令的动作（#2586）
@@ -351,6 +356,26 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            "char_page" => {
+                // #2775：{page} 切到角色窗某页（0=装备 1=状态 2=State 3=技能）并打开角色窗，
+                // 供自动化验证技能页 Hint（页签只能点，无热键）
+                let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::CharPage {
+                        page,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             "pickup" => {
                 let object_id = params
                     .get("object_id")
@@ -587,6 +612,7 @@ fn apply_control_commands(
     ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     mut cursor_probe: ResMut<CursorProbe>,
     mut player_menu: ResMut<crate::game::player_menu::PlayerMenuState>,
+    mut page_res: ResMut<crate::game::dialogs::character::CharPage>,
     q: ControlQueries,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
@@ -744,6 +770,13 @@ fn apply_control_commands(
                     None => json!({"error": "object not found"}),
                 }
                 .to_string();
+                let _ = reply.send(s);
+            }
+            ControlCommand::CharPage { page, reply } => {
+                // #2775：切页 + 打开角色窗（技能页 Hint 的实机验证入口；C# 页签只能点）
+                page_res.0 = page;
+                mgr.open(crate::game::dialogs::DialogKind::Character);
+                let s = json!({"ok": true, "page": page}).to_string();
                 let _ = reply.send(s);
             }
             ControlCommand::GetState { reply } => {
