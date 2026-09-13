@@ -6,6 +6,8 @@
 //   S: UpdateIntelligentCreatureList[count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]
 //     [active u8][filter 9×u8][grade u8][rules: minimal i32][mouse u8][mouseR i32][auto u8]
 //     [autoR i32][semi u8][semiR i32][blackstone u8]（#2757 起，字段顺序见 `IntelligentCreatureRules`）
+//     [icon i32][fullness i32][expire i64][blackstone_time i32]（#2761 起）
+//     [creature_summoned u8][summoned_type u8][pearl_count i32]（#2761 起，C# 包尾三字段）
 // ============================================================================
 
 use bevy::prelude::*;
@@ -41,6 +43,14 @@ pub struct CreatureEntry {
     /// 避免两端各写一份字段顺序（用于渲染 `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行，
     /// C# `DrawCreatureAnimation`:727-735）。
     pub rules: IntelligentCreatureRules,
+    /// #2761 图标（C# `IntelligentCreatureInfo.Icon` → `Prguse2[icon]`；0 = 无对应，跳过绘制）
+    pub icon: i32,
+    /// #2761 完整度（0..10000，C# `ClientIntelligentCreature.Fullness`）
+    pub fullness: i32,
+    /// #2761 到期剩余秒数（C# 客户端按 `Expire - Now` 渲染；0 = 永久 → `过期: 永不过期`）
+    pub expire_secs: i64,
+    /// #2761 黑曜石产出计时（秒；上限 `BLACKSTONE_PRODUCE_TIME` = 10800）
+    pub blackstone_time: i32,
 }
 
 /// 宠物状态
@@ -60,6 +70,12 @@ pub struct CreatureState {
     pub options: [bool; 9],
     /// 品质（C# ItemGrade；本批仅保存，暂不做品质选择 UI）
     pub grade: u8,
+    /// #2761 是否有召唤中的宠物（C# `User.CreatureSummoned`，包尾下发）
+    pub summoned: bool,
+    /// #2761 召唤中的宠物种类（C# `User.SummonedCreatureType`；0 = 无）
+    pub summoned_type: u8,
+    /// #2761 玩家珍珠数（C# `User.PearlCount`，包尾下发 → `CreaturePearls` 标签）
+    pub pearl_count: i32,
 }
 
 #[derive(Component)]
@@ -1124,8 +1140,18 @@ fn creature_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::CreatureList { creatures } = ev {
+        if let ServerEvent::CreatureList {
+            creatures,
+            summoned,
+            summoned_type,
+            pearl_count,
+        } = ev
+        {
             creature.creatures = creatures.clone();
+            // #2761：C# `UpdateIntelligentCreatureList` 尾部三字段
+            creature.summoned = *summoned;
+            creature.summoned_type = *summoned_type;
+            creature.pearl_count = *pearl_count;
             // #619：列表更新提示（--creature-test 依赖）
             creature.message = format!("宠物列表已更新（{} 个）", creatures.len());
         }

@@ -267,6 +267,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             active_enabled INTEGER NOT NULL DEFAULT 0,
             active_level INTEGER NOT NULL DEFAULT 1,
             active_blackstone_time INTEGER NOT NULL DEFAULT 0,
+            active_expire_at INTEGER NOT NULL DEFAULT 0,
             owned_json TEXT NOT NULL DEFAULT '[]',
             request_updates INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (character_name) REFERENCES characters(name)
@@ -1020,6 +1021,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     )
     .execute(&pool)
     .await;
+    // #2761：智能宠物到期时间（unix 秒，0 = 永久；C# CreatureInfo.Expire）
+    let _ =
+        sqlx::query("ALTER TABLE creatures ADD COLUMN active_expire_at INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool)
+            .await;
     let _ = sqlx::query("ALTER TABLE heroes ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
         .execute(&pool)
         .await;
@@ -3225,6 +3231,7 @@ async fn save_creatures(
         active_enabled,
         active_level,
         active_blackstone_time,
+        active_expire_at,
     ) = if let Some(c) = &log.active_creature {
         (
             c.creature_type as i32,
@@ -3234,16 +3241,18 @@ async fn save_creatures(
             if c.enabled { 1 } else { 0 },
             c.level as i32,
             c.blackstone_time as i32,
+            c.expire_at,
         )
     } else {
-        (0, None, 0, 100, 0, 1, 0)
+        (0, None, 0, 100, 0, 1, 0, 0)
     };
 
     sqlx::query(
         r#"INSERT OR REPLACE INTO creatures (
             character_name, active_type, active_custom_name, active_pickup_mode,
-            active_hunger, active_enabled, active_level, active_blackstone_time, owned_json, request_updates
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            active_hunger, active_enabled, active_level, active_blackstone_time, active_expire_at,
+            owned_json, request_updates
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(character_name)
     .bind(active_type)
@@ -3253,9 +3262,11 @@ async fn save_creatures(
     .bind(active_enabled)
     .bind(active_level)
     .bind(active_blackstone_time)
+    .bind(active_expire_at)
     .bind(&owned_json)
     .bind(if log.request_updates { 1 } else { 0 })
-    .execute(&mut *conn).await?;
+    .execute(&mut *conn)
+    .await?;
 
     Ok(())
 }
@@ -3263,7 +3274,8 @@ async fn save_creatures(
 async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<CreatureLog> {
     let row = sqlx::query(
         "SELECT active_type, active_custom_name, active_pickup_mode, active_hunger,
-                active_enabled, active_level, active_blackstone_time, owned_json, request_updates
+                active_enabled, active_level, active_blackstone_time, active_expire_at,
+                owned_json, request_updates
          FROM creatures WHERE character_name = ?",
     )
     .bind(character_name)
@@ -3289,6 +3301,7 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
                         .max(0) as u32,
                     pearl_ticker: 0, // C# PearlTicker 瞬态（登录重置）
                     filter: crate::actors::creature::CreatureFilter::default(),
+                    expire_at: r.try_get::<i64, _>("active_expire_at").unwrap_or(0),
                 })
             } else {
                 None

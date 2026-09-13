@@ -555,6 +555,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             // [count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]
             // [active u8][filter 9×u8][grade u8][rules: minimal i32][mouse u8][mouseR i32]
             // [auto u8][autoR i32][semi u8][semiR i32][blackstone u8]（#2757 起）
+            // [icon i32][fullness i32][expire i64][blackstone_time i32]（#2761 起）
+            // 包尾：[creature_summoned u8][summoned_type u8][pearl_count i32]（#2761，C# 尾部三字段）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -578,11 +580,39 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     &mut cur,
                 )
                 .unwrap_or_default();
-                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name, active, filter, grade, rules });
+                // #2761：图标/完整度/到期剩余秒/黑石计时——字段不足（旧服务端）即取 0
+                let icon = cur.read_i32::<LittleEndian>().unwrap_or(0);
+                let fullness = cur.read_i32::<LittleEndian>().unwrap_or(0);
+                let expire_secs = cur.read_i64::<LittleEndian>().unwrap_or(0);
+                let blackstone_time = cur.read_i32::<LittleEndian>().unwrap_or(0);
+                creatures.push(CreatureEntry {
+                    creature_type,
+                    pickup_mode,
+                    enabled,
+                    hunger,
+                    name,
+                    active,
+                    filter,
+                    grade,
+                    rules,
+                    icon,
+                    fullness,
+                    expire_secs,
+                    blackstone_time,
+                });
             }
+            // #2761：C# `S.UpdateIntelligentCreatureList` 包尾三字段（缺字段 = 旧服务端，取默认）
+            let summoned = cur.read_u8().unwrap_or(0) != 0;
+            let summoned_type = cur.read_u8().unwrap_or(0);
+            let pearl_count = cur.read_i32::<LittleEndian>().unwrap_or(0);
             if ok {
                 let count = creatures.len();
-                server_events.write(ServerEvent::CreatureList { creatures });
+                server_events.write(ServerEvent::CreatureList {
+                    creatures,
+                    summoned,
+                    summoned_type,
+                    pearl_count,
+                });
                 tracing::info!("🐾 宠物列表: {} 个", count);
             } else {
                 tracing::warn!("⚠️ UpdateIntelligentCreatureList 解析失败");
@@ -1076,12 +1106,14 @@ mod tests {
         }
     }
 
-    /// 构造 S.UpdateIntelligentCreatureList 包；`with_rules=false` 模拟 #2757 之前的老服务端。
+    /// 构造 S.UpdateIntelligentCreatureList 包；`with_progress=false`/`with_rules=false`
+    /// 依次模拟 #2761 / #2757 之前的老服务端。
     /// 字节顺序即 wire 契约（与 ServerRust `send_creature_list_packet` 一致）：
     /// [count i32][type u8][pickup u8][enabled u8][hunger u8][name dotnet][active u8]
     /// [filter 9×u8][grade u8][rules: minimal i32][mouse u8][mouseR i32][auto u8][autoR i32]
-    /// [semi u8][semiR i32][blackstone u8]
-    fn build_creature_list_payload(with_rules: bool) -> Vec<u8> {
+    /// [semi u8][semiR i32][blackstone u8][icon i32][fullness i32][expire i64][bstone_time i32]
+    /// [creature_summoned u8][summoned_type u8][pearl_count i32]
+    fn build_creature_list_payload(with_rules: bool, with_progress: bool) -> Vec<u8> {
         let mut body = Vec::new();
         body.extend_from_slice(&1i32.to_le_bytes()); // count
         body.push(2); // type = BabyPig
@@ -1105,6 +1137,15 @@ mod tests {
             body.extend_from_slice(&5i32.to_le_bytes());
             body.push(0);
         }
+        if with_progress {
+            body.extend_from_slice(&507i32.to_le_bytes()); // icon（C# BabyDragon 行）
+            body.extend_from_slice(&7500i32.to_le_bytes()); // fullness
+            body.extend_from_slice(&3600i64.to_le_bytes()); // expire_in_secs
+            body.extend_from_slice(&5400i32.to_le_bytes()); // blackstone_time
+            body.push(1); // creature_summoned
+            body.push(9); // summoned_type
+            body.extend_from_slice(&4321i32.to_le_bytes()); // pearl_count
+        }
         let mut payload = Vec::new();
         PacketHeader::new(
             (PacketHeader::HEADER_SIZE + body.len()) as u16,
@@ -1117,7 +1158,7 @@ mod tests {
     }
 
     fn decode_creature_list(mut events: MessageWriter<ServerEvent>, mut payload: Local<Option<Vec<u8>>>) {
-        let payload = payload.get_or_insert_with(|| build_creature_list_payload(true));
+        let payload = payload.get_or_insert_with(|| build_creature_list_payload(true, true));
         let _ = handle_progress(&mut events, payload);
     }
 
@@ -1125,29 +1166,43 @@ mod tests {
         mut events: MessageWriter<ServerEvent>,
         mut payload: Local<Option<Vec<u8>>>,
     ) {
-        let payload = payload.get_or_insert_with(|| build_creature_list_payload(false));
+        let payload = payload.get_or_insert_with(|| build_creature_list_payload(false, false));
         let _ = handle_progress(&mut events, payload);
     }
 
-    fn drain_creatures(app: &mut App) -> Vec<crate::game::dialogs::creature::CreatureEntry> {
+    /// 取出唯一 `ServerEvent::CreatureList`：`(creatures, summoned, summoned_type, pearl_count)`
+    fn drain_creature_list(
+        app: &mut App,
+    ) -> (
+        Vec<crate::game::dialogs::creature::CreatureEntry>,
+        bool,
+        u8,
+        i32,
+    ) {
         let mut messages = app.world_mut().resource_mut::<Messages<ServerEvent>>();
         let drained: Vec<ServerEvent> = messages.drain().collect();
         assert_eq!(drained.len(), 1, "应恰好产出 1 个 ServerEvent");
         match drained.into_iter().next().unwrap() {
-            ServerEvent::CreatureList { creatures } => creatures,
+            ServerEvent::CreatureList {
+                creatures,
+                summoned,
+                summoned_type,
+                pearl_count,
+            } => (creatures, summoned, summoned_type, pearl_count),
             other => panic!("unexpected event: {:?}", other),
         }
     }
 
-    /// #2757：规则字段（C# `IntelligentCreatureRules`）随列表条目解析。
+    /// #2757/#2761：规则字段（C# `IntelligentCreatureRules`）与进度字段（图标/完整度/到期/黑石）
+    /// 随条目解析，包尾三字段（召唤态/召唤种类/玩家珍珠数）随列表解析。
     #[test]
-    fn creature_list_decodes_rules() {
+    fn creature_list_decodes_rules_and_progress_fields() {
         let mut app = App::new();
         app.init_resource::<Messages<ServerEvent>>();
         app.add_systems(Update, decode_creature_list);
         app.update();
 
-        let creatures = drain_creatures(&mut app);
+        let (creatures, summoned, summoned_type, pearl_count) = drain_creature_list(&mut app);
         assert_eq!(creatures.len(), 1);
         let c = &creatures[0];
         assert_eq!((c.creature_type, c.hunger, c.grade), (2, 42, 3));
@@ -1166,9 +1221,14 @@ mod tests {
                 can_produce_black_stone: false,
             }
         );
+        assert_eq!(
+            (c.icon, c.fullness, c.expire_secs, c.blackstone_time),
+            (507, 7500, 3600, 5400)
+        );
+        assert_eq!((summoned, summoned_type, pearl_count), (true, 9, 4321));
     }
 
-    /// #2757：老服务端不带规则字段时列表仍可解析，规则取全禁用默认（其余字段不受影响）。
+    /// #2757/#2761：老服务端不带规则/进度字段时列表仍可解析，两者取默认（其余字段不受影响）。
     #[test]
     fn creature_list_without_rules_falls_back_to_disabled() {
         let mut app = App::new();
@@ -1176,7 +1236,7 @@ mod tests {
         app.add_systems(Update, decode_creature_list_legacy);
         app.update();
 
-        let creatures = drain_creatures(&mut app);
+        let (creatures, summoned, summoned_type, pearl_count) = drain_creature_list(&mut app);
         assert_eq!(creatures.len(), 1);
         let c = &creatures[0];
         assert_eq!((c.creature_type, c.hunger, c.grade), (2, 42, 3));
@@ -1185,6 +1245,84 @@ mod tests {
             mir2_shared::data::client_data::IntelligentCreatureRules::default()
         );
         assert!(!c.rules.semi_auto_pickup_enabled && !c.rules.can_produce_black_stone);
+        assert_eq!(
+            (c.icon, c.fullness, c.expire_secs, c.blackstone_time),
+            (0, 0, 0, 0)
+        );
+        assert_eq!((summoned, summoned_type, pearl_count), (false, 0, 0));
+    }
+
+    /// #2761：与 ServerRust `test_creature_list_body_matches_documented_wire` **同一串字节**
+    /// （各自按同一条 wire 文档手推）→ 两端顺序互为见证：服务端断言「发出的是这串」，
+    /// 本测试断言「这串解码成期望值」。
+    fn build_server_literal_creature_list_payload() -> Vec<u8> {
+        #[rustfmt::skip]
+        let body: Vec<u8> = vec![
+            0x01, 0x00, 0x00, 0x00, 0x02, 0x01, 0x01, 0x28, 0x06, 0xE5,
+            0xB0, 0x8F, 0xE7, 0x8C, 0xAA, 0x01, 0x01, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x0F, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0xF4, 0x01, 0x00, 0x00,
+            0xA0, 0x0F, 0x00, 0x00, 0x80, 0x3A, 0x09, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x10, 0x0E, 0x00, 0x00, 0x01, 0x02, 0x09, 0x03,
+            0x00, 0x00,
+        ];
+        let mut payload = Vec::new();
+        PacketHeader::new(
+            (PacketHeader::HEADER_SIZE + body.len()) as u16,
+            ServerPacketIds::UpdateIntelligentCreatureList as i16,
+        )
+        .write_to(&mut payload)
+        .unwrap();
+        payload.extend_from_slice(&body);
+        payload
+    }
+
+    fn decode_server_literal(
+        mut events: MessageWriter<ServerEvent>,
+        mut payload: Local<Option<Vec<u8>>>,
+    ) {
+        let payload = payload.get_or_insert_with(build_server_literal_creature_list_payload);
+        let _ = handle_progress(&mut events, payload);
+    }
+
+    #[test]
+    fn creature_list_wire_contract_matches_server_literal() {
+        let mut app = App::new();
+        app.init_resource::<Messages<ServerEvent>>();
+        app.add_systems(Update, decode_server_literal);
+        app.update();
+
+        let (creatures, summoned, summoned_type, pearl_count) = drain_creature_list(&mut app);
+        assert_eq!(creatures.len(), 1);
+        let c = &creatures[0];
+        assert_eq!(
+            (
+                c.creature_type,
+                c.pickup_mode,
+                c.enabled,
+                c.hunger,
+                c.active,
+                c.grade
+            ),
+            (2, 1, true, 40, true, 0)
+        );
+        assert_eq!(c.name, "小猪");
+        assert_eq!(c.filter, [1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            c.rules,
+            mir2_shared::data::client_data::IntelligentCreatureRules {
+                minimal_fullness: 4000,
+                semi_auto_pickup_enabled: true,
+                semi_auto_pickup_range: 3,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            (c.icon, c.fullness, c.expire_secs, c.blackstone_time),
+            (500, 4000, 604_800, 3600)
+        );
+        assert_eq!((summoned, summoned_type, pearl_count), (true, 2, 777));
     }
 
     /// 构造 mock 服务端（`--auto-enter` 离线实机走的路径）的宠物列表包。
@@ -1212,8 +1350,9 @@ mod tests {
         let _ = handle_progress(&mut events, payload);
     }
 
-    /// #2757：mock 必须与真实服务端同格式——mock 的两条样本解码出 C# `IntelligentCreatureInfo`
-    /// 的 Chick 行（M11/A7/S7 + 黑石）与 BabyPig 行（Semi 3 / 满 4000），
+    /// #2757/#2761：mock 必须与真实服务端同格式——mock 的两条样本解码出 C# `IntelligentCreatureInfo`
+    /// 的 Chick 行（M11/A7/S7 + 黑石 + 图标 501 + 完整度 7500 + 到期 7 天 + 黑石 1h）
+    /// 与 BabyPig 行（Semi 3 / 满 4000 / 图标 500 / 永久），包尾带召唤态与珍珠数，
     /// 否则实机截图验证不具备说服力。
     #[test]
     fn mock_creature_list_matches_csharp_rules() {
@@ -1222,11 +1361,15 @@ mod tests {
         app.add_systems(Update, decode_mock_creature_list);
         app.update();
 
-        let creatures = drain_creatures(&mut app);
+        let (creatures, summoned, summoned_type, pearl_count) = drain_creature_list(&mut app);
         assert_eq!(creatures.len(), 2);
         let c = &creatures[0];
         assert_eq!(c.name, "小鸡");
         assert!(c.active);
+        assert_eq!(
+            (c.icon, c.fullness, c.expire_secs, c.blackstone_time),
+            (501, 7500, 7 * 86400, 3600)
+        );
         assert_eq!(
             c.rules,
             mir2_shared::data::client_data::IntelligentCreatureRules {
@@ -1243,6 +1386,10 @@ mod tests {
         let pig = &creatures[1];
         assert_eq!(pig.name, "小猪");
         assert_eq!(
+            (pig.icon, pig.fullness, pig.expire_secs, pig.blackstone_time),
+            (500, 10000, 0, 0)
+        );
+        assert_eq!(
             pig.rules,
             mir2_shared::data::client_data::IntelligentCreatureRules {
                 minimal_fullness: 4000,
@@ -1251,5 +1398,9 @@ mod tests {
                 ..Default::default()
             }
         );
+        // 包尾三字段：第 1 条（小鸡）为召唤中 → summoned_type 与它的 type 字节一致
+        assert!(summoned);
+        assert_eq!(summoned_type, c.creature_type);
+        assert_eq!(pearl_count, 1234);
     }
 }

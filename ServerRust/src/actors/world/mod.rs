@@ -11170,12 +11170,40 @@ pub(crate) fn send_manage_heroes_packet(
 // ============================================================
 
 /// 发送宠物列表（owned + active 标记；wire：[count i32][per: type u8][pet_mode u8][enabled u8]
-/// [hunger u8][name dotnet][active u8][filter 9×u8][grade u8][rules 8 字段]，#2757 起带宠物规则）
+/// [hunger u8][name dotnet][active u8][filter 9×u8][grade u8][rules 8 字段（#2757）]
+/// [icon i32][fullness i32][expire_in i64][blackstone_time i32]（#2761）]
+/// [creature_summoned u8][summoned_type u8][pearl_count i32]（#2761，C# 尾部三字段））
 fn send_creature_list_packet(
     gate_ref: &ActorRef<GateActor>,
     session_id: u64,
     log: &crate::actors::creature::CreatureLog,
+    pearl_count: i32,
 ) {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let body = build_creature_list_body(log, pearl_count, now_secs);
+    let _ = gate_ref
+        .tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::UpdateIntelligentCreatureList as i16,
+                &body,
+            ),
+        })
+        .try_send();
+}
+
+/// 组装 `S.UpdateIntelligentCreatureList` 包体（wire 契约见 `send_creature_list_packet` 文档注释）。
+///
+/// 抽成纯函数以便单测按字节钉住两端契约（客户端 `handle_progress` 的解码顺序 + `MockCreatureList`）：
+/// `now_secs` 显式传入，测试可用固定时钟。
+fn build_creature_list_body(
+    log: &crate::actors::creature::CreatureLog,
+    pearl_count: i32,
+    now_secs: i64,
+) -> Vec<u8> {
     let mut entries: Vec<&IntelligentCreature> = log.owned_creatures.iter().collect();
     if let Some(active) = &log.active_creature {
         if !entries
@@ -11185,6 +11213,14 @@ fn send_creature_list_packet(
             entries.push(active);
         }
     }
+    // #2761：到期时间以「剩余秒数」下发（C# 客户端按 `Expire - Now` 渲染 `过期: …`；
+    // 0 = 永久，对应 C# `DateTime.MinValue` 的 `ExpireNever` 分支）
+    let summoned_type = log
+        .active_creature
+        .as_ref()
+        .map(|c| c.creature_type as u8)
+        .unwrap_or(0);
+    let summoned = log.active_creature.is_some();
     let mut body = Vec::new();
     body.extend_from_slice(&(entries.len() as i32).to_le_bytes());
     for c in entries {
@@ -11216,18 +11252,21 @@ fn send_creature_list_packet(
         let rules = crate::actors::creature::creature_rules(c.creature_type);
         if rules.write_to(&mut body).is_err() {
             warn!("Failed to serialize IntelligentCreatureRules");
-            return;
+            return Vec::new();
         }
+        // #2761：宠物图标（Prguse2[Icon]）+ 完整度 + 到期剩余秒 + 黑石计时
+        body.extend_from_slice(
+            &crate::actors::creature::creature_icon(c.creature_type).to_le_bytes(),
+        );
+        body.extend_from_slice(&c.fullness().to_le_bytes());
+        body.extend_from_slice(&c.expire_in_secs(now_secs).unwrap_or(0).to_le_bytes());
+        body.extend_from_slice(&(c.blackstone_time as i32).to_le_bytes());
     }
-    let _ = gate_ref
-        .tell(SendToClient {
-            session_id,
-            data: build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::UpdateIntelligentCreatureList as i16,
-                &body,
-            ),
-        })
-        .try_send();
+    // #2761：C# `S.UpdateIntelligentCreatureList` 尾部三字段（召唤态/召唤种类/玩家珍珠数）
+    body.push(if summoned { 1u8 } else { 0u8 });
+    body.push(summoned_type);
+    body.extend_from_slice(&pearl_count.to_le_bytes());
+    body
 }
 
 /// 下发队友位置（C# S.SendMemberLocation：[name dotnet][map_index u16][x i32][y i32]，#1309）
@@ -13334,6 +13373,108 @@ mod tests {
         assert_eq!(info.ingredients[1].item_index, 2002);
         // 未登记的 item_info → 名称回退 #index（不 panic）
         assert_eq!(info.ingredients[1].name, "#2002");
+    }
+
+    /// #2761：`S.UpdateIntelligentCreatureList` 包体字节契约（与 Client-Bevy `handle_progress`
+    /// 解码顺序、`MockCreatureList` 同序）。期望字节按 wire 文档逐字段手推：
+    /// [count i32][type u8][pickup u8][enabled u8][hunger u8][name dotnet][active u8]
+    /// [filter 9×u8][grade u8][rules 8 字段][icon i32][fullness i32][expire_in i64]
+    /// [blackstone_time i32][summoned u8][summoned_type u8][pearl_count i32]
+    #[test]
+    fn test_creature_list_body_matches_documented_wire() {
+        use crate::actors::creature::{
+            CreatureFilter, CreatureLog, CreatureType, IntelligentCreature, PickupMode,
+        };
+        let mut c = IntelligentCreature::new(CreatureType::BabyPig);
+        c.custom_name = Some("小猪".to_string());
+        c.pickup_mode = PickupMode::GoldOnly;
+        c.hunger = 40;
+        c.enabled = true;
+        c.filter = CreatureFilter::default(); // pickup_all=true，其余 false，grade=0
+        c.blackstone_time = 3600;
+        c.expire_at = 1_000_000 + 604_800; // 剩余 7 天
+        let log = CreatureLog {
+            active_creature: Some(c.clone()),
+            owned_creatures: vec![c],
+            request_updates: false,
+        };
+        let body = super::build_creature_list_body(&log, 777, 1_000_000);
+        #[rustfmt::skip]
+        let expected: Vec<u8> = vec![
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x02,
+            0x01,
+            0x01,
+            0x28,
+            0x06,
+            0xE5,
+            0xB0,
+            0x8F,
+            0xE7,
+            0x8C,
+            0xAA,
+            0x01,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0xA0,
+            0x0F,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x03,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0xF4,
+            0x01,
+            0x00,
+            0x00,
+            0xA0,
+            0x0F,
+            0x00,
+            0x00,
+            0x80,
+            0x3A,
+            0x09,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x10,
+            0x0E,
+            0x00,
+            0x00,
+            0x01,
+            0x02,
+            0x09,
+            0x03,
+            0x00,
+            0x00,
+        ];
+        assert_eq!(body, expected);
     }
 
     /// #2348：C# Envir.LoadLineMessages 解析（跳过 ;/空行）

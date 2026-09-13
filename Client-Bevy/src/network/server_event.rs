@@ -318,7 +318,13 @@ pub enum ServerEvent {
         items: Vec<InspectItem>,
     },
     /// UpdateIntelligentCreatureList：宠物列表
-    CreatureList { creatures: Vec<CreatureEntry> },
+    CreatureList {
+        creatures: Vec<CreatureEntry>,
+        /// #2761 C# 包尾三字段：召唤态 / 召唤种类 / 玩家珍珠数
+        summoned: bool,
+        summoned_type: u8,
+        pearl_count: i32,
+    },
     /// ChangeHero：切换英雄
     HeroChanged { index: u8 },
     /// MarriageRequest：求婚邀请
