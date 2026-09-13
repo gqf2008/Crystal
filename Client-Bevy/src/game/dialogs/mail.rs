@@ -136,6 +136,19 @@ pub struct MailReadBtn;
 #[derive(Component)]
 pub struct MailCollect;
 
+/// #2786：回复按钮（C# `MailDialogs.cs:180-196` `ReplyButton` `Prguse[569..571]` @(102,414)）
+#[derive(Component)]
+pub struct MailReplyBtn;
+
+/// 列表操作按钮种类（写/回复/读/删）
+#[derive(Clone, Copy)]
+enum MailAction {
+    Write,
+    Reply,
+    Read,
+    Delete,
+}
+
 /// 写邮件附件槽（C# MailComposeParcelDialog 附件 5 格）
 #[derive(Component)]
 pub struct MailAttachSlot(pub usize);
@@ -190,6 +203,8 @@ impl Plugin for MailPlugin {
             (
                 mail_compose_request_system,
                 mail_ui_system,
+                // #2786：回复钮（独立系统，避免 mail_ui_system 参数超上限）
+                mail_reply_system,
                 mail_compose_system,
                 mail_stamp_system,
             )
@@ -665,21 +680,22 @@ fn spawn_mail(
         spawn_label(p, &cjk, "", 10.0, 58.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 12)
             .insert((MailDetailText, Visibility::Hidden));
 
-        // C# 列表操作按钮 y=414：写邮件 / 阅读 / 删除。
+        // C# 列表操作按钮 y=414：写邮件 @75 / 回复 @102 / 阅读 @129 / 删除 @156
         let actions = [
-            (75.0, 563, 564, 565),
-            (129.0, 572, 573, 574),
-            (156.0, 557, 558, 559),
+            (75.0, 563usize, 564usize, 565usize, MailAction::Write),
+            (102.0, 569, 570, 571, MailAction::Reply),
+            (129.0, 572, 573, 574, MailAction::Read),
+            (156.0, 557, 558, 559, MailAction::Delete),
         ];
-        for (x, normal, hover, pressed) in actions {
+        for (x, normal, hover, pressed, action) in actions {
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, normal),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, hover),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, pressed),
             ) {
                 let mut e = spawn_icon_button(p, n, h, pr, x, MAIL_BUTTON_Y, 24.0, 24.0, 10);
-                match normal {
-                    563 => {
+                match action {
+                    MailAction::Write => {
                         // #2771：C# `MailDialogs.cs:163` `SendButton` Hint（发送；同位置同三帧 563..565）
                         e.insert((
                             MailWrite,
@@ -688,7 +704,16 @@ fn spawn_mail(
                             },
                         ));
                     }
-                    572 => {
+                    MailAction::Reply => {
+                        // #2786：C# `MailDialogs.cs:189` `ReplyButton` Hint（回复）
+                        e.insert((
+                            MailReplyBtn,
+                            crate::ui::tooltip::UiHint {
+                                text: "回复".to_string(),
+                            },
+                        ));
+                    }
+                    MailAction::Read => {
                         // #2771：C# `MailDialogs.cs:207` `ReadButton` Hint（读取）
                         e.insert((
                             MailReadBtn,
@@ -697,7 +722,7 @@ fn spawn_mail(
                             },
                         ));
                     }
-                    _ => {
+                    MailAction::Delete => {
                         // #2771：C# `MailDialogs.cs:232` `DeleteButton` Hint（删除）
                         e.insert((
                             MailDelete,
@@ -1040,6 +1065,35 @@ fn mail_ui_system(
     }
 }
 
+/// #2786：回复按钮 → 打开写信窗并预填收件人
+///（C# `MailDialogs.cs:191-196`：`if (SelectedMail == null) return; ComposeMail(SelectedMail.SenderName)`）。
+/// 独立系统：`mail_ui_system` 的参数已接近 Bevy 的上限。
+fn mail_reply_system(
+    mail: Res<MailState>,
+    reply_btn: Query<(Entity, &Interaction), With<MailReplyBtn>>,
+    mut compose: MessageWriter<ComposeMail>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    for (e, inter) in &reply_btn {
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        if let Some(sender) = mail
+            .selected
+            .and_then(|idx| mail.mails.get(idx))
+            .map(|m| m.sender.clone())
+        {
+            compose.write(ComposeMail {
+                to: sender.clone(),
+                // C# `ComposeMail(SenderName)` 不带正文预填
+                message: None,
+            });
+            tracing::info!("📧 回复邮件: 收件人 {}", sender);
+        }
+    }
+}
+
 /// 消费服务端邮件事件（网络层只广播 ServerEvent）
 fn mail_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -1106,6 +1160,57 @@ pub fn build_mail_items_idx(attach: &[Option<u64>]) -> [u64; 5] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2786：点「回复」→ 打开写信窗并把收件人预填为选中邮件的发件人
+    ///（C# `MailDialogs.cs:191-196` `ComposeMail(SelectedMail.SenderName)`）
+    #[test]
+    fn reply_button_composes_mail_to_selected_sender() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        let mut st = MailState::default();
+        st.mails = vec![
+            MailEntry {
+                mail_id: 11,
+                sender: "张三".to_string(),
+                subject: "你好".to_string(),
+                unread: true,
+                gold: 0,
+                collected: false,
+            },
+            MailEntry {
+                mail_id: 12,
+                sender: "李四".to_string(),
+                subject: "在吗".to_string(),
+                unread: false,
+                gold: 0,
+                collected: false,
+            },
+        ];
+        st.selected = Some(1);
+        world.insert_resource(st);
+        world.insert_resource(Messages::<ComposeMail>::default());
+        world.spawn((MailReplyBtn, Interaction::Pressed));
+        world
+            .run_system_once(mail_reply_system)
+            .expect("回复系统应成功");
+        let mut msgs = world.resource_mut::<Messages<ComposeMail>>();
+        let drained: Vec<_> = msgs.drain().collect();
+        assert_eq!(drained.len(), 1, "应写出一条 ComposeMail");
+        assert_eq!(drained[0].to, "李四", "收件人 = 选中邮件发件人");
+        assert_eq!(
+            drained[0].message, None,
+            "C# ComposeMail(SenderName) 不带正文"
+        );
+
+        // 负控：未选中任何邮件 → C# `if (SelectedMail == null) return;` → 不写信
+        world.resource_mut::<MailState>().selected = None;
+        world
+            .run_system_once(mail_reply_system)
+            .expect("回复系统应成功");
+        let mut msgs = world.resource_mut::<Messages<ComposeMail>>();
+        assert_eq!(msgs.drain().count(), 0, "未选中邮件不得写信");
+    }
 
     #[test]
     fn mail_list_layout_matches_csharp_anchor() {
