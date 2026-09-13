@@ -861,6 +861,11 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
                         msg.session_id,
                         &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id),
                     );
+                    // #2820：购买/续租即置脏并立即持久化（C# `MyGuild.NeedSave` + `Envir.SaveConquests`）
+                    // ——此前只改运行时态，重启后领地主权与租期回退
+                    let cid = self.conquest_instances[idx].id;
+                    self.conquest_instances[idx].need_save = true;
+                    self.persist_conquest_state(cid).await;
                 } else {
                     send_system_message(
                         &self.gate_ref,
@@ -931,6 +936,10 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             msg.session_id,
             &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id),
         );
+        // #2820：挂售成交同样即置脏 + 立即持久化（与无主回退分支一致）
+        let cid = self.conquest_instances[idx].id;
+        self.conquest_instances[idx].need_save = true;
+        self.persist_conquest_state(cid).await;
         // C# 卖家 EndGT（:10504）：踢出领地地图玩家（传送回绑定点）
         self.evict_gt_map_players(gt_map_index).await;
     }
