@@ -783,6 +783,27 @@ impl WorldActor {
     }
 }
 
+/// #2820：领地购买/续租的**写入段**（C# `PlayerObject.PurchaseGuildTerritory` 的赋值 + `MyGuild.NeedSave`）。
+/// 抽成纯函数以便单测：写主、清挂售与售价、按 `gt_days`（挂售成交再多 1 天）算租期、置脏；
+/// DB 落库由调用方紧跟的 `persist_conquest_state` 完成。
+pub(crate) fn apply_gt_purchase(
+    inst: &mut crate::actors::world::conquest::ConquestInstance,
+    guild_name: &str,
+    now_tick: u64,
+    gt_days: u32,
+    sold_from_sale: bool,
+) -> i32 {
+    inst.owner_guild = Some(guild_name.to_string());
+    if sold_from_sale {
+        inst.for_sale = false;
+        inst.sale_price = 0;
+    }
+    let days = gt_days as u64 + u64::from(sold_from_sale);
+    inst.rent_expire_tick = now_tick + days * crate::actors::world::conquest::TICKS_PER_DAY;
+    inst.need_save = true;
+    inst.id
+}
+
 pub struct PurchaseGuildTerritoryRequest {
     pub session_id: u64,
     pub territory_id: u32,
@@ -852,19 +873,21 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
                     .unwrap_or(false)
                 {
                     let inst = &mut self.conquest_instances[idx];
-                    inst.owner_guild = Some(guild_name.clone());
-                    inst.rent_expire_tick = self.tick_count
-                        + self.conquest_cfg.gt_days as u64
-                            * crate::actors::world::conquest::TICKS_PER_DAY;
+                    // #2820：统一走抽出的写入段（置脏），紧接着落库
+                    let cid = apply_gt_purchase(
+                        inst,
+                        &guild_name,
+                        self.tick_count,
+                        self.conquest_cfg.gt_days,
+                        false,
+                    );
                     send_system_message(
                         &self.gate_ref,
                         msg.session_id,
                         &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id),
                     );
-                    // #2820：购买/续租即置脏并立即持久化（C# `MyGuild.NeedSave` + `Envir.SaveConquests`）
+                    // #2820：立即持久化（C# `MyGuild.NeedSave` + `Envir.SaveConquests`）
                     // ——此前只改运行时态，重启后领地主权与租期回退
-                    let cid = self.conquest_instances[idx].id;
-                    self.conquest_instances[idx].need_save = true;
                     self.persist_conquest_state(cid).await;
                 } else {
                     send_system_message(
@@ -925,20 +948,20 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
         // C# :10512-10522 买家获得领地（GTRent = Now + GTDays+1；EndGT 释放卖家）
         let gt_map_index = self.conquest_instances[idx].map_index as u16;
         let inst = &mut self.conquest_instances[idx];
-        inst.owner_guild = Some(guild_name.clone());
-        inst.for_sale = false;
-        inst.sale_price = 0;
-        inst.rent_expire_tick = self.tick_count
-            + (self.conquest_cfg.gt_days as u64 + 1)
-                * crate::actors::world::conquest::TICKS_PER_DAY;
+        // #2820：挂售成交分支（多 1 天租期）同样走写入段并置脏
+        let cid = apply_gt_purchase(
+            inst,
+            &guild_name,
+            self.tick_count,
+            self.conquest_cfg.gt_days,
+            true,
+        );
         send_system_message(
             &self.gate_ref,
             msg.session_id,
             &format!("行会 {} 成功购买了领地 #{}！", guild_name, msg.territory_id),
         );
-        // #2820：挂售成交同样即置脏 + 立即持久化（与无主回退分支一致）
-        let cid = self.conquest_instances[idx].id;
-        self.conquest_instances[idx].need_save = true;
+        // #2820：挂售成交同样立即持久化（与无主回退分支一致）
         self.persist_conquest_state(cid).await;
         // C# 卖家 EndGT（:10504）：踢出领地地图玩家（传送回绑定点）
         self.evict_gt_map_players(gt_map_index).await;
@@ -958,6 +981,43 @@ fn guild_storage_gold_change_body(amount: u32, change_type: u8, name: &str) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2820：领地购买/续租写入段——写主 + 置脏 + 租期（挂售成交多 1 天、清挂售与售价）
+    /// （C# `PlayerObject.PurchaseGuildTerritory` + `MyGuild.NeedSave`）
+    #[test]
+    fn apply_gt_purchase_writes_owner_dirty_and_rent() {
+        use crate::actors::world::conquest::{ConquestGame, ConquestInstance, TICKS_PER_DAY};
+        let make = |id: i32| ConquestInstance::new(id, 0, 0, ConquestGame::Classic);
+
+        // 无主回退分支：1M 直购（sold_from_sale = false）
+        let mut inst = make(7);
+        inst.owner_guild = None;
+        inst.need_save = false;
+        let cid = apply_gt_purchase(&mut inst, "行会A", 1_000, 3, false);
+        assert_eq!(cid, 7, "返回实例 id（供 persist 用）");
+        assert_eq!(inst.owner_guild.as_deref(), Some("行会A"));
+        assert_eq!(
+            inst.rent_expire_tick,
+            1_000 + 3 * TICKS_PER_DAY,
+            "租期 = 现在 + gt_days 天"
+        );
+        assert!(inst.need_save, "购买必须置脏（否则不会被保存 ⇒ 重启回退）");
+
+        // 挂售成交分支：清挂售/售价 + 多 1 天
+        let mut inst = make(9);
+        inst.for_sale = true;
+        inst.sale_price = 500_000;
+        inst.need_save = false;
+        apply_gt_purchase(&mut inst, "行会B", 2_000, 3, true);
+        assert!(!inst.for_sale, "成交后撤下挂售");
+        assert_eq!(inst.sale_price, 0);
+        assert_eq!(
+            inst.rent_expire_tick,
+            2_000 + 4 * TICKS_PER_DAY,
+            "挂售成交按 C# `GTRent = Now + (GTDays+1) 天`"
+        );
+        assert!(inst.need_save);
+    }
 
     #[test]
     fn test_war_key_sorted() {
